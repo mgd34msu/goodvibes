@@ -1,7 +1,7 @@
 /**
  * TailscaleSettings, the one confirmed action behind a "needs https, available
  * via tailscale" label, reachable from the browser instead of only the TUI
- * (tailscale.get / tailscale.serve.run, SDK 1.8.0's LAN-http posture work).
+ * (tailscale.get / tailscale.serve.run, platform 1.8.0's LAN-http posture work).
  *
  * READ-ONLY detection first: tailscale.get reports whether the binary is present,
  * the node is logged in, and its MagicDNS name. This panel renders NOTHING while
@@ -19,7 +19,7 @@
  * landed).
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { formatError } from '../../lib/errors';
 import { useToast } from '../../lib/toast';
@@ -37,11 +37,11 @@ export function TailscaleSettings() {
 
   const detection = useQuery({
     queryKey: queryKeys.tailscale,
-    queryFn: () => sdk.operator.tailscale.get(),
+    queryFn: () => platformClient.operator.tailscale.get(),
   });
 
   const serveRun = useMutation({
-    mutationFn: () => sdk.operator.tailscale.serveRun(),
+    mutationFn: () => platformClient.operator.tailscale.serveRun(),
     onSuccess: async (result) => {
       toast(
         result.receipt.ok

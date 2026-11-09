@@ -4,14 +4,14 @@ import type {
   CaptureChildProcess,
   UtteranceAudioArtifact,
   WakeRuntimeSettings,
-} from '@goodvibes-jev/engine/sdk/platform/voice';
+} from '@goodvibes-jev/engine/platform/platform/voice';
 import { createTuiCaptureOpener, isExecutableOnPath } from '../../audio/capture.ts';
 import { wireVoiceInputRuntime } from '../../audio/voice-input-session.ts';
 
 /**
  * Push-to-talk voice input, and the recorder command lines the real tools accept.
  *
- * The argv assertions are here rather than left to the SDK's own tests because
+ * The argv assertions are here rather than left to the platform's own tests because
  * this is the surface that spawns them: `--container raw` on pw-record is the
  * difference between raw PCM and a container header that byte-misaligns the whole
  * stream (a detector fed that never fires and never errors), and a backend the

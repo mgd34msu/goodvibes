@@ -103,7 +103,7 @@ export function createRuntimeShutdown(
         deps.shutdownOptions,
       ),
     );
-    // Always last: final persistence and SDK shutdown still need the graph.
+    // Always last: final persistence and platform shutdown still need the graph.
     await attempt(() => deps.disposeRuntimeGraph());
   }, 'Agent shutdown failed to release one or more owned resources');
 }

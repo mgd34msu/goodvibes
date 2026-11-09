@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandRegistry } from '../../input/command-registry.ts';
 import { createAgentHarnessTool } from '../../tools/agent-harness-tool.ts';
 import { createAgentRouteTool, registerAgentRouteTool } from '../../tools/agent-route-tool.ts';

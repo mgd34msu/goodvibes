@@ -1,13 +1,13 @@
-import { captureKnowledgeSourceReferences, registerGeneratedKnowledgeSourceReferences } from '../sdk/src/platform/knowledge/source-structural-references.js';
+import { captureKnowledgeSourceReferences, registerGeneratedKnowledgeSourceReferences } from '../platform/src/platform/knowledge/source-structural-references.js';
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { assertJudgmentInput } from '../sdk/src/platform/gate/judgment-input.js';
-import type { SQLiteStore } from '../sdk/src/platform/state/sqlite-store.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { prepareKnowledgeRecordAdmission } from '../sdk/src/platform/knowledge/store-record-snapshot.js';
-import { knowledgeRawRepresentation, knowledgeSourceCrawledNow, knowledgeSearchStamp, retainKnowledgeRepresentation, sameKnowledgeRecord, isKnowledgeClock } from '../sdk/src/platform/knowledge/store-record-representation.js';
+import { assertJudgmentInput } from '../platform/src/platform/gate/judgment-input.js';
+import type { SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { prepareKnowledgeRecordAdmission } from '../platform/src/platform/knowledge/store-record-snapshot.js';
+import { knowledgeRawRepresentation, knowledgeSourceCrawledNow, knowledgeSearchStamp, retainKnowledgeRepresentation, sameKnowledgeRecord, isKnowledgeClock } from '../platform/src/platform/knowledge/store-record-representation.js';
 import { seedHomeAssistantObservation } from './_helpers/homegraph-observation-fixtures.js';
 
 // A deliberately adversarial, valid 13-digit payment-card number, also within

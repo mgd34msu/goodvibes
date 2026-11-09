@@ -8,8 +8,8 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { TaskScheduler } from '../sdk/src/platform/scheduler/scheduler.ts';
-import type { TaskRunRecord } from '../sdk/src/platform/scheduler/scheduler.ts';
+import { TaskScheduler } from '../platform/src/platform/scheduler/scheduler.ts';
+import type { TaskRunRecord } from '../platform/src/platform/scheduler/scheduler.ts';
 
 function tempDir(suffix: string): string {
   const d = join(tmpdir(), `gv-scheduler-history-${suffix}-${Date.now()}`);

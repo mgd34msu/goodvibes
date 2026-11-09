@@ -3,9 +3,9 @@ import {
   type OrchestratorOptions,
   type OrchestratorCoreServices,
   type OrchestratorUserInputOptions,
-} from '@goodvibes-jev/engine/sdk/platform/core';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
+} from '@goodvibes-jev/engine/platform/platform/core';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 /** Mutable UI callbacks remain owned by each shell instance. */
 export function createTerminalOrchestrator(
   options: Omit<OrchestratorOptions, 'getViewportHeight' | 'scrollToEnd' | 'requestRender'>,

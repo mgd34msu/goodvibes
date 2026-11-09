@@ -56,11 +56,11 @@ test('building a prompt packet sends the task and renders the returned items, un
   await expectNoHorizontalScroll(page);
 });
 
-test('a real post-1.2.0 truncated packet (the final SDK\'s full field shape) renders the truncation disclosure', async ({ page }) => {
+test('a real post-1.2.0 truncated packet (the final platform\'s full field shape) renders the truncation disclosure', async ({ page }) => {
   // packet: 'truncated' answers truncated/totalCandidates/droppedCount/droppedForBudget/
   // budgetExhausted all populated (packet.ts's real shape), not just the hand-authored
   // truncated/totalCandidates/droppedCount subset, proving the disclosure renders from
-  // a genuine final-SDK wire response.
+  // a genuine final-platform wire response.
   await installMockDaemon(page, { packet: 'truncated' });
   await page.goto('/?view=library&tab=knowledge');
   await page.getByRole('radio', { name: 'Packet' }).click();

@@ -11,8 +11,8 @@
  * NAMED provider keeps exact findProvider semantics.
  */
 import { describe, expect, test } from 'bun:test';
-import { VoiceProviderRegistry } from '../sdk/src/platform/voice/provider-registry.js';
-import type { VoiceProvider, VoiceProviderStatus } from '../sdk/src/platform/voice/types.js';
+import { VoiceProviderRegistry } from '../platform/src/platform/voice/provider-registry.js';
+import type { VoiceProvider, VoiceProviderStatus } from '../platform/src/platform/voice/types.js';
 
 function provider(
   id: string,

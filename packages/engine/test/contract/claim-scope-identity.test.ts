@@ -4,9 +4,9 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { hashState } from '@goodvibes-jev/judgment';
-import { captureAnswerClaimOutput, answerClaimScopes, completeAnswerClaimCoverage, recordAnswerClaimReview, scopedClaimQuestion } from '../../sdk/src/platform/contract/final-answer-claims.js';
-import { createNativeDataWriteOwner, nativeReaderCapabilities, assertNativeReaderCompatible } from '../../sdk/src/platform/runtime/native-reader-compatibility.js';
-import { realUpdateFileIo } from '../../sdk/src/platform/runtime/update-file-io.js';
+import { captureAnswerClaimOutput, answerClaimScopes, completeAnswerClaimCoverage, recordAnswerClaimReview, scopedClaimQuestion } from '../../platform/src/platform/contract/final-answer-claims.js';
+import { createNativeDataWriteOwner, nativeReaderCapabilities, assertNativeReaderCompatible } from '../../platform/src/platform/runtime/native-reader-compatibility.js';
+import { realUpdateFileIo } from '../../platform/src/platform/runtime/update-file-io.js';
 
 test('fresh actual claim coverage uses its exact original immutable answer without hashing the same passages again', () => {
   const output = 'A supported claim with its complete surrounding qualification.\n'.repeat(200);

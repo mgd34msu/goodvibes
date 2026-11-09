@@ -16,7 +16,7 @@
  * one line.
  */
 
-import type { OperatorMethodInput } from '@goodvibes-jev/engine/sdk/contracts';
+import type { OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
 import { getModelIdFromProviderModel, getProviderIdFromModel } from '../config/provider-model.ts';
 
 type ScheduleCreateInput = OperatorMethodInput<'automation.schedules.create'>;

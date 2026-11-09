@@ -9,9 +9,9 @@
  * is dropped before the auth call runs, so it never outlives the attempt.
  */
 
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
+import type { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { SurfaceModal, SurfaceModalHost } from './surface-modal-host.ts';
 import type { SurfaceLayer } from '../renderer/surface-kit.ts';
 import { renderMaskedEntryModal, type MaskedEntryView } from '../renderer/masked-entry-modal.ts';

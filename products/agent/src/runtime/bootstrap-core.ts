@@ -1,4 +1,4 @@
-import { prepareConfiguredProjectContext } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import { prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { initialTerminalRuntimeFields } from '@goodvibes-jev/engine/terminal-shell/bootstrap-primitives';
 import { projectAgentToolDependencies } from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-context';
 import {
@@ -19,23 +19,23 @@ import { ConversationManager } from '../core/conversation';
 import { publishToSharedFeed } from '../core/notices.ts';
 import { registerSessionConversation } from './conversation-rewind-port.ts';
 import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { getConfiguredSystemPrompt } from '../config/index.ts';
 import { installAgentDaemonConfigClient } from '../config/daemon-config-routing.ts';
 import { installAgentDaemonCredentialsClient } from '../config/daemon-credential-routing.ts';
 import { getProviderIdFromModel } from '../config/provider-model.ts';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { registerAllTools } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { PermissionManager } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { registerAllTools } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { PermissionManager } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { createRuntimeNotifier } from './bootstrap-notifier.ts';
 import { readAgentHostSetting } from '../config/host-settings.ts';
 
 import { Compositor } from '../renderer/compositor.ts';
-import type { PermissionRequestHandler } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import type { PermissionRequestHandler } from '@goodvibes-jev/engine/platform/platform/permissions';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
-import type { ConversationFollowUpItem } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { OrchestratorUserInputOptions } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { ControlPlaneRecentEvent } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import type { ConversationFollowUpItem } from '@goodvibes-jev/engine/platform/platform/core';
+import type { OrchestratorUserInputOptions } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ControlPlaneRecentEvent } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { MutableRuntimeState } from '@/runtime/index.ts';
 import type { BootstrapOptions } from './context.ts';
 import '@/runtime/index.ts';
@@ -47,13 +47,13 @@ import { generateUserSessionId } from '@/runtime/index.ts';
 import { loadBootstrapSystemPrompt, syncConfiguredServices } from '@/runtime/index.ts';
 import { registerBootstrapHookBridge } from '@/runtime/index.ts';
 import { createRuntimeServices, foldAgentLegacyMemory, type RuntimeServices } from './services.ts';
-import { createHostPowerSeam } from '@goodvibes-jev/engine/sdk/platform/power';
-import { formatMemoryFoldReport } from '@goodvibes-jev/engine/sdk/platform/state';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { createHostPowerSeam } from '@goodvibes-jev/engine/platform/platform/power';
+import { formatMemoryFoldReport } from '@goodvibes-jev/engine/platform/platform/state';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { importVibeFilesIntoMemoryOnce } from '../agent/vibe-file.ts';
 import { createUiRuntimeServices, type UiRuntimeServices } from './ui-services.ts';
 import { getTerminalSize } from '../shell/terminal-size.ts';
-import { installPermissionManagerSafetyGuard } from '@goodvibes-jev/engine/sdk/platform/gate/policy';
+import { installPermissionManagerSafetyGuard } from '@goodvibes-jev/engine/platform/platform/gate/policy';
 import { composeAgentToolRegistry } from './agent-tool-registry.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { registerAgentRuntimeEvents } from './agent-runtime-events.ts';
@@ -359,7 +359,7 @@ export async function initializeBootstrapCore(
   // Wire permissionManager into the SAME AgentOrchestrator instance that runs
   // spawned/background agent tool calls (services.agentOrchestrator, set up
   // above with agentOrchestratorToolDeps before permissionManager existed).
-  // Without this, the SDK's gateBackgroundToolCall() sees no permissionManager
+  // Without this, the platform's gateBackgroundToolCall() sees no permissionManager
   // on context and leaves every background tool call ungated, spawned agents
   // would run with no permission check at all, regardless of permissions.mode
   // or permissions.backgroundAgents. Replays the full toolDeps object because

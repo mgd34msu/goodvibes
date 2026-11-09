@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { FakeClusterClock, GroupAdmissionService, createGroupKeyMaterial } from '../sdk/src/platform/cluster/index.js';
+import { FakeClusterClock, GroupAdmissionService, createGroupKeyMaterial } from '../platform/src/platform/cluster/index.js';
 
 function fixture(send?: (service: GroupAdmissionService) => Promise<void>) {
   const clock = new FakeClusterClock();

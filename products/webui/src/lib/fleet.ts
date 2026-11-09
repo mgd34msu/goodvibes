@@ -1,24 +1,24 @@
 /**
  * fleet.ts, tolerant readers + display helpers for fleet.snapshot / fleet.list
- * (packages/sdk/src/platform/control-plane/method-catalog-fleet.ts).
+ * (packages/engine/platform/src/platform/control-plane/method-catalog-fleet.ts).
  *
  * Mirrors the sessions-union.ts pattern: kind/state are read as OPEN STRINGS
  * even though the wire enum (PROCESS_KIND_SCHEMA / PROCESS_STATE_SCHEMA,
  * operator-contract-schemas-fleet.ts) is closed, because these types are
- * hand-mirrored from the SDK source rather than generated (the pinned
+ * hand-mirrored from the platform source rather than generated (the pinned
  * @goodvibes-jev/engine/contracts codegen package predates fleet.*, see the
  * invokeGatewayMethod comment in goodvibes.ts) and a daemon newer than this
  * client may introduce a kind/state we have never seen. Render it verbatim,
  * never drop it.
  */
 
-import type { ProcessCheckSummary, ProcessCheckCriterion } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
+import type { ProcessCheckSummary, ProcessCheckCriterion } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import type { ApprovalRecord, FleetProcessNode } from './goodvibes';
 import { asRecord } from './object';
 
 /**
  * PROCESS_KIND_SCHEMA (operator-contract-schemas-fleet.ts) at the time this was written.
- * 'acp-agent' (SDK 1.8.0): a third-party coding agent spawned via acp.spawn, hosted as a
+ * 'acp-agent' (platform 1.8.0): a third-party coding agent spawned via acp.spawn, hosted as a
  * daemon session, a steerable/stoppable fleet row like any other agent kind. This client
  * renders it with the same generic KindBadge every other kind gets (kindLabel just prints
  * the string), the honest minimal treatment; a dedicated spawn UX is a later round.
@@ -43,7 +43,7 @@ export const KNOWN_PROCESS_KINDS = [
 /**
  * The one fleet kind goodvibes did not spawn or host, an externally-launched
  * coding-agent session (Claude Code / Codex / opencode / unknown), read-only
- * visibility only (SDK 1.8.0). Never killable/interruptible/pausable/resumable
+ * visibility only (platform 1.8.0). Never killable/interruptible/pausable/resumable
  * (see the node's own `capabilities`, always false here) and never counted in
  * "own agent" totals (activeCount below), it is not goodvibes' process to
  * count. Steerable only over a genuine channel (node.observed.steer.kind ===
@@ -108,12 +108,12 @@ export function isAwaitingApprovalState(state: string): boolean {
 // ({ reason: 'approval' | 'input' | 'pick' | 'conflict', detail? }), a projection of
 // the node's blocked-on-a-human state, recomputed on every snapshot and never persisted
 // (ProcessAttention, platform/runtime/fleet/types.ts). We read it straight off
-// the snapshot rather than accumulating our own store: the SDK's registry is "a
+// the snapshot rather than accumulating our own store: the platform's registry is "a
 // view, not a second source of truth", and so is this surface. A daemon that
 // predates the marker simply omits it, every reader below degrades to "no
 // attention" rather than crashing.
 //
-// 'pick' and 'conflict' (SDK 1.8.0) are ONE waiting-on-human class alongside
+// 'pick' and 'conflict' (platform 1.8.0) are ONE waiting-on-human class alongside
 // 'approval'/'input', a ready best-of-N group (every reader below, and the count/badge/
 // jump machinery they feed, is already reason-agnostic) and a merge conflict both flag
 // their node exactly like an approval or an input ask does. Only the human-facing LABEL
@@ -217,7 +217,7 @@ export function formatDurationMs(ms: number | undefined): string {
 // ─── Latest review (wrfc-chain / wrfc-subtask acceptance summary) ────────────
 //
 // A wrfc-chain / wrfc-subtask node whose review has COMPLETED carries a derived
-// `review` projection (ProcessReviewSummary, SDK 1.9.0,
+// `review` projection (ProcessReviewSummary, platform 1.9.0,
 // platform/runtime/fleet/types.ts, served on fleet.snapshot / fleet.list nodes):
 //   { score, passed, cycles, checklist: [{ item, verified, evidence, howExercised? }] }
 // `passed` is the CONTROLLER verdict (gate-inclusive: checklist + constraints +
@@ -439,8 +439,8 @@ export function attemptGroupIds(nodes: readonly FleetProcessNode[]): ReadonlySet
 // ─── Actions the browser can genuinely back over the wire ─────────────────────
 //
 // fleet.snapshot's per-node `capabilities` (interruptible/killable/pausable/
-// resumable/steerable) describe what the underlying process CAN do, but the SDK's own
-// fleet registry (packages/sdk/src/platform/runtime/fleet/registry.ts killNode/
+// resumable/steerable) describe what the underlying process CAN do, but the platform's own
+// fleet registry (packages/engine/platform/src/platform/runtime/fleet/registry.ts killNode/
 // interrupt/resume) performs those actions with DIRECT, same-process calls into
 // per-kind managers (agentManager.cancel, watcherRegistry.stopWatcher,
 // workflowManager.cancel, triggerManager.remove, automationManager.removeJob, ...),
@@ -500,9 +500,9 @@ export function unbackedCapabilityNote(node: FleetProcessNode): string | null {
 /**
  * Correlate a fleet node to any approvals awaiting a decision on it, so a node in
  * 'awaiting-approval' state can show (and act on) the real request inline instead of
- * sending the operator to a different view. Matches the SAME two signals the SDK's own
+ * sending the operator to a different view. Matches the SAME two signals the platform's own
  * fleet registry uses to derive the 'awaiting-approval' state in the first place
- * (packages/sdk/src/platform/runtime/fleet/registry.ts collectPendingApprovals):
+ * (packages/engine/platform/src/platform/runtime/fleet/registry.ts collectPendingApprovals):
  *   - approval.sessionId === node.sessionRef.sessionId (either may be absent), or
  *   - node.kind === 'agent' && approval.metadata['agentId'] === node.id (metadata.agentId
  *     is an untyped, optional string on the wire, read defensively).

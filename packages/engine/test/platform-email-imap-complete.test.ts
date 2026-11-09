@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import type { Socket } from 'node:net';
-import { ImapClient, type ImapCompleteMessageRead } from '../sdk/src/platform/email/imap-client.js';
-import { parseBodyStructure, type ImapBodyPart } from '../sdk/src/platform/email/imap-bodystructure.js';
+import { ImapClient, type ImapCompleteMessageRead } from '../platform/src/platform/email/imap-client.js';
+import { parseBodyStructure, type ImapBodyPart } from '../platform/src/platform/email/imap-bodystructure.js';
 import {
   decodeCompleteTextPart,
   parseCompleteBodyStructure,
-} from '../sdk/src/platform/email/imap-bodystructure-complete.js';
-import { hasVerifiedImapMessageIdentity } from '../sdk/src/platform/email/imap-message-read.js';
+} from '../platform/src/platform/email/imap-bodystructure-complete.js';
+import { hasVerifiedImapMessageIdentity } from '../platform/src/platform/email/imap-message-read.js';
 
 /** In-memory, byte-only transport. Never opens a socket or contacts a provider. */
 class SyntheticSocket extends EventEmitter {

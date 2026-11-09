@@ -23,14 +23,14 @@ import { captureCatalogData } from './agent-harness-catalog-ranking.ts';
  * signup form cannot cause a signup.
  */
 
-import { ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import { AgentAccountRegistry, type AgentAccountRecord } from '@goodvibes-jev/engine/sdk/platform/google';
-import { mintAddressFor } from '@goodvibes-jev/engine/sdk/platform/google';
+import { ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { AgentAccountRegistry, type AgentAccountRecord } from '@goodvibes-jev/engine/platform/platform/google';
+import { mintAddressFor } from '@goodvibes-jev/engine/platform/platform/google';
 import { containsSecretLikeText } from '../agent/memory-safety.ts';
 import { getSessionExpectationBook } from '../agent/signup/session-expectations.ts';
 import { evaluateOutwardEffect, getSessionUntrustedContentLedger } from '../trust/untrusted-content.ts';
-import type { ShellPathService } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 
 const ACCOUNT_ACTIONS = ['list', 'alias', 'record', 'forget', 'sweep'] as const;
 

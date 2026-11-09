@@ -1,16 +1,16 @@
 # Transports
 
-The transport packages are source-of-truth packages re-exported through the SDK
-facade.
+The transport modules live in the engine package and are re-exported through
+explicit platform facade subpaths.
 
 - `transport-core`: shared direct transport primitives, event/error helpers,
   UUID helpers, and common transport utilities. Its `./relay` subpath (not
   re-exported from the main entry point) carries the crypto and protocol
   primitives for the zero-knowledge, self-hostable relay. The relay operator
   can read the hop-level frames but not the end-to-end encrypted payload.
-- `transport-direct`: SDK facade name for in-process direct transport backed by
+- `transport-direct`: platform facade name for in-process direct transport backed by
   `transport-core`. It is a package export subpath only; there is no separate
-  `packages/transport-direct` workspace package.
+  `transport-direct` implementation directory.
 - `transport-http`: HTTP JSON transport, retry policy, auth header resolution,
   idempotency keys, and JSON Schema response validation helpers.
 - `transport-realtime`: WebSocket and realtime runtime event transport.
@@ -19,16 +19,16 @@ facade.
 
 | Subpath | Primary exports |
 |---|---|
-| `@goodvibes-jev/engine/sdk/transport-core` | `ClientTransport`, direct in-process helpers, event envelopes, common transport errors |
-| `@goodvibes-jev/engine/sdk/transport-direct` | Facade for direct/in-process transport helpers from `transport-core` |
-| `@goodvibes-jev/engine/sdk/transport-http` | HTTP client construction, auth token normalization, retry/backoff helpers, SSE transport |
-| `@goodvibes-jev/engine/sdk/transport-realtime` | Runtime event SSE/WebSocket connectors and domain event feeds |
+| `@goodvibes-jev/engine/platform/transport-core` | `ClientTransport`, direct in-process helpers, event envelopes, common transport errors |
+| `@goodvibes-jev/engine/platform/transport-direct` | Facade for direct/in-process transport helpers from `transport-core` |
+| `@goodvibes-jev/engine/platform/transport-http` | HTTP client construction, auth token normalization, retry/backoff helpers, SSE transport |
+| `@goodvibes-jev/engine/platform/transport-realtime` | Runtime event SSE/WebSocket connectors and domain event feeds |
 
 ## Retry and errors
 
 HTTP retry behavior is centralized in `transport-http` and uses the canonical
 `RETRYABLE_STATUS_CODES` from `@goodvibes-jev/engine/errors`. Transport errors are
-`GoodVibesSdkError` instances with `source: "transport"` so callers can treat
+`GoodVibesError` instances with `source: "transport"` so callers can treat
 network, protocol, timeout, and configuration failures without message parsing.
 
 ## Realtime events
@@ -48,7 +48,7 @@ SSE connector (`createEventSourceConnector`) does not fire:
 import {
   createRemoteRuntimeEvents,
   createWebSocketConnector,
-} from '@goodvibes-jev/engine/sdk/transport-realtime';
+} from '@goodvibes-jev/engine/platform/transport-realtime';
 
 const events = createRemoteRuntimeEvents(
   createWebSocketConnector('https://goodvibes.example.com', token, WebSocket, {
@@ -65,7 +65,7 @@ fresh consumer never finishes a turn it never started; see
 surface: domain events, outbound-queue backpressure caps, the `ws://` auth
 guard, and the turn lifecycle gate.
 
-Transport errors should preserve useful event fields and use typed SDK error
+Transport errors should preserve useful event fields and use typed platform error
 classes. Retryable HTTP status codes come from `@goodvibes-jev/engine/errors`.
 
 ## See also

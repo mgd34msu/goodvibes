@@ -10,9 +10,9 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
-import { ControlPlaneGateway } from '../sdk/src/platform/control-plane/gateway.ts';
-import type { ControlPlaneGatewayConfig } from '../sdk/src/platform/control-plane/gateway.ts';
-import { SSE_HEARTBEAT_INTERVAL_MS, sseIdleTimeoutSeconds } from '../sdk/src/platform/control-plane/sse-timing.ts';
+import { ControlPlaneGateway } from '../platform/src/platform/control-plane/gateway.ts';
+import type { ControlPlaneGatewayConfig } from '../platform/src/platform/control-plane/gateway.ts';
+import { SSE_HEARTBEAT_INTERVAL_MS, sseIdleTimeoutSeconds } from '../platform/src/platform/control-plane/sse-timing.ts';
 
 describe('SSE idle-timeout invariant', () => {
   test('the derived idle timeout always comfortably exceeds the heartbeat interval', () => {

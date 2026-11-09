@@ -13,12 +13,12 @@ import { describe, expect, test, afterAll, afterEach } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import {
   PermissionManager,
   createPermissionConfigReader,
-} from '../sdk/src/platform/permissions/manager.js';
-import type { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.js';
+} from '../platform/src/platform/permissions/manager.js';
+import type { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.js';
 import {
   buildTracePayload,
   buildLogsPayload,
@@ -29,9 +29,9 @@ import {
   type OtlpTracePayload,
   type OtlpLogsPayload,
   type OtlpKeyValue,
-} from '../sdk/src/platform/runtime/permissions/decision-otlp.js';
-import type { DecisionLogEntry } from '../sdk/src/platform/runtime/permissions/decision-log.js';
-import type { PermissionDecision } from '../sdk/src/platform/runtime/permissions/types.js';
+} from '../platform/src/platform/runtime/permissions/decision-otlp.js';
+import type { DecisionLogEntry } from '../platform/src/platform/runtime/permissions/decision-log.js';
+import type { PermissionDecision } from '../platform/src/platform/runtime/permissions/types.js';
 
 useGateReadings();
 

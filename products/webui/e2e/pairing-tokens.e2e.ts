@@ -1,5 +1,5 @@
 /**
- * Pairing tokens settings/security surface (pairing.tokens.*, SDK 1.8.0):
+ * Pairing tokens settings/security surface (pairing.tokens.*, platform 1.8.0):
  * list/rename/revoke per device, the migrate-this-browser affordance, and the
  * revoke-shared-token action, each destructive step gated by the real
  * ConfirmSheet with a plain-language consequence, never a bare click-to-destroy.

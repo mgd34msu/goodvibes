@@ -15,8 +15,8 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseProfileDocument } from '../sdk/src/platform/owner-profile/document.ts';
-import { OwnerProfileStore } from '../sdk/src/platform/owner-profile/store.ts';
+import { parseProfileDocument } from '../platform/src/platform/owner-profile/document.ts';
+import { OwnerProfileStore } from '../platform/src/platform/owner-profile/store.ts';
 import { useSecurityReadings } from './helpers/security-readings.ts';
 
 useSecurityReadings();

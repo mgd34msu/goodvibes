@@ -13,8 +13,8 @@
  *    and the contract and its unit agent stop.
  */
 import { afterEach, expect, test } from 'bun:test';
-import { run } from '../sdk/src/platform/hooks/runners/agent.ts';
-import type { HookDefinition, HookEvent } from '../sdk/src/platform/hooks/types.ts';
+import { run } from '../platform/src/platform/hooks/runners/agent.ts';
+import type { HookDefinition, HookEvent } from '../platform/src/platform/hooks/types.ts';
 import { ASK, makeHarness, oneUnitPlan, waitFor, type Harness } from './contract/runner-support.ts';
 
 let harness: Harness | undefined;

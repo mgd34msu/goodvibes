@@ -1,11 +1,11 @@
 import { semanticRepairProfileValues } from './repair-profile-fixture-readings.js';
 import { isDeepStrictEqual } from 'node:util';
 import type { Question } from '@goodvibes-jev/judgment';
-import { captureStrictJudgmentJson } from '../../sdk/src/platform/gate/judgment-result.js';
-import type { KnowledgeNodeRecord } from '../../sdk/src/platform/knowledge/types.js';
-import { repairProfileRequirement } from '../../sdk/src/platform/knowledge/semantic/repair-profile-requirement/battery.js';
-import { subjectTitle } from '../../sdk/src/platform/knowledge/semantic/self-improvement-graph.js';
-import { selfImprovementGapContext, selfImprovementEvidenceCoverage } from '../../sdk/src/platform/knowledge/semantic/self-improvement-assessment/battery.js';
+import { captureStrictJudgmentJson } from '../../platform/src/platform/gate/judgment-result.js';
+import type { KnowledgeNodeRecord } from '../../platform/src/platform/knowledge/types.js';
+import { repairProfileRequirement } from '../../platform/src/platform/knowledge/semantic/repair-profile-requirement/battery.js';
+import { subjectTitle } from '../../platform/src/platform/knowledge/semantic/self-improvement-graph.js';
+import { selfImprovementGapContext, selfImprovementEvidenceCoverage } from '../../platform/src/platform/knowledge/semantic/self-improvement-assessment/battery.js';
 
 export interface SelfImprovementFixtureValues {
   readonly query: string;

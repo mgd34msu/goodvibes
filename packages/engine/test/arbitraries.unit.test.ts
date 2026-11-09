@@ -7,7 +7,7 @@
  *   2. FIXTURE_EVENTS covers every KNOWN_EVENT_TYPES entry at least once.
  *   3. jsonValueArb generates values that survive a JSON round-trip.
  *
- * This test exists so that when new event types are added to the SDK the
+ * This test exists so that when new event types are added to the platform the
  * author is reminded to update both KNOWN_EVENT_TYPES and FIXTURE_EVENTS.
  */
 

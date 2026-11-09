@@ -1,4 +1,4 @@
-import type { Orchestrator } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { Orchestrator } from '@goodvibes-jev/engine/platform/platform/core';
 import type { SpokenTurnRuntime } from '../audio/spoken-turn-wiring.ts';
 
 /**
@@ -11,7 +11,7 @@ export function createCancelGeneration(
   cancelPendingRecovery?: () => boolean,
 ): () => boolean {
   return () => {
-    // TURN_ERROR finalizes the SDK attempt before our async reading/memory
+    // TURN_ERROR finalizes the platform attempt before our async reading/memory
     // preparation finishes. Esc/Ctrl+C must revoke that owned recovery even
     // though isThinking is already false and abort() would emit no TURN_CANCEL.
     const cancelledRecovery = cancelPendingRecovery?.() === true;
@@ -64,10 +64,10 @@ export function createCancelToolCall(
 
 
 /**
- * Relay recovery cancellation through both memory preparation and native SDK
+ * Relay recovery cancellation through both memory preparation and native platform
  * admission. The latter can be pending before isThinking/TURN_SUBMITTED, so a
  * boolean pre-entry check alone cannot cancel it. The turn hold releases this
- * signal without abort on submission; the SDK then owns ordinary turn abort.
+ * signal without abort on submission; the platform then owns ordinary turn abort.
  */
 export async function runOwnedTurnRetry(options: {
   readonly prepare: () => Promise<unknown>;

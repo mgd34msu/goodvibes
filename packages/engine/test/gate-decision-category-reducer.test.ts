@@ -2,8 +2,8 @@
 // DECISION_EMITTED, instead of guessing it from the tool name: a tool the
 // engine does not define gets the category Jev read for the call.
 import { describe, expect, test } from 'bun:test';
-import { updatePermissionState } from '../sdk/src/platform/runtime/store/helpers/reducers/lifecycle.ts';
-import { createInitialPermissionsState } from '../sdk/src/platform/runtime/store/domains/permissions.ts';
+import { updatePermissionState } from '../platform/src/platform/runtime/store/helpers/reducers/lifecycle.ts';
+import { createInitialPermissionsState } from '../platform/src/platform/runtime/store/domains/permissions.ts';
 
 describe('permissions reducer: decision category', () => {
   test('lastDecision.category is the category on the event', () => {

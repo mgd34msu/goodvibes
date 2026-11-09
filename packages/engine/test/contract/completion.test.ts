@@ -10,16 +10,16 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { join } from 'node:path';
 import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { hashState, JudgmentError, SqliteDecisionLog } from '@goodvibes-jev/judgment';
-import * as completionBinding from '../../sdk/src/platform/contract/completion-evidence-binding.js';
-import { CONTRACT_PASSED_WITHOUT_OUTPUT, describeCommitOutcome, describeContractOutcome, renderContractAnswer } from '../../sdk/src/platform/contract/index.js';
+import * as completionBinding from '../../platform/src/platform/contract/completion-evidence-binding.js';
+import { CONTRACT_PASSED_WITHOUT_OUTPUT, describeCommitOutcome, describeContractOutcome, renderContractAnswer } from '../../platform/src/platform/contract/index.js';
 import { makeHarness, oneUnitPlan, startContract, twoUnitPlan, waitFor, type AgentScript, type Harness } from './runner-support.js';
 import { contractOf, finishes, git, judgeOf, terminal } from './steps-support.js';
 import { plannerOutput } from './plan-support.js';
-import { ReadTool } from '../../sdk/src/platform/tools/read/index.js';
-import { ProjectIndex } from '../../sdk/src/platform/state/project-index.js';
-import { contractWorkReceipts } from '../../sdk/src/platform/contract/work-receipts.js';
-import { answerClaimScopes, completeAnswerClaimCoverage } from '../../sdk/src/platform/contract/final-answer-claims.js';
-import { judgmentExecutionEvidence } from '../../sdk/src/platform/contract/judgment-execution-evidence.js';
+import { ReadTool } from '../../platform/src/platform/tools/read/index.js';
+import { ProjectIndex } from '../../platform/src/platform/state/project-index.js';
+import { contractWorkReceipts } from '../../platform/src/platform/contract/work-receipts.js';
+import { answerClaimScopes, completeAnswerClaimCoverage } from '../../platform/src/platform/contract/final-answer-claims.js';
+import { judgmentExecutionEvidence } from '../../platform/src/platform/contract/judgment-execution-evidence.js';
 
 let harness: Harness | undefined;
 afterEach(() => {

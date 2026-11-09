@@ -22,7 +22,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:tes
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { cleanupResearchScreeningFixtures, ordinaryResearchOwner } from '../helpers/research-screening.ts';
-import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/sdk/platform/config';
+import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
 import { createTestManagers } from '../helpers/test-managers.ts';
 import { harnessSettingsCatalog } from '../../tools/agent-harness-settings-catalog.ts';
 import { listHarnessModes } from '../../tools/agent-harness-mode-catalog.ts';

@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createSettingsSyncModalSurface } from '../../views/modals/settings-sync-modal.ts';
 import { createProviderHealthModalSurface, type ProviderRuntimeInspect } from '../../views/modals/provider-health-modal.ts';
-import type { ProviderRuntimeSnapshot } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ProviderRuntimeSnapshot } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { ConfigModalActionContext, ConfigModalRow } from '../../input/config-modal-types.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 

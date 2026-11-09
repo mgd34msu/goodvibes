@@ -16,9 +16,9 @@ import { join } from 'node:path';
 import {
   parseProfileDocument,
   splitProvenanceSuffix,
-} from '../sdk/src/platform/owner-profile/document.ts';
-import { OwnerProfileStore } from '../sdk/src/platform/owner-profile/store.ts';
-import { resetProcessUntrustedContentLedgerForTests } from '../sdk/src/platform/security/untrusted-content.ts';
+} from '../platform/src/platform/owner-profile/document.ts';
+import { OwnerProfileStore } from '../platform/src/platform/owner-profile/store.ts';
+import { resetProcessUntrustedContentLedgerForTests } from '../platform/src/platform/security/untrusted-content.ts';
 
 // Profile writes ask the content-derivation reading whenever the process
 // ledger holds untrusted text; another test file's reads must not reach these.

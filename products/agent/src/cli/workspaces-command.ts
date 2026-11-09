@@ -1,8 +1,8 @@
 import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import { createShellPathService } from '@/runtime/index.ts';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { WorkspaceRegistrationError } from '@goodvibes-jev/engine/sdk/platform/workspace';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { WorkspaceRegistrationError } from '@goodvibes-jev/engine/platform/platform/workspace';
 import {
   createWorkspaceRegistrationStore,
   migrateLegacyWorkspaceRegistryIfNeeded,
@@ -14,7 +14,7 @@ import type { CliCommandRuntime } from './management.ts';
 
 /**
  * `goodvibes-agent workspaces`, manage the shared registered-workspace store
- * (SDK 1.6.1 platform/workspace/registration) that gates automatic checkpoints
+ * (platform 1.6.1 platform/workspace/registration) that gates automatic checkpoints
  * (owner ruling, 2026-07-10; see ../runtime/services.ts and
  * ../config/workspace-registration.ts). A workspace root not covered by this
  * store gets no automatic turn/agent-lifecycle checkpoints, and explicit

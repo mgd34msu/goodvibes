@@ -13,8 +13,8 @@ import {
   projectMemoryToFiles,
   readProjectedMemoryFiles,
   type MemoryRecord,
-} from '../sdk/src/platform/state/index.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
+} from '../platform/src/platform/state/index.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
 
 /**
  * Standing memory as git-backed markdown files that round-trip through the

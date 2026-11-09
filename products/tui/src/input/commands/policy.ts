@@ -1,4 +1,4 @@
-import { POLICY_COMMAND, runPolicyCommand } from '@goodvibes-jev/engine/sdk/platform/gate/policy';
+import { POLICY_COMMAND, runPolicyCommand } from '@goodvibes-jev/engine/platform/platform/gate/policy';
 import type { SlashCommand, CommandContext } from '../command-registry.ts';
 import { createPolicyCommandContext } from './policy-dispatch.ts';
 

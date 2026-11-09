@@ -16,9 +16,9 @@
  */
 import { contractFixture, contractUnit } from '../helpers/contract-work-tree-fixtures.ts';
 import { describe, expect, test } from 'bun:test';
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { AgentManager, ProcessManager } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { ProcessNode, SteerResult } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
+import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
+import type { AgentManager, ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ProcessNode, SteerResult } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import type { AgentLaneInfo, WorkTreeSources } from '../../core/work-tree-sources.ts';
 import { SessionViews } from '../../shell/session-views.ts';
 import { renderStatusLine } from '../../renderer/status-line.ts';
@@ -90,7 +90,7 @@ function scene(opts: { processStatus?: string; processDone?: boolean } = {}) {
   return { views, proc, renders: () => renders };
 }
 
-const text = (lines: readonly import('@goodvibes-jev/engine/sdk/platform/types').Line[]): string[] => lines.map((l) => lineToString(l).replace(/\s+$/, ''));
+const text = (lines: readonly import('@goodvibes-jev/engine/platform/platform/types').Line[]): string[] => lines.map((l) => lineToString(l).replace(/\s+$/, ''));
 
 describe('live run 5: a contract owner view shows its tree', () => {
   test('the owner is named "Contract" on its chip, not by its template', () => {
@@ -194,7 +194,7 @@ describe('live run 5: notices are drawn after the turn, outside its lanes', () =
       { role: 'tool', callId: 'c1', toolName: 'agent', content: JSON.stringify({ agentId: 'x', status: 'spawned' }) },
       { role: 'assistant', content: 'Started.', model: 'route-llm' },
     ];
-    const lines: import('@goodvibes-jev/engine/sdk/platform/types').Line[] = [];
+    const lines: import('@goodvibes-jev/engine/platform/platform/types').Line[] = [];
     const ctx: ConversationRenderContext = {
       history: { addLine: (l) => { lines.push(l); }, addLines: (ls) => { lines.push(...ls); }, getLineCount: () => lines.length },
       blockRegistry: [], collapseState: new Map(), errorLineRegistry: [], messageKindRegistry: new Map(), configManager: null, splashOptions: {},

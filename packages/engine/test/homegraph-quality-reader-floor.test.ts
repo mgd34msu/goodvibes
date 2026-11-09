@@ -3,9 +3,9 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import type { KnowledgeIssueUpsertInput } from '../sdk/src/platform/knowledge/types.js';
-import { nativeReaderCapabilities } from '../sdk/src/platform/runtime/native-reader-compatibility.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import type { KnowledgeIssueUpsertInput } from '../platform/src/platform/knowledge/types.js';
+import { nativeReaderCapabilities } from '../platform/src/platform/runtime/native-reader-compatibility.js';
 const roots: string[] = [], stores: KnowledgeStore[] = [];
 afterEach(async () => { await Promise.all(stores.splice(0).map(store => store.close())); for (const root of roots.splice(0)) rmSync(root,{ recursive: true, force: true }); });
 for (const path of ['upsert','replace','guarded-replacement','node-issue','import','prepared-ingest'] as const) test(`actual ${path} refuses opaque quality publication before row/cache changes when a reader cohort cannot accept it`, async () => {

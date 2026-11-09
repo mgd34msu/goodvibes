@@ -14,7 +14,7 @@ import type {
   security as Security,
   shell as Shell,
   transport as Transport,
-} from '@goodvibes-jev/engine/sdk/platform/runtime';
+} from '@goodvibes-jev/engine/platform/platform/runtime';
 
 // Local runtime entry points.
 export { bootstrapRuntime } from './bootstrap.ts';
@@ -24,15 +24,15 @@ export { createUiRuntimeServices } from './ui-services.ts';
 export type { UiRuntimeServices } from './ui-services.ts';
 
 // Public runtime exports. createFeatureFlagManager comes straight from the
-// SDK state surface below: gate states are seeded from domain settings keys
+// platform state surface below: gate states are seeded from domain settings keys
 // via deriveFeatureStates (exported there too), so the old local wrapper that
 // filtered unknown persisted featureFlags-category ids has nothing to filter.
-export * from '@goodvibes-jev/engine/sdk/platform/runtime/state';
-export * from '@goodvibes-jev/engine/sdk/platform/runtime/store';
-export * from '@goodvibes-jev/engine/sdk/platform/runtime/ui';
-export * from '@goodvibes-jev/engine/sdk/platform/runtime/observability';
-export * from '@goodvibes-jev/engine/sdk/platform/runtime/settings';
-export * from '@goodvibes-jev/engine/sdk/platform/runtime/sandbox';
+export * from '@goodvibes-jev/engine/platform/platform/runtime/state';
+export * from '@goodvibes-jev/engine/platform/platform/runtime/store';
+export * from '@goodvibes-jev/engine/platform/platform/runtime/ui';
+export * from '@goodvibes-jev/engine/platform/platform/runtime/observability';
+export * from '@goodvibes-jev/engine/platform/platform/runtime/settings';
+export * from '@goodvibes-jev/engine/platform/platform/runtime/sandbox';
 export {
   CONTROL_PLANE_CLIENT_KINDS,
   CONTROL_PLANE_TRANSPORT_KINDS,
@@ -40,7 +40,7 @@ export {
   SURFACE_KINDS,
   registeredEventTypes,
   validateKnownEvent as validateEvent,
-} from '@goodvibes-jev/engine/sdk/events';
+} from '@goodvibes-jev/engine/platform/events';
 export type {
   AgentEvent,
   CommunicationEvent,
@@ -60,7 +60,7 @@ export type {
   ToolEvent,
   TransportEvent,
   TurnEvent,
-} from '@goodvibes-jev/engine/sdk/events';
+} from '@goodvibes-jev/engine/platform/events';
 
 // Bootstrap compatibility aliases, grouped live re-exports (see the import
 // comment above for why these must not be eager namespace reads).
@@ -81,7 +81,7 @@ export {
   // call site (bootstrap-external-services.ts) so it never spawns or embeds a
   // daemon itself. A daemon that is INSTALLED on this machine but stopped is
   // handled separately at boot: one start through the platform service manager,
-  // then a fresh adopt-only probe (the SDK's autostartInstalledDaemon, wired in
+  // then a fresh adopt-only probe (the platform's autostartInstalledDaemon, wired in
   // runtime/bootstrap-external-services.ts).
   startHostServices,
   startHostServices as startExternalServices,
@@ -101,7 +101,7 @@ export {
   createRuntimeHookApi,
   createRuntimeMcpApi,
   createRuntimeOpsApi,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/bootstrap';
+} from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 
 export type BackgroundRuntimeTaskHandle = Bootstrap.BackgroundRuntimeTaskHandle;
 export type BackgroundMcpDiscoveryOptions = Bootstrap.BackgroundMcpDiscoveryOptions;
@@ -168,7 +168,7 @@ export {
   createNetworkFetch,
   GlobalNetworkTransportInstaller,
   inspectOutboundTls,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/transport';
+} from '@goodvibes-jev/engine/platform/platform/runtime/transport';
 
 export type DirectTransport = Transport.DirectTransport;
 export type DirectClientTransport<TOperator = unknown, TPeer = unknown> = Transport.DirectClientTransport<TOperator, TPeer>;
@@ -206,7 +206,7 @@ export type RemoteRuntimeEvents = Transport.RemoteRuntimeEvents;
 export type SerializedRuntimeEnvelope = Transport.SerializedRuntimeEnvelope;
 
 // Operations compatibility aliases. Grouped as a single live ESM re-export
-// from the SDK's own `platform/runtime/operations` subpath rather than eager
+// from the platform's own `platform/runtime/operations` subpath rather than eager
 // `export const X = operations.X` module-scope reads off the `operations`
 // namespace object: those reads evaluated the namespace getter while the
 // compiled single-file bundle could still be mid-cycle, and the binding they
@@ -261,7 +261,7 @@ export {
   // re-exported here without a registered subpath. Tests that need these types
   // should import from the operations namespace types directly.
   createTaskManager, PhasedToolExecutor, budgetPhase, permissionPhase,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+} from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 export type InstallKind = Operations.InstallKind;
 export type ReachabilityCheckInput = Operations.ReachabilityCheckInput;
 export type ReachabilityCheckResult = Operations.ReachabilityCheckResult;
@@ -385,7 +385,7 @@ export {
   getPersistedWorktreeMeta,
   reviewWorktreeAttachments,
   WorktreeRegistry,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
+} from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 
 export type MutableRuntimeState = Shell.MutableRuntimeState;
 export type ProviderAccountRecord = Shell.ProviderAccountRecord;
@@ -451,7 +451,7 @@ export {
   verifyBundle,
   MAX_INPUT_LENGTH,
   MAX_TOKEN_COUNT,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/security';
+} from '@goodvibes-jev/engine/platform/platform/runtime/security';
 
 export type AuthInspectionSnapshot = Security.AuthInspectionSnapshot;
 export type ProviderAuthInspection = Security.ProviderAuthInspection;
@@ -479,4 +479,4 @@ export type DivergenceReport = Security.DivergenceReport;
 export type EnforceGateResult = Security.EnforceGateResult;
 export type SignedPolicyBundle<T = unknown> = Security.SignedPolicyBundle<T>;
 
-export { inspectInboundTls, extractForwardedClientIp, type InspectableDomain, type InboundTlsMode, type InboundServerSurface, type InboundTlsSnapshot } from '@goodvibes-jev/engine/sdk/platform/runtime/inspection';
+export { inspectInboundTls, extractForwardedClientIp, type InspectableDomain, type InboundTlsMode, type InboundServerSurface, type InboundTlsSnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/inspection';

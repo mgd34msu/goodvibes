@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
-import { fetchModelContextWindows } from '@goodvibes-jev/engine/sdk/platform/discovery';
-import { scanHosts } from '../sdk/src/platform/discovery/scanner.js';
+import { fetchModelContextWindows } from '@goodvibes-jev/engine/platform/platform/discovery';
+import { scanHosts } from '../platform/src/platform/discovery/scanner.js';
 
 // ---------------------------------------------------------------------------
 // fetch mock helpers

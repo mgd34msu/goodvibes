@@ -14,7 +14,7 @@
  * Source of truth:
  *   - Operator: buildOperatorContract(new GatewayMethodCatalog()), built-in methods/events
  *     auto-registered from the method-catalog-* modules, product.version overridden with
- *     the SDK's current VERSION.
+ *     the engine's current VERSION.
  *   - Peer: the authoritative PEER_CONTRACT constant exported from the contracts package
  *     (peer contract is hand-maintained; this script just re-emits the JSON artifact from it).
  *
@@ -23,32 +23,32 @@
  *   bun run scripts/refresh-contract-artifacts.ts --check   # exit 1 if any artifact drifted
  *
  * After a successful refresh, run `bun run docs:generate` to refresh
- * docs/reference-*.md from the new artifacts. SDK package preparation copies
- * the checked-in contract package artifacts into the published SDK dist.
+ * docs/reference-*.md from the new artifacts. engine package preparation copies
+ * the checked-in contract package artifacts into the published engine dist.
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { buildOperatorContract } from '../sdk/src/platform/control-plane/operator-contract.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { buildOperatorContract } from '../platform/src/platform/control-plane/operator-contract.ts';
 import { PEER_CONTRACT } from '../contracts/src/generated/peer-contract.ts';
 import { buildMockDaemonFixtureMap } from '../contracts/src/testing/mock-daemon.ts';
 import type { OperatorContractManifest } from '../contracts/src/types.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SDK_ROOT = resolve(__dirname, '..');
+const ENGINE_ROOT = resolve(__dirname, '..');
 const CHECK_ONLY = process.argv.includes('--check');
 
-const OPERATOR_JSON_PATH = resolve(SDK_ROOT, 'contracts/artifacts/operator-contract.json');
-const PEER_JSON_PATH = resolve(SDK_ROOT, 'contracts/artifacts/peer-contract.json');
-const OPERATOR_TS_PATH = resolve(SDK_ROOT, 'contracts/src/generated/operator-contract.ts');
-const OPERATOR_METHOD_IDS_PATH = resolve(SDK_ROOT, 'contracts/src/generated/operator-method-ids.ts');
-const PEER_TS_PATH = resolve(SDK_ROOT, 'contracts/src/generated/peer-contract.ts');
-const PEER_ENDPOINT_IDS_PATH = resolve(SDK_ROOT, 'contracts/src/generated/peer-endpoint-ids.ts');
-const FOUNDATION_METADATA_PATH = resolve(SDK_ROOT, 'contracts/src/generated/foundation-metadata.ts');
-const MOCK_DAEMON_FIXTURES_PATH = resolve(SDK_ROOT, 'contracts/src/generated/mock-daemon-fixtures.ts');
+const OPERATOR_JSON_PATH = resolve(ENGINE_ROOT, 'contracts/artifacts/operator-contract.json');
+const PEER_JSON_PATH = resolve(ENGINE_ROOT, 'contracts/artifacts/peer-contract.json');
+const OPERATOR_TS_PATH = resolve(ENGINE_ROOT, 'contracts/src/generated/operator-contract.ts');
+const OPERATOR_METHOD_IDS_PATH = resolve(ENGINE_ROOT, 'contracts/src/generated/operator-method-ids.ts');
+const PEER_TS_PATH = resolve(ENGINE_ROOT, 'contracts/src/generated/peer-contract.ts');
+const PEER_ENDPOINT_IDS_PATH = resolve(ENGINE_ROOT, 'contracts/src/generated/peer-endpoint-ids.ts');
+const FOUNDATION_METADATA_PATH = resolve(ENGINE_ROOT, 'contracts/src/generated/foundation-metadata.ts');
+const MOCK_DAEMON_FIXTURES_PATH = resolve(ENGINE_ROOT, 'contracts/src/generated/mock-daemon-fixtures.ts');
 
 /**
  * Stringify that preserves shared DAG references (duplicates them in the

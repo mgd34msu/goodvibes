@@ -7,8 +7,8 @@
  * verbs, and the automation kind:'checkin' execution branch.
  */
 import { describe, expect, test } from 'bun:test';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { registerCheckinGatewayMethods } from '../sdk/src/platform/control-plane/routes/checkin.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { registerCheckinGatewayMethods } from '../platform/src/platform/control-plane/routes/checkin.ts';
 import {
   CheckinService,
   CheckinReceiptStore,
@@ -17,8 +17,8 @@ import {
   isQuietHours,
   type CheckinDecision,
   type CheckinStateSnapshot,
-} from '../sdk/src/platform/checkin/index.ts';
-import { executeCheckinJob } from '../sdk/src/platform/automation/checkin-execution.ts';
+} from '../platform/src/platform/checkin/index.ts';
+import { executeCheckinJob } from '../platform/src/platform/automation/checkin-execution.ts';
 
 const KEYS = {
   enabled: 'checkin.enabled',

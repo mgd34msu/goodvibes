@@ -5,7 +5,7 @@
  * border color and an amber │ marks the threshold.
  */
 import { describe, expect, test } from 'bun:test';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { renderStatusLine } from '../../renderer/status-line.ts';
 import { activeTokens } from '../../renderer/theme.ts';
 import { lineToString } from '../setup.ts';

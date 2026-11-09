@@ -1,5 +1,5 @@
-import type { ConversationManager } from '@goodvibes-jev/engine/sdk/platform/core';
-import { estimateTokens } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { ConversationManager } from '@goodvibes-jev/engine/platform/platform/core';
+import { estimateTokens } from '@goodvibes-jev/engine/platform/platform/core';
 type InspectorConversation = Pick<ConversationManager, 'getMessagesForLLM'>;
 import { activeTokens } from './theme.js';
 import { beginModal, finishModal, scrollCountText, type KitHint, type SurfaceLayer, } from './surface-kit.js';

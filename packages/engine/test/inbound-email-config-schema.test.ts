@@ -30,34 +30,34 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'bun:test';
-import { CONFIG_SCHEMA, DEFAULT_CONFIG } from '../sdk/src/platform/config/schema.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { ConfigError } from '../sdk/src/platform/types/errors.js';
+import { CONFIG_SCHEMA, DEFAULT_CONFIG } from '../platform/src/platform/config/schema.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { ConfigError } from '../platform/src/platform/types/errors.js';
 import {
   isDaemonOwnedConfigKey,
   isClientOwnedConfigKey,
   configKeyScope,
   listDaemonOwnedConfigPaths,
-} from '../sdk/src/platform/config/config-ownership.js';
+} from '../platform/src/platform/config/config-ownership.js';
 import {
   DEFAULT_VERIFICATION_WINDOW_MS,
   MAX_VERIFICATION_WINDOW_MS,
-} from '../sdk/src/platform/google/verification-expectations.js';
-import { composeInboundMail } from '../sdk/src/platform/daemon/facade-inbound-mail.js';
-import { surfaceHasCommandAuthority } from '../sdk/src/platform/security/untrusted-content.js';
-import { capabilityVerdict } from '../sdk/src/platform/email/inbound/capability.js';
+} from '../platform/src/platform/google/verification-expectations.js';
+import { composeInboundMail } from '../platform/src/platform/daemon/facade-inbound-mail.js';
+import { surfaceHasCommandAuthority } from '../platform/src/platform/security/untrusted-content.js';
+import { capabilityVerdict } from '../platform/src/platform/email/inbound/capability.js';
 import type {
   InboundCapabilityTransition,
   InboundCapabilityVerdict,
   InboundMailObserver,
-} from '../sdk/src/platform/email/inbound/ports.js';
+} from '../platform/src/platform/email/inbound/ports.js';
 import type {
   InboundMailSupervisor,
   InboundMailSupervisorDeps,
-} from '../sdk/src/platform/email/inbound/index.js';
-import type { InboundWatcherSettings } from '../sdk/src/platform/email/inbound/ports.js';
-import type { StructuredNotice } from '../sdk/src/platform/email/inbound-notice.js';
-import type { GatewayMethodHandler } from '../sdk/src/platform/control-plane/method-catalog.js';
+} from '../platform/src/platform/email/inbound/index.js';
+import type { InboundWatcherSettings } from '../platform/src/platform/email/inbound/ports.js';
+import type { StructuredNotice } from '../platform/src/platform/email/inbound-notice.js';
+import type { GatewayMethodHandler } from '../platform/src/platform/control-plane/method-catalog.js';
 
 const tmpRoots: string[] = [];
 afterEach(() => {
@@ -352,7 +352,7 @@ function inboundMessage(): Parameters<InboundMailSupervisorDeps['handle']>[0] {
 }
 
 /**
- * Every production `.ts` under the SDK except the config definitions
+ * Every production `.ts` under the platform except the config definitions
  * themselves.
  *
  * Excluded on purpose: `config/` is where a key is DECLARED, and a declaration
@@ -360,7 +360,7 @@ function inboundMessage(): Parameters<InboundMailSupervisorDeps['handle']>[0] {
  * read.
  */
 function readSourceFilesOutsideConfig(): string[] {
-  const root = join(import.meta.dir, '..', 'sdk', 'src');
+  const root = join(import.meta.dir, '..', 'platform', 'src');
   const texts: string[] = [];
   const walk = (directory: string): void => {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -676,7 +676,7 @@ describe('each inbound setting reaches the thing it names', () => {
    * BOTH ways the gate above could stop being able to fail:
    *
    *   1. A detector that answers true regardless of its input. The absent key
-   *      catches that, nothing under `sdk/src` contains that string,
+   *      catches that, nothing under `platform/src` contains that string,
    *      so a `true` means the answer stopped depending on the argument.
    *   2. A detector widened to match a bare MENTION instead of a call. The
    *      absent key does NOT catch that, and this was verified rather than
@@ -757,7 +757,7 @@ describe('each inbound setting reaches the thing it names', () => {
    * whose effective setting depends on which caller ran last.
    */
   test('each Gmail poll interval is read exactly once, at source-create time', () => {
-    const root = join(import.meta.dir, '..', 'sdk', 'src');
+    const root = join(import.meta.dir, '..', 'platform', 'src');
     const files: string[] = [];
     const walk = (directory: string): void => {
       for (const entry of readdirSync(directory, { withFileTypes: true })) {

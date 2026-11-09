@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { clearTurnAnchors, recordTurnAnchor } from '@goodvibes-jev/engine/sdk/platform/rewind';
+import { clearTurnAnchors, recordTurnAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { createConversationRewindPort, createSessionConversationRewindPort, registerSessionConversation, unregisterSessionConversation, type RewindableConversation } from '../../runtime/conversation-rewind-port.ts';
 
 const SESSION = 'fixture-product-rewind';

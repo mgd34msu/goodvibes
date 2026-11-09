@@ -4,9 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { FileUndoManager } from '../sdk/src/platform/state/file-undo.js';
-import { createWriteTool } from '../sdk/src/platform/tools/write/index.js';
+import type { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { FileUndoManager } from '../platform/src/platform/state/file-undo.js';
+import { createWriteTool } from '../platform/src/platform/tools/write/index.js';
 import { useToolReadings } from './_helpers/tool-readings.js';
 
 useToolReadings([['', { fixesErrors: true, onlyTheFix: true }]]);

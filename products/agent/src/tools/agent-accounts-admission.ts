@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, realpathSync, statSync, type BigIntStats } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
-import { assertCurrentToolEffect, assertCurrentToolInvocation, assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector, type ToolExecuteOptions } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { assertCurrentToolEffect, assertCurrentToolInvocation, assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector, type ToolExecuteOptions } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { AgentAccountsToolOptions } from './agent-accounts-tool.ts';
 import { assertAgentMemoryInput } from './agent-memory-input-guard.ts';
 import { getSessionExpectationBook } from '../agent/signup/session-expectations.ts';

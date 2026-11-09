@@ -1,7 +1,7 @@
 /** Exact canonical-read/recorded-judgment replay; synthetic source and answers, never live calibration. */
 import { readFileSync } from 'node:fs';
 import type { Page } from '@playwright/test';
-import { parseBrowserJudgmentRequest, type BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-sdk';
+import { parseBrowserJudgmentRequest, type BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-api';
 import type { OperatorMethodOutput } from '../../src/lib/goodvibes';
 import { installMockDaemon } from './mock-daemon';
 

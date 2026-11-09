@@ -8,7 +8,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { CommandRegistry } from '../../input/command-registry.ts';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { registerSettingsSyncRuntimeCommands } from '../../input/commands/settings-sync-runtime.ts';

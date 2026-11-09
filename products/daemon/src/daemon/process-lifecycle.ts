@@ -1,4 +1,4 @@
-import { reportFatalBootFailure } from '@goodvibes-jev/engine/sdk/platform/daemon';
+import { reportFatalBootFailure } from '@goodvibes-jev/engine/platform/platform/daemon';
 
 export type DaemonProcessExitCode = 0 | 1;
 export type DaemonProcessSignal = 'SIGINT' | 'SIGTERM';

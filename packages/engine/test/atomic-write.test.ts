@@ -10,7 +10,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { atomicWriteFileSync } from '../sdk/src/platform/config/atomic-write.ts';
+import { atomicWriteFileSync } from '../platform/src/platform/config/atomic-write.ts';
 
 let tmpDir: string;
 

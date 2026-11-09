@@ -1,5 +1,5 @@
-import { loadPackageScripts, getSkippedGateReason } from '@goodvibes-jev/engine/sdk/platform/contract';
-import type { ToolCall } from '@goodvibes-jev/engine/sdk/platform/types';
+import { loadPackageScripts, getSkippedGateReason } from '@goodvibes-jev/engine/platform/platform/contract';
+import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireShellPaths } from './runtime-services.ts';
 
@@ -94,7 +94,7 @@ export function parseTestOutput(output: string): ParsedTestResults | null {
  * Single-quote shell-escape a value for safe interpolation into a
  * `/bin/sh -c` string: wrap in single quotes, turning any embedded single
  * quote into `'\''` (close quote, escaped literal quote, reopen quote).
- * Mirrors the injection-risk class already present in the SDK's
+ * Mirrors the injection-risk class already present in the platform's
  * wrfc-gates.ts (executeGateCommand) and this repo's git-runtime.ts /
  * diff-runtime.ts, which build shell command strings the same way, a
  * pattern arg is never string-concatenated into the command raw.

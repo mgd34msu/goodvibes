@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { atomicWriteFileSync, type AtomicWriteOptions } from '@goodvibes-jev/engine/sdk/platform/config';
+import { atomicWriteFileSync, type AtomicWriteOptions } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { assertNoSecretLikeText } from './persona-registry.ts';
@@ -9,14 +9,14 @@ import { parseMarkdownFrontmatter, stripMarkdownFrontmatter } from './markdown-f
 // canonical memory store, not a separate source of truth. renderVibeProjection emits
 // the same '## VIBE.md' block from those records (caveat preserved); the file is
 // demoted to an import/export FORMAT folded in via vibeBodyToConstraintOptions.
-import { renderVibeProjection, vibeBodyToConstraintOptions } from '@goodvibes-jev/engine/sdk/platform/state';
-import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { renderVibeProjection, vibeBodyToConstraintOptions } from '@goodvibes-jev/engine/platform/platform/state';
+import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-import type { MemoryRecord, MemoryScope } from '@goodvibes-jev/engine/sdk/platform/state';
+import type { MemoryRecord, MemoryScope } from '@goodvibes-jev/engine/platform/platform/state';
 // Writes go through the memory-spine's MemoryAccess surface (add), not the raw
 // MemoryRegistry, so this import folds correctly whether the agent is local or has
 // adopted a daemon, see services.ts's memorySpineClient.
-import type { MemoryAccess } from '@goodvibes-jev/engine/sdk/platform/runtime/memory-spine';
+import type { MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 
 export type AgentVibeScope = 'project' | 'global';
 

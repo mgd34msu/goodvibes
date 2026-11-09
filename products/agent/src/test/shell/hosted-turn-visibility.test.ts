@@ -21,7 +21,7 @@ import {
 } from '../../shell/hosted-turn-activity.ts';
 import { buildThrobberState, ThinkingStallClock } from '../../core/thinking-overlay.ts';
 import { createHostedFrameRenderer } from '../../runtime/client/hosted-frame-render.ts';
-import type { Orchestrator } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { Orchestrator } from '@goodvibes-jev/engine/platform/platform/core';
 
 /** The orchestrator fields the shell's turn indicator reads, and nothing else. */
 function turnState(): ThinkingUiState {

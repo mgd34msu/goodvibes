@@ -1,9 +1,9 @@
 import { afterEach, expect, test } from 'bun:test';
-import { TelegramPollingReceiveProgress } from '../sdk/src/platform/channels/telegram/receive-progress.js';
-import { createTelegramSourceAccountOwner } from '../sdk/src/platform/channels/telegram/source-account.js';
-import { TelegramBotApi, TelegramUpdateResponseError } from '../sdk/src/platform/channels/telegram/api.js';
-import { TelegramIngressSupervisor } from '../sdk/src/platform/channels/telegram/ingress.js';
-import { TelegramOffsetStore } from '../sdk/src/platform/channels/telegram/offset-store.js';
+import { TelegramPollingReceiveProgress } from '../platform/src/platform/channels/telegram/receive-progress.js';
+import { createTelegramSourceAccountOwner } from '../platform/src/platform/channels/telegram/source-account.js';
+import { TelegramBotApi, TelegramUpdateResponseError } from '../platform/src/platform/channels/telegram/api.js';
+import { TelegramIngressSupervisor } from '../platform/src/platform/channels/telegram/ingress.js';
+import { TelegramOffsetStore } from '../platform/src/platform/channels/telegram/offset-store.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

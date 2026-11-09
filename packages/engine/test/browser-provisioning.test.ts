@@ -1,7 +1,7 @@
 import { useBrowserProvisionReadings } from './_helpers/browser-provision-readings.js';
 import { describe, expect, test } from 'bun:test';
-import { ensureBrowserBinary } from '../sdk/src/platform/browser/browser-provisioning.js';
-import type { BrowserProvisionIo, CommandOutcome } from '../sdk/src/platform/browser/browser-types.js';
+import { ensureBrowserBinary } from '../platform/src/platform/browser/browser-provisioning.js';
+import type { BrowserProvisionIo, CommandOutcome } from '../platform/src/platform/browser/browser-types.js';
 
 const BROWSERS_PATH = '/cache/ms-playwright';
 const EXECUTABLE = `${BROWSERS_PATH}/chromium-1234/chrome-linux64/chrome`;

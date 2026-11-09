@@ -14,7 +14,7 @@
 
 import { aeadOpen, aeadSeal, RELAY_NONCE_BYTES } from './crypto.js';
 import type { RelayHandshakeKeys } from './handshake.js';
-import { GoodVibesSdkError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes-jev/engine/errors';
 
 const COUNTER_BYTES = 8;
 const DIRECTION_PREFIX_BYTES = RELAY_NONCE_BYTES - COUNTER_BYTES; // 4
@@ -65,7 +65,7 @@ export class RelaySecureChannel {
   /** Seal an application payload into a wire frame (counter prefix + ciphertext). */
   async seal(plaintext: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
     if (this.sendCounter >= MAX_COUNTER) {
-      throw new GoodVibesSdkError('Relay secure channel counter exhausted; reconnect required.', {
+      throw new GoodVibesError('Relay secure channel counter exhausted; reconnect required.', {
         category: 'protocol',
         source: 'transport',
         recoverable: true,
@@ -85,11 +85,11 @@ export class RelaySecureChannel {
   /** Open a received wire frame, enforcing strictly-increasing counters. */
   async open(frame: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
     if (frame.length <= COUNTER_BYTES) {
-      throw new GoodVibesSdkError('Truncated relay channel frame.', { category: 'protocol', source: 'transport', recoverable: false });
+      throw new GoodVibesError('Truncated relay channel frame.', { category: 'protocol', source: 'transport', recoverable: false });
     }
     const counter = Number(new DataView(frame.buffer, frame.byteOffset, COUNTER_BYTES).getBigUint64(0, false));
     if (counter <= this.lastRecvCounter) {
-      throw new GoodVibesSdkError('Relay channel frame replay or reorder detected.', {
+      throw new GoodVibesError('Relay channel frame replay or reorder detected.', {
         category: 'protocol',
         source: 'transport',
         recoverable: false,

@@ -2,7 +2,7 @@ import type { AgentPersonaRecord } from '../agent/persona-registry.ts';
 import type { AgentRoutineRecord } from '../agent/routine-registry.ts';
 import type { AgentSkillRecord } from '../agent/skill-registry.ts';
 import type { AgentNoteRecord } from '../agent/note-registry.ts';
-import type { MemoryRecord } from '@goodvibes-jev/engine/sdk/platform/state';
+import type { MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
 import type {
   AgentWorkspaceLocalEditor,
   AgentWorkspaceLocalEditorKind,

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { GoodVibesSdkError } from '../errors/src/index.js';
-import { IdempotencyStore } from '../sdk/src/platform/runtime/idempotency/index.js';
+import { GoodVibesError } from '../errors/src/index.js';
+import { IdempotencyStore } from '../platform/src/platform/runtime/idempotency/index.js';
 
 function captureThrown(fn: () => void): unknown {
   try {
@@ -26,18 +26,18 @@ describe('IdempotencyStore finalization', () => {
     const store = new IdempotencyStore();
     const err = captureThrown(() => store.markComplete('missing-key'));
 
-    expect(err).toBeInstanceOf(GoodVibesSdkError);
-    expect((err as GoodVibesSdkError).code).toBe('IDEMPOTENCY_RECORD_NOT_FOUND');
-    expect((err as GoodVibesSdkError).operation).toBe('markComplete');
+    expect(err).toBeInstanceOf(GoodVibesError);
+    expect((err as GoodVibesError).code).toBe('IDEMPOTENCY_RECORD_NOT_FOUND');
+    expect((err as GoodVibesError).operation).toBe('markComplete');
   });
 
   test('markFailed surfaces a missing record', () => {
     const store = new IdempotencyStore();
     const err = captureThrown(() => store.markFailed('missing-key'));
 
-    expect(err).toBeInstanceOf(GoodVibesSdkError);
-    expect((err as GoodVibesSdkError).code).toBe('IDEMPOTENCY_RECORD_NOT_FOUND');
-    expect((err as GoodVibesSdkError).operation).toBe('markFailed');
+    expect(err).toBeInstanceOf(GoodVibesError);
+    expect((err as GoodVibesError).code).toBe('IDEMPOTENCY_RECORD_NOT_FOUND');
+    expect((err as GoodVibesError).operation).toBe('markFailed');
   });
 
   test('normal finalization keeps completed records queryable', () => {

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { createScopedBrowserSdk } from '../sdk/src/browser-scoped.js';
-import type { NativeConversationIntakeResult } from '../sdk/src/platform/workflow/work-ledger/native-intake-wire.js';
+import { createScopedBrowserPlatform } from '../platform/src/browser-scoped.js';
+import type { NativeConversationIntakeResult } from '../platform/src/platform/workflow/work-ledger/native-intake-wire.js';
 const method = 'workLedger.intake.admit';
 const routes = { [method]: { method: 'POST', path: '/api/work-ledger/intake/admit' } };
 const request = { inputId: 'input-1', sourceRevision: 'source-revision-1' };
@@ -18,8 +18,8 @@ test('scoped typed browser intake preserves routing, recovery and work distincti
       source: { version: 2, sourceId: common.sourceRef.sourceId, sourceRevision: request.sourceRevision, sessionId: common.sourceRef.sessionId,
         offsetEncoding: 'utf16', proposalRevision: 'proposal-1', spans: [{ partId: 'input', start: 0, end: 4 }], admissionDecisionId: 'decision-1', judgmentDecisionIds: ['decision-1'] }, goal: 'Goal', criteria: ['Goal'] } },
   ] satisfies readonly NativeConversationIntakeResult[]) {
-    const sdk = createScopedBrowserSdk(routes, [], { baseUrl: 'https://native-fixture.invalid', fetch: async () => new Response(JSON.stringify(snapshot), { headers: { 'Content-Type': 'application/json' } }) });
-    const result = await sdk.operator.invoke(method, request);
+    const platformClient = createScopedBrowserPlatform(routes, [], { baseUrl: 'https://native-fixture.invalid', fetch: async () => new Response(JSON.stringify(snapshot), { headers: { 'Content-Type': 'application/json' } }) });
+    const result = await platformClient.operator.invoke(method, request);
     expect(result).toEqual(snapshot);
     if (result.kind === 'work') { expect(result.receipt.source.version).toBe(2); expect(result.receipt.source.offsetEncoding).toBe('utf16'); }
     else if (result.kind === 'turn') expect(result.route).toBe('converse');

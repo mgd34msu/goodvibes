@@ -20,7 +20,7 @@
  * plus the provider-shaped registries the daemon really has (providers, memory
  * embeddings, voice, media, web search), which are neither host's exclusively.
  *
- * The two surface-side kinds are the ones this host cannot serve. The SDK's
+ * The two surface-side kinds are the ones this host cannot serve. The platform's
  * PluginLoaderDeps has no optional members and its API guards nothing, so a
  * host that passes nothing for a registry does not decline that kind, it
  * throws a TypeError inside the plugin's own init, which the loader catches by
@@ -34,11 +34,11 @@
  * run it, naming the plugin, so the same plugin loaded by a surface is visibly
  * where that half happens.
  */
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { CommandRegistryLike, HostSlashCommand } from '@goodvibes-jev/engine/sdk/platform/runtime/ui';
-import type { PluginLoaderDeps } from '@goodvibes-jev/engine/sdk/platform/plugins';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import type { CommandRegistryLike, HostSlashCommand } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
+import type { PluginLoaderDeps } from '@goodvibes-jev/engine/platform/platform/plugins';
 import type { RuntimeServices } from './runtime-services-types.js';
 
 /**

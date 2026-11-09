@@ -17,7 +17,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { connect, type Socket } from 'node:net';
-import { EmailService } from '../sdk/src/platform/email/email-service.ts';
+import { EmailService } from '../platform/src/platform/email/email-service.ts';
 import {
   testDescribeSenderClaim,
   throwingEmailTransport,

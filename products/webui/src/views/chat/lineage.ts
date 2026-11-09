@@ -9,7 +9,7 @@
  * was edited from.
  *
  * This module turns that flat, server-authoritative list into a render model that keeps
- * the promise the SDK makes: the active conversation reads cleanly, and every superseded
+ * the promise the platform makes: the active conversation reads cleanly, and every superseded
  * message stays VIEWABLE as retained history rather than silently vanishing. Because the
  * model is derived purely from the server list (not from ephemeral client state), it
  * survives reloads and reflects exactly what the daemon retained.

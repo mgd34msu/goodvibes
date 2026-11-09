@@ -4,11 +4,11 @@
  * notify, and session and agent cost rows driven by the turn and agent feeds.
  */
 import { describe, expect, test } from 'bun:test';
-import { CostTracker, EvalRegistry } from '../sdk/src/platform/observe/index.ts';
-import type { EvalGateResult, EvalSuiteResult } from '../sdk/src/platform/runtime/eval/types.ts';
-import type { AgentRecord } from '../sdk/src/platform/tools/agent/record.ts';
-import type { UiEventFeed } from '../sdk/src/platform/runtime/ui-events.ts';
-import type { AgentEvent, TurnEvent } from '../sdk/src/platform/runtime/events/index.ts';
+import { CostTracker, EvalRegistry } from '../platform/src/platform/observe/index.ts';
+import type { EvalGateResult, EvalSuiteResult } from '../platform/src/platform/runtime/eval/types.ts';
+import type { AgentRecord } from '../platform/src/platform/tools/agent/record.ts';
+import type { UiEventFeed } from '../platform/src/platform/runtime/ui-events.ts';
+import type { AgentEvent, TurnEvent } from '../platform/src/platform/runtime/events/index.ts';
 
 const suite = (name: string, meanScore: number): EvalSuiteResult => ({ suite: name, startedAt: 0, finishedAt: 1, results: [], meanScore, passed: true });
 

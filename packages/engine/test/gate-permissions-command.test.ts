@@ -2,14 +2,14 @@
 // The TUI keeps the `/permissions` registration; the command logic it calls
 // is runPermissionsCommand in gate/policy/permissions-runtime.ts.
 import { describe, expect, test } from 'bun:test';
-import type { StoredUserPermissionRule } from '../sdk/src/platform/permissions/user-rule-store.ts';
+import type { StoredUserPermissionRule } from '../platform/src/platform/permissions/user-rule-store.ts';
 import {
   runPermissionsCommand,
   type PermissionRuleSelectionItem,
   type PermissionRuleSelectionResult,
   type PermissionsCommandContext,
   type RememberedRuleStore,
-} from '../sdk/src/platform/gate/policy/permissions-runtime.ts';
+} from '../platform/src/platform/gate/policy/permissions-runtime.ts';
 
 function makeRuleStore(initial: Array<{ id: string; tool: string; effect: 'allow' | 'deny'; tier: 'tool' | 'command'; description?: string }>) {
   const records = initial.map((r) => ({

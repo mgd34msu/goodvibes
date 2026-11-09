@@ -1,4 +1,4 @@
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogMethods, captureCatalogSnapshot, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureCatalogReadRequest, selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
@@ -8,11 +8,11 @@ import { withModelReadingSource } from './agent-harness-model-reading-source.ts'
  *
  * Split out of agent-harness-metadata.ts when that module passed the 800-line
  * ceiling. The seam is the subject, not the line count: everything here is
- * about what a connected host can do and which SDK operator route reaches it,
+ * about what a connected host can do and which platform operator route reaches it,
  * while what stays behind is the local command-policy table. Its sibling
  * agent-harness-connected-host-status.ts already owned the status half.
  */
-import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext } from '../input/command-registry.ts';
 import { resolveAgentConnectedHostConnection } from '../agent/routine-schedule-promotion.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
@@ -408,7 +408,7 @@ export function blockedConnectedHostCapabilities(): readonly Record<string, unkn
         liveStatus: 'host action:"status"',
         operate: 'agent_operator_method with confirm:true and explicitUserRequest',
       },
-      reason: 'Daemon mutations must resolve to a documented SDK operator method and carry explicit user authorization.',
+      reason: 'Daemon mutations must resolve to a documented platform operator method and carry explicit user authorization.',
     },
   ];
 }

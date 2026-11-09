@@ -54,7 +54,7 @@ interface RecordedCall { readonly methodId: string; readonly input: unknown }
 
 function recordingVerbs(answers: Record<string, unknown>, calls: RecordedCall[]): DaemonVerbCaller {
   return {
-    probe: () => ({ available: true, sdk: {} as never }),
+    probe: () => ({ available: true, platformClient: {} as never }),
     invoke: async <T,>(methodId: string, input?: unknown): Promise<T> => {
       calls.push({ methodId, input });
       if (!(methodId in answers)) throw new Error(`no recorded answer for ${methodId}`);

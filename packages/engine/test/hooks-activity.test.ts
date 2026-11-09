@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { HookActivityTracker } from '@goodvibes-jev/engine/sdk/platform/hooks';
-import type { HookEvent } from '@goodvibes-jev/engine/sdk/platform/hooks';
+import { HookActivityTracker } from '@goodvibes-jev/engine/platform/platform/hooks';
+import type { HookEvent } from '@goodvibes-jev/engine/platform/platform/hooks';
 
 function makeEvent(): HookEvent {
   return {

@@ -1,8 +1,8 @@
 import { afterAll, expect, test } from 'bun:test';
 import { lstatSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { captureCatalogSnapshot } from '../../tools/agent-harness-catalog-ranking.ts';
 import { withModelReadingSource } from '../../tools/agent-harness-model-reading-source.ts';
 import { forwardHarnessCatalogCall, retainHarnessCatalogCurrent } from '../../tools/agent-harness-catalog-ingress.ts';

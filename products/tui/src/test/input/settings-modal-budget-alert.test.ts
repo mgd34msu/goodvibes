@@ -3,7 +3,7 @@
  * (src/input/settings-modal-data.ts: buildBudgetAlertUsdSyntheticEntry,
  * and its injection into buildSettingGroups's 'behavior' category).
  *
- * Context: budgetAlertUsd is a TUI-local key, never registered in the SDK's
+ * Context: budgetAlertUsd is a TUI-local key, never registered in the platform's
  * CONFIG_SCHEMA. Before this entry existed, the actual USD threshold was
  * invisible to every schema-driven inspection surface (/config, and
  * /settings-sync show <key>, which rejects any key outside CONFIG_KEYS) even
@@ -14,10 +14,10 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { buildBudgetAlertUsdSyntheticEntry, buildSettingGroups } from '../../input/settings-modal-data.ts';
-import { BUDGET_ALERT_USD_CONFIG_KEY, BUDGET_ALERT_USD_DEFAULT } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { BUDGET_ALERT_USD_CONFIG_KEY, BUDGET_ALERT_USD_DEFAULT } from '@goodvibes-jev/engine/platform/platform/providers';
 
 describe('buildBudgetAlertUsdSyntheticEntry', () => {
   const originalCwd = process.cwd();
@@ -42,7 +42,7 @@ describe('buildBudgetAlertUsdSyntheticEntry', () => {
 
   test('defaults to BUDGET_ALERT_USD_DEFAULT (0 = disabled) when never set', () => {
     const entry = buildBudgetAlertUsdSyntheticEntry(cm);
-    // BUDGET_ALERT_USD_CONFIG_KEY is TUI-local and not in the SDK's ConfigKey
+    // BUDGET_ALERT_USD_CONFIG_KEY is TUI-local and not in the platform's ConfigKey
     // union (see settings-modal-data.ts doc comment); production code casts
     // it the same way when building the synthetic setting descriptor.
     expect(entry.setting.key).toBe(BUDGET_ALERT_USD_CONFIG_KEY as ConfigKey);
@@ -70,7 +70,7 @@ describe('buildBudgetAlertUsdSyntheticEntry', () => {
     const groups = buildSettingGroups(cm);
     const behaviorKeys = (groups.get('behavior') ?? []).map((e) => e.setting.key);
     // Both keys below are TUI-local synthetic settings, not members of the
-    // SDK's ConfigKey union, same `as ConfigKey` cast production code uses.
+    // platform's ConfigKey union, same `as ConfigKey` cast production code uses.
     expect(behaviorKeys.filter((k) => k === (BUDGET_ALERT_USD_CONFIG_KEY as ConfigKey))).toHaveLength(1);
     expect(behaviorKeys).toContain('behavior.notifyOnBudgetBreach' as ConfigKey);
   });

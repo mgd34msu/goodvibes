@@ -1,5 +1,5 @@
-import { loadSkillByTrigger } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import { loadSkillByTrigger } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import { activeTokens } from './renderer/theme.js';
 export interface CommandRouteContext {
   readonly workspace: {

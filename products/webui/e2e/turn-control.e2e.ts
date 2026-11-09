@@ -1,5 +1,5 @@
 /**
- * Turn control, server-side stop, steer, and queue-when-busy (SDK 1.4).
+ * Turn control, server-side stop, steer, and queue-when-busy (platform 1.4).
  *
  * Hermetic against the stateful chat mock in holdReplies mode: a send leaves
  * the turn visibly active so Stop / steer / queued markers are exercisable.

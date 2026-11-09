@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { RuntimeEventBus } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
-import { createAgentTool, ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { createAgentTool, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { createRuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { installAgentToolPolicyGuard } from '../../tools/agent-tool-policy-guard.ts';

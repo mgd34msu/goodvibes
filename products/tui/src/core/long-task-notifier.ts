@@ -7,7 +7,7 @@
  * the first line of the message that started the turn, trimmed at a word
  * boundary), the body is the outcome: done, failed or cancelled, elapsed time,
  * files changed, tool calls, agents started, review score, and for a failure
- * the reason. Text comes from the SDK's runtime/turn-notification.ts so every
+ * the reason. Text comes from the platform's runtime/turn-notification.ts so every
  * channel and host words it the same way.
  *
  * PRIVACY RULE: Only explicit false from behavior.notificationsMetadataOnly
@@ -18,8 +18,8 @@
  * included, carry the name and the outcome.
  *
  * Delivery targets (in preference order):
- *   1. Desktop notification (linux notify-send / mac osascript) via SDK
- *      notifyCompletion, detected and dispatched by the SDK; silently
+ *   1. Desktop notification (linux notify-send / mac osascript) via platform
+ *      notifyCompletion, detected and dispatched by the platform; silently
  *      no-ops when the platform does not support it.
  *   2. Configured outbound webhook channel (ntfy topic / webhook URL) via
  *      WebhookNotifier.sendNotification(), only fires when the user has URLs configured.
@@ -37,10 +37,10 @@
  * unaffected.
  */
 
-import { notifyCompletion } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
-import type { WebhookNotifier } from '@goodvibes-jev/engine/sdk/platform/integrations';
-import type { FocusTracker } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { notifyCompletion } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
+import type { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import {
   FORCE_NOTIFY_DURATION_MS,
   buildTurnNotification,
@@ -49,7 +49,7 @@ import {
   type ConfigGet,
   type TurnOutcome,
   type TurnNotificationFacts,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+} from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 
 /** Default threshold in seconds. Turns shorter than this do not notify. */
 export const NOTIFY_AFTER_SECONDS_DEFAULT = 60;
@@ -89,13 +89,13 @@ export interface MaybeNotifyLongTaskOptions {
    */
   readonly outcome?: TurnOutcome | undefined;
 
-  /** The turn's name (SDK resolveTurnName). Left out of the text when metadata-only is on. */
+  /** The turn's name (platform resolveTurnName). Left out of the text when metadata-only is on. */
   readonly name?: string | null | undefined;
 
   /** Why a failed or cancelled task stopped. Left out of the text when metadata-only is on. */
   readonly reason?: string | null | undefined;
 
-  /** What the task did (SDK TurnActivityTally.snapshot()). */
+  /** What the task did (platform TurnActivityTally.snapshot()). */
   readonly activity?: {
     readonly toolCalls?: number | undefined;
     readonly filesChanged?: number | undefined;
@@ -110,7 +110,7 @@ export interface MaybeNotifyLongTaskOptions {
    */
   readonly metadataOnly?: boolean | undefined;
 
-  /** Desktop delivery; defaults to the SDK notifyCompletion. Tests pass a spy to read the text. */
+  /** Desktop delivery; defaults to the platform notifyCompletion. Tests pass a spy to read the text. */
   readonly notifyDesktop?: typeof notifyCompletion | undefined;
 
   /**
@@ -122,7 +122,7 @@ export interface MaybeNotifyLongTaskOptions {
   /**
    * The desktop popup is also due past this many milliseconds, even under
    * `thresholdSeconds` (and when the threshold is 0): a turn's end passes the
-   * SDK Orchestrator's own popup rule here (over 30s), since this notice
+   * platform Orchestrator's own popup rule here (over 30s), since this notice
    * replaced that popup. The webhook still waits for `thresholdSeconds`.
    */
   readonly desktopAfterMs?: number | undefined;
@@ -205,7 +205,7 @@ export function maybeNotifyLongTask(opts: MaybeNotifyLongTaskOptions): boolean {
   };
 
   // Delivery 1: desktop notification (notify-send on linux, osascript on mac).
-  // notifyCompletion is non-throwing; SDK handles platform absence silently.
+  // notifyCompletion is non-throwing; platform handles platform absence silently.
   // Its own duration heuristic only pops a desktop notification above 30s;
   // the threshold above is the user's (behavior.notifyAfterSeconds), so a
   // threshold under 30s must still reach the desktop.

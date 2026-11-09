@@ -229,7 +229,7 @@ async function compose(ctx: CommandContext, gateway: Gateway, verb: 'draft' | 's
 
   if (verb === 'draft') {
     await withStatusOnFailure(ctx, gateway, 'draft', async () => {
-      // No `confirm` in the body: the SDK contract for draft.create does not
+      // No `confirm` in the body: the platform contract for draft.create does not
       // declare one (its input schema is closed), and the handler is registered
       // without the confirmation wrapper. Sending one would be a field the
       // schema rejects.

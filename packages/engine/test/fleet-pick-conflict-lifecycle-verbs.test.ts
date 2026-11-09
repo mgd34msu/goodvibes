@@ -16,7 +16,7 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
 import {
   createFleetAttemptsListHandler,
   createFleetAttemptsPickHandler,
@@ -24,14 +24,14 @@ import {
   createFleetConflictsResolveHandler,
   type FleetAttemptsController,
   type FleetConflictsDeps,
-} from '../sdk/src/platform/control-plane/routes/fleet.ts';
-import { registerWorktreeSetupGatewayMethods } from '../sdk/src/platform/control-plane/routes/worktree-setup.ts';
-import { WorktreeRegistry } from '../sdk/src/platform/runtime/worktree/registry.ts';
+} from '../platform/src/platform/control-plane/routes/fleet.ts';
+import { registerWorktreeSetupGatewayMethods } from '../platform/src/platform/control-plane/routes/worktree-setup.ts';
+import { WorktreeRegistry } from '../platform/src/platform/runtime/worktree/registry.ts';
 import {
   createAttemptsCoordinator,
   emptyWorkItemUsage,
-} from '../sdk/src/platform/orchestration/index.ts';
-import type { WorkItem, WorkItemSpec, Workstream } from '../sdk/src/platform/orchestration/types.ts';
+} from '../platform/src/platform/orchestration/index.ts';
+import type { WorkItem, WorkItemSpec, Workstream } from '../platform/src/platform/orchestration/types.ts';
 
 const ctx = { context: { principalId: 'op', admin: true } } as const;
 

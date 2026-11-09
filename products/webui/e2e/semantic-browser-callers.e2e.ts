@@ -1,6 +1,6 @@
 /** Production UI, real browser transport, synthetic protocol replies; no providers or secrets. */
 import { expect, test, type Page } from "@playwright/test";
-import type { BrowserJudgmentRequest } from "@goodvibes-jev/engine/daemon-sdk";
+import type { BrowserJudgmentRequest } from "@goodvibes-jev/engine/daemon-api";
 import { installMockDaemon } from "./support/mock-daemon";
 import { nextFrames, openSettings } from "./support/app";
 

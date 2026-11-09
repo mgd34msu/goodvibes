@@ -4,10 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { installJudgmentPort, bindJudgmentPortAuthority } from '@goodvibes-jev/engine/errors';
 import { fakePort, choiceAnswer } from '@goodvibes-jev/judgment/testing';
-import { ExecutionPlanManager, PlanStatusUnavailableError, type PlanItemStatus } from '../sdk/src/platform/core/execution-plan.js';
-import { handleFinalResponseOutcome } from '../sdk/src/platform/core/orchestrator-turn-helpers.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { registry } from '../sdk/src/platform/core/judgment-registry.js';
+import { ExecutionPlanManager, PlanStatusUnavailableError, type PlanItemStatus } from '../platform/src/platform/core/execution-plan.js';
+import { handleFinalResponseOutcome } from '../platform/src/platform/core/orchestrator-turn-helpers.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { registry } from '../platform/src/platform/core/judgment-registry.js';
 
 const roots: string[] = [];
 let previous: ReturnType<typeof installJudgmentPort>;

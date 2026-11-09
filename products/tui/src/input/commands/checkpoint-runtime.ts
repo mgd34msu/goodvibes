@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // checkpoint-runtime.ts, /checkpoints, /checkpoint
 //
-// UX over WorkspaceCheckpointManager (@goodvibes-jev/engine/sdk/platform/workspace),
+// UX over WorkspaceCheckpointManager (@goodvibes-jev/engine/platform/platform/workspace),
 // the whole-workspace, git-backed snapshot engine wired onto RuntimeServices as
 // `workspaceCheckpointManager` (src/runtime/services.ts) and threaded through
 // CommandContext.workspace exactly like FileUndoManager already is.
@@ -11,8 +11,8 @@
 // completed turn, reusing this same checkpoint store for the files half.
 // ---------------------------------------------------------------------------
 
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
-import type { WorkspaceCheckpoint } from '@goodvibes-jev/engine/sdk/platform/workspace';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { WorkspaceCheckpoint } from '@goodvibes-jev/engine/platform/platform/workspace';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 
 // ---------------------------------------------------------------------------

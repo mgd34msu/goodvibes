@@ -1,9 +1,9 @@
 import { describeConfiguredPermissions, describePermissionMode } from '../permissions/configured-posture.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { PermissionManager, createPermissionConfigReader } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import type { PermissionCheckResult } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { PermissionManager, createPermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
+import type { PermissionCheckResult } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { PolicyRuntimeState, createFeatureFlagManager, deriveFeatureStates } from '@/runtime/index.ts';
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
 import { describeConfiguredEffort } from '../providers/reasoning-effort-surface.ts';
 import type { CliCommandOutput } from '@goodvibes-jev/engine/terminal-shell';
 import type { GoodVibesCliOutputFormat } from '@goodvibes-jev/engine/terminal-shell';
@@ -126,7 +126,7 @@ function reasonExplanation(result: PermissionCheckResult, mode: string, autoAppr
   }
 }
 
-/** Stable per-tool config key for the explain narrative (mirrors the SDK's TOOL_CONFIG_KEYS defaults). */
+/** Stable per-tool config key for the explain narrative (mirrors the platform's TOOL_CONFIG_KEYS defaults). */
 function toolConfigKey(tool: string): string {
   const map: Record<string, string> = {
     goodvibes_context: 'state', goodvibes_settings: 'write', repo_map: 'read',

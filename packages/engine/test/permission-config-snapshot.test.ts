@@ -2,10 +2,10 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigManager } from '../sdk/src/platform/config/index.js';
-import { createPermissionConfigReader, PermissionManager } from '../sdk/src/platform/permissions/manager.js';
-import { UserPermissionRuleStore } from '../sdk/src/platform/permissions/user-rule-store.js';
-import { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.js';
+import { ConfigManager } from '../platform/src/platform/config/index.js';
+import { createPermissionConfigReader, PermissionManager } from '../platform/src/platform/permissions/manager.js';
+import { UserPermissionRuleStore } from '../platform/src/platform/permissions/user-rule-store.js';
+import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.js';
 import { useGateReadings } from './_helpers/gate-readings.js';
 
 useGateReadings();

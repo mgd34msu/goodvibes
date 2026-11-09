@@ -10,7 +10,7 @@
  *
  * Everything here is pure data (no Lines, no theme): paint.ts draws it.
  */
-import type { ToolCall } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
 import { stripDangerousAnsi } from '../ansi-sanitize.js';
 /** Text safe to put in a cell: no escape sequences at all, no control characters. */
 export function cellText(text: string): string {
@@ -29,7 +29,7 @@ export function cellText(text: string): string {
  * bg      ▶ a process it started keeps running in the background
  */
 export type BeadStatus = 'unknown' | 'ok' | 'warn' | 'err' | 'run' | 'wait' | 'cancel' | 'bg';
-/** The SDK execution outcome, when recorded. Result text does not establish it. */
+/** The platform execution outcome, when recorded. Result text does not establish it. */
 export type CallOutcome = 'ok' | 'error' | 'cancelled';
 export interface BeadStatusInput {
     /** Undefined when a result is legacy/imported or has not arrived. */

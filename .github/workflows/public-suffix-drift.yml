@@ -31,7 +31,7 @@ name: Public Suffix Drift
 # less precisely than it should be.
 #
 # The fix is DATA-ONLY: edit the tables in
-# packages/sdk/src/platform/security/public-suffix.ts. No code change, and the
+# packages/engine/platform/src/platform/security/public-suffix.ts. No code change, and the
 # module header carries the refresh procedure. The job's own output names each
 # suffix and says whether it is the security-relevant direction (upstream has
 # it, we do not, so two registrants compare equal) or the correctness one (we

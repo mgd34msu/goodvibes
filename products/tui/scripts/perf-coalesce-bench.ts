@@ -25,9 +25,9 @@
 
 import { performance } from 'node:perf_hooks';
 import { Compositor } from '../src/renderer/compositor.ts';
-import { createEmptyLine } from '@goodvibes-jev/engine/sdk/platform/types';
+import { createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types';
 import { createRenderScheduler } from '@goodvibes-jev/engine/terminal-shell';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 
 const WIDTH = 80;
 const HEIGHT = 24;

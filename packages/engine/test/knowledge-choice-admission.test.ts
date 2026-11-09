@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { prepareHomeGraphTriageReadings } from '../sdk/src/platform/knowledge/home-graph/triage/reader.js';
-import { createHomeGraphAutoLinkReader } from '../sdk/src/platform/knowledge/home-graph/auto-link/reader.js';
-import { createRepairSourceAuthorityReader } from '../sdk/src/platform/knowledge/semantic/repair-source-authority/reader.js';
-import { verifyKnowledgeAnswer } from '../sdk/src/platform/knowledge/semantic/answer-verification/reader.js';
+import { prepareHomeGraphTriageReadings } from '../platform/src/platform/knowledge/home-graph/triage/reader.js';
+import { createHomeGraphAutoLinkReader } from '../platform/src/platform/knowledge/home-graph/auto-link/reader.js';
+import { createRepairSourceAuthorityReader } from '../platform/src/platform/knowledge/semantic/repair-source-authority/reader.js';
+import { verifyKnowledgeAnswer } from '../platform/src/platform/knowledge/semantic/answer-verification/reader.js';
 
 let previous: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previous = installJudgmentPort(undefined); });

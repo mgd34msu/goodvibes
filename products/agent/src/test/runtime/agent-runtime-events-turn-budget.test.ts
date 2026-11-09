@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { RuntimeEventBus, createEventEnvelope } from '@/runtime/index.ts';
-import { AgentManager } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { AgentMessageBus } from '@goodvibes-jev/engine/sdk/platform/agents';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { AgentManager } from '@goodvibes-jev/engine/platform/platform/tools';
+import { AgentMessageBus } from '@goodvibes-jev/engine/platform/platform/agents';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { createDomainDispatch } from '../../runtime/store/index.ts';
 import { registerAgentRuntimeEvents } from '../../runtime/agent-runtime-events.ts';
@@ -13,7 +13,7 @@ const flushMicrotasks = async (rounds = 6) => {
 };
 
 /**
- * The typed turn-budget-exhaustion outcome (SDK 1.8.0, agents/turn-budget.ts):
+ * The typed turn-budget-exhaustion outcome (platform 1.8.0, agents/turn-budget.ts):
  * the real orchestrator stamps AgentRecord.failureReason === 'max_turns' plus
  * turnBudget { limit, source } on the record when a run spends its whole
  * budget. Exercising the REAL orchestrator to genuinely exhaust a budget here
@@ -25,7 +25,7 @@ const flushMicrotasks = async (rounds = 6) => {
  * fields alone, never touching the (irrelevant, generic) child-failure
  * envelope path.
  */
-describe('registerAgentRuntimeEvents: AGENT_FAILED typed turn-budget outcome (SDK 1.8.0)', () => {
+describe('registerAgentRuntimeEvents: AGENT_FAILED typed turn-budget outcome (platform 1.8.0)', () => {
   function makeHarness() {
     const configDir = makeProjectTempDir('gv-turn-budget');
     const configManager = new ConfigManager({ surfaceRoot: 'tui', configDir });

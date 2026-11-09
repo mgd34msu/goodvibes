@@ -25,7 +25,7 @@ test('actual TUI keyboard route and direct tool registry both permit protected r
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createShellPathService } from '../../runtime/index.ts';
 import { pairNativeTestHost, replaceNativeTestCredential } from '../helpers/native-host-pairing.ts';
 import { tuiHostPairingStorePath } from '../../runtime/tui-host-credential-store.ts';
@@ -89,7 +89,7 @@ test('actual TUI command forwards its installed journal reader owner before nati
   } finally { await f.stop(); }
 });
 
-test('TUI keyboard submits complete sources through the real SDK and registry status never resubmits', async () => {
+test('TUI keyboard submits complete sources through the real platform and registry status never resubmits', async () => {
   const f = await nativeHost();
   try {
     const output = await runTuiImportProof(f, ['submit', f.projectId]);

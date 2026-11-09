@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { CAPTURED_CONTRACTS, malformedCapturedRecords } from '../../../e2e/support/native-contract-records';
 import { useContractList, useContractScope } from '../../hooks/useContracts';
 import { tokenStore } from '../../lib/client-lifetime';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import { ContractDetail } from './ContractDetail';
 
 const originalFetch = globalThis.fetch;
@@ -30,7 +30,7 @@ async function settle(predicate: () => boolean) {
 function installWire(fixture: typeof CAPTURED_CONTRACTS[number]) {
   let getBody = fixture.getBody, listBody = fixture.listBody;
   const requests: { path: string; method: string; search: string }[] = [];
-  // Only the network boundary is replaced. sdk.operator.contracts, its generated
+  // Only the network boundary is replaced. platform.operator.contracts, its generated
   // routes, useContracts, runtime schema validation and ContractDetail are real.
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
@@ -83,7 +83,7 @@ describe('genuine runner records across the WebUI inspection boundary', () => {
   for (const fixture of CAPTURED_CONTRACTS) {
     test(`${fixture.name}: complete facade response is preserved and detail remains readable`, async () => {
       const wire = installWire(fixture);
-      const response = await sdk.operator.contracts.get(fixture.record.id);
+      const response = await platformClient.operator.contracts.get(fixture.record.id);
       expect(response).toEqual(fixture.record);
       // Explicitly retain the parsed report, even though the product displays
       // its lastOutput/answer rather than a separate report-specific viewer.

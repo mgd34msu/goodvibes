@@ -1,11 +1,11 @@
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort } from '@goodvibes-jev/judgment/testing';
 import { authoredPrivacyAnswer, errorText } from './_helpers/authored-error-readings.ts';
-import { redactSensitiveDataAsync } from '../sdk/src/platform/utils/redaction.ts';
+import { redactSensitiveDataAsync } from '../platform/src/platform/utils/redaction.ts';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { createPhasedExecutor } from '../sdk/src/platform/runtime/tools/index.js';
-import type { ToolRuntimeContext } from '../sdk/src/platform/runtime/tools/index.js';
-import type { Tool } from '../sdk/src/platform/types/tools.js';
+import { createPhasedExecutor } from '../platform/src/platform/runtime/tools/index.js';
+import type { ToolRuntimeContext } from '../platform/src/platform/runtime/tools/index.js';
+import type { Tool } from '../platform/src/platform/types/tools.js';
 
 function outputTool(name: string, output: string): Tool {
   return {

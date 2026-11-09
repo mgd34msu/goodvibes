@@ -22,14 +22,14 @@ import {
   resolveOperatorTokenPath,
   writeOperatorTokenFile,
   readOperatorTokenFile,
-} from '../sdk/src/platform/workspace/daemon-home.ts';
+} from '../platform/src/platform/workspace/daemon-home.ts';
 import {
   getOrCreateCompanionToken,
-} from '../sdk/src/platform/pairing/companion-token.ts';
-import { DaemonHttpRouter } from '../sdk/src/platform/daemon/http/router.ts';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
-import type { ProviderRegistry } from '../sdk/src/platform/providers/registry.ts';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.ts';
+} from '../platform/src/platform/pairing/companion-token.ts';
+import { DaemonHttpRouter } from '../platform/src/platform/daemon/http/router.ts';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
+import type { ProviderRegistry } from '../platform/src/platform/providers/registry.ts';
+import type { ConfigManager } from '../platform/src/platform/config/manager.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

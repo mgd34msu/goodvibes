@@ -22,16 +22,16 @@ import {
   ExpectationMailboxUnreadableError,
   InboundExpectationRegistry,
   type ExpectationExpiryReport,
-} from '../sdk/src/platform/email/inbound/expectation-registry.ts';
-import { PersistedExpectationStore } from '../sdk/src/platform/email/inbound/expectation-store.ts';
-import { capabilityVerdict } from '../sdk/src/platform/email/inbound/capability.ts';
-import type { InboundCapabilityVerdict } from '../sdk/src/platform/email/inbound/ports.ts';
+} from '../platform/src/platform/email/inbound/expectation-registry.ts';
+import { PersistedExpectationStore } from '../platform/src/platform/email/inbound/expectation-store.ts';
+import { capabilityVerdict } from '../platform/src/platform/email/inbound/capability.ts';
+import type { InboundCapabilityVerdict } from '../platform/src/platform/email/inbound/ports.ts';
 import {
   MAX_VERIFICATION_WINDOW_MS,
   VerificationExpectationBook,
   type CandidateEmail,
-} from '../sdk/src/platform/google/verification-expectations.ts';
-import { deliveredRecipientFromAliasMailbox } from '../sdk/src/platform/google/delivery-evidence.ts';
+} from '../platform/src/platform/google/verification-expectations.ts';
+import { deliveredRecipientFromAliasMailbox } from '../platform/src/platform/google/delivery-evidence.ts';
 
 const NOW_MS = Date.parse('2026-07-28T09:00:00.000Z');
 const NOW = new Date(NOW_MS);

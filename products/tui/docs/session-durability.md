@@ -17,7 +17,7 @@ triggering a recovery-file write would be lost.
 
 ## WAL journal layer (gap-filler)
 
-The transcript journal (the SDK's `TranscriptJournal`, wired in `src/core/turn-event-wiring.ts`)
+The transcript journal (the platform's `TranscriptJournal`, wired in `src/core/turn-event-wiring.ts`)
 fills this gap with a per-session append-only NDJSON file that records durable conversation events
 **before** the turn snapshot is written.
 
@@ -32,7 +32,7 @@ fills this gap with a per-session append-only NDJSON file that records durable c
    gap-filler). If the snapshot fails, the full conversation state is appended as an
    `assistant_turn` record so recovery can still reconstruct it.
 
-3. **Restart / session resume** → `replayJournalForSession()` (the SDK's, called from
+3. **Restart / session resume** → `replayJournalForSession()` (the platform's, called from
    `resumeSessionCore` in `src/core/session-resume-core.ts`) is reached from two call sites:
    (a) `session-workflow.ts`, which handles `/session resume` directly and is also where
    `--continue`, `--resume`, and `--fork` route through (see [CLI flags](cli-flags.md)); and
@@ -109,7 +109,7 @@ filesystem.
 `journal.rotate()` deletes a journal once its records have been folded into a snapshot or
 replayed, but a session that crashes and is never resumed never reaches either step, so its
 journal would otherwise stay on disk forever. A reaper (`reapOrphanedJournals`, wired into the
-TUI's bootstrap at `src/runtime/services.ts` through the SDK's `createDurabilityServices`, which
+TUI's bootstrap at `src/runtime/services.ts` through the platform's `createDurabilityServices`, which
 runs it once at startup and then every six hours) sweeps the journal directory and deletes a
 file that is neither the current process's own session nor apparently open in another running
 process, provided it is either empty or has gone untouched for longer than seven days. Whatever

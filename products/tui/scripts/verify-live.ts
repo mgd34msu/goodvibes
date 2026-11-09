@@ -5,7 +5,7 @@ import {
   writeLiveVerificationReportFiles,
 } from '../src/verification/live-verifier.ts';
 import { join, resolve } from 'node:path';
-import { resolveGoodVibesTreeDirectory } from '@goodvibes-jev/engine/sdk/platform/config';
+import { resolveGoodVibesTreeDirectory } from '@goodvibes-jev/engine/platform/platform/config';
 
 function readArgValue(args: readonly string[], flag: string): string | undefined {
   const index = args.indexOf(flag);

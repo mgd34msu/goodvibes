@@ -17,11 +17,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { createSessionSurface } from '../sdk/src/platform/runtime/session-surface.js';
-import { readLastSessionPointer } from '../sdk/src/platform/runtime/session-persistence.js';
-import { SessionManager } from '../sdk/src/platform/sessions/manager.js';
-import { WorkspaceCheckpointManager } from '../sdk/src/platform/workspace/checkpoint/manager.js';
-import { logger } from '../sdk/src/platform/utils/logger.js';
+import { createSessionSurface } from '../platform/src/platform/runtime/session-surface.js';
+import { readLastSessionPointer } from '../platform/src/platform/runtime/session-persistence.js';
+import { SessionManager } from '../platform/src/platform/sessions/manager.js';
+import { WorkspaceCheckpointManager } from '../platform/src/platform/workspace/checkpoint/manager.js';
+import { logger } from '../platform/src/platform/utils/logger.js';
 
 /** Structured data from the info lines captured by the most recent withCapturedInfo call. */
 let capturedInfoData: Array<Record<string, unknown> | undefined> = [];

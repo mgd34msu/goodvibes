@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import type { ProcessManager } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { describeBackgroundProcess } from '../../tools/agent-harness-background-processes.ts';
 

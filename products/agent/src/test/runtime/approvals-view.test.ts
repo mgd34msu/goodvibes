@@ -10,8 +10,8 @@
  * underneath for every case where a stream cannot be had.
  */
 import { describe, expect, test } from 'bun:test';
-import type { SharedApprovalRecord } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import type { DaemonReachability, DaemonVerbCaller } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+import type { SharedApprovalRecord } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import type { DaemonReachability, DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import {
   applyApprovalUpdate,
   createApprovalsView,

@@ -13,7 +13,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 
 export function encodeGolden(surface: string, lines: readonly Line[]): string {
   const text: string[] = [];

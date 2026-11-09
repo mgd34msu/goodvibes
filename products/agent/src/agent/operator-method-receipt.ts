@@ -1,8 +1,8 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { isDeepStrictEqual } from 'node:util';
-import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
+import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
+import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 
 interface ReceiptScope {
   readonly methodId: string;

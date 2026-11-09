@@ -1,5 +1,5 @@
-import { DEFAULT_CONFIG } from '@goodvibes-jev/engine/sdk/platform/config';
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { DEFAULT_CONFIG } from '@goodvibes-jev/engine/platform/platform/config';
+import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { OnboardingSnapshotState } from '../../runtime/onboarding/index.ts';
 
 /**

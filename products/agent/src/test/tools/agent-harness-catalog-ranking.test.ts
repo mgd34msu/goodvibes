@@ -1,11 +1,11 @@
 import { afterAll, afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import * as operatorContracts from '@goodvibes-jev/engine/sdk/contracts';
+import * as operatorContracts from '@goodvibes-jev/engine/platform/contracts';
 import { judgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { ToolRegistry, assertCurrentToolExecution } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { PermissionManager, type PermissionConfigReader } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import { DEFAULT_CONFIG, type GoodVibesConfig } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ToolRegistry, assertCurrentToolExecution } from '@goodvibes-jev/engine/platform/platform/tools';
+import { PermissionManager, type PermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { DEFAULT_CONFIG, type GoodVibesConfig } from '@goodvibes-jev/engine/platform/platform/config';
 import { PolicyRuntimeState } from '@/runtime/index.ts';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { bindAgentResearchSourceOwner } from '../../agent/protected-research-report.ts';

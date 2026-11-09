@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { allocateFixIdentity, hasScheduledFix } from '../../sdk/src/platform/contract/fix-identity.js';
-import { deserializeContract, serializeContract } from '../../sdk/src/platform/contract/store.js';
+import { allocateFixIdentity, hasScheduledFix } from '../../platform/src/platform/contract/fix-identity.js';
+import { deserializeContract, serializeContract } from '../../platform/src/platform/contract/store.js';
 import { makeContract, makeGroup, makeUnit } from './fixtures.js';
 
 function fixture() {

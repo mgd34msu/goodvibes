@@ -4,7 +4,7 @@ import {
   type McpClientNotification,
   type McpClientServerRequest,
   type McpClientUnhandledResponse,
-} from '../sdk/src/platform/mcp/client.js';
+} from '../platform/src/platform/mcp/client.js';
 
 function dispatchJsonLine(client: McpClient, message: unknown): void {
   (client as unknown as { _dispatchLine(line: string): void })._dispatchLine(JSON.stringify(message));

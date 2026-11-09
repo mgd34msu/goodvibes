@@ -27,25 +27,25 @@
  * the process survives, but now also leaves a crash record, because "the agent
  * misbehaved but stayed up" was equally invisible after the fact.
  *
- * WHERE THE RECORD LOGIC LIVES: in the SDK
+ * WHERE THE RECORD LOGIC LIVES: in the platform
  * (platform/runtime/crash-capture.ts, reached through
  * platform/runtime/operations), which is also where the append-only retention
  * registry knows about it, so the platform janitor bounds the file by age and
  * total size for every surface rather than only by the record count enforced on
  * write. The agent carried its own copy of the builder, reader and bounded
- * appender for exactly one release, the SDK export was not published yet and
+ * appender for exactly one release, the platform export was not published yet and
  * the agent needed to stop dying silently that day, and this file now imports
  * the canonical one. The shapes and the caps were written to match, so this is
  * a substitution, not a behaviour change. What stays here is the wiring: which
  * handlers get registered, what the agent writes to stderr on the way out, and
  * the order the three sinks are attempted in.
  */
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import {
   appendCrashRecord,
   buildCrashRecord,
   CRASH_LOG_FILENAME,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+} from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { createUnhandledRejectionHandler } from './unhandled-rejection-guard.ts';
 import { writeFatalLine } from '../utils/fatal-boot-write.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';

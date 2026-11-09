@@ -7,12 +7,12 @@
  * to actually release) before it takes the device.
  */
 import { describe, expect, test } from 'bun:test';
-import { AudioCaptureError } from '@goodvibes-jev/engine/sdk/platform/voice/capture';
+import { AudioCaptureError } from '@goodvibes-jev/engine/platform/platform/voice/capture';
 import type {
   AudioCaptureHandlers,
   AudioCaptureOpener,
   AudioCaptureRequest,
-} from '@goodvibes-jev/engine/sdk/platform/voice/capture';
+} from '@goodvibes-jev/engine/platform/platform/voice/capture';
 import { MicArbiter, type MicLease } from './mic-arbiter';
 
 const REQUEST: AudioCaptureRequest = {

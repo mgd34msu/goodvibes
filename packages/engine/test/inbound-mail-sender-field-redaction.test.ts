@@ -39,14 +39,14 @@ import {
   InboundMailStore,
   validateInboundMailRecord,
   type InboundMailRecordInput,
-} from '../sdk/src/platform/email/inbound/record-store.ts';
-import { detectCardShapes } from '../sdk/src/platform/security/card-shapes.ts';
+} from '../platform/src/platform/email/inbound/record-store.ts';
+import { detectCardShapes } from '../platform/src/platform/security/card-shapes.ts';
 import {
   receiptTimestamp,
   renderInboundMailNotice,
-} from '../sdk/src/platform/email/inbound-notice.ts';
-import { renderNoticeForSurface } from '../sdk/src/platform/email/inbound-notice-channels.ts';
-import type { DeliveredRecipient } from '../sdk/src/platform/google/delivery-evidence.ts';
+} from '../platform/src/platform/email/inbound-notice.ts';
+import { renderNoticeForSurface } from '../platform/src/platform/email/inbound-notice-channels.ts';
+import type { DeliveredRecipient } from '../platform/src/platform/google/delivery-evidence.ts';
 import { useSecurityReadings } from './helpers/security-readings.ts';
 
 useSecurityReadings();

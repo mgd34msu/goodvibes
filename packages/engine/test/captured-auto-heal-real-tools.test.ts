@@ -5,16 +5,16 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { installJudgmentPort } from '../errors/src/index.js';
-import { ConfigManager } from '../sdk/src/platform/config/index.js';
-import { createContractInputAuthority } from '../sdk/src/platform/contract/input-authority.js';
-import { captureContractInput, contractInputPath, materializeContractInput } from '../sdk/src/platform/contract/input-snapshot.js';
-import type { Contract } from '../sdk/src/platform/contract/types.js';
-import { admitCapturedExecDependency } from '../sdk/src/platform/tools/exec/captured-exec-dependencies.js';
-import { createCapturedExecNodeRuntimeAdmission } from '../sdk/src/platform/tools/exec/captured-exec-runtime-input.js';
-import { probeCapturedExecAvailability, type CapturedExecAuthority } from '../sdk/src/platform/tools/exec/captured-exec.js';
-import { createCapturedAutoHealBackend, healToolFile } from '../sdk/src/platform/tools/shared/captured-auto-heal.js';
-import { capturedInputTool } from '../sdk/src/platform/tools/shared/captured-input-tools.js';
-import type { HealResult } from '../sdk/src/platform/tools/shared/auto-heal.js';
+import { ConfigManager } from '../platform/src/platform/config/index.js';
+import { createContractInputAuthority } from '../platform/src/platform/contract/input-authority.js';
+import { captureContractInput, contractInputPath, materializeContractInput } from '../platform/src/platform/contract/input-snapshot.js';
+import type { Contract } from '../platform/src/platform/contract/types.js';
+import { admitCapturedExecDependency } from '../platform/src/platform/tools/exec/captured-exec-dependencies.js';
+import { createCapturedExecNodeRuntimeAdmission } from '../platform/src/platform/tools/exec/captured-exec-runtime-input.js';
+import { probeCapturedExecAvailability, type CapturedExecAuthority } from '../platform/src/platform/tools/exec/captured-exec.js';
+import { createCapturedAutoHealBackend, healToolFile } from '../platform/src/platform/tools/shared/captured-auto-heal.js';
+import { capturedInputTool } from '../platform/src/platform/tools/shared/captured-input-tools.js';
+import type { HealResult } from '../platform/src/platform/tools/shared/auto-heal.js';
 import { toolReadingsPort } from './_helpers/tool-readings.js';
 
 const supported = (await probeCapturedExecAvailability()).available;

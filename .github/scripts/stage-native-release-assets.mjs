@@ -4,8 +4,8 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync,
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readTarGzEntries } from '../../packages/engine/sdk/dist/platform/browser/index.js';
-import { assertDaemonNativePayloadBytes, nativeReaderCapabilities, parseDaemonCiArtifact, resolveDaemonNativePayloads, resolveSqliteVecAsset } from '../../packages/engine/sdk/dist/platform/runtime/self-update.js';
+import { readTarGzEntries } from '../../packages/engine/platform/dist/platform/browser/index.js';
+import { assertDaemonNativePayloadBytes, nativeReaderCapabilities, parseDaemonCiArtifact, resolveDaemonNativePayloads, resolveSqliteVecAsset } from '../../packages/engine/platform/dist/platform/runtime/self-update.js';
 import { verifyAgentCiArtifact } from '../../products/agent/scripts/ci-artifact.ts';
 import { resolveSqliteVecArchive } from '../../products/agent/src/runtime/release-artifacts.ts';
 import { readVerifiedDaemonCiArtifact } from '../../products/daemon/scripts/ci-artifact.ts';

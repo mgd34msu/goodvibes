@@ -14,7 +14,7 @@ import { describe, expect, test } from 'bun:test';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 import { createVoiceSttGateway, describeTranscriptionFailure } from '../../core/voice-stt-gateway.ts';
-import { readVoiceDiagnostics } from '@goodvibes-jev/engine/sdk/platform/voice';
+import { readVoiceDiagnostics } from '@goodvibes-jev/engine/platform/platform/voice';
 
 const audio = {
   mimeType: 'audio/wav',

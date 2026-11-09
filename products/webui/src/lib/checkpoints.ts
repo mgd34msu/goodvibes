@@ -1,6 +1,6 @@
 /**
  * checkpoints.ts, display helpers for checkpoints.*
- * (packages/sdk/src/platform/control-plane/method-catalog-fleet.ts /
+ * (packages/engine/platform/src/platform/control-plane/method-catalog-fleet.ts /
  * WorkspaceCheckpointManager).
  */
 

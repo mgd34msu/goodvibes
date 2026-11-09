@@ -3,8 +3,8 @@ import { randomBytes } from 'node:crypto';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { WorkspaceCheckpointManager } from '../sdk/src/platform/workspace/checkpoint/manager.js';
-import { CHECKPOINT_REF_PREFIX } from '../sdk/src/platform/workspace/checkpoint/side-git.js';
+import { WorkspaceCheckpointManager } from '../platform/src/platform/workspace/checkpoint/manager.js';
+import { CHECKPOINT_REF_PREFIX } from '../platform/src/platform/workspace/checkpoint/side-git.js';
 
 function runGit(cwd: string, args: string[]): string {
   const result = Bun.spawnSync(['git', ...args], { cwd });

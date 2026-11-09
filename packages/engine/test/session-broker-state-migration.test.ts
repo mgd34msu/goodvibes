@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { loadSessionBrokerState } from '../sdk/src/platform/control-plane/session-broker-state.js';
+import { loadSessionBrokerState } from '../platform/src/platform/control-plane/session-broker-state.js';
 
 describe('shared session store loading', () => {
   test('normalizes persisted session records to the current required shape', () => {

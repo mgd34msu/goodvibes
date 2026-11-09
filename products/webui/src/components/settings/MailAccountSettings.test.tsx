@@ -20,7 +20,7 @@ mock.module('../../lib/goodvibes', () => ({
   runBrowserJudgment: () => Promise.reject(new Error('No semantic reading in this display fixture.')),
   getCurrentAuth: () => Promise.resolve({}),
   invokeMethod: () => Promise.resolve({}),
-  sdk: {
+  client: {
     operator: {
       email: {
         inbox: {

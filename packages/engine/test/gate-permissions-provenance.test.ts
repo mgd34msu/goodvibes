@@ -4,8 +4,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { applyRuntimeConfigValue } from '@goodvibes-jev/engine/terminal-shell';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { buildPermissionProvenance, renderPermissionProvenance } from '../sdk/src/platform/gate/policy/permissions-provenance.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { buildPermissionProvenance, renderPermissionProvenance } from '../platform/src/platform/gate/policy/permissions-provenance.ts';
 
 function findRow(prov: ReturnType<typeof buildPermissionProvenance>, key: string) {
   const row = prov.rows.find((r) => r.key === key);

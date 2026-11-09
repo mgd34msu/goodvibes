@@ -3,12 +3,12 @@ import { afterEach, expect, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.ts';
-import { prepareConfiguredProjectContext, createConfiguredPlanningStore, configuredPlanningStoreIdentity } from '../sdk/src/platform/knowledge/project-planning/configured-project.ts';
-import { ProjectIdentityRegistry } from '../sdk/src/platform/knowledge/project-planning/project-registry.ts';
-import { ProjectPlanningService } from '../sdk/src/platform/knowledge/project-planning/service.ts';
-import { inspectWorkPlanProjects } from '../sdk/src/platform/knowledge/project-planning/persisted-work-plan-projects.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.ts';
+import { prepareConfiguredProjectContext, createConfiguredPlanningStore, configuredPlanningStoreIdentity } from '../platform/src/platform/knowledge/project-planning/configured-project.ts';
+import { ProjectIdentityRegistry } from '../platform/src/platform/knowledge/project-planning/project-registry.ts';
+import { ProjectPlanningService } from '../platform/src/platform/knowledge/project-planning/service.ts';
+import { inspectWorkPlanProjects } from '../platform/src/platform/knowledge/project-planning/persisted-work-plan-projects.ts';
 const roots: string[] = [];
 afterEach(() => { for (const path of roots.splice(0)) rmSync(path, { recursive: true, force: true }); });
 function fixture() { const root = mkdtempSync(join(tmpdir(), 'planning-identity-')); roots.push(root); const workspace = join(root, 'workspace'); mkdirSync(workspace); const config = new ConfigManager({ workingDir: workspace, configDir: join(root, 'config'), surfaceRoot: 'identity-test', readOnly: true }); return { root, workspace, config }; }

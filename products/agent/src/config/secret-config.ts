@@ -1,8 +1,8 @@
-import { createSecretConfigKeyRegistry, createSecretBackedConfigWriter, isGoodVibesSecretReferenceValue as isSecretReferenceValue, type ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
+import { createSecretConfigKeyRegistry, createSecretBackedConfigWriter, isGoodVibesSecretReferenceValue as isSecretReferenceValue, type ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { routeDaemonOwnedCredentialWrite } from './daemon-credential-routing.ts';
 import { routeDaemonOwnedConfigWrite } from './daemon-config-routing.ts';
-export { normalizeSecretKeyPart, buildGoodVibesSecretKey, buildGoodVibesSecretRef, isGoodVibesSecretReferenceValue as isSecretReferenceValue, isMalformedGoodVibesSecretReferenceValue, getSecretWriteMedium, buildSecretBackedConfigUpdate, defaultSecretBackedScope } from '@goodvibes-jev/engine/sdk/platform/config';
-export type { SecretBackedConfigUpdate, SecretBackedConfigManager, SecretBackedSecretStore } from '@goodvibes-jev/engine/sdk/platform/config';
+export { normalizeSecretKeyPart, buildGoodVibesSecretKey, buildGoodVibesSecretRef, isGoodVibesSecretReferenceValue as isSecretReferenceValue, isMalformedGoodVibesSecretReferenceValue, getSecretWriteMedium, buildSecretBackedConfigUpdate, defaultSecretBackedScope } from '@goodvibes-jev/engine/platform/platform/config';
+export type { SecretBackedConfigUpdate, SecretBackedConfigManager, SecretBackedSecretStore } from '@goodvibes-jev/engine/platform/platform/config';
 export const { SECRET_CONFIG_KEYS, isSecretConfigKey } = createSecretConfigKeyRegistry([
   'email.passwordRef' as ConfigKey,
   'calendar.google.clientSecretRef' as ConfigKey,

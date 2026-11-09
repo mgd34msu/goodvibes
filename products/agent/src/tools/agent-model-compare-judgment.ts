@@ -1,4 +1,4 @@
-import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { randomUUID } from 'node:crypto';
 import type { AgentModelCompareArtifactStore, AgentModelCompareModelCatalog, AgentModelCompareRouteUpdateResult, AgentModelCompareToolArgs, CompareCandidateResult, LoadedComparisonJudgment, SavedComparisonArtifact, StoredComparison } from './agent-model-compare-types.ts';
 import { MODEL_REASON_THEME_LABELS } from './agent-model-compare-types.ts';

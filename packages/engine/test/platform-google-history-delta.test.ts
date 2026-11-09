@@ -13,9 +13,9 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { GoogleApiClient, type GoogleApiFetchPort } from '../sdk/src/platform/google/api-client.ts';
-import { GoogleTokenManager } from '../sdk/src/platform/google/token-manager.ts';
-import type { GoogleOAuthCredentials } from '../sdk/src/platform/google/credential-adoption.ts';
+import { GoogleApiClient, type GoogleApiFetchPort } from '../platform/src/platform/google/api-client.ts';
+import { GoogleTokenManager } from '../platform/src/platform/google/token-manager.ts';
+import type { GoogleOAuthCredentials } from '../platform/src/platform/google/credential-adoption.ts';
 
 // ---------------------------------------------------------------------------
 // Fixtures

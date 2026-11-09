@@ -3,12 +3,12 @@ import type {} from 'bun';
 import type { FetchLike } from '@goodvibes-jev/engine/transport-core';
 import { createFetch, createHttpTransport, openRawServerSentEventStream, requestJsonRaw } from '@goodvibes-jev/engine/transport-http';
 import { createEventSourceConnector, type RelayClient } from '@goodvibes-jev/engine/transport-realtime';
-import { createOperatorSdk } from '@goodvibes-jev/engine/operator-sdk';
-import { createPeerSdk } from '@goodvibes-jev/engine/peer-sdk';
-import { createGoodVibesSdk } from '@goodvibes-jev/engine/sdk';
-import { createBrowserGoodVibesSdk } from '@goodvibes-jev/engine/sdk/browser';
-import { createBrowserKnowledgeSdk } from '@goodvibes-jev/engine/sdk/browser/knowledge';
-import { createHttpTransport as createRuntimeHttpTransport, createRealtimeTransport } from '@goodvibes-jev/engine/sdk/platform/runtime/transport';
+import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
+import { createPeerApiClient } from '@goodvibes-jev/engine/peer-client';
+import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
+import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
+import { createBrowserKnowledgePlatform } from '@goodvibes-jev/engine/platform/browser/knowledge';
+import { createHttpTransport as createRuntimeHttpTransport, createRealtimeTransport } from '@goodvibes-jev/engine/platform/platform/runtime/transport';
 
 const callable: FetchLike = async (_input, _init) => new Response('fixture');
 const hostFetch: FetchLike = globalThis.fetch;
@@ -24,11 +24,11 @@ export function verifyPortableFetchConsumers(relay: RelayClient): void {
   const baseUrl = 'https://fixture.invalid';
   const implementations: FetchLike[] = [callable, hostFetch, relay.fetch];
   for (const fetchImpl of implementations) {
-    createOperatorSdk({ baseUrl, fetchImpl });
-    createPeerSdk({ baseUrl, fetchImpl });
-    createGoodVibesSdk({ baseUrl, fetch: fetchImpl });
-    createBrowserGoodVibesSdk({ baseUrl, fetch: fetchImpl });
-    createBrowserKnowledgeSdk({ baseUrl, fetch: fetchImpl });
+    createOperatorApiClient({ baseUrl, fetchImpl });
+    createPeerApiClient({ baseUrl, fetchImpl });
+    createGoodVibesPlatform({ baseUrl, fetch: fetchImpl });
+    createBrowserGoodVibesPlatform({ baseUrl, fetch: fetchImpl });
+    createBrowserKnowledgePlatform({ baseUrl, fetch: fetchImpl });
     createHttpTransport({ baseUrl, fetchImpl, fetch: fetchImpl });
     createRuntimeHttpTransport({ baseUrl, fetchImpl });
     createRealtimeTransport({ baseUrl, fetchImpl });

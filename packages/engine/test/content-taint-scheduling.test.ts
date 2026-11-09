@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
-import { findContentTaint, type TaintSource } from '../sdk/src/platform/security/content-taint.js';
-import { MAX_DERIVATION_CHARS } from '../sdk/src/platform/security/batteries/content-derivation.js';
+import { findContentTaint, type TaintSource } from '../platform/src/platform/security/content-taint.js';
+import { MAX_DERIVATION_CHARS } from '../platform/src/platform/security/batteries/content-derivation.js';
 import { securityPort, type DerivationState } from './helpers/security-readings.js';
 
 const sources: readonly TaintSource[] = [

@@ -1,8 +1,8 @@
-# GoodVibes SDK security best practices
+# GoodVibes platform security best practices
 
 > **Surface scope:** This document describes the security model for the **full surface (Bun runtime)**. Companion consumers (React Native, browser, Hermes) operate through the subset of the security stack exposed via `./react-native`, `./browser`, and related companion-surface barrels. See [Runtime Surfaces](./surfaces.md) for the full surface breakdown.
 
-This guide covers the security model of the GoodVibes daemon and SDK. It is intended for operators embedding the daemon, developers building surfaces, and anyone configuring authentication for production deployments.
+This guide covers the security model of the GoodVibes daemon and platform. It is intended for operators embedding the daemon, developers building surfaces, and anyone configuring authentication for production deployments.
 
 For vulnerability reporting, see [`SECURITY.md`](../../../SECURITY.md) at the repo root.
 
@@ -74,7 +74,7 @@ Session tokens are carried as:
 1. `Authorization: Bearer <token>` header
 2. `goodvibes_session` cookie (HTTP-only, SameSite=Lax, Secure when on HTTPS)
 
-The session cookie is set on login and cleared on logout by the daemon's internal cookie builders (`buildOperatorSessionCookie()` / `buildExpiredOperatorSessionCookie()`). These builders are daemon-host HTTP wiring and are **not** exported from the `@goodvibes-jev/engine/sdk/platform/security` barrel.
+The session cookie is set on login and cleared on logout by the daemon's internal cookie builders (`buildOperatorSessionCookie()` / `buildExpiredOperatorSessionCookie()`). These builders are daemon-host HTTP wiring and are **not** exported from the `@goodvibes-jev/engine/platform/platform/security` barrel.
 
 **Role model:**
 - Users may have any combination of string roles
@@ -85,7 +85,7 @@ The session cookie is set on login and cleared on logout by the daemon's interna
 
 ## Token management
 
-**Public subpath:** `@goodvibes-jev/engine/sdk/platform/security`: exports `SpawnTokenManager`, `ApiTokenAuditor`, the `TokenScopePolicy` type, `UserAuthManager`, `isOperatorAdmin`, and `authenticateOperatorToken`. (The operator session cookie builders referenced above are internal daemon wiring and are not part of this barrel.)
+**Public subpath:** `@goodvibes-jev/engine/platform/platform/security`: exports `SpawnTokenManager`, `ApiTokenAuditor`, the `TokenScopePolicy` type, `UserAuthManager`, `isOperatorAdmin`, and `authenticateOperatorToken`. (The operator session cookie builders referenced above are internal daemon wiring and are not part of this barrel.)
 
 ### Spawn tokens
 
@@ -164,7 +164,7 @@ On rotation: call `deregisterToken(oldId)` then `registerToken(newMetadata)` to 
 
 ## Companion app pairing
 
-**Public subpath:** `@goodvibes-jev/engine/sdk/platform/pairing` (daemon embedders).
+**Public subpath:** `@goodvibes-jev/engine/platform/platform/pairing` (daemon embedders).
 
 Pairing connects a companion app or browser to the daemon without requiring the user to
 manually enter credentials, by scanning a QR code or opening a deep link. For the full
@@ -208,7 +208,7 @@ flow, the deep-link/QR content, offer set, migration path, and client integratio
 
 ### Security settings report
 
-SDK hosts can expose a user-facing explanation of security-relevant settings with:
+platform hosts can expose a user-facing explanation of security-relevant settings with:
 
 - `getSecuritySettingsReport(gates)` from the runtime surface
 - `IntegrationHelperService.getSecuritySettingsReport()`
@@ -279,7 +279,7 @@ The `fetch` tool sanitizes responses by default (`fetch.sanitizeMode`, default `
 
 ## Secret management
 
-**Public subpath:** `@goodvibes-jev/engine/sdk/platform/config` (daemon embedders).
+**Public subpath:** `@goodvibes-jev/engine/platform/platform/config` (daemon embedders).
 
 ### SecretsManager
 
@@ -318,7 +318,7 @@ Slack setup uses this same URI mechanism. Direct setup writes Slack token values
 
 ## The gate
 
-**Public subpaths:** `@goodvibes-jev/engine/sdk/platform/gate` (the boundary, the presets, the stakes reading and surface authority) and `@goodvibes-jev/engine/sdk/platform/gate/policy` (the policy and posture runtimes the TUI and agent call). `@goodvibes-jev/engine/sdk/platform/runtime` keeps the `security.*` namespace for policy simulation and signed policy bundles.
+**Public subpaths:** `@goodvibes-jev/engine/platform/platform/gate` (the boundary, the presets, the stakes reading and surface authority) and `@goodvibes-jev/engine/platform/platform/gate/policy` (the policy and posture runtimes the TUI and agent call). `@goodvibes-jev/engine/platform/platform/runtime` keeps the `security.*` namespace for policy simulation and signed policy bundles.
 
 The gate replaces the old permission layer. It is the one path every tool call takes before it runs, and `PermissionManager` (`platform/permissions/manager.ts`) runs it. A call passes the boundary first, then graduated autonomy: Jev reads what the call does, code composes the reading into the call's stakes, and the active preset maps the stakes to allow, ask or deny.
 
@@ -431,7 +431,7 @@ The `AuthenticatedPrincipal` type carries a `principalKind` (`user` | `bot` | `s
 
 ### Bootstrap credential file
 
-**Note:** The bootstrap credential file is written internally during first-boot bootstrap and by `rotatePassword('admin', …)`; the only public `UserAuthManager` method that touches it directly is `clearBootstrapCredentialFile()` (accessed as `authManager.clearBootstrapCredentialFile()`). The `UserAuthManager` class is importable from `@goodvibes-jev/engine/sdk/platform/security`; host code reaches the configured, operational instance through daemon/runtime composition rather than instantiating it ad hoc.
+**Note:** The bootstrap credential file is written internally during first-boot bootstrap and by `rotatePassword('admin', …)`; the only public `UserAuthManager` method that touches it directly is `clearBootstrapCredentialFile()` (accessed as `authManager.clearBootstrapCredentialFile()`). The `UserAuthManager` class is importable from `@goodvibes-jev/engine/platform/platform/security`; host code reaches the configured, operational instance through daemon/runtime composition rather than instantiating it ad hoc.
 
 #### What it is and when it is created
 
@@ -448,7 +448,7 @@ GoodVibes bootstrap auth
 username=admin
 password=<32-hex-chars>
 purpose=Use these credentials only for local daemon/http listener /login routes when those surfaces are enabled.
-note=Normal SDK host usage does not require these credentials.
+note=Normal platform host usage does not require these credentials.
 ```
 
 This file is an **output**, not an authentication input. The runtime reads it only for drift detection and to recognize bootstrap-credential logins; the hash in `auth-users.json` is authoritative, so edits to this file do not change the stored password hash.
@@ -477,11 +477,11 @@ Drift detection fires only on file-backed instances; test configs that pass expl
    authManager.clearBootstrapCredentialFile(); // returns true if the file existed and was removed
    ```
    Alternatively, delete the file manually: `rm .goodvibes/tui/auth-bootstrap.txt`.
-   Or, from a remote operator client using the SDK:
+   Or, from a remote operator client using the platform:
    ```ts
    // Requires admin access. Available via the operator control surface
    // (HTTP DELETE /api/local-auth/bootstrap-file).
-   await sdk.operator.invoke('local_auth.bootstrap.delete', {});
+   await platformClient.operator.invoke('local_auth.bootstrap.delete', {});
    ```
 4. Verify the file is gone:
    ```ts

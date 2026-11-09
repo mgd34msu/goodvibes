@@ -1,11 +1,11 @@
 /** Runs unchanged with Bun source exports and published Node ESM exports. */
 import assert from 'node:assert/strict';
-import { createOperatorSdk } from '@goodvibes-jev/engine/operator-sdk';
-import { createOperatorWorkLedgerReadClient } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/operator-read-client';
+import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
+import { createOperatorWorkLedgerReadClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/operator-read-client';
 
 const calls = [];
 const projectId = 'operator-package-consumer';
-const operator = createOperatorSdk({
+const operator = createOperatorApiClient({
   baseUrl: 'http://127.0.0.1:9', authToken: 'synthetic-package-token',
   fetch: async (input, init) => {
     const url = new URL(String(input));

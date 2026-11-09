@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import type { ContractRunner, ContractView, OwnerReplyOutcome } from '@goodvibes-jev/engine/sdk/platform/contract';
-import type { AgentManager } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { ContractRunner, ContractView, OwnerReplyOutcome } from '@goodvibes-jev/engine/platform/platform/contract';
+import type { AgentManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import { SessionViews } from '../../shell/session-views.ts';
 import { contractFixture } from '../helpers/contract-work-tree-fixtures.ts';
 
-const text = (lines: readonly import('@goodvibes-jev/engine/sdk/platform/types').Line[]): string => lines.map((line) => line.map((cell) => cell.char).join('')).join('\n');
+const text = (lines: readonly import('@goodvibes-jev/engine/platform/platform/types').Line[]): string => lines.map((line) => line.map((cell) => cell.char).join('')).join('\n');
 function setup(initial: ContractView, replyResult: Promise<OwnerReplyOutcome> = Promise.resolve({ escalationId: 'e1', reading: 'approve', outcome: 'act', action: 'approved' })) {
   let contract = initial;
   let genericKills = 0;

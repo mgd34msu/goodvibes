@@ -1,6 +1,6 @@
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import type { SharedSessionParticipant } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { SharedSessionParticipant } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 function hasFlag(args: readonly string[], flag: string): boolean {
   return args.includes(flag);

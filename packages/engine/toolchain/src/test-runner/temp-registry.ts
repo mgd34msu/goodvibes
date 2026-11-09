@@ -6,7 +6,7 @@ export const OWNED_TMP_ENV = 'GOODVIBES_TEST_OWNED_TMP_ROOT';
 
 export function ownedTestTmpRoot(): string {
   const root = process.env[OWNED_TMP_ENV];
-  if (process.env.GOODVIBES_SDK_TEST_RUNNER !== '1' || !root || !isAbsolute(root)) {
+  if (process.env.GOODVIBES_ENGINE_TEST_RUNNER !== '1' || !root || !isAbsolute(root)) {
     throw new Error('Test temp allocation requires the official test runner (bun scripts/test.ts).');
   }
   if (lstatSync(root).isSymbolicLink() || !lstatSync(root).isDirectory()) throw new Error('Invalid owned test temp root');

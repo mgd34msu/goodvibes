@@ -12,7 +12,7 @@
  * before retiring its sessions. Payment execution must drain through its own
  * registration owner before a replacement graph can reuse those stores.
  */
-import type { BrowserCheckoutSeam } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import type { BrowserCheckoutSeam } from '@goodvibes-jev/engine/platform/platform/control-plane';
 
 export interface BrowserCheckoutSeamHolder {
   readonly get: () => BrowserCheckoutSeam | undefined;

@@ -10,8 +10,8 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { MEMORY_RECORD_NOT_FOUND_CODE } from '@goodvibes-jev/engine/errors';
-import { createMemorySpineRestTransport } from '../sdk/src/platform/runtime/memory-spine/rest-transport.ts';
-import type { MemoryBundle, MemoryRecord } from '../sdk/src/platform/state/memory-store.ts';
+import { createMemorySpineRestTransport } from '../platform/src/platform/runtime/memory-spine/rest-transport.ts';
+import type { MemoryBundle, MemoryRecord } from '../platform/src/platform/state/memory-store.ts';
 
 interface CapturedRequest {
   readonly url: string;

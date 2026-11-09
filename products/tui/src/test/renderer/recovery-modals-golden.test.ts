@@ -36,7 +36,7 @@ import {
 } from '../../runtime/recovery-prompt.ts';
 import type { SelectionItem } from '../../input/selection-modal.ts';
 import type { RecoveryFileInfo } from '@/runtime/index.ts';
-import type { Cell, Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Cell, Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { frameFromLayer } from '../helpers/surface-frame.ts';
 import { activeTokens } from '../../renderer/theme.ts';
 

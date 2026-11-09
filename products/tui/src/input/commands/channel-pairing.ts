@@ -1,7 +1,7 @@
 /**
  * channel-pairing.ts, guided `/channel pair` flow.
  *
- * Adapters and their credential requirements are driven from the SDK's
+ * Adapters and their credential requirements are driven from the platform's
  * getBuiltinSetupSchema, the same setup-schema source every GoodVibes
  * consumer (TUI, webui, agent) reads, not a hand-maintained list here.
  * Secret (masked) credentials are stored the same secure way onboarding
@@ -17,10 +17,10 @@
  *                                     and report the actual delivered/error
  *                                     outcome, never a fabricated success.
  */
-import { getBuiltinSetupSchema } from '@goodvibes-jev/engine/sdk/platform/channels';
-import type { ChannelSetupFieldDescriptor, ChannelSetupSchema, ChannelSurface } from '@goodvibes-jev/engine/sdk/platform/channels';
+import { getBuiltinSetupSchema } from '@goodvibes-jev/engine/platform/platform/channels';
+import type { ChannelSetupFieldDescriptor, ChannelSetupSchema, ChannelSurface } from '@goodvibes-jev/engine/platform/platform/channels';
 import type { CommandContext } from '../command-registry.ts';
-import type { ConfigManager, ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager, ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { persistSecretBackedConfigValue } from '../../config/secret-config.ts';
 import { describeOperatorRpcError, getOperatorRpc } from './operator-rpc.ts';
 
@@ -199,7 +199,7 @@ async function verifySurface(ctx: CommandContext, schema: ChannelSetupSchema): P
   }
   ctx.print(`\n[verify] Sending a real test message through ${schema.surface}...`);
   try {
-    const result = await rpc.sdk.operator.invoke('channels.test.send', { surface: schema.surface });
+    const result = await rpc.platformClient.operator.invoke('channels.test.send', { surface: schema.surface });
     if (result.delivered) {
       ctx.print(`[verify] delivered:true${result.responseId ? ` (responseId: ${result.responseId})` : ''}${result.address ? ` → ${result.address}` : ''}`);
     } else {

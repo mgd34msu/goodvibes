@@ -14,15 +14,15 @@
  *   - a permission prompt waiting on you:  Waiting for your approval · bash · npm test · 12s
  *   - a compaction:                       Compacting the conversation · 4s
  *   - a running tool:                     Running bash · npm test · 3s
- *   - the model (the honest waiting phrase from the SDK): Thinking... · 12s · first token 1.2s · 40 tok/s
+ *   - the model (the honest waiting phrase from the platform): Thinking... · 12s · first token 1.2s · 40 tok/s
  *
  * Inside an agent or process view the row keeps main in sight the same way,
  * led by "main ·" so it is never read as the view's own activity.
  */
-import { type Line, createEmptyLine } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { ToolCall } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { ContractStatus } from '@goodvibes-jev/engine/sdk/platform/contract';
-import { getDisplayWidth, interpolateColor, truncateDisplay } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { type Line, createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types';
+import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
+import type { ContractStatus } from '@goodvibes-jev/engine/platform/platform/contract';
+import { getDisplayWidth, interpolateColor, truncateDisplay } from '@goodvibes-jev/engine/platform/platform/utils';
 import { formatElapsed } from '../format.js';
 import { beadArgument, beadName } from './bead.js';
 import { activeTokens } from './theme.js';

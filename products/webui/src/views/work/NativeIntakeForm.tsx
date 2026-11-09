@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type SyntheticEvent } from "react";
-import type { NativeConversationIntakeUnsupportedSource, NativeSelectedDiffSelector } from "@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client";
+import type { NativeConversationIntakeUnsupportedSource, NativeSelectedDiffSelector } from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client";
 import { type ClientLifetime, isClientLifetimeCurrent } from "../../lib/client-lifetime";
 import {
   nativeIntakeDescription,

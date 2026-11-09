@@ -2,13 +2,13 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import { basename, join } from 'node:path';
-import { createSessionSurface } from '../sdk/src/platform/runtime/session-surface.js';
+import { createSessionSurface } from '../platform/src/platform/runtime/session-surface.js';
 import { autoRestoreRecovery, checkRecoveryForSession, consumeRecovery, deleteRecoveryFile, getRecoveryFilePath,
-  loadRecoveryConversation, removeRecoveryPoint, writeRecoveryFile } from '../sdk/src/platform/runtime/session-persistence.js';
-import { writeFileAtomic } from '../sdk/src/platform/utils/atomic-json-store.js';
-import { createNativeDataWriteOwner, assertNativeReaderCompatible, nativeReaderCapabilities, NativeDataCompatibilityError, NATIVE_READER_REQUIREMENT_FILE } from '../sdk/src/platform/runtime/native-reader-compatibility.js';
-import { realUpdateFileIo } from '../sdk/src/platform/runtime/self-update.js';
-import { createSessionStorageServices } from '../sdk/src/platform/runtime/session-storage-services.js';
+  loadRecoveryConversation, removeRecoveryPoint, writeRecoveryFile } from '../platform/src/platform/runtime/session-persistence.js';
+import { writeFileAtomic } from '../platform/src/platform/utils/atomic-json-store.js';
+import { createNativeDataWriteOwner, assertNativeReaderCompatible, nativeReaderCapabilities, NativeDataCompatibilityError, NATIVE_READER_REQUIREMENT_FILE } from '../platform/src/platform/runtime/native-reader-compatibility.js';
+import { realUpdateFileIo } from '../platform/src/platform/runtime/self-update.js';
+import { createSessionStorageServices } from '../platform/src/platform/runtime/session-storage-services.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const roots: string[] = [];
@@ -136,8 +136,8 @@ test('deprecated getter discovers the actual published opaque file without a sid
 test('actual concurrent processes publish one unsafe-ID snapshot through the common allocation lock', async () => {
   const f = fixture(), id = 'shared/private/process-identity';
   const helper = join(f.root, 'recovery-child.ts'), input = join(f.root, 'recovery-input.json'), go = join(f.root, 'go');
-  const surfaceModule = new URL('../sdk/src/platform/runtime/session-surface.ts', import.meta.url).href;
-  const persistenceModule = new URL('../sdk/src/platform/runtime/session-persistence.ts', import.meta.url).href;
+  const surfaceModule = new URL('../platform/src/platform/runtime/session-surface.ts', import.meta.url).href;
+  const persistenceModule = new URL('../platform/src/platform/runtime/session-persistence.ts', import.meta.url).href;
   fs.writeFileSync(input, JSON.stringify({ identity: f.identity, id }), { mode: 0o600 });
   fs.writeFileSync(helper, `
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';

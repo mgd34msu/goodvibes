@@ -9,13 +9,13 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { EntryType, Question } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { forgetModelLimitReadings } from '../sdk/src/platform/routing/model-limit-readings.js';
+import { forgetModelLimitReadings } from '../platform/src/platform/routing/model-limit-readings.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { OpenAICompatProvider } from '../sdk/src/platform/providers/openai-compat.js';
-import { AnthropicCompatProvider } from '../sdk/src/platform/providers/anthropic-compat.js';
-import { BUILTIN_COMPAT_PROVIDERS } from '../sdk/src/platform/providers/builtin-catalog.js';
+import { OpenAICompatProvider } from '../platform/src/platform/providers/openai-compat.js';
+import { AnthropicCompatProvider } from '../platform/src/platform/providers/anthropic-compat.js';
+import { BUILTIN_COMPAT_PROVIDERS } from '../platform/src/platform/providers/builtin-catalog.js';
 
 async function withMockedFetch<T>(
   handler: (url: string, init?: RequestInit) => Response | Promise<Response>,

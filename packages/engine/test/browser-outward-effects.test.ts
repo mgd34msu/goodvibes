@@ -3,14 +3,14 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 // `playwright-core` is an optional dependency hoisted only under
-// packages/sdk/node_modules, not resolvable from test/ at the repo root (see
+// packages/platform/node_modules, not resolvable from test/ at the repo root (see
 // tsconfig.tests.json's project root). Every use of these types below goes
 // through an `as unknown as X` cast at the mock boundary, so a same-named
 // local opaque alias preserves identical behavior without a real resolution.
 type BrowserContext = unknown;
 type Page = unknown;
-import { BrowserEngine, UntrustedEffectError } from '../sdk/src/platform/browser/browser-engine.js';
-import { BrowserSessionManager } from '../sdk/src/platform/browser/browser-sessions.js';
+import { BrowserEngine, UntrustedEffectError } from '../platform/src/platform/browser/browser-engine.js';
+import { BrowserSessionManager } from '../platform/src/platform/browser/browser-sessions.js';
 /**
  * The real factory, not a local imitation of it.
  *
@@ -22,19 +22,19 @@ import { BrowserSessionManager } from '../sdk/src/platform/browser/browser-sessi
  * product's factory also means the "a page cannot grant one" assertion below
  * exercises the refusal that actually ships.
  */
-import { grantOwnerApproval } from '../sdk/src/platform/security/owner-approval.js';
+import { grantOwnerApproval } from '../platform/src/platform/security/owner-approval.js';
 import type {
   BrowserProvisionIo,
   OutwardEffectDecision,
   OwnerApproval,
   UntrustedContentEnvelope,
   UntrustedContentPort,
-} from '../sdk/src/platform/browser/browser-types.js';
+} from '../platform/src/platform/browser/browser-types.js';
 import { securityPort } from './helpers/security-readings.ts';
 
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { browserCredentialPage } from '../sdk/src/platform/browser/browser-control-identity.js';
+import { browserCredentialPage } from '../platform/src/platform/browser/browser-control-identity.js';
 let previousPort: ReturnType<typeof installJudgmentPort>;
 const attributes = { type: '', autocomplete: '', name: '', id: '', placeholder: '', ariaLabel: '', label: '' };
 const credentialPageState = () => ({ url: PAGE_URL, documents: [{ frameChain: [], url: PAGE_URL, title: 'Quarterly Report', controls: ELEMENTS.map(({ value: _value, ...row }) => ({ ...row, documentUrl: PAGE_URL, control: attributes })) }] });

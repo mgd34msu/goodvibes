@@ -1,4 +1,4 @@
-import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 /**
  * recovery-autosave.ts, periodic recovery-file autosave + liveness-marker
  * refresh, extracted out of main.ts to keep it under the architecture
@@ -15,7 +15,7 @@ import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/sdk
  */
 import { writeRecoveryFile } from '@/runtime/index.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
-import { writeLivenessMarker } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { writeLivenessMarker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { ConversationManager, ConversationMessageSnapshot } from '../core/conversation.ts';
 
 export interface StartRecoveryAutosaveOptions {

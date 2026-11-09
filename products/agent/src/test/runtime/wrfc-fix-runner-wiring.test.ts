@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { buildFixPlannerPrompt } from '@goodvibes-jev/engine/sdk/platform/contract';
+import { buildFixPlannerPrompt } from '@goodvibes-jev/engine/platform/platform/contract';
 import { createEventEnvelope } from '@/runtime/index.ts';
 import { CONTRACT_ASK, contractPlan, contractRuntimeFixture, waitForContract } from '../helpers/contract-runtime-fixture.ts';
 

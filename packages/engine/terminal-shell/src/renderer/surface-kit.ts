@@ -21,9 +21,9 @@
  * Colors come only from the active theme's tokens (activeTokens()).
  */
 
-import { createEmptyCell, type Cell, type Line } from '@goodvibes-jev/engine/sdk/platform/types';
-import { mixHex } from '@goodvibes-jev/engine/sdk/platform/presentation';
-import { getDisplayWidth, wrapText } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { createEmptyCell, type Cell, type Line } from '@goodvibes-jev/engine/platform/platform/types';
+import { mixHex } from '@goodvibes-jev/engine/platform/platform/presentation';
+import { getDisplayWidth, wrapText } from '@goodvibes-jev/engine/platform/platform/utils';
 import { activeTokens } from './theme.js';
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createSystemOnePort, noul, SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { withWebuiAnswerBoundary } from '../sdk/src/platform/judgment-browser/batteries/webui-answers.ts';
+import { withWebuiAnswerBoundary } from '../platform/src/platform/judgment-browser/batteries/webui-answers.ts';
 
 const request = { signal: new AbortController().signal, state: 'Synthetic routing fixture', questions: { yes: noul('Is this synthetic?') } };
 function transport(): JudgmentPort {

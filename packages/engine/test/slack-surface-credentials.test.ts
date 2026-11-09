@@ -2,17 +2,17 @@ import { describe, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { getBuiltinSetupSchema } from '../sdk/src/platform/channels/builtin/setup-schema.js';
-import { buildBuiltinAccount } from '../sdk/src/platform/channels/builtin/accounts.js';
-import { runBuiltinAccountAction } from '../sdk/src/platform/channels/builtin/account-actions.js';
-import { ChannelProviderRuntimeManager } from '../sdk/src/platform/channels/provider-runtime.js';
-import { DaemonSurfaceDeliveryHelper } from '../sdk/src/platform/daemon/surface-delivery.js';
-import { ServiceRegistry } from '../sdk/src/platform/config/service-registry.js';
-import type { BuiltinChannelRuntimeDeps } from '../sdk/src/platform/channels/builtin/shared.js';
-import type { ChannelSurface } from '../sdk/src/platform/channels/types.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { SecretsManager } from '../sdk/src/platform/config/secrets.js';
-import type { SubscriptionManager } from '../sdk/src/platform/config/subscriptions.js';
+import { getBuiltinSetupSchema } from '../platform/src/platform/channels/builtin/setup-schema.js';
+import { buildBuiltinAccount } from '../platform/src/platform/channels/builtin/accounts.js';
+import { runBuiltinAccountAction } from '../platform/src/platform/channels/builtin/account-actions.js';
+import { ChannelProviderRuntimeManager } from '../platform/src/platform/channels/provider-runtime.js';
+import { DaemonSurfaceDeliveryHelper } from '../platform/src/platform/daemon/surface-delivery.js';
+import { ServiceRegistry } from '../platform/src/platform/config/service-registry.js';
+import type { BuiltinChannelRuntimeDeps } from '../platform/src/platform/channels/builtin/shared.js';
+import type { ChannelSurface } from '../platform/src/platform/channels/types.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { SecretsManager } from '../platform/src/platform/config/secrets.js';
+import type { SubscriptionManager } from '../platform/src/platform/config/subscriptions.js';
 
 type MutableConfig = ConfigManager & { readonly values: Map<string, unknown> };
 

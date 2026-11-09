@@ -9,14 +9,14 @@ import { mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { SettingsModal, SETTINGS_CATEGORIES } from '../../input/settings-modal.ts';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/sdk/platform/payments';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/platform/platform/payments';
 import { SecretsManager } from '../../config/secrets.ts';
-import { ServiceRegistry } from '@goodvibes-jev/engine/sdk/platform/config';
-import { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
+import { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
-import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
+import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
 import { renderSettingsModal } from '../../renderer/settings-modal.ts';
 import { layerText } from '../helpers/surface-frame.ts';
 import { linesToText } from '../setup.ts';
@@ -87,7 +87,7 @@ describe('renderSettingsModal payments category', () => {
   });
 
   test('a money field renders the stored amount as-is, with no unit conversion', () => {
-    // SDK 2.0.5 removed the minor-unit storage these keys used to have: the
+    // platform 2.0.5 removed the minor-unit storage these keys used to have: the
     // stored value already IS the amount a person typed ("19.99" stores as
     // 19.99), so the settings screen renders it exactly like any other
     // number setting rather than reformatting it through a currency table.
@@ -114,7 +114,7 @@ describe('renderSettingsModal payments category', () => {
     expect(setTexts).not.toMatch(/•{4,}/);
   });
 
-  test('selecting prompt renders the exact SDK warning text in the context panel', () => {
+  test('selecting prompt renders the exact platform warning text in the context panel', () => {
     modal.selectedIndex = modal.currentItems.findIndex((entry) => entry.setting.key === 'payments.cvvHandling');
     modal.activateSelected(); // enum cycle: stored -> prompt
     expect(cm.get('payments.cvvHandling')).toBe('prompt');
@@ -128,7 +128,7 @@ describe('renderSettingsModal payments category', () => {
     // The schema's own always-shown description text separately explains what
     // 'prompt' would do (for either value, as documentation), that is not
     // this warning and stays out of this assertion. What must never appear
-    // against the 'stored' default is the SDK's moment-of-selection warning
+    // against the 'stored' default is the platform's moment-of-selection warning
     // string itself.
     modal.selectedIndex = modal.currentItems.findIndex((entry) => entry.setting.key === 'payments.cvvHandling');
     expect(modal.getSelected()?.currentValue).toBe('stored');

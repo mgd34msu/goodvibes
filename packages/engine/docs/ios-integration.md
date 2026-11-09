@@ -9,14 +9,14 @@ Use this guide when you are building:
 
 The source of truth for iOS companion integrations in this repo is:
 - the [companion wire protocol](./companion-wire-protocol.md), which documents the shared auth, WebSocket, and method-call contract for native clients
-- the contract artifacts `packages/engine/contracts/artifacts/operator-contract.json` and `peer-contract.json` (also published on the `@goodvibes-jev/engine/sdk/contracts/operator-contract.json` and `@goodvibes-jev/engine/sdk/contracts/peer-contract.json` subpaths)
+- the contract artifacts `packages/engine/contracts/artifacts/operator-contract.json` and `peer-contract.json` (also published on the `@goodvibes-jev/engine/platform/contracts/operator-contract.json` and `@goodvibes-jev/engine/platform/contracts/peer-contract.json` subpaths)
 - the surface references: [surfaces.md](./surfaces.md), [exports.md](./exports.md), [public-surface.md](./public-surface.md), [packages.md](./packages.md)
 - the generated API reference docs ([operator](./reference-operator.md), [peer](./reference-peer.md), [runtime events](./reference-runtime-events.md))
 - the Swift example in [ios-swift-quickstart.swift](../examples/ios-swift-quickstart.swift)
 
 ## Installation
 
-Native iOS apps consume the JSON contracts rather than the npm package. See the [entry point guide](./packages.md) for the install matrix. If you bundle the contracts from npm, install `@goodvibes-jev/engine/sdk` (the canonical install command and version live in [Getting started](./getting-started.md#install)) and read them from the `@goodvibes-jev/engine/sdk/contracts/*.json` subpaths. Pin to the SDK release whose contracts you target.
+Native iOS apps consume the JSON contracts rather than the npm package. See the [entry point guide](./packages.md) for the install matrix. If you bundle the contracts from npm, install `@goodvibes-jev/engine` (the canonical install command and version live in [Getting started](./getting-started.md#install)) and read them from the `@goodvibes-jev/engine/platform/contracts/*.json` subpaths. Pin to the platform release whose contracts you target.
 
 ## Connecting
 
@@ -33,7 +33,7 @@ See the [companion wire protocol](./companion-wire-protocol.md) for the full ref
 - reconnect on foreground/resume and reachability changes
 - use HTTP APIs for snapshots and mutations
 - use WebSocket events for live updates
-- use the TypeScript SDK only when your iOS app is actually React Native or Expo based
+- use the TypeScript platform only when your iOS app is actually React Native or Expo based
 
 ## Swift example
 

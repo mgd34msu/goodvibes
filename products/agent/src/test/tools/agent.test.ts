@@ -1,10 +1,10 @@
 import { getTestRuntimeServices, resetTestRuntimeServices } from '../helpers/runtime-services.ts';
 import { describe, test, expect } from 'bun:test';
-import { createAgentTool, AgentManager, ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import { AgentMessageBus } from '@goodvibes-jev/engine/sdk/platform/agents';
+import { createAgentTool, AgentManager, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { AgentMessageBus } from '@goodvibes-jev/engine/platform/platform/agents';
 import { RuntimeEventBus } from '@/runtime/index.ts';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { join } from 'node:path';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 import {
@@ -43,11 +43,11 @@ import {
   normalizeAgentToolInvocationForAgentPolicy,
   wrapAgentToolForAgentPolicy,
 } from '../../tools/agent-tool-policy-guard.ts';
-import { AGENT_READ_ADMISSION_DENIAL_MESSAGE } from '@goodvibes-jev/engine/sdk/platform/gate/policy';
+import { AGENT_READ_ADMISSION_DENIAL_MESSAGE } from '@goodvibes-jev/engine/platform/platform/gate/policy';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { executeToolCalls, type ToolExecutionDeps } from '@goodvibes-jev/engine/sdk/platform/core';
+import { executeToolCalls, type ToolExecutionDeps } from '@goodvibes-jev/engine/platform/platform/core';
 import { composeAgentToolRegistry } from '../../runtime/agent-tool-registry.ts';
 import { composeAgentPermissionManager } from '../../runtime/bootstrap-core.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';

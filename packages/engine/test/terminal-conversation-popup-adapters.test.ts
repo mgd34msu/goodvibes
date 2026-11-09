@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { createEmptyLine } from '../sdk/src/platform/types/grid.js';
+import { createEmptyLine } from '../platform/src/platform/types/grid.js';
 import { applyConversationPopupRows, isCommonConversationModalOpen } from '../terminal-shell/src/renderer/conversation-overlays.js';
 
 function fixture() {

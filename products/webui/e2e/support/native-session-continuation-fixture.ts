@@ -8,13 +8,13 @@ import {
   nativeConversationIntakeCaptureRequestSchema,
   nativeConversationIntakeLookupResultSchema,
   type NativeConversationIntakeCaptureRequest,
-} from "@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client";
+} from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client";
 import {
   nativeHostedSessionLookupSchema,
   nativeHostedTurnLookupSchema,
   nativeHostedTurnRequestSchema,
   type NativeHostedTurnRequest,
-} from "@goodvibes-jev/engine/sdk/platform/hosted-sessions/native-turn-client";
+} from "@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client";
 import { installMockDaemon } from "./mock-daemon";
 import type { FleetSnapshotResult } from "../../src/lib/goodvibes";
 

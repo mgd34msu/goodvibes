@@ -4,7 +4,7 @@ import {
   forwardKeepAwakeToAdoptedDaemon,
   postPowerKeepAwakeSet,
   type PowerKeepAwakeRemoteConnection,
-} from '../sdk/src/platform/power/keep-awake-remote.ts';
+} from '../platform/src/platform/power/keep-awake-remote.ts';
 
 const originalFetch = globalThis.fetch;
 

@@ -3,7 +3,7 @@ import { getEventListeners } from 'node:events';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { BrowserHostClient, BrowserHostError } from '../sdk/src/platform/browser/browser-host-client.js';
+import { BrowserHostClient, BrowserHostError } from '../platform/src/platform/browser/browser-host-client.js';
 import { withTestTimeout } from './_helpers/test-timeout.js';
 
 /** Real owned subprocesses; no system browser or user profile is opened. */

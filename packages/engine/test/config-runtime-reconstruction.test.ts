@@ -2,9 +2,9 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { DEFAULT_CONFIG } from '../sdk/src/platform/config/schema.ts';
-import { ensureConnectorConfigSections } from '../sdk/src/platform/config/connector-config-sections.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { DEFAULT_CONFIG } from '../platform/src/platform/config/schema.ts';
+import { ensureConnectorConfigSections } from '../platform/src/platform/config/connector-config-sections.ts';
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function write(path: string, value: unknown) { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, JSON.stringify(value)); }

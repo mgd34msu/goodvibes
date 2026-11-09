@@ -13,10 +13,10 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createExecTool } from '../sdk/src/platform/tools/exec/runtime.js';
-import { ProcessManager } from '../sdk/src/platform/tools/shared/process-manager.js';
-import { OverflowHandler } from '../sdk/src/platform/tools/shared/overflow.js';
-import { createFetchTool } from '../sdk/src/platform/tools/fetch/runtime.js';
+import { createExecTool } from '../platform/src/platform/tools/exec/runtime.js';
+import { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.js';
+import { OverflowHandler } from '../platform/src/platform/tools/shared/overflow.js';
+import { createFetchTool } from '../platform/src/platform/tools/fetch/runtime.js';
 import { EXEC_GATE_TABLE } from './_helpers/gate-readings.ts';
 import { useToolReadings } from './_helpers/tool-readings.ts';
 

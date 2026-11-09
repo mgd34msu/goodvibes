@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { CardMaterialRedactor } from '../sdk/src/platform/payments/card-redaction.js';
+import { CardMaterialRedactor } from '../platform/src/platform/payments/card-redaction.js';
 
 test('opaque session/page identities cannot collide or clear another page protection', () => {
   const redactor = new CardMaterialRedactor();

@@ -3,7 +3,7 @@
 ## Channels
 
 GoodVibes includes a shared channel/runtime layer. Every surface it drives
-(the SDK's `ChannelSurface` type) is one of the following:
+(the platform's `ChannelSurface` type) is one of the following:
 
 | Surface | What it is |
 | --- | --- |
@@ -33,7 +33,7 @@ delivery, or reply logic.
 
 ## Home Assistant
 
-The Home Assistant surface is configured from onboarding or Settings > Surfaces. The TUI stores the SDK config keys and controls auto-start; the SDK daemon owns the actual Home Assistant API/tool surface, callback verification, account metadata, and channel actions.
+The Home Assistant surface is configured from onboarding or Settings > Surfaces. The TUI stores the platform config keys and controls auto-start; the platform daemon owns the actual Home Assistant API/tool surface, callback verification, account metadata, and channel actions.
 
 Relevant settings:
 
@@ -49,7 +49,7 @@ Relevant settings:
 | `surfaces.homeassistant.deviceName` | `GoodVibes Daemon` | Device display name |
 | `surfaces.homeassistant.eventType` | `goodvibes_message` | Event type used for daemon-to-Home Assistant deliveries |
 
-The inbound daemon callback path is `/webhook/homeassistant`. Authenticated Home Assistant Assist clients can also use `GET /api/homeassistant/health`, `POST /api/homeassistant/conversation`, `POST /api/homeassistant/conversation/stream`, and `POST /api/homeassistant/conversation/cancel`. These routes are SDK-owned isolated remote-chat paths with daemon-owned sessions. Responses report `mode: "remote-chat"` and expose `assistant.text` / `assistant.speechText`; Home Assistant clients should not expect `agentId`. Use a `goodvibes://` secret reference or an environment-backed secret for tokens when possible.
+The inbound daemon callback path is `/webhook/homeassistant`. Authenticated Home Assistant Assist clients can also use `GET /api/homeassistant/health`, `POST /api/homeassistant/conversation`, `POST /api/homeassistant/conversation/stream`, and `POST /api/homeassistant/conversation/cancel`. These routes are platform-owned isolated remote-chat paths with daemon-owned sessions. Responses report `mode: "remote-chat"` and expose `assistant.text` / `assistant.speechText`; Home Assistant clients should not expect `agentId`. Use a `goodvibes://` secret reference or an environment-backed secret for tokens when possible.
 
 ## Shared reply pipeline
 
@@ -208,7 +208,7 @@ Set `behavior.notifyAfterSeconds` in `/config behavior` (or `settings.json`):
 
 Notifications are delivered in this order:
 
-1. **Desktop notification.** `notify-send` on Linux, `osascript` on macOS. The SDK handles platform detection; the call is a silent no-op when neither is available.
+1. **Desktop notification.** `notify-send` on Linux, `osascript` on macOS. The platform handles platform detection; the call is a silent no-op when neither is available.
 2. **Outbound webhook / ntfy topic.** If you have webhook URLs configured (via `/notify add <url>`), the notification is also sent as a plain-text POST to all configured endpoints. This works with ntfy.sh topics and any service accepting a plain POST body.
 
 ### Notification content
@@ -221,7 +221,7 @@ Notifications are gated by `behavior.notifyOnlyWhenUnfocused` (on by default). T
 
 ### Wiring
 
-The threshold is read inside `wireTurnEventHandlers` on every `TURN_COMPLETED` event. The `behavior.notifyAfterSeconds` key is a TUI-local synthetic setting; it is not yet in the SDK ConfigKey union.
+The threshold is read inside `wireTurnEventHandlers` on every `TURN_COMPLETED` event. The `behavior.notifyAfterSeconds` key is a TUI-local synthetic setting; it is not yet in the platform ConfigKey union.
 
 ## Related docs
 

@@ -5,11 +5,11 @@ import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { createSemanticWriteGuard } from '../sdk/src/platform/knowledge/semantic/primary-source-plan.js';
-import { withAnswerVerificationBudget } from '../sdk/src/platform/knowledge/semantic/answer-verification/budget.js';
-import { prepareAnswerSourceExcerptBatches, prepareAnswerSourceExcerpts } from '../sdk/src/platform/knowledge/semantic/answer-excerpts/prepare.js';
+import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { createSemanticWriteGuard } from '../platform/src/platform/knowledge/semantic/primary-source-plan.js';
+import { withAnswerVerificationBudget } from '../platform/src/platform/knowledge/semantic/answer-verification/budget.js';
+import { prepareAnswerSourceExcerptBatches, prepareAnswerSourceExcerpts } from '../platform/src/platform/knowledge/semantic/answer-excerpts/prepare.js';
 
 let previous: JudgmentPort | undefined;
 const roots: string[] = [], spaceId = 'wiki:excerpt-batches', query = 'What features does AC-7 have?';

@@ -21,13 +21,13 @@ import { randomUUID } from 'node:crypto';
 import {
   IntegrationHelperService,
   type IntegrationHelpersServices,
-} from '../sdk/src/platform/runtime/integration/helpers.ts';
+} from '../platform/src/platform/runtime/integration/helpers.ts';
 import {
   getRecoveryFilePath,
   writeLastSessionPointer,
   writeRecoveryFile,
-} from '../sdk/src/platform/runtime/session-persistence.ts';
-import { createSessionSurface, type SessionSurface } from '../sdk/src/platform/runtime/session-surface.ts';
+} from '../platform/src/platform/runtime/session-persistence.ts';
+import { createSessionSurface, type SessionSurface } from '../platform/src/platform/runtime/session-surface.ts';
 
 const roots: string[] = [];
 

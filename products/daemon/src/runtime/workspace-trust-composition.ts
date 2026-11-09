@@ -1,8 +1,8 @@
 /** One live trust authority for each physical workspace owned by this daemon. */
 import { realpathSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
-import { createShellPathService } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
-import { WorkspaceTrustManager } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { WorkspaceTrustManager } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 
 const trustByHost = new WeakMap<WorkspaceTrustManager, Map<string, WorkspaceTrustManager>>();

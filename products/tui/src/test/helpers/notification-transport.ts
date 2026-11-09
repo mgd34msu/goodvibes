@@ -1,6 +1,6 @@
 import { afterEach, spyOn } from 'bun:test';
-import { WebhookNotifier } from '@goodvibes-jev/engine/sdk/platform/integrations';
-import * as webhookHttp from '@goodvibes-jev/engine/sdk/platform/utils';
+import { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
+import * as webhookHttp from '@goodvibes-jev/engine/platform/platform/utils';
 
 // Real delivery classes; the only substituted boundary is HTTP. A missing
 // synthetic route fails closed, so these tests cannot use a real endpoint.

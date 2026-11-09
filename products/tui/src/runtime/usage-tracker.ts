@@ -12,7 +12,7 @@ import { isConversationUsageAvailable } from '../core/conversation-usage.ts';
  * `/cost budget <usd>` command and the notifier never disagree.
  */
 
-import type { AgentRecord } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { AgentRecord } from '@goodvibes-jev/engine/platform/platform/tools';
 import {
   BUDGET_ALERT_USD_CONFIG_KEY,
   calcSessionCost,
@@ -22,11 +22,11 @@ import {
   readBudgetAlertUsd,
   writeManualModelPrice,
   type BudgetAlertConfigAccess,
-} from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { AgentEvent, TurnEvent } from '@goodvibes-jev/engine/sdk/events';
-import { evaluateSessionMaintenance } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import type { SessionMemoryQuery, UiEventFeed } from '@goodvibes-jev/engine/sdk/platform/runtime/ui';
+} from '@goodvibes-jev/engine/platform/platform/providers';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { AgentEvent, TurnEvent } from '@goodvibes-jev/engine/platform/events';
+import { evaluateSessionMaintenance } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import type { SessionMemoryQuery, UiEventFeed } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
 import type { UiReadModel, UiSessionSnapshot } from './ui-read-models.ts';
 
 /** Tokens one completed turn added. */

@@ -13,8 +13,8 @@ import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createOperatorSdk } from '@goodvibes-jev/engine/operator-sdk';
-import { createOperatorNativeWorkExecutionClient, type NativeWorkExecutionSnapshot } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
+import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
+import { createOperatorNativeWorkExecutionClient, type NativeWorkExecutionSnapshot } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
 import { beginTuiHostPairing, completeTuiHostPairing } from '../../runtime/tui-host-credential-store.ts';
 import { launchNativeIntegrationHost } from '../helpers/native-integration-host.ts';
 import { inputAreaVisible, launchTui, makeHome, screenText, startHomeDaemonServer, startStubModel, type TuiSession } from './harness.ts';
@@ -81,7 +81,7 @@ test('compiled native reviewed repair fails review, fixes, genuinely re-reviews,
     })).status).toBe('paired');
     home.setTuiSetting('controlPlane.publicBaseUrl', origin); home.setTuiSetting('daemon.enabled', true);
     writeFileSync(join(home.home, '.goodvibes/tui/onboarding-checked.json'), JSON.stringify({ version: 1, checkedAt: now, updatedAt: now, source: 'e2e' }));
-    client = createOperatorNativeWorkExecutionClient(createOperatorSdk({ baseUrl: ready.baseUrl, authToken: token, retry: { maxAttempts: 1 } }), 'project');
+    client = createOperatorNativeWorkExecutionClient(createOperatorApiClient({ baseUrl: ready.baseUrl, authToken: token, retry: { maxAttempts: 1 } }), 'project');
     const snapshot = () => client!.status(ready.identity, { signal: AbortSignal.timeout(10_000) });
     const start = async () => { tui = launchTui(home!, { cols: 180, rows: 60 }); await tui.waitForScreen('compiled reviewed native input', inputAreaVisible, 45_000); };
     const openStatus = async () => {

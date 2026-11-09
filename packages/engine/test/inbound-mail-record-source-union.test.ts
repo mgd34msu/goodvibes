@@ -21,7 +21,7 @@ import {
   InboundMailStore,
   describeRecordIdentity,
   validateInboundMailRecord,
-} from '../sdk/src/platform/email/inbound/record-store.ts';
+} from '../platform/src/platform/email/inbound/record-store.ts';
 
 let dir: string;
 let storePath: string;

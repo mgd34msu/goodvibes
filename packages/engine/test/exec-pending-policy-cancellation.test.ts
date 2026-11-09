@@ -4,10 +4,10 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { createExecTool, OverflowHandler, ProcessManager } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { createExecTool, OverflowHandler, ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
-import { AGENT_OWNER_TERMINAL_GUARD } from '@goodvibes-jev/engine/sdk/platform/gate/policy';
-import { isRetryableExecResult } from '../sdk/src/platform/tools/exec/runtime.ts';
+import { AGENT_OWNER_TERMINAL_GUARD } from '@goodvibes-jev/engine/platform/platform/gate/policy';
+import { isRetryableExecResult } from '../platform/src/platform/tools/exec/runtime.ts';
 const makeProjectTempDir = (prefix: string): string => mkdtempSync(join(tmpdir(), prefix));
 
 let previous: ReturnType<typeof installJudgmentPort>;

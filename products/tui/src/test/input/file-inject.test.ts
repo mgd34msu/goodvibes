@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FilePickerModal } from '../../input/file-picker.ts';
 import { expandPrompt } from '../../input/handler-content-actions.ts';
-import type { ContentPart } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
 
 // ---------------------------------------------------------------------------
 // Helpers

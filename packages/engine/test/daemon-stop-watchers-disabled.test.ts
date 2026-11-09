@@ -18,7 +18,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { bootDaemon, type BootedDaemon } from '../sdk/src/platform/daemon/boot.ts';
+import { bootDaemon, type BootedDaemon } from '../platform/src/platform/daemon/boot.ts';
 
 let home: string;
 let work: string;

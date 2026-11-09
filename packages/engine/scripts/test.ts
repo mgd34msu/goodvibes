@@ -21,7 +21,7 @@ import {
 import { withWorkspaceLock } from './workspace-lock.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SDK_ROOT = resolve(__dirname, '..');
+const ENGINE_ROOT = resolve(__dirname, '..');
 const args = process.argv.slice(2);
 
 /**
@@ -57,7 +57,7 @@ const args = process.argv.slice(2);
 const RUN_TMP_DIR_NAME = makeRunTmpDirName();
 
 function resolveTestArgs(): readonly string[] {
-  return partitionTestArgs(SDK_ROOT, args) ?? (args.length > 0 ? args : defaultTestArgs(SDK_ROOT));
+  return partitionTestArgs(ENGINE_ROOT, args) ?? (args.length > 0 ? args : defaultTestArgs(ENGINE_ROOT));
 }
 
 /**
@@ -248,7 +248,7 @@ export async function runTests(resolvePlans: () => readonly (readonly string[])[
                 expectedParentPid,
                 ...(output ? { deadlineAt, stdout: output, stderr: output } : {}),
                 argv: [...timeoutArgs, ...testArgs],
-                cwd: SDK_ROOT,
+                cwd: ENGINE_ROOT,
                 ...(projectTmpRoot ? { fixtureEnv: { GOODVIBES_TEST_PROJECT_TMP_ROOT: projectTmpRoot } } : {}),
                 env: {
                   ...process.env,

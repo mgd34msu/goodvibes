@@ -9,8 +9,8 @@
 // the durable workflow tools, and the product-supplied pieces.
 import { useGateReadings } from './_helpers/gate-readings.ts';
 import { describe, expect, test } from 'bun:test';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.ts';
-import type { Tool } from '../sdk/src/platform/types/tools.ts';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
+import type { Tool } from '../platform/src/platform/types/tools.ts';
 import {
   AGENT_ANALYZE_NETWORK_DENIAL_MESSAGE,
   AGENT_CONTROL_MUTATION_DENIAL_MESSAGE,
@@ -38,7 +38,7 @@ import {
   explainAgentToolPolicyInvocation,
   installAgentToolPolicyGuard,
   isBlockedReadPath,
-} from '../sdk/src/platform/gate/policy/index.ts';
+} from '../platform/src/platform/gate/policy/index.ts';
 
 /** The agent tool's own mode enum, as the engine's agent tool declares it. */
 const AGENT_TOOL_MODES = ['spawn', 'batch-spawn', 'status', 'cancel', 'list', 'templates', 'get', 'budget', 'plan', 'wait', 'message', 'contracts', 'contract-history', 'cohort-status', 'cohort-report'] as const;

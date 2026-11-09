@@ -5,9 +5,9 @@ import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { prepareKnowledgeScopeSelection, KnowledgeScopeSelectionHeldError } from '../sdk/src/platform/knowledge/scope-selection.js';
-import { registerGeneratedKnowledgeSourceReferences } from '../sdk/src/platform/knowledge/source-structural-references.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { prepareKnowledgeScopeSelection, KnowledgeScopeSelectionHeldError } from '../platform/src/platform/knowledge/scope-selection.js';
+import { registerGeneratedKnowledgeSourceReferences } from '../platform/src/platform/knowledge/source-structural-references.js';
 
 const roots: string[] = [], stores: KnowledgeStore[] = [];
 let previous: JudgmentPort | undefined;

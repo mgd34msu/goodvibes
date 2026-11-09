@@ -18,7 +18,7 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, write
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { getProviderModelsCachePath } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { getProviderModelsCachePath } from '@goodvibes-jev/engine/platform/platform/providers';
 import { TuiConfigManager } from '../../config/host-settings.ts';
 import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
 import { seedBenchmarkCacheFixture } from '../helpers/benchmark-cache-fixture.ts';

@@ -1,7 +1,7 @@
 /**
  * wake-host.ts, the browser tab as a wake-word surface.
  *
- * The SDK owns everything that is identical on every surface: the front end, the
+ * The platform owns everything that is identical on every surface: the front end, the
  * scoring rules, the pre-roll, the silence and ceiling policy, the engine reset
  * after a command, the restart/latch policy. `WakeListener` is all of that. What a
  * host owns is four things, and this file is those four:
@@ -29,7 +29,7 @@ import {
   type CapturedUtterance,
   type UtteranceAudioArtifact,
   type NoiseSuppressionFactory,
-} from '@goodvibes-jev/engine/sdk/platform/voice/capture';
+} from '@goodvibes-jev/engine/platform/platform/voice/capture';
 import {
   WakeListener,
   WakeWordEngine,
@@ -39,7 +39,7 @@ import {
   type WakeModelHandle,
   type WakeRuntimeSettings,
   type WakeStartRefusal,
-} from '@goodvibes-jev/engine/sdk/platform/voice/wake/runtime';
+} from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
 import { micArbiter, type MicArbiter } from './mic-arbiter';
 import { playWakeChime } from './wake-chime';
 import { loadWakeModel, openWakeModelCache, WakeModelError } from './wake-models';
@@ -48,7 +48,7 @@ import { CONFIG_SCHEMA_ENTRIES } from '../generated/config-schema';
 
 /**
  * The model id the daemon actually serves to a tab. Read from this repo's
- * generated schema snapshot (the drift-checked copy of the SDK's own row) rather
+ * generated schema snapshot (the drift-checked copy of the platform's own row) rather
  * than spelled here, so it cannot fall out of step with the pinned model.
  */
 export const PINNED_WAKE_MODEL_ID: string = (() => {
@@ -142,10 +142,10 @@ export interface WakeHostDeps {
   /** Loads models and the inference runtime for a resolved configuration. */
   readonly loadModelSet: (settings: WakeRuntimeSettings) => Promise<WakeModelSet>;
   /**
-   * Builds the speex suppression stage. The SDK's listener wraps the opener and
+   * Builds the speex suppression stage. The platform's listener wraps the opener and
    * defaults to the embedded WebAssembly filter; injected here so a test can check
    * that captured frames REACH a stage without compiling one, while the filter's
-   * own numbers stay the SDK's to assert.
+   * own numbers stay the platform's to assert.
    */
   readonly createNoiseSuppression?: NoiseSuppressionFactory | undefined;
   /** Sends an utterance to speech-to-text and returns the text. */
@@ -611,7 +611,7 @@ const mutableDeps: {
  *
  * Its daemon-facing dependencies are installed by `installWakeHostDaemonDeps`
  * rather than imported here, so this module does not pull `lib/goodvibes` (and
- * with it the whole SDK client surface) into the import graph of anything that
+ * with it the whole platform client surface) into the import graph of anything that
  * only wants the capture primitive.
  */
 export const wakeHost: WakeHost = createWakeHost({

@@ -2,8 +2,8 @@ import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-c
 import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { KnowledgeStore } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { KnowledgeStore } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createRuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';

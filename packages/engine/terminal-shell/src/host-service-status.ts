@@ -1,4 +1,4 @@
-import type { HostServiceStatus, HostServicesHandle } from '@goodvibes-jev/engine/sdk/platform/runtime/bootstrap';
+import type { HostServiceStatus, HostServicesHandle } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 export type HostServiceName = 'daemon' | 'httpListener';
 export function formatHostServiceBaseUrl(host: string, port: number): string {
   const normalized = host.trim().toLowerCase();

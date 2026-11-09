@@ -3,7 +3,7 @@
  * notification names the work; fixes are automatic).
  *
  * 1. The TUI's long-task notifier owns the turn's desktop popup, so the wiring
- *    hands the SDK Orchestrator's own end-of-turn popup off: a long turn pops
+ *    hands the platform Orchestrator's own end-of-turn popup off: a long turn pops
  *    once, not twice. What the Orchestrator's popup gave the TUI and the
  *    long-task path did not (the bell above 5s, behavior.notifyOnComplete) is
  *    kept here.
@@ -20,12 +20,12 @@ import { describe, expect, mock, spyOn, test } from 'bun:test';
 import { installFullScreenTerminalOutputGuard } from '@goodvibes-jev/engine/terminal-shell/terminal-output-guard';
 import { wireTurnEventHandlers, type WireTurnEventHandlersOptions } from '../../core/turn-event-wiring.ts';
 import { wireStreamEventMetrics, type WireStreamEventMetricsOptions, type StreamMetrics } from '../../core/stream-event-wiring.ts';
-import type { WebhookNotifier } from '@goodvibes-jev/engine/sdk/platform/integrations';
+import type { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { FocusTracker } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { makeTestSurface } from '../helpers/session-surface.ts';
 import { createCancelGeneration } from '../../core/turn-cancellation.ts';
-import type { Orchestrator } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { Orchestrator } from '@goodvibes-jev/engine/platform/platform/core';
 
 const ASK = 'Migrate the billing tables to the new schema';
 
@@ -83,7 +83,7 @@ function harness(opts: HarnessOptions = {}) {
   // These named-notice routing tests explicitly use the public content-enabled setting.
   const settings: Record<string, unknown> = { 'behavior.notifyAfterSeconds': 30, 'behavior.notificationsMetadataOnly': false, ...opts.config };
   const orchestrator: Record<string, unknown> = { lastInputTokens: 0, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
-  // This is the SDK state after TURN_ERROR has run finalizeTurn/stopThinking.
+  // This is the platform state after TURN_ERROR has run finalizeTurn/stopThinking.
   // main.ts passes this exact cancellation action to both Esc and Ctrl+C.
   const abort = mock(() => {});
   const cancelGeneration = createCancelGeneration(
@@ -468,7 +468,7 @@ test('the real cancel action revokes an accepted failover while memory preparati
 });
 
 
-test('the real cancel action revokes the pending reading while the SDK is idle', async () => {
+test('the real cancel action revokes the pending reading while the platform is idle', async () => {
   let release!: () => void;
   const pending = new Promise<void>(resolve => { release = resolve; });
   const previous = installJudgmentPort({ model: 'jev-1.13.0', async ask() { await pending; throw new Error('reading unavailable'); } });

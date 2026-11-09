@@ -1,11 +1,11 @@
 import {
   DEFAULT_KNOWLEDGE_SPACE_ID,
   goodVibesAgentKnowledgeSpaceId,
-} from '@goodvibes-jev/engine/sdk/platform/knowledge';
+} from '@goodvibes-jev/engine/platform/platform/knowledge';
 
 type JsonRecord = Record<string, unknown>;
 
-// Resolved on first use, not at module load: the SDK helper reads its own
+// Resolved on first use, not at module load: the platform helper reads its own
 // module's constants, and the single-file compiler's nondeterministic module
 // order could run this line before they exist, silently yielding an
 // "undefined"-prefixed space id (the build-order lottery class, 2.0.13).

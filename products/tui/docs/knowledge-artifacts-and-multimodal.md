@@ -35,15 +35,15 @@ Regular Knowledge/Wiki and Home Assistant Home Graph are separate runtime instan
 
 ## Semantic ask
 
-The SDK owns semantic question answering through:
+The platform owns semantic question answering through:
 
 - `POST /api/knowledge/ask`
 - operator method `knowledge.ask`
 - local TUI command `/knowledge ask <query> [--space <knowledgeSpaceId>] [--limit <n>] [--mode <concise|standard|detailed>]`
 
-SDK-owned semantic enrichment supports provider-backed LLM extraction with timeout, abort, and concurrency controls. Broad reindex caps LLM attempts and then continues with deterministic extraction, so hosts should wire the SDK semantic service rather than implementing their own timeout or concurrency shim.
+platform-owned semantic enrichment supports provider-backed LLM extraction with timeout, abort, and concurrency controls. Broad reindex caps LLM attempts and then continues with deterministic extraction, so hosts should wire the platform semantic service rather than implementing their own timeout or concurrency shim.
 
-TUI rendering should display the answer object returned by the SDK, every field of it:
+TUI rendering should display the answer object returned by the platform, every field of it:
 
 | Field | Holds |
 | --- | --- |
@@ -55,17 +55,17 @@ TUI rendering should display the answer object returned by the SDK, every field 
 | `answer.confidence` | The confidence score |
 | `answer.synthesized` | Whether the answer was synthesized rather than directly sourced |
 
-Do not reformat search results into local answer snippets. The SDK response is the answer contract; the TUI only presents it.
+Do not reformat search results into local answer snippets. The platform response is the answer contract; the TUI only presents it.
 
 ## Durable refinement
 
-SDK 0.28.0 adds durable semantic refinement tasks for the base knowledge layer. Refinement records preserve the gap, subject, state, trace, source assessments, blocked reasons, accepted facts, rejected evidence, and follow-up state so clients can explain what the knowledge system attempted instead of only reporting "skipped".
+platform 0.28.0 adds durable semantic refinement tasks for the base knowledge layer. Refinement records preserve the gap, subject, state, trace, source assessments, blocked reasons, accepted facts, rejected evidence, and follow-up state so clients can explain what the knowledge system attempted instead of only reporting "skipped".
 
-SDK 0.28.1 makes refinement runs budget-aware and non-blocking for user-facing routes. Ask routes should answer from current evidence and return `refinementTaskIds` when repair work is queued or still running. Reindex should queue repair instead of waiting for every repair to finish. Broad `refinement/run` calls cap effective work per run and report truncation or budget exhaustion rather than pinning the daemon. Stale `searching` or `evaluating` tasks older than the SDK recovery window are moved back to a retriable blocked state on the next run.
+platform 0.28.1 makes refinement runs budget-aware and non-blocking for user-facing routes. Ask routes should answer from current evidence and return `refinementTaskIds` when repair work is queued or still running. Reindex should queue repair instead of waiting for every repair to finish. Broad `refinement/run` calls cap effective work per run and report truncation or budget exhaustion rather than pinning the daemon. Stale `searching` or `evaluating` tasks older than the platform recovery window are moved back to a retriable blocked state on the next run.
 
-SDK 0.28.2 fixes the published dist guardrail path for refinement budgets. Runtime dist uses 12 refinement gaps as the default run size and 24 as the maximum effective limit. It also reopens historical `No semantic gap repairer is configured` tasks once the host has wired the SDK web-backed repairer, so old blocked tasks should no longer look like current host composition failures after a run reaches them.
+platform 0.28.2 fixes the published dist guardrail path for refinement budgets. Runtime dist uses 12 refinement gaps as the default run size and 24 as the maximum effective limit. It also reopens historical `No semantic gap repairer is configured` tasks once the host has wired the platform web-backed repairer, so old blocked tasks should no longer look like current host composition failures after a run reaches them.
 
-SDK 0.28.3 coalesces overlapping semantic repair runs so repeated or concurrent refinement triggers should be bounded instead of piling up duplicate repair work. Home Graph repair-source metadata now preserves `linkedObjects` through answer rendering.
+platform 0.28.3 coalesces overlapping semantic repair runs so repeated or concurrent refinement triggers should be bounded instead of piling up duplicate repair work. Home Graph repair-source metadata now preserves `linkedObjects` through answer rendering.
 
 Daemon routes:
 
@@ -78,9 +78,9 @@ POST /api/knowledge/refinement/tasks/{id}/cancel
 
 The list route accepts filters such as `knowledgeSpaceId` or `spaceId`, `state`, `subjectKind`, `subjectId`, `gapId`, and `limit`. `POST /api/knowledge/refinement/run` is admin-gated and accepts `knowledgeSpaceId` or `spaceId`, optional `gapIds`, optional `sourceIds`, `limit`, and `force`.
 
-Use these SDK routes directly for task inspection and manual repair runs. Do not duplicate the refinement state machine in the TUI.
+Use these platform routes directly for task inspection and manual repair runs. Do not duplicate the refinement state machine in the TUI.
 
-The TUI daemon runtime wires SDK semantic refinement to the SDK web gap repairer. Gap repair uses the configured GoodVibes web search providers for source discovery and the knowledge ingest service for accepted repair sources. If web search providers are unavailable or disabled, tasks may still become blocked by search/provider readiness, but they should not report `No semantic gap repairer is configured`.
+The TUI daemon runtime wires platform semantic refinement to the platform web gap repairer. Gap repair uses the configured GoodVibes web search providers for source discovery and the knowledge ingest service for accepted repair sources. If web search providers are unavailable or disabled, tasks may still become blocked by search/provider readiness, but they should not report `No semantic gap repairer is configured`.
 
 ## Issue review
 
@@ -90,7 +90,7 @@ Knowledge issues can be reviewed through the local TUI command and the daemon/op
 - `POST /api/knowledge/issues/{id}/review`
 - operator method `knowledge.issue.review`
 
-Review actions update the issue state through the SDK. `accept`, `reject`, `resolve`, and `forget` mark the issue resolved; `reopen` and `edit` return it to open. Optional JSON values can supply reviewed source or node facts for SDK-owned application.
+Review actions update the issue state through the platform. `accept`, `reject`, `resolve`, and `forget` mark the issue resolved; `reopen` and `edit` return it to open. Optional JSON values can supply reviewed source or node facts for platform-owned application.
 
 ## Connectors and extractors
 

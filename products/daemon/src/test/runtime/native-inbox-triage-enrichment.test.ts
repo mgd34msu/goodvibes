@@ -2,16 +2,16 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { createNativeDataWriteOwner, NATIVE_READER_REQUIREMENT_FILE } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { FakeClusterClock } from '@goodvibes-jev/engine/sdk/platform/cluster';
-import { EmailService, describeSenderClaimNeutrally } from '@goodvibes-jev/engine/sdk/platform/email';
+import { createNativeDataWriteOwner, NATIVE_READER_REQUIREMENT_FILE } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { FakeClusterClock } from '@goodvibes-jev/engine/platform/platform/cluster';
+import { EmailService, describeSenderClaimNeutrally } from '@goodvibes-jev/engine/platform/platform/email';
 import { InboxCursorStore, inboxTriage, registerCompositeInboxSurface, registerInboxSurface,
   type InboxListOutput, type InboxPollingControl, type InboxTriageAuthority,
   type InboundProviderAdapter, type OwnedInboxSource, type OwnedTriagedInboxSource,
-} from '@goodvibes-jev/engine/sdk/platform/intake';
-import type { ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/sdk/platform/security';
+} from '@goodvibes-jev/engine/platform/platform/intake';
+import type { ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/platform/platform/security';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import type { HandlerContext } from '../../daemon/handlers/context.js';

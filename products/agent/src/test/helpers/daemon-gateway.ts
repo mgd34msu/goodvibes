@@ -40,7 +40,7 @@
  * owner-profile document at daemon scope. Every caller here runs against a temp
  * home, and a suite that does not is reaching the machine's real profile.
  */
-import { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 import { attachWsOnlyGatewayVerbHandlers } from '@goodvibes-jev/engine/terminal-shell';
 import { createSessionConversationRewindPort } from '../../runtime/conversation-rewind-port.ts';

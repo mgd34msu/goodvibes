@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { BenchmarkStore } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { BenchmarkStore } from '@goodvibes-jev/engine/platform/platform/providers';
 import { makeProjectTempDir } from './project-temp.ts';
 import { seedBenchmarkCacheFixture } from './benchmark-cache-fixture.ts';
 

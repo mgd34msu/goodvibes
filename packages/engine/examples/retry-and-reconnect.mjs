@@ -1,13 +1,13 @@
 /**
  * Configure HTTP retry and realtime reconnect policies.
  */
-import { createGoodVibesSdk } from '@goodvibes-jev/engine/sdk';
+import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
 
 const authToken = process.env.GOODVIBES_TOKEN;
 if (!authToken) {
   throw new Error('GOODVIBES_TOKEN env var is required (operator bearer token from the daemon).');
 }
-const sdk = createGoodVibesSdk({
+const platformClient = createGoodVibesPlatform({
   baseUrl: process.env.GOODVIBES_BASE_URL ?? 'http://127.0.0.1:3421',
   authToken,
   retry: {
@@ -32,9 +32,9 @@ const sdk = createGoodVibesSdk({
   },
 });
 
-console.log(await sdk.operator.control.status());
+console.log(await platformClient.operator.control.status());
 
-const stop = sdk.realtime.viaSse().agents.on('AGENT_COMPLETED', (event) => {
+const stop = platformClient.realtime.viaSse().agents.on('AGENT_COMPLETED', (event) => {
   console.log('agent completed', event);
 });
 

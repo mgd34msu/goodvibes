@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createGhCliCiSource } from '../sdk/src/platform/ci-watch/gh-source.ts';
+import { createGhCliCiSource } from '../platform/src/platform/ci-watch/gh-source.ts';
 
 let scratch: string;
 let originalPath: string;

@@ -1,13 +1,13 @@
 import { expect, spyOn, test } from 'bun:test';
 import { join } from 'node:path';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { AutomationManager, automationActionBinding, type SpawnAutomationTaskInput } from '../sdk/src/platform/automation/index.ts';
-import { SharedSessionBroker } from '../sdk/src/platform/control-plane/session-broker.ts';
-import type { RouteBindingManager } from '../sdk/src/platform/channels/index.ts';
-import { startCiFixSession } from '../sdk/src/platform/control-plane/routes/seeded-sessions.ts';
-import { withExternalOperationSource } from '../sdk/src/platform/permissions/external-operation-scope.ts';
-import { getContractActionSource } from '../sdk/src/platform/tools/agent/contract-binding.ts';
-import { findZombieCause } from '../sdk/src/platform/contract/resume.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { AutomationManager, automationActionBinding, type SpawnAutomationTaskInput } from '../platform/src/platform/automation/index.ts';
+import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.ts';
+import type { RouteBindingManager } from '../platform/src/platform/channels/index.ts';
+import { startCiFixSession } from '../platform/src/platform/control-plane/routes/seeded-sessions.ts';
+import { withExternalOperationSource } from '../platform/src/platform/permissions/external-operation-scope.ts';
+import { getContractActionSource } from '../platform/src/platform/tools/agent/contract-binding.ts';
+import { findZombieCause } from '../platform/src/platform/contract/resume.ts';
 import { makeHarness, oneUnitPlan, waitFor } from './contract/runner-support.ts';
 import { plannerOutput } from './contract/plan-support.ts';
 

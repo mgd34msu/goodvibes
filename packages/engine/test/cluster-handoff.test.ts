@@ -8,24 +8,24 @@
  * property of the sequence.
  */
 import { describe, expect, test } from 'bun:test';
-import { ClusterCoordinator } from '../sdk/src/platform/cluster/coordinator.js';
-import { FakeClusterClock } from '../sdk/src/platform/cluster/clock.js';
-import { MemoryClusterBus } from '../sdk/src/platform/cluster/memory-transport.js';
-import { decodeMessage, encodeMessage, signMessage } from '../sdk/src/platform/cluster/protocol.js';
-import { compareStableRank } from '../sdk/src/platform/cluster/ranking.js';
-import { DEFAULT_CLUSTER_SETTINGS, resolveClusterSettings } from '../sdk/src/platform/cluster/settings.js';
-import { ntfySurface, providerSurface, surfaceIdFor } from '../sdk/src/platform/cluster/surface-id.js';
+import { ClusterCoordinator } from '../platform/src/platform/cluster/coordinator.js';
+import { FakeClusterClock } from '../platform/src/platform/cluster/clock.js';
+import { MemoryClusterBus } from '../platform/src/platform/cluster/memory-transport.js';
+import { decodeMessage, encodeMessage, signMessage } from '../platform/src/platform/cluster/protocol.js';
+import { compareStableRank } from '../platform/src/platform/cluster/ranking.js';
+import { DEFAULT_CLUSTER_SETTINGS, resolveClusterSettings } from '../platform/src/platform/cluster/settings.js';
+import { ntfySurface, providerSurface, surfaceIdFor } from '../platform/src/platform/cluster/surface-id.js';
 import {
   INITIAL_CONSUMER_CONFLICT_STATE,
   nextConsumerConflictBackoff,
-} from '../sdk/src/platform/cluster/consumer-conflict-backoff.js';
-import { deriveClusterTiming } from '../sdk/src/platform/cluster/timing.js';
-import { parsePeers, UdpClusterTransport } from '../sdk/src/platform/cluster/udp-transport.js';
+} from '../platform/src/platform/cluster/consumer-conflict-backoff.js';
+import { deriveClusterTiming } from '../platform/src/platform/cluster/timing.js';
+import { parsePeers, UdpClusterTransport } from '../platform/src/platform/cluster/udp-transport.js';
 import {
   CLUSTER_PROTOCOL_VERSION,
   type ClusterConsumerGate,
   type ClusterMessage,
-} from '../sdk/src/platform/cluster/types.js';
+} from '../platform/src/platform/cluster/types.js';
 import {
   addNode,
   advance,

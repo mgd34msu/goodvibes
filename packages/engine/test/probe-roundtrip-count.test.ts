@@ -12,7 +12,7 @@
  */
 
 import { afterEach, describe, expect, test } from 'bun:test';
-import { imapMailboxConnectionPort } from '../sdk/src/platform/email/inbound/index.ts';
+import { imapMailboxConnectionPort } from '../platform/src/platform/email/inbound/index.ts';
 import {
   makeFakeMailbox,
   openMailboxSocket,

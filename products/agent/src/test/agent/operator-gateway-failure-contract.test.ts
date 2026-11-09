@@ -2,12 +2,12 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { failureReading, failureState, forgetFailureReadings, GoodVibesSdkError, installJudgmentPort, SDKErrorCodes } from '@goodvibes-jev/engine/errors';
+import { failureReading, failureState, forgetFailureReadings, GoodVibesError, installJudgmentPort, EngineErrorCodes } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { redactSensitiveDataAsync, redactionCredential } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { redactSensitiveDataAsync, redactionCredential } from '@goodvibes-jev/engine/platform/platform/utils';
 import { isDeepStrictEqual } from 'node:util';
 import { invokeOperatorGatewayMethod, type OperatorGatewayCallResult } from '../../agent/operator-gateway-call.ts';
-import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/sdk/contracts';
+import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
 import { createProfileGatewayInvoke } from '../../agent/owner-profile-gateway.ts';
 import { mockFetch } from '../helpers/typed-fetch-mock.ts';
 
@@ -69,8 +69,8 @@ async function reading(category: string, confidence = 0.99, publicMessage?: stri
   if (publicMessage !== undefined) expect(await redactSensitiveDataAsync(publicMessage)).toBe(publicMessage);
   return requests;
 }
-// A real response stream can reject after headers arrive. This reaches the SDK's
-// body-reading seam without mocking the SDK or replacing the production caller.
+// A real response stream can reject after headers arrive. This reaches the platform's
+// body-reading seam without mocking the platform or replacing the production caller.
 function rejectBody(error: unknown) {
   response = async () => {
     const reply = new Response('{}');
@@ -83,7 +83,7 @@ function expectOneMutation() {
     authorization: 'Bearer fixture-token', body: JSON.stringify(payload) }]);
 }
 
-describe('operator gateway uses the shared engine failure contract through the real SDK', () => {
+describe('operator gateway uses the shared engine failure contract through the real platform', () => {
   test('missing token remains a local failure', async () => {
     const log = await reading('network');
     expect(await invokeOperatorGatewayMethod({ ...connection, token: null }, methodId, route, payload))
@@ -91,7 +91,7 @@ describe('operator gateway uses the shared engine failure contract through the r
     expect(requests).toHaveLength(0);
     expect(log).toHaveLength(0);
   });
-  test('synchronous SDK setup errors still return a promise and use shared failure classification', async () => {
+  test('synchronous platform setup errors still return a promise and use shared failure classification', async () => {
     const log = await reading('unknown');
     let pending: ReturnType<typeof invoke> | undefined;
     expect(() => { pending = invokeOperatorGatewayMethod({ ...connection, baseUrl: 'not a valid URL' }, methodId, route, payload); }).not.toThrow();
@@ -110,7 +110,7 @@ describe('operator gateway uses the shared engine failure contract through the r
     expectOneMutation();
     expect(log).toHaveLength(0);
   });
-  test.each([401, 403])('HTTP %s preserves the SDK bounded auth handling only', async (status) => {
+  test.each([401, 403])('HTTP %s preserves the platform bounded auth handling only', async (status) => {
     const log = await reading('network');
     response = async () => Response.json({ error: 'opaque' }, { status });
     expect(await invoke()).toMatchObject({ kind: 'auth_required' });
@@ -132,7 +132,7 @@ describe('operator gateway uses the shared engine failure contract through the r
     expect(requests.map(({ method }) => method)).toEqual(['POST', 'GET']);
     expect(requests[1]).toEqual({ url: `${connection.baseUrl}/status`, method: 'GET', authorization: 'Bearer fixture-token', body: undefined });
   });
-  test('opaque transport rejection uses structured SDK category without judgment or retry', async () => {
+  test('opaque transport rejection uses structured platform category without judgment or retry', async () => {
     const log = await reading('authentication');
     response = async () => { throw new Error('opaque socket interruption'); };
     expect(await invoke()).toMatchObject({ kind: 'connected_host_unavailable' });
@@ -147,12 +147,12 @@ describe('operator gateway uses the shared engine failure contract through the r
     expect(log).toHaveLength(0);
   });
   test.each([
-    [SDKErrorCodes.AUTH_REQUIRED, 'auth_required'], [SDKErrorCodes.PERMISSION_DENIED, 'auth_required'],
-    [SDKErrorCodes.CANCELLED, 'connected_host_error'], [SDKErrorCodes.PAYMENT_REQUIRED, 'connected_host_error'],
-    [SDKErrorCodes.CONFLICT, 'connected_host_error'], [SDKErrorCodes.NETWORK_UNREACHABLE, 'connected_host_unavailable'],
+    [EngineErrorCodes.AUTH_REQUIRED, 'auth_required'], [EngineErrorCodes.PERMISSION_DENIED, 'auth_required'],
+    [EngineErrorCodes.CANCELLED, 'connected_host_error'], [EngineErrorCodes.PAYMENT_REQUIRED, 'connected_host_error'],
+    [EngineErrorCodes.CONFLICT, 'connected_host_error'], [EngineErrorCodes.NETWORK_UNREACHABLE, 'connected_host_unavailable'],
   ] as const)('body stream typed %s outranks misleading wording', async (code, kind) => {
     const log = await reading('not_found');
-    rejectBody(new GoodVibesSdkError('fetch 404', { code }));
+    rejectBody(new GoodVibesError('fetch 404', { code }));
     expect(await invoke()).toMatchObject({ kind });
     expectOneMutation();
     expect(log).toHaveLength(0);

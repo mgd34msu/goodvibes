@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { decisionModelPolicyState, installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError } from '@goodvibes-jev/judgment';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
-import { diagnoseInvalidGrant, type GrantDiagnosisInput } from '../sdk/src/platform/google/grant-diagnosis.js';
-import { readApiFailure, readGrantFailure } from '../sdk/src/platform/google/failure-readings.js';
-import { GoogleApiClient } from '../sdk/src/platform/google/api-client.js';
-import { GoogleTokenManager } from '../sdk/src/platform/google/token-manager.js';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
+import { diagnoseInvalidGrant, type GrantDiagnosisInput } from '../platform/src/platform/google/grant-diagnosis.js';
+import { readApiFailure, readGrantFailure } from '../platform/src/platform/google/failure-readings.js';
+import { GoogleApiClient } from '../platform/src/platform/google/api-client.js';
+import { GoogleTokenManager } from '../platform/src/platform/google/token-manager.js';
 
 let prior: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { prior = installJudgmentPort(undefined); });

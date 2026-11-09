@@ -120,7 +120,7 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
 
   // Relay pairing is transport-only, it never signs anyone in, so this is a plain
   // synchronous decode + local store (lib/relay-pairing.ts), no useMutation/network
-  // round trip. decodeRelayPairingCode throws the SDK's own GoodVibesSdkError on a
+  // round trip. decodeRelayPairingCode throws the platform's own GoodVibesError on a
   // malformed code; formatError renders that the same honest way as every other
   // rejection on this screen.
   function submitRelayCode(event: SyntheticEvent<HTMLFormElement>) {

@@ -1,7 +1,7 @@
 /**
  * terminal-palette.ts, the terminal's own colours as reported at startup.
  *
- * `TerminalPalette` mirrors the SDK type of the same name (the theme engine's
+ * `TerminalPalette` mirrors the platform type of the same name (the theme engine's
  * input for "use the terminal's palette" themes). Keep the two shapes identical:
  * `background` from OSC 11, `foreground` from OSC 10, and `ansi[0..15]` from
  * OSC 4;N. Every value is `#rrggbb`; a slot the terminal did not answer is
@@ -12,7 +12,7 @@
  * (all replies in, or the window closes). The terminal system theme is derived from the published palette.
  */
 
-/** Mirrors the SDK `TerminalPalette` type. `ansi` always has 16 entries. */
+/** Mirrors the platform `TerminalPalette` type. `ansi` always has 16 entries. */
 export type TerminalPalette = {
   background?: string | undefined;
   foreground?: string | undefined;

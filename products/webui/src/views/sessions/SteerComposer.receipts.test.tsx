@@ -1,4 +1,4 @@
-/** Real browser facade and HTTP Response decoding, without replacing the composer or SDK. */
+/** Real browser facade and HTTP Response decoding, without replacing the composer or platform. */
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';

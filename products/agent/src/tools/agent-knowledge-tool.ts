@@ -1,10 +1,10 @@
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import { assertCurrentToolInvocation, assertProjectionExecution, ToolInputProjectionError, type ToolRegistry, type ToolInputProjector } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { assertCurrentToolInvocation, assertProjectionExecution, ToolInputProjectionError, type ToolRegistry, type ToolInputProjector } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureOperatorConnection } from '../agent/operator-connection-owner.ts';
 import { captureCatalogMethods, captureCatalogSnapshot } from './agent-harness-catalog-ranking.ts';
 import type { ShellPathService } from '@/runtime/index.ts';
 import {
-  createAgentSdk,
+  createAgentPlatform,
   classifyKnowledgeError,
   getAgentKnowledgeJson,
   resolveConnectedHostConnection,
@@ -217,17 +217,17 @@ export function createAgentKnowledgeTool(
           }
           let method: ConnectedHostCallMethod = AGENT_KNOWLEDGE_METHODS.status;
           try {
-            const sdk = createAgentSdk(connection, restrictions);
+            const platformClient = createAgentPlatform(connection, restrictions);
             if (args.action === 'status') {
               method = AGENT_KNOWLEDGE_METHODS.status;
-              const data = await sdk.knowledge.status();
+              const data = await platformClient.knowledge.status();
               return validatedToolOutput(data, connection, method, formatStatus);
             }
             if (args.action === 'ask') {
               method = AGENT_KNOWLEDGE_METHODS.ask;
               const query = readString(args.query);
               if (!query) return toolFailure('query is required for Agent Knowledge ask.');
-              const data = await sdk.knowledge.ask({
+              const data = await platformClient.knowledge.ask({
                 query,
                 limit: readLimit(args.limit, 8),
                 mode: readMode(args.mode),
@@ -241,7 +241,7 @@ export function createAgentKnowledgeTool(
               method = AGENT_KNOWLEDGE_METHODS.search;
               const query = readString(args.query);
               if (!query) return toolFailure('query is required for Agent Knowledge search.');
-              const data = await sdk.knowledge.search({ query, limit: readLimit(args.limit, 10) });
+              const data = await platformClient.knowledge.search({ query, limit: readLimit(args.limit, 10) });
               return validatedToolOutput(data, connection, method, (validatedData) => formatSearch(validatedData, query));
             }
             if (args.action === 'sources' || args.action === 'nodes' || args.action === 'issues') {

@@ -3,11 +3,11 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ProcessManager, type SpawnOptions } from '../sdk/src/platform/tools/shared/process-manager.js';
-import { createBunStreamHost, createProcessManagerTriggerHost, createTriggerActionExecutor } from '../sdk/src/platform/triggers/hosts.js';
-import { TriggerManager } from '../sdk/src/platform/triggers/manager.js';
-import { TriggerManagerWork, stopTriggerResources } from '../sdk/src/platform/triggers/manager-work.js';
-import { createActionGrant } from '../sdk/src/platform/triggers/grants.js';
+import { ProcessManager, type SpawnOptions } from '../platform/src/platform/tools/shared/process-manager.js';
+import { createBunStreamHost, createProcessManagerTriggerHost, createTriggerActionExecutor } from '../platform/src/platform/triggers/hosts.js';
+import { TriggerManager } from '../platform/src/platform/triggers/manager.js';
+import { TriggerManagerWork, stopTriggerResources } from '../platform/src/platform/triggers/manager-work.js';
+import { createActionGrant } from '../platform/src/platform/triggers/grants.js';
 import { waitFor } from './_helpers/test-timeout.js';
 
 class FastProcesses extends ProcessManager {

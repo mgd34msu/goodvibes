@@ -1,7 +1,7 @@
 /** Consumer-vantage declarations for structural normalization, not previews. */
 import {
   sha256First, digestSender, stripMarkup, normalizeWhitespace,
-} from '@goodvibes-jev/engine/sdk/platform/intake';
+} from '@goodvibes-jev/engine/platform/platform/intake';
 
 const hash: (input: string, hexChars: number) => string = sha256First;
 const digest: (senderExternalId: string) => string = digestSender;

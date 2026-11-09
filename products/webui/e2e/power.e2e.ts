@@ -1,6 +1,6 @@
 /**
  * Power, the host sleep-ownership surface (power.status.get/keepAwake.set,
- * SDK 1.8.0). Proves the "sleep disabled" chip in the shell header's
+ * platform 1.8.0). Proves the "sleep disabled" chip in the shell header's
  * indicators (PowerChip; it renders only while a hold is real), the Power
  * panel's toggle in Settings (ruled shape: one toggle, no timers, no AC-only
  * sub-options), and the "held because X" line, all against the mock daemon.

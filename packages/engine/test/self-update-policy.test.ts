@@ -19,7 +19,7 @@ import {
   verifyChecksum,
   type UpdateFetchLike,
   type UpdateFileIo,
-} from '../sdk/src/platform/runtime/self-update.js';
+} from '../platform/src/platform/runtime/self-update.js';
 
 /** In-memory filesystem recording every operation in order. */
 function memoryIo(initial: Record<string, Buffer> = {}) {

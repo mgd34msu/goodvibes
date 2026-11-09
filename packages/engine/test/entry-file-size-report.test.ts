@@ -31,7 +31,7 @@ beforeEach(() => {
   for (const name of ['bundle-budget.ts', 'export-conditions.ts']) {
     copyFileSync(join(SOURCE_SCRIPTS, name), join(engine, 'scripts', name));
   }
-  write('package.json', JSON.stringify({ exports: { './sdk': './sdk/dist/index.js' } }));
+  write('package.json', JSON.stringify({ exports: { './platform': './platform/dist/index.js' } }));
   write('sdk/dist/index.js', 'export const fixture = 1;\n');
   write('bundle-budgets.json', '{}\n');
   writeFileSync(join(root, 'offline.ts'), "globalThis.fetch = async () => { throw new Error('Unexpected network in fixture'); };\n");
@@ -41,7 +41,7 @@ afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 test('a built new export reports its entry-file bytes without requiring a baseline', () => {
   write('package.json', JSON.stringify({ exports: {
-    './sdk': './sdk/dist/index.js', './sdk/new-entry': './sdk/dist/new-entry.js',
+    './platform': './platform/dist/index.js', './platform/new-entry': './platform/dist/new-entry.js',
   } }));
   const source = 'export { fixture } from "./index.js";\n';
   write('sdk/dist/new-entry.js', source);
@@ -86,7 +86,7 @@ for (const domains of [['retired-domain'], { invalid: 'list' }]) {
 }
 
 test('a missing built export remains a fatal packaging error', () => {
-  write('package.json', JSON.stringify({ exports: { './sdk/missing': './sdk/dist/missing.js' } }));
+  write('package.json', JSON.stringify({ exports: { './platform/missing': './platform/dist/missing.js' } }));
   const result = run();
   expect(result.code).not.toBe(0);
   expect(result.output).toContain('built file');

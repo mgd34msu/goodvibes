@@ -7,7 +7,7 @@ import { withTestTimeout } from './_helpers/test-timeout.ts';
 
 const ROOT = resolve(import.meta.dir, '../../..');
 const ENGINE = resolve(import.meta.dir, '..');
-const PUBLIC_ENTRY = '@goodvibes-jev/engine/sdk/platform/judgment-browser/catalogs';
+const PUBLIC_ENTRY = '@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs';
 interface Graph {
   inputs: Record<string, { imports: { path: string; external?: boolean }[] }>;
   outputs: Record<string, { imports: { path: string; external?: boolean }[] }>;
@@ -44,7 +44,7 @@ test('public catalogs and the real palette caller exclude server provider, loggi
       expect(paths.some((path) => path.endsWith(`/judgment-browser/batteries/catalogs.${source ? 'ts' : 'js'}`))).toBe(true);
       if (caller) expect(paths.some((path) => path.endsWith('/webui/src/lib/command-judgment.ts'))).toBe(true);
       else {
-        const catalogs = runInNewContext(`${readFileSync(outfile, 'utf8')}\ntestCatalogs`, Object.create(null), { timeout: 5_000 }) as typeof import('../sdk/src/platform/judgment-browser/batteries/catalogs.ts');
+        const catalogs = runInNewContext(`${readFileSync(outfile, 'utf8')}\ntestCatalogs`, Object.create(null), { timeout: 5_000 }) as typeof import('../platform/src/platform/judgment-browser/batteries/catalogs.ts');
         expect(catalogs.WEBUI_BUILTIN_COMMANDS).toHaveLength(27);
         expect(catalogs.readWebuiStatusCatalog('knowledge-job.running', 'library-dot')).toEqual({ vocabulary: 'library-dot', tone: 'info' });
         expect(catalogs.readWebuiStatusCatalog('account-auth.expiring', 'badge')).toEqual({ vocabulary: 'badge', tone: 'warning' });

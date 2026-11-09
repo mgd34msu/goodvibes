@@ -2,21 +2,21 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, spyOn } from 'bun:test';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { runProcess } from '../sdk/src/platform/runtime/remote/host/backends/process-runner.ts';
+import { runProcess } from '../platform/src/platform/runtime/remote/host/backends/process-runner.ts';
 import {
   tokenizeCommand,
   createLocalProcessBackend,
-} from '../sdk/src/platform/runtime/remote/host/backends/local-process.ts';
-import { createSshBackend } from '../sdk/src/platform/runtime/remote/host/backends/ssh.ts';
-import { createCloudTerminalBackend } from '../sdk/src/platform/runtime/remote/host/backends/cloud-terminal.ts';
+} from '../platform/src/platform/runtime/remote/host/backends/local-process.ts';
+import { createSshBackend } from '../platform/src/platform/runtime/remote/host/backends/ssh.ts';
+import { createCloudTerminalBackend } from '../platform/src/platform/runtime/remote/host/backends/cloud-terminal.ts';
 import {
   type BackendContext,
   BackendDispatchError,
   buildRemoteShellCommand,
-} from '../sdk/src/platform/runtime/remote/host/backends/types.ts';
-import type { RemoteHostCredentialStore as DaemonCredentialStore } from '../sdk/src/platform/runtime/remote/host/context.ts';
-import type { RemoteHostLogger as HandlerLogger } from '../sdk/src/platform/runtime/remote/host/context.ts';
-import type { PeerRecord } from '../sdk/src/platform/runtime/remote/host/peer-registry.ts';
+} from '../platform/src/platform/runtime/remote/host/backends/types.ts';
+import type { RemoteHostCredentialStore as DaemonCredentialStore } from '../platform/src/platform/runtime/remote/host/context.ts';
+import type { RemoteHostLogger as HandlerLogger } from '../platform/src/platform/runtime/remote/host/context.ts';
+import type { PeerRecord } from '../platform/src/platform/runtime/remote/host/peer-registry.ts';
 
 const noopLogger: HandlerLogger = { info: () => {}, warn: () => {}, error: () => {} };
 const stubCredentials: DaemonCredentialStore = {

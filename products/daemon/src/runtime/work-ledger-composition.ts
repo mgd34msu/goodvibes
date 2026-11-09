@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { KnowledgeStore } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import type { KnowledgeStore } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import {
   createWorkLedger,
   type KnowledgeWorkLedgerStorage,
@@ -8,7 +8,7 @@ import {
   type WorkLedgerService,
   type WorkLedgerState,
   type WorkLedgerStorage,
-} from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger';
+} from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 
 /** Trusted native composition only. Never copy authority onto RuntimeServices. */
 export interface NativeWorkLedgerOwner {

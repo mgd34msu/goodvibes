@@ -33,9 +33,9 @@ import {
   STALE_TEMP_FILE_MIN_AGE_MS,
   writeJsonFileAtomic,
   writeJsonFileAtomicSafe,
-} from '../sdk/src/platform/utils/atomic-json-store.ts';
+} from '../platform/src/platform/utils/atomic-json-store.ts';
 
-const STORE_MODULE = resolve(import.meta.dir, '../sdk/src/platform/utils/atomic-json-store.ts');
+const STORE_MODULE = resolve(import.meta.dir, '../platform/src/platform/utils/atomic-json-store.ts');
 
 function tempFiles(dir: string, storePath: string): string[] {
   const prefix = `${basename(storePath)}.tmp-`;

@@ -1,7 +1,7 @@
 /** Public verification must not reveal a secret that can mint publisher signatures. */
 import { describe, expect, test } from 'bun:test';
 import { createHmac, generateKeyPairSync, sign } from 'node:crypto';
-import { PluginTrustStore, pluginManifestSignaturePayload, validatePluginSignature } from '../sdk/src/platform/runtime/plugins/trust.ts';
+import { PluginTrustStore, pluginManifestSignaturePayload, validatePluginSignature } from '../platform/src/platform/runtime/plugins/trust.ts';
 
 const publisher = generateKeyPairSync('ed25519');
 const otherPublisher = generateKeyPairSync('ed25519');

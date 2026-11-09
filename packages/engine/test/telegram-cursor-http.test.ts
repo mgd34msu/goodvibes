@@ -3,11 +3,11 @@
 import { expect, test } from 'bun:test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { BuiltinChannelRuntime } from '../sdk/src/platform/channels/builtin-runtime.js';
-import { ChannelPluginRegistry } from '../sdk/src/platform/channels/plugin-registry.js';
-import { createTelegramSourceAccountOwner } from '../sdk/src/platform/channels/telegram/source-account.js';
-import { createDaemonChannelRouteHandlers } from '../daemon-sdk/src/channel-routes.js';
-import { readTelegramCursorPreview, readTelegramCursorMigrationResult } from '../sdk/src/platform/channels/telegram/cursor-migration-data.js';
+import { BuiltinChannelRuntime } from '../platform/src/platform/channels/builtin-runtime.js';
+import { ChannelPluginRegistry } from '../platform/src/platform/channels/plugin-registry.js';
+import { createTelegramSourceAccountOwner } from '../platform/src/platform/channels/telegram/source-account.js';
+import { createDaemonChannelRouteHandlers } from '../daemon-api/src/channel-routes.js';
+import { readTelegramCursorPreview, readTelegramCursorMigrationResult } from '../platform/src/platform/channels/telegram/cursor-migration-data.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 test('the actual channel action route checks admin access and migrates the verified original queue through its real runtime', async () => {

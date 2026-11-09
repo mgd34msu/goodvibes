@@ -1,8 +1,8 @@
-import { OwnedSelectionObservation } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveNativeHostCredential } from '../../runtime/client/native-host-credential.ts';
 import { beginTuiHostPairing, completeTuiHostPairing, tuiHostPairingStorePath } from '../../runtime/tui-host-credential-store.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';

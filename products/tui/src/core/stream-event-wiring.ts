@@ -6,8 +6,8 @@ import { createErrorNoticeOwner, unavailableErrorLine, userErrorLine } from './f
 import type { PendingFailoverNotice } from './turn-event-wiring.ts';
 import { ProviderSetupReadings, describeProviderSetup, type ProviderSetupClassification } from '../providers/provider-classification.ts';
 import type { FailoverTurnState } from './active-model-identity.ts';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
-import type { ProviderRuntimeMetadata, ReasoningEffortSpec } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { ProviderRuntimeMetadata, ReasoningEffortSpec } from '@goodvibes-jev/engine/platform/platform/providers';
 import {
   publishActiveEffortOptions,
   remapEffortForServingModel,
@@ -80,7 +80,7 @@ interface StreamSystemMessageRouter {
 
 /**
  * Loosely-typed variant of the turns event feed, used only to subscribe to
- * STREAM_STALL, a proposed event the SDK's TurnEvent union does not carry, so
+ * STREAM_STALL, a proposed event the platform's TurnEvent union does not carry, so
  * `events.turns.on` rejects the name at compile time. See the subscription site
  * below. `events.turns.on` stays fully typed against the real union everywhere
  * else in this file, STREAM_RETRY included.
@@ -220,7 +220,7 @@ export interface WireStreamEventMetricsResult {
    * before either fires).
    */
   readonly clearFailoverVisited: () => void;
-  /** Cancel recovery during async reading/preparation, even when the SDK is idle. */
+  /** Cancel recovery during async reading/preparation, even when the platform is idle. */
   readonly cancelPendingRecovery: () => boolean;
   /**
    * Register a callback that fires whenever a TURN_ERROR is surfaced to the
@@ -279,7 +279,7 @@ function buildCostDeltaSuffix(
  *
  * This path is NOT the synthetic provider's tier-isolated failover, which is
  * where the documented "free, paid and subscription tiers never mix" contract
- * lives (docs/providers-and-routing.md:77-128, enforced in the SDK's
+ * lives (docs/providers-and-routing.md:77-128, enforced in the platform's
  * synthetic.ts by CanonicalModel.tier). The optimizer chain consumed here
  * carries no tier metadata at all, its nodes are
  * `{ position, providerId, modelId, capable, explanation }` and `explanation`
@@ -424,7 +424,7 @@ export function wireStreamEventMetrics(
    * Both halves of a failover come through switchNarrated, so this covers the
    * switch out and the switch back. The requested level is left untouched in
    * config, the fallback is temporary and the user's choice must survive it,
-   * but the level actually sent is the resolved one, and the SDK's own sentence
+   * but the level actually sent is the resolved one, and the platform's own sentence
    * explaining the remap is surfaced verbatim rather than reworded.
    *
    * The sentence is RETURNED rather than announced. On the failover-out path
@@ -509,7 +509,7 @@ export function wireStreamEventMetrics(
   unsubs.push(events.turns.on('STREAM_DELTA', () => {
     metrics.deltaCount++;
     metrics.lastDeltaAtMs = Date.now();
-    // A byte arrived: any in-flight reconnect (if the SDK reported one)
+    // A byte arrived: any in-flight reconnect (if the platform reported one)
     // has succeeded.
     metrics.reconnectAttempt = undefined;
     metrics.reconnectMaxAttempts = undefined;
@@ -536,7 +536,7 @@ export function wireStreamEventMetrics(
 
   // Both terminal turn outcomes end the failover's authority over the
   // registry: a completed turn got its answer, a cancelled one will not.
-  // (TURN_COMPLETED and TURN_ERROR are mutually exclusive per turn in the SDK
+  // (TURN_COMPLETED and TURN_ERROR are mutually exclusive per turn in the platform
   //, TURN_COMPLETED is emitted only on the success path in
   // orchestrator-turn-helpers, TURN_ERROR only from the orchestrator's catch,
   // so restoring here can never undo a switch whose retry has not run yet.)
@@ -781,9 +781,9 @@ export function wireStreamEventMetrics(
     metrics.reconnectMaxAttempts = event.maxAttempts;
     render();
   }));
-  // STREAM_STALL is a proposed SDK event and is not on the TurnEvent union, so
+  // STREAM_STALL is a proposed platform event and is not on the TurnEvent union, so
   // the typed feed rejects the name at compile time. Subscribing through the
-  // loose variant means the SDK's own signal is observed the day it lands
+  // loose variant means the platform's own signal is observed the day it lands
   // rather than silently dropped. Informational only: the local
   // createStreamStallWatchdog above is the authoritative no-delta detector and
   // already drives the visible indicator via streamMetrics.stallEpisode, so

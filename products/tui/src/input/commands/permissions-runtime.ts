@@ -1,7 +1,7 @@
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import type { SelectionItem, SelectionAction } from '../selection-modal.ts';
 import { buildPermissionProvenance, renderPermissionProvenance } from './permissions-provenance.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 /** One remembered-rule row: what it does, and how/when it was remembered. */
 function describeRuleRow(record: {

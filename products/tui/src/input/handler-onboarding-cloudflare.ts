@@ -22,7 +22,7 @@ import {
   getCloudflareSetupSource,
   shouldShowCloudflareStep,
 } from './onboarding/onboarding-wizard-cloudflare.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 type CloudflareOnboardingAction = Extract<OnboardingWizardAction,
   | 'cloudflare-token-requirements'
@@ -377,7 +377,7 @@ export async function maybeProvisionCloudflareOnFinalApplyForHandler(handler: In
       id: 'cloudflare:provision',
       status: result.ok ? 'pass' : 'warn',
       message: result.ok
-        ? 'Cloudflare resources were provisioned and verified through the daemon SDK route.'
+        ? 'Cloudflare resources were provisioned and verified through the daemon route.'
         : 'Cloudflare provisioning returned warnings or failed verification. Settings were saved; rerun the Cloudflare wizard action after correcting token/resource issues.',
       target: 'cloudflare',
     }];

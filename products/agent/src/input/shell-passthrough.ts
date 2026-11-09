@@ -8,7 +8,7 @@
  * without triggering a turn of its own.
  *
  * A buffer is used rather than appending a conversation message because the
- * SDK drops `system` messages from the LLM view and does not merge consecutive
+ * platform drops `system` messages from the LLM view and does not merge consecutive
  * `user` messages (which would trip a consecutive-user-message API error).
  */
 

@@ -7,17 +7,17 @@ import { createSystemOnePort, DEFAULT_MODEL, SqliteDecisionLog, withDecisionLog,
 } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { createNativeLegacyImportHost, legacyImportSemanticManifest, NATIVE_IMPORT_SITE,
-} from '../sdk/src/platform/workflow/work-ledger/native-import.js';
-import { WorkLedgerAccessError } from '../sdk/src/platform/workflow/work-ledger/types.js';
-import { createWorkLedger } from '../sdk/src/platform/workflow/work-ledger/service.js';
-import { prepareLegacyWorkLedgerMigration } from '../sdk/src/platform/workflow/work-ledger/legacy-import.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import type { SQLiteStore } from '../sdk/src/platform/state/sqlite-store.js';
-import { PairingTokenManager } from '../sdk/src/platform/pairing/pairing-token-store.js';
-import { WorkspaceRegistrationStore } from '../sdk/src/platform/workspace/registration/store.js';
-import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../sdk/src/platform/daemon/control-plane.js';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.js';
-import { acquireCrossProcessLock } from '../sdk/src/platform/workspace/checkpoint/cross-process-lock.js';
+} from '../platform/src/platform/workflow/work-ledger/native-import.js';
+import { WorkLedgerAccessError } from '../platform/src/platform/workflow/work-ledger/types.js';
+import { createWorkLedger } from '../platform/src/platform/workflow/work-ledger/service.js';
+import { prepareLegacyWorkLedgerMigration } from '../platform/src/platform/workflow/work-ledger/legacy-import.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import type { SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
+import { PairingTokenManager } from '../platform/src/platform/pairing/pairing-token-store.js';
+import { WorkspaceRegistrationStore } from '../platform/src/platform/workspace/registration/store.js';
+import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../platform/src/platform/daemon/control-plane.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
+import { acquireCrossProcessLock } from '../platform/src/platform/workspace/checkpoint/cross-process-lock.js';
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });

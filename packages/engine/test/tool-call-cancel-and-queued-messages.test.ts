@@ -15,16 +15,16 @@
  * sessions.queuedMessages.*) via the live-turn controls holder.
  */
 import { describe, expect, test } from 'bun:test';
-import { executeToolCalls, TOOL_CALL_CANCELLED_MESSAGE } from '../sdk/src/platform/core/orchestrator-tool-runtime.ts';
+import { executeToolCalls, TOOL_CALL_CANCELLED_MESSAGE } from '../platform/src/platform/core/orchestrator-tool-runtime.ts';
 import {
   ToolCallAbortRegistry,
   listQueuedMessages,
   editQueuedMessage,
   deleteQueuedMessage,
   type QueuedMessageEntry,
-} from '../sdk/src/platform/core/orchestrator-live-turn.ts';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.ts';
-import type { PermissionManager } from '../sdk/src/platform/permissions/manager.ts';
+} from '../platform/src/platform/core/orchestrator-live-turn.ts';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
+import type { PermissionManager } from '../platform/src/platform/permissions/manager.ts';
 import {
   createSessionRuntimeControls,
   createSessionToolCallCancelHandler,
@@ -33,9 +33,9 @@ import {
   createSessionQueuedMessageDeleteHandler,
   SessionLiveTurnControlsHolder,
   type SessionLiveTurnControls,
-} from '../sdk/src/platform/control-plane/routes/session-runtime.ts';
-import { GatewayVerbError } from '../sdk/src/platform/control-plane/routes/gateway-verb-error.ts';
-import { ConversationManager } from '../sdk/src/platform/core/conversation.ts';
+} from '../platform/src/platform/control-plane/routes/session-runtime.ts';
+import { GatewayVerbError } from '../platform/src/platform/control-plane/routes/gateway-verb-error.ts';
+import { ConversationManager } from '../platform/src/platform/core/conversation.ts';
 
 const allowAll = { check: async () => true } as unknown as PermissionManager;
 

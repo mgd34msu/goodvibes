@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { createOAuthLocalListener } from '../sdk/src/platform/config/oauth-local-listener.js';
+import { createOAuthLocalListener } from '../platform/src/platform/config/oauth-local-listener.js';
 
 test('invalid OAuth callbacks cannot retire the pending owner flow or inject HTML', async () => {
   const listener = await createOAuthLocalListener({ expectedState: 'owner-state', timeoutMs: 3000 });

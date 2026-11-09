@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.js';
-import { knowledgeRawRepresentation, retainKnowledgeRepresentation, sameKnowledgeRecord } from '../sdk/src/platform/knowledge/store-record-representation.js';
+import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input.js';
+import { knowledgeRawRepresentation, retainKnowledgeRepresentation, sameKnowledgeRecord } from '../platform/src/platform/knowledge/store-record-representation.js';
 
 test('native representation keeps detached raw values without granting copies the original clock representation', () => {
   const value = { metadata: { stamp: { decidedAt: 4_222_222_222_222 }, description: 'Original' } };

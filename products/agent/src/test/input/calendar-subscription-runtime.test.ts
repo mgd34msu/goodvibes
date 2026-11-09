@@ -10,7 +10,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { FeedFetcher, FeedFetchResult } from '@goodvibes-jev/engine/sdk/platform/calendar';
+import type { FeedFetcher, FeedFetchResult } from '@goodvibes-jev/engine/platform/platform/calendar';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { runCalendarSubscriptionCommand } from '../../input/commands/calendar-subscription-runtime.ts';
 import { runCalendarRuntimeCommand } from '../../input/commands/calendar-runtime.ts';

@@ -31,9 +31,9 @@ import {
   JUDGMENT_EVAL_SUITE,
   judgmentEvalScenarios,
   type DriftOptions,
-} from '../sdk/src/platform/observe/index.ts';
-import { EvalRunner, formatSuiteResult } from '../sdk/src/platform/runtime/eval/index.ts';
-import { DECISION_LOG_FILE } from '../sdk/src/platform/state/decision-log.ts';
+} from '../platform/src/platform/observe/index.ts';
+import { EvalRunner, formatSuiteResult } from '../platform/src/platform/runtime/eval/index.ts';
+import { DECISION_LOG_FILE } from '../platform/src/platform/state/decision-log.ts';
 import { loadEngineRegistries } from './judgment-registries.ts';
 
 const { values } = parseArgs({

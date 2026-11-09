@@ -1,6 +1,6 @@
 /**
  * Memory diagnostics, the daemon's memory-governance observability surface
- * (ops.memory.get, SDK 1.9.0-dev). Proves the settings Memory section's tier chip,
+ * (ops.memory.get, platform 1.9.0-dev). Proves the settings Memory section's tier chip,
  * budget-vs-RSS bar, per-cache footprint table, paused-jobs list, and tripwire
  * line against the mock daemon, plus the honest "does not serve" state on an
  * older daemon build. Runs on both phone and desktop (default project set).

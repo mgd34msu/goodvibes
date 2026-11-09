@@ -13,7 +13,7 @@
 // This module intentionally holds ZERO relay-protocol knowledge, it only knows
 // bytes and keys. Higher layers (handshake.ts, secure-channel.ts) compose these.
 
-import { GoodVibesSdkError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes-jev/engine/errors';
 
 /** Named curve used for all relay key agreement. */
 export const RELAY_CURVE = 'P-256' as const;
@@ -27,7 +27,7 @@ export const RELAY_KEY_BYTES = 32;
 function subtle(): SubtleCrypto {
   const c = globalThis.crypto;
   if (!c || typeof c.subtle === 'undefined') {
-    throw new GoodVibesSdkError('Web Crypto (crypto.subtle) is unavailable in this runtime.', {
+    throw new GoodVibesError('Web Crypto (crypto.subtle) is unavailable in this runtime.', {
       category: 'config',
       source: 'transport',
       recoverable: false,
@@ -42,7 +42,7 @@ export function randomBytes(n: number): Uint8Array<ArrayBuffer> {
   const out = new Uint8Array(n);
   const c = globalThis.crypto;
   if (!c || typeof c.getRandomValues !== 'function') {
-    throw new GoodVibesSdkError('Secure random generation is unavailable in this runtime.', {
+    throw new GoodVibesError('Secure random generation is unavailable in this runtime.', {
       category: 'config',
       source: 'transport',
       recoverable: false,
@@ -88,7 +88,7 @@ export function fromBase64Url(text: string): Uint8Array<ArrayBuffer> {
   const fullGroups = Math.floor(len / 4);
   const remainder = len - fullGroups * 4;
   if (remainder === 1) {
-    throw new GoodVibesSdkError('Invalid base64url string length.', { category: 'bad_request', source: 'transport', recoverable: false });
+    throw new GoodVibesError('Invalid base64url string length.', { category: 'bad_request', source: 'transport', recoverable: false });
   }
   const outLen = fullGroups * 3 + (remainder === 2 ? 1 : remainder === 3 ? 2 : 0);
   const out = new Uint8Array(outLen);
@@ -97,7 +97,7 @@ export function fromBase64Url(text: string): Uint8Array<ArrayBuffer> {
   const at = (index: number): number => {
     const code = clean.charCodeAt(index);
     const v = code < 128 ? B64URL_LOOKUP[code]! : -1;
-    if (v < 0) throw new GoodVibesSdkError('Invalid base64url character.', { category: 'bad_request', source: 'transport', recoverable: false });
+    if (v < 0) throw new GoodVibesError('Invalid base64url character.', { category: 'bad_request', source: 'transport', recoverable: false });
     return v;
   };
   for (let g = 0; g < fullGroups; g += 1, i += 4) {
@@ -176,7 +176,7 @@ export async function exportRawPublicKey(key: CryptoKey): Promise<Uint8Array<Arr
 /** Import a 65-byte raw uncompressed P-256 public key. */
 export async function importRawPublicKey(bytes: Uint8Array<ArrayBuffer>): Promise<CryptoKey> {
   if (bytes.length !== RELAY_PUBLIC_KEY_BYTES || bytes[0] !== 0x04) {
-    throw new GoodVibesSdkError('Malformed P-256 public key (expected 65-byte uncompressed point).', {
+    throw new GoodVibesError('Malformed P-256 public key (expected 65-byte uncompressed point).', {
       category: 'bad_request',
       source: 'transport',
       recoverable: false,
@@ -214,7 +214,7 @@ export async function hkdf(ikm: Uint8Array<ArrayBuffer>, salt: Uint8Array<ArrayB
 /** Import a 32-byte raw key as an AES-256-GCM key. */
 export async function importAeadKey(rawKey: Uint8Array<ArrayBuffer>): Promise<CryptoKey> {
   if (rawKey.length !== RELAY_KEY_BYTES) {
-    throw new GoodVibesSdkError('AEAD key must be 32 bytes.', { category: 'bad_request', source: 'transport', recoverable: false });
+    throw new GoodVibesError('AEAD key must be 32 bytes.', { category: 'bad_request', source: 'transport', recoverable: false });
   }
   return subtle().importKey('raw', rawKey, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
 }
@@ -231,7 +231,7 @@ export async function aeadOpen(key: CryptoKey, nonce: Uint8Array<ArrayBuffer>, c
     const pt = await subtle().decrypt({ name: 'AES-GCM', iv: nonce, additionalData: aad }, key, ciphertext);
     return new Uint8Array(pt);
   } catch {
-    throw new GoodVibesSdkError('Relay AEAD authentication failed (tampered or out-of-order frame).', {
+    throw new GoodVibesError('Relay AEAD authentication failed (tampered or out-of-order frame).', {
       category: 'bad_request',
       source: 'transport',
       recoverable: false,

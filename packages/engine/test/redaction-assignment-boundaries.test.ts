@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { redactSensitiveDataAsync } from '../sdk/src/platform/utils/redaction.ts';
-import type { RedactionPart } from '../sdk/src/platform/utils/batteries/redaction.ts';
+import { redactSensitiveDataAsync } from '../platform/src/platform/utils/redaction.ts';
+import type { RedactionPart } from '../platform/src/platform/utils/batteries/redaction.ts';
 import { errorSpan, errorText } from './_helpers/authored-error-readings.ts';
 
 let previous: ReturnType<typeof installJudgmentPort>;

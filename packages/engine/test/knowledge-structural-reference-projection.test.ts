@@ -5,12 +5,12 @@ import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, scoreAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { judgmentInputProblem, JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
+import { judgmentInputProblem, JudgmentInputError } from '../platform/src/platform/gate/judgment-input.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { historicalSemanticFactId } from './_helpers/historical-semantic-identity.js';
-import { prepareSourceLinkedRepairProfileFacts } from '../sdk/src/platform/knowledge/semantic/self-improvement-promotion.js';
-import { prepareGeneratedFactSupport, KnowledgeGeneratedFactSupportHeldError, type GeneratedFactSupportInput } from '../sdk/src/platform/knowledge/semantic/verification/generated-fact-support.js';
-import { withEngineGeneratedSupportReferences } from '../sdk/src/platform/knowledge/semantic/verification/structural-references.js';
+import { prepareSourceLinkedRepairProfileFacts } from '../platform/src/platform/knowledge/semantic/self-improvement-promotion.js';
+import { prepareGeneratedFactSupport, KnowledgeGeneratedFactSupportHeldError, type GeneratedFactSupportInput } from '../platform/src/platform/knowledge/semantic/verification/generated-fact-support.js';
+import { withEngineGeneratedSupportReferences } from '../platform/src/platform/knowledge/semantic/verification/structural-references.js';
 
 const spaceId = 'support-test';
 const actualClaimId = historicalSemanticFactId({ spaceId, kind: 'specification', title: 'HDMI ports', value: 'four hdmi ports', subjectIds: ['synthetic-repro-subject-767'] });

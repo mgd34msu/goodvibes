@@ -5,10 +5,10 @@
  * account had actually granted.
  */
 import { describe, expect, test } from 'bun:test';
-import { createGoogleCalendarGatewayService } from '../sdk/src/platform/google/gateway-calendar-service.ts';
-import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '../sdk/src/platform/google/setup-plan.ts';
-import { isGatewayVerbError } from '../sdk/src/platform/control-plane/routes/gateway-verb-error.ts';
-import type { GoogleConnectionSources } from '../sdk/src/platform/google/connection.ts';
+import { createGoogleCalendarGatewayService } from '../platform/src/platform/google/gateway-calendar-service.ts';
+import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '../platform/src/platform/google/setup-plan.ts';
+import { isGatewayVerbError } from '../platform/src/platform/control-plane/routes/gateway-verb-error.ts';
+import type { GoogleConnectionSources } from '../platform/src/platform/google/connection.ts';
 
 const TOKEN_ENDPOINT = 'oauth2.googleapis.com/token';
 

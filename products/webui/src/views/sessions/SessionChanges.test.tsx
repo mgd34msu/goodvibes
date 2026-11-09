@@ -75,7 +75,7 @@ mock.module('../../lib/goodvibes', () => ({
   GOODVIBES_BASE_URL: 'http://localhost:3000',
   getCurrentAuth: () => Promise.resolve({}),
   invokeMethod: () => Promise.resolve({}),
-  sdk: {
+  client: {
     operator: {
       invoke: (method: string) => {
         if (method === 'workLedger.turn.session') return Promise.resolve({ kind: 'legacy' });

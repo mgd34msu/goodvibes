@@ -13,14 +13,14 @@
 
 import { describe, expect, test } from 'bun:test';
 
-import { dispatchModelRoutes } from '../sdk/src/platform/daemon/http/model-routes.ts';
-import type { ModelRouteContext } from '../sdk/src/platform/daemon/http/model-routes.ts';
+import { dispatchModelRoutes } from '../platform/src/platform/daemon/http/model-routes.ts';
+import type { ModelRouteContext } from '../platform/src/platform/daemon/http/model-routes.ts';
 import { ModelReasoningOptionsSchema } from '../contracts/src/zod-schemas/providers.ts';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
-import type { ProviderRegistry } from '../sdk/src/platform/providers/registry.ts';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import type { ModelDefinition } from '../sdk/src/platform/providers/registry-types.ts';
-import type { ReasoningEffortSpec } from '../sdk/src/platform/providers/reasoning-effort.ts';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
+import type { ProviderRegistry } from '../platform/src/platform/providers/registry.ts';
+import type { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import type { ModelDefinition } from '../platform/src/platform/providers/registry-types.ts';
+import type { ReasoningEffortSpec } from '../platform/src/platform/providers/reasoning-effort.ts';
 
 function makeModel(
   provider: string,

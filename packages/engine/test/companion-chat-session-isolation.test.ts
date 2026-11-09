@@ -10,12 +10,12 @@
 import { describe, expect, test, beforeEach } from 'bun:test';
 import { settleEvents } from './_helpers/test-timeout.js';
 import { trackDisposables } from './_helpers/disposables.ts';
-import { CompanionChatManager } from '../sdk/src/platform/companion/companion-chat-manager.js';
+import { CompanionChatManager } from '../platform/src/platform/companion/companion-chat-manager.js';
 import type {
   CompanionChatEventPublisher,
   CompanionLLMProvider,
   CompanionProviderChunk,
-} from '../sdk/src/platform/companion/companion-chat-manager.js';
+} from '../platform/src/platform/companion/companion-chat-manager.js';
 
 const disposables = trackDisposables();
 

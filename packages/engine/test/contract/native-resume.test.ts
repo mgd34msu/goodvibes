@@ -1,12 +1,12 @@
 import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { currentFileObservations, currentFileMatchesText } from '../../sdk/src/platform/contract/current-file-observations.js';
+import { currentFileObservations, currentFileMatchesText } from '../../platform/src/platform/contract/current-file-observations.js';
 import { SqliteDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { contractPath, createContractIntake, type Contract, type NativeContractSource } from '../../sdk/src/platform/contract/index.js';
-import type { NativeContractDecisionHost } from '../../sdk/src/platform/contract/native-decisions.js';
-import { nativeSourceCriteria } from '../../sdk/src/platform/contract/native-source.js';
+import { contractPath, createContractIntake, type Contract, type NativeContractSource } from '../../platform/src/platform/contract/index.js';
+import type { NativeContractDecisionHost } from '../../platform/src/platform/contract/native-decisions.js';
+import { nativeSourceCriteria } from '../../platform/src/platform/contract/native-source.js';
 import { makeContract } from './fixtures.js';
 import { makeHarness, makeRepo, oneUnitPlan, startContract, waitFor, type Harness } from './runner-support.js';
 import { plannerOutput, shapeOf } from './plan-support.js';

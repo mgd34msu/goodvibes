@@ -21,8 +21,8 @@
  */
 import type { MessageLineCache } from './conversation-line-cache.js';
 import type { BlockMeta } from './work-tree-types.js';
-import { createEmptyLine, type Line } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/sdk/platform/core';
+import { createEmptyLine, type Line } from '@goodvibes-jev/engine/platform/platform/types';
+import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
 import type { createConversationRenderer } from './conversation-rendering.js';
 import type { ConversationRenderContext } from './conversation-render-context.js';
 import { buildContractOwnerModel, type WorkTreePresentation } from './work-tree-model.js';
@@ -33,7 +33,7 @@ import type { TreeGlyphSetName } from './renderer/lane-graph-glyphs.js';
 import { renderUserMessage } from './renderer/user-message.js';
 import { activeTokens } from './renderer/theme.js';
 import { formatElapsed } from './format.js';
-import { getDisplayWidth, truncateDisplay } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { getDisplayWidth, truncateDisplay } from '@goodvibes-jev/engine/platform/platform/utils';
 export interface AgentViewInput {
     readonly lineCache?: Pick<MessageLineCache<ConversationRenderContext>, 'renderInto'> | undefined;
     readonly contentCache?: import('./bead-content-cache.js').BeadContentCache | undefined;

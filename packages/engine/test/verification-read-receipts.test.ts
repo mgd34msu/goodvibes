@@ -1,8 +1,8 @@
 import { expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
-import { verificationSources } from '../sdk/src/platform/core/verification/source.js';
-import { citedReadSources, nativeReadReceipts } from '../sdk/src/platform/core/verification/read-receipts.js';
-import { observeReadContent, clipReadContent } from '../sdk/src/platform/tools/read/observation.js';
+import { verificationSources } from '../platform/src/platform/core/verification/source.js';
+import { citedReadSources, nativeReadReceipts } from '../platform/src/platform/core/verification/read-receipts.js';
+import { observeReadContent, clipReadContent } from '../platform/src/platform/tools/read/observation.js';
 
 function observedRead(truncate = false) {
   const content = Array.from({ length: 1800 }, (_, index) => `${String(index + 21).padStart(5)} | source statement ${index}: ${'actual file text '.repeat(8)}`).join('\n');

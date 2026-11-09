@@ -1,5 +1,5 @@
 /**
- * Orchestrator-runner steer drain, SDK half.
+ * Orchestrator-runner steer drain, platform half.
  *
  * Drives the REAL per-agent turn loop (`runAgentTask`, orchestrator-runner.ts)
  * against a scripted fake LLMProvider, with a real AgentMessageBus, a real
@@ -16,7 +16,7 @@
  *    messageId, the agentId, and the turn it was drained on.
  *  - A steer queued after the agent has taken its last turn is never drained
  *    and never emits consumed (the honest "stranded" case; resolving the
- *    dangling badge is the TUI's job, not the SDK's, but the SDK must not
+ *    dangling badge is the TUI's job, not the platform's, but the platform must not
  *    lie about consumption that never happened).
  */
 import { describe, expect, test, afterEach } from 'bun:test';
@@ -24,16 +24,16 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { runAgentTask, type AgentOrchestratorRunContext } from '../sdk/src/platform/agents/orchestrator-runner.js';
-import { AgentMessageBus } from '../sdk/src/platform/agents/message-bus.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { createProcessRegistry } from '../sdk/src/platform/runtime/fleet/index.js';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.js';
-import type { AgentRecord } from '../sdk/src/platform/tools/agent/manager.js';
-import type { LLMProvider, ChatResponse } from '../sdk/src/platform/providers/interface.js';
-import type { ModelDefinition } from '../sdk/src/platform/providers/registry-types.js';
-import type { ProviderRegistry } from '../sdk/src/platform/providers/registry.js';
-import type { CommunicationEvent } from '../sdk/src/events/communication.js';
+import { runAgentTask, type AgentOrchestratorRunContext } from '../platform/src/platform/agents/orchestrator-runner.js';
+import { AgentMessageBus } from '../platform/src/platform/agents/message-bus.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { createProcessRegistry } from '../platform/src/platform/runtime/fleet/index.js';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.js';
+import type { AgentRecord } from '../platform/src/platform/tools/agent/manager.js';
+import type { LLMProvider, ChatResponse } from '../platform/src/platform/providers/interface.js';
+import type { ModelDefinition } from '../platform/src/platform/providers/registry-types.js';
+import type { ProviderRegistry } from '../platform/src/platform/providers/registry.js';
+import type { CommunicationEvent } from '../platform/src/events/communication.js';
 import { useFailureReadings } from './_helpers/failure-readings.ts';
 
 // The runner reads a failed chat's error to decide on a context-window,

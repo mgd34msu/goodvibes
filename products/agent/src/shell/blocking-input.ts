@@ -1,6 +1,6 @@
 import { handleSimplePermissionInput } from '@goodvibes-jev/engine/terminal-shell/blocking-permission-input';
 import type { ConversationManager } from '../core/conversation';
-import type { PermissionRequest } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import type { PermissionRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
 import type { SessionSnapshot } from '@/runtime/index.ts';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
 import { readConversationMessageSnapshots } from '../core/conversation-message-snapshot.ts';
@@ -26,9 +26,9 @@ export type BlockingInputHandlerOptions = {
   conversation: ConversationManager;
   systemMessageRouter: SystemMessageRouter;
   render: () => void;
-  /** The prompted "yes, resume it" primitive (SDK consumeRecovery): loads the recovery snapshot and retires its file in one operation, only once the load actually succeeds. The caller keys this to the offered snapshot's sessionId. */
+  /** The prompted "yes, resume it" primitive (platform consumeRecovery): loads the recovery snapshot and retires its file in one operation, only once the load actually succeeds. The caller keys this to the offered snapshot's sessionId. */
   consumeRecovery: () => SessionSnapshot | null;
-  /** The prompted "no, and remove it" primitive (SDK removeRecoveryPoint): clears the recovery snapshot without loading it. The caller keys this to the offered snapshot's sessionId. */
+  /** The prompted "no, and remove it" primitive (platform removeRecoveryPoint): clears the recovery snapshot without loading it. The caller keys this to the offered snapshot's sessionId. */
   removeRecoveryPoint: () => void;
 };
 

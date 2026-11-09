@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
-import { ConsecutiveErrorBreaker, CONSECUTIVE_ERROR_WARN, CONSECUTIVE_ERROR_BREAK } from '@goodvibes-jev/engine/sdk/platform/core';
+import { ConsecutiveErrorBreaker, CONSECUTIVE_ERROR_WARN, CONSECUTIVE_ERROR_BREAK } from '@goodvibes-jev/engine/platform/platform/core';
 
 describe('ConsecutiveErrorBreaker', () => {
   let breaker: ConsecutiveErrorBreaker;

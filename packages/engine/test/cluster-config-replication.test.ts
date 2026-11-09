@@ -22,7 +22,7 @@ import {
   wireText,
   type GroupTestWorld,
 } from './cluster-group-harness.js';
-import { createGroup, groupStatus, joinGroup } from '../sdk/src/platform/cluster/group-operations.js';
+import { createGroup, groupStatus, joinGroup } from '../platform/src/platform/cluster/group-operations.js';
 import {
   classifyDaemonConfigPath,
   isPortConfigKey,
@@ -34,7 +34,7 @@ import {
   replicatedSecretKeyFor,
   REPLICATED_CONFIG_DOMAINS,
   REPLICATED_CONFIG_KEYS,
-} from '../sdk/src/platform/cluster/config-replication-policy.js';
+} from '../platform/src/platform/cluster/config-replication-policy.js';
 import {
   createConfigReplicaDocument,
   deleteReplicaEntry,
@@ -46,11 +46,11 @@ import {
   CONFIG_TOMBSTONE_MAX_AGE_MS,
   MAX_REPLICATED_TOMBSTONES,
   MAX_REPLICATED_VALUE_BYTES,
-} from '../sdk/src/platform/cluster/config-replica.js';
-import { listDaemonOwnedConfigPaths } from '../sdk/src/platform/config/config-ownership.js';
-import { GROUP_MATERIAL_SECRET_KEY } from '../sdk/src/platform/cluster/group-store.js';
-import { isDaemonOwnedSecretKey } from '../sdk/src/platform/config/daemon-secret-keys.js';
-import { SecretsManager } from '../sdk/src/platform/config/secrets.js';
+} from '../platform/src/platform/cluster/config-replica.js';
+import { listDaemonOwnedConfigPaths } from '../platform/src/platform/config/config-ownership.js';
+import { GROUP_MATERIAL_SECRET_KEY } from '../platform/src/platform/cluster/group-store.js';
+import { isDaemonOwnedSecretKey } from '../platform/src/platform/config/daemon-secret-keys.js';
+import { SecretsManager } from '../platform/src/platform/config/secrets.js';
 
 /**
  * Real replicated paths, taken from the policy itself.

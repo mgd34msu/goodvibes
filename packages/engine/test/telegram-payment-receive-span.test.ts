@@ -3,9 +3,9 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { TelegramOffsetStore } from '../sdk/src/platform/channels/telegram/offset-store.js';
-import { TelegramPollingReceiveProgress } from '../sdk/src/platform/channels/telegram/receive-progress.js';
-import { TELEGRAM_UPDATE_RETENTION_MS } from '../sdk/src/platform/channels/telegram/payment-receive-span.js';
+import { TelegramOffsetStore } from '../platform/src/platform/channels/telegram/offset-store.js';
+import { TelegramPollingReceiveProgress } from '../platform/src/platform/channels/telegram/receive-progress.js';
+import { TELEGRAM_UPDATE_RETENTION_MS } from '../platform/src/platform/channels/telegram/payment-receive-span.js';
 
 const cleanup: (() => void)[] = [];
 afterEach(() => { for (const close of cleanup.splice(0).reverse()) close(); });
@@ -104,13 +104,13 @@ test('bounded drain failure is not absence, and only actual terminal bookkeeping
 });
 
 test.each([true, null, {}, { url: '' }, { url: '', pending_update_count: -1 }])('malformed webhook status cannot certify no prior receive path: %j', async result => {
-  const { TelegramBotApi } = await import('../sdk/src/platform/channels/telegram/api.js');
+  const { TelegramBotApi } = await import('../platform/src/platform/channels/telegram/api.js');
   const api = new TelegramBotApi('123:synthetic-token', async () => Response.json({ ok: true, result }));
   await expect(api.getWebhookInfo()).rejects.toThrow('not confirmed');
 });
 
 test('webhook removal requires actual provider acknowledgement', async () => {
-  const { TelegramBotApi } = await import('../sdk/src/platform/channels/telegram/api.js');
+  const { TelegramBotApi } = await import('../platform/src/platform/channels/telegram/api.js');
   const api = new TelegramBotApi('123:synthetic-token', async () => Response.json({ ok: true, result: false }));
   await expect(api.deleteWebhook(false)).rejects.toThrow('did not confirm');
 });

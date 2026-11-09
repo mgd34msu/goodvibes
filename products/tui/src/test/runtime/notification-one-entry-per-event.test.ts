@@ -1,9 +1,9 @@
 /** Occurrence identity comes only from a proven shared key, never correlation metadata. */
 import { describe, expect, test } from 'bun:test';
-import { RuntimeEventBus, createEventEnvelope } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
-import { runtimeEventKey, registerHostRuntimeEvents } from '@goodvibes-jev/engine/sdk/platform/runtime/bootstrap';
+import { RuntimeEventBus, createEventEnvelope } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { runtimeEventKey, registerHostRuntimeEvents } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 import { createNotificationDispatcher, createShellNoticeSink, wireRuntimeNotificationBridge, wireMemoryPressureNotice } from '../../runtime/notification-dispatch.ts';
-import { emitContractPassed } from '@goodvibes-jev/engine/sdk/platform/runtime/emitters';
+import { emitContractPassed } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
 import { NotificationFeed } from '../../views/notifications-feed.ts';
 import { configGetStub } from '../helpers/config-manager-stub.ts';
 import { SAMPLES } from '../helpers/contract-event-samples.ts';
@@ -69,7 +69,7 @@ for (const lineFirst of [true, false]) {
 }
 
 for (const bridgeFirst of [true, false]) {
-  test(`actual SDK operator lines and bus events share one occurrence (${bridgeFirst ? 'bridge' : 'line'} first)`, async () => {
+  test(`actual platform operator lines and bus events share one occurrence (${bridgeFirst ? 'bridge' : 'line'} first)`, async () => {
     const feed = new NotificationFeed();
     const dispatcher = createNotificationDispatcher(config, feed);
     const bus = new RuntimeEventBus();

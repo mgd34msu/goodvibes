@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { diagnoseInvalidGrant, type GrantDiagnosisInput } from '../sdk/src/platform/google/grant-diagnosis.ts';
-import { openGoogleConnection } from '../sdk/src/platform/google/connection.ts';
-import { GOOGLE_CONFIG_KEYS } from '../sdk/src/platform/google/setup-plan.ts';
-import { GoogleApiClient } from '../sdk/src/platform/google/api-client.ts';
-import { GoogleTokenManager } from '../sdk/src/platform/google/token-manager.ts';
-import { proveGoogleConnection } from '../sdk/src/platform/google/connection-proof.ts';
-import { readGoogleTwoStepState } from '../sdk/src/platform/google/browser-elements.ts';
-import type { GoogleBrowserPort } from '../sdk/src/platform/google/types.ts';
+import { diagnoseInvalidGrant, type GrantDiagnosisInput } from '../platform/src/platform/google/grant-diagnosis.ts';
+import { openGoogleConnection } from '../platform/src/platform/google/connection.ts';
+import { GOOGLE_CONFIG_KEYS } from '../platform/src/platform/google/setup-plan.ts';
+import { GoogleApiClient } from '../platform/src/platform/google/api-client.ts';
+import { GoogleTokenManager } from '../platform/src/platform/google/token-manager.ts';
+import { proveGoogleConnection } from '../platform/src/platform/google/connection-proof.ts';
+import { readGoogleTwoStepState } from '../platform/src/platform/google/browser-elements.ts';
+import type { GoogleBrowserPort } from '../platform/src/platform/google/types.ts';
 
 let previous: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previous = installJudgmentPort(undefined); });

@@ -3,7 +3,7 @@ import { describe, test, expect, beforeEach } from 'bun:test';
 import { ConversationManager } from '../../core/conversation';
 import { PolicyRuntimeState } from '@/runtime/index.ts';
 import { createTestConfigManager } from '../helpers/test-managers.ts';
-import { AgentManager } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { AgentManager } from '@goodvibes-jev/engine/platform/platform/tools';
 
 // ---------------------------------------------------------------------------
 // ConversationManager streaming block lifecycle
@@ -91,10 +91,10 @@ describe('ConversationManager streaming block lifecycle', () => {
 
 describe('Orchestrator: abort during streaming cleanup', () => {
   async function buildOrchestrator() {
-    const { Orchestrator } = await import('@goodvibes-jev/engine/sdk/platform/core');
+    const { Orchestrator } = await import('@goodvibes-jev/engine/platform/platform/core');
     const { ConversationManager } = await import('../../core/conversation.ts');
-    const { PermissionManager, createPermissionConfigReader } = await import('@goodvibes-jev/engine/sdk/platform/permissions');
-    const { ToolRegistry } = await import('@goodvibes-jev/engine/sdk/platform/tools');
+    const { PermissionManager, createPermissionConfigReader } = await import('@goodvibes-jev/engine/platform/platform/permissions');
+    const { ToolRegistry } = await import('@goodvibes-jev/engine/platform/platform/tools');
     const configManager = createTestConfigManager();
     const cm = new ConversationManager(() => 80, configManager);
     const policyRuntimeState = new PolicyRuntimeState();

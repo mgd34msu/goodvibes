@@ -7,11 +7,11 @@ import 'node:fs/promises';
 import type { CommandRegistry, CommandContext } from '../command-registry.ts';
 import type { SelectionItem } from '../selection-modal.ts';
 
-import '@goodvibes-jev/engine/sdk/platform/providers';
-import '@goodvibes-jev/engine/sdk/platform/utils';
-import '@goodvibes-jev/engine/sdk/platform/config';
+import '@goodvibes-jev/engine/platform/platform/providers';
+import '@goodvibes-jev/engine/platform/platform/utils';
+import '@goodvibes-jev/engine/platform/platform/config';
 import { openCommandView, requireBookmarkManager, requireProviderApi, requireSecretsManager } from './runtime-services.ts';
-import '@goodvibes-jev/engine/sdk/platform/utils';
+import '@goodvibes-jev/engine/platform/platform/utils';
 
 const localActions = createLocalCommandActions<CommandContext>(requireProviderApi, {
   hidden: false,

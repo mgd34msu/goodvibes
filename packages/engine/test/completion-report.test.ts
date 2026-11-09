@@ -5,7 +5,7 @@
  * from prose, and an earlier block is not the report.
  */
 import { describe, expect, test } from 'bun:test';
-import { parseCompletionReport, parseCompletionReportParts, type EngineerReport } from '../sdk/src/platform/agents/completion-report.js';
+import { parseCompletionReport, parseCompletionReportParts, type EngineerReport } from '../platform/src/platform/agents/completion-report.js';
 
 const engineer: EngineerReport = {
   version: 1,

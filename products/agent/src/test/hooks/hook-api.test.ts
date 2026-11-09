@@ -2,8 +2,8 @@ import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { createHookApi, HookWorkbench, listHookPointContracts } from '@goodvibes-jev/engine/sdk/platform/hooks';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { createHookApi, HookWorkbench, listHookPointContracts } from '@goodvibes-jev/engine/platform/platform/hooks';
 import { getTestHookDispatcher } from '../helpers/runtime-services.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 

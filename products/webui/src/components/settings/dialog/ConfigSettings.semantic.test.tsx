@@ -4,7 +4,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { BrowserJudgmentRequest } from "@goodvibes-jev/engine/daemon-sdk";
+import type { BrowserJudgmentRequest } from "@goodvibes-jev/engine/daemon-api";
 import { invalidateClientLifetime } from "../../../lib/client-lifetime";
 import { ToastProvider } from "../../../lib/toast";
 
@@ -18,7 +18,7 @@ let pending: {
 let configReadError: Error | undefined;
 let configReadOverride: (() => Promise<unknown>) | undefined;
 mock.module("../../../lib/goodvibes", () => ({
-  sdk: {
+  client: {
     operator: {
       config: {
         get: async () => {

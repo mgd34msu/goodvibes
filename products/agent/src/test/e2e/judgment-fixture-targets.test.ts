@@ -2,7 +2,7 @@
 import { expect, test } from 'bun:test';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import type { Questions } from '@goodvibes-jev/judgment';
-import { bindVerificationTargets } from '@goodvibes-jev/engine/sdk/platform/core';
+import { bindVerificationTargets } from '@goodvibes-jev/engine/platform/platform/core';
 import { startE2EJudgments } from './judgment-fixture.ts';
 import recorded from '../fixtures/e2e-judgments/headless-completion.json' with { type: 'json' };
 

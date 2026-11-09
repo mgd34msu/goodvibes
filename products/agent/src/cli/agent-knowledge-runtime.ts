@@ -1,9 +1,9 @@
 import { HttpStatusError } from '@goodvibes-jev/engine/errors';
-import { createBrowserAgentSdk, type BrowserAgentSdk } from '@goodvibes-jev/engine/sdk/browser/agent';
-import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { assertProjectionCurrent } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { createBrowserAgentPlatform, type BrowserAgentPlatform } from '@goodvibes-jev/engine/platform/browser/agent';
+import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
+import { assertProjectionCurrent } from '@goodvibes-jev/engine/platform/platform/tools';
 import { isDeepStrictEqual } from 'node:util';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { VERSION } from '../version.ts';
 import { normalizeAgentKnowledgeScopeAliases } from '../agent/knowledge-scope-alias.ts';
 import { readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
@@ -146,7 +146,7 @@ export async function classifyKnowledgeError(error: unknown, connection: AgentKn
   receipt?.assertCurrent?.();
   if (error instanceof Error) knowledgeTransportFailures.get(error)?.();
   request.assertCurrent();
-  // The canonical SDK transport constructs this exact native error class from its HTTP response.
+  // The canonical platform transport constructs this exact native error class from its HTTP response.
   const native = error instanceof Error && Object.getPrototypeOf(error) === HttpStatusError.prototype ? error : undefined;
   const nativeStatus = native && Object.getOwnPropertyDescriptor(native, 'status');
   const status = receipt?.status ?? (nativeStatus && 'value' in nativeStatus
@@ -179,11 +179,11 @@ export function normalizeAgentKnowledgeData<TData>(data: TData): TData {
   return normalizeAgentKnowledgeScopeAliases(data);
 }
 
-export function createAgentSdk(connection: AgentKnowledgeConnection,
-  options: AgentKnowledgeRequestOptions = {}): BrowserAgentSdk {
+export function createAgentPlatform(connection: AgentKnowledgeConnection,
+  options: AgentKnowledgeRequestOptions = {}): BrowserAgentPlatform {
   const request = retainKnowledgeRequest(connection, options);
   request.assertCurrent();
-  const sdkFor = (assertCurrent: () => void) => createBrowserAgentSdk({
+  const engineFor = (assertCurrent: () => void) => createBrowserAgentPlatform({
     baseUrl: request.baseUrl,
     authToken: request.token,
     retry: options.signal || options.assertCurrent ? { maxAttempts: 1, baseDelayMs: 0, maxDelayMs: 0 } : undefined,
@@ -197,7 +197,7 @@ export function createAgentSdk(connection: AgentKnowledgeConnection,
     },
   });
   const invokeCurrent = async <TInput, TData>(input: TInput,
-    call: (sdk: BrowserAgentSdk, input: TInput) => Promise<TData>): Promise<TData> => {
+    call: (platformClient: BrowserAgentPlatform, input: TInput) => Promise<TData>): Promise<TData> => {
     request.assertCurrent();
     const original = captureStrictJudgmentJson(input);
     const assertCurrent = () => {
@@ -207,17 +207,17 @@ export function createAgentSdk(connection: AgentKnowledgeConnection,
     };
     assertCurrent();
     let data: TData;
-    try { data = await call(sdkFor(assertCurrent), input); }
+    try { data = await call(engineFor(assertCurrent), input); }
     catch (error) { assertCurrent(); throw error; }
     assertCurrent();
     const normalized = normalizeAgentKnowledgeData(data);
     assertCurrent(); return normalized;
   };
-  const sdk = sdkFor(request.assertCurrent);
+  const platformClient = engineFor(request.assertCurrent);
   return {
-    ...sdk,
+    ...platformClient,
     knowledge: {
-      ...sdk.knowledge,
+      ...platformClient.knowledge,
       ask: async (input) => invokeCurrent(input, (current, value) => current.knowledge.ask(value)),
       search: async (input) => invokeCurrent(input, (current, value) => current.knowledge.search(value)),
       status: async (input) => invokeCurrent(input, (current, value) => current.knowledge.status(value)),

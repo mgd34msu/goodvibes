@@ -15,11 +15,11 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { bootDaemon, type BootedDaemon } from '../sdk/src/platform/daemon/boot.ts';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { prepareConfiguredProjectContext } from '../sdk/src/platform/knowledge/project-planning/configured-project.ts';
-import { gatewayPricingCachePath } from '../sdk/src/platform/providers/gateway-pricing.ts';
-import { createShellPathService } from '../sdk/src/platform/runtime/shell-paths.ts';
+import { bootDaemon, type BootedDaemon } from '../platform/src/platform/daemon/boot.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { prepareConfiguredProjectContext } from '../platform/src/platform/knowledge/project-planning/configured-project.ts';
+import { gatewayPricingCachePath } from '../platform/src/platform/providers/gateway-pricing.ts';
+import { createShellPathService } from '../platform/src/platform/runtime/shell-paths.ts';
 
 const TOKEN = 'test-boot-token';
 let home: string;

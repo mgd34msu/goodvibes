@@ -39,8 +39,8 @@
  *   surfaces (the interactive prompt and headless run's stderr) render it.
  */
 import net from 'node:net';
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { resolveDaemonEnabled } from '@goodvibes-jev/engine/sdk/platform/config';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   connectedHostPort,
   dialHostForConfiguredHost,

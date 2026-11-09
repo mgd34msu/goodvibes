@@ -1,12 +1,12 @@
 /** Production daemon routes over owned fixtures; no live providers or real grants. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
-import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { WorkspaceRegistrationStore, sharedWorkspaceRegisterPath, legacyWorkspaceRegisterPath } from '@goodvibes-jev/engine/sdk/platform/workspace';
-import { registerInboxSurface } from '@goodvibes-jev/engine/sdk/platform/intake';
-import { createOperatorSdk } from '@goodvibes-jev/engine/operator-sdk';
-import { createOperatorNativeWorkSubmissionClient } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-submission-client';
-import { getOperatorWorkLedgerProject, createOperatorNativeWorkExecutionClient } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
-import { createOperatorWorkLedgerReadClient } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/operator-read-client';
+import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { WorkspaceRegistrationStore, sharedWorkspaceRegisterPath, legacyWorkspaceRegisterPath } from '@goodvibes-jev/engine/platform/platform/workspace';
+import { registerInboxSurface } from '@goodvibes-jev/engine/platform/platform/intake';
+import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
+import { createOperatorNativeWorkSubmissionClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-submission-client';
+import { getOperatorWorkLedgerProject, createOperatorNativeWorkExecutionClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
+import { createOperatorWorkLedgerReadClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/operator-read-client';
 import { startDaemonFixture } from '../../testing/daemon-fixture.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 
@@ -25,12 +25,12 @@ async function fixture() {
     homeDir: daemon.homeDirectory, daemonStateDir: paths.resolveUserPath() });
   await scopes.add(daemon.workingDirectory);
   const paired = daemon.services.pairingTokens.mint({ name: 'Owned source submission fixture' });
-  const sdk = createOperatorSdk({ baseUrl: daemon.baseUrl, authToken: paired.token, retry: { maxAttempts: 1 } });
-  const projectId = await getOperatorWorkLedgerProject(sdk);
-  const client = createOperatorNativeWorkSubmissionClient(sdk, projectId);
-  const reader = createOperatorWorkLedgerReadClient(sdk, projectId);
+  const platformClient = createOperatorApiClient({ baseUrl: daemon.baseUrl, authToken: paired.token, retry: { maxAttempts: 1 } });
+  const projectId = await getOperatorWorkLedgerProject(platformClient);
+  const client = createOperatorNativeWorkSubmissionClient(platformClient, projectId);
+  const reader = createOperatorWorkLedgerReadClient(platformClient, projectId);
   cleanups.push(() => { client.dispose(); reader.dispose(); });
-  return { daemon, scopes, paired, sdk, projectId, client, reader };
+  return { daemon, scopes, paired, platformClient, projectId, client, reader };
 }
 const source = () => ({ requestId: 'owned-request-1', inputId: 'owned-input-1', expectedRevision: 0,
   goal: '  Keep the full source ☃.\nDo not rewrite it.  ', criteria: ['  Exact first criterion.  ', 'Duplicate criterion', 'Duplicate criterion', 'Final criterion\n'] });
@@ -51,7 +51,7 @@ test('actual daemon submission atomically captures exact source and owner, with 
   const replay = await f.client.submit(input); expect(replay.replayed).toBe(true); expect(replay.receipt).toEqual(first.receipt);
   expect(await f.client.get({ requestId: input.requestId })).toEqual({ kind: 'found', receipt: first.receipt });
   expect((await f.reader.readSnapshot()).revision).toBe(1);
-  const execution = createOperatorNativeWorkExecutionClient(f.sdk, f.projectId);
+  const execution = createOperatorNativeWorkExecutionClient(f.platformClient, f.projectId);
   await expect(execution.status({ workId: first.receipt.workId, attemptId: first.receipt.attemptId, expectedRevision: first.receipt.expectedRevision })).rejects.toMatchObject({ code: 'NATIVE_EXECUTION_NOT_FOUND' });
   execution.dispose(); expect(f.daemon.services.agentManager.list()).toHaveLength(0);
 }, 20000);
@@ -59,7 +59,7 @@ test('actual daemon submission atomically captures exact source and owner, with 
 test('lost daemon submit response is resolved through original request lookup without another work or executor', async () => {
   const f = await fixture(); const input = source();
   let delivered = false;
-  const original = f.sdk.invoke.bind(f.sdk);
+  const original = f.platformClient.invoke.bind(f.platformClient);
   const client = createOperatorNativeWorkSubmissionClient({ invoke: async <T>(method: string, body?: Record<string, unknown>, options?: { signal?: AbortSignal }) => {
     const result = await original<T>(method, body, options);
     if (method === 'workLedger.submit' && !delivered) { delivered = true; throw new Error('Owned lost-response transport'); }
@@ -99,7 +99,7 @@ test('actual routes reject anonymous/shared credentials, host-field injection an
 test('submission lookup is scoped to the live paired principal and original project', async () => {
   const f = await fixture(); const input = source(); await f.client.submit(input);
   const other = f.daemon.services.pairingTokens.mint({ name: 'Different owned source principal' });
-  const client = createOperatorNativeWorkSubmissionClient(createOperatorSdk({ baseUrl: f.daemon.baseUrl, authToken: other.token, retry: { maxAttempts: 1 } }), f.projectId);
+  const client = createOperatorNativeWorkSubmissionClient(createOperatorApiClient({ baseUrl: f.daemon.baseUrl, authToken: other.token, retry: { maxAttempts: 1 } }), f.projectId);
   try { expect(await client.get({ requestId: input.requestId })).toEqual({ kind: 'not-found' }); }
   finally { client.dispose(); }
   expect(await f.client.get({ requestId: 'unknown-request' })).toEqual({ kind: 'not-found' });

@@ -46,7 +46,7 @@ export interface StreamMetrics {
    * Epoch ms of the most recent STREAM_START or STREAM_DELTA; undefined when
    * idle (no turn in flight). Read every render frame, not just on the
    * watchdog's one-shot hint, so "ms since last byte" can be computed even
-   * when no new SDK event has arrived at all (a no-delta stall watchdog for
+   * when no new platform event has arrived at all (a no-delta stall watchdog for
    * the render loop itself, independent of the low-priority system message).
    */
   lastDeltaAtMs: number | undefined;
@@ -57,7 +57,7 @@ export interface StreamMetrics {
    */
   stallEpisode: number;
   /**
-   * Populated from the SDK's STREAM_RETRY event, which fires when an in-flight
+   * Populated from the platform's STREAM_RETRY event, which fires when an in-flight
    * provider call reconnects after a transport error rather than failing the
    * turn. A turn that never retries simply leaves these undefined. Cleared on
    * STREAM_DELTA, a byte arriving means the reconnect succeeded.

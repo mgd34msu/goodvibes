@@ -1,17 +1,17 @@
 import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { MockLLMProvider } from '../setup.ts';
-import { HookDispatcher } from '@goodvibes-jev/engine/sdk/platform/hooks';
-import type { HookEvent, HookResult } from '@goodvibes-jev/engine/sdk/platform/hooks';
-import { PermissionManager } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import type { LLMProvider, ChatRequest, ChatResponse } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { HookDispatcher } from '@goodvibes-jev/engine/platform/platform/hooks';
+import type { HookEvent, HookResult } from '@goodvibes-jev/engine/platform/platform/hooks';
+import { PermissionManager } from '@goodvibes-jev/engine/platform/platform/permissions';
+import type { LLMProvider, ChatRequest, ChatResponse } from '@goodvibes-jev/engine/platform/platform/providers';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createEventEnvelope } from '@/runtime/index.ts';
-import { createPermissionConfigReader } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import { createPermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { PolicyRuntimeState } from '@/runtime/index.ts';
 import { createTestManagers } from '../helpers/test-managers.ts';
 import { resetSettingsControlPlaneStore } from '../helpers/settings-control-plane.ts';
-import { AgentManager } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { AgentManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer, scoreAnswer } from '@goodvibes-jev/judgment/testing';
@@ -94,7 +94,7 @@ describe('Orchestrator', () => {
   });
 
   async function buildOrchestrator(renderRequest: (() => void) | null = null) {
-    const { Orchestrator } = await import('@goodvibes-jev/engine/sdk/platform/core');
+    const { Orchestrator } = await import('@goodvibes-jev/engine/platform/platform/core');
     const { ConversationManager } = await import('../../core/conversation.ts');
     const cm = new ConversationManager(() => 80, configManager);
     const policyRuntimeState = new PolicyRuntimeState();
@@ -124,7 +124,7 @@ describe('Orchestrator', () => {
   }
 
   async function buildOrchestratorWithHooks(hookDispatcher: HookDispatcher) {
-    const { Orchestrator } = await import('@goodvibes-jev/engine/sdk/platform/core');
+    const { Orchestrator } = await import('@goodvibes-jev/engine/platform/platform/core');
     const { ConversationManager } = await import('../../core/conversation.ts');
     const cm = new ConversationManager(() => 80, configManager);
     const policyRuntimeState = new PolicyRuntimeState();
@@ -547,7 +547,7 @@ describe('Orchestrator', () => {
 
       const mockAcp = {
         spawn: mock(async (_task: unknown) => 'agent-id-123'),
-      } as unknown as import('@goodvibes-jev/engine/sdk/platform/acp').AcpManager;
+      } as unknown as import('@goodvibes-jev/engine/platform/platform/acp').AcpManager;
 
       orch.registerDelegateTool(mockAcp);
 
@@ -559,7 +559,7 @@ describe('Orchestrator', () => {
 
       const mockAcp = {
         spawn: mock(async (_task: unknown) => 'agent-id'),
-      } as unknown as import('@goodvibes-jev/engine/sdk/platform/acp').AcpManager;
+      } as unknown as import('@goodvibes-jev/engine/platform/platform/acp').AcpManager;
 
       orch.registerDelegateTool(mockAcp);
 
@@ -579,7 +579,7 @@ describe('Orchestrator', () => {
       const { orch } = await buildOrchestrator();
 
       const spawnMock = mock(async (_task: unknown) => 'spawned-agent-id');
-      const mockAcp = { spawn: spawnMock } as unknown as import('@goodvibes-jev/engine/sdk/platform/acp').AcpManager;
+      const mockAcp = { spawn: spawnMock } as unknown as import('@goodvibes-jev/engine/platform/platform/acp').AcpManager;
 
       orch.registerDelegateTool(mockAcp);
 
@@ -599,7 +599,7 @@ describe('Orchestrator', () => {
       toolRegistry.register({ definition: { name: 'agent', description: 'Native checked delegation.', parameters: {} },
         execute: async () => ({ success: false, error: 'Synthetic checked plan is held.' }) });
       const spawnMock = mock(async () => 'must-not-spawn');
-      orch.registerDelegateTool({ spawn: spawnMock } as unknown as import('@goodvibes-jev/engine/sdk/platform/acp').AcpManager);
+      orch.registerDelegateTool({ spawn: spawnMock } as unknown as import('@goodvibes-jev/engine/platform/platform/acp').AcpManager);
       expect(toolRegistry.has('agent')).toBe(true);
       expect(toolRegistry.has('delegate')).toBe(false);
       expect(spawnMock).not.toHaveBeenCalled();
@@ -611,7 +611,7 @@ describe('Orchestrator', () => {
       // Register WITHOUT calling registerDelegateTool - then directly inject
       // We test the internal null-check by accessing the tool function after registration
       // First register with a real mock to get the tool registered
-      const mockAcp = { spawn: mock(async () => 'id') } as unknown as import('@goodvibes-jev/engine/sdk/platform/acp').AcpManager;
+      const mockAcp = { spawn: mock(async () => 'id') } as unknown as import('@goodvibes-jev/engine/platform/platform/acp').AcpManager;
       orch.registerDelegateTool(mockAcp);
 
       // Now manually clear the internal acpManager via type cast to simulate null scenario

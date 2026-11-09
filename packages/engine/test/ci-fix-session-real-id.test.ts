@@ -8,13 +8,13 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AutomationManager } from '../sdk/src/platform/automation/index.ts';
+import { AutomationManager } from '../platform/src/platform/automation/index.ts';
 import { trackDisposables } from './_helpers/disposables.ts';
-import { SharedSessionBroker } from '../sdk/src/platform/control-plane/session-broker.ts';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import type { RouteBindingManager } from '../sdk/src/platform/channels/index.ts';
-import { startCiFixSession } from '../sdk/src/platform/control-plane/routes/register-gateway-verb-groups.ts';
-import type { FixSessionBrief } from '../sdk/src/platform/ci-watch/types.ts';
+import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import type { RouteBindingManager } from '../platform/src/platform/channels/index.ts';
+import { startCiFixSession } from '../platform/src/platform/control-plane/routes/register-gateway-verb-groups.ts';
+import type { FixSessionBrief } from '../platform/src/platform/ci-watch/types.ts';
 
 const flags = (enabledIds: readonly string[]) => ({
   isEnabled: (id: string): boolean => enabledIds.includes(id),

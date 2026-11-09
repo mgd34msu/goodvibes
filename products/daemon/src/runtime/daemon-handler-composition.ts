@@ -1,15 +1,15 @@
 import type { DaemonTriagePermissionHost, DaemonTriageTaggingRequest } from './tagged-inbox-composition.js';
-import type { OwnedInboxTagging } from '@goodvibes-jev/engine/sdk/platform/intake';
+import type { OwnedInboxTagging } from '@goodvibes-jev/engine/platform/platform/intake';
 /** Product host surfaces over canonical engine implementations. */
-import type { EmailService } from '@goodvibes-jev/engine/sdk/platform/email';
+import type { EmailService } from '@goodvibes-jev/engine/platform/platform/email';
 import { registerOwnedMailInbox } from './owned-inbox-mail.js';
-import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { createDaemonCredentialStore } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ClusterCoordinator } from '@goodvibes-jev/engine/sdk/platform/cluster';
-import type { GatewayMethodCatalog, NativeMutationHost } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { registerRoutingMethods, registerDraftMethods, type ChannelDeliveryRouter } from '@goodvibes-jev/engine/sdk/platform/channels';
-import { registerRemoteSurface } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import type { InboxPollingControl, RegisterInboxSurfaceOptions } from '@goodvibes-jev/engine/sdk/platform/intake';
+import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { createDaemonCredentialStore } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ClusterCoordinator } from '@goodvibes-jev/engine/platform/platform/cluster';
+import type { GatewayMethodCatalog, NativeMutationHost } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { registerRoutingMethods, registerDraftMethods, type ChannelDeliveryRouter } from '@goodvibes-jev/engine/platform/platform/channels';
+import { registerRemoteSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import type { InboxPollingControl, RegisterInboxSurfaceOptions } from '@goodvibes-jev/engine/platform/platform/intake';
 import { registerDaemonHandlers, type DaemonHandlerSurfaces, type RoutingRegistration } from '../daemon/handlers/index.js';
 import type { HandlerContext, HandlerLogger, OwnedHandlerSurface } from '../daemon/handlers/context.js';
 import { createPaymentsServices } from './payments-composition.js';
@@ -52,7 +52,7 @@ export type DaemonInboxFactory = (
 
 export interface DaemonHandlerCompositionOptions {
   readonly paymentContinuationOwner?: import('./payments-composition.js').PaymentsCompositionOptions['paymentContinuationOwner'];
-  readonly nativeDataWriter?: import('@goodvibes-jev/engine/sdk/platform/runtime/self-update').NativeDataWriteOwner | undefined;
+  readonly nativeDataWriter?: import('@goodvibes-jev/engine/platform/platform/runtime/self-update').NativeDataWriteOwner | undefined;
   readonly triagePermissionHost?: DaemonTriagePermissionHost;
   readonly nativeMutationHost?: NativeMutationHost | undefined;
   readonly gatewayMethods: GatewayMethodCatalog;

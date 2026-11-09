@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { NativeWorkSubmissionRequest } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-submission-client';
+import type { NativeWorkSubmissionRequest } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-submission-client';
 
 async function within<T>(promise: Promise<T>, milliseconds = 15_000): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;

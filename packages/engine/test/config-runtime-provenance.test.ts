@@ -2,9 +2,9 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { createDaemonSystemRouteHandlers } from '../daemon-sdk/src/system-routes.ts';
-import { buildPermissionProvenance } from '../sdk/src/platform/gate/policy/permissions-provenance.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { createDaemonSystemRouteHandlers } from '../daemon-api/src/system-routes.ts';
+import { buildPermissionProvenance } from '../platform/src/platform/gate/policy/permissions-provenance.ts';
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function fixture() {

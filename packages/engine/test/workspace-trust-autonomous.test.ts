@@ -2,8 +2,8 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { WorkspaceTrustManager } from '../sdk/src/platform/runtime/workspace-trust.ts';
-import { createShellPathService } from '../sdk/src/platform/runtime/shell-paths.ts';
+import { WorkspaceTrustManager } from '../platform/src/platform/runtime/workspace-trust.ts';
+import { createShellPathService } from '../platform/src/platform/runtime/shell-paths.ts';
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function fixture() {

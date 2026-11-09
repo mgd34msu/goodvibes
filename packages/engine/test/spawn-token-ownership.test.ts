@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { SpawnTokenManager } from '../sdk/src/platform/security/spawn-tokens.js';
+import { SpawnTokenManager } from '../platform/src/platform/security/spawn-tokens.js';
 
 test('serialized grants resolve only under the original manager', () => {
   const owner = new SpawnTokenManager('session:with:colons');

@@ -14,11 +14,11 @@ import { join } from 'node:path';
 import {
   discoverLegacySessionSources,
   importLegacySessionStores,
-} from '../sdk/src/platform/control-plane/index.ts';
-import { SharedSessionBroker } from '../sdk/src/platform/control-plane/session-broker.ts';
-import { CompanionChatPersistence } from '../sdk/src/platform/companion/companion-chat-persistence.ts';
-import type { PersistedChatSession } from '../sdk/src/platform/companion/companion-chat-persistence.ts';
-import { RouteBindingManager } from '../sdk/src/platform/channels/index.ts';
+} from '../platform/src/platform/control-plane/index.ts';
+import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.ts';
+import { CompanionChatPersistence } from '../platform/src/platform/companion/companion-chat-persistence.ts';
+import type { PersistedChatSession } from '../platform/src/platform/companion/companion-chat-persistence.ts';
+import { RouteBindingManager } from '../platform/src/platform/channels/index.ts';
 import { trackDisposables } from './_helpers/disposables.ts';
 
 const disposables = trackDisposables();

@@ -1,8 +1,8 @@
 /** Usage compatibility for persisted legacy acknowledgements. New background updates run through ordinary checked turns. */
 import { describe, expect, test } from 'bun:test';
-import { ConversationManager } from '../sdk/src/platform/core/conversation.ts';
-import { sumConversationUsage } from '../sdk/src/platform/core/orchestrator-usage.ts';
-import type { ConversationMessageSnapshot } from '../sdk/src/platform/core/conversation.ts';
+import { ConversationManager } from '../platform/src/platform/core/conversation.ts';
+import { sumConversationUsage } from '../platform/src/platform/core/orchestrator-usage.ts';
+import type { ConversationMessageSnapshot } from '../platform/src/platform/core/conversation.ts';
 
 describe('persisted follow-up acknowledgement usage', () => {
   test('sumConversationUsage takes the context size from the latest real turn, not an acknowledgement', () => {

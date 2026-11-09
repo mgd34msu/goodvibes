@@ -3,8 +3,8 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync, chmodSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { captureContractInput, materializeContractInput } from '../../sdk/src/platform/contract/input-snapshot.js';
-import { applyCapturedInputDelta } from '../../sdk/src/platform/contract/input-apply.js';
+import { captureContractInput, materializeContractInput } from '../../platform/src/platform/contract/input-snapshot.js';
+import { applyCapturedInputDelta } from '../../platform/src/platform/contract/input-apply.js';
 function git(root: string, ...args: string[]) {
   const r = spawnSync('git', ['-C', root, ...args]);
   if (r.status !== 0) throw Error(r.stderr.toString());
@@ -47,7 +47,7 @@ test('binary/modification/deletion/mode delta preserves owner raw index and dirt
       inputSnapshot: snapshot,
       worktreePath: view,
       branch: 'review-result',
-    } as import('../../sdk/src/platform/contract/types.js').Contract;
+    } as import('../../platform/src/platform/contract/types.js').Contract;
     expect(await applyCapturedInputDelta(contract, async () => true, new AbortController().signal)).toBe(5);
     expect(readFileSync(join(root, 'same.txt'), 'utf8')).toBe('unstaged owner\ncontract addition\n');
     expect(readFileSync(join(root, 'notes'), 'utf8')).toBe('untracked owner\n');

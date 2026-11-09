@@ -3,8 +3,8 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SecretsManager, SecretStoreUnreadableError } from '../sdk/src/platform/config/secrets.js';
-import { loadOrCreateKeyfile } from '../sdk/src/platform/config/secrets-keyfile.js';
+import { SecretsManager, SecretStoreUnreadableError } from '../platform/src/platform/config/secrets.js';
+import { loadOrCreateKeyfile } from '../platform/src/platform/config/secrets-keyfile.js';
 
 /**
  * Key-mismatch hardening (2026-07 incident: a lost keyfile + non-exclusive

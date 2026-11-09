@@ -13,14 +13,14 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadPlugin, type LoadedPlugin, type PluginLoaderDeps } from '../sdk/src/platform/plugins/loader.ts';
-import { PluginInFlightTracker, PluginQuiescingError } from '../sdk/src/platform/plugins/in-flight.ts';
-import { PluginManager } from '../sdk/src/platform/plugins/manager.ts';
-import { runHotReload } from '../sdk/src/platform/runtime/plugins/hot-reload.ts';
-import { PluginLifecycleManager } from '../sdk/src/platform/runtime/plugins/manager.ts';
-import type { PluginManifestV2 } from '../sdk/src/platform/runtime/plugins/types.ts';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.ts';
-import type { HostSlashCommand } from '../sdk/src/platform/runtime/host-ui.ts';
+import { loadPlugin, type LoadedPlugin, type PluginLoaderDeps } from '../platform/src/platform/plugins/loader.ts';
+import { PluginInFlightTracker, PluginQuiescingError } from '../platform/src/platform/plugins/in-flight.ts';
+import { PluginManager } from '../platform/src/platform/plugins/manager.ts';
+import { runHotReload } from '../platform/src/platform/runtime/plugins/hot-reload.ts';
+import { PluginLifecycleManager } from '../platform/src/platform/runtime/plugins/manager.ts';
+import type { PluginManifestV2 } from '../platform/src/platform/runtime/plugins/types.ts';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
+import type { HostSlashCommand } from '../platform/src/platform/runtime/host-ui.ts';
 
 interface DrainProbe {
   generation: number;

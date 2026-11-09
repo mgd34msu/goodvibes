@@ -2,10 +2,10 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { rmSync } from 'node:fs';
 import { resolve } from 'node:path';
-import * as directClient from '../sdk/src/platform/security/source-screening/direct-client.ts';
+import * as directClient from '../platform/src/platform/security/source-screening/direct-client.ts';
 import { isolatedTestEnvironment } from '../scripts/test-isolation.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { captureLoopbackEndpoint, createScreeningTransport } from '../sdk/src/platform/security/source-screening/transport.ts';
+import { captureLoopbackEndpoint, createScreeningTransport } from '../platform/src/platform/security/source-screening/transport.ts';
 
 const cleanups: (() => unknown | Promise<unknown>)[] = [];
 afterEach(async () => {

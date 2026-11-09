@@ -17,7 +17,7 @@ import { CommandRegistry } from '../../input/command-registry.ts';
 import { registerBuiltinCommands } from '../../input/commands.ts';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
+import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { makeTestSurface } from '../helpers/session-surface.ts';
 import { legacyPaneReturnContext, rewriteAsLegacyPaneSession } from '../helpers/legacy-pane-session.ts';

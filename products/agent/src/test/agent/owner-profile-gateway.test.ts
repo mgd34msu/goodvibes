@@ -20,8 +20,8 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import type { GatewayMethodInvocation } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import type { GatewayMethodInvocation } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { createProfileGatewayInvoke } from '../../agent/owner-profile-gateway.ts';
 import { PROFILE_METHOD_IDS, type ProfileMethodId } from '../../tools/agent-profile-types.ts';
 import type { AgentConnectedHostConfigReader } from '../../agent/routine-schedule-promotion.ts';

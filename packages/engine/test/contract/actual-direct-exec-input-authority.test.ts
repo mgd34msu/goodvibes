@@ -2,7 +2,7 @@
 import { expect, spyOn, test } from 'bun:test';
 import * as asyncFs from 'node:fs/promises';
 import { join } from 'node:path';
-import { probeCapturedExecAvailability } from '../../sdk/src/platform/tools/exec/captured-exec.js';
+import { probeCapturedExecAvailability } from '../../platform/src/platform/tools/exec/captured-exec.js';
 import { DIRECT_EXEC_CAPTURED_VALUE, DIRECT_EXEC_PRIVATE_MARKER, runDirectExecContract } from '../fixtures/captured-direct-exec-compiled-entry.js';
 
 const availability = await probeCapturedExecAvailability();

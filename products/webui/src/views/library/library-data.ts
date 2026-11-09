@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   invokeMethod,
-  sdk,
+  client as platformClient,
   type MemoryRecord,
   type MemoryUpdateReviewInput,
 } from '../../lib/goodvibes';
@@ -27,14 +27,14 @@ export function useDebouncedValue<T>(value: T, delayMs = 250): T {
 export function useReviewQueue() {
   return useQuery({
     queryKey: queryKeys.memoryReviewQueue,
-    queryFn: () => sdk.operator.memory.reviewQueue({ limit: 50 }),
+    queryFn: () => platformClient.operator.memory.reviewQueue({ limit: 50 }),
   });
 }
 
 export function useConsolidationReceipts() {
   return useQuery({
     queryKey: queryKeys.memoryConsolidationReceipts,
-    queryFn: () => sdk.operator.memory.consolidation.receipts(),
+    queryFn: () => platformClient.operator.memory.consolidation.receipts(),
   });
 }
 
@@ -61,12 +61,12 @@ export function useMemoryRecordMutations() {
     await queryClient.invalidateQueries({ queryKey: ['memory'] });
   };
   const remove = useMutation({
-    mutationFn: (record: MemoryRecord) => sdk.operator.memory.delete(record.id),
+    mutationFn: (record: MemoryRecord) => platformClient.operator.memory.delete(record.id),
     onSuccess: invalidate,
   });
   const saveReview = useMutation({
     mutationFn: ({ id, input }: { id: string; input: MemoryUpdateReviewInput }) =>
-      sdk.operator.memory.updateReview(id, input),
+      platformClient.operator.memory.updateReview(id, input),
     onSuccess: invalidate,
   });
   return { remove, saveReview };

@@ -17,7 +17,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { bootDaemon, type BootedDaemon } from '../sdk/src/platform/daemon/boot.ts';
+import { bootDaemon, type BootedDaemon } from '../platform/src/platform/daemon/boot.ts';
 import { seedBenchmarkCache } from './_helpers/benchmark-cache.ts';
 
 const SHARED = 'legacy-shared-token';

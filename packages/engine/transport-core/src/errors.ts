@@ -1,4 +1,4 @@
-import { GoodVibesSdkError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes-jev/engine/errors';
 
 export function isAbortError(error: unknown): boolean {
   return Boolean(
@@ -53,7 +53,7 @@ export function transportErrorFromUnknown(error: unknown, context: string): Erro
   const recoverable = /^(?:EAI_AGAIN|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EPIPE|ECONNABORTED)$/.test(code)
     || /^UND_ERR_/.test(code)
     || code === 'fetch failed';
-  return new GoodVibesSdkError(`${context}: ${describeUnknownTransportError(error)}`, {
+  return new GoodVibesError(`${context}: ${describeUnknownTransportError(error)}`, {
     category: 'network',
     source: 'transport',
     recoverable,

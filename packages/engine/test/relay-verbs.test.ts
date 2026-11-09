@@ -15,13 +15,13 @@
  * on every call so a controller dropped at stop stops being answered for.
  */
 import { describe, expect, test } from 'bun:test';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
 import {
   RELAY_METHOD_IDS,
   registerRelayGatewayMethods,
   type RelayReachabilityService,
-} from '../sdk/src/platform/control-plane/routes/relay.ts';
-import type { GatewayMethodInvocation } from '../sdk/src/platform/control-plane/method-catalog-shared.ts';
+} from '../platform/src/platform/control-plane/routes/relay.ts';
+import type { GatewayMethodInvocation } from '../platform/src/platform/control-plane/method-catalog-shared.ts';
 
 const PAIRING = {
   protocol: 1,

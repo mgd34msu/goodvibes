@@ -16,8 +16,8 @@ import {
   nudgeDeliveryFor,
   type NudgeFindings,
   type NudgeTransport,
-} from '../../sdk/src/platform/contract/nudge.js';
-import type { ContractUnit, CriterionVerdict } from '../../sdk/src/platform/contract/types.js';
+} from '../../platform/src/platform/contract/nudge.js';
+import type { ContractUnit, CriterionVerdict } from '../../platform/src/platform/contract/types.js';
 import { makeCriterion, makeUnit } from './fixtures.js';
 
 const golden = (name: string): string => readFileSync(join(import.meta.dir, 'golden', `${name}.txt`), 'utf-8').replace(/\n$/, '');

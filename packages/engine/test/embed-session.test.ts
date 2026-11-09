@@ -1,7 +1,7 @@
 /**
  * embed-session.test.ts
  *
- * Exercises the SDK Embedding API 1.0 facade (`createEmbeddedSession`) against a
+ * Exercises the platform Embedding API 1.0 facade (`createEmbeddedSession`) against a
  * real in-process daemon: the exposed seams (runtime bus, session broker,
  * approval broker), the injected permission-callback bridge, a spawn-mode submit
  * starting a contract through the daemon's contracts surface, and idempotent
@@ -11,10 +11,10 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createEmbeddedSession, type EmbeddedSession } from '../sdk/src/embed.ts';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
+import { createEmbeddedSession, type EmbeddedSession } from '../platform/src/embed.ts';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
 import { seedBenchmarkCache } from './_helpers/benchmark-cache.ts';
-import type { PermissionPromptRequest } from '../sdk/src/platform/permissions/prompt.ts';
+import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.ts';
 
 function makeRequest(callId: string): PermissionPromptRequest {
   return {

@@ -7,14 +7,14 @@
  * ask a contract's criteria trace to.
  */
 import { describe, expect, test } from 'bun:test';
-import { readCompletionRepairContext } from '../sdk/src/platform/core/completion-repair-context.js';
-import { ConversationManager } from '../sdk/src/platform/core/conversation.js';
-import type { ConversationMessageSnapshot } from '../sdk/src/platform/core/conversation.js';
-import { handleToolResponseOutcome } from '../sdk/src/platform/core/orchestrator-turn-helpers.js';
-import type { ToolCall, ToolResult } from '../sdk/src/platform/types/tools.js';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import type { TurnEvent } from '../sdk/src/events/turn.js';
+import { readCompletionRepairContext } from '../platform/src/platform/core/completion-repair-context.js';
+import { ConversationManager } from '../platform/src/platform/core/conversation.js';
+import type { ConversationMessageSnapshot } from '../platform/src/platform/core/conversation.js';
+import { handleToolResponseOutcome } from '../platform/src/platform/core/orchestrator-turn-helpers.js';
+import type { ToolCall, ToolResult } from '../platform/src/platform/types/tools.js';
+import type { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import type { TurnEvent } from '../platform/src/events/turn.js';
 
 function createProviderRegistry() {
   return {

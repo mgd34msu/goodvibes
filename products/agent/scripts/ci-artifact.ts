@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
-import { writeFileAtomic } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { writeFileAtomic } from '@goodvibes-jev/engine/platform/platform/utils';
 import { recordTerminalReaderArtifact, retainTerminalReaderCohort, verifyTerminalReaderArtifact } from '@goodvibes-jev/engine/toolchain';
 
 const payloads = ['goodvibes-agent-linux-x64', 'goodvibes-agent-linux-x64.bun', 'goodvibes-agent-linux-x64.bun.LICENSE.md', 'goodvibes-agent-linux-x64.bun.json', 'lib/sqlite-vec-linux-x64/vec0.so'] as const;

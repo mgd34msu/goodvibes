@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { compactRegisteredToolDefinitions } from '../../tools/tool-definition-compaction.ts';
 
 function makeTool(name: string, description: string): Tool {

@@ -8,7 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, expect, test } from 'bun:test';
-import { STEER_TTL_MS, type ProcessNode } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
+import { STEER_TTL_MS, type ProcessNode } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import { reconcileSteerBadges, steerBadgeGlyph, steerBadgeTone } from '../../views/fleet-steer.ts';
 import type { FleetTab, SteerBadgeStatus } from '../../views/fleet-session-tabs.ts';
 import { DEFAULT_VIEW_PALETTE } from '../../views/polish.ts';
@@ -138,7 +138,7 @@ describe('reconcileSteerBadges', () => {
   // -------------------------------------------------------------------------
   // TTL-expiry fallback (long-tool-call case): the target stays healthy and
   // non-terminal throughout, but the underlying steer message's own TTL
-  // (the SDK's MessageBus stamps every steer with STEER_TTL_MS, see
+  // (the platform's MessageBus stamps every steer with STEER_TTL_MS, see
   // registry.js's steer()) lapses in the bus without ever producing a
   // COMMUNICATION_CONSUMED. Without this, the badge would show 'queued'
   // forever while delivery is still unknown.

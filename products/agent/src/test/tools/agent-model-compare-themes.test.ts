@@ -1,10 +1,10 @@
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-import { withDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { withDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import type { ArtifactRecord } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import { modelReasonTheme, routingRegistry } from '@goodvibes-jev/engine/sdk/platform/routing';
+import type { ArtifactRecord } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import { modelReasonTheme, routingRegistry } from '@goodvibes-jev/engine/platform/platform/routing';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { formatComparisonSynthesis } from '../../tools/agent-model-compare-judgment.ts';

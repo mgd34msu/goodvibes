@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   acquireCrossProcessLock, AtomicWriteDurabilityError, confirmFileDurable, writeJsonFileAtomic,
-} from '@goodvibes-jev/engine/sdk/platform/state/durable-file-io';
+} from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
 import {
   TUI_HOST_PAIRING_MAX_BYTES, TUI_HOST_PAIRING_MAX_RECORDS, TUI_HOST_PAIRING_UNAVAILABLE_REASON,
   tuiHostPairingStorePath, beginTuiHostPairing, canonicalizePairingHost, completeTuiHostPairing, readTuiHostPairing,
@@ -141,7 +141,7 @@ test('independent same-host processes get one durable winner, including repeated
 }));
 
 test('a crashed process leaves a durable unknown marker and its dead-owner lock is recoverable', async () => fixture(async (home, path) => {
-  const durableModule = import.meta.resolve('@goodvibes-jev/engine/sdk/platform/state/durable-file-io');
+  const durableModule = import.meta.resolve('@goodvibes-jev/engine/platform/platform/state/durable-file-io');
   const child = Bun.spawnSync([process.execPath, '--eval', `
     import { writeSync } from 'node:fs';
     import { beginTuiHostPairing } from ${JSON.stringify(moduleUrl)};

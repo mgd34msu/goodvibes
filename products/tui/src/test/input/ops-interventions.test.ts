@@ -2,7 +2,7 @@
  * /ops interventions, live proof of the operator control-plane path.
  *
  * This surface shipped dead for three months: OpsControlPlane construction
- * was gated on 'operator-control-plane', an id never registered in any SDK
+ * was gated on 'operator-control-plane', an id never registered in any platform
  * registry, so isEnabled was permanently false, /ops task|agent always
  * errored, and the Ops Control view never left its not-configured state.
  * The gate now rides the real control-plane gateway capability

@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { createFindTool } from '../sdk/src/platform/tools/find/executor.js';
+import { createFindTool } from '../platform/src/platform/tools/find/executor.js';
 
 let work: string;
 

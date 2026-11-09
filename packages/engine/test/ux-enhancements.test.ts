@@ -15,12 +15,12 @@ import {
   type ConnectorTransportEvent,
   type ReconnectAttemptInfo,
   type RuntimeEventConnectorOptions,
-} from '../sdk/dist/index.js';
+} from '../platform/dist/index.js';
 import type {
   TaskEvent,
   KnowledgeEvent,
   TransportEvent,
-} from '../sdk/dist/index.js';
+} from '../platform/dist/index.js';
 import { WebSocketMessageAssembler } from '../transport-core/src/websocket-messages.ts';
 import { settleEvents } from './_helpers/test-timeout.js';
 

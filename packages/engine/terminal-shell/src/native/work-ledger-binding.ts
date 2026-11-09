@@ -1,6 +1,6 @@
-import type { OperatorRemoteClient } from '@goodvibes-jev/engine/operator-sdk';
-import { createOperatorWorkLedgerReadClient } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/operator-read-client';
-import { createOperatorNativeWorkExecutionClient } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
+import type { OperatorRemoteClient } from '@goodvibes-jev/engine/operator-client';
+import { createOperatorWorkLedgerReadClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/operator-read-client';
+import { createOperatorNativeWorkExecutionClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
 import type { NativeWorkLedgerBinding } from './work-ledger-projection.js';
 export function createNativeWorkLedgerReadBinding(
   operator: Pick<OperatorRemoteClient, 'invoke'> & { dispose(): void },

@@ -43,7 +43,7 @@ test("actual CLI waits for provider facts and shares one reading across each pro
   const home = mkdtempSync(join(tmpdir(), 'agent-provider-facts-'));
   const source = `
 import { mock } from 'bun:test';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { parseGoodVibesCli } from '@goodvibes-jev/engine/terminal-shell';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';

@@ -11,18 +11,18 @@ import {
   adaptCodeIndex,
   codeIndexNodeId,
   type CodeIndexProcessSource,
-} from '../sdk/src/platform/runtime/fleet/adapters/code-index.js';
-import { createProcessRegistry } from '../sdk/src/platform/runtime/fleet/index.js';
-import type { ProcessRegistryDeps, RegistryTimers } from '../sdk/src/platform/runtime/fleet/registry.js';
-import type { AgentManager, AgentRecord } from '../sdk/src/platform/tools/agent/manager.js';
-import type { ProcessManager } from '../sdk/src/platform/tools/shared/process-manager.js';
-import type { WatcherRegistry } from '../sdk/src/platform/watchers/registry.js';
+} from '../platform/src/platform/runtime/fleet/adapters/code-index.js';
+import { createProcessRegistry } from '../platform/src/platform/runtime/fleet/index.js';
+import type { ProcessRegistryDeps, RegistryTimers } from '../platform/src/platform/runtime/fleet/registry.js';
+import type { AgentManager, AgentRecord } from '../platform/src/platform/tools/agent/manager.js';
+import type { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.js';
+import type { WatcherRegistry } from '../platform/src/platform/watchers/registry.js';
 import type {
   ScheduleManager,
   TriggerManager,
   WorkflowManager,
-} from '../sdk/src/platform/tools/workflow/index.js';
-import type { CodeIndexBuildStats, CodeIndexStats } from '../sdk/src/platform/state/code-index-store.js';
+} from '../platform/src/platform/tools/workflow/index.js';
+import type { CodeIndexBuildStats, CodeIndexStats } from '../platform/src/platform/state/code-index-store.js';
 
 const T0 = 1_750_000_000_000;
 

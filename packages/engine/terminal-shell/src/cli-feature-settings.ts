@@ -1,5 +1,5 @@
 /**
- * cli-feature-settings.ts, a front-end's own helpers over the SDK's
+ * cli-feature-settings.ts, a front-end's own helpers over the platform's
  * FEATURE_SETTINGS surface.
  *
  * Every platform capability is configured through a first-class settings key
@@ -11,7 +11,7 @@
  *   - whether a raw config value means the feature is currently on,
  *   - which single settings write turns a feature on or off.
  *
- * Enablement kinds (from the SDK binding layer):
+ * Enablement kinds (from the platform binding layer):
  *   - boolean : the key's boolean value is the enablement.
  *   - enum    : active while the key's value is in enabledValues (several
  *               features can share one key, e.g. behavior.compactionStrategy).
@@ -21,16 +21,16 @@
  *               fetch.sanitizeMode) has no off position at all.
  */
 
-import { CONFIG_SCHEMA, type ConfigKey, type ConfigManager, type ConfigSetting } from '@goodvibes-jev/engine/sdk/platform/config';
+import { CONFIG_SCHEMA, type ConfigKey, type ConfigManager, type ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   FEATURE_SETTINGS,
   deriveFeatureState,
   type FeatureSetting,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/state';
+} from '@goodvibes-jev/engine/platform/platform/runtime/state';
 
-export type { FeatureSetting } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
+export type { FeatureSetting } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 
-/** Every capability by id, in SDK declaration order. */
+/** Every capability by id, in platform declaration order. */
 export const FEATURE_SETTINGS_BY_ID: ReadonlyMap<string, FeatureSetting> = new Map(
   FEATURE_SETTINGS.map((feature) => [feature.id, feature]),
 );

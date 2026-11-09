@@ -1,5 +1,5 @@
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { formatDeviceLine, resolveTokenByIdPrefix } from '@goodvibes-jev/engine/sdk/platform/pairing';
+import { formatDeviceLine, resolveTokenByIdPrefix } from '@goodvibes-jev/engine/platform/platform/pairing';
 
 /**
  * Register the /devices command, manage the per-device pairing tokens minted by

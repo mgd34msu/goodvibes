@@ -47,7 +47,7 @@ function makeGateOptions(root: string, overrides: Partial<LanScanGateOptions> = 
 }
 
 /** A fake discovery pass, this is the ONLY thing allowed to stand in for the
- * SDK's real subnet scan in tests. It never touches the network. */
+ * platform's real subnet scan in tests. It never touches the network. */
 function fakeDiscovery(
   emit: (opts: BackgroundProviderDiscoveryOptions) => void,
 ): { readonly fn: (opts: BackgroundProviderDiscoveryOptions) => BackgroundRuntimeTaskHandle; calls: number } {
@@ -87,7 +87,7 @@ describe('lan-scan-consent: persistence', () => {
     expect(loadLanScanConsent(shellPaths, SURFACE_ROOT)).toBeUndefined();
   });
 
-  test('discoveredProvidersFilePath points at the same location the SDK persists scan results to', () => {
+  test('discoveredProvidersFilePath points at the same location the platform persists scan results to', () => {
     const root = makeProjectTempDir('gv-lan-consent');
     const shellPaths = createShellPathService({ workingDirectory: root, homeDirectory: root });
     expect(discoveredProvidersFilePath(shellPaths, SURFACE_ROOT)).toBe(
@@ -185,7 +185,7 @@ describe('runGatedLanScan: consent gate (test doubles only: never a real network
     saveLanScanConsent(shellPaths, SURFACE_ROOT, 'granted');
 
     const discovery = fakeDiscovery((opts) => {
-      // Mimics the SDK's real per-server raw emit shape verbatim (bootstrap-background.js).
+      // Mimics the platform's real per-server raw emit shape verbatim (bootstrap-background.js).
       opts.systemMessageRouter.low('[Local] Ollama at 192.168.1.7:11434 (2 models) — from last session');
       opts.systemMessageRouter.low('[Scan] Found LM Studio at 10.0.0.5:1234 (3 models)');
       opts.requestRender();

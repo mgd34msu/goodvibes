@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
-import type { NativeWorkSubmissionRequest } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-submission-client';
+import type { NativeWorkSubmissionRequest } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-submission-client';
 import { createNativeWorkLedgerView } from '../../runtime/native-work-ledger-host.ts';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerAgentWorkspaceRuntimeCommands } from '../../input/commands/agent-workspace-runtime.ts';

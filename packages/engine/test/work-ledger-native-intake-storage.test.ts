@@ -4,18 +4,18 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, expect, test } from 'bun:test';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { KNOWLEDGE_SCHEMA_VERSION } from '../sdk/src/platform/knowledge/store-schema.js';
-import { acquireCrossProcessLock } from '../sdk/src/platform/workspace/checkpoint/cross-process-lock.js';
-import { loadSqlJsEngine, SQLiteStore, type SqlDatabase } from '../sdk/src/platform/state/sqlite-store.js';
-import type { SQLitePublicationIO } from '../sdk/src/platform/state/sqlite-store-persistence.js';
-import { createWorkLedger } from '../sdk/src/platform/workflow/work-ledger/service.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { KNOWLEDGE_SCHEMA_VERSION } from '../platform/src/platform/knowledge/store-schema.js';
+import { acquireCrossProcessLock } from '../platform/src/platform/workspace/checkpoint/cross-process-lock.js';
+import { loadSqlJsEngine, SQLiteStore, type SqlDatabase } from '../platform/src/platform/state/sqlite-store.js';
+import type { SQLitePublicationIO } from '../platform/src/platform/state/sqlite-store-persistence.js';
+import { createWorkLedger } from '../platform/src/platform/workflow/work-ledger/service.js';
 import {
   nativeConversationSourceId, nativeConversationSourceRevision, nativeConversationProposalRevision, nativeConversationDecisionBinding,
   parseNativeConversationCapture, validateNativeConversationProposal,
   type NativeConversationCapture, type NativeConversationStorage,
-} from '../sdk/src/platform/workflow/work-ledger/native-intake-types.js';
-import type { WorkLedgerSubmission } from '../sdk/src/platform/workflow/work-ledger/types.js';
+} from '../platform/src/platform/workflow/work-ledger/native-intake-types.js';
+import type { WorkLedgerSubmission } from '../platform/src/platform/workflow/work-ledger/types.js';
 
 const roots: string[] = [], stores: KnowledgeStore[] = [];
 afterEach(async () => { await Promise.all(stores.splice(0).map(store => store.close())); for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });

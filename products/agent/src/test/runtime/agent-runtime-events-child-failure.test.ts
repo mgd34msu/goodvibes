@@ -1,12 +1,12 @@
 import { getTestRuntimeServices } from '../helpers/runtime-services.ts';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { redactSensitiveDataAsync } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { redactSensitiveDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { RuntimeEventBus, createEventEnvelope } from '@/runtime/index.ts';
-import { AgentManager, ToolRegistry, createAgentTool } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { AgentMessageBus } from '@goodvibes-jev/engine/sdk/platform/agents';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { AgentManager, ToolRegistry, createAgentTool } from '@goodvibes-jev/engine/platform/platform/tools';
+import { AgentMessageBus } from '@goodvibes-jev/engine/platform/platform/agents';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { createDomainDispatch } from '../../runtime/store/index.ts';
 import { registerAgentRuntimeEvents } from '../../runtime/agent-runtime-events.ts';
@@ -39,7 +39,7 @@ beforeEach(async () => {
 });
 afterEach(() => { installJudgmentPort(previousPort); });
 
-describe('registerAgentRuntimeEvents: AGENT_FAILED child-failure envelope enrichment (SDK 1.6.1)', () => {
+describe('registerAgentRuntimeEvents: AGENT_FAILED child-failure envelope enrichment (platform 1.6.1)', () => {
   test('AGENT_FAILED renders a compact suffix with the real classified reason from the agent tool\'s own status action', async () => {
     const configDir = makeProjectTempDir('gv-child-failure');
     const configManager = new ConfigManager({ surfaceRoot: 'tui', configDir });

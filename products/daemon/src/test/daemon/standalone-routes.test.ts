@@ -7,17 +7,17 @@
  * F14, control-plane SSE DEFAULT_DOMAINS includes 'providers' and 'turn'
  *
  * These tests start a real DaemonServer bound to a random high port and issue
- * real HTTP requests. No mocks of HTTP or SDK internals.
+ * real HTTP requests. No mocks of HTTP or platform internals.
  */
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { DaemonServer } from '@goodvibes-jev/engine/sdk/platform/daemon';
-import { UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
+import { DaemonServer } from '@goodvibes-jev/engine/platform/platform/daemon';
+import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
 import { createFeatureFlagManager, RuntimeEventBus } from '../../runtime/index.ts';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ChatRequest, ChatResponse, LLMProvider } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { createRuntimeStore } from '@goodvibes-jev/engine/sdk/platform/runtime/store';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ChatRequest, ChatResponse, LLMProvider } from '@goodvibes-jev/engine/platform/platform/providers';
+import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
 import { createRuntimeServices } from '../../runtime/services.ts';
 import { startGatewayFixture, fixtureModel as buildTestModelDefinition } from '../helpers/gateway-route-fixture.js';
 import type { DaemonFixture } from '../../testing/daemon-fixture.js';
@@ -135,7 +135,7 @@ describe('F1: companion-chat routes on standalone DaemonServer', () => {
   });
 
   test('POST /api/companion/chat/sessions creates a session', async () => {
-    // SDK companion routes: POST /api/companion/chat/sessions returns {sessionId, createdAt}
+    // platform companion routes: POST /api/companion/chat/sessions returns {sessionId, createdAt}
     // GET /api/companion/chat/sessions (list) is not in the companion-chat-routes surface.
     const res = await fetch(`http://127.0.0.1:${port}/api/companion/chat/sessions`, {
       method: 'POST',
@@ -145,7 +145,7 @@ describe('F1: companion-chat routes on standalone DaemonServer', () => {
     // Companion routes are wired in DaemonHttpRouter when companionChatManager is present.
     expect(res.status).toBe(201);
     const body = await res.json() as Record<string, unknown>;
-    // SDK response shape: { sessionId: string, createdAt: number }
+    // platform response shape: { sessionId: string, createdAt: number }
     expect(typeof body['sessionId']).toBe('string');
     expect(typeof body['createdAt']).toBe('number');
   });
@@ -314,7 +314,7 @@ describe('F1: companion-chat routes on standalone DaemonServer', () => {
     const res = await fetch(`http://127.0.0.1:${port}/api/models/current`, {
       headers: bearerHeaders(),
     });
-    // Should return 200. SDK shape: { model: null | {...}, configured: bool, configuredVia?: string }
+    // Should return 200. platform shape: { model: null | {...}, configured: bool, configuredVia?: string }
     expect(res.status).toBe(200);
     const body = await res.json() as Record<string, unknown>;
     expect('model' in body).toBe(true);
@@ -419,7 +419,7 @@ describe('F4: panel registry on standalone daemon', () => {
 
   // The daemon has no screen, so it has no panels, the route answers honestly
   // rather than pretending. A panel is a thing a surface draws; the daemon's
-  // panel manager is the SDK's no-op precisely so this cannot quietly become a
+  // panel manager is the platform's no-op precisely so this cannot quietly become a
   // half-working feature that opens panels nobody can see.
   test('POST /api/panels/open answers 404 for any id', async () => {
     for (const id of ['welcome', 'fleet', 'anything-at-all']) {

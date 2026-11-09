@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { createDaemonMediaRouteHandlers } from '../daemon-sdk/src/media-routes.js';
-import { DEFAULT_CONFIG, CONFIG_SCHEMA } from '../sdk/src/platform/config/schema.js';
-import { VoiceProviderRegistry } from '../sdk/src/platform/voice/provider-registry.js';
-import { VoiceService } from '../sdk/src/platform/voice/service.js';
-import { createElevenLabsProvider } from '../sdk/src/platform/voice/providers/elevenlabs.js';
-import type { VoiceAudioChunk, VoiceSynthesisStreamResult } from '../sdk/src/platform/voice/types.js';
+import { createDaemonMediaRouteHandlers } from '../daemon-api/src/media-routes.js';
+import { DEFAULT_CONFIG, CONFIG_SCHEMA } from '../platform/src/platform/config/schema.js';
+import { VoiceProviderRegistry } from '../platform/src/platform/voice/provider-registry.js';
+import { VoiceService } from '../platform/src/platform/voice/service.js';
+import { createElevenLabsProvider } from '../platform/src/platform/voice/providers/elevenlabs.js';
+import type { VoiceAudioChunk, VoiceSynthesisStreamResult } from '../platform/src/platform/voice/types.js';
 
 async function collectBytes(chunks: AsyncIterable<{ readonly data: Uint8Array }>): Promise<number[]> {
   const bytes: number[] = [];

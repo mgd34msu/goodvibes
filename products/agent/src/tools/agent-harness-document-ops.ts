@@ -1,5 +1,5 @@
 import type { CommandContext } from '../input/command-registry.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogData, captureCatalogMethods, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { AGENT_WORKSPACE_CATEGORIES } from '../input/agent-workspace-categories.ts';
 import { buildAgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace-snapshot.ts';
@@ -522,11 +522,11 @@ function buildLanes(context: CommandContext): readonly DocumentOpsLane[] {
       status: artifactBrowserReady ? 'ready' : artifactBrowserActions.length > 0 ? 'partial' : 'gap',
       outcome: 'Find and reuse uploaded, exported, generated, and source-backed artifacts from one place.',
       current: artifactBrowserReady
-        ? 'Agent has a unified artifact browser with filters, redacted metadata, bounded text previews, admitted artifact export-to-file, admitted multi-artifact package export and ZIP archive export, admitted artifact-to-Knowledge promotion, admitted artifact-to-document attachment, and admitted artifact-to-document insertion over the SDK artifact store.'
+        ? 'Agent has a unified artifact browser with filters, redacted metadata, bounded text previews, admitted artifact export-to-file, admitted multi-artifact package export and ZIP archive export, admitted artifact-to-Knowledge promotion, admitted artifact-to-document attachment, and admitted artifact-to-document insertion over the platform artifact store.'
         : 'Artifacts are real and visible in transcript, source, session, and media routes, but the unified browser is not fully wired in this runtime.',
       next: artifactBrowserReady
         ? 'Use package or ZIP archive exports across document, upload, generated media, session, comparison, and Knowledge artifacts.'
-        : 'Wire agent_artifacts and browse/show workspace actions over the SDK artifact store.',
+        : 'Wire agent_artifacts and browse/show workspace actions over the platform artifact store.',
       userRoute: 'Agent Workspace -> Documents & Files -> Browse artifacts, Export package, or Promote to Knowledge',
       modelRoute: artifactBrowserReady ? 'agent_artifacts + agent_knowledge_ingest' : 'agent_harness mode:"workspace_actions" categoryId:"artifacts"',
       signals: [

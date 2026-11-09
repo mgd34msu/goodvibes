@@ -26,10 +26,10 @@
 
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireSecretsManager } from './runtime-services.ts';
-import { renderGoogleSetupReport } from '@goodvibes-jev/engine/sdk/platform/google';
-import type { GoogleClientIntakeChoice } from '@goodvibes-jev/engine/sdk/platform/google';
-import { renderGoogleSetupRunbook } from '@goodvibes-jev/engine/sdk/platform/google';
-import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '@goodvibes-jev/engine/sdk/platform/google';
+import { renderGoogleSetupReport } from '@goodvibes-jev/engine/platform/platform/google';
+import type { GoogleClientIntakeChoice } from '@goodvibes-jev/engine/platform/platform/google';
+import { renderGoogleSetupRunbook } from '@goodvibes-jev/engine/platform/platform/google';
+import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '@goodvibes-jev/engine/platform/platform/google';
 import {
   adoptGoogleCredentials,
   connectGoogle,
@@ -40,7 +40,7 @@ import {
   reauthorizeGoogle,
   runGoogleSetup,
 } from './google-connection-actions.ts';
-import type { GoogleProgressPort, GoogleSetupPath, GoogleSetupStepSpec, GoogleStepResult } from '@goodvibes-jev/engine/sdk/platform/google';
+import type { GoogleProgressPort, GoogleSetupPath, GoogleSetupStepSpec, GoogleStepResult } from '@goodvibes-jev/engine/platform/platform/google';
 import { getOutwardApprovalStore, takeRefusedOutwardAction } from '../../trust/outward-approvals.ts';
 
 const USAGE = [

@@ -2,11 +2,11 @@ import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:tes
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { installJudgmentPort, JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
-import { ToolRegistry, ToolInputProjectionError, registrySelect } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import { ServiceRegistry, SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { SecurityReadSourceRetiredError } from '@goodvibes-jev/engine/sdk/platform/security';
-import type { McpApi, McpServerSecurityRecord } from '@goodvibes-jev/engine/sdk/platform/mcp';
+import { ToolRegistry, ToolInputProjectionError, registrySelect } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { ServiceRegistry, SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { SecurityReadSourceRetiredError } from '@goodvibes-jev/engine/platform/platform/security';
+import type { McpApi, McpServerSecurityRecord } from '@goodvibes-jev/engine/platform/platform/mcp';
 import { createShellPathService } from '@/runtime/index.ts';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { createTestManagers } from '../helpers/test-managers.ts';

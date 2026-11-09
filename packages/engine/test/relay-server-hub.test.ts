@@ -12,7 +12,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   RelayHub,
   type RelayServerSocket,
-} from '../daemon-sdk/src/relay-server.js';
+} from '../daemon-api/src/relay-server.js';
 import {
   decodeControlFrame,
   encodeControlFrame,

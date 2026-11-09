@@ -4,7 +4,7 @@
  * in order, with the contract's id and status on the request.
  */
 import { describe, expect, test } from 'bun:test';
-import { ContractExternalWorkBridge, type ContractExternalWorkAdapter } from '../../sdk/src/platform/contract/index.js';
+import { ContractExternalWorkBridge, type ContractExternalWorkAdapter } from '../../platform/src/platform/contract/index.js';
 
 describe('ContractExternalWorkBridge', () => {
   test('dispatch, status, cancel and result go to the adapter', async () => {

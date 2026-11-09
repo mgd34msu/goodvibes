@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test';
-import { formatLastSeen, formatCreated, formatDeviceLine, resolveTokenByIdPrefix, shortTokenId } from '../sdk/src/platform/pairing/device-lines.ts';
-import type { PublicPairingToken } from '../sdk/src/platform/pairing/index.ts';
+import { formatLastSeen, formatCreated, formatDeviceLine, resolveTokenByIdPrefix, shortTokenId } from '../platform/src/platform/pairing/device-lines.ts';
+import type { PublicPairingToken } from '../platform/src/platform/pairing/index.ts';
 
 const NOW = Date.UTC(2026, 6, 13, 12, 0, 0);
 

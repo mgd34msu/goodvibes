@@ -5,7 +5,7 @@ import { retryTransientInstall } from './install-retry.ts';
 import {
   cleanupStage,
   collectTarballs,
-  createSdkTempDir,
+  createPlatformTempDir,
   getAuthToken,
   getPublishRegistryOverride,
   getRootVersion,
@@ -21,16 +21,16 @@ import {
 const REGISTRY_MODE = process.argv.includes('--registry');
 // The old packages are subpaths of the one engine package.
 const ENGINE_PACKAGE_NAME = requirePackageName('.');
-const PUBLIC_PACKAGE_DIR = 'sdk';
+const PUBLIC_PACKAGE_DIR = 'platform';
 const PUBLIC_PACKAGE_NAME = packageNameForDir(PUBLIC_PACKAGE_DIR);
 const CONTRACTS_PACKAGE_NAME = packageNameForDir('contracts');
 const ERRORS_PACKAGE_NAME = packageNameForDir('errors');
-const DAEMON_SDK_PACKAGE_NAME = packageNameForDir('daemon-sdk');
+const DAEMON_API_PACKAGE_NAME = packageNameForDir('daemon-api');
 const TRANSPORT_CORE_PACKAGE_NAME = packageNameForDir('transport-core');
 const TRANSPORT_HTTP_PACKAGE_NAME = packageNameForDir('transport-http');
 const TRANSPORT_REALTIME_PACKAGE_NAME = packageNameForDir('transport-realtime');
-const OPERATOR_SDK_PACKAGE_NAME = packageNameForDir('operator-sdk');
-const PEER_SDK_PACKAGE_NAME = packageNameForDir('peer-sdk');
+const OPERATOR_CLIENT_PACKAGE_NAME = packageNameForDir('operator-client');
+const PEER_CLIENT_PACKAGE_NAME = packageNameForDir('peer-client');
 const JUDGMENT_PACKAGE_NAME = manifestPackageName('../judgment');
 
 function requirePackageName(dir: string): string {
@@ -92,12 +92,12 @@ const autoUpdater = await import('${AUTO_UPDATER_ENTRY}');
 const daemonReceipts = await import('${RECEIPTS_ENTRY}');
 const contractsPackage = await import('${CONTRACTS_PACKAGE_NAME}');
 const errorsPackage = await import('${ERRORS_PACKAGE_NAME}');
-const daemonSdkPackage = await import('${DAEMON_SDK_PACKAGE_NAME}');
+const daemonApiPackage = await import('${DAEMON_API_PACKAGE_NAME}');
 const transportCorePackage = await import('${TRANSPORT_CORE_PACKAGE_NAME}');
 const transportHttpPackage = await import('${TRANSPORT_HTTP_PACKAGE_NAME}');
 const transportRealtimePackage = await import('${TRANSPORT_REALTIME_PACKAGE_NAME}');
-const operatorSdkPackage = await import('${OPERATOR_SDK_PACKAGE_NAME}');
-const peerSdkPackage = await import('${PEER_SDK_PACKAGE_NAME}');
+const operatorClientPackage = await import('${OPERATOR_CLIENT_PACKAGE_NAME}');
+const peerClientPackage = await import('${PEER_CLIENT_PACKAGE_NAME}');
 const judgmentDecisions = await import('${JUDGMENT_PACKAGE_NAME}/decisions');
 const judgmentRoot = await import('${JUDGMENT_PACKAGE_NAME}');
 const engineErrors = await import('${ERRORS_PACKAGE_NAME}');
@@ -171,11 +171,11 @@ await refusal.ask({ state: requestState, questions: requestQuestions });
 if (refusalAttempts !== 1) throw new Error('packaged decision refusal incorrectly tried another model');
 console.log('packaged decision adapters, finite failover, refusal and zero-effect outage checks passed');
 
-const sdk = root.createGoodVibesSdk({ baseUrl: 'http://127.0.0.1:3210' });
-if (!sdk?.operator || !sdk?.peer || !sdk?.realtime) throw new Error('sdk entrypoint missing expected surfaces');
+const engine = root.createGoodVibesPlatform({ baseUrl: 'http://127.0.0.1:3210' });
+if (!engine?.operator || !engine?.peer || !engine?.realtime) throw new Error('engine entrypoint missing expected surfaces');
 if (typeof auth.createMemoryTokenStore !== 'function') throw new Error('auth entrypoint missing token helpers');
-if (typeof operator.createOperatorSdk !== 'function') throw new Error('operator client export missing');
-if (typeof peer.createPeerSdk !== 'function') throw new Error('peer client export missing');
+if (typeof operator.createOperatorApiClient !== 'function') throw new Error('operator client export missing');
+if (typeof peer.createPeerApiClient !== 'function') throw new Error('peer client export missing');
 if (typeof daemon.createDaemonControlRouteHandlers !== 'function') throw new Error('daemon route export missing');
 if (!contracts.OPERATOR_METHOD_IDS || !contracts.PEER_ENDPOINT_IDS) throw new Error('contracts export missing');
 if (typeof runtimeEvents.createRemoteRuntimeEvents !== 'function') throw new Error('runtime realtime export missing');
@@ -201,17 +201,17 @@ if (typeof selfUpdate.compareVersions !== 'function') throw new Error('self-upda
 if (typeof selfUpdate.verifyChecksum !== 'function') throw new Error('self-update verifyChecksum export missing');
 if (typeof autoUpdater.DaemonAutoUpdater !== 'function') throw new Error('auto-updater DaemonAutoUpdater export missing');
 if (typeof daemonReceipts.DaemonReceiptStore !== 'function') throw new Error('daemon receipts store export missing');
-if (typeof root.createGoodVibesSdk !== 'function') throw new Error('umbrella sdk export missing');
-if (typeof webEntry.createWebGoodVibesSdk !== 'function') throw new Error('web sdk export missing');
-if (typeof nativeEntry.createReactNativeGoodVibesSdk !== 'function') throw new Error('react-native sdk export missing');
+if (typeof root.createGoodVibesPlatform !== 'function') throw new Error('umbrella engine export missing');
+if (typeof webEntry.createWebGoodVibesPlatform !== 'function') throw new Error('web engine export missing');
+if (typeof nativeEntry.createReactNativeGoodVibesPlatform !== 'function') throw new Error('react-native engine export missing');
 if (!contractsPackage.OPERATOR_METHOD_IDS || !contractsPackage.PEER_ENDPOINT_IDS) throw new Error('contracts package export missing');
-if (typeof errorsPackage.GoodVibesSdkError !== 'function') throw new Error('errors package export missing');
-if (typeof daemonSdkPackage.createDaemonControlRouteHandlers !== 'function') throw new Error('daemon-sdk package export missing');
+if (typeof errorsPackage.GoodVibesError !== 'function') throw new Error('errors package export missing');
+if (typeof daemonApiPackage.createDaemonControlRouteHandlers !== 'function') throw new Error('daemon-api package export missing');
 if (typeof transportCorePackage.createDirectClientTransport !== 'function') throw new Error('transport-core package export missing');
 if (typeof transportHttpPackage.createHttpTransport !== 'function') throw new Error('transport-http package export missing');
 if (typeof transportRealtimePackage.createRemoteRuntimeEvents !== 'function') throw new Error('transport-realtime package export missing');
-if (typeof operatorSdkPackage.createOperatorSdk !== 'function') throw new Error('operator-sdk package export missing');
-if (typeof peerSdkPackage.createPeerSdk !== 'function') throw new Error('peer-sdk package export missing');
+if (typeof operatorClientPackage.createOperatorApiClient !== 'function') throw new Error('operator-client package export missing');
+if (typeof peerClientPackage.createPeerApiClient !== 'function') throw new Error('peer-client package export missing');
 if (typeof judgmentDecisions.defineBattery !== 'function') throw new Error('judgment decisions export missing');
 if (typeof judgmentRoot.createSystemOnePort !== 'function') throw new Error('judgment root export missing');
 if (typeof engineErrors.readFailure !== 'function' || typeof engineErrors.installJudgmentPort !== 'function') throw new Error('engine errors judgment reading export missing');
@@ -261,7 +261,7 @@ const nestedInternalRoot = join(packageRoot, 'node_modules', '@goodvibes-jev');
 if (existsSync(nestedInternalRoot)) {
   const leaked = readdirSync(nestedInternalRoot);
   if (leaked.length > 0) {
-    throw new Error('SDK package contains nested GoodVibes package installs: ' + leaked.join(', '));
+    throw new Error('engine package contains nested GoodVibes package installs: ' + leaked.join(', '));
   }
 }
 console.log('install smoke ok');
@@ -271,7 +271,7 @@ function writeConsumerFiles(projectDir: string): void {
   writeFileSync(
     resolve(projectDir, 'package.json'),
     `${JSON.stringify({
-      name: 'goodvibes-sdk-install-smoke',
+      name: 'goodvibes-install-smoke',
       private: true,
       type: 'module',
     }, null, 2)}\n`,
@@ -299,7 +299,7 @@ function writeRegistryConfig(projectDir: string): void {
 }
 
 async function installWithNpm(specs: readonly string[]): Promise<void> {
-  const projectDir = createSdkTempDir('goodvibes-sdk-npm-smoke-');
+  const projectDir = createPlatformTempDir('goodvibes-npm-smoke-');
   try {
     writeConsumerFiles(projectDir);
     await retryTransientInstall(() => run('npm', ['install', ...specs], projectDir, {
@@ -315,7 +315,7 @@ async function installWithNpm(specs: readonly string[]): Promise<void> {
 }
 
 async function installWithBun(specs: readonly string[]): Promise<void> {
-  const projectDir = createSdkTempDir('goodvibes-sdk-bun-smoke-');
+  const projectDir = createPlatformTempDir('goodvibes-bun-smoke-');
   try {
     writeConsumerFiles(projectDir);
     if (!REGISTRY_MODE) {
@@ -351,7 +351,7 @@ function buildRegistrySpecs(): string[] {
 
 async function buildTarballSpecs() {
   const { tempRoot, publicStages } = await stagePackages();
-  const packDestination = createSdkTempDir('goodvibes-sdk-tarballs-');
+  const packDestination = createPlatformTempDir('goodvibes-tarballs-');
   const packResults = publicStages.map((stage) => packStage(stage.stageDir, packDestination));
   const tarballs = collectTarballs(packResults, packDestination);
   return { tempRoot, specs: tarballs };

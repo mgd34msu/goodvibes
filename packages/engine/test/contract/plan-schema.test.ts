@@ -11,11 +11,11 @@ import {
   validateContractPlan,
   type PlanLimits,
   type PlanProblemCode,
-} from '../../sdk/src/platform/contract/plan-schema.js';
-import { PLANNER_DECOMPOSITION_TOOLS } from '../../sdk/src/platform/agents/planner-decomposition-runner.js';
-import { parseAmendment } from '../../sdk/src/platform/contract/amendment.js';
-import { buildPlanTree } from '../../sdk/src/platform/contract/planner.js';
-import { unitShapeInput } from '../../sdk/src/platform/contract/batteries/unit-shape.js';
+} from '../../platform/src/platform/contract/plan-schema.js';
+import { PLANNER_DECOMPOSITION_TOOLS } from '../../platform/src/platform/agents/planner-decomposition-runner.js';
+import { parseAmendment } from '../../platform/src/platform/contract/amendment.js';
+import { buildPlanTree } from '../../platform/src/platform/contract/planner.js';
+import { unitShapeInput } from '../../platform/src/platform/contract/batteries/unit-shape.js';
 import { ASK, asPlan, draftUnit, plannerOutput, shapeOf, singleUnitPlan, validPlan, type DraftPlan } from './plan-support.js';
 
 const LIMITS: PlanLimits = { maxUnits: 64, defaultAttempts: 1 };

@@ -1,9 +1,9 @@
 import type { AgentResearchReportSource as ResearchSource } from '../agent/research-report-input.ts';
 import { prepareProtectedResearchReport, createAgentResearchReportProjector, bindAgentResearchSourceOwner, bindAgentResearchReportSourceOwner, type PreparedResearchReport } from '../agent/protected-research-report.ts';
-import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/sdk/platform/security';
-import type { ArtifactDescriptor, ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import { assertCurrentToolEffect, assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
+import type { ArtifactDescriptor, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { assertCurrentToolEffect, assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 
 export interface AgentResearchReportToolArgs {
   readonly runId?: unknown;

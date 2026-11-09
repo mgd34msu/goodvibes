@@ -2,10 +2,10 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createExecTool } from '../sdk/src/platform/tools/exec/index.ts';
-import { ProcessManager } from '../sdk/src/platform/tools/shared/process-manager.ts';
-import { OverflowHandler } from '../sdk/src/platform/tools/shared/overflow.ts';
-import { AGENT_OWNER_TERMINAL_GUARD } from '../sdk/src/platform/gate/policy/exec-posture.ts';
+import { createExecTool } from '../platform/src/platform/tools/exec/index.ts';
+import { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.ts';
+import { OverflowHandler } from '../platform/src/platform/tools/shared/overflow.ts';
+import { AGENT_OWNER_TERMINAL_GUARD } from '../platform/src/platform/gate/policy/exec-posture.ts';
 import { EXEC_GATE_TABLE } from './_helpers/gate-readings.ts';
 import { useToolReadings } from './_helpers/tool-readings.ts';
 

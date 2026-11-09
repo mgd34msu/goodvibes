@@ -1,5 +1,5 @@
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
-import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { registerBuiltinCapabilities } from './builtin-capabilities.ts';
 import { resolveCapabilityIndex } from './capability-index.ts';
 import { setCapabilitySnapshot } from './capability-snapshot.ts';

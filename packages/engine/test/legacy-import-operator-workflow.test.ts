@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openLegacyImportOperator } from '../terminal-shell/src/legacy-work-ledger-import-operator.js';
 import { LegacyImportJournal, type LegacyImportCommand } from '../terminal-shell/src/legacy-work-ledger-import-journal.js';
-import { prepareLegacyWorkLedgerMigration, projectLegacyImportWorks } from '../sdk/src/platform/workflow/work-ledger/legacy-import.js';
+import { prepareLegacyWorkLedgerMigration, projectLegacyImportWorks } from '../platform/src/platform/workflow/work-ledger/legacy-import.js';
 import type { JevDecision } from '@goodvibes-jev/judgment/decisions';
 import fixture from '../../../products/agent/src/test/fixtures/legacy-ledger/preparation.json' with { type: 'json' };
 const roots: string[] = [];

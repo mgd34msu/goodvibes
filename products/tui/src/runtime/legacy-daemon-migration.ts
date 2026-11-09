@@ -47,14 +47,14 @@ import { spawnSync } from 'node:child_process';
 import net from 'node:net';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { TuiConfigManager } from '../config/host-settings.ts';
-import { PlatformServiceManager, type ManagedServiceStatus } from '@goodvibes-jev/engine/sdk/platform/daemon';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { PlatformServiceManager, type ManagedServiceStatus } from '@goodvibes-jev/engine/platform/platform/daemon';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { runDaemonConfigMigration } from '../config/run-daemon-config-migration.ts';
 
 /** Structurally derived from `PlatformServiceManager`'s own constructor, the
- * SDK's public `platform/daemon` entry point only re-exports the class and
+ * platform's public `platform/daemon` entry point only re-exports the class and
  * `ManagedServiceStatus`, not the options/definition/action-runner interfaces
  * by name, so we pull their shapes off the class itself rather than reaching
  * past the package's declared export map. */
@@ -74,12 +74,12 @@ export const MANAGED_SERVICE_NAME = 'goodvibes';
 export const MANAGED_SERVICE_DESCRIPTION = 'GoodVibes daemon (shared session broker + companion host)';
 
 /**
- * Follow-up: resolve the unit name the SDK's `PlatformServiceManager`
+ * Follow-up: resolve the unit name the platform's `PlatformServiceManager`
  * would actually manage, from config alone, for callers that need the
  * honest display name BEFORE any manager/status exists (the onboarding
  * wizard's detection banner resolves this at snapshot-collection time and
  * carries it on `OnboardingLegacyDaemonSnapshot.trackedServiceName`).
- * Mirrors the SDK's own internal `resolveServiceName()` precedence exactly:
+ * Mirrors the platform's own internal `resolveServiceName()` precedence exactly:
  * the `service.serviceName` config key first, trimmed, falling back to the
  * default (`MANAGED_SERVICE_NAME`, which `buildManagedDaemonServiceManager`
  * passes as `defaultServiceName`) when the key is unset or blank. Takes a
@@ -141,7 +141,7 @@ export function buildManagedDaemonServiceManager(params: BuildManagedDaemonServi
     // operator-tokens.json, auth-users.json and daemon-settings.json, which is
     // `<home>/.goodvibes/daemon`. This baked the USER HOME, so a serviced
     // daemon filed its identity a level above where every reader in this
-    // repository looks: the SDK's platform/config goodvibes-home resolves the flag AS the state
+    // repository looks: the platform's platform/config goodvibes-home resolves the flag AS the state
     // directory, cli/service-posture.ts already writes the state directory into
     // GOODVIBES_DAEMON_HOME for the unit it installs, and runtime/bootstrap.ts
     // reads the companion token from the state directory. On a normal machine
@@ -251,7 +251,7 @@ export function detectLegacyUnit(input: DetectLegacyUnitInput): LegacyUnitInfo {
 
 /**
  * The unit name `PlatformServiceManager` is ACTUALLY about to mutate can
- * differ from `MANAGED_SERVICE_NAME` / `definitionOverride.name`. The SDK's
+ * differ from `MANAGED_SERVICE_NAME` / `definitionOverride.name`. The platform's
  * internal `resolveServiceName()`, used by `install()`, `uninstall()`, and
  * `status()` alike to compute the unit file PATH, resolves from the
  * `service.serviceName` CONFIG key first, falling back to the
@@ -265,10 +265,10 @@ export function detectLegacyUnit(input: DetectLegacyUnitInput): LegacyUnitInfo {
  *
  * This resolves the name actually in play so callers can detect that
  * collision before mutating anything: it prefers `status.serviceName` when
- * the linked SDK build carries it (a parallel SDK change adds this field to
+ * the linked platform build carries it (a parallel platform change adds this field to
  * `ManagedServiceStatus` precisely so callers never have to guess), and
  * falls back to the basename of `status.path` with its unit-file extension
- * stripped against an SDK build that predates that field. The fallback only
+ * stripped against a platform build that predates that field. The fallback only
  * has to handle the systemd `<name>.service` (and launchd `<name>.plist`)
  * shapes: every call site in this module reaches this after already
  * confirming the platform is 'systemd' (a non-systemd host is refused
@@ -455,7 +455,7 @@ export async function runLegacyDaemonMigration(
   // actually about to install/uninstall isn't the legacy unit itself. This
   // happens when the host's `service.serviceName` config key is set to the
   // legacy unit's own name, see `resolveManagedUnitName`'s doc comment for
-  // why the SDK resolves mutation paths from that config key rather than
+  // why the platform resolves mutation paths from that config key rather than
   // from the definition this engine passes. Without this check, `install()`
   // below would overwrite the legacy unit file, a failed-health rollback
   // (`uninstall()`) would DELETE it while still claiming it was "never

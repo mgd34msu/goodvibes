@@ -18,8 +18,8 @@
  * form, then is dropped whole (a half-cut marker reads worse than none); the
  * branch goes before the marker does, the title before either.
  */
-import { type Line, createEmptyLine } from '@goodvibes-jev/engine/sdk/platform/types';
-import { getDisplayWidth, interpolateColor, truncateDisplay } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { type Line, createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types';
+import { getDisplayWidth, interpolateColor, truncateDisplay } from '@goodvibes-jev/engine/platform/platform/utils';
 export interface GitHeaderInfo {
     readonly branch: string;
     readonly dirty: boolean;

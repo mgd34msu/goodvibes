@@ -9,10 +9,10 @@
  * working directory on the contracts it builds.
  */
 import { describe, expect, test } from 'bun:test';
-import { deriveRemoteCapabilities } from '../sdk/src/platform/runtime/remote/capabilities.ts';
-import { RemoteRunnerRegistry } from '../sdk/src/platform/runtime/remote/runner-registry.ts';
-import type { RemoteRunnerContract } from '../sdk/src/platform/runtime/remote/types.ts';
-import type { AgentRecord } from '../sdk/src/platform/tools/agent/manager.ts';
+import { deriveRemoteCapabilities } from '../platform/src/platform/runtime/remote/capabilities.ts';
+import { RemoteRunnerRegistry } from '../platform/src/platform/runtime/remote/runner-registry.ts';
+import type { RemoteRunnerContract } from '../platform/src/platform/runtime/remote/types.ts';
+import type { AgentRecord } from '../platform/src/platform/tools/agent/manager.ts';
 
 const ROOT = '/home/dev/projects/shop-api';
 

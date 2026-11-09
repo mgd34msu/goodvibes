@@ -9,15 +9,15 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { SettingsModal, SETTINGS_CATEGORIES, SETTINGS_CATEGORY_GROUPS } from '../../input/settings-modal.ts';
 import { InputHistory } from '../../input/input-history.ts';
-import { ConfigManager, type ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
-import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager, type ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
 import { SecretsManager } from '../../config/secrets.ts';
 import { buildGoodVibesSecretKey, buildGoodVibesSecretRef } from '../../config/secret-config.ts';
-import { ServiceRegistry } from '@goodvibes-jev/engine/sdk/platform/config';
-import { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
+import { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
-import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
+import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -177,7 +177,7 @@ describe('SettingsModal', () => {
     ]);
   });
 
-  test('open() routes every SDK config schema key into the workspace', () => {
+  test('open() routes every platform config schema key into the workspace', () => {
     modal.open(cm, ffm, subscriptionManager, serviceRegistry, mcpRegistry);
     const visibleKeys = new Set<string>();
     for (const entries of modal.groups.values()) {

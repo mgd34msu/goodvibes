@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { McpClient } from '../sdk/src/platform/mcp/client.js';
+import { McpClient } from '../platform/src/platform/mcp/client.js';
 import {
   createMcpElicitationApprovalHandler,
   parseElicitationParams,
-} from '../sdk/src/platform/mcp/elicitation.js';
-import type { PermissionPromptDecision, PermissionPromptRequest } from '../sdk/src/platform/permissions/prompt.js';
+} from '../platform/src/platform/mcp/elicitation.js';
+import type { PermissionPromptDecision, PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.js';
 
 function dispatchJsonLine(client: McpClient, message: unknown): void {
   (client as unknown as { _dispatchLine(line: string): void })._dispatchLine(JSON.stringify(message));

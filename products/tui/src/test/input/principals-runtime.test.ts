@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { CommandRegistry, type CommandContext } from '@/input/command-registry.ts';
 import { registerPrincipalsRuntimeCommands, renderPrincipal } from '@/input/commands/principals-runtime.ts';
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/sdk';
+import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
 
 type Principal = OperatorMethodOutput<'principals.list'>['principals'][number];
 

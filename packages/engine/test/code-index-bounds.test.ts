@@ -9,9 +9,9 @@ import { beforeEach, describe, expect, test, afterEach } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CodeIndexStore } from '../sdk/src/platform/state/code-index-store.js';
-import { MemoryEmbeddingProviderRegistry } from '../sdk/src/platform/state/memory-embeddings.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
+import { CodeIndexStore } from '../platform/src/platform/state/code-index-store.js';
+import { MemoryEmbeddingProviderRegistry } from '../platform/src/platform/state/memory-embeddings.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
 
 const roots: string[] = [];
 

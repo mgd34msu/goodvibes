@@ -1,6 +1,6 @@
 # Realtime and telemetry
 
-> **Surface scope:** This document covers realtime transport and telemetry for both the **full surface (Bun runtime)** and the **companion surface** (React Native, Expo, browser). Full-surface consumers use `createGoodVibesSdk`; companion consumers use their surface-specific constructors. See [Published Surface Matrix](./surfaces.md) for the full breakdown.
+> **Surface scope:** This document covers realtime transport and telemetry for both the **full surface (Bun runtime)** and the **companion surface** (React Native, Expo, browser). Full-surface consumers use `createGoodVibesPlatform`; companion consumers use their surface-specific constructors. See [Published Surface Matrix](./surfaces.md) for the full breakdown.
 
 > **Scope vs. [Observability](./observability.md):** This document is the consumer-facing quick reference for realtime feeds and basic telemetry consumption. For the complete event-domain catalog, observer-pipeline internals, redaction, correlation context, and metric-label allowlist, see [Observability](./observability.md). Content overlap is intentional but kept minimal here.
 
@@ -9,14 +9,14 @@ Use realtime feeds for live UI updates and operator monitoring.
 ## Runtime events
 
 ```ts
-import { createGoodVibesSdk } from '@goodvibes-jev/engine/sdk';
+import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
 
-const sdk = createGoodVibesSdk({
+const platformClient = createGoodVibesPlatform({
   baseUrl: 'http://127.0.0.1:3421',
   authToken: process.env.GOODVIBES_TOKEN,
 });
 
-const unsubscribe = sdk.realtime.viaSse().agents.on('AGENT_COMPLETED', (event) => {
+const unsubscribe = platformClient.realtime.viaSse().agents.on('AGENT_COMPLETED', (event) => {
   console.log(event);
 });
 ```
@@ -29,7 +29,7 @@ The realtime layer supports:
 
 ### Realtime connectors
 
-The realtime transport (`@goodvibes-jev/engine/sdk/transport-realtime`) exposes two low-level connector factories plus a domain-event layer. Wrap either connector with `createRemoteRuntimeEvents(connector)` for the typed runtime-event feed.
+The realtime transport (`@goodvibes-jev/engine/platform/transport-realtime`) exposes two low-level connector factories plus a domain-event layer. Wrap either connector with `createRemoteRuntimeEvents(connector)` for the typed runtime-event feed.
 
 - `createEventSourceConnector(baseUrl, token, fetch, options?)`: SSE connector. Supports `Last-Event-ID` stream resume, reconnect (via the stream reconnect policy), and dynamic auth-token resolution on reconnect.
 - `createWebSocketConnector(baseUrl, token, WebSocket, options?)`: WebSocket connector. The connection-lifecycle hooks below are passed via the `options` object. Adds connection-lifecycle hooks that the SSE connector does **not** fire:
@@ -56,22 +56,22 @@ Telemetry APIs live on the operator client:
 // snapshot: returns recent telemetry entries. The filter input is an inline per-method
 // shape (there is no exported TelemetrySnapshotOptions type):
 // { limit?; since?; until?; domains?; types?; severity?; traceId?; sessionId?; turnId?; agentId?; taskId?; cursor?; view? }
-const snapshot = await sdk.operator.telemetry.snapshot({ limit: 100 });
+const snapshot = await platformClient.operator.telemetry.snapshot({ limit: 100 });
 // errors: filter by severity ('debug' | 'error' | 'info' | 'warn'), domains, time range
 // (since/until), and a cursor for pagination
-const errors = await sdk.operator.telemetry.errors({ severity: 'error' });
+const errors = await platformClient.operator.telemetry.errors({ severity: 'error' });
 ```
 
-The same filter shape works across the sibling list methods. `sdk.operator.telemetry.events(filter)` returns the raw runtime-event records, a superset of what `errors` returns, unfiltered by severity. `sdk.operator.telemetry.traces(filter)` returns OTel-shaped spans, and `sdk.operator.telemetry.metrics(filter)` returns an aggregate metrics snapshot. `sdk.operator.telemetry.stream(handlers, filter)` opens a live server-sent stream of telemetry records and returns an unsubscribe function, for consumers that want a push feed instead of polling `snapshot`.
+The same filter shape works across the sibling list methods. `platformClient.operator.telemetry.events(filter)` returns the raw runtime-event records, a superset of what `errors` returns, unfiltered by severity. `platformClient.operator.telemetry.traces(filter)` returns OTel-shaped spans, and `platformClient.operator.telemetry.metrics(filter)` returns an aggregate metrics snapshot. `platformClient.operator.telemetry.stream(handlers, filter)` opens a live server-sent stream of telemetry records and returns an unsubscribe function, for consumers that want a push feed instead of polling `snapshot`.
 
 ## OTLP exports
 
-The operator SDK exposes the OTLP-shaped daemon endpoints:
+The operator platform exposes the OTLP-shaped daemon endpoints:
 
 ```ts
-await sdk.operator.telemetry.otlp.traces();
-await sdk.operator.telemetry.otlp.logs();
-await sdk.operator.telemetry.otlp.metrics();
+await platformClient.operator.telemetry.otlp.traces();
+await platformClient.operator.telemetry.otlp.logs();
+await platformClient.operator.telemetry.otlp.metrics();
 ```
 
 The OTLP endpoints return JSON-encoded OTLP responses (`application/json` with OTLP export response shape). Binary protobuf encoding is not used on these routes.

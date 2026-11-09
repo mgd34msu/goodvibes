@@ -4,11 +4,11 @@
  * When the same goodvibes install runs more than once on one network, a
  * laptop and a desktop, or two processes on one machine, every copy
  * independently reads the shared inbox, so one message is picked up twice and
- * answered twice. The SDK's cluster coordinator elects exactly one node to be
+ * answered twice. The platform's cluster coordinator elects exactly one node to be
  * responsible for inbound consumption; everything else stays warm and silent.
  *
  * This file exists because this daemon does NOT get that for free from the
- * SDK facade. The facade gates the consumers IT owns (Telegram
+ * platform facade. The facade gates the consumers IT owns (Telegram
  * ingress, the ntfy/Slack/Discord provider runtime), but this repository
  * composes an inbound consumer of its own, the Slack/Discord/email inbox
  * poller in daemon/handlers/inbox, and the facade knows nothing about it.
@@ -17,7 +17,7 @@
  *
  * So this composition builds the ONE coordinator for the process, registers
  * the inbox poller with it, and hands the same instance to the DaemonServer
- * (via `DaemonConfig.clusterCoordinator`) so the SDK's consumers ride the same
+ * (via `DaemonConfig.clusterCoordinator`) so the platform's consumers ride the same
  * leadership rather than holding a second, competing election.
  *
  * What leadership does NOT gate, here or anywhere: outbound delivery,
@@ -31,10 +31,10 @@ import {
   type ClusterConsumerGate,
   type ClusterClock,
   type ClusterTransport,
-} from '@goodvibes-jev/engine/sdk/platform/cluster';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+} from '@goodvibes-jev/engine/platform/platform/cluster';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ShellPathService } from './index.js';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import { VERSION } from '../version.js';
 
@@ -52,7 +52,7 @@ export interface GatedPollerControl {
  * Constructing it is inert: no socket is opened and no state is written until
  * `start()` runs, so composing a runtime in a test never joins a network.
  *
- * The version is THIS BINARY's version, not the SDK package's, the same
+ * The version is THIS BINARY's version, not the platform package's, the same
  * distinction daemon/cli.ts already makes for the self-update artifact. It is
  * the first ranking tier, so getting it wrong would let a stale build hold the
  * role through an update.

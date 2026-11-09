@@ -22,29 +22,29 @@ Use the platform this way:
 The shape below is the same on every companion surface: bootstrap state over
 HTTP, subscribe to a live event channel, and re-read the snapshot on resume.
 This example uses the browser entrypoint; React Native is identical except it
-uses `createReactNativeGoodVibesSdk` and prefers `sdk.realtime.viaWebSocket()`.
+uses `createReactNativeGoodVibesPlatform` and prefers `platformClient.realtime.viaWebSocket()`.
 
 ```ts
-import { createBrowserGoodVibesSdk } from '@goodvibes-jev/engine/sdk/browser';
+import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
 
 // `token` and `render()` are provided by your app; omit `authToken` for
 // same-origin cookie-backed sessions.
-const sdk = createBrowserGoodVibesSdk({
+const platformClient = createBrowserGoodVibesPlatform({
   baseUrl: 'https://goodvibes.example.com',
   authToken: token,
 });
 
 async function refresh(): Promise<void> {
   // The snapshot is the authoritative copy of state.
-  render(await sdk.operator.control.snapshot());
+  render(await platformClient.operator.control.snapshot());
 }
 
 // 1. HTTP bootstrap: load the snapshot before opening any stream.
 await refresh();
 
 // 2. Subscribe: keep a live event channel open. Use viaSse() for operator
-//    dashboards; use sdk.realtime.viaWebSocket() on mobile/React Native.
-const events = sdk.realtime.viaSse();
+//    dashboards; use platformClient.realtime.viaWebSocket() on mobile/React Native.
+const events = platformClient.realtime.viaSse();
 const unsubscribe = events.agents.on('AGENT_COMPLETED', () => {
   // Treat realtime as a wake-up signal, then re-read authoritative state.
   void refresh();
@@ -99,7 +99,7 @@ Companion clients have two different model-selection modes:
 - do not model the app entirely as raw event streams with no snapshot APIs
 - do not rely on string parsing for errors
 - do not assume mobile streaming behavior matches desktop/browser behavior
-- keep companion-app behavior implemented in the SDK itself, not in an external host repo
+- keep companion-app behavior implemented in the platform itself, not in an external host repo
 
 ## Next reads
 

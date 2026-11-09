@@ -1,8 +1,8 @@
 import { captureJudgmentPort, decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
-import { gateJudgmentRegistry } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { gateJudgmentRegistry } from '@goodvibes-jev/engine/platform/platform/gate';
+import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Battery, YesNoItem } from '@goodvibes-jev/judgment';
 import { captureCatalogMethods, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';

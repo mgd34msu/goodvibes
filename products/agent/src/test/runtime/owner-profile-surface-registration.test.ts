@@ -14,7 +14,7 @@ import { describe, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
-import { CONFIG_SCHEMA, ConfigManager, SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { CONFIG_SCHEMA, ConfigManager, SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 import { SettingsModal } from '../../input/settings-modal.ts';
@@ -24,7 +24,7 @@ import {
   SETTINGS_CATEGORY_GROUPS,
 } from '../../input/settings-modal-types.ts';
 import { CATEGORY_LABELS } from '../../renderer/settings-modal-helpers.ts';
-import { readPermissionCategory } from '@goodvibes-jev/engine/sdk/platform/gate/policy';
+import { readPermissionCategory } from '@goodvibes-jev/engine/platform/platform/gate/policy';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 

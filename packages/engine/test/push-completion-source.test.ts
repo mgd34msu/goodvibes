@@ -8,14 +8,14 @@
  * hand-built notices, deliver() overridden to capture composed messages.
  */
 import { describe, expect, test } from 'bun:test';
-import { PushService } from '../sdk/src/platform/push/index.js';
+import { PushService } from '../platform/src/platform/push/index.js';
 import type {
   FleetNotice,
   PushMessage,
   PushNotificationCategory,
   VapidManager,
   PushSubscriptionStore,
-} from '../sdk/src/platform/push/index.js';
+} from '../platform/src/platform/push/index.js';
 
 function makeService(
   isCategoryEnabled?: (category: PushNotificationCategory) => boolean,

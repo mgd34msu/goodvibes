@@ -23,10 +23,10 @@ import {
   writeRecoveryFile,
   type SessionPersistenceOptions,
   type SessionSnapshot,
-} from '../sdk/src/platform/runtime/session-persistence.ts';
-import { createSessionSurface, type SessionSurface } from '../sdk/src/platform/runtime/session-surface.ts';
-import { resolveSharedDirectory } from '../sdk/src/platform/runtime/surface-root.ts';
-import { logger } from '../sdk/src/platform/utils/logger.ts';
+} from '../platform/src/platform/runtime/session-persistence.ts';
+import { createSessionSurface, type SessionSurface } from '../platform/src/platform/runtime/session-surface.ts';
+import { resolveSharedDirectory } from '../platform/src/platform/runtime/surface-root.ts';
+import { logger } from '../platform/src/platform/utils/logger.ts';
 
 const roots: string[] = [];
 
@@ -114,7 +114,7 @@ describe('session-persistence: legacy form stays byte-compatible and warns once'
 describe('session-persistence: surface and legacy options cannot be mixed (compile-time)', () => {
   test('mixing surface with a legacy scope field is rejected by the type checker', () => {
     const { surface, workingDirectory } = tempSurface();
-    // NOTE: bun test does not type-check test files (packages/sdk/tsconfig.json
+    // NOTE: bun test does not type-check test files (packages/platform/tsconfig.json
     // excludes **/*.test.ts, and this repo's `pretest` tsc build only compiles
     // src/**/*.ts, see package.json). So this assertion documents the intended
     // compile-time contract (as the sibling type-tests under test/types/ do for

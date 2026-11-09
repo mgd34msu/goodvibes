@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 import type { Page, Route } from '@playwright/test';
-import { parseBrowserJudgmentRequest, type BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-sdk';
+import { parseBrowserJudgmentRequest, type BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-api';
 import { installMockDaemon } from './mock-daemon';
 
 interface Wire {

@@ -3,7 +3,7 @@
  *
  * End-to-end auth flow fixture: boots a fake Bun.serve HTTP server that emulates
  * the operator endpoint's auth flow, then drives the real `createGoodVibesAuthClient`
- * + `createOperatorSdk` against it.
+ * + `createOperatorApiClient` against it.
  *
  * Auth flow modelled:
  *   POST /api/control/auth/login   → set session cookie; return { token, authenticated, ... }
@@ -18,9 +18,9 @@
  */
 
 import { describe, expect, test, afterEach } from 'bun:test';
-import { createGoodVibesAuthClient, createMemoryTokenStore } from '../../sdk/src/auth.js';
-import { createOperatorSdk } from '../../operator-sdk/src/client.js';
-import type { OperatorSdk } from '../../operator-sdk/src/client.js';
+import { createGoodVibesAuthClient, createMemoryTokenStore } from '../../platform/src/auth.js';
+import { createOperatorApiClient } from '../../operator-client/src/client.js';
+import type { OperatorApiClient } from '../../operator-client/src/client.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -210,35 +210,35 @@ function buildFakeOperatorServer(opts: {
 // ---------------------------------------------------------------------------
 
 /**
- * Build a stub OperatorSdk that routes to our fake server.
+ * Build a stub OperatorApiClient that routes to our fake server.
  *
- * We compose with a real `createOperatorSdk` so the real HTTP transport +
+ * We compose with a real `createOperatorApiClient` so the real HTTP transport +
  * contract resolution path is exercised. The cookie jar is managed via the
  * `credentials: 'include'` fetch behaviour, our test manually threads the
  * cookie in headers because Bun's fetch does not maintain a cookie jar across
  * requests.
  */
-function makeOperatorForServer(baseUrl: string, sessionToken?: string): OperatorSdk {
+function makeOperatorForServer(baseUrl: string, sessionToken?: string): OperatorApiClient {
   const headers: Record<string, string> = {};
   if (sessionToken) {
     headers['cookie'] = `${COOKIE_NAME}=${encodeURIComponent(sessionToken)}`;
   }
-  return createOperatorSdk({ baseUrl, headers });
+  return createOperatorApiClient({ baseUrl, headers });
 }
 
 /**
- * Wire a stub OperatorSdk whose `control.auth.login` and `control.auth.current`
+ * Wire a stub OperatorApiClient whose `control.auth.login` and `control.auth.current`
  * delegate to the fake server via fetch, with cookie threading.
  *
- * We use a minimal mock approach because `createOperatorSdk` doesn't provide a
+ * We use a minimal mock approach because `createOperatorApiClient` doesn't provide a
  * handle to the token emitted by login. This helper gives us full control to
  * thread the session cookie from login → subsequent calls.
  */
-function makeFakeOperatorSdk(
+function makeFakeOperatorApiClient(
   baseUrl: string,
   authToken?: string,
-): OperatorSdk {
-  return createOperatorSdk({
+): OperatorApiClient {
+  return createOperatorApiClient({
     baseUrl,
     ...(authToken ? { authToken } : {}),
   });
@@ -296,8 +296,8 @@ describe('auth-flow-e2e: session-cookie-only mode', () => {
     expect(currentBody.sessionCookiePresent).toBe(true);
     expect(currentBody.principalId).toBe('alice');
 
-    // createGoodVibesAuthClient via operator sdk (bearer-based token flow)
-    const operator = makeFakeOperatorSdk(srv.baseUrl, sessionToken);
+    // createGoodVibesAuthClient via operator platform (bearer-based token flow)
+    const operator = makeFakeOperatorApiClient(srv.baseUrl, sessionToken);
     const authClient = createGoodVibesAuthClient(operator, tokenStore);
     expect(authClient.writable).toBe(true);
     expect(await authClient.getToken()).toBe(sessionToken);
@@ -350,7 +350,7 @@ describe('auth-flow-e2e: shared-token-only mode', () => {
     expect(body.principalKind).toBe('token');
 
     // createGoodVibesAuthClient with shared-token operator
-    const operator = makeFakeOperatorSdk(srv.baseUrl, SHARED_TOKEN);
+    const operator = makeFakeOperatorApiClient(srv.baseUrl, SHARED_TOKEN);
     const authClient = createGoodVibesAuthClient(operator, null);
     expect(authClient.writable).toBe(false);
   });
@@ -404,7 +404,7 @@ describe('auth-flow-e2e: both-configured fallthrough', () => {
 
     // createGoodVibesAuthClient with session token
     const tokenStore = createMemoryTokenStore(token);
-    const operator = makeFakeOperatorSdk(srv.baseUrl, token);
+    const operator = makeFakeOperatorApiClient(srv.baseUrl, token);
     const authClient = createGoodVibesAuthClient(operator, tokenStore);
     expect(authClient.writable).toBe(true);
 

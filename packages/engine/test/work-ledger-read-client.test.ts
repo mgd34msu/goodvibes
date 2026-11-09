@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
-import { createEmptyWorkLedgerState, createWorkLedger } from '../sdk/src/platform/workflow/work-ledger/service.js';
-import { createLocalWorkLedgerReadBinding } from '../sdk/src/platform/workflow/work-ledger/read-client.js';
-import type { WorkLedgerActor, WorkLedgerDecision, WorkLedgerState, WorkLedgerStorage } from '../sdk/src/platform/workflow/work-ledger/types.js';
+import { createEmptyWorkLedgerState, createWorkLedger } from '../platform/src/platform/workflow/work-ledger/service.js';
+import { createLocalWorkLedgerReadBinding } from '../platform/src/platform/workflow/work-ledger/read-client.js';
+import type { WorkLedgerActor, WorkLedgerDecision, WorkLedgerState, WorkLedgerStorage } from '../platform/src/platform/workflow/work-ledger/types.js';
 
 function deferred() {
   let resolve!: () => void;

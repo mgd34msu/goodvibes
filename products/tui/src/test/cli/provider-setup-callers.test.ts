@@ -10,7 +10,7 @@ const source = `
 import { mock } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { CONFIG_SCHEMA, ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { CONFIG_SCHEMA, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { parseGoodVibesCli } from '@goodvibes-jev/engine/terminal-shell';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';

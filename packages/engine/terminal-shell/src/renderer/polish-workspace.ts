@@ -1,5 +1,5 @@
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
-import { createEmptyLine } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
+import { createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types';
 
 import { buildViewLine, type ViewPalette } from './polish-core.js';
 import { getSurfaceContentRows, getTrackedVisibleWindow, getVisibleWindow, type VisibleWindow } from '../surface-layout.js';

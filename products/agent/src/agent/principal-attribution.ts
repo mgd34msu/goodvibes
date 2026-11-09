@@ -18,9 +18,9 @@
  * underlying detail can read the optional `error` field separately.
  */
 
-import { createBrowserGoodVibesSdk } from '@goodvibes-jev/engine/sdk/browser';
-import type { OperatorMethodInput } from '@goodvibes-jev/engine/sdk/contracts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
+import type { OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 export const UNKNOWN_PRINCIPAL_LABEL = 'unknown principal';
 
@@ -75,7 +75,7 @@ export async function resolveChannelPrincipalAttribution(
     return { ...UNKNOWN_ATTRIBUTION, error: 'No connected-host operator token available for principal resolution.' };
   }
   try {
-    const sdk = createBrowserGoodVibesSdk({
+    const platformClient = createBrowserGoodVibesPlatform({
       baseUrl: connection.baseUrl,
       authToken: connection.token,
       // A single attempt is enough for a display-only lookup, this must not
@@ -83,12 +83,12 @@ export async function resolveChannelPrincipalAttribution(
       retry: { maxAttempts: 1, baseDelayMs: 0, maxDelayMs: 0 },
     });
     const payload: PrincipalsResolveInput = { channel, value };
-    // No `as OperatorMethodOutput<'principals.resolve'>` here: the SDK's typed
+    // No `as OperatorMethodOutput<'principals.resolve'>` here: the platform's typed
     // overload already returns it, so the assertion would be redundant, and a
     // redundant assertion is not free, because it keeps compiling if the
     // contract's output changes underneath it. That is how `as never` hid two
     // breaking input changes for two rounds.
-    const result = await sdk.operator.invoke('principals.resolve', payload);
+    const result = await platformClient.operator.invoke('principals.resolve', payload);
     if (!result.known || !result.principal) return UNKNOWN_ATTRIBUTION;
     const principal: ResolvedPrincipalSummary = {
       id: result.principal.id,

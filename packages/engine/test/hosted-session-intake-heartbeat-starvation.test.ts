@@ -21,8 +21,8 @@
  * wait behind them, and heartbeats keep going while a slow turn is in flight.
  */
 import { describe, expect, test } from 'bun:test';
-import { HostedSessionSpineIntake, type HostedSessionSpine } from '../sdk/src/platform/hosted-sessions/spine-intake.ts';
-import type { HostedSessionRecord } from '../sdk/src/platform/hosted-sessions/types.ts';
+import { HostedSessionSpineIntake, type HostedSessionSpine } from '../platform/src/platform/hosted-sessions/spine-intake.ts';
+import type { HostedSessionRecord } from '../platform/src/platform/hosted-sessions/types.ts';
 
 function record(id: string): HostedSessionRecord {
   return {

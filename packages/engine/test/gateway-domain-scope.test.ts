@@ -15,13 +15,13 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { ControlPlaneGateway } from '../sdk/src/platform/control-plane/gateway.js';
+import { ControlPlaneGateway } from '../platform/src/platform/control-plane/gateway.js';
 import {
   EVENT_DOMAIN,
   clientMayReceiveEventDomain,
-} from '../sdk/src/platform/control-plane/gateway-scope-enforcement.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import type { RuntimeEventDomain } from '../sdk/src/platform/runtime/events/index.js';
+} from '../platform/src/platform/control-plane/gateway-scope-enforcement.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import type { RuntimeEventDomain } from '../platform/src/platform/runtime/events/index.js';
 
 function makeGateway(): ControlPlaneGateway {
   return new ControlPlaneGateway({ runtimeBus: new RuntimeEventBus() });

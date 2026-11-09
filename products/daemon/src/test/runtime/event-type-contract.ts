@@ -1,5 +1,5 @@
 import type { ContractEvent, GateEvent } from '../../runtime/index.ts';
-import type { ContractEvent as EngineContractEvent, GateEvent as EngineGateEvent } from '@goodvibes-jev/engine/sdk/events';
+import type { ContractEvent as EngineContractEvent, GateEvent as EngineGateEvent } from '@goodvibes-jev/engine/platform/events';
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
 type Assert<T extends true> = T;

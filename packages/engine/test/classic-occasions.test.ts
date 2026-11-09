@@ -5,12 +5,12 @@ import { join } from 'node:path';
 import { DecisionModelsDisabledError, decisionModelPolicyState, installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
-import { OwnerProfileStore } from '../sdk/src/platform/owner-profile/store.js';
-import { OccasionStateStore } from '../sdk/src/platform/occasions/state-store.js';
-import { OccasionsService } from '../sdk/src/platform/occasions/service.js';
-import { OCCASIONS_DEFAULTS } from '../sdk/src/platform/occasions/policy.js';
-import { resetProcessUntrustedContentLedgerForTests } from '../sdk/src/platform/security/untrusted-content.js';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
+import { OwnerProfileStore } from '../platform/src/platform/owner-profile/store.js';
+import { OccasionStateStore } from '../platform/src/platform/occasions/state-store.js';
+import { OccasionsService } from '../platform/src/platform/occasions/service.js';
+import { OCCASIONS_DEFAULTS } from '../platform/src/platform/occasions/policy.js';
+import { resetProcessUntrustedContentLedgerForTests } from '../platform/src/platform/security/untrusted-content.js';
 
 let previous: JudgmentPort | undefined, installed = false;
 const roots: string[] = [];

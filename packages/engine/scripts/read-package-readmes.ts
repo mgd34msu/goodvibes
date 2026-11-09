@@ -26,7 +26,7 @@ import {
   storedAnswer,
   type StoredEntry,
 } from './ci-readings/stored-readings.ts';
-import { packageDirs, publicPackageDirs, SDK_ROOT } from './release-shared.ts';
+import { packageDirs, publicPackageDirs, ENGINE_ROOT } from './release-shared.ts';
 
 const { values } = parseArgs({ args: Bun.argv.slice(2), options: { all: { type: 'boolean' } } });
 const SITE = 'engine.gates.package-readme.release';
@@ -37,7 +37,7 @@ const readings: Record<string, StoredEntry> = {};
 let read = 0;
 
 for (const dir of packageDirs) {
-  const state = readmeState(resolve(SDK_ROOT, dir));
+  const state = readmeState(resolve(ENGINE_ROOT, dir));
   const hash = stateHash(state);
   const asked = readmeQuestions(publicPackageDirs.includes(dir));
   const previous = stored[hash] ?? readings[hash];
@@ -54,7 +54,7 @@ for (const dir of packageDirs) {
 saveStoredReadings(READINGS_PATH, { decision: decisionId(packageReadme), model: readingModel(packageReadme), readings });
 console.log(`[package-readmes] ${read} read, ${packageDirs.length - read} reused, ${packageDirs.length} package README(s)`);
 for (const dir of packageDirs) {
-  const state = readmeState(resolve(SDK_ROOT, dir));
+  const state = readmeState(resolve(ENGINE_ROOT, dir));
   const entry = readings[stateHash(state)]!;
   console.log(`  ${dir}/README.md  ${Object.entries(entry.answers).map(([question, answer]) => `${question}: ${answer.verdict}, ${answer.outcome}, ${answer.probability}`).join('; ')}`);
   for (const problem of readmeProblems(dir, state, publicPackageDirs.includes(dir), readings)) console.log(`    ${problem}`);

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { shutdownRuntime } from '../sdk/src/platform/runtime/lifecycle.js';
+import { shutdownRuntime } from '../platform/src/platform/runtime/lifecycle.js';
 
 describe('runtime shutdown lifecycle', () => {
   test('continues cleanup after session persistence fails and then reports the failure', async () => {

@@ -2,16 +2,16 @@
  * ui-factory-waiting.test.ts, the honest waiting-state wording.
  *
  * UIFactory.busyPhrase derives WHICH waiting state applies (renderer-local)
- * and defers the exact wording to the SDK presentation contract's
+ * and defers the exact wording to the platform presentation contract's
  * waitingPhrase(). This proves the state derivation + contract consumption:
  * approval / pre-first-token / stalled / thinking, plus the tool-active stall
- * suppression, plus that THINKING_PHRASES is the SDK's (no local re-mint).
+ * suppression, plus that THINKING_PHRASES is the platform's (no local re-mint).
  */
 
 import { afterEach, describe, expect, test } from 'bun:test';
 import { UIFactory } from '../../renderer/ui-factory.ts';
 import { setActiveThemeMode } from '../../renderer/theme.ts';
-import { THINKING_PHRASES } from '@goodvibes-jev/engine/sdk/platform/presentation';
+import { THINKING_PHRASES } from '@goodvibes-jev/engine/platform/platform/presentation';
 
 afterEach(() => setActiveThemeMode('dark'));
 
@@ -57,7 +57,7 @@ describe('busyPhrase honest waiting states (the status line\'s phrase)', () => {
     expect(UIFactory.busyPhrase(0, 5, { msSinceLastDelta: STALL, reconnect: { attempt: 2, maxAttempts: 5 } })).toContain('Reconnecting (attempt 2/5)...');
   });
 
-  test('no stall → a rotated THINKING_PHRASE from the SDK contract', () => {
+  test('no stall → a rotated THINKING_PHRASE from the platform contract', () => {
     expect(UIFactory.busyPhrase(0)).toContain(THINKING_PHRASES[0]); // frame 0 → 'Thinking...'
   });
 

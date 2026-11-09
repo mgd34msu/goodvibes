@@ -40,8 +40,8 @@
  * pretending otherwise would put text in the transcript that no tool returned.
  */
 
-import type { ToolCall, ToolResult } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { TokenUsage } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { ToolCall, ToolResult } from '@goodvibes-jev/engine/platform/platform/types';
+import type { TokenUsage } from '@goodvibes-jev/engine/platform/platform/core';
 
 /**
  * The part of the conversation model this mapping writes to.

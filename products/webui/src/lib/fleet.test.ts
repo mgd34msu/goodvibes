@@ -104,7 +104,7 @@ describe('costLabel', () => {
     expect(costLabel(node({ id: 'n1', costState: 'estimated', costUsd: null }))).not.toContain('$');
   });
 
-  test('costUsd entirely absent (undefined, per the SDK contract, not just null) never throws', () => {
+  test('costUsd entirely absent (undefined, per the platform contract, not just null) never throws', () => {
     const { costUsd: _omit, ...rest } = node({ id: 'n1', costState: 'priced', costUsd: 5 });
     expect(costLabel(rest as FleetProcessNode)).not.toContain('$');
   });
@@ -248,7 +248,7 @@ describe('attention (needs-a-human) helpers', () => {
     expect(attentionCount([])).toBe(0);
   });
 
-  // 'pick' and 'conflict' (SDK 1.8.0) are the SAME waiting-on-human class as
+  // 'pick' and 'conflict' (platform 1.8.0) are the SAME waiting-on-human class as
   // approval/input, attentionCount already treats every reason identically (it only
   // checks `needsAttention` truthiness), so both are counted with no code change.
   test('attentionCount counts pick and conflict nodes exactly like approval/input', () => {
@@ -279,7 +279,7 @@ describe('attention (needs-a-human) helpers', () => {
   });
 });
 
-describe('acp-agent node kind (SDK 1.8.0)', () => {
+describe('acp-agent node kind (platform 1.8.0)', () => {
   test('is a known kind; renders with the honest generic KindBadge, not the unknown-kind warning', () => {
     expect(isKnownProcessKind('acp-agent')).toBe(true);
     expect(kindLabel('acp-agent')).toBe('acp-agent');

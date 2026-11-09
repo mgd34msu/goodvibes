@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { nativeHostedTurnLookupSchema } from "@goodvibes-jev/engine/sdk/platform/hosted-sessions/native-turn-client";
+import { nativeHostedTurnLookupSchema } from "@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client";
 import { loadNativeHostedTurnCapture } from "./native-hosted-turn-fixture";
 
 describe("native hosted turn exact production HTTP captures", () => {
   for (const name of ["completed", "cancelled"] as const) {
-    test(`${name} validates SDK schemas, operator contract and unmodified original identity`, () => {
+    test(`${name} validates platform schemas, operator contract and unmodified original identity`, () => {
       const capture = loadNativeHostedTurnCapture(name);
       const auth = JSON.parse(capture.auth.body) as {
         authenticated: boolean;

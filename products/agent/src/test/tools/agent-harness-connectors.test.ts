@@ -1,11 +1,11 @@
 import { cleanupResearchScreeningFixtures } from '../helpers/research-screening.ts';
 import { afterAll, afterEach, beforeEach, describe, expect, setSystemTime, spyOn, test } from 'bun:test';
-import * as operatorContracts from '@goodvibes-jev/engine/sdk/contracts';
+import * as operatorContracts from '@goodvibes-jev/engine/platform/contracts';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { installAgentMcpCallRoute, resetAgentMcpCallRouteForTests } from '../../tools/agent-mcp-call-route.ts';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { join } from 'node:path';
-import { ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
+import { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import { createHarnessArtifactStore, makeFixture, executeHarnessJson, createHarnessFixtureReadings } from "./agent-harness-tool-fixture.ts";
 
 

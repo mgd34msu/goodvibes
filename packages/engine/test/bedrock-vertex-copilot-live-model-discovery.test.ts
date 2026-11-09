@@ -36,10 +36,10 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AmazonBedrockProvider, BEDROCK_DATED_STATIC_MODELS } from '../sdk/src/platform/providers/amazon-bedrock.js';
-import { AmazonBedrockMantleProvider, BEDROCK_MANTLE_DATED_STATIC_MODELS } from '../sdk/src/platform/providers/amazon-bedrock-mantle.js';
-import { AnthropicVertexProvider, VERTEX_DATED_STATIC_MODELS } from '../sdk/src/platform/providers/anthropic-vertex.js';
-import { GitHubCopilotProvider, COPILOT_DATED_STATIC_MODELS } from '../sdk/src/platform/providers/github-copilot.js';
+import { AmazonBedrockProvider, BEDROCK_DATED_STATIC_MODELS } from '../platform/src/platform/providers/amazon-bedrock.js';
+import { AmazonBedrockMantleProvider, BEDROCK_MANTLE_DATED_STATIC_MODELS } from '../platform/src/platform/providers/amazon-bedrock-mantle.js';
+import { AnthropicVertexProvider, VERTEX_DATED_STATIC_MODELS } from '../platform/src/platform/providers/anthropic-vertex.js';
+import { GitHubCopilotProvider, COPILOT_DATED_STATIC_MODELS } from '../platform/src/platform/providers/github-copilot.js';
 
 const FAKE_VERTEX_AUTH_CLIENT = {
   getRequestHeaders: async () => new Headers({ Authorization: 'Bearer fake-vertex-token' }),

@@ -10,7 +10,7 @@ import { createTaskManager } from '@/runtime/index.ts';
 import { OpsControlPlane } from '@/runtime/index.ts';
 import { createShellPathService } from '@/runtime/index.ts';
 import { createFeatureFlagManager, deriveFeatureStates, type FeatureFlagManager } from '@/runtime/index.ts';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createTasksReadModel } from '../helpers/ui-read-models.ts';
 import type { OperatorClient } from '@/runtime/index.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
@@ -254,7 +254,7 @@ describe('tasks command', () => {
   // it did not disable task tracking when runtime.unifiedTasks was turned
   // off. Unlike the other five classes in this sweep, this key's schema
   // default was ALSO wrong (recorded false while every install always
-  // shipped enabled, because of this exact gap), the SDK has corrected the
+  // shipped enabled, because of this exact gap), the platform has corrected the
   // default to true/enabled, and bootstrap.ts now threads featureFlags, the
   // same shape as the other five fixes.
   //

@@ -3,7 +3,7 @@
  * release-train adoption sweep (CONVERSATION REWIND PORT).
  *
  * This Agent DOES have a genuine in-process mutable conversation store, its
- * own ConversationManager (src/core/conversation.ts, extends the SDK's shared
+ * own ConversationManager (src/core/conversation.ts, extends the platform's shared
  * base class exactly like goodvibes-tui's), the shape RewindConversationPort
  * assumes ("a daemon-hosted mutable conversation store"). It is not
  * channel-scoped or otherwise unrewindable: one process, one live
@@ -35,7 +35,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { ConversationManager } from '../../core/conversation.ts';
-import { recordTurnAnchor } from '@goodvibes-jev/engine/sdk/platform/rewind';
+import { recordTurnAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { registerSessionConversation, unregisterSessionConversation } from '../../runtime/conversation-rewind-port.ts';
 import { getTestRuntimeServices } from '../helpers/runtime-services.ts';
 import { buildDaemonGatewayCatalog } from '../helpers/daemon-gateway.ts';
@@ -56,7 +56,7 @@ interface RewindApplyResult {
   readonly refused: boolean;
 }
 
-describe('rewind.plan/apply conversation scope (live conversationRewindPort, SDK 1.6.1)', () => {
+describe('rewind.plan/apply conversation scope (live conversationRewindPort, platform 1.6.1)', () => {
   test('rewind.plan reports the conversation store as available (a real port is wired) but nothing to drop for an unregistered session', async () => {
     const services = getTestRuntimeServices();
     const result = await buildDaemonGatewayCatalog(services).invoke('rewind.plan', {
@@ -65,7 +65,7 @@ describe('rewind.plan/apply conversation scope (live conversationRewindPort, SDK
     } as never) as RewindPlanResult;
 
     // available:true reflects "a conversation store IS wired on this
-    // runtime" (see the SDK's UnifiedRewindService.plan), not "this session
+    // runtime" (see the platform's UnifiedRewindService.plan), not "this session
     // has messages", the port genuinely resolves this unregistered session
     // to null and honestly reports zero rather than fabricating a count.
     expect(result.conversation?.available).toBe(true);

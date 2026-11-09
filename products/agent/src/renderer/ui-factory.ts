@@ -1,6 +1,6 @@
 import { createUiFactory, type ThinkingStallInfo } from '@goodvibes-jev/engine/terminal-shell/ui-factory';
 import { VERSION } from '../version.ts';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { renderHeaderLine } from './header-line.ts';
 export type { ThinkingStallInfo } from '@goodvibes-jev/engine/terminal-shell/ui-factory';
 export class UIFactory extends createUiFactory({ secondaryQueue: true, previewEndInset: 2 }) {

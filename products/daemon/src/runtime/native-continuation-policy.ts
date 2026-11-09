@@ -2,7 +2,7 @@
  * their exact opaque revision tuple; old CI1 grants retain their original
  * digest recipe only on actual legacy capture/adoption, never every guard. */
 import { createHash } from 'node:crypto';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 
 type ConfigurationOwner = Pick<ConfigManager, 'captureDurableConfigurationIncarnation' | 'getDurableConfigurationIncarnation' | 'onDidChangeIncarnation'>;
 interface ScopeOwner { current(): { readonly revision: string; readonly scopes: readonly string[] } }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { buildErrorResponseBody, jsonErrorResponse } from '../daemon-sdk/src/error-response.ts';
+import { buildErrorResponseBody, jsonErrorResponse } from '../daemon-api/src/error-response.ts';
 import { createHttpStatusError } from '../errors/src/index.ts';
 
 const reference = '11111111-1111-4111-8111-111111111111';

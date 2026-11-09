@@ -14,7 +14,7 @@
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { BookOpen, Brain, FileText, Link, Search } from 'lucide-react';
-import { invokeMethod, sdk } from '../lib/goodvibes';
+import { invokeMethod, client as platformClient } from '../lib/goodvibes';
 import { queryKeys } from '../lib/queries';
 import { MarkdownMessage } from '../components/MarkdownMessage';
 import { bestId, bestStatus, bestTitle, compactJson, countFrom, firstArray, firstString, readPath } from '../lib/object';
@@ -166,14 +166,14 @@ export function KnowledgeView({ query = '' }: KnowledgeViewProps) {
   const [linkOpen, setLinkOpen] = useState(false);
   const [mapFilter, setMapFilter] = useState('');
 
-  const status = useQuery({ queryKey: queryKeys.knowledgeStatus, queryFn: () => sdk.knowledge.status() });
+  const status = useQuery({ queryKey: queryKeys.knowledgeStatus, queryFn: () => platformClient.knowledge.status() });
   const sources = useQuery({ queryKey: queryKeys.knowledgeSources, queryFn: () => invokeMethod('knowledge.sources.list', { limit: 100 }) });
   const nodes = useQuery({ queryKey: queryKeys.knowledgeNodes, queryFn: () => invokeMethod('knowledge.nodes.list', { limit: 100 }) });
   const issues = useQuery({ queryKey: queryKeys.knowledgeIssues, queryFn: () => invokeMethod('knowledge.issues.list', { limit: 100 }) });
   const projections = useQuery({ queryKey: queryKeys.knowledgeProjections, queryFn: () => invokeMethod('knowledge.projections.list', { limit: 100 }) });
   const knowledgeMap = useQuery({
     queryKey: [...queryKeys.knowledgeMap, mapFilter],
-    queryFn: () => sdk.knowledge.map({
+    queryFn: () => platformClient.knowledge.map({
       limit: 150,
       includeSources: true,
       includeIssues: true,
@@ -184,8 +184,8 @@ export function KnowledgeView({ query = '' }: KnowledgeViewProps) {
 
   const ask = useMutation({
     mutationFn: (mode: 'ask' | 'search') => mode === 'ask'
-      ? sdk.knowledge.ask({ query, limit: 10, includeSources: true, includeConfidence: true, includeLinkedObjects: true, timeoutMs: 20_000 })
-      : sdk.knowledge.search({ query, limit: 25, includeSources: true, includeNodes: true }),
+      ? platformClient.knowledge.ask({ query, limit: 10, includeSources: true, includeConfidence: true, includeLinkedObjects: true, timeoutMs: 20_000 })
+      : platformClient.knowledge.search({ query, limit: 25, includeSources: true, includeNodes: true }),
   });
 
   const allSources = useMemo(() => firstArray(sources.data, ['sources', 'items', 'data']), [sources.data]);

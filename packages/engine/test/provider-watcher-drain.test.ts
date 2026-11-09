@@ -3,10 +3,10 @@ import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 
 import * as fs from 'fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { watchCustomProviders } from '../sdk/src/platform/providers/custom-loader.ts';
-import { ProviderRegistry } from '../sdk/src/platform/providers/registry.ts';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
-import { bootDaemon, type BootedDaemon } from '../sdk/src/platform/daemon/boot.ts';
+import { watchCustomProviders } from '../platform/src/platform/providers/custom-loader.ts';
+import { ProviderRegistry } from '../platform/src/platform/providers/registry.ts';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
+import { bootDaemon, type BootedDaemon } from '../platform/src/platform/daemon/boot.ts';
 import { seedBenchmarkCache } from './_helpers/benchmark-cache.ts';
 import { withTestTimeout } from './_helpers/test-timeout.ts';
 

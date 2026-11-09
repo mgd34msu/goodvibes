@@ -9,7 +9,7 @@
  * content now, so none of them dead-ends.
  */
 
-import type { ProcessKind } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
+import type { ProcessKind } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 
 /** A specific row to select when a view opens (a fleet process id, optionally its kind). */
 export interface ViewTarget {
@@ -50,7 +50,7 @@ const VIEW_TARGET_KINDS = {
   'code-index': true, tool: true,
 } satisfies Record<ProcessKind | 'tool', true>;
 
-/** Parse `<id>[:<kind>]`, preserving the SDK's namespaced process IDs. */
+/** Parse `<id>[:<kind>]`, preserving the platform's namespaced process IDs. */
 export function parseViewTarget(raw: string | undefined): ViewTarget | undefined {
   if (!raw || raw.split(':').some((part) => part.trim().length === 0)) return undefined;
   const sep = raw.lastIndexOf(':');

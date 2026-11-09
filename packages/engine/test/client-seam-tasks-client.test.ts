@@ -18,9 +18,9 @@
  * Ported from the terminal app's suite when this module was hoisted.
  */
 import { describe, expect, test } from 'bun:test';
-import { createTasksClient } from '../sdk/src/platform/runtime/client/tasks-client.ts';
-import type { DaemonVerbCaller } from '../sdk/src/platform/runtime/client/daemon-verbs.ts';
-import type { RuntimeTask } from '../sdk/src/platform/runtime/store/index.ts';
+import { createTasksClient } from '../platform/src/platform/runtime/client/tasks-client.ts';
+import type { DaemonVerbCaller } from '../platform/src/platform/runtime/client/daemon-verbs.ts';
+import type { RuntimeTask } from '../platform/src/platform/runtime/store/index.ts';
 
 function task(id: string, title: string): RuntimeTask {
   return {

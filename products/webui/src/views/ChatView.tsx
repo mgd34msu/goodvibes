@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { BookOpen, CalendarDays, LayoutGrid, Mail } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getClientLifetime, isClientLifetimeCurrent } from '../lib/client-lifetime';
-import { sdk } from '../lib/goodvibes';
+import { client as platformClient } from '../lib/goodvibes';
 import { asRecord, bestId, bestTitle, firstString } from '../lib/object';
 import { queryKeys } from '../lib/queries';
 import { useProviderModelOptions } from '../lib/use-provider-model-options';
@@ -127,9 +127,9 @@ export function ChatView({
   const [pendingScrollTarget, setPendingScrollTarget] = useState<{ sessionId: string; messageId: string } | null>(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState('');
 
-  const providers = useQuery({ queryKey: queryKeys.providers, queryFn: () => sdk.operator.providers.list() });
-  const modelCatalog = useQuery({ queryKey: ['models'], queryFn: () => sdk.operator.models.list() });
-  const currentModel = useQuery({ queryKey: ['models', 'current'], queryFn: () => sdk.operator.models.current.get() });
+  const providers = useQuery({ queryKey: queryKeys.providers, queryFn: () => platformClient.operator.providers.list() });
+  const modelCatalog = useQuery({ queryKey: ['models'], queryFn: () => platformClient.operator.models.list() });
+  const currentModel = useQuery({ queryKey: ['models', 'current'], queryFn: () => platformClient.operator.models.current.get() });
   const catalogProviderOptions = useMemo(() => providerOptionsFromResponse(modelCatalog.data), [modelCatalog.data]);
 
   const providerOptions = useMemo(() => {
@@ -200,7 +200,7 @@ export function ChatView({
   );
 
   const renameSession = useMutation({
-    mutationFn: ({ sessionId, title }: { sessionId: string; title: string }) => sdk.chat.sessions.update(sessionId, { title }),
+    mutationFn: ({ sessionId, title }: { sessionId: string; title: string }) => platformClient.chat.sessions.update(sessionId, { title }),
     onSuccess: async (result, variables) => {
       onLocalSessionUpdated(variables.sessionId, companionSessionFromDetail(result) ?? { sessionId: variables.sessionId, title: variables.title });
       await queryClient.invalidateQueries({ queryKey: ['companion-chat', 'sessions'] });
@@ -214,7 +214,7 @@ export function ChatView({
   const applySessionRoute = async (patch: { provider?: string; model?: string; reasoningEffort?: string | null }) => {
     const lifetime = getClientLifetime(); routeSelectionCurrent(selectedChat, lifetime);
     if (ACTIVE_TURN_STATES.includes(turnState)) throw new Error('Wait for this chat’s current reply to finish before changing its model or effort.');
-    const result = await sdk.chat.sessions.update(activeSessionId, patch);
+    const result = await platformClient.chat.sessions.update(activeSessionId, patch);
     routeSelectionCurrent(selectedChat, lifetime);
     const acknowledged = companionSessionFromDetail(result);
     if (bestId(acknowledged) !== activeSessionId
@@ -236,7 +236,7 @@ export function ChatView({
       if (!model) throw new Error('The selected model is unavailable.');
       if (activeSessionId) return applySessionRoute({ provider: model.providerId, model: model.rawModelId });
       const lifetime = getClientLifetime(); routeSelectionCurrent(selectedChat, lifetime);
-      const result = await sdk.operator.models.current.set(registryKey);
+      const result = await platformClient.operator.models.current.set(registryKey);
       routeSelectionCurrent(selectedChat, lifetime); return result;
     },
     onError: () => setSelectedProviderId(currentProviderId),
@@ -255,7 +255,7 @@ export function ChatView({
       if (sessionProvider === 'decision-router') throw new Error('Decision Router effort is configured by category.');
       if (activeSessionId) return applySessionRoute({ reasoningEffort: effort === '' ? null : effort });
       const lifetime = getClientLifetime(); routeSelectionCurrent(selectedChat, lifetime);
-      const result = await sdk.operator.models.current.set(currentRegistryKey, effort === '' ? null : effort);
+      const result = await platformClient.operator.models.current.set(currentRegistryKey, effort === '' ? null : effort);
       routeSelectionCurrent(selectedChat, lifetime); return result;
     },
     onSuccess: async () => { if (!activeSessionId) await queryClient.invalidateQueries({ queryKey: ['models', 'current'] }); },
@@ -272,7 +272,7 @@ export function ChatView({
   const messages = useQuery({
     queryKey: ['companion-chat', activeSessionId, 'messages'],
     enabled: Boolean(activeSessionId),
-    queryFn: () => sdk.chat.messages.list(activeSessionId),
+    queryFn: () => platformClient.chat.messages.list(activeSessionId),
     retry: (failureCount, error) => !isSessionNotFoundError(error) && failureCount < 2,
     // 'stream paused' is deliberately NOT an ACTIVE_TURN_STATE (isStreaming must go
     // false once the live channel gives up), but it still needs the periodic-refresh

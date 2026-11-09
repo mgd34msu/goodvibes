@@ -1,10 +1,10 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { getOperatorContract } from '@goodvibes-jev/engine/sdk/contracts';
-import { DEFAULT_CONFIG, type PermissionMode } from '@goodvibes-jev/engine/sdk/platform/config';
-import { PermissionManager, type PermissionConfigReader } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import { PolicyRuntimeState } from '@goodvibes-jev/engine/sdk/platform/runtime/security';
-import { ToolRegistry, ToolInputProjectionError, assertCurrentToolInvocation } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
+import { DEFAULT_CONFIG, type PermissionMode } from '@goodvibes-jev/engine/platform/platform/config';
+import { PermissionManager, type PermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { PolicyRuntimeState } from '@goodvibes-jev/engine/platform/platform/runtime/security';
+import { ToolRegistry, ToolInputProjectionError, assertCurrentToolInvocation } from '@goodvibes-jev/engine/platform/platform/tools';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import type { CommandContext } from '../../input/command-registry.ts';

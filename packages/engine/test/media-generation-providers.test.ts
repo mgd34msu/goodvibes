@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { builtinGenerationProviders } from '../sdk/src/platform/media/builtin-generation-providers.ts';
-import type { MediaProvider } from '../sdk/src/platform/media/provider-registry.ts';
+import { builtinGenerationProviders } from '../platform/src/platform/media/builtin-generation-providers.ts';
+import type { MediaProvider } from '../platform/src/platform/media/provider-registry.ts';
 
 const originalFetch = globalThis.fetch;
 const originalFalKey = process.env.FAL_KEY;

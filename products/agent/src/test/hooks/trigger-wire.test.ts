@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
-import { HookDispatcher } from '@goodvibes-jev/engine/sdk/platform/hooks';
-import { TriggerManager } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { HookDispatcher } from '@goodvibes-jev/engine/platform/platform/hooks';
+import { TriggerManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import { getTestTriggerManager, resetTestRuntimeServices } from '../helpers/runtime-services.ts';
 
 beforeEach(() => {

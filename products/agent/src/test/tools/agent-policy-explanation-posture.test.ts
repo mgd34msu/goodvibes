@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { explainAgentPolicyDecision } from '../../tools/agent-policy-explanation.ts';
 import { computeApprovalPosture } from '../../permissions/approval-posture.ts';

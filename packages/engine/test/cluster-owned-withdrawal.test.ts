@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { ClusterCoordinator } from '../sdk/src/platform/cluster/coordinator.js';
-import { ClusterSurfaceRegistry } from '../sdk/src/platform/cluster/surface-registry.js';
-import { FakeClusterClock } from '../sdk/src/platform/cluster/clock.js';
-import { MemoryClusterBus } from '../sdk/src/platform/cluster/memory-transport.js';
-import { decodeMessage } from '../sdk/src/platform/cluster/protocol.js';
-import { providerSurface } from '../sdk/src/platform/cluster/surface-id.js';
-import type { ClusterConsumerGate } from '../sdk/src/platform/cluster/types.js';
+import { ClusterCoordinator } from '../platform/src/platform/cluster/coordinator.js';
+import { ClusterSurfaceRegistry } from '../platform/src/platform/cluster/surface-registry.js';
+import { FakeClusterClock } from '../platform/src/platform/cluster/clock.js';
+import { MemoryClusterBus } from '../platform/src/platform/cluster/memory-transport.js';
+import { decodeMessage } from '../platform/src/platform/cluster/protocol.js';
+import { providerSurface } from '../platform/src/platform/cluster/surface-id.js';
+import type { ClusterConsumerGate } from '../platform/src/platform/cluster/types.js';
 import { settings, SILENT } from './cluster-harness.js';
 
 const surface = providerSurface('custom', 'owned-withdrawal');

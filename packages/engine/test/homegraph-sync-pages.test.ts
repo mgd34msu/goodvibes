@@ -20,14 +20,14 @@ beforeEach(() => { qualityReadings.set({
 }); });
 
 import { beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import { HomeGraphRoutes } from '../sdk/src/platform/daemon/http/home-graph-routes.js';
+import { HomeGraphRoutes } from '../platform/src/platform/daemon/http/home-graph-routes.js';
 import {
   HomeGraphService,
   homeAssistantKnowledgeSpaceId,
-} from '../sdk/src/platform/knowledge/index.js';
-import { answerHomeGraphQuery } from '../sdk/src/platform/knowledge/home-graph/ask.js';
-import { reindexHomeGraphSources } from '../sdk/src/platform/knowledge/home-graph/reindex.js';
-import { readHomeGraphSearchState } from '../sdk/src/platform/knowledge/home-graph/search.js';
+} from '../platform/src/platform/knowledge/index.js';
+import { answerHomeGraphQuery } from '../platform/src/platform/knowledge/home-graph/ask.js';
+import { reindexHomeGraphSources } from '../platform/src/platform/knowledge/home-graph/reindex.js';
+import { readHomeGraphSearchState } from '../platform/src/platform/knowledge/home-graph/search.js';
 import {
   createCompressedPdfBuffer,
   createHomeGraphService,

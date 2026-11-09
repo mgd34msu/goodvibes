@@ -1,8 +1,8 @@
 /** Ownership regressions, authored and UNRUN during coding first. */
 import { expect, test } from 'bun:test';
-import { discoverGlobalPackageOwner } from '../sdk/src/platform/runtime/global-package-owner.ts';
-import { quoteShadowArgument, removableShadows, scanCommandShadows, splitPathEntries, type ShadowScanInput } from '../sdk/src/platform/runtime/path-shadow.ts';
-import { fallbackUpdateCommand } from '../sdk/src/platform/runtime/install-kind.ts';
+import { discoverGlobalPackageOwner } from '../platform/src/platform/runtime/global-package-owner.ts';
+import { quoteShadowArgument, removableShadows, scanCommandShadows, splitPathEntries, type ShadowScanInput } from '../platform/src/platform/runtime/path-shadow.ts';
+import { fallbackUpdateCommand } from '../platform/src/platform/runtime/install-kind.ts';
 const home = '/home/owner', install = `${home}/.local/bin`, earlier = `${home}/earlier/goodvibes`;
 function scan(target: string, overrides: Partial<ShadowScanInput> = {}) {
   return scanCommandShadows({ commands: ['goodvibes'], installDir: install, pathEntries: [`${home}/earlier`, install], homeDir: home,

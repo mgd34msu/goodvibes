@@ -6,7 +6,7 @@ import '@goodvibes-jev/engine/terminal-shell/task-presentation';
  * The rows come from two places. This process's own registry holds the exec,
  * agent and ACP tasks the loop here spawned; the daemon holds the rest,
  * scheduled work, channel-driven runs, tasks other surfaces submitted. The
- * SDK's tasks client unions them, local rows winning on a shared id because
+ * platform's tasks client unions them, local rows winning on a shared id because
  * they are the live copy, and reports the daemon's half as missing rather than
  * failing the whole list when it cannot be reached.
  *
@@ -16,7 +16,7 @@ import '@goodvibes-jev/engine/terminal-shell/task-presentation';
  */
 import type { CommandContext } from '../command-registry.ts';
 
-import '@goodvibes-jev/engine/sdk/platform/runtime/client';
+import '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { createAgentDaemonVerbCaller } from '../../runtime/client/daemon-verbs.ts';
 import { requireOperatorClient, requireShellPaths } from './runtime-services.ts';
 

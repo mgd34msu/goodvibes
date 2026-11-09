@@ -19,8 +19,8 @@ import { createSessionGraphHandler, flagValue } from '@goodvibes-jev/engine/term
  */
 
 import type { SlashCommand, CommandContext } from '../command-registry.ts';
-import type { CancellationScope, CrossSessionTaskRef } from '@goodvibes-jev/engine/sdk/platform/sessions';
-import { VALID_SCOPES } from '@goodvibes-jev/engine/sdk/platform/sessions';
+import type { CancellationScope, CrossSessionTaskRef } from '@goodvibes-jev/engine/platform/platform/sessions';
+import { VALID_SCOPES } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { handleSessionWorkflowCommand } from './session-workflow.ts';
 import { requireSessionOrchestration, requireSessionManager } from './runtime-services.ts';
 import { filterUserFacingSessions } from './session-picker-filter.ts';

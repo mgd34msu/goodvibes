@@ -1,5 +1,5 @@
 import { prepareProtectedResearchReport, type ResearchReportOperation } from '../agent/protected-research-report.ts';
-import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/sdk/platform/security';
+import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
 import { prepareAgentResearchReportInput } from '../agent/research-report-input.ts';
 import type { AgentWorkspaceActionResult, AgentWorkspaceLocalEditor } from './agent-workspace-types.ts';
 

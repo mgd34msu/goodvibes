@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { describeContextWindowSource } from '../sdk/src/platform/providers/context-window-catalog.js';
-import type { ModelDefinition } from '../sdk/src/platform/providers/registry-types.js';
+import { describeContextWindowSource } from '../platform/src/platform/providers/context-window-catalog.js';
+import type { ModelDefinition } from '../platform/src/platform/providers/registry-types.js';
 
 function definition(fields: Pick<ModelDefinition, 'contextWindowProvenance' | 'contextWindowOrigin'>): ModelDefinition {
   return { id: 'm', provider: 'p', registryKey: 'p:m', displayName: 'm', description: '', contextWindow: 8192, selectable: true,

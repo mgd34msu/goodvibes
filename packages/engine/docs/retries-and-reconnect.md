@@ -2,16 +2,16 @@
 
 This applies to both full-surface (Bun) and companion-surface (Hermes/browser) consumers unless otherwise noted.
 
-The SDK exposes retry and reconnect as first-class configuration instead of leaving them to ad hoc wrapper code.
+The platform exposes retry and reconnect as first-class configuration instead of leaving them to ad hoc wrapper code.
 
 ## HTTP retry
 
 All runtime-specific entrypoints can take a retry policy:
 
 ```ts
-import { createGoodVibesSdk } from '@goodvibes-jev/engine/sdk';
+import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
 
-const sdk = createGoodVibesSdk({
+const platformClient = createGoodVibesPlatform({
   baseUrl: 'http://127.0.0.1:3421',
   authToken: process.env.GOODVIBES_TOKEN ?? null,
   retry: {
@@ -34,7 +34,7 @@ Avoid retrying unsafe mutations blindly unless your application has idempotency 
 SSE reconnect is controlled through `realtime.sseReconnect`:
 
 ```ts
-const sdk = createBrowserGoodVibesSdk({
+const platformClient = createBrowserGoodVibesPlatform({
   realtime: {
     sseReconnect: {
       enabled: true,
@@ -45,14 +45,14 @@ const sdk = createBrowserGoodVibesSdk({
 });
 ```
 
-The SDK preserves `Last-Event-ID` and sends it on reconnect so the server can replay missed events when supported.
+The platform preserves `Last-Event-ID` and sends it on reconnect so the server can replay missed events when supported.
 
 ## WebSocket reconnect
 
 WebSocket reconnect is controlled through `realtime.webSocketReconnect`:
 
 ```ts
-const sdk = createReactNativeGoodVibesSdk({
+const platformClient = createReactNativeGoodVibesPlatform({
   baseUrl: 'https://goodvibes.example.com',
   authToken: token,
   realtime: {
@@ -68,11 +68,11 @@ const sdk = createReactNativeGoodVibesSdk({
 
 ## Idempotency keys
 
-For non-GET mutations, the SDK automatically injects an `Idempotency-Key` header when the call is marked idempotent. This enables safe retry of state-changing operations without duplicate side effects.
+For non-GET mutations, the platform automatically injects an `Idempotency-Key` header when the call is marked idempotent. This enables safe retry of state-changing operations without duplicate side effects.
 
 **Precedence chain (highest → lowest):**
 
-1. **`perMethodPolicy[methodId]`.** An explicit per-method retry policy set on the SDK options overrides everything else.
+1. **`perMethodPolicy[methodId]`.** An explicit per-method retry policy set on the platform options overrides everything else.
 2. **`contract.idempotent`.** The operator contract marks certain POST/PUT/PATCH/DELETE routes as idempotent (`idempotent: true`). Those methods automatically get an `Idempotency-Key` on each call.
 3. **HTTP-verb default.** Safe methods (`GET`, `HEAD`, `OPTIONS`) are retried by default. Unsafe methods are not retried unless explicitly marked idempotent.
 
@@ -80,12 +80,12 @@ When an idempotent call is retried, the same `Idempotency-Key` UUID is used on e
 
 There is no per-call `idempotencyKey` request option. The per-call options accepted by the transport layer (`ContractInvokeOptions`) are `signal`, `headers`, and `responseSchema` only. The `Idempotency-Key` is generated internally (`generateIdempotencyKey`) and is attached only when the resolved method is a mutation (POST/PUT/PATCH/DELETE) **and** either the contract marks the route `idempotent: true` or a `perMethodPolicy` entry exists for that method ID.
 
-For application-level idempotency on a mutation the contract does not already mark idempotent, register a `perMethodPolicy` entry keyed by the method ID. That both enables retries for the method and causes the SDK to attach a stable `Idempotency-Key` on each attempt:
+For application-level idempotency on a mutation the contract does not already mark idempotent, register a `perMethodPolicy` entry keyed by the method ID. That both enables retries for the method and causes the platform to attach a stable `Idempotency-Key` on each attempt:
 
 ```ts
-import { createGoodVibesSdk } from '@goodvibes-jev/engine/sdk';
+import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
 
-const sdk = createGoodVibesSdk({
+const platformClient = createGoodVibesPlatform({
   baseUrl: 'http://127.0.0.1:3421',
   authToken: process.env.GOODVIBES_TOKEN ?? null,
   retry: {
@@ -96,7 +96,7 @@ const sdk = createGoodVibesSdk({
 });
 
 // The Idempotency-Key is generated and reused across retries automatically.
-const result = await sdk.operator.sessions.create({ title: 'My session' });
+const result = await platformClient.operator.sessions.create({ title: 'My session' });
 ```
 
 Never retry unsafe mutations blindly. Only operations with application-level or contract-level idempotency guarantees are safe to retry.
@@ -107,7 +107,7 @@ If a long-lived client can rotate tokens, prefer `tokenStore` or `getAuthToken` 
 
 ## Default behavior
 
-Out of the box the SDK is conservative. Retries and reconnect are **off** by default and must be opted into:
+Out of the box the platform is conservative. Retries and reconnect are **off** by default and must be opted into:
 
 - **HTTP retry is off.** `DEFAULT_HTTP_RETRY_POLICY.maxAttempts` is `1` (one attempt, no retries). When you enable retries, only safe methods are retried by default (`retryOnMethods: ['GET', 'HEAD', 'OPTIONS']`) and `retryOnNetworkError` is `true`; default delays are `baseDelayMs: 250`, `maxDelayMs: 2000`, `backoffFactor: 2`. A server-sent `Retry-After` header on a retryable response raises the computed delay to at least that value, but the result is still capped at 10 minutes so a hostile or misconfigured server cannot park a client indefinitely.
 - **Stream / SSE reconnect is off.** `DEFAULT_STREAM_RECONNECT_POLICY.enabled` is `false`. When enabled, `maxAttempts` defaults to `10` (`DEFAULT_STREAM_MAX_ATTEMPTS`), with `baseDelayMs: 500` and `maxDelayMs: 30000`.

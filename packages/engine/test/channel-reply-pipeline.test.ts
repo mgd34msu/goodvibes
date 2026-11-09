@@ -1,14 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import { ChannelPluginRegistry } from '../sdk/src/platform/channels/plugin-registry.js';
-import { ChannelReplyPipeline } from '../sdk/src/platform/channels/reply-pipeline.js';
-import { DaemonSurfaceDeliveryHelper } from '../sdk/src/platform/daemon/surface-delivery.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { emitAgentCompleted, emitAgentSpawning } from '../sdk/src/platform/runtime/emitters/agents.js';
+import { ChannelPluginRegistry } from '../platform/src/platform/channels/plugin-registry.js';
+import { ChannelReplyPipeline } from '../platform/src/platform/channels/reply-pipeline.js';
+import { DaemonSurfaceDeliveryHelper } from '../platform/src/platform/daemon/surface-delivery.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { emitAgentCompleted, emitAgentSpawning } from '../platform/src/platform/runtime/emitters/agents.js';
 import {
   emitContractChecked,
   emitContractCreated,
   emitContractPassed,
-} from '../sdk/src/platform/runtime/emitters/contract.js';
+} from '../platform/src/platform/runtime/emitters/contract.js';
 
 /** A deliverable check over two criteria, passed or not. */
 function deliverableCheck(contractId: string, passed: boolean) {

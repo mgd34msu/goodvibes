@@ -13,8 +13,8 @@
  */
 import { describe, expect, test } from 'bun:test';
 
-import { gateBackgroundToolCall } from '../sdk/src/platform/agents/background-permission-gate.js';
-import type { PermissionConfigReader } from '../sdk/src/platform/permissions/manager.js';
+import { gateBackgroundToolCall } from '../platform/src/platform/agents/background-permission-gate.js';
+import type { PermissionConfigReader } from '../platform/src/platform/permissions/manager.js';
 
 type AgentRecordArg = Parameters<typeof gateBackgroundToolCall>[1];
 type Accepts<T> = T extends AgentRecordArg ? 'yes' : 'no';

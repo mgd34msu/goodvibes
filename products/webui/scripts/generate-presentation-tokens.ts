@@ -2,7 +2,7 @@
 /**
  * generate-presentation-tokens.ts
  *
- * Bridges the SDK presentation contract (@goodvibes-jev/engine/sdk/platform/presentation
+ * Bridges the engine presentation contract (@goodvibes-jev/engine/platform/platform/presentation
  *, the status-glyph registry, tone-token table, thinking-phrase pool and
  * waiting-state wording that the TUI and agent already render through) onto
  * two generated, checked-in artifacts:
@@ -20,7 +20,7 @@
  * presentation contract's own docstring. `waitingPhrase` is a pure function,
  * not a data table; it has no meaningful "generated" form (a text diff of a
  * re-export wouldn't catch a behavior change), so src/lib/presentation-bridge.ts
- * imports it directly from the SDK package instead of going through here.
+ * imports it directly from the engine package instead of going through here.
  *
  * Regenerate with `bun run release:prepare`; `bun run generated:check`
  * verifies these snapshots against the workspace engine before every build.
@@ -38,7 +38,7 @@ import {
   resolveTones,
   SPINNER_FRAMES,
   THINKING_PHRASES,
-} from '@goodvibes-jev/engine/sdk/platform/presentation';
+} from '@goodvibes-jev/engine/platform/platform/presentation';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
@@ -54,7 +54,7 @@ export const TS_OUT_PATH = resolve(ROOT, 'src/lib/generated/presentation-tokens.
 // ---------------------------------------------------------------------------
 
 /**
- * Keep the SDK contract's STRUCTURE (every key, nesting, and array-ness) while
+ * Keep the engine contract's STRUCTURE (every key, nesting, and array-ness) while
  * widening its leaf VALUES from the exact literals the package declares
  * (`'✓'`, `'#22c55e'`, …) to plain string/number/boolean.
  *
@@ -84,7 +84,7 @@ export interface PresentationContractSnapshot {
   readonly thinkingPhrases: WidenLiterals<typeof THINKING_PHRASES>;
 }
 
-/** Read the real contract from the installed @goodvibes-jev/engine/sdk. */
+/** Read the real contract from the installed @goodvibes-jev/engine/platform. */
 export function loadContractSnapshot(): PresentationContractSnapshot {
   return {
     glyphs: GLYPHS,
@@ -112,14 +112,14 @@ function cssStringLiteral(value: string): string {
 const GENERATED_BANNER = [
   'GENERATED FILE. DO NOT EDIT BY HAND.',
   'Produced by scripts/generate-presentation-tokens.ts from',
-  '@goodvibes-jev/engine/sdk/platform/presentation, the presentation contract',
+  '@goodvibes-jev/engine/platform/platform/presentation, the presentation contract',
   'the TUI and agent already render through. See that package\'s own',
   'docstring for the parity-audit provenance.',
   '',
   'This is a layer SEPARATE from src/styles/tokens.css: tokens.css owns the',
   'web UI\'s own brand palette / layout / motion tokens (an explicitly',
   'webui-only, NOT-contract layer, documented at its own top); this file',
-  'owns only the values the SDK contract actually defines: status glyphs',
+  'owns only the values the engine contract actually defines: status glyphs',
   'and the state tone-color table.',
   '',
   'Regenerate: `bun run presentation:generate`.',

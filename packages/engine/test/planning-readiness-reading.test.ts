@@ -1,4 +1,4 @@
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.ts';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
@@ -8,14 +8,14 @@ import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { fieldKind } from '../sdk/src/platform/utils/batteries/field-kind.ts';
-import { KnowledgeStore, ProjectPlanningService, evaluateProjectPlanningReadiness, type ProjectPlanningStateUpsertInput } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import { JudgmentInputError, snapshotJudgmentInput } from '../sdk/src/platform/gate/judgment-input.js';
-import { loadSqlJsEngine, SQLiteStore, type SqlDatabase } from '../sdk/src/platform/state/sqlite-store.js';
-import { createSchema, KNOWLEDGE_SCHEMA_VERSION } from '../sdk/src/platform/knowledge/store-schema.js';
-import { listStoreSnapshots } from '../sdk/src/platform/state/store-snapshots.js';
-import { StoreMigrationError, StoreSchemaDowngradeError } from '../sdk/src/platform/state/store-versioning.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
+import { fieldKind } from '../platform/src/platform/utils/batteries/field-kind.ts';
+import { KnowledgeStore, ProjectPlanningService, evaluateProjectPlanningReadiness, type ProjectPlanningStateUpsertInput } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { JudgmentInputError, snapshotJudgmentInput } from '../platform/src/platform/gate/judgment-input.js';
+import { loadSqlJsEngine, SQLiteStore, type SqlDatabase } from '../platform/src/platform/state/sqlite-store.js';
+import { createSchema, KNOWLEDGE_SCHEMA_VERSION } from '../platform/src/platform/knowledge/store-schema.js';
+import { listStoreSnapshots } from '../platform/src/platform/state/store-snapshots.js';
+import { StoreMigrationError, StoreSchemaDowngradeError } from '../platform/src/platform/state/store-versioning.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
 
 let previous: JudgmentPort | undefined;
 // Logger role readings carry only field names; count the actual content readers.

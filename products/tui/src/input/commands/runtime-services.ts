@@ -53,8 +53,8 @@ export const {
 } = createCommandServiceAccessors<CommandContext>();
 export const { requireEcosystemCatalogPaths } = createCommandPathAccessors('tui');
 import type { CommandContext } from '../command-registry.ts';
-import { compactSmallWindow, getLastCompactionEvent, SMALL_WINDOW_THRESHOLD } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { CompactionContext, CompactionEvent } from '@goodvibes-jev/engine/sdk/platform/core';
+import { compactSmallWindow, getLastCompactionEvent, SMALL_WINDOW_THRESHOLD } from '@goodvibes-jev/engine/platform/platform/core';
+import type { CompactionContext, CompactionEvent } from '@goodvibes-jev/engine/platform/platform/core';
 import { recordCompactionQualityScore, scoreCompactionRun } from '../../renderer/compaction-quality.ts';
 import type { CompactionQualityScore } from '../../renderer/compaction-quality.ts';
 
@@ -62,7 +62,7 @@ import type { SessionSurface } from '@/runtime/index.ts';
 
 
 
-import type { KnowledgeApi } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import type { KnowledgeApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 
 
 
@@ -109,7 +109,7 @@ export function openOnboardingWizard(
   openWizard(modeOrOptions);
 }
 
-/** Result of a manual /compact run: the SDK's CompactionEvent, plus an
+/** Result of a manual /compact run: the platform's CompactionEvent, plus an
  * out-of-band quality score () when one could be computed. */
 export interface CompactionRunResult {
   readonly event: CompactionEvent;
@@ -117,7 +117,7 @@ export interface CompactionRunResult {
 }
 
 /**
- * Compact the conversation and return the CompactionEvent recorded by the SDK
+ * Compact the conversation and return the CompactionEvent recorded by the platform
  * (plus an out-of-band quality score), or null if no event was recorded (e.g.
  * compaction was skipped or produced no change).
  */
@@ -132,7 +132,7 @@ export async function compactConversation(context: CommandContext): Promise<Comp
   const contextWindow = providerRegistry.getKnownContextWindowForModel(providerRegistry.getCurrentModel()) ?? 0;
 
   // Small-window models lack room for the structured (multi-LLM) extraction
-  // pipeline, so mirror the SDK auto-compaction path and degrade to the
+  // pipeline, so mirror the platform auto-compaction path and degrade to the
   // simplified "keep the most recent messages" compaction.
   if (contextWindow > 0 && contextWindow < SMALL_WINDOW_THRESHOLD) {
     const compacted = compactSmallWindow(conversationManager.getMessagesForLLM(), 10);
@@ -181,7 +181,7 @@ export async function compactConversation(context: CommandContext): Promise<Comp
   const eventAfter = getLastCompactionEvent();
   if (eventAfter !== null && eventAfter !== eventBefore) {
     //: score this run out-of-band (see compaction-quality.ts for why
-    // this can't just subscribe to the SDK's own CompactionManager pipeline)
+    // this can't just subscribe to the platform's own CompactionManager pipeline)
     // and keep the score keyed by this event's timestamp for /compact-history.
     const qualityScore = await scoreCompactionRun({
       sessionId: context.session.runtime.sessionId,

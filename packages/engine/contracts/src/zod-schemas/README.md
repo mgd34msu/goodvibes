@@ -60,5 +60,5 @@ import { ListProviderModelsResponseSchema } from '@goodvibes-jev/engine/contract
 
 ## See also
 
-- Main SDK: [`@goodvibes-jev/engine/sdk`](../../../sdk/README.md)
+- Main platform: [`@goodvibes-jev/engine/platform`](../../../platform/README.md)
 - [Getting Started](../../../docs/getting-started.md)

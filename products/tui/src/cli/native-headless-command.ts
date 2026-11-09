@@ -1,12 +1,12 @@
-import { OwnedSelectionObservation } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { runHeadlessCommand, type HeadlessCommandRuntime } from '@goodvibes-jev/engine/terminal-shell/headless-command';
 import { createShellPathService } from '@/runtime/index.ts';
 import { bootstrapRuntime } from '../runtime/bootstrap.ts';
 import { executeNativeHeadless, writeNativeHeadlessResult, type NativeHeadlessHost, type NativeHeadlessResult } from './native-headless.ts';
 import { executeHeadlessTurn } from './native-headless-turn.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { NativeHeadlessMode } from './native-headless-options.ts';
-import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/sdk/platform/config';
+import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveNativeHostCredential } from '../runtime/client/native-host-credential.ts';
 import { restoreHeadlessSession } from '@goodvibes-jev/engine/terminal-shell/startup-lifecycle';
 

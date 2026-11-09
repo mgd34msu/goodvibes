@@ -1,6 +1,6 @@
 /**
  * A fake judgment port for the state layer's memory decisions
- * (sdk/src/platform/state/batteries/*), so tests of memory search, knowledge
+ * (platform/src/platform/state/batteries/*), so tests of memory search, knowledge
  * injection, consolidation and usage detection never call the live Jev API.
  *
  * Each decision is answered by a function of the request's state. The

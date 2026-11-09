@@ -23,8 +23,8 @@ import {
   JSON_ARRAY_SCHEMA,
   JSON_OBJECT_SCHEMA,
   JSON_VALUE_SCHEMA,
-} from '../sdk/src/platform/control-plane/method-catalog-shared.ts';
-import { METADATA_SCHEMA } from '../sdk/src/platform/control-plane/operator-contract-schemas-shared.ts';
+} from '../platform/src/platform/control-plane/method-catalog-shared.ts';
+import { METADATA_SCHEMA } from '../platform/src/platform/control-plane/operator-contract-schemas-shared.ts';
 
 /** Renders a single schema node to the TS type-string convention used in foundation-client-types.ts. */
 export function renderType(schema: Record<string, unknown>): string {

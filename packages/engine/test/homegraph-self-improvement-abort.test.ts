@@ -11,11 +11,11 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { ArtifactStore } from '../sdk/src/platform/artifacts/index.js';
-import { refreshHomeGraphDevicePassport } from '../sdk/src/platform/knowledge/home-graph/generated-pages.js';
-import { buildHomeGraphMetadata } from '../sdk/src/platform/knowledge/home-graph/helpers.js';
-import { runHomeGraphSyncSelfImprovementPump } from '../sdk/src/platform/knowledge/home-graph/sync-self-improvement.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
+import { ArtifactStore } from '../platform/src/platform/artifacts/index.js';
+import { refreshHomeGraphDevicePassport } from '../platform/src/platform/knowledge/home-graph/generated-pages.js';
+import { buildHomeGraphMetadata } from '../platform/src/platform/knowledge/home-graph/helpers.js';
+import { runHomeGraphSyncSelfImprovementPump } from '../platform/src/platform/knowledge/home-graph/sync-self-improvement.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 
 const tmpRoots: string[] = [];
 
@@ -69,7 +69,7 @@ describe('Home Graph sync self-improvement cancellation', () => {
   });
 
   test('a governor pause mid-pump stops the pump at the next ROUND boundary, with a receipt logged', async () => {
-    const { logger } = await import('../sdk/src/platform/utils/logger.js');
+    const { logger } = await import('../platform/src/platform/utils/logger.js');
     const controller = new AbortController();
     let paused = false;
     let calls = 0;

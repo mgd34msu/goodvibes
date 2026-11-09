@@ -20,10 +20,10 @@ import {
   OUTWARD_APPROVAL_GESTURE,
   resetOutwardApprovalStoreForTests,
 } from '../../trust/outward-approvals.ts';
-import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '@goodvibes-jev/engine/sdk/platform/google';
+import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '@goodvibes-jev/engine/platform/platform/google';
 import { runGoogleCommand } from '../../input/commands/google-runtime.ts';
 import type { CommandContext } from '../../input/command-registry.ts';
-import { startTurnForOwnerInput } from '@goodvibes-jev/engine/sdk/platform/security';
+import { startTurnForOwnerInput } from '@goodvibes-jev/engine/platform/platform/security';
 
 let home = '';
 

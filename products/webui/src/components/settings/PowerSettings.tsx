@@ -1,6 +1,6 @@
 /**
  * PowerSettings, the admin/ops surface for the host sleep-ownership state
- * (power.status.get / power.keepAwake.set, SDK 1.8.0). Same non-schema-driven
+ * (power.status.get / power.keepAwake.set, platform 1.8.0). Same non-schema-driven
  * pattern as NotificationSettings/PairingTokensSettings: these two verbs carry
  * no CONFIG_SCHEMA entry (they are dedicated wire verbs, not config.set keys),
  * so they get their own panel rather than a schema-driven SettingsModal row.

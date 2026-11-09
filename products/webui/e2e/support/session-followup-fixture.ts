@@ -1,4 +1,4 @@
-/** Exact real HTTP captures, replayed through the production browser SDK. */
+/** Exact real HTTP captures, replayed through the production browser platform. */
 import { readFileSync } from 'node:fs';
 import type { Page, Route } from '@playwright/test';
 import { firstJsonSchemaFailure } from '@goodvibes-jev/engine/transport-http';

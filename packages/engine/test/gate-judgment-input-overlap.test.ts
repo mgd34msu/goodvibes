@@ -1,6 +1,6 @@
 /** Literal declaration syntax must not be hidden by an ordinary outer label. */
 import { expect, test } from 'bun:test';
-import { assertJudgmentInput, judgmentInputCardProblem, snapshotJudgmentEvidence, JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.ts';
+import { assertJudgmentInput, judgmentInputCardProblem, snapshotJudgmentEvidence, JudgmentInputError } from '../platform/src/platform/gate/judgment-input.ts';
 
 test('repeated screening keeps credential modes and changed input distinct', () => {
   const credential = 'password=synthetic-mode-check';

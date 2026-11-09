@@ -37,16 +37,16 @@ import { describe, expect, test } from 'bun:test';
 import {
   GOOGLE_CONFIG_KEYS,
   GOOGLE_SECRET_KEYS,
-} from '../sdk/src/platform/google/setup-plan.ts';
-import { isDaemonOwnedConfigKey } from '../sdk/src/platform/config/config-ownership.ts';
+} from '../platform/src/platform/google/setup-plan.ts';
+import { isDaemonOwnedConfigKey } from '../platform/src/platform/config/config-ownership.ts';
 import {
   daemonSecretKeyFor,
   isDaemonOwnedSecretKey,
-} from '../sdk/src/platform/config/daemon-secret-keys.ts';
+} from '../platform/src/platform/config/daemon-secret-keys.ts';
 import {
   classifyDaemonConfigPath,
   replicatedSecretKeys,
-} from '../sdk/src/platform/cluster/config-replication-policy.ts';
+} from '../platform/src/platform/cluster/config-replication-policy.ts';
 
 const CONFIG_PATHS = Object.entries(GOOGLE_CONFIG_KEYS);
 const SECRET_NAMES = Object.entries(GOOGLE_SECRET_KEYS);

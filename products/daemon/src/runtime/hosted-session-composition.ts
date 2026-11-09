@@ -4,7 +4,7 @@ import { nativeHostedConversationOwner } from './native-hosted-conversation-comp
  * hosted-session-composition.ts, what this daemon states so it may host
  * conversation loops.
  *
- * The engine is the SDK's (`@goodvibes-jev/engine/sdk/platform/hosted-sessions`):
+ * The engine is the platform's (`@goodvibes-jev/engine/platform/platform/hosted-sessions`):
  * lifecycle, the detach policy, the bounded disk state, the verbs, the
  * lifecycle channel. It is off until a product says how a workspace FLOOR is
  * built, and that is deliberate, the floor's `requestApproval` seam is where a
@@ -55,17 +55,17 @@ import { nativeHostedConversationOwner } from './native-hosted-conversation-comp
  *    own composition, where a reader can see which spawns hold it. Nothing on
  *    the wire and nothing in a tool argument can reach it.
  */
-import { createClientRuntimeServices } from '@goodvibes-jev/engine/sdk/platform/runtime/client-services';
-import { createRuntimeStore } from '@goodvibes-jev/engine/sdk/platform/runtime/store';
-import { createShellPathService } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
-import { createLaunchTolerantProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { DaemonHostedSessionsOptions } from '@goodvibes-jev/engine/sdk/platform/daemon';
+import { createClientRuntimeServices } from '@goodvibes-jev/engine/platform/platform/runtime/client-services';
+import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
+import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { createLaunchTolerantProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { DaemonHostedSessionsOptions } from '@goodvibes-jev/engine/platform/platform/daemon';
 import type {
   HostedSessionExecPosture,
   HostedWorkspaceFloor,
-} from '@goodvibes-jev/engine/sdk/platform/hosted-sessions';
-import { CONVERSATIONAL_DIAGNOSIS_SECTION } from '@goodvibes-jev/engine/sdk/platform/agents';
-import { createWorkspaceTrustDecisionAsk, trustGatedApprovalRaiser, type ApprovalRaise } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+} from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
+import { CONVERSATIONAL_DIAGNOSIS_SECTION } from '@goodvibes-jev/engine/platform/platform/agents';
+import { createWorkspaceTrustDecisionAsk, trustGatedApprovalRaiser, type ApprovalRaise } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import type { RuntimeServices } from './runtime-services-types.js';
 
@@ -83,7 +83,7 @@ function hostedSystemPrompt(input: { readonly workspaceRoot: string }): string {
       'Never invent authority or route around a refusal.',
     ].join(' '),
     // The same contract every other conversational turn is held to, from the
-    // SDK rather than restated here, a second copy is a copy that drifts.
+    // platform rather than restated here, a second copy is a copy that drifts.
     CONVERSATIONAL_DIAGNOSIS_SECTION,
   ].join('\n\n');
 }

@@ -113,11 +113,11 @@ exists in the legacy flow described below.
 ### Step 1: Host mints a hand-off
 
 The host surface calls the `pairing.handoff.create` gateway verb (or, for host code composing
-the SDK directly, `mintPairingHandoff()` from `@goodvibes-jev/engine/sdk/platform/pairing`) with a
+the platform directly, `mintPairingHandoff()` from `@goodvibes-jev/engine/platform/platform/pairing`) with a
 device name and the offer set it wants to present:
 
 ```ts
-import { mintPairingHandoff, availablePairingOffers, defaultPairingTokenName } from '@goodvibes-jev/engine/sdk/platform/pairing';
+import { mintPairingHandoff, availablePairingOffers, defaultPairingTokenName } from '@goodvibes-jev/engine/platform/platform/pairing';
 
 const offers = availablePairingOffers({
   relayEnabled: true,       // relay.enabled + relay.url configured
@@ -144,7 +144,7 @@ than reprinting the last one.
 ### Step 2: Host renders the QR
 
 ```ts
-import { generateQrMatrix, renderQrToString, pairingQrContent } from '@goodvibes-jev/engine/sdk/platform/pairing';
+import { generateQrMatrix, renderQrToString, pairingQrContent } from '@goodvibes-jev/engine/platform/platform/pairing';
 
 const matrix = generateQrMatrix(pairingQrContent(handoff));
 // matrix is a QrMatrix object: { size: number; modules: readonly boolean[][] }; modules[row][col] === true means a dark module
@@ -222,7 +222,7 @@ The host surface calls `getOrCreateCompanionToken(options)` to get the existing 
 ```ts
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/sdk/platform/pairing';
+import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/platform/platform/pairing';
 
 const daemonHomeDir = join(homedir(), '.goodvibes', 'daemon');
 const record = getOrCreateCompanionToken({ daemonHomeDir });
@@ -236,7 +236,7 @@ called. Token storage is daemon-home scoped (see [Storage](#storage)).
 ### Building the legacy connection payload
 
 ```ts
-import { buildCompanionConnectionInfo, encodeConnectionPayload } from '@goodvibes-jev/engine/sdk/platform/pairing';
+import { buildCompanionConnectionInfo, encodeConnectionPayload } from '@goodvibes-jev/engine/platform/platform/pairing';
 
 const payload = buildCompanionConnectionInfo({
   daemonUrl: 'http://192.168.1.42:3421',
@@ -256,7 +256,7 @@ The `daemonUrl` should be the address reachable by the companion device. For loc
 ### Encoding and rendering
 
 ```ts
-import { generateQrMatrix, renderQrToString } from '@goodvibes-jev/engine/sdk/platform/pairing';
+import { generateQrMatrix, renderQrToString } from '@goodvibes-jev/engine/platform/platform/pairing';
 
 const matrix = generateQrMatrix(json);
 const qrString = renderQrToString(matrix); // block-character QR for terminal output
@@ -269,7 +269,7 @@ const qrString = renderQrToString(matrix); // block-character QR for terminal ou
 const raw = qrScanner.scan();
 const payload = JSON.parse(raw) as CompanionConnectionInfo;
 await tokenStore.setToken(payload.token);
-const sdk = createGoodVibesSdk({ baseUrl: payload.url, tokenStore });
+const platformClient = createGoodVibesPlatform({ baseUrl: payload.url, tokenStore });
 ```
 
 ### Migrating off the shared token
@@ -291,41 +291,41 @@ GET /api/control-plane/auth HTTP/1.1
 Authorization: Bearer <token>
 ```
 
-Use the SDK's standard auth helpers to handle this automatically:
+Use the platform's standard auth helpers to handle this automatically:
 
 ```ts
-import { createGoodVibesSdk } from '@goodvibes-jev/engine/sdk';
-import { createMemoryTokenStore } from '@goodvibes-jev/engine/sdk/auth';
+import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
+import { createMemoryTokenStore } from '@goodvibes-jev/engine/platform/auth';
 
 const tokenStore = createMemoryTokenStore();
 await tokenStore.setToken(token);
 
-const sdk = createGoodVibesSdk({
+const platformClient = createGoodVibesPlatform({
   baseUrl,
   tokenStore,
 });
 
-// All sdk.operator.* and sdk.realtime.* calls now include the Bearer header
-const status = await sdk.operator.control.status();
+// All platformClient.operator.* and platformClient.realtime.* calls now include the Bearer header
+const status = await platformClient.operator.control.status();
 ```
 
 For React Native or Expo, prefer the built-in secure token stores rather than rolling a custom adapter:
 
-- **Expo**: `createExpoSecureTokenStore` from `@goodvibes-jev/engine/sdk/expo`, backed by `expo-secure-store`
-- **iOS**: `createIOSKeychainTokenStore` from `@goodvibes-jev/engine/sdk/react-native`, backed by iOS Keychain
-- **Android**: `createAndroidKeystoreTokenStore` from `@goodvibes-jev/engine/sdk/react-native`, backed by Android Keystore
+- **Expo**: `createExpoSecureTokenStore` from `@goodvibes-jev/engine/platform/expo`, backed by `expo-secure-store`
+- **iOS**: `createIOSKeychainTokenStore` from `@goodvibes-jev/engine/platform/react-native`, backed by iOS Keychain
+- **Android**: `createAndroidKeystoreTokenStore` from `@goodvibes-jev/engine/platform/react-native`, backed by Android Keystore
 
 ```ts
-import { createReactNativeGoodVibesSdk, createIOSKeychainTokenStore } from '@goodvibes-jev/engine/sdk/react-native';
+import { createReactNativeGoodVibesPlatform, createIOSKeychainTokenStore } from '@goodvibes-jev/engine/platform/react-native';
 
 const tokenStore = createIOSKeychainTokenStore({ service: 'com.example.gv' });
-const sdk = createReactNativeGoodVibesSdk({
+const platformClient = createReactNativeGoodVibesPlatform({
   baseUrl,
   tokenStore,
 });
 ```
 
-For `createMemoryTokenStore` (non-persistent, suitable only for ephemeral use or development), import from `@goodvibes-jev/engine/sdk/auth`.
+For `createMemoryTokenStore` (non-persistent, suitable only for ephemeral use or development), import from `@goodvibes-jev/engine/platform/auth`.
 
 ---
 
@@ -340,7 +340,7 @@ For `createMemoryTokenStore` (non-persistent, suitable only for ephemeral use or
 Calling `regenerateCompanionToken({ daemonHomeDir })` (equivalent to `getOrCreateCompanionToken` with `regenerate: true`) issues a new token and replaces the stored record. Any companion app holding the previous token will receive `401 Unauthorized` on its next API call and must re-pair.
 
 ```ts
-import { regenerateCompanionToken } from '@goodvibes-jev/engine/sdk/platform/pairing';
+import { regenerateCompanionToken } from '@goodvibes-jev/engine/platform/platform/pairing';
 
 const newRecord = regenerateCompanionToken({ daemonHomeDir });
 ```
@@ -366,7 +366,7 @@ Per-device pairing tokens are stored **hashed** (SHA-256): the file at
 `<surfaceRoot>/control-plane/pairing-tokens.json` never holds a usable secret, only the hash,
 the device's name, and its created/last-seen timestamps.
 
-The legacy shared token is stored as a plaintext JSON file at `<daemonHomeDir>/operator-tokens.json` (default: `~/.goodvibes/daemon/operator-tokens.json`). This file should have user-only read permissions. The SDK sets `0600` on creation and re-enforces it via `chmodSync` after write. Do not commit either file to source control; the daemon home directory should be outside any project tree.
+The legacy shared token is stored as a plaintext JSON file at `<daemonHomeDir>/operator-tokens.json` (default: `~/.goodvibes/daemon/operator-tokens.json`). This file should have user-only read permissions. The platform sets `0600` on creation and re-enforces it via `chmodSync` after write. Do not commit either file to source control; the daemon home directory should be outside any project tree.
 
 ### Token storage on the companion
 
@@ -486,11 +486,11 @@ it states the plan and asks for confirmation before acting (`-y`/`--yes` for the
 answer); an unreachable daemon, a rejected token, or a daemon too old to serve the mint verb are
 each refused by name.
 
-> **SDK vs host wiring:** The `/qrcode` TUI command and the `goodvibes-daemon pair` subcommand
-> are host-application wrappers, not SDK exports. The primitives they compose,
+> **platform vs host wiring:** The `/qrcode` TUI command and the `goodvibes-daemon pair` subcommand
+> are host-application wrappers, not platform exports. The primitives they compose,
 > `mintPairingHandoff`, `generateQrMatrix`, `renderQrToString`, and (for the legacy path)
 > `getOrCreateCompanionToken`, `buildCompanionConnectionInfo`, `encodeConnectionPayload`, are all
-> exported from `@goodvibes-jev/engine/sdk/platform/pairing` and can be composed directly by any
+> exported from `@goodvibes-jev/engine/platform/platform/pairing` and can be composed directly by any
 > embedder.
 
 ---
@@ -501,11 +501,11 @@ each refused by name.
 
 A companion app requires:
 
-1. **A QR scanner, or a deep-link handler.** To capture the pairing code displayed by the host surface, either a camera scan (native camera APIs or libraries like `expo-barcode-scanner`) or, for a web/PWA companion, handling its own app being opened at a `#pair=<token>` URL. Either way, parse the result with `parsePairingHandoffLink()` from `@goodvibes-jev/engine/sdk/platform/pairing` (current flow) or `JSON.parse()` (legacy payload; see [Legacy: the shared token](#legacy-the-shared-token)).
+1. **A QR scanner, or a deep-link handler.** To capture the pairing code displayed by the host surface, either a camera scan (native camera APIs or libraries like `expo-barcode-scanner`) or, for a web/PWA companion, handling its own app being opened at a `#pair=<token>` URL. Either way, parse the result with `parsePairingHandoffLink()` from `@goodvibes-jev/engine/platform/platform/pairing` (current flow) or `JSON.parse()` (legacy payload; see [Legacy: the shared token](#legacy-the-shared-token)).
 
 2. **Persistent, secure token storage.** To retain the companion token across app restarts. See the token storage guidance above.
 
-3. **An HTTP client.** For all request/response interactions. The SDK handles this when used as a client library. For native Kotlin/Swift apps without the SDK, use standard `fetch`, `URLSession`, or `OkHttp` with the `Authorization: Bearer <token>` header.
+3. **An HTTP client.** For all request/response interactions. The platform handles this when used as a client library. For native Kotlin/Swift apps without the platform, use standard `fetch`, `URLSession`, or `OkHttp` with the `Authorization: Bearer <token>` header.
 
 4. **An SSE or WebSocket connection.** For realtime event delivery. The daemon exposes both:
    - SSE: suitable for Bun and browser clients.
@@ -514,23 +514,23 @@ A companion app requires:
 ### Minimal integration pattern (React Native / Expo)
 
 ```ts
-import { createReactNativeGoodVibesSdk, createIOSKeychainTokenStore } from '@goodvibes-jev/engine/sdk/react-native';
+import { createReactNativeGoodVibesPlatform, createIOSKeychainTokenStore } from '@goodvibes-jev/engine/platform/react-native';
 
 // createIOSKeychainTokenStore and createAndroidKeystoreTokenStore are available from
-// @goodvibes-jev/engine/sdk/react-native. For Expo, use createExpoSecureTokenStore
-// from @goodvibes-jev/engine/sdk/expo.
+// @goodvibes-jev/engine/platform/react-native. For Expo, use createExpoSecureTokenStore
+// from @goodvibes-jev/engine/platform/expo.
 const tokenStore = createIOSKeychainTokenStore({ service: 'com.example.goodvibes' });
 
-export function usePairedSdk(baseUrl: string) {
-  const sdk = createReactNativeGoodVibesSdk({
+export function usePairedPlatform(baseUrl: string) {
+  const platformClient = createReactNativeGoodVibesPlatform({
     baseUrl,
     tokenStore,
   });
-  return sdk;
+  return platformClient;
 }
 
 // After scanning the QR code (or opening the deep link):
-import { parsePairingHandoffLink } from '@goodvibes-jev/engine/sdk/platform/pairing';
+import { parsePairingHandoffLink } from '@goodvibes-jev/engine/platform/platform/pairing';
 
 async function onPairingLinkReceived(scannedOrOpenedUrl: string) {
   const parsed = parsePairingHandoffLink(scannedOrOpenedUrl);
@@ -538,13 +538,13 @@ async function onPairingLinkReceived(scannedOrOpenedUrl: string) {
   await tokenStore.setToken(parsed.token);
   // parsed.offers names which setup steps (notifications/relay/passkey) this
   // pairing carries; complete them with pairing.handoff.complete.
-  // sdk is now ready to use with the stored token
+  // platformClient is now ready to use with the stored token
 }
 ```
 
 ### Minimal integration pattern (native Android / iOS)
 
-Native clients that do not use the TypeScript SDK can connect using standard HTTP:
+Native clients that do not use the TypeScript platform can connect using standard HTTP:
 
 ```
 # Verify the token is working
@@ -560,7 +560,7 @@ ws://<daemon-host>:<port>/api/control-plane/ws
 
 with the same `Authorization: Bearer <token>` header (or as a query parameter if the WebSocket client library does not support custom headers).
 
-Event envelopes arrive as JSON-serialized `SerializedEventEnvelope` objects. The schema is exported as `SerializedEventEnvelopeSchema` from `@goodvibes-jev/engine/sdk/contracts`.
+Event envelopes arrive as JSON-serialized `SerializedEventEnvelope` objects. The schema is exported as `SerializedEventEnvelopeSchema` from `@goodvibes-jev/engine/platform/contracts`.
 
 ### Handling token invalidation
 
@@ -568,7 +568,7 @@ When a device's token is revoked (`pairing.tokens.delete`), or the legacy shared
 regenerated or turned off, that device's connection starts receiving `401` responses. Implement a re-pairing flow:
 
 ```ts
-sdk.operator.control.status().catch(async (err) => {
+platformClient.operator.control.status().catch(async (err) => {
   if (err.kind === 'auth') {
     // Token has been invalidated; prompt user to re-scan the QR code
     showRepairingScreen();

@@ -1,4 +1,4 @@
-import { DecisionRouterProvider } from '../sdk/src/platform/providers/decision-router.js';
+import { DecisionRouterProvider } from '../platform/src/platform/providers/decision-router.js';
 import { choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '../errors/src/index.js';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
@@ -41,19 +41,19 @@ import { describe, expect, test } from 'bun:test';
 import {
   executeOrchestratorTurnLoop,
   type OrchestratorTurnLoopContext,
-} from '../sdk/src/platform/core/orchestrator-turn-loop.js';
-import { ConversationManager } from '../sdk/src/platform/core/conversation.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.js';
-import { appendGoodVibesRuntimeAwarenessPrompt } from '../sdk/src/platform/tools/goodvibes-runtime/index.js';
-import { FINAL_RESPONSE_REVIEW_INSTRUCTIONS } from '../sdk/src/platform/core/verification/response-prompt.js';
-import type { LLMProvider, ChatResponse } from '../sdk/src/platform/providers/interface.js';
-import type { ModelDefinition } from '../sdk/src/platform/providers/registry-types.js';
-import type { HelperModel } from '../sdk/src/platform/config/helper-model.js';
-import type { MemoryRecord } from '../sdk/src/platform/state/memory-store.js';
-import type { TurnKnowledgeRegistrySource, TurnInjectionRecord } from '../sdk/src/platform/agents/turn-knowledge-injection.js';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { UNKNOWN_MODEL_PRICING } from '../sdk/src/platform/providers/model-pricing.js';
+} from '../platform/src/platform/core/orchestrator-turn-loop.js';
+import { ConversationManager } from '../platform/src/platform/core/conversation.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.js';
+import { appendGoodVibesRuntimeAwarenessPrompt } from '../platform/src/platform/tools/goodvibes-runtime/index.js';
+import { FINAL_RESPONSE_REVIEW_INSTRUCTIONS } from '../platform/src/platform/core/verification/response-prompt.js';
+import type { LLMProvider, ChatResponse } from '../platform/src/platform/providers/interface.js';
+import type { ModelDefinition } from '../platform/src/platform/providers/registry-types.js';
+import type { HelperModel } from '../platform/src/platform/config/helper-model.js';
+import type { MemoryRecord } from '../platform/src/platform/state/memory-store.js';
+import type { TurnKnowledgeRegistrySource, TurnInjectionRecord } from '../platform/src/platform/agents/turn-knowledge-injection.js';
+import type { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { UNKNOWN_MODEL_PRICING } from '../platform/src/platform/providers/model-pricing.js';
 import { useMemoryReadings } from './_helpers/memory-readings.ts';
 
 // Knowledge ranking reads through the judgment port; the fake reads a record as

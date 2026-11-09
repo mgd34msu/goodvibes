@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { EntryType, Question } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { forgetFailureReadings, installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { normalizeError, readNormalizedError, summarizeError } from '../sdk/src/platform/utils/error-display.js';
-import { registerAccountIdentityRedaction } from '../sdk/src/platform/utils/redaction.js';
+import { normalizeError, readNormalizedError, summarizeError } from '../platform/src/platform/utils/error-display.js';
+import { registerAccountIdentityRedaction } from '../platform/src/platform/utils/redaction.js';
 import { authoredPrivacyAnswer, errorSpan, errorText } from './_helpers/authored-error-readings.ts';
 
 /**

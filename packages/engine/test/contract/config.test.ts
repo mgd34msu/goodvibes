@@ -9,15 +9,15 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CONFIG_SCHEMA, DEFAULT_CONFIG } from '../../sdk/src/platform/config/schema.js';
-import { ConfigManager } from '../../sdk/src/platform/config/manager.js';
+import { CONFIG_SCHEMA, DEFAULT_CONFIG } from '../../platform/src/platform/config/schema.js';
+import { ConfigManager } from '../../platform/src/platform/config/manager.js';
 import {
   CONTRACT_CONFIG_DEFAULTS,
   getEnabledContractGates,
   readContractConfig,
   type ContractConfig,
   type ContractConfigReader,
-} from '../../sdk/src/platform/contract/index.js';
+} from '../../platform/src/platform/contract/index.js';
 
 function makeConfigManager(): ConfigManager {
   const configDir = join(tmpdir(), `gv-contract-config-${Date.now()}-${crypto.randomUUID()}`);

@@ -69,14 +69,14 @@ export function isPrivateNetworkHost(hostname: string): boolean {
 export function normalizeBaseUrl(baseUrl: string): string {
   const normalized = baseUrl.trim();
   if (!normalized) {
-    throw new ConfigurationError('Transport baseUrl is required. Pass a non-empty baseUrl string to your transport or SDK options.', { code: 'SDK_TRANSPORT_BASE_URL_REQUIRED' });
+    throw new ConfigurationError('Transport baseUrl is required. Pass a non-empty baseUrl string to your transport or platform options.', { code: 'ENGINE_TRANSPORT_BASE_URL_REQUIRED' });
   }
   let parsed: URL;
   try {
     parsed = new URL(normalized);
   } catch (cause) {
     throw new ConfigurationError('Transport baseUrl must be an absolute URL.', {
-      code: 'SDK_TRANSPORT_BASE_URL_INVALID',
+      code: 'ENGINE_TRANSPORT_BASE_URL_INVALID',
       source: 'transport',
       hint: 'Pass a full URL such as https://goodvibes.example.com.',
       cause,
@@ -85,7 +85,7 @@ export function normalizeBaseUrl(baseUrl: string): string {
   const protocol = parsed.protocol;
   if (protocol !== 'https:' && protocol !== 'wss:' && protocol !== 'http:' && protocol !== 'ws:') {
     throw new ConfigurationError(`Unsupported transport baseUrl protocol: ${protocol}`, {
-      code: 'SDK_TRANSPORT_BASE_URL_PROTOCOL_UNSUPPORTED',
+      code: 'ENGINE_TRANSPORT_BASE_URL_PROTOCOL_UNSUPPORTED',
       source: 'transport',
       hint: 'Use https:// or wss://. http:// and ws:// are supported on private-network origins (localhost, RFC 1918, .local) and for explicit public-http deployments.',
     });
@@ -100,7 +100,7 @@ export function normalizeBaseUrl(baseUrl: string): string {
   const allowInsecure = runtimeProcess?.env?.GOODVIBES_ALLOW_INSECURE_TRANSPORT === 'true';
   if ((protocol === 'http:' || protocol === 'ws:') && !privateNetwork && !allowInsecure) {
     throw new ConfigurationError('Refusing insecure PUBLIC GoodVibes transport baseUrl.', {
-      code: 'SDK_TRANSPORT_INSECURE_BASE_URL',
+      code: 'ENGINE_TRANSPORT_INSECURE_BASE_URL',
       source: 'transport',
       hint: 'Use https:// or wss:// for public origins. Plain http is supported on private-network origins (localhost, 10/8, 172.16/12, 192.168/16, .local). For an intentional public-http deployment set GOODVIBES_ALLOW_INSECURE_TRANSPORT=true (server-side only).',
     });
@@ -111,13 +111,13 @@ export function normalizeBaseUrl(baseUrl: string): string {
 export function buildUrl(baseUrl: string, path: string): string {
   const normalized = normalizeBaseUrl(baseUrl);
   if (/^[a-z][a-z0-9+\-.]*:/i.test(path)) {
-    throw new ConfigurationError(`Absolute path not allowed: ${path}`, { code: 'SDK_TRANSPORT_PATH_ABSOLUTE' });
+    throw new ConfigurationError(`Absolute path not allowed: ${path}`, { code: 'ENGINE_TRANSPORT_PATH_ABSOLUTE' });
   }
   let resolved: string;
   try {
     resolved = new URL(path, `${normalized}/`).toString();
   } catch (cause) {
-    throw new ConfigurationError(`Invalid transport path: ${path}`, { code: 'SDK_TRANSPORT_PATH_INVALID', cause });
+    throw new ConfigurationError(`Invalid transport path: ${path}`, { code: 'ENGINE_TRANSPORT_PATH_INVALID', cause });
   }
   return assertSameOriginAbsoluteUrl(resolved, normalized);
 }
@@ -127,7 +127,7 @@ export function buildUrl(baseUrl: string, path: string): string {
  *
  * Used by transport call sites that allow absolute URLs as a convenience but
  * MUST NOT leak the bearer Authorization header to a different origin. Throws
- * `ConfigurationError SDK_TRANSPORT_CROSS_ORIGIN` when origins diverge.
+ * `ConfigurationError ENGINE_TRANSPORT_CROSS_ORIGIN` when origins diverge.
  *
  * Returns the validated absolute URL unchanged on success.
  */
@@ -137,7 +137,7 @@ export function assertSameOriginAbsoluteUrl(absoluteUrl: string, originReference
     parsed = new URL(absoluteUrl);
   } catch (cause) {
     throw new ConfigurationError(`Invalid absolute transport URL: ${absoluteUrl}`, {
-      code: 'SDK_TRANSPORT_URL_INVALID',
+      code: 'ENGINE_TRANSPORT_URL_INVALID',
       source: 'transport',
       cause,
     });
@@ -147,14 +147,14 @@ export function assertSameOriginAbsoluteUrl(absoluteUrl: string, originReference
     referenceOrigin = new URL(originReferenceUrl).origin;
   } catch (cause) {
     throw new ConfigurationError(`Invalid transport origin reference URL: ${originReferenceUrl}`, {
-      code: 'SDK_TRANSPORT_URL_INVALID',
+      code: 'ENGINE_TRANSPORT_URL_INVALID',
       source: 'transport',
       cause,
     });
   }
   if (parsed.origin !== referenceOrigin) {
     throw new ConfigurationError(`Cross-origin transport request rejected: ${parsed.origin} does not match transport baseUrl origin ${referenceOrigin}`, {
-      code: 'SDK_TRANSPORT_CROSS_ORIGIN',
+      code: 'ENGINE_TRANSPORT_CROSS_ORIGIN',
       source: 'transport',
       hint: 'The transport bearer token would be sent to a different origin. Use a same-origin URL or open a separate transport for the cross-origin endpoint.',
     });

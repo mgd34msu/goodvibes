@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { fileURLToPath } from 'node:url';
 import { rm } from 'node:fs/promises';
-import { InboxCursorStore } from '../sdk/src/platform/intake/cursor-store.ts';
-import { InboundPoller } from '../sdk/src/platform/intake/poller.ts';
-import { aggregateInbox } from '../sdk/src/platform/intake/aggregator.ts';
-import * as publicIntake from '../sdk/src/platform/intake/index.ts';
-import type { AdapterContext, ProviderPollOptions, ProviderPollResult } from '../sdk/src/platform/intake/provider-adapter.ts';
+import { InboxCursorStore } from '../platform/src/platform/intake/cursor-store.ts';
+import { InboundPoller } from '../platform/src/platform/intake/poller.ts';
+import { aggregateInbox } from '../platform/src/platform/intake/aggregator.ts';
+import * as publicIntake from '../platform/src/platform/intake/index.ts';
+import type { AdapterContext, ProviderPollOptions, ProviderPollResult } from '../platform/src/platform/intake/provider-adapter.ts';
 import { createDiscordInboxAdapter, type DiscordInboxHttp, type DiscordInboxMapper,
-  type DiscordInboxCatalog, type DiscordInboxPorts } from '../sdk/src/platform/intake/providers/discord.ts';
+  type DiscordInboxCatalog, type DiscordInboxPorts } from '../platform/src/platform/intake/providers/discord.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const EPOCH = 1_420_070_400_000;
@@ -118,8 +118,8 @@ describe('private Discord adapter admission and catalog', () => {
     expect(publicIntake).not.toHaveProperty('createDiscordInboxAdapter');
     expect(publicIntake.buildAdapters(f.ctx, ['discord']).size).toBe(0);
     const consumer = fileURLToPath(new URL('../../../products/daemon', import.meta.url));
-    expect(Bun.resolveSync('@goodvibes-jev/engine/sdk/platform/intake', consumer)).toBe(fileURLToPath(new URL('../sdk/src/platform/intake/index.ts', import.meta.url)));
-    expect(() => Bun.resolveSync('@goodvibes-jev/engine/sdk/platform/intake/providers/discord', consumer)).toThrow();
+    expect(Bun.resolveSync('@goodvibes-jev/engine/platform/platform/intake', consumer)).toBe(fileURLToPath(new URL('../platform/src/platform/intake/index.ts', import.meta.url)));
+    expect(() => Bun.resolveSync('@goodvibes-jev/engine/platform/platform/intake/providers/discord', consumer)).toThrow();
     for (const missing of ['http', 'mapItem', 'listDmChannels'] as const) {
       expect(() => createDiscordInboxAdapter(f.ctx, { ...f.ports, [missing]: undefined } as unknown as DiscordInboxPorts)).toThrow('requires HTTP');
     }

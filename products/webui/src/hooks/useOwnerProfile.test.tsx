@@ -34,12 +34,12 @@ function record(verb: string, input: unknown): Promise<unknown> {
   return Promise.resolve(WRITE_ANSWER);
 }
 
-// queries.ts imports getCurrentAuth/invokeMethod/sdk from this module, so all three must
+// queries.ts imports getCurrentAuth/invokeMethod/platform from this module, so all three must
 // be present or the module fails to link.
 mock.module('../lib/goodvibes', () => ({
   getCurrentAuth: () => Promise.resolve({}),
   invokeMethod: () => Promise.resolve({}),
-  sdk: {
+  client: {
     operator: {
       profile: {
         read: () => Promise.resolve({ state: { kind: 'loaded', path: '/p' }, sections: [] }),
@@ -212,7 +212,7 @@ describe('every profile write states its authority', () => {
  * Every profile mutation's body conforms to the input the CONTRACT declares for its id.
  *
  * The check reads OPERATOR_CONTRACT's own `inputSchema` rather than a list written here,
- * so it re-derives itself on every pin bump: when the SDK renames, retires or requires a
+ * so it re-derives itself on every pin bump: when the platform renames, retires or requires a
  * property, this fails without anyone remembering to update an expectation. That is the
  * point, the two contract changes that broke this surface (`authority` becoming required,
  * and `forget` moving off `lineIndex`) both produced zero type errors, because the

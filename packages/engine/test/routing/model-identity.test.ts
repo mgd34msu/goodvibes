@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { ModelIdentityResolver, type IdentityCandidate } from '../../sdk/src/platform/routing/model-identity.js';
-import { buildSyntheticCanonicalModels, SyntheticIdentities } from '../../sdk/src/platform/providers/model-catalog-synthetic.js';
-import type { CatalogModel } from '../../sdk/src/platform/providers/model-catalog.js';
+import { ModelIdentityResolver, type IdentityCandidate } from '../../platform/src/platform/routing/model-identity.js';
+import { buildSyntheticCanonicalModels, SyntheticIdentities } from '../../platform/src/platform/providers/model-catalog-synthetic.js';
+import type { CatalogModel } from '../../platform/src/platform/providers/model-catalog.js';
 
 describe('published model identity', () => {
   test('resolves exact IDs, declared aliases and canonical IDs locally', async () => {

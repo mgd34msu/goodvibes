@@ -1,5 +1,5 @@
 /**
- * DaemonApprovalStore: the properties under test are the four the SDK's
+ * DaemonApprovalStore: the properties under test are the four the platform's
  * owner-approval ruling names, kept across a restart. Single use must hold on
  * disk (an approval spent before a restart must not be spendable after one),
  * the content binding keeps its existing wire format, the TTL must expire
@@ -8,7 +8,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { DaemonApprovalStore, PaymentApprovalStoreError } from '../sdk/src/platform/payments/host/approval-store.js';
+import { DaemonApprovalStore, PaymentApprovalStoreError } from '../platform/src/platform/payments/host/approval-store.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const ACTION = 'payments.checkout.begin';
@@ -55,7 +55,7 @@ describe('DaemonApprovalStore: persisted, single use, content bound', () => {
     const store = new DaemonApprovalStore(filePath, clock);
     store.grant({ action: ACTION, content: CONTENT });
 
-    nowMs += 6 * 60 * 1000; // past the SDK's five-minute TTL
+    nowMs += 6 * 60 * 1000; // past the platform's five-minute TTL
     const missed = store.take({ action: ACTION, content: CONTENT });
     expect(missed.approval).toBeNull();
     if (missed.approval === null) expect(missed.mismatch).toBe('expired');

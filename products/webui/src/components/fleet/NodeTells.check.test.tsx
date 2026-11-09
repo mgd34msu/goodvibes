@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
-import { createProcessRegistry, type ProcessRegistryDeps } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
-import { CURRENT_CONTRACT_SCHEMA_VERSION, type ContractView, type Criterion } from '@goodvibes-jev/engine/sdk/platform/contract';
-import { emptyWorkItemUsage } from '@goodvibes-jev/engine/sdk/platform/orchestration';
+import { createProcessRegistry, type ProcessRegistryDeps } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+import { CURRENT_CONTRACT_SCHEMA_VERSION, type ContractView, type Criterion } from '@goodvibes-jev/engine/platform/platform/contract';
+import { emptyWorkItemUsage } from '@goodvibes-jev/engine/platform/platform/orchestration';
 import { NodeReviewSummary } from './NodeTells';
 import type { FleetProcessNode } from '../../lib/goodvibes';
 

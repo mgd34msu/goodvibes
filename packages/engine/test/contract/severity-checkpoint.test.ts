@@ -2,7 +2,7 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { readFileSync, rmSync } from 'node:fs';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { installJudgmentPort, judgmentPort } from '@goodvibes-jev/engine/errors';
-import { contractPath, deserializeContract } from '../../sdk/src/platform/contract/store.js';
+import { contractPath, deserializeContract } from '../../platform/src/platform/contract/store.js';
 import { makeHarness, makeRepo, oneUnitPlan, startContract, waitFor, type AgentStep, type Harness } from './runner-support.js';
 
 function deferred() {

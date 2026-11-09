@@ -7,19 +7,19 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { LayeredPolicyEvaluator } from '../sdk/src/platform/runtime/permissions/evaluator.js';
-import { PermissionManager, type PermissionConfigReader } from '../sdk/src/platform/permissions/manager.js';
-import type { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.js';
-import type { PermissionMode } from '../sdk/src/platform/config/schema.js';
-import { buildToolDenial, buildDenialErrorMessage, PLAN_MODE_DENIAL_REASON } from '../sdk/src/platform/permissions/denial.js';
-import { bindPermissionModeChangeEvent } from '../sdk/src/platform/permissions/mode-change-emitter.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
+import { LayeredPolicyEvaluator } from '../platform/src/platform/runtime/permissions/evaluator.js';
+import { PermissionManager, type PermissionConfigReader } from '../platform/src/platform/permissions/manager.js';
+import type { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.js';
+import type { PermissionMode } from '../platform/src/platform/config/schema.js';
+import { buildToolDenial, buildDenialErrorMessage, PLAN_MODE_DENIAL_REASON } from '../platform/src/platform/permissions/denial.js';
+import { bindPermissionModeChangeEvent } from '../platform/src/platform/permissions/mode-change-emitter.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
 import {
   appendPlanModeInstruction,
   PLAN_MODE_INSTRUCTION_MARKER,
-} from '../sdk/src/platform/permissions/plan-mode-instructions.js';
-import { buildReinjectedInstructions } from '../sdk/src/platform/core/compaction-sections.js';
+} from '../platform/src/platform/permissions/plan-mode-instructions.js';
+import { buildReinjectedInstructions } from '../platform/src/platform/core/compaction-sections.js';
 
 // ── helpers ────────────────────────────────────────────────────────────────
 

@@ -3,12 +3,12 @@ import { expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { captureJudgmentVolumeMonitorControl } from '../sdk/src/platform/observe/judgment-volume-monitor.ts';
-import { composeJudgmentVolumeMonitor } from '../sdk/src/platform/runtime/judgment-volume-monitor.ts';
-import { createDisposalScope } from '../sdk/src/platform/runtime/disposal.ts';
-import { judgmentConfigSettings } from '../sdk/src/platform/config/schema-domain-judgment.ts';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { logger } from '../sdk/src/platform/utils/logger.ts';
+import { captureJudgmentVolumeMonitorControl } from '../platform/src/platform/observe/judgment-volume-monitor.ts';
+import { composeJudgmentVolumeMonitor } from '../platform/src/platform/runtime/judgment-volume-monitor.ts';
+import { createDisposalScope } from '../platform/src/platform/runtime/disposal.ts';
+import { judgmentConfigSettings } from '../platform/src/platform/config/schema-domain-judgment.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { logger } from '../platform/src/platform/utils/logger.ts';
 
 const budget = { name: 'All decisions', maxLogicalDecisions: 100, maxWireAttempts: 200 };
 test('Judgment settings expose owner call-volume budgets and refuse enabled empty budgets', () => {

@@ -16,10 +16,10 @@ import {
   McpSchemaFreshnessTracker,
   McpLifecycleManager,
   type QuarantineReason,
-} from '../sdk/src/platform/runtime/mcp/index.ts';
+} from '../platform/src/platform/runtime/mcp/index.ts';
 import {
   type McpEvent,
-} from '../sdk/src/events/mcp.ts';
+} from '../platform/src/events/mcp.ts';
 
 // ---------------------------------------------------------------------------
 // McpSchemaFreshnessTracker, quarantine unit tests

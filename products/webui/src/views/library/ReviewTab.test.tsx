@@ -16,7 +16,7 @@ mock.module('../../lib/goodvibes', () => ({
   VIBE_PERSONA_TAG: 'vibe',
   getCurrentAuth: () => Promise.resolve({}),
   invokeMethod: (method: string) => Promise.resolve(method === 'knowledge.candidates.list' ? { candidates } : {}),
-  sdk: {
+  client: {
     operator: {
       memory: {
         reviewQueue: () => Promise.resolve({ records: queue }),

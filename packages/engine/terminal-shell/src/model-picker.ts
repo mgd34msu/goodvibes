@@ -1,10 +1,10 @@
-import type { ModelDefinition, FavoritesStore, BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { compositeScore, EFFORT_DESCRIPTIONS } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ModelDefinition, FavoritesStore, BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { compositeScore, EFFORT_DESCRIPTIONS } from '@goodvibes-jev/engine/platform/platform/providers';
 import {
   effortPresentationForModel,
   toEffortModel,
   type EffortPresentation,
-} from '@goodvibes-jev/engine/sdk/platform/providers/reasoning-effort-surface';
+} from '@goodvibes-jev/engine/platform/platform/providers/reasoning-effort-surface';
 import {
   beginModelPickerCatalogLoad,
   isModelPickerCatalogCurrent,

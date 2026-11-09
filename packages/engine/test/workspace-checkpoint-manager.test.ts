@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { WorkspaceCheckpointManager } from '../sdk/src/platform/workspace/checkpoint/manager.js';
-import { createSessionSurface } from '../sdk/src/platform/runtime/session-surface.js';
+import { WorkspaceCheckpointManager } from '../platform/src/platform/workspace/checkpoint/manager.js';
+import { createSessionSurface } from '../platform/src/platform/runtime/session-surface.js';
 
 function runGit(cwd: string, args: string[]): string {
   const result = Bun.spawnSync(['git', ...args], { cwd });

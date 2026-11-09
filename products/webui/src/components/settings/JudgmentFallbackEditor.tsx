@@ -2,7 +2,7 @@ import { useState } from "react";
 import {
   captureJudgmentFallbackSettings,
   type JudgmentFallbackSettings,
-} from "@goodvibes-jev/engine/sdk/browser/decision-router";
+} from "@goodvibes-jev/engine/platform/browser/decision-router";
 import { DECISION_MODEL_PROFILES } from "@goodvibes-jev/judgment/decisions";
 import { useSettingsDraft } from "../../hooks/useSettingsDraft";
 import { SettingsDraftConflict } from "./SettingsDraftConflict";

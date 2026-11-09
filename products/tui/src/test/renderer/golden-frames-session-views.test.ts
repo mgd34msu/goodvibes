@@ -20,7 +20,7 @@ usePresentationReadings([["error TS2345: Argument of type 'string | undefined' i
 process.env.TZ = 'UTC'; // the process view's clock times
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { activeTokens, setActiveThemeMode, setActiveThemeName } from '../../renderer/theme.ts';
 import { auditFrame } from '../helpers/frame-audit.ts';
 import { assertGoldenIn, encodeGolden } from '../helpers/golden-snapshot.ts';

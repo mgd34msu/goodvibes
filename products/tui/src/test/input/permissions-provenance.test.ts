@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { applyRuntimeConfigValue } from '@goodvibes-jev/engine/terminal-shell';
 import { buildPermissionProvenance, renderPermissionProvenance } from '../../input/commands/permissions-provenance.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
@@ -61,7 +61,7 @@ describe('permission provenance', () => {
     expect(text).toContain('origin:');
   });
 
-  test('read-only secret checks name the actual SDK decision site rather than retired path rules', () => {
+  test('read-only secret checks name the actual platform decision site rather than retired path rules', () => {
     const cm = new ConfigManager({ workingDir: root, homeDir: root, surfaceRoot: 'tui' });
     const prov = buildPermissionProvenance(cm);
     expect(prov.readSecretsSite).toBe('engine.gate.read-secrets');

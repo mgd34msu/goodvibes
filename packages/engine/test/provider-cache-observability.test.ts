@@ -1,18 +1,18 @@
-import { transformModelsDevResponse } from '../sdk/src/platform/providers/model-catalog-cache.js';
+import { transformModelsDevResponse } from '../platform/src/platform/providers/model-catalog-cache.js';
 import { afterEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { FavoritesStore } from '../sdk/src/platform/providers/favorites.js';
-import { GitHubCopilotProvider, getGitHubCopilotTokenCachePath } from '../sdk/src/platform/providers/github-copilot.js';
-import { BenchmarkStore } from '../sdk/src/platform/providers/model-benchmarks.js';
-import { getCatalogModelDefinitionsFrom, loadCatalogCache, type CatalogModel } from '../sdk/src/platform/providers/model-catalog.js';
-import { ModelLimitsService } from '../sdk/src/platform/providers/model-limits.js';
-import { ProviderRegistry } from '../sdk/src/platform/providers/registry.js';
-import type { DiscoveredServer } from '../sdk/src/platform/discovery/scanner.js';
-import { logger } from '../sdk/src/platform/utils/logger.js';
+import { FavoritesStore } from '../platform/src/platform/providers/favorites.js';
+import { GitHubCopilotProvider, getGitHubCopilotTokenCachePath } from '../platform/src/platform/providers/github-copilot.js';
+import { BenchmarkStore } from '../platform/src/platform/providers/model-benchmarks.js';
+import { getCatalogModelDefinitionsFrom, loadCatalogCache, type CatalogModel } from '../platform/src/platform/providers/model-catalog.js';
+import { ModelLimitsService } from '../platform/src/platform/providers/model-limits.js';
+import { ProviderRegistry } from '../platform/src/platform/providers/registry.js';
+import type { DiscoveredServer } from '../platform/src/platform/discovery/scanner.js';
+import { logger } from '../platform/src/platform/utils/logger.js';
 
 const originalFetch = globalThis.fetch;
 

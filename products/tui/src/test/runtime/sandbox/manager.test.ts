@@ -3,7 +3,7 @@ import {
   buildSandboxReview,
   listSandboxProfiles,
   type ConfigManagerLike,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/sandbox';
+} from '@goodvibes-jev/engine/platform/platform/runtime/sandbox';
 import { renderSandboxDoctor } from '../../../runtime/sandbox-public-gaps.ts';
 
 function makeManager(): ConfigManagerLike {

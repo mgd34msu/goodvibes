@@ -1,5 +1,5 @@
 export {buildMcpEntries} from '@goodvibes-jev/engine/terminal-shell/settings-mcp-entries';
-import { readConfigSettingForDisplay } from '@goodvibes-jev/engine/sdk/platform/config';
+import { readConfigSettingForDisplay } from '@goodvibes-jev/engine/platform/platform/config';
 /**
  * settings-modal-data, pure data-assembly helpers for SettingsModal.
  *
@@ -8,15 +8,15 @@ import { readConfigSettingForDisplay } from '@goodvibes-jev/engine/sdk/platform/
  * to these during open() and tab-switch operations.
  */
 
-import { type ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/sdk/platform/config';
+import { type ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
 import { getResolvedSettingLookup } from '@/runtime/index.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
 
 import { buildSubscriptionEntries } from './settings-modal-subscriptions.ts';
-import type { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ServiceInspectionQuery } from '@/runtime/index.ts';
-import { CODE_INDEX_ENABLED_CONFIG_KEY, NOTIFICATIONS_METADATA_ONLY_KEY } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { CODE_INDEX_ENABLED_CONFIG_KEY, NOTIFICATIONS_METADATA_ONLY_KEY } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import {
   WORKTREE_SETUP_CARRY_OVER_GLOBS_CONFIG_KEY,
   WORKTREE_SETUP_COMMANDS_CONFIG_KEY,
@@ -25,7 +25,7 @@ import {
   isWorktreeSetupListConfigKey,
   readWorktreeSetupList,
 } from './worktree-setup-config.ts';
-import { BUDGET_ALERT_USD_CONFIG_KEY, BUDGET_ALERT_USD_DEFAULT, readBudgetAlertUsd } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { BUDGET_ALERT_USD_CONFIG_KEY, BUDGET_ALERT_USD_DEFAULT, readBudgetAlertUsd } from '@goodvibes-jev/engine/platform/platform/providers';
 import { MEMORY_PROJECTION_DIR_CONFIG_KEY, buildMemoryProjectionDirSyntheticEntry } from './commands/recall-files-config.ts';
 import { MEMORY_SHOW_PROVENANCE_CONFIG_KEY, buildMemoryProvenanceSyntheticEntry } from '../core/memory-provenance.ts';
 import {
@@ -108,7 +108,7 @@ export function refreshHostSettingEntry(entry: SettingEntry, configManager: Conf
       metadataUnavailable: undefined,
     });
   } catch {
-    // The SDK deliberately withholds lock metadata when policy cannot be read.
+    // The platform deliberately withholds lock metadata when policy cannot be read.
     // Do not turn that absence into an unlocked/default provenance claim.
     Object.assign(entry, {
       effectiveSource: undefined,
@@ -283,7 +283,7 @@ export function buildSettingGroups(
   }
 
   // Inject the storage.codeIndexEnabled toggle into the
-  // storage category. TUI-local synthetic setting (not in the SDK ConfigKey
+  // storage category. TUI-local synthetic setting (not in the platform ConfigKey
   // union, see code-index-services.ts), same rationale as
   // notifyAfterSeconds above: opt-in, default off, states its own bounds.
   const storageEntries = groups.get('storage');
@@ -293,7 +293,7 @@ export function buildSettingGroups(
 
   // Inject the memory.projection.dir synthetic entry into the storage
   // category (alongside codeIndexEnabled, both are local-storage posture
-  // settings). Not in the SDK ConfigKey union, same rationale as above.
+  // settings). Not in the platform ConfigKey union, same rationale as above.
   if (storageEntries && !storageEntries.some((e) => e.setting.key === MEMORY_PROJECTION_DIR_CONFIG_KEY)) {
     storageEntries.push(buildMemoryProjectionDirSyntheticEntry(configManager));
   }
@@ -307,7 +307,7 @@ export function buildSettingGroups(
   // Inject the worktree.setup.commands / worktree.setup.carryOverGlobs
   // synthetic entries into the orchestration category (worktree isolation is
   // an orchestration-engine concern, see WorkstreamIsolation 'worktree').
-  // Neither key is in the SDK ConfigKey union (see worktree-setup-config.ts),
+  // Neither key is in the platform ConfigKey union (see worktree-setup-config.ts),
   // same rationale as the other synthetic settings above.
   const orchestrationEntries = groups.get('orchestration');
   if (orchestrationEntries) {
@@ -327,11 +327,11 @@ export function buildSettingGroups(
   injectExecEnvScrubSyntheticEntry(groups, configManager);
 
   // Payment card capability (see payments-config.ts): the CONFIG_SCHEMA loop
-  // above already populated 'payments' with the fourteen real SDK settings
+  // above already populated 'payments' with the fourteen real platform settings
   // (enabled, defaultCardId, currency, cvvHandling, budgets, shipping,
   // windows, notifyChannels). What's injected here are the four secret-tier
   // card-material fields and the two ordinary address fields, which are
-  // TUI-local synthetic sub-keys under that real section (not yet SDK
+  // TUI-local synthetic sub-keys under that real section (not yet platform
   // CONFIG_SCHEMA entries, see payments-config.ts's header comment), backed
   // by the same real configManager as everything else in this group.
   const paymentsEntries = groups.get('payments');
@@ -339,8 +339,8 @@ export function buildSettingGroups(
     paymentsEntries.push(...buildPaymentsSyntheticEntries(configManager));
   }
 
-  // relay.* is a real SDK CONFIG_SCHEMA domain; append the threat-model note
-  // the SDK's own descriptions don't carry (see relay-settings-descriptions.ts).
+  // relay.* is a real platform CONFIG_SCHEMA domain; append the threat-model note
+  // the platform's own descriptions don't carry (see relay-settings-descriptions.ts).
   enrichRelaySettingDescriptions(groups);
 
   // Daemon-owned keys (e.g. surfaces.telegram.*) live only in the daemon's
@@ -353,7 +353,7 @@ export function buildSettingGroups(
   // non-feature-owned rows stay orphans; skipped on the featureless path.
   if (featureFlagManager) applyFeatureUnitLayout(groups, buildFlagEntries(featureFlagManager));
 
-  // learning.consolidation.* is a real SDK config domain now, so its keys arrive
+  // learning.consolidation.* is a real platform config domain now, so its keys arrive
   // through the CONFIG_SCHEMA loop above; the old TUI-local synthetic entries were
   // removed for this reason.
 
@@ -381,7 +381,7 @@ export const NOTIFY_AFTER_SECONDS_DEFAULT_SETTING = 60;
 /**
  * The synthetic ConfigSetting descriptor for behavior.notifyAfterSeconds.
  *
- * This key is TUI-local and is not yet in the SDK ConfigKey union. The
+ * This key is TUI-local and is not yet in the platform ConfigKey union. The
  * descriptor is injected into the behavior settings group so users can
  * configure the long-task push notification threshold from /config behavior.
  *
@@ -423,7 +423,7 @@ export function buildNotifyAfterSecondsSyntheticEntry(configManager: Pick<Config
 /**
  * The synthetic ConfigSetting descriptor for behavior.budgetAlertUsd.
  *
- * This key is TUI-local and is not yet in the SDK ConfigKey union, it never
+ * This key is TUI-local and is not yet in the platform ConfigKey union, it never
  * appeared in CONFIG_SCHEMA, so it was invisible to every schema-driven
  * inspection surface (/config, /settings-sync show <key>) even though the
  * value round-trips correctly through configManager.get/set. The descriptor
@@ -462,7 +462,7 @@ export function buildBudgetAlertUsdSyntheticEntry(configManager: Pick<ConfigMana
 // ---------------------------------------------------------------------------
 
 /**
- * The five alert-gating booleans, all TUI-local (not yet in the SDK
+ * The five alert-gating booleans, all TUI-local (not yet in the platform
  * ConfigKey union), all defaulting to on. Read/written generically by
  * core/alert-gating.ts (readBooleanConfig) and the per-alert-class modules
  * (budget-breach-notifier.ts, approval-alert.ts, turn-event-wiring.ts,
@@ -517,7 +517,7 @@ export function buildNotifyAlertSyntheticEntries(configManager: Pick<ConfigManag
 
 /**
  * The OSC 9 in-terminal desktop-notification toggles + the audible bell.
- * TUI-local synthetic booleans (not in the SDK ConfigKey union), each carrying
+ * TUI-local synthetic booleans (not in the platform ConfigKey union), each carrying
  * its OWN default (unlike the always-on alert toggles above): approval-wait
  * on, turn-end/agent-blocked off, bell off. Read generically by
  * core/terminal-notifier.ts (readBooleanConfig); this is only the
@@ -583,7 +583,7 @@ export function buildFlagEntries(featureFlagManager: FeatureFlagManager | null):
   const entries: FlagEntry[] = [];
   for (const { flag, state, persistedState, pendingRestart } of featureFlagManager.getAll().values()) {
     const feature = FEATURE_SETTINGS_BY_ID.get(flag.id);
-    if (!feature) continue; // gate with no settings surface (registry/binding drift is SDK test-guarded)
+    if (!feature) continue; // gate with no settings surface (registry/binding drift is platform test-guarded)
     entries.push({ feature, flag, state, persistedState, pendingRestart });
   }
   return entries;

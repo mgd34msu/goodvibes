@@ -5,9 +5,9 @@
  * Two of these are structural pins rather than ordinary unit tests, and they
  * are the important ones:
  *
- *  - the entry gate is the SDK's allowlist, not a local list. If the owner ever
- *    closes the webui again, the SDK edit alone must switch this surface off;
- *    the "webui is an entry surface" test below fails loudly if the pinned SDK
+ *  - the entry gate is the platform's allowlist, not a local list. If the owner ever
+ *    closes the webui again, the platform edit alone must switch this surface off;
+ *    the "webui is an entry surface" test below fails loudly if the pinned platform
  *    stops saying so, instead of this app silently keeping a form the ruling
  *    no longer covers.
  *
@@ -18,7 +18,7 @@
  *    facade is what makes that a red test rather than a silent leak.
  */
 import { describe, expect, test } from 'bun:test';
-import { mayEnterCardDetails, mayOfferCardEntryFlow } from '@goodvibes-jev/engine/sdk/platform/payments/browser';
+import { mayEnterCardDetails, mayOfferCardEntryFlow } from '@goodvibes-jev/engine/platform/platform/payments/browser';
 import {
   buildCardCreateInput,
   CARD_MATERIAL_FIELDS,
@@ -51,19 +51,19 @@ function draft(overrides: Partial<CardDraft> = {}): CardDraft {
   };
 }
 
-describe('the entry gate is the SDK allowlist, never a local list', () => {
-  test('the SDK says a card may be typed on this surface', () => {
-    // Asked of the SDK directly, so this fails if the pinned SDK's ruling changes.
+describe('the entry gate is the platform allowlist, never a local list', () => {
+  test('the platform says a card may be typed on this surface', () => {
+    // Asked of the platform directly, so this fails if the pinned platform's ruling changes.
     expect(mayEnterCardDetails(WEBUI_CARD_ENTRY_SURFACE)).toBe(true);
     expect(mayOfferCardEntryFlow(WEBUI_CARD_ENTRY_SURFACE)).toBe(true);
   });
 
-  test('the module helpers agree with the SDK for this surface', () => {
+  test('the module helpers agree with the platform for this surface', () => {
     expect(mayEnterCardDetailsHere()).toBe(true);
     expect(mayOfferCardEntryHere()).toBe(true);
   });
 
-  test('a surface the SDK refuses is refused here; the gate is not "am I the webui?"', () => {
+  test('a surface the platform refuses is refused here; the gate is not "am I the webui?"', () => {
     for (const remote of ['telegram', 'discord', 'slack', 'whatsapp', 'signal', 'ntfy', 'webhook', 'email', 'sms']) {
       expect(mayEnterCardDetailsHere(remote)).toBe(false);
       expect(mayOfferCardEntryHere(remote)).toBe(false);

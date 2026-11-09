@@ -1,7 +1,7 @@
 /** Original daemon254699bf tagger cases through the current composition facade. */
 import { afterEach, expect, test } from 'bun:test';
-import { createTriageTagger, type TriageTaggerOptions } from '../sdk/src/platform/intake/triage/tagger/index.js';
-import type { ImapStoreArgs } from '../sdk/src/platform/intake/triage/tagger/imap.js';
+import { createTriageTagger, type TriageTaggerOptions } from '../platform/src/platform/intake/triage/tagger/index.js';
+import type { ImapStoreArgs } from '../platform/src/platform/intake/triage/tagger/imap.js';
 import { triageCredentials } from './_helpers/intake-triage-credentials.js';
 
 const cleanups: Array<() => Promise<void>> = [];

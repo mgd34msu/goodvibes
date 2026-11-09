@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigError } from '@goodvibes-jev/engine/sdk/platform/types';
+import { ConfigError } from '@goodvibes-jev/engine/platform/platform/types';
 import { createDaemonCliConfiguration } from '../../cli/configuration.js';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../../config/surface.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
@@ -49,8 +49,8 @@ function probe(mode: 'send' | 'structural' | 'default' | 'config', tier: 'daemon
     run: new URL('../../cli/run.ts', import.meta.url).href,
     configuration: new URL('../../cli/configuration.ts', import.meta.url).href,
     secrets: new URL('../../config/secrets.ts', import.meta.url).href,
-    registry: new URL('../../../../../packages/engine/sdk/src/platform/config/service-registry.ts', import.meta.url).href,
-    logger: new URL('../../../../../packages/engine/sdk/src/platform/utils/logger.ts', import.meta.url).href,
+    registry: new URL('../../../../../packages/engine/platform/src/platform/config/service-registry.ts', import.meta.url).href,
+    logger: new URL('../../../../../packages/engine/platform/src/platform/utils/logger.ts', import.meta.url).href,
   };
   writeFileSync(script, `
 import { spyOn } from 'bun:test';

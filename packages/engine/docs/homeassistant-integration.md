@@ -1,6 +1,6 @@
 # Home Assistant integration
 
-Home Assistant support is an SDK-owned daemon surface. The Home Assistant
+Home Assistant support is a platform-owned daemon surface. The Home Assistant
 custom integration lives in a separate project, but it should treat the daemon
 as the source of truth for pairing, prompts, tool catalogs, agent tools, replies,
 and Home Assistant REST-backed operations.
@@ -31,7 +31,7 @@ References:
 - [Home Assistant device registry](https://developers.home-assistant.io/docs/device_registry_index/)
 - [Home Assistant service actions](https://developers.home-assistant.io/docs/dev_101_services/)
 
-## SDK Contract
+## platform Contract
 
 ### Enablement
 
@@ -96,7 +96,7 @@ config flow setup. The most useful endpoints are:
 | `POST /api/homeassistant/home-graph/facts/review` | Accept, reject, resolve, edit, or forget a graph issue/source/node. |
 | `GET /api/homeassistant/home-graph/refinement/tasks` | List durable Home Graph refinement tasks and traces. |
 | `GET /api/homeassistant/home-graph/refinement/tasks/{id}` | Inspect one refinement task. |
-| `POST /api/homeassistant/home-graph/refinement/run` | Run source-backed gap refinement for the HA knowledge space. Accepts `limit`, `maxRunMs`, `gapIds`, `sourceIds`, and `force`; broad limits are capped by the SDK and reported in the result. |
+| `POST /api/homeassistant/home-graph/refinement/run` | Run source-backed gap refinement for the HA knowledge space. Accepts `limit`, `maxRunMs`, `gapIds`, `sourceIds`, and `force`; broad limits are capped by the platform and reported in the result. |
 | `POST /api/homeassistant/home-graph/refinement/tasks/{id}/cancel` | Cancel a queued or active refinement task. |
 | `GET /api/homeassistant/home-graph/sources` | Browse source inventory and provenance for the HA space. |
 | `GET /api/homeassistant/home-graph/browse` | Browse namespace-filtered nodes, edges, sources, and issues. |
@@ -115,27 +115,27 @@ for Home Assistant Assist conversation agents.
 
 #### Knowledge space and isolation
 
-Home Graph is the SDK-owned knowledge/wiki layer for Home Assistant. The HA
+Home Graph is the platform-owned knowledge/wiki layer for Home Assistant. The HA
 integration collects context and calls daemon APIs; the daemon stores,
 searches, links, reviews, exports, and renders the graph. Home Graph records are
-not written into the default GoodVibes knowledge space. By default the SDK uses
+not written into the default GoodVibes knowledge space. By default the platform uses
 `homeassistant:<installationId>` as the `knowledgeSpaceId`, and every Home Graph
 source, node, edge, issue, extraction, projection artifact, and export carries
 that space metadata.
 
 Read-only Home Graph routes can infer the active Home Assistant knowledge space
 when a client omits `installationId` and `knowledgeSpaceId`. When a client sends
-only `installationId`, the SDK resolves the existing Home Assistant space for
+only `installationId`, the platform resolves the existing Home Assistant space for
 that installation even if older records preserved Home Assistant's uppercase
-config-entry id in `knowledgeSpaceId`. The SDK also reads Home Assistant spaces
+config-entry id in `knowledgeSpaceId`. The platform also reads Home Assistant spaces
 case-tolerantly, so existing manuals, graph nodes, links, and extraction rows
 remain queryable without reuploading or migrating data.
 
 #### Snapshot sync and wire format
 
 Snapshot sync accepts Home Assistant-native object fields at the HTTP boundary
-and normalizes them into the SDK's internal graph shape before creating nodes
-and relations. This keeps Home Assistant-specific wire handling in the SDK
+and normalizes them into the platform's internal graph shape before creating nodes
+and relations. This keeps Home Assistant-specific wire handling in the platform
 route/service layer while stored Home Graph records carry the canonical
 camelCase metadata fields.
 
@@ -175,7 +175,7 @@ group still owns it. A helpers-only update does not retire devices, areas,
 integrations or unrelated entities.
 
 Snapshot sync also refreshes living Home Graph pages by default, but the default
-sync path is intentionally bounded. The SDK prioritizes likely real-world
+sync path is intentionally bounded. The platform prioritizes likely real-world
 devices such as TVs, locks, thermostats, cameras, routers, appliances, phones,
 and other physical devices, then defers lower-value software/plugin/add-on pages
 to explicit page generation, reindex, or refinement routes. This keeps Home
@@ -187,7 +187,7 @@ The sync response reports `generated.deferredDevicePassports`,
 remain. Page automation also accepts `maxRunMs`, so integrations can keep
 snapshot service calls responsive even when a large installation has many
 pages eligible for refresh. Foreground snapshot page generation is still
-capped by the SDK; callers can request lower limits, but very large values are
+capped by the platform; callers can request lower limits, but very large values are
 treated as background/deferred intent rather than permission to block the
 sync route indefinitely.
 
@@ -197,7 +197,7 @@ instead of exporting the SQLite database after every node and edge write.
 
 #### Generated device and room pages
 
-For each selected active Home Assistant device, the SDK materializes a device
+For each selected active Home Assistant device, the platform materializes a device
 passport markdown artifact and a stable generated-page source. For each selected
 active room/area, it materializes a room page. This is built on the same
 generated-projection primitive used by the base knowledge/wiki system, so
@@ -213,7 +213,7 @@ source-snippet sections.
 Generated page sources are marked with `metadata.homeGraphGeneratedPage: true`,
 `metadata.projectionKind`, and `metadata.pageEditable: true`; the source id
 stays stable across regenerations while the artifact id points at the latest
-rendered markdown. If the rendered markdown is unchanged, the SDK reuses the
+rendered markdown. If the rendered markdown is unchanged, the platform reuses the
 existing generated artifact instead of creating a duplicate on every snapshot
 sync. Generated markdown artifacts are stored durably because they back living
 wiki pages.
@@ -256,7 +256,7 @@ frontend bridge without exposing the daemon token:
 - Raw binary with `Content-Type` set to the file MIME type and metadata passed
   in query parameters or headers such as `X-GoodVibes-Filename`.
 
-The SDK stores the upload as an artifact first and then indexes it into the
+The platform stores the upload as an artifact first and then indexes it into the
 isolated Home Graph knowledge space. Large uploads share the global
 `storage.artifacts.maxBytes` cap, which defaults to `512 MiB`; clients should
 avoid JSON `dataBase64` for manuals, receipts, photos, and other large files.
@@ -278,7 +278,7 @@ Home Graph uses the same provider-backed answer synthesis path as
 self-improving background work so a question is not forced to wait behind a
 full enrichment pass before answer synthesis starts.
 
-If a source matches before typed facts have been extracted, the SDK still
+If a source matches before typed facts have been extracted, the platform still
 returns synthesized prose that describes the currently indexed evidence and
 the remaining gap instead of dumping raw snippet bullets.
 
@@ -298,7 +298,7 @@ tiny delayed repair pass and does not run external web/LLM repair inline with
 the Home Assistant service response.
 
 For concrete objects such as devices,
-services, integrations, and providers, the SDK can create intrinsic
+services, integrations, and providers, the platform can create intrinsic
 feature/specification gaps as soon as the object or source exists, classify
 whether the gap is applicable, suppress non-applicable gaps before search, and
 repair eligible gaps through source-backed web ingest from the delayed sync
@@ -311,24 +311,24 @@ Repair skip checks are gap-specific: an older repair URL for the same Home
 Assistant object does not block another intrinsic gap unless it is linked to
 that exact gap with `repairs_gap`.
 
-Accepted repair sources are not just remembered as URLs. The SDK re-enriches
+Accepted repair sources are not just remembered as URLs. The platform re-enriches
 them under the refinement budget, promotes useful extracted evidence into typed
 feature/capability/specification facts, and links those fact nodes back to the
 concrete Home Assistant subject with `describes` edges. Official/vendor repair
 facts are preferred over weaker secondary deterministic fragments during Ask
 and page generation.
 
-Provider-backed semantic calls are bounded by SDK timeouts and abort signals,
+Provider-backed semantic calls are bounded by platform timeouts and abort signals,
 and broad reindex uses a small LLM budget before continuing deterministically,
 so Home Assistant panels should not add host-side wrappers to avoid hung provider
 requests. If a source was previously enriched deterministically because no LLM
-was available or the LLM budget was exhausted, the SDK can upgrade that source
+was available or the LLM budget was exhausted, the platform can upgrade that source
 during a later ask/reindex and supersede weaker deterministic semantic
 facts/pages instead of returning both previous and current interpretations.
 
 Repair tasks that are blocked until a retry window include top-level
 `nextRepairAttemptAt` in addition to trace/metadata details, so Home Assistant
-panels can show retry timing without parsing SDK trace details.
+panels can show retry timing without parsing platform trace details.
 
 #### Source extraction
 
@@ -349,7 +349,7 @@ oversized single source holds rather than losing its exceptions.
 
 Home Graph artifact sources do not need to be uploaded again after extraction
 quality improves. When ask finds a relevant linked source with missing or
-placeholder extraction data, the SDK re-extracts the already-stored artifact and
+placeholder extraction data, the platform re-extracts the already-stored artifact and
 saves the new extraction record before ranking the answer. Later questions
 reuse that stored extraction instead of parsing the manual on every request.
 
@@ -386,15 +386,15 @@ show honestly what a reindex did and why it stopped.
 | `coalesced` | Whether this call yielded to an already-running reindex instead of starting another |
 | `sources`, `linked`, enrichment counts, `generated`, `failures` | Repaired-source, auto-link, semantic enrichment, regenerated-page, and per-source failure summaries |
 
-If another Home Graph reindex is already running, the SDK returns
+If another Home Graph reindex is already running, the platform returns
 `coalesced: true` quickly and leaves the active run in charge instead of
 stacking another foreground scan.
 
 #### Reset and rebuild
 
-If a development or early-preview Home Graph space was populated by older SDK
+If a development or early-preview Home Graph space was populated by older platform
 builds with bad source links, stale generated pages, or contaminated refinement
-tasks, rebuild it through SDK routes instead of editing the SQLite database.
+tasks, rebuild it through platform routes instead of editing the SQLite database.
 First call `POST /api/homeassistant/home-graph/export` and save the JSON for
 diagnosis. Then call the admin-only
 `POST /api/homeassistant/home-graph/reset` route with `installationId` or
@@ -437,7 +437,7 @@ unusable and repair-needed, not as answer evidence.
 
 Answers include synthesized text, sources, linked objects,
 semantic facts, and knowledge gaps when available; clients should display the
-answer text, sources, facts, and linked objects returned by the SDK rather than
+answer text, sources, facts, and linked objects returned by the platform rather than
 locally re-ranking the graph or rendering raw extraction snippets.
 `linkedObjects` contains real Home Assistant graph objects only. Semantic
 extraction artifacts such as generated wiki pages, fact nodes, and knowledge
@@ -505,7 +505,7 @@ device/service identity, manufacturer/model hints, the gap wording, and the
 query.
 
 Existing official/vendor sources count as usable repair evidence; the
-SDK links and promotes them instead of blocking solely because they were already
+platform links and promotes them instead of blocking solely because they were already
 indexed. One strong official/vendor source can close a gap, while non-official
 evidence still needs corroboration across distinct domains.
 
@@ -526,7 +526,7 @@ attached to the same device or service.
 Ask-created gaps queue refinement tasks and start repair asynchronously. Ask
 does not wait for web search, URL ingest, or re-answering; it returns the
 current best source-backed answer and any `refinementTaskIds` for continued
-repair. The route also has an SDK-owned synthesis timeout so a slow provider
+repair. The route also has a platform-owned synthesis timeout so a slow provider
 cannot hold the Home Assistant panel or daemon request open indefinitely.
 
 Home Graph reindex also queues repairable gaps, caps foreground source
@@ -579,18 +579,18 @@ should not keep treating those records as current wiring failures after the
 host is fixed.
 
 Run-budget exhaustion is retryable state, not a terminal dead end. When a
-repair attempt times out or runs out of foreground budget, the SDK marks the
+repair attempt times out or runs out of foreground budget, the platform marks the
 gap `deferred`, records `nextRepairAttemptAt`, and leaves the task blocked with
 retry metadata for the next scheduled/manual refinement pass. If accepted
-source evidence exists but is not sufficient to close the gap, the SDK still
+source evidence exists but is not sufficient to close the gap, the platform still
 links/promotes that evidence and defers the task rather than throwing away the
 progress.
 
 Home Graph Ask also keeps real Home Assistant linked objects when the strongest
 evidence comes from web-repaired semantic sources whose `sourceDiscovery`
 metadata references the HA object. Ask source records also include `sourceId`
-and `url` aliases alongside the canonical SDK source fields. Overlapping repair
-and reindex runs are coalesced by the SDK, so repeated broad
+and `url` aliases alongside the canonical platform source fields. Overlapping repair
+and reindex runs are coalesced by the platform, so repeated broad
 Refine/Reindex/Ask-triggered calls should not stack unbounded LLM/search/source
 work in the daemon.
 
@@ -632,18 +632,18 @@ Assistant registry dimension.
 
 Each field is multi-select: values inside one field are ORed
 together, and different fields are ANDed together. When a Home Assistant filter
-matches a leaf object such as an entity domain, the SDK also keeps immediate
+matches a leaf object such as an entity domain, the platform also keeps immediate
 device, area, source, fact, and gap context edges so the map remains a graph
 instead of a disconnected list of matching records.
 
 The JSON response includes `nodes`, `edges`, `width`, `height`, `nodeCount`,
 `edgeCount`, `svg`, and `facets`. Edge records include canonical `fromId` and
 `toId` plus `source`, `target`, `sourceTitle`, and `targetTitle` aliases so
-browser graph renderers can consume the map without remapping the SDK fields.
+browser graph renderers can consume the map without remapping the platform fields.
 `facets.homeAssistant` contains the actual
 areas, devices, entity domains, integrations, labels, and other Home Assistant
 values present in the graph, with counts. Panels should build filter controls
-from those facets and send selected filters back to the SDK; they should not
+from those facets and send selected filters back to the platform; they should not
 fetch the whole graph and implement graph filtering locally. The route also
 accepts a trailing slash and JSON `POST` input with the same fields so panel
 bridges can use either query-string or JSON dispatch without router catch-all
@@ -653,7 +653,7 @@ errors.
 
 Home Graph quality issues are generated from the current graph but review
 decisions are durable. When a user or LLM resolves/rejects an issue through
-`POST /api/homeassistant/home-graph/facts/review`, the SDK records review and
+`POST /api/homeassistant/home-graph/facts/review`, the platform records review and
 suppression metadata separately from the generated issue row. Later sync or
 quality refreshes keep the saved issue ID and do not reopen that issue unless
 relevant device or related-entity evidence changes. Reordering related entities,
@@ -680,7 +680,7 @@ can also update the underlying node facts:
 ```
 
 `homegraph.device.unknown_battery` applies only to plausible battery-powered
-physical devices. The SDK skips integrations, add-ons, Home Assistant
+physical devices. The platform skips integrations, add-ons, Home Assistant
 host/core/supervisor/software objects, helpers, Sun/weather-only objects,
 bridges, hubs, coordinators, adapters, and obvious mains-powered media or
 appliance devices unless explicit metadata says the device is battery-powered.
@@ -689,7 +689,7 @@ devices and is suppressed by `manualRequired: false`.
 
 Home Assistant integration snapshots can include integration documentation
 metadata such as `documentation_url`, `source_url`, and `issue_tracker_url`.
-The SDK also derives the standard
+The platform also derives the standard
 `https://www.home-assistant.io/integrations/<domain>/` URL for integration
 nodes. These are stored as linked documentation-candidate sources in the
 isolated Home Graph space. They are not fetched during snapshot sync; clients
@@ -950,12 +950,12 @@ The event payload is JSON and includes:
 The Home Assistant integration should listen for this event type and update
 entities, diagnostics, notifications, or repairs from the event data. The
 `replyToMessageId`, `conversationId`, `sessionId`, and `routeId` fields are
-stable SDK-owned correlation fields for matching a Home Assistant service call
+stable platform-owned correlation fields for matching a Home Assistant service call
 or webhook prompt to the final GoodVibes event.
 
-## SDK Home Assistant tools
+## platform Home Assistant tools
 
-The SDK exposes Home Assistant tools to operators and isolated remote-chat
+The platform exposes Home Assistant tools to operators and isolated remote-chat
 turns. Side-effecting tools are intentionally explicit.
 
 | Tool | Action | Side effects | Purpose |
@@ -1017,7 +1017,7 @@ The Home Assistant integration should implement:
 
 Do not reimplement GoodVibes routing, tool catalogs, or provider/model
 resolution in the Home Assistant project. The HA integration should consume the
-SDK/daemon endpoints above and keep Home Assistant-specific UI/entity/service
+platform/daemon endpoints above and keep Home Assistant-specific UI/entity/service
 logic on the HA side.
 
 ## Next reads

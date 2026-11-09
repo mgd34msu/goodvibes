@@ -14,7 +14,7 @@
  * Split out of settings-modal.ts, which is at the line cap
  * check-architecture.ts enforces, beside the MCP and subscription builders.
  */
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { FeatureFlagManager, FlagState } from '@/runtime/index.ts';
 import { FEATURE_SETTINGS } from '@/runtime/index.ts';
 import { isFeatureEnabledInConfig } from '../runtime/feature-enablement.ts';

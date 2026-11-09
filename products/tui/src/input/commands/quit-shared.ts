@@ -1,8 +1,8 @@
 import type { StatusResult } from 'simple-git';
 import { basename } from 'path';
 import type { CommandContext } from '../command-registry.ts';
-import { GitService } from '@goodvibes-jev/engine/sdk/platform/git';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { GitService } from '@goodvibes-jev/engine/platform/platform/git';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 type GitLike = Pick<GitService, 'addAll' | 'status' | 'commit'>;
 

@@ -2,7 +2,7 @@
  * Adapter behavioral coverage, Webhook adapter.
  */
 import { describe, expect, test } from 'bun:test';
-import { handleGenericWebhookSurface } from '../sdk/src/platform/adapters/webhook/index.js';
+import { handleGenericWebhookSurface } from '../platform/src/platform/adapters/webhook/index.js';
 
 function makeWebhookContext(overrides: Partial<Record<string, unknown>> = {}) {
   const calls: Array<{ kind: string; input: unknown }> = [];

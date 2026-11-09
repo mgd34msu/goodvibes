@@ -1,6 +1,6 @@
 import { createUiFactory, type ThinkingStallInfo } from '@goodvibes-jev/engine/terminal-shell/ui-factory';
 import { VERSION } from '../version.ts';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { renderHeaderLine } from './header-line.ts';
 import type { GitHeaderInfo } from './git-status.ts';
 import type { StreamMetrics } from '../core/stream-metrics.ts';

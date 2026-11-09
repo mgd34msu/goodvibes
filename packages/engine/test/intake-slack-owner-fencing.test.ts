@@ -1,11 +1,11 @@
 import { screeningAnswers } from './_helpers/screening-answers.js';
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { Client } from 'undici/index.js';
-import * as directClient from '../sdk/src/platform/security/source-screening/direct-client.ts';
-import { createSlackInboxOwner } from '../sdk/src/platform/intake/providers/slack-owner.ts';
-import { createSlackInboxHttpOwner } from '../sdk/src/platform/intake/providers/slack-http.ts';
-import type { ProtectedSourceOwnerOptions } from '../sdk/src/platform/security/source-screening/types.ts';
-import { acquireAccountInboxIdentity } from '../sdk/src/platform/intake/providers/account-identity.js';
+import * as directClient from '../platform/src/platform/security/source-screening/direct-client.ts';
+import { createSlackInboxOwner } from '../platform/src/platform/intake/providers/slack-owner.ts';
+import { createSlackInboxHttpOwner } from '../platform/src/platform/intake/providers/slack-http.ts';
+import type { ProtectedSourceOwnerOptions } from '../platform/src/platform/security/source-screening/types.ts';
+import { acquireAccountInboxIdentity } from '../platform/src/platform/intake/providers/account-identity.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const cleanups: Array<() => unknown | Promise<unknown>> = [];

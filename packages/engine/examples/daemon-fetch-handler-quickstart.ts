@@ -5,13 +5,13 @@ import {
   createDaemonControlRouteHandlers,
   createDaemonTelemetryRouteHandlers,
   jsonErrorResponse,
-} from '@goodvibes-jev/engine/sdk/daemon';
-import { getOperatorContract } from '@goodvibes-jev/engine/sdk/contracts';
-import sdkPackage from '@goodvibes-jev/engine/package.json' with { type: 'json' };
+} from '@goodvibes-jev/engine/platform/daemon';
+import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
+import enginePackage from '@goodvibes-jev/engine/package.json' with { type: 'json' };
 
 const controlHandlers = createDaemonControlRouteHandlers({
   authToken: null,
-  version: sdkPackage.version,
+  version: enginePackage.version,
   sessionCookieName: 'goodvibes_session',
   controlPlaneGateway: {
     getSnapshot: () => ({ ok: true }),
@@ -45,7 +45,7 @@ const controlHandlers = createDaemonControlRouteHandlers({
   invokeGatewayMethodCall: async () => ({
     status: 404,
     ok: false,
-    // Gateway method response shape, not a GoodVibesSdkError envelope.
+    // Gateway method response shape, not a GoodVibesError envelope.
     body: { error: 'No gateway methods are registered in this quickstart' },
   }),
   parseOptionalJsonBody: async (request) => {

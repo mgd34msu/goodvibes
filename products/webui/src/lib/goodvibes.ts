@@ -1,21 +1,21 @@
-import { readTriggerOperatorStatus, readTriggerMigrationResult } from '@goodvibes-jev/engine/sdk/platform/triggers/browser';
+import { readTriggerOperatorStatus, readTriggerMigrationResult } from '@goodvibes-jev/engine/platform/platform/triggers/browser';
 import {
-  createBrowserKnowledgeSdk,
+  createBrowserKnowledgePlatform,
   forSession,
   KNOWLEDGE_BROWSER_ROUTES,
-} from '@goodvibes-jev/engine/sdk/browser/knowledge';
-import type { BrowserKnowledgeMethodId } from '@goodvibes-jev/engine/sdk/browser/knowledge';
+} from '@goodvibes-jev/engine/platform/browser/knowledge';
+import type { BrowserKnowledgeMethodId } from '@goodvibes-jev/engine/platform/browser/knowledge';
 import { WEBUI_METHOD_ROUTES } from '@goodvibes-jev/engine/contracts/generated/webui-facade';
 import { getClientLifetime, isClientLifetimeCurrent, tokenStore, WEBUI_TOKEN_STORE_KEY } from './client-lifetime';
 export { tokenStore, WEBUI_TOKEN_STORE_KEY } from './client-lifetime';
 import { isRuntimeEventDomain } from '@goodvibes-jev/engine/contracts';
 import { routedFetch } from './relay-connection';
-import { readTelegramCursorPreview, readTelegramCursorMigrationResult, type TelegramCursorPreview } from '@goodvibes-jev/engine/sdk/platform/channels/telegram-cursor';
+import { readTelegramCursorPreview, readTelegramCursorMigrationResult, type TelegramCursorPreview } from '@goodvibes-jev/engine/platform/platform/channels/telegram-cursor';
 import { resolveDaemonRefusal } from './daemon-refusal';
-import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/sdk/browser/decision-policy';
+import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/platform/browser/decision-policy';
 import { browserDecisionPolicy } from './decision-policy';
-import type { PaymentWindowView, PaymentWindowAnswer, PaymentPurchaseStatus, PaymentOperationView, PaymentOperationCancellation } from '@goodvibes-jev/engine/sdk/platform/payments';
-import { readPaymentWindowStatus, readPaymentWindowAnswer, readPaymentOperation, readPaymentOperationCancellation, PAYMENT_PURCHASE_RECONCILE_HTTP } from '@goodvibes-jev/engine/sdk/platform/payments/browser';
+import type { PaymentWindowView, PaymentWindowAnswer, PaymentPurchaseStatus, PaymentOperationView, PaymentOperationCancellation } from '@goodvibes-jev/engine/platform/platform/payments';
+import { readPaymentWindowStatus, readPaymentWindowAnswer, readPaymentOperation, readPaymentOperationCancellation, PAYMENT_PURCHASE_RECONCILE_HTTP } from '@goodvibes-jev/engine/platform/platform/payments/browser';
 import { readClientCompatibilityFloor, recordObservedClientCompatibilityFloor } from './client-compatibility';
 // The union profile.forget accepts as a target (a field id OR a raw line index), named in
 // lib/owner-profile.ts beside the readers for the same verbs' output. The generated
@@ -94,7 +94,7 @@ import type {
 
 // Re-exported so existing consumers (lib/fleet.ts, lib/checkpoints.ts, FleetView.tsx,
 // WorkstreamView.tsx, CheckpointsView.tsx, ...) keep importing these names from
-// './goodvibes' unchanged, the byte-compatible facade covers types, not just the `sdk`
+// './goodvibes' unchanged, the byte-compatible facade covers types, not just the `platform`
 // object. Definitions live in contract-bridge-types.ts (the pin-bump swap seam).
 export type {
   ContractsListInput,
@@ -213,12 +213,12 @@ interface RequestOptions {
  * reachable only through the generic gateway-method invoke endpoint, come from the
  * contract-emitted facade artifact (@goodvibes-jev/engine/contracts/generated/webui-facade):
  * WEBUI_METHOD_ROUTES (every REST-routed method id → route). The ergonomic layer below
- * (the sdk.operator.* call shapes, typed I/O, error normalization, auth handling, and the
+ * (the platform.operator.* call shapes, typed I/O, error normalization, auth handling, and the
  * routedFetch relay integration) stays hand-written on top, that split is the design.
  *
  * EXTRA_METHOD_ROUTES is DERIVED (buildExtraMethodRoutes): WEBUI_METHOD_ROUTES minus every
- * id the pinned browser SDK route maps already cover (those resolve natively through
- * scopedSdk.operator.invoke, the no-route fall-through in invokeOperator below). No route
+ * id the pinned browser platform route maps already cover (those resolve natively through
+ * scopedPlatform.operator.invoke, the no-route fall-through in invokeOperator below). No route
  * path or http method is written by hand here, the drift test in goodvibes.test.ts pins
  * this table against the generated artifact so a hand-written row can never shadow or
  * diverge from a generated one. (Until the 2.0.0 re-pin this table also carried three
@@ -228,17 +228,17 @@ interface RequestOptions {
  * are gone and models.* flows through WEBUI_METHOD_ROUTES like everything else below.)
  *
  * The retirement invariant the previous hand-table documented still holds structurally:
- * sessions.get / steer / followUp / messages.* / inputs.* are covered by the browser SDK
+ * sessions.get / steer / followUp / messages.* / inputs.* are covered by the browser platform
  * (SHARED_BROWSER_ROUTES) and so are subtracted out, they resolve natively, never through
  * a generated REST row (see goodvibes.test.ts's EXTRA_METHOD_ROUTES retirement suite).
  */
 
-// The browser SDK owns these routes natively (its SHARED_BROWSER_ROUTES ∪
-// KNOWLEDGE_BROWSER_ROUTES maps, the set scopedSdk is built from). invokeOperator must let
-// them fall through to scopedSdk.operator.invoke rather than shadow them with a generated
+// The browser platform owns these routes natively (its SHARED_BROWSER_ROUTES ∪
+// KNOWLEDGE_BROWSER_ROUTES maps, the set scopedPlatform is built from). invokeOperator must let
+// them fall through to scopedPlatform.operator.invoke rather than shadow them with a generated
 // REST row (the fall-through carries the scoped transport: relay, auth, observer, SSE).
 // KNOWLEDGE_BROWSER_ROUTES is a public runtime export; SHARED_BROWSER_ROUTES is not, so its
-// ids are listed here and pinned to the SDK's own BrowserKnowledgeMethodId type by
+// ids are listed here and pinned to the platform's own BrowserKnowledgeMethodId type by
 // SHARED_COVERAGE_IS_COMPLETE below, a pin bump that adds a browser-covered method this
 // list has not accounted for stops the build until the list is updated.
 const SHARED_BROWSER_METHOD_IDS = [
@@ -265,7 +265,7 @@ type BrowserCoveredMethodId =
   | (typeof SHARED_BROWSER_METHOD_IDS)[number]
   | Extract<keyof typeof KNOWLEDGE_BROWSER_ROUTES, string>;
 // Compile-time half of the drift protection: fails to compile if BrowserKnowledgeMethodId
-// (the SDK's own SHARED ∪ KNOWLEDGE union) gains a member this module does not subtract,
+// (the platform's own SHARED ∪ KNOWLEDGE union) gains a member this module does not subtract,
 // otherwise a generated REST row could silently shadow a natively-covered method.
 const SHARED_COVERAGE_IS_COMPLETE: [BrowserKnowledgeMethodId] extends [BrowserCoveredMethodId] ? true : never = true;
 void SHARED_COVERAGE_IS_COMPLETE;
@@ -404,7 +404,7 @@ async function requestStream(path: string, body: unknown, signal?: AbortSignal):
 /**
  * hostedSessionDetachBeacon, best-effort detach for a page teardown (pagehide /
  * visibilitychange-to-hidden, see HostedSessionsView.tsx), for when there is no time
- * left to await the ordinary async sdk.operator.sessions.hosted.detach round trip. Reads
+ * left to await the ordinary async platform.operator.sessions.hosted.detach round trip. Reads
  * the auth token synchronously straight out of localStorage (the browser token store IS
  * localStorage under an async wrapper, createBrowserTokenStore) and fires one `fetch`
  * with `keepalive: true`, so the browser completes the request after the page itself has
@@ -462,7 +462,7 @@ function interpolateRoute(route: RouteDefinition, input: unknown): { path: strin
 
 /**
  * True when a method resolves via a hand-written EXTRA_METHOD_ROUTES row rather than
- * natively through scopedSdk.operator.invoke. Exported so the retirement contract is
+ * natively through scopedPlatform.operator.invoke. Exported so the retirement contract is
  * test-enforced: sessions.get/steer/followUp must be native (false); sessions.close /
  * reopen must still be table-routed (true).
  */
@@ -472,7 +472,7 @@ export function isExtraRoutedMethod(methodId: string): boolean {
 
 /**
  * The resolved REST route for a table-routed method id, or undefined when the method falls
- * through to the browser SDK / generic invoke path. Exported for the drift test that pins
+ * through to the browser platform / generic invoke path. Exported for the drift test that pins
  * this derived table against the generated WEBUI_METHOD_ROUTES artifact, proving no
  * hand-written row shadows or diverges from a generated one.
  */
@@ -485,7 +485,7 @@ export function webuiRouteFor(methodId: string): RouteDefinition | undefined {
  *
  * Overload 1 covers every id in the installed `OperatorMethodId` union (every row in
  * EXTRA_METHOD_ROUTES except models.*, see overload 2, plus every sessions.* id that
- * falls through to scopedSdk.operator.invoke below). The `input` parameter is typed
+ * falls through to scopedPlatform.operator.invoke below). The `input` parameter is typed
  * `OperatorMethodInput<TMethodId>` DIRECTLY, which is the whole point: an earlier
  * signature took a free `TInput` type parameter defaulting to that same type, and a
  * default is not a constraint, TypeScript infers it from the argument whenever one is
@@ -520,7 +520,7 @@ async function invokeOperator(methodId: string, input?: unknown, signal?: AbortS
     // system cannot see through a string-keyed table lookup. isExtraRoutedMethod's test
     // coverage below is what actually enforces it, not this cast.
     const lifetime = getClientLifetime();
-    try { return await scopedSdk.operator.invoke(
+    try { return await scopedPlatform.operator.invoke(
       methodId as BrowserKnowledgeMethodId,
       input as OperatorMethodInput<BrowserKnowledgeMethodId>,
       { signal },
@@ -679,15 +679,15 @@ async function invokeOperatorUncheckedInput<TOutput>(
 
 /**
  * invokeGatewayMethod, typed direct call to the generic invoke-by-id endpoint
- * (POST /api/control-plane/methods/{methodId}/invoke), mirroring the SDK's
+ * (POST /api/control-plane/methods/{methodId}/invoke), mirroring the platform's
  * own `invokeVerb` test helper (test/w3-s2-fleet-checkpoints-search.test.ts).
  *
  * WHY THIS EXISTS: fleet.*, checkpoints.*, and sessions.search are
  * registered with `transport: ['ws']` and NO `http` route binding
  * (method-catalog-fleet.ts / session-search.ts), they are reachable ONLY through this
- * generic invoke mechanism, not through scopedSdk.operator.invoke (which resolves
+ * generic invoke mechanism, not through scopedPlatform.operator.invoke (which resolves
  * against the fixed SHARED_BROWSER_ROUTES/KNOWLEDGE_BROWSER_ROUTES tables baked into the
- * browser SDK build and has no entries for these verbs) and not through
+ * browser platform build and has no entries for these verbs) and not through
  * EXTRA_METHOD_ROUTES (built for REST-shaped path-param routes, which these verbs don't
  * have).
  *
@@ -764,7 +764,7 @@ async function readContractMethod<M extends 'contracts.list' | 'contracts.get'>(
 
 /**
  * One edit hunk of an `edit`-tool approval's `request.args.edits` array.
- * Mirrors the SDK's EditHunkLike (approval-hunk-apply.ts), path/find/replace
+ * Mirrors the platform's EditHunkLike (approval-hunk-apply.ts), path/find/replace
  * plus an optional stable id. Read defensively (see lib/approvals.ts): a
  * request whose args are not edit-shaped simply has no hunks to render.
  */
@@ -790,7 +790,7 @@ export interface ApprovalAnalysis {
 
 /**
  * Attribution for a permission ask that did not originate from the foreground
- * turn loop, the SDK's `PermissionAttribution` discriminated union (platform/
+ * turn loop, the platform's `PermissionAttribution` discriminated union (platform/
  * permissions/prompt.ts). Populated when a background/subagent tool call, an
  * MCP server's elicitation request, or a sandboxed exec's host-access
  * escalation brokers an ask, so a surface can render "who/what is asking"
@@ -834,7 +834,7 @@ export interface SandboxEscalationAttribution {
 
 /**
  * A RUNNING command blocked on its own terminal (host-key confirm, credential
- * ask, an interactive installer). The SDK's exec PTY prompt-answer path
+ * ask, an interactive installer). The platform's exec PTY prompt-answer path
  * (exec-prompt-wiring.ts) turns the detected prompt into an ordinary broker
  * ask with tool 'exec:prompt' and this attribution; an approval whose
  * decision carries `modifiedArgs.answer` (a string) feeds that text to the
@@ -907,8 +907,8 @@ export interface ApprovalRecordedOutcome {
 export type ApprovalStatus = 'pending' | 'claimed' | 'approved' | 'denied' | 'cancelled' | 'expired';
 
 /**
- * One entry in an approval's decision trail, the SDK's SharedApprovalAuditRecord
- * (packages/sdk/src/platform/control-plane/approval-broker.ts). Appended on every
+ * One entry in an approval's decision trail, the platform's SharedApprovalAuditRecord
+ * (packages/engine/platform/src/platform/control-plane/approval-broker.ts). Appended on every
  * lifecycle transition (created/claimed/approved/denied/cancelled/expired/updated),
  * so a resolved approval's `audit` array is the honest provenance of who did what,
  * from where, and when, not just the final `decision`/`resolvedBy` snapshot.
@@ -939,7 +939,7 @@ export interface ApprovalRecord {
   /**
    * The session an ACCEPTED ask spawned: a CI "fix this?" offer that was
    * approved gets the started fix-session's REAL, attachable session id (never
-   * an internal scheduling handle, SDK bb4b9c30) stamped onto the resolved
+   * an internal scheduling handle, platform bb4b9c30) stamped onto the resolved
    * APPROVED record by the broker and published live through the broker-update
    * path, so the accepting surface can open the session. Mutually exclusive
    * with fixSessionError; never present on denied records; absent until the
@@ -948,14 +948,14 @@ export interface ApprovalRecord {
   readonly fixSessionId?: string;
   /**
    * The honest failure when the accepted ask's spawn did NOT produce an
-   * attachable session (SDK bb4b9c30): stamped on the approved record instead
+   * attachable session (platform bb4b9c30): stamped on the approved record instead
    * of a dead id. Mutually exclusive with fixSessionId.
    */
   readonly fixSessionError?: string;
   readonly metadata: Record<string, unknown>;
   /**
    * The full decision trail. Optional in this client-side type (rather than
-   * mirroring the SDK's required field) because this client reads the wire
+   * mirroring the platform's required field) because this client reads the wire
    * response as-is with no runtime schema validation (see `invokeOperator`
    * below), a mixed-version or pre-audit daemon record may genuinely omit
    * it. Treat absence as "no trail recorded", never as an error.
@@ -1085,7 +1085,7 @@ export interface WatcherActionResult {
 }
 
 /**
- * Calendar (calendar.*, SDK 1.1.0).
+ * Calendar (calendar.*, platform 1.1.0).
  *
  * CORRECTED AT THE 1.19.1 RE-PIN. This comment used to claim these ids have "NO
  * OperatorMethodInputMap/OutputMap entry in the installed contracts package (verified:
@@ -1150,7 +1150,7 @@ export type CalendarIcsExportResult = OperatorMethodOutput<'calendar.ics.export'
  * Email (email.*), the daemon's IMAP/SMTP verbs.
  *
  * NO LONGER HAND-AUTHORED, as of the 1.19.1 re-pin. These shapes used to be transcribed
- * field-by-field from the SDK's catalog because, as the comment here put it, the ids
+ * field-by-field from the platform's catalog because, as the comment here put it, the ids
  * "have no OperatorMethodInputMap/OutputMap entry, so OperatorMethodInput/Output<'email.*'>
  * would degrade to the generic fallback". They have entries now, so the types below are
  * derived from the contract and the transcription cannot drift from it.
@@ -1164,7 +1164,7 @@ export type CalendarIcsExportResult = OperatorMethodOutput<'calendar.ics.export'
  *
  * CAPABILITY REALITY (the reason every view over these renders a not-available state
  * as a first-class outcome rather than an error): all four ship `invokable: false`,
- * and the SDK catalog's own comment states there is no /api/email surface on the
+ * and the platform catalog's own comment states there is no /api/email surface on the
  * daemon router at any prefix yet. Cataloged, not served. Identical to how calendar.*
  * shipped, and the honest states are what makes that shippable rather than a dead end.
  */
@@ -1182,7 +1182,7 @@ export type EmailMessageDetail = OperatorMethodOutput<'email.inbox.read'>;
 export type EmailAttachment = NonNullable<EmailMessageDetail['attachments']>[number];
 
 /**
- * `confirm` is required and literal-true: the SDK marks email.send `dangerous: true`
+ * `confirm` is required and literal-true: the platform marks email.send `dangerous: true`
  * with the description "Irreversible external send; requires confirm: true and
  * explicit user review of recipients and body." Typing it as the literal rather than
  * `boolean` means a caller cannot forget it or pass false and discover the refusal at
@@ -1238,7 +1238,7 @@ export interface SessionDeleteResult {
  * set the UI surfaces as viewable prior versions; `turnStarted` says whether a new turn
  * is now streaming back. Hand-authored: companion.chat.messages.retry has no generated
  * OperatorMethodOutputMap entry in the installed contracts (its id IS in the union, but
- * the I/O map is not), cross-checked against the SDK's method-catalog-control-companion.
+ * the I/O map is not), cross-checked against the platform's method-catalog-control-companion.
  */
 export interface CompanionRegenerateResult {
   readonly sessionId: string;
@@ -1271,7 +1271,7 @@ export interface CompanionEditInput {
 
 /**
  * Explicit capped-exponential reconnect policy for every SSE consumer. Without it the
- * SDK falls back to its own defaults and a dropped stream can appear "live"; with it a
+ * platform falls back to its own defaults and a dropped stream can appear "live"; with it a
  * dropped stream reconnects with backoff and, once attempts are exhausted, degrades to
  * the honest "SSE error/off" strip state and the 15s health-probe fallback.
  */
@@ -1299,10 +1299,10 @@ export type MemoryReviewState = 'fresh' | 'reviewed' | 'stale' | 'contradicted';
 export type MemoryProvenanceKind = 'session' | 'turn' | 'task' | 'event' | 'file';
 
 /** VIBE.md persona/preference lines are constraint records tagged with this, see the
- * SDK's vibe-projection.ts (VIBE_PERSONA_TAG). There is no `memory.fold`/projection verb
+ * platform's vibe-projection.ts (VIBE_PERSONA_TAG). There is no `memory.fold`/projection verb
  * on the wire ("fold is NOT on the wire", the brief this view was built from), so this
  * client replicates the same cls+tag test locally rather than deep-importing an
- * internal, non-exported SDK module path. See memory-helpers.ts's isPersonaRecord. */
+ * internal, non-exported platform module path. See memory-helpers.ts's isPersonaRecord. */
 export const VIBE_PERSONA_TAG = 'vibe';
 
 export interface MemoryProvenanceLink {
@@ -1370,14 +1370,14 @@ export interface MemoryReviewQueueResult {
   readonly records: readonly MemoryRecord[];
 }
 
-// ─── Memory consolidation receipts (memory.consolidation.receipts, SDK 1.8.0's
+// ─── Memory consolidation receipts (memory.consolidation.receipts, platform 1.8.0's
 // consolidation-reaches-the-review-queue work) ──────────────────────────────────
 //
 // What each idle/scheduled consolidation pass scanned, merged, archived, decayed,
 // and, the judgment calls it never makes unilaterally, PROPOSED. A proposal names
 // the record ids it concerns; those records are already marked into the review
 // queue (reviewState set to 'fresh' or 'contradicted' by the pass itself, see
-// packages/sdk/src/platform/state/memory-consolidation.ts), so "route to review"
+// packages/engine/platform/src/platform/state/memory-consolidation.ts), so "route to review"
 // here means finding those same ids in the existing review queue, not a separate
 // resolution path. `route` is an internal agent-tool invocation string
 // (`memory action:"curator" ...`), not a browser route, never rendered as a link.
@@ -1454,17 +1454,17 @@ export interface MemoryReviewQueueInput {
   readonly scope?: MemoryScope;
 }
 
-// ─── Web Push (push.*, SDK 1.1.0) ────────────────────────────────────
+// ─── Web Push (push.*, platform 1.1.0) ────────────────────────────────────
 //
-// The push.* verbs are registered ws-only with NO REST http binding (SDK
+// The push.* verbs are registered ws-only with NO REST http binding (platform
 // method-catalog-push.ts), exactly like fleet.*/checkpoints.*/sessions.search,
 // so they are reachable ONLY through the generic invoke-by-id endpoint
-// (invokeGatewayMethod), never through scopedSdk.operator.invoke or an
+// (invokeGatewayMethod), never through scopedPlatform.operator.invoke or an
 // EXTRA_METHOD_ROUTES row. push.* IS in the installed 1.1.0 OperatorMethodId
 // union (OPERATOR_METHOD_IDS), so the method-id strings below typecheck; the
 // generated I/O maps are the generic `unknown` fallback for this family (no
 // OperatorMethodInputMap entry yet), so every call supplies its explicit
-// TOutput shape, cross-checked field-by-field against the SDK's own
+// TOutput shape, cross-checked field-by-field against the platform's own
 // method-catalog-push.ts outputSchema/inputSchema.
 //
 // CUSTODY: the daemon never returns a subscription's capability URL (endpoint)
@@ -1484,7 +1484,7 @@ export interface PushSubscriptionKeys {
 export interface PublicPushSubscription {
   readonly id: string;
   readonly principalId: string;
-  /** The device identity this record is reconciled on, when known (SDK 1.8.0). */
+  /** The device identity this record is reconciled on, when known (platform 1.8.0). */
   readonly deviceId?: string;
   readonly endpointOrigin: string;
   readonly createdAt: number;
@@ -1514,7 +1514,7 @@ export interface PushVapidKeyResult {
 // scaffolding for a constraint that no longer exists. Verified by compiling it as an
 // interface before changing it, not assumed from reading the type.
 export interface PushSubscriptionCreateInput {
-  /** Stable per-install device identity (SDK 1.8.0); absent falls back to the legacy endpoint-keyed record. */
+  /** Stable per-install device identity (platform 1.8.0); absent falls back to the legacy endpoint-keyed record. */
   readonly deviceId?: string;
   readonly endpoint: string;
   readonly keys: PushSubscriptionKeys;
@@ -1533,7 +1533,7 @@ export interface PushVerifyResult {
   readonly receipt: PushDeliveryReceipt;
 }
 
-// push.subscriptions.reconcile (SDK 1.8.0): the reconcile-on-open self-heal verb.
+// push.subscriptions.reconcile (platform 1.8.0): the reconcile-on-open self-heal verb.
 // Unlike subscribe/create (register-or-refresh), reconcile REQUIRES deviceId, it
 // is the verb a client calls when it already knows its own device identity and
 // wants the daemon's record healed to match its current live endpoint/keys,
@@ -1551,9 +1551,9 @@ export interface PushSubscriptionReconcileResult {
   readonly drift: PushReconcileDrift;
 }
 
-// ─── Pairing (pairing.tokens.*, pairing.handoff.*, SDK 1.8.0) ─────────
+// ─── Pairing (pairing.tokens.*, pairing.handoff.*, platform 1.8.0) ─────────
 //
-// See the sdk.operator.pairing facade block below for the custody/transport
+// See the platform.operator.pairing facade block below for the custody/transport
 // notes; these are the wire shapes it types against.
 
 /** The redacted, wire-safe view of a pairing token, never the secret itself. */
@@ -1590,7 +1590,7 @@ export interface PairingTokensRevokeSharedResult {
   readonly legacySharedRevoked: boolean;
 }
 
-// ─── Origin posture (pairing.posture.get, SDK 1.8.0's LAN-http posture work) ──
+// ─── Origin posture (pairing.posture.get, platform 1.8.0's LAN-http posture work) ──
 //
 // The honest TLS/capability posture of a web origin: plain http on a private-network
 // origin (LAN IP, .local, localhost) is a supported posture, reported with ONE honest
@@ -1598,7 +1598,7 @@ export interface PairingTokensRevokeSharedResult {
 // each browser-gated capability (service worker/PWA install, push, microphone) is
 // labeled available or with the daemon's OWN "needs https, available via tailscale"
 // wording, never a client-fabricated guess. Mirrors
-// packages/sdk/src/platform/pairing/origin-posture.ts's ORIGIN_POSTURE_SCHEMA exactly.
+// packages/engine/platform/src/platform/pairing/origin-posture.ts's ORIGIN_POSTURE_SCHEMA exactly.
 export type BrowserGatedCapability = 'service-worker' | 'push' | 'microphone';
 export interface OriginCapability {
   readonly capability: string;
@@ -1669,7 +1669,7 @@ export interface PairingHandoffCompleteResult {
   readonly results: readonly PairingHandoffOutcome[];
 }
 
-// ─── Tailscale one-action https (tailscale.get / tailscale.serve.run, SDK 1.8.0's
+// ─── Tailscale one-action https (tailscale.get / tailscale.serve.run, platform 1.8.0's
 // LAN-http posture work) ────────────────────────────────────────────────────────
 //
 // The one confirmed action behind a "needs https, available via tailscale" label,
@@ -1683,7 +1683,7 @@ export interface PairingHandoffCompleteResult {
 // either way, and on success the daemon's web.publicBaseUrl updates to the same
 // https URL. Both ids carry no REST route binding (transport: ws-only), so they
 // resolve through invokeGatewayMethod exactly like fleet.*/permissions.rules.*.
-// Mirrors packages/sdk/src/platform/remote-access/tailscale.ts exactly.
+// Mirrors packages/engine/platform/src/platform/remote-access/tailscale.ts exactly.
 export interface TailscaleServeReceipt {
   readonly at: number;
   readonly command: string;
@@ -1755,7 +1755,7 @@ export interface ConfigSetOutcome {
   readonly value?: unknown;
   /** Absolute path (or daemon base URL, if landed remotely) the value actually landed in. */
   readonly persistedTo?: string;
-  /** Mirrors the SDK's ConfigKeyTier (platform/config/manager-key-source.ts). */
+  /** Mirrors the platform's ConfigKeyTier (platform/config/manager-key-source.ts). */
   readonly tier?: 'daemon' | 'shared' | 'project' | 'global' | 'default';
   /** Effective origin can be runtime-only while tier describes its persisted underlay. */
   readonly effectiveOrigin?: 'daemon' | 'shared' | 'project' | 'global' | 'default' | 'runtime' | 'runtime-default';
@@ -1787,7 +1787,7 @@ export type PaymentCardMetadata = OperatorMethodOutput<'payments.cards.list'>['c
 
 /**
  * What `payments.cards.create` accepts. Card material goes IN through here and
- * never comes back out; see the method comment on sdk.operator.payments.
+ * never comes back out; see the method comment on platform.operator.payments.
  */
 export interface PaymentCardCreateRequest {
   readonly label: string;
@@ -1800,7 +1800,7 @@ export interface PaymentCardCreateRequest {
   readonly issuerCapMinorUnits: number | null;
 }
 
-const scopedSdk = createBrowserKnowledgeSdk({
+const scopedPlatform = createBrowserKnowledgePlatform({
   baseUrl: GOODVIBES_BASE_URL,
   tokenStore,
   // routedFetch (lib/relay-connection.ts) is the plain global fetch whenever no relay
@@ -1817,12 +1817,12 @@ const scopedSdk = createBrowserKnowledgeSdk({
   },
 });
 
-export const sdk = {
+export const client = {
   auth: {
-    current: () => scopedSdk.auth.current(),
+    current: () => scopedPlatform.auth.current(),
     getToken: () => tokenStore.getToken(),
-    setToken: (token: string | null) => scopedSdk.auth.setToken(token),
-    clearToken: () => scopedSdk.auth.clearToken(),
+    setToken: (token: string | null) => scopedPlatform.auth.setToken(token),
+    clearToken: () => scopedPlatform.auth.clearToken(),
   },
   operator: {
     invoke: invokeOperator,
@@ -1831,8 +1831,8 @@ export const sdk = {
       // { receipts: 'consume' }, done exactly once per daemon connect, not per
       // poll, to receive undelivered update/crash/migration receipts and mark
       // them delivered; the daemon returns each such receipt exactly once.
-      status: (input?: { receipts?: 'consume' }) => scopedSdk.operator.invoke('control.status', input ?? {}),
-      snapshot: () => scopedSdk.operator.invoke('control.snapshot', {}),
+      status: (input?: { receipts?: 'consume' }) => scopedPlatform.operator.invoke('control.status', input ?? {}),
+      snapshot: () => scopedPlatform.operator.invoke('control.snapshot', {}),
       // methodInfo: an honest, read-only capability probe. 'control.methods.get'
       // IS in the installed 0.38 OperatorMethodId union with a real generated I/O map
       // (foundation-client-types.ts), so this is a normal typed invokeOperator call, not
@@ -1844,12 +1844,12 @@ export const sdk = {
       methodInfo: (methodId: string) => invokeOperator('control.methods.get', { methodId }),
     },
     accounts: {
-      snapshot: () => scopedSdk.operator.invoke('accounts.snapshot', {}),
+      snapshot: () => scopedPlatform.operator.invoke('accounts.snapshot', {}),
     },
     providers: {
-      list: () => scopedSdk.operator.invoke('providers.list', {}),
-      get: (providerId: string) => scopedSdk.operator.invoke('providers.get', { providerId }),
-      usage: (providerId: string) => scopedSdk.operator.invoke('providers.usage.get', { providerId }),
+      list: () => scopedPlatform.operator.invoke('providers.list', {}),
+      get: (providerId: string) => scopedPlatform.operator.invoke('providers.get', { providerId }),
+      usage: (providerId: string) => scopedPlatform.operator.invoke('providers.usage.get', { providerId }),
     },
     credentials: {
       // Cross-surface secret-free credential status (see the 1.0.1 entry in
@@ -1872,7 +1872,7 @@ export const sdk = {
         ),
     },
     // config.*, like models.*, no OperatorMethodId coverage in the pinned
-    // browser SDK route maps, so both resolve through EXTRA_METHOD_ROUTES.
+    // browser platform route maps, so both resolve through EXTRA_METHOD_ROUTES.
     // get() returns the daemon's FULL config tree unredacted (configManager.
     // getAll(), verified against system-routes.ts). Two consumers: the voice
     // surface reads the SHARED tts.provider/tts.voice defaults so the browser
@@ -1937,7 +1937,7 @@ export const sdk = {
         delete: (id: string) => invokeOperator<'payments.cards.delete'>('payments.cards.delete', { id }),
       },
     },
-    // Power (power.status.get / power.keepAwake.set, SDK 1.8.0's host sleep-ownership
+    // Power (power.status.get / power.keepAwake.set, platform 1.8.0's host sleep-ownership
     // work): both carry real generated OperatorMethodInputMap/OutputMap entries and a
     // real `http` route binding (GET /api/power/status, POST /api/power/keep-awake,
     // read:health / write:config), so both resolve through EXTRA_METHOD_ROUTES with no
@@ -1953,7 +1953,7 @@ export const sdk = {
       status: () => invokeOperator('power.status.get', {}),
       setKeepAwake: (enabled: boolean) => invokeOperator('power.keepAwake.set', { enabled }),
     },
-    // Memory governance (ops.memory.get, SDK 1.9.0-dev's memory-relay-voice-hardening
+    // Memory governance (ops.memory.get, platform 1.9.0-dev's memory-relay-voice-hardening
     // work): the MemoryGovernor's own observability snapshot, current pressure tier,
     // budget vs RSS/heap, per-cache footprints the governor can shrink, paused
     // deferrable jobs, and the leak-tripwire state. Carries a real generated
@@ -1967,7 +1967,7 @@ export const sdk = {
         get: () => invokeOperator('ops.memory.get', {}),
       },
     },
-    // Voice (SDK 1.1.0). status/providers/voices are read:voice; stt/tts are write:voice.
+    // Voice (platform 1.1.0). status/providers/voices are read:voice; stt/tts are write:voice.
     // ttsStream returns the RAW streamed-audio Response (not JSON), the Web Audio player
     // reads its bytes. All resolve through EXTRA_METHOD_ROUTES (except ttsStream, which is
     // a raw fetch) and carry the real generated I/O types.
@@ -1980,7 +1980,7 @@ export const sdk = {
       tts: (input: OperatorMethodInput<'voice.tts'>) => invokeOperator('voice.tts', input),
       ttsStream: (input: OperatorMethodInput<'voice.tts.stream'>, signal?: AbortSignal) =>
         requestStream('/api/voice/tts/stream', input, signal),
-      // Managed local-voice provisioning (voice.local.status / voice.local.install, SDK
+      // Managed local-voice provisioning (voice.local.status / voice.local.install, platform
       // 1.9.0-dev). Both carry real generated OperatorMethodInputMap/OutputMap entries
       // and real `http` route bindings (GET /api/voice/local/status, read:health; POST
       // /api/voice/local/install, write:config), so both resolve through
@@ -2028,7 +2028,7 @@ export const sdk = {
       list: () => invokeOperator('models.list'),
       current: {
         get: () => invokeOperator('models.current.get'),
-        // `effort` rides the same verb (sdk adds it alongside registryKey; the
+        // `effort` rides the same verb (platform adds it alongside registryKey; the
         // generated input type here lags one pin behind, hence the unchecked
         // call for the effort-carrying variant). null CLEARS the persisted
         // level back to the provider default; omission leaves it untouched.
@@ -2148,7 +2148,7 @@ export const sdk = {
           invokeOperator('occasions.plans.confirm', input),
       },
     },
-    // Channel profiles (channels.profiles.*, SDK 1.6.1). Real generated I/O maps
+    // Channel profiles (channels.profiles.*, platform 1.6.1). Real generated I/O maps
     // throughout, no bridge overrides needed, unlike Approvals/Tasks above.
     channels: {
       telegramCursor: {
@@ -2169,7 +2169,7 @@ export const sdk = {
           invokeOperator('channels.profiles.delete', channelId ? { surfaceKind, channelId } : { surfaceKind }),
       },
     },
-    // Check-in (checkin.*, SDK 1.6.1): the proactive-contact configuration, its run
+    // Check-in (checkin.*, platform 1.6.1): the proactive-contact configuration, its run
     // receipts, and a manual run-now trigger. Real generated I/O maps throughout.
     checkin: {
       config: {
@@ -2181,7 +2181,7 @@ export const sdk = {
       },
       run: () => invokeOperator('checkin.run', {}),
     },
-    // Principals (principals.*, SDK 1.6.1): the named-identity registry. Real generated
+    // Principals (principals.*, platform 1.6.1): the named-identity registry. Real generated
     // I/O maps throughout.
     //
     // On the `{ id, ...input }` spread form used here and by sessions.steer / followUp /
@@ -2237,7 +2237,7 @@ export const sdk = {
       undo: (input: OperatorMethodInput<'profile.undo'>) => invokeOperator('profile.undo', input),
       status: () => invokeOperator('profile.status', {}),
     },
-    // CI (ci.*, SDK 1.6.1): per-job CI status polling (never a rollup without the job
+    // CI (ci.*, platform 1.6.1): per-job CI status polling (never a rollup without the job
     // list, see ci.status's own description) and standing watches. Real generated I/O
     // maps throughout.
     ci: {
@@ -2288,7 +2288,7 @@ export const sdk = {
     permissions: {
       rules: {
         // transport: ws-only (no REST binding, and not in the scoped browser
-        // SDK's entrypoint), generic-invoke-only via invokeGatewayMethod,
+        // platform's entrypoint), generic-invoke-only via invokeGatewayMethod,
         // exactly like fleet.*/checkpoints.*.
         list: () =>
           invokeGatewayMethod<'permissions.rules.list', { rules: readonly PermissionRuleRecord[] }>(
@@ -2329,7 +2329,7 @@ export const sdk = {
           'memory.review-queue',
           input ?? {},
         ),
-      // memory.consolidation.receipts (SDK 1.8.0), HAS a real generated I/O map
+      // memory.consolidation.receipts (platform 1.8.0), HAS a real generated I/O map
       // (unlike the six ids above), but the explicit TOutput override keeps the
       // hand-authored, narrower `merged`/`archived`/`decayed` entry shapes above
       // rather than the generated catch-all `{} & Record<string, unknown>`.
@@ -2369,7 +2369,7 @@ export const sdk = {
       unarchive: (id: string) => invokeGatewayMethod<'fleet.unarchive', FleetUnarchiveResult>('fleet.unarchive', { id }),
       archiveFinished: () => invokeGatewayMethod<'fleet.archiveFinished', FleetArchiveFinishedResult>('fleet.archiveFinished', {}),
       archivedList: () => invokeGatewayMethod<'fleet.archived.list', FleetArchivedListResult>('fleet.archived.list', {}),
-      // Best-of-N attempt resolution (SDK 1.6.1, confirm/apply grammar SDK 1.8.0). list is
+      // Best-of-N attempt resolution (platform 1.6.1, confirm/apply grammar platform 1.8.0). list is
       // read-only (held-merge candidate groups with per-candidate diffs + any prior judge
       // proposal); judge PROPOSES a winner with reasons, explicitly model judgment
       // (scoredBy:'model'), never an auto-pick; pick is the ONE-ACT verb: confirm defaults
@@ -2396,7 +2396,7 @@ export const sdk = {
         judge: (groupId: string) =>
           invokeGatewayMethod<'fleet.attempts.judge', FleetAttemptsJudgeResult>('fleet.attempts.judge', { groupId }),
       },
-      // graph.get (SDK 1.8.0's fix-phase workstream rework): the dependency-graph view
+      // graph.get (platform 1.8.0's fix-phase workstream rework): the dependency-graph view
       // of one workstream, nodes (id, title, state, cluster, files, merge state,
       // blocked reason, orphaned flag, deepest-remaining-path depth, stalled tell,
       // agent), edges (from depends-on to), and the elastic-pool state (ready/running
@@ -2409,7 +2409,7 @@ export const sdk = {
       graph: {
         get: (workstreamId: string) => invokeOperator('fleet.graph.get', { workstreamId }),
       },
-      // observed.steer (SDK 1.8.0's read-only foreign-agent visibility): steer an
+      // observed.steer (platform 1.8.0's read-only foreign-agent visibility): steer an
       // externally-launched coding-agent session over its genuine channel (tmux
       // send-keys). `id` is the OBSERVED NODE's own id (observed:<pid>, not a
       // sessionId, these rows carry no sessionRef). ws-only, generic-invoke, same
@@ -2430,7 +2430,7 @@ export const sdk = {
         invokeGatewayMethod<'checkpoints.restore', CheckpointsRestoreResult>('checkpoints.restore', input),
       restorePreview: (input: CheckpointsRestorePreviewInput) =>
         invokeGatewayMethod<'checkpoints.restorePreview', CheckpointsRestorePreviewResult>('checkpoints.restorePreview', input),
-      // revertHunkPreview/revertHunk (SDK 1.6.1): the review-cockpit's REJECT→REVERT flow.
+      // revertHunkPreview/revertHunk (platform 1.6.1): the review-cockpit's REJECT→REVERT flow.
       // preview is read-only (validates the hunk still reverse-applies, mints a ~2min
       // single-use confirmToken, or answers applies:false with a human conflict string and
       // a null token); revertHunk consumes the token to snapshot-then-reverse-apply exactly
@@ -2441,7 +2441,7 @@ export const sdk = {
       revertHunk: (input: CheckpointsRevertHunkInput) =>
         invokeGatewayMethod<'checkpoints.revertHunk', CheckpointsRevertHunkResult>('checkpoints.revertHunk', input),
     },
-    // rewind.plan/apply (SDK 1.6.1): the unified message-anchored rewind, a terraform-style
+    // rewind.plan/apply (platform 1.6.1): the unified message-anchored rewind, a terraform-style
     // dry-run/apply pair over the platform's history stores. plan previews what restoring
     // files and/or conversation to a turn anchor would change and mints a single-use
     // confirmToken; apply consumes it, records an undo point (a pre-restore safety checkpoint
@@ -2455,11 +2455,11 @@ export const sdk = {
     },
     sessions: {
       list: (signal?: AbortSignal) => invokeOperator('sessions.list', {}, signal),
-      // get/steer/followUp/create/messages.*/inputs.* are native in the 0.38 browser SDK
+      // get/steer/followUp/create/messages.*/inputs.* are native in the 0.38 browser platform
       // (SHARED_BROWSER_ROUTES), they resolve WITHOUT an EXTRA_METHOD_ROUTES row,
-      // through invokeOperator's scopedSdk.operator.invoke fall-through. Routing them
+      // through invokeOperator's scopedPlatform.operator.invoke fall-through. Routing them
       // through the same typed invokeOperator used everywhere else (rather than calling
-      // scopedSdk.operator.invoke directly) means their input/output flow through the
+      // scopedPlatform.operator.invoke directly) means their input/output flow through the
       // REAL generated OperatorMethodInput/Output types with no `as never` cast at any
       // of these call sites, TypeScript rejects a wrong-shaped `input` here at compile
       // time (see goodvibes.test.ts's "wrong-typed steer input is a compile error" case).
@@ -2474,7 +2474,7 @@ export const sdk = {
       // delete (delete-means-delete): NOT in the installed 0.38 OperatorMethodId
       // union (unlike close/reopen above), see the EXTRA_METHOD_ROUTES header comment.
       // Untyped call site, like models.*, SessionDeleteResult is this module's own
-      // honest local shape (`{sessionId, deleted}`), cross-checked against the SDK
+      // honest local shape (`{sessionId, deleted}`), cross-checked against the platform
       // repo's method-catalog-control-core.ts 'sessions.delete' outputSchema at the time
       // of writing. Requires the session to already be closed (409 SESSION_ACTIVE
       // otherwise), callers close first (see App.tsx / SessionsView.tsx call sites).
@@ -2505,7 +2505,7 @@ export const sdk = {
         list: (sessionId: string, signal?: AbortSignal) => invokeOperator('sessions.inputs.list', { sessionId }, signal),
         cancel: (sessionId: string, inputId: string) => invokeOperator('sessions.inputs.cancel', { sessionId, inputId }),
       },
-      // toolCalls.cancel (SDK 1.8.0's interaction-wins round): stop ONE running tool
+      // toolCalls.cancel (platform 1.8.0's interaction-wins round): stop ONE running tool
       // call mid-flight without ending the turn, the turn continues (e.g. the model
       // sees a cancelled tool result and can respond to it), unlike
       // companion.chat.turns.cancel which stops the whole turn. Real generated I/O map
@@ -2515,7 +2515,7 @@ export const sdk = {
       toolCalls: {
         cancel: (sessionId: string, callId: string) => invokeOperator('sessions.toolCalls.cancel', { sessionId, callId }),
       },
-      // queuedMessages.list/edit/delete (SDK 1.8.0's interaction-wins round): a message
+      // queuedMessages.list/edit/delete (platform 1.8.0's interaction-wins round): a message
       // posted while another turn is still running sits queued (not yet delivered to the
       // model) until that turn ends. This lets a caller review, edit, or drop a queued
       // message before it is ever sent, real generated I/O maps and real `http` routes
@@ -2531,13 +2531,13 @@ export const sdk = {
       // detach (WEBUI-FLEET-DEPTH): remove ONE participant (surfaceId) from a shared
       // session, WITHOUT closing or killing it, detach != close != kill. Idempotent:
       // detaching an already-detached surface, or detaching from a closed session, is a
-      // no-op success (verified against the SDK's own sessions.detach description). Used
+      // no-op success (verified against the platform's own sessions.detach description). Used
       // by FleetView's "detach this browser" action on a session-backed fleet node: stop
       // receiving live updates for a process you're done watching without touching the
       // process itself or any other surface attached to it (e.g. the TUI).
       detach: (sessionId: string, surfaceId: string) =>
         invokeOperator<'sessions.detach', SessionsDetachResult>('sessions.detach', { sessionId, surfaceId }),
-      // permissionMode.get/set + contextUsage.get (SDK 1.6.1): session-scoped, real
+      // permissionMode.get/set + contextUsage.get (platform 1.6.1): session-scoped, real
       // generated I/O maps, typed through the same invokeOperator overload as
       // close/reopen above, no bridge override needed. Both answer honestly only for
       // the daemon's own live local session (404 SESSION_NOT_LOCAL otherwise); callers
@@ -2550,7 +2550,7 @@ export const sdk = {
       contextUsage: {
         get: (sessionId: string) => invokeOperator('sessions.contextUsage.get', { sessionId }),
       },
-      // changes.get (SDK 1.6.1): the session-scoped aggregate workspace diff, joined
+      // changes.get (platform 1.6.1): the session-scoped aggregate workspace diff, joined
       // over checkpoints stamped with this session's id (`transport: ["ws"]` only, no
       // `http` route, generic-invoke-only like checkpoints.*/sessions.search above, NOT
       // routed through invokeOperator/EXTRA_METHOD_ROUTES). A session with no stamped
@@ -2572,7 +2572,7 @@ export const sdk = {
       // entries (contract-bridge-types.ts), so they call invokeGatewayMethod directly
       // like every other bridged family, no more invokeGatewayMethodUncheckedInput. A
       // hosted session is steered with the ORDINARY sessions.steer/followUp/
-      // toolCalls.cancel above, there is no sessions.hosted.steer (see the SDK's
+      // toolCalls.cancel above, there is no sessions.hosted.steer (see the platform's
       // method-catalog-hosted-sessions.ts header comment), so none is wired here.
       hosted: {
         list: (input?: SessionsHostedListInput) =>
@@ -2615,7 +2615,7 @@ export const sdk = {
         invokeGatewayMethod<'push.subscriptions.delete', PushSubscriptionDeleteResult>('push.subscriptions.delete', { subscriptionId }),
       verify: (subscriptionId: string) =>
         invokeGatewayMethod<'push.subscriptions.verify', PushVerifyResult>('push.subscriptions.verify', { subscriptionId }),
-      // reconcile (SDK 1.8.0): the reconcile-on-open self-heal call, see
+      // reconcile (platform 1.8.0): the reconcile-on-open self-heal call, see
       // reconcilePushSubscriptionOnOpen in lib/push/push-client.ts. Requires
       // deviceId (unlike subscribe, where it is optional) because reconcile's
       // whole point is healing the record already keyed on this device's identity.
@@ -2625,7 +2625,7 @@ export const sdk = {
           input,
         ),
     },
-    // ─── Pairing (pairing.tokens.*, pairing.handoff.*, SDK 1.8.0) ───────────
+    // ─── Pairing (pairing.tokens.*, pairing.handoff.*, platform 1.8.0) ───────────
     //
     // Per-device revocable pairing tokens replace the old single shared token:
     // each paired surface (a phone, a second laptop, …) gets its OWN named
@@ -2688,7 +2688,7 @@ export const sdk = {
           ),
       },
     },
-    // cost.attribution.get (SDK 1.6.1): windowed (24h/7d), cache-aware-priced cost
+    // cost.attribution.get (platform 1.6.1): windowed (24h/7d), cache-aware-priced cost
     // attribution grouped by a dimension (agent/tool/hook/mcp/model/provider/session).
     // `transport: ["ws"]` only, generic-invoke-only like sessions.changes.get above.
     // Honest-unpriced: a row's costUsd is null when nothing in it could be priced,
@@ -2701,7 +2701,7 @@ export const sdk = {
           invokeGatewayMethod<'cost.attribution.get', CostAttributionGetResult>('cost.attribution.get', input),
       },
     },
-    // tailscale.get / tailscale.serve.run (SDK 1.8.0), see the type block above for
+    // tailscale.get / tailscale.serve.run (platform 1.8.0), see the type block above for
     // the full rationale. Neither id has a REST route binding, so both are
     // generic-invoke-only via invokeGatewayMethod.
     tailscale: {
@@ -2714,7 +2714,7 @@ export const sdk = {
       create: (input?: OperatorMethodInput<'companion.chat.sessions.create'>) => invokeOperator('companion.chat.sessions.create', input),
       get: (sessionId: string) => invokeOperator('companion.chat.sessions.get', { sessionId }),
       list: (input?: OperatorMethodInput<'companion.chat.sessions.list'>) => invokeOperator('companion.chat.sessions.list', input),
-      update: (sessionId: string, input: Parameters<typeof scopedSdk.chat.sessions.update>[1]) =>
+      update: (sessionId: string, input: Parameters<typeof scopedPlatform.chat.sessions.update>[1]) =>
         invokeOperator('companion.chat.sessions.update', { sessionId, ...input }),
       // delete-means-delete: this call site itself is UNCHANGED, the route
       // (DELETE /api/companion/chat/sessions/{sessionId}) already resolves through
@@ -2739,10 +2739,10 @@ export const sdk = {
       close: (sessionId: string) => invokeOperator('companion.chat.sessions.close', { sessionId }),
     },
     messages: {
-      create: (sessionId: string, input: Parameters<typeof scopedSdk.chat.messages.create>[1]) =>
+      create: (sessionId: string, input: Parameters<typeof scopedPlatform.chat.messages.create>[1]) =>
         invokeOperator('companion.chat.messages.create', { sessionId, ...input }),
       list: (sessionId: string) => invokeOperator('companion.chat.messages.list', { sessionId }),
-      steer: (sessionId: string, input: Parameters<typeof scopedSdk.chat.messages.steer>[1]) =>
+      steer: (sessionId: string, input: Parameters<typeof scopedPlatform.chat.messages.steer>[1]) =>
         invokeOperator('companion.chat.messages.steer', { sessionId, ...input }),
       // regenerate (companion.chat.messages.retry): re-run an assistant response
       // honestly. Omit messageId to regenerate the latest assistant reply. The prior
@@ -2767,20 +2767,20 @@ export const sdk = {
           ...(input.metadata ? { metadata: input.metadata } : {}),
         }) as Promise<CompanionEditResult>,
     },
-    // Server-side turn stop (companion.chat.turns.cancel, SDK 1.4+). The
+    // Server-side turn stop (companion.chat.turns.cancel, platform 1.4+). The
     // terminal turn.cancelled event on the session stream is the authoritative
     // signal; treat 404 NO_ACTIVE_TURN as benign and feature-detect older
     // daemons with isMethodUnavailableError.
     turns: {
-      cancel: (sessionId: string, input?: Parameters<typeof scopedSdk.chat.turns.cancel>[1]) =>
+      cancel: (sessionId: string, input?: Parameters<typeof scopedPlatform.chat.turns.cancel>[1]) =>
         invokeOperator('companion.chat.turns.cancel', { sessionId, ...input }),
     },
-    events: scopedSdk.chat.events,
+    events: scopedPlatform.chat.events,
   },
-  artifacts: scopedSdk.artifacts,
+  artifacts: scopedPlatform.artifacts,
   realtime: {
     // Errors belong to this fresh event bus, alongside its listeners and closer.
-    // Keep the native SDK in charge of authentication, resumption and reconnect.
+    // Keep the native platform in charge of authentication, resumption and reconnect.
     viaSse: (options?: {
       readonly signal?: AbortSignal | undefined;
       readonly onError?: ((error: unknown) => void) | undefined;
@@ -2788,7 +2788,7 @@ export const sdk = {
       const lifetime = getClientLifetime();
       const callerSignal = options?.signal;
       const onError = options?.onError;
-      return createBrowserKnowledgeSdk({
+      return createBrowserKnowledgePlatform({
         baseUrl: GOODVIBES_BASE_URL,
         tokenStore,
         fetch: routedFetch,
@@ -2810,23 +2810,23 @@ export const sdk = {
       pathOrUrl: string,
       handlers: RawStreamHandlers,
       options?: RawStreamOptions,
-    ) => scopedSdk.streams.open(pathOrUrl, handlers, options),
+    ) => scopedPlatform.streams.open(pathOrUrl, handlers, options),
   },
-  knowledge: scopedSdk.knowledge,
+  knowledge: scopedPlatform.knowledge,
 };
 
-export type RawStreamHandlers = Parameters<typeof scopedSdk.streams.open>[1];
-export type RawStreamOptions = Parameters<typeof scopedSdk.streams.open>[2];
+export type RawStreamHandlers = Parameters<typeof scopedPlatform.streams.open>[1];
+export type RawStreamOptions = Parameters<typeof scopedPlatform.streams.open>[2];
 
 export { forSession };
-export type GoodVibesClient = typeof sdk;
+export type GoodVibesClient = typeof client;
 export type { OperatorMethodId, OperatorMethodInput, OperatorMethodOutput, OperatorTypedMethodId, RuntimeEventDomain };
 
 export async function invokeMethod<TMethodId extends OperatorTypedMethodId>(
   methodId: TMethodId,
   input?: OperatorMethodInput<TMethodId>,
 ): Promise<OperatorMethodOutput<TMethodId>> {
-  return sdk.operator.invoke(methodId, input);
+  return client.operator.invoke(methodId, input);
 }
 
 /** Direct authenticated, cancellable call to the generated judgment route. */
@@ -2870,7 +2870,7 @@ export async function getCurrentAuth(): Promise<unknown> {
   // instead of the honest one-shot handoff to sign-in. Reject on `authenticated !==
   // true` with a 401/authentication error (NOT network/status-0, so it is treated as
   // unauthorized, sign-in front door, not as a daemon-unreachable outage).
-  const snapshot = await sdk.auth.current();
+  const snapshot = await client.auth.current();
   const record = asRecord(snapshot);
   if ('authenticated' in record && record.authenticated !== true) {
     throw Object.assign(new Error('Operator token rejected: the daemon reports the session is not authenticated.'), {
@@ -2973,18 +2973,18 @@ export async function login(username: string, password: string): Promise<unknown
 export async function setExplicitAuthToken(rawToken: string): Promise<unknown> {
   const token = rawToken.replace(/^Bearer\s+/i, '').trim();
   if (!token) throw new Error('Token is required');
-  await sdk.auth.setToken(token);
+  await client.auth.setToken(token);
   const validationLifetime = getClientLifetime();
   try {
     return await getCurrentAuth();
   } catch (error) {
-    if (getClientLifetime() === validationLifetime) await sdk.auth.clearToken();
+    if (getClientLifetime() === validationLifetime) await client.auth.clearToken();
     throw error;
   }
 }
 
 export async function clearStoredAuthToken(): Promise<void> {
-  await sdk.auth.clearToken();
+  await client.auth.clearToken();
 }
 
 export function isRuntimeDomain(value: string): value is RuntimeEventDomain {

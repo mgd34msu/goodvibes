@@ -3,8 +3,8 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { chmodSync, existsSync, linkSync, readFileSync, renameSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from './_helpers/project-temp.js';
-import { HandlerSqliteStore } from '../sdk/src/platform/state/daemon-handler-sqlite-store.js';
-import { writeFileAtomic } from '../sdk/src/platform/state/durable-file-io.js';
+import { HandlerSqliteStore } from '../platform/src/platform/state/daemon-handler-sqlite-store.js';
+import { writeFileAtomic } from '../platform/src/platform/state/durable-file-io.js';
 const stores: HandlerSqliteStore[] = [];
 afterEach(() => { for (const store of stores.splice(0).reverse()) store.close(); });
 function store(root: string) { const value = new HandlerSqliteStore({ workingDirectory: root, fileName: 'private.sqlite', schema: ['CREATE TABLE IF NOT EXISTS notes (value TEXT NOT NULL)'] }); stores.push(value); return value; }

@@ -11,11 +11,11 @@ import {
   type ContractIntegrationInspection,
   type OperatorContractRunner,
   type ContractCliRunner,
-} from '@goodvibes-jev/engine/sdk/platform/contract';
+} from '@goodvibes-jev/engine/platform/platform/contract';
 import type {
   createNativeWorkExecutionHost,
   NativeWorkExecutionHost,
-} from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution';
+} from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution';
 
 // Keep the historical attachment surface explicit: the new read capability
 // must not become another prerequisite for already supported durable runners.

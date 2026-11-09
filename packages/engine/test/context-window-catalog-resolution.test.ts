@@ -7,11 +7,11 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import {
   applyCatalogContextWindow, buildCatalogContextWindowIndex, CatalogContextWindowResolver,
   isLocalBaseUrl, matchCatalogProviderId, resolveCatalogContextWindow,
-} from '../sdk/src/platform/providers/context-window-catalog.js';
-import { ContextWindowOverrideStore } from '../sdk/src/platform/providers/context-window-overrides.js';
-import { ModelLimitsService } from '../sdk/src/platform/providers/model-limits.js';
-import type { CatalogModel } from '../sdk/src/platform/providers/model-catalog.js';
-import type { ModelDefinition } from '../sdk/src/platform/providers/registry-types.js';
+} from '../platform/src/platform/providers/context-window-catalog.js';
+import { ContextWindowOverrideStore } from '../platform/src/platform/providers/context-window-overrides.js';
+import { ModelLimitsService } from '../platform/src/platform/providers/model-limits.js';
+import type { CatalogModel } from '../platform/src/platform/providers/model-catalog.js';
+import type { ModelDefinition } from '../platform/src/platform/providers/registry-types.js';
 
 function catalog(providerId: string, id: string, tokens: number): CatalogModel {
   return { id, name: id, provider: providerId, providerId, providerEnvVars: [], pricing: null, tier: 'paid', contextWindow: tokens };

@@ -6,14 +6,14 @@
  * from `errors/src/index.ts`, those are a separate module instance
  * and `instanceof` returns false across the boundary.
  *
- * For tests that assert `err instanceof GoodVibesSdkError`, use these re-exports.
+ * For tests that assert `err instanceof GoodVibesError`, use these re-exports.
  *
  * Wire the dist-staleness sentinel so dist-loading tests
  * fail loudly when the compiled output is older than the TypeScript source.
  */
 import './dist-mtime-check.js';
 export {
-  GoodVibesSdkError,
+  GoodVibesError,
   HttpStatusError,
   ConfigurationError,
   ContractError,

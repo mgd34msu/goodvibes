@@ -2,15 +2,15 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { PermissionPromptDecision, PermissionPromptRequest } from '../sdk/src/platform/permissions/prompt.js';
-import { ApprovalBroker, type RequestSharedApprovalInput } from '../sdk/src/platform/control-plane/approval-broker.js';
-import { WorkspaceTrustManager } from '../sdk/src/platform/runtime/workspace-trust.js';
+import type { PermissionPromptDecision, PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.js';
+import { ApprovalBroker, type RequestSharedApprovalInput } from '../platform/src/platform/control-plane/approval-broker.js';
+import { WorkspaceTrustManager } from '../platform/src/platform/runtime/workspace-trust.js';
 const GOODVIBES_DAEMON_SURFACE_ROOT = 'tui';
 import {
   createWorkspaceTrustDecisionAsk,
   trustGatedApprovalRaiser,
   type ApprovalRaiseExtras,
-} from '../sdk/src/platform/runtime/workspace-trust-approval.js';
+} from '../platform/src/platform/runtime/workspace-trust-approval.js';
 
 let workspace: string;
 

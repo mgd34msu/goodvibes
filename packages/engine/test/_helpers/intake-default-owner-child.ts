@@ -1,5 +1,5 @@
 /** Real independent-process source owner used by retention regression source. */
-import { createOwnedTriagedInboxSource } from '../../sdk/src/platform/intake/triage/owned.js';
+import { createOwnedTriagedInboxSource } from '../../platform/src/platform/intake/triage/owned.js';
 const root = process.argv[2];
 if (!root) throw new Error('A fixture workspace is required');
 // Source startup must not itself expire the deliberately archived fixture.

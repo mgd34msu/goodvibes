@@ -6,7 +6,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, test, expect } from 'bun:test';
-import type { ProcessNode, ProcessState } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
+import type { ProcessNode, ProcessState } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import {
   buildFleetRows,
   buildFleetSnapshot,
@@ -188,7 +188,7 @@ describe('buildFleetSnapshot: honest cost/token aggregates', () => {
   });
 
   test('unpriced costState never contributes to totalCost even when costUsd happens to be a number', () => {
-    // Defensive: the SDK contract says costUsd is null when unpriced, but the
+    // Defensive: the platform contract says costUsd is null when unpriced, but the
     // aggregate must honor costState as the source of truth regardless.
     const node = makeNode({ id: 'unpriced', costState: 'unpriced', costUsd: 0 });
     expect(hasFleetCost(node.costUsd, node.costState)).toBe(false);
@@ -537,8 +537,8 @@ describe('createFleetReadModel', () => {
     expect(registry.steerCalls).toEqual([{ id: 'agent-x', text: 'hello' }]);
   });
 
-  test('steer passes the SDK\'s wake-retry result (woke: true) straight through; this read model needs no change for steer-wake', () => {
-    // ProcessRegistry.steer() now wake-retries a stalled node internally (SDK
+  test('steer passes the platform\'s wake-retry result (woke: true) straight through; this read model needs no change for steer-wake', () => {
+    // ProcessRegistry.steer() now wake-retries a stalled node internally (platform
     // 1.6.1's agent-experience round) and reports it via SteerResult.woke.
     // The TUI's fleet read model is a pure passthrough to registry.steer(),
     // pin that the extra field survives instead of being dropped by an
@@ -602,7 +602,7 @@ describe('createStaticFleetReadModel', () => {
 
 // ---------------------------------------------------------------------------
 // d4: /schedule AutomationManager jobs surface in the fleet tree as
-// 'schedule'-kind nodes with the automation-manager source marker. The SDK's
+// 'schedule'-kind nodes with the automation-manager source marker. The platform's
 // adaptAutomationJob (platform/runtime/fleet/adapters/automation.ts) produces
 // the ProcessNode; this mirrors its exact documented output (a job created via
 // /schedule IS a schedule from the user's viewpoint) and proves the TUI
@@ -611,7 +611,7 @@ describe('createStaticFleetReadModel', () => {
 // workflow-tool ScheduleEntry sharing the same kind.
 // ---------------------------------------------------------------------------
 
-/** Mirror of the SDK adaptAutomationJob output (not cleanly re-exported from the fleet index, so replicated here from its verified source shape). */
+/** Mirror of the platform adaptAutomationJob output (not cleanly re-exported from the fleet index, so replicated here from its verified source shape). */
 function adaptedAutomationJobNode(job: { id: string; name: string; prompt: string; enabled: boolean }): ProcessNode {
   return {
     id: `automation-job:${job.id}`,

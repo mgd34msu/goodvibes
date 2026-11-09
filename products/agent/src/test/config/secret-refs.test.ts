@@ -11,10 +11,10 @@ import {
   normalizeSecretRef,
   resolveSecretRef,
   type SecretCommandRunner,
-} from '@goodvibes-jev/engine/sdk/platform/config';
+} from '@goodvibes-jev/engine/platform/platform/config';
 import { SecretsManager } from '../../config/secrets.ts';
-import { ServiceRegistry } from '@goodvibes-jev/engine/sdk/platform/config';
-import { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
+import { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 function makeTmpDir(): string {

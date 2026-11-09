@@ -64,7 +64,7 @@ const SESSIONS_FIXTURE = {
 };
 
 // DELETE-MEANS-DELETE fixtures/state, a small in-memory companion-chat
-// session store the mocked sdk.chat.sessions.* methods read/write, so a test can
+// session store the mocked platform.chat.sessions.* methods read/write, so a test can
 // simulate BOTH an honest daemon that hard-deletes (delete really removes the record)
 // and an older daemon that only soft-closes (delete only closes it, file retained) by
 // flipping `chatDeleteReallyRemoves`.
@@ -90,7 +90,7 @@ resetChatDeleteFixtures();
 // SteerComposer, and the statically-imported-but-not-rendered other views) resolves
 // through this one module, so every name any of them import must be present.
 // App calls useDaemonHealth() (the shell's avatar dot and account menu read it), which
-// does a raw `fetch()` outside the sdk facade and polls sdk.operator.models.current.get()
+// does a raw `fetch()` outside the platform facade and polls platform.operator.models.current.get()
 // (not stubbed above). Neither matters to this test, so mock the whole hook: it avoids
 // real-network noise and an unstubbed method call.
 mock.module('./hooks/useDaemonHealth', () => ({
@@ -122,7 +122,7 @@ mock.module('./lib/goodvibes', () => ({
   GOODVIBES_BASE_URL: 'http://localhost/test',
   WEBUI_VERSION: undefined,
   // MemoryView (mounted unconditionally by App.tsx's render switch) imports this
-  // named value at module load time, a plain re-export of the SDK's constant, not
+  // named value at module load time, a plain re-export of the platform's constant, not
   // exercised by any test in this file.
   VIBE_PERSONA_TAG: 'vibe',
   DEFAULT_SSE_RECONNECT: { enabled: true, baseDelayMs: 1, maxDelayMs: 2, backoffFactor: 2, maxAttempts: 1 },
@@ -142,7 +142,7 @@ mock.module('./lib/goodvibes', () => ({
   invokeMethod: () => Promise.resolve({}),
   runBrowserJudgment: () => Promise.reject(new Error('Judgment is not installed in this app fixture.')),
   readBrowserDecisionPolicy: async () => ({ policy: 'Default - On', operation: 'decision', reason: null, revision: 0 }),
-  sdk: {
+  client: {
     operator: {
       invoke: (method: string) => method === 'workLedger.turn.session'
         ? Promise.resolve({ kind: 'legacy' })

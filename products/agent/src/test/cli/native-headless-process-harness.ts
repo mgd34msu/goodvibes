@@ -1,12 +1,12 @@
 /** Real source/compiled entrypoints and a real paired daemon. Only external model/Jev replies are fixtures. */
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import type { NativeConversationIntakeCaptureRequest } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
+import type { NativeConversationIntakeCaptureRequest } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 import type { NativeIntakeJournalRecord } from '../../runtime/native-conversation-intake-journal.ts';
 import { isolatedEnv, lastUserText, makeHome, removeHome, startStubModel, type E2EHome, type ModelRequest, type ModelReply } from '../e2e/harness.ts';
 import type { DecisionModelPolicy } from '@goodvibes-jev/engine/errors';
 import { startE2ENativeHost } from '../e2e/native-host-fixture.ts';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
 
 export type HeadlessProduct = 'agent' | 'tui';

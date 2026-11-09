@@ -14,8 +14,8 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createVoiceSetupService } from '../sdk/src/platform/runtime/voice-setup.ts';
-import { provisionLocalVoiceRuntime } from '../sdk/src/platform/voice/provisioning/index.ts';
+import { createVoiceSetupService } from '../platform/src/platform/runtime/voice-setup.ts';
+import { provisionLocalVoiceRuntime } from '../platform/src/platform/voice/provisioning/index.ts';
 
 const enc = new TextEncoder();
 

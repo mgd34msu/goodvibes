@@ -191,7 +191,7 @@
   },
   "./observer": {
     "gzip_bytes": 2231,
-    "rationale": "observer surface; measured 1859 B gzip @ commit c0e5910; headroom max(ceil(1859*1.2)=2231, 1859+50=1909) \u2192 2231 (1.2x dominates by 322 B); dominated by createOpenTelemetryObserver (~700 B), SDKObserver interface + createConsoleObserver (~500 B), OtelTracer/OtelSpan/OtelMeter/OtelCounter/OtelHistogram types (~300 B)"
+    "rationale": "observer surface; measured 1859 B gzip @ commit c0e5910; headroom max(ceil(1859*1.2)=2231, 1859+50=1909) \u2192 2231 (1.2x dominates by 322 B); dominated by createOpenTelemetryObserver (~700 B), PlatformObserver interface + createConsoleObserver (~500 B), OtelTracer/OtelSpan/OtelMeter/OtelCounter/OtelHistogram types (~300 B)"
   },
   "./operator": {
     "gzip_bytes": 118,

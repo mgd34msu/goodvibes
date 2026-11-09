@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { InboxCursorStore } from '../sdk/src/platform/intake/cursor-store.ts';
-import { InboundPoller } from '../sdk/src/platform/intake/poller.ts';
-import type { InboundChannelItem, InboundProviderAdapter, ProviderPollResult } from '../sdk/src/platform/intake/provider-adapter.ts';
-import { aggregateInbox, decodePageCursor, encodePageCursor, normalizeInboxQuery, toWireItem, DEFAULT_LIMIT, MAX_LIMIT } from '../sdk/src/platform/intake/aggregator.ts';
+import { InboxCursorStore } from '../platform/src/platform/intake/cursor-store.ts';
+import { InboundPoller } from '../platform/src/platform/intake/poller.ts';
+import type { InboundChannelItem, InboundProviderAdapter, ProviderPollResult } from '../platform/src/platform/intake/provider-adapter.ts';
+import { aggregateInbox, decodePageCursor, encodePageCursor, normalizeInboxQuery, toWireItem, DEFAULT_LIMIT, MAX_LIMIT } from '../platform/src/platform/intake/aggregator.ts';
 
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });

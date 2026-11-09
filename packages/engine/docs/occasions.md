@@ -105,7 +105,7 @@ Telegram token cannot stop the agent hearing about an approaching occasion.
 
 Telegram is a transport the daemon can reach by itself, a bot token and an HTTP
 call. The agent is not, because landing a message in an agent conversation means taking a
-turn inside the agent product. So the SDK owns the destination and the contract
+turn inside the agent product. So the platform owns the destination and the contract
 (`channels/delivery/strategies-agent.ts`) and the agent product registers the
 callable that does the landing. Until it does, a push addressed to the agent
 fails saying exactly that, rather than looking like an unknown surface.

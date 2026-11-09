@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { createOwnedTriagedInboxSource } from '../sdk/src/platform/intake/triage/owned.js';
+import { createOwnedTriagedInboxSource } from '../platform/src/platform/intake/triage/owned.js';
 import { makeProjectTempDir } from './_helpers/project-temp.js';
 
 const logger = { info() {}, warn() {}, error() {} };

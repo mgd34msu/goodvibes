@@ -23,8 +23,8 @@
 import { describe, expect, test } from 'bun:test';
 import { createTerminalPaintWindow } from '../../shell/terminal-paint-window.ts';
 import { Compositor } from '../../renderer/compositor.ts';
-import { createStyledCell } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import { createStyledCell } from '@goodvibes-jev/engine/platform/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import type { CompositeRequest } from '../../renderer/compositor.ts';
 
 function makeWindow() {

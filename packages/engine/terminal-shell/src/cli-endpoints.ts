@@ -3,8 +3,8 @@
  * for the three network endpoints a front-end's daemon exposes: the control
  * plane, the plain HTTP listener, and the web UI.
  */
-import { resolveWebPort } from '@goodvibes-jev/engine/sdk/platform/daemon';
-import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { resolveWebPort } from '@goodvibes-jev/engine/platform/platform/daemon';
+import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 
 export type RuntimeEndpointId = 'controlPlane' | 'httpListener' | 'web';
 export type RuntimeHostMode = 'local' | 'network' | 'custom';
@@ -43,8 +43,8 @@ export interface RuntimeEndpointBinding {
   readonly host: string;
   readonly port: number;
   /**
-   * False when the stored hostMode is not one of the SDK's recognized modes
-   * ('local' | 'network' | 'custom'). The SDK's resolveHostBinding is a switch
+   * False when the stored hostMode is not one of the platform's recognized modes
+   * ('local' | 'network' | 'custom'). The platform's resolveHostBinding is a switch
    * with NO default case: an unrecognized mode yields an undefined binding and
    * the daemon throws in its constructor before ever binding. Displays must
    * therefore never present the host/port below as a definite binding when
@@ -57,7 +57,7 @@ export interface RuntimeEndpointBinding {
 /**
  * THE one display seam for endpoint bindings: every surface that renders a
  * binding as text goes through this, so no surface can present the resolver's
- * loopback fallback as a definite bind for a hostMode the SDK cannot handle
+ * loopback fallback as a definite bind for a hostMode the platform cannot handle
  * (its bind resolver has no default case, the daemon throws before binding).
  * The recognized case renders the familiar `<mode> <host>:<port>`.
  */
@@ -82,12 +82,12 @@ export function resolveRuntimeEndpointBinding(
   const keys = RUNTIME_ENDPOINT_CONFIG_KEYS[endpoint];
   const hostMode = String(config.get(keys.hostMode) ?? 'local');
   const configuredHost = String(config.get(keys.host) ?? '127.0.0.1');
-  // Port coercion is anchored PER ENDPOINT to what the SDK actually does with
+  // Port coercion is anchored PER ENDPOINT to what the platform actually does with
   // the stored value, so a display never disagrees with the machinery:
   //   - controlPlane / httpListener bind via resolveHostBinding, which is fed
   //     `Number(raw ?? default)` and applies `customPort || DEFAULT`, a
   //     stored 0 or non-numeric value collapses to the endpoint default.
-  //   - web goes through the SDK's own resolveWebPort, which every surface
+  //   - web goes through the platform's own resolveWebPort, which every surface
   //     that announces, links a channel account, or serves over tailscale
   //     also anchors to, so the display never disagrees with the machinery.
   const rawPort = Number(config.get(keys.port) ?? RUNTIME_ENDPOINT_DEFAULT_PORTS[endpoint]);
@@ -104,7 +104,7 @@ export function resolveRuntimeEndpointBinding(
     return { hostMode, configuredHost, host: '127.0.0.1', port, recognized: true };
   }
   // Unrecognized hostMode ('LAN', 'Network', '', a trimmed variant, …): the
-  // SDK bind path has NO default case for this, resolveHostBinding returns
+  // platform bind path has NO default case for this, resolveHostBinding returns
   // undefined and the daemon throws before binding. There IS no real binding
   // to display; recognized:false tells callers to warn instead of asserting
   // the loopback fallback below as fact.

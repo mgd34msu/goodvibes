@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { livenessMarkerPathFor, writeLivenessMarker } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { livenessMarkerPathFor, writeLivenessMarker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { installProcessLifecycle, type ProcessLifecycleDeps } from '../../runtime/process-lifecycle.ts';
 import type { BootstrapContext } from '../../runtime/bootstrap.ts';
 import { ALT_SCREEN_EXIT, CLEAR_SCREEN, CURSOR_SHOW, FOCUS_DISABLE, KEYBOARD_EXT_DISABLE, MOUSE_DISABLE, PASTE_DISABLE } from '../../renderer/terminal-escapes.ts';

@@ -1,9 +1,9 @@
 /**
  * useApprovalUpdates, the browser-side consumer of `control.approval_update`.
  *
- * Reference: the SDK's own node-side consumer at
- * packages/sdk/src/platform/runtime/client/approval-updates.ts (never imported
- * here, it wraps the SDK's node stream transport, which does not belong in the
+ * Reference: the platform's own node-side consumer at
+ * packages/engine/platform/src/platform/runtime/client/approval-updates.ts (never imported
+ * here, it wraps the platform's node stream transport, which does not belong in the
  * browser bundle; this hook is the webui-native equivalent, built on the SAME
  * raw-stream escape hatch useSessionRealtime.ts uses).
  *
@@ -22,7 +22,7 @@
  */
 import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { sdk, DEFAULT_SSE_RECONNECT } from '../lib/goodvibes';
+import { client as platformClient, DEFAULT_SSE_RECONNECT } from '../lib/goodvibes';
 import { queryKeys } from '../lib/queries';
 import { RELAY_OVERFLOW_EVENT, noteRelayOverflow, readDroppedCount } from '../lib/relay-stream-overflow';
 
@@ -30,7 +30,7 @@ import { RELAY_OVERFLOW_EVENT, noteRelayOverflow, readDroppedCount } from '../li
 export const APPROVAL_UPDATE_WIRE_EVENT = 'approval-update';
 
 /** `?domains=` narrowing for this stream, the tag `approval-update` carries in
- * the SDK's EVENT_DOMAIN table (gateway-scope-enforcement.ts). */
+ * the platform's EVENT_DOMAIN table (gateway-scope-enforcement.ts). */
 const APPROVAL_UPDATE_EVENTS_PATH = '/api/control-plane/events?domains=gate';
 
 export interface UseApprovalUpdatesResult {
@@ -59,7 +59,7 @@ export function useApprovalUpdates(enabled: boolean): UseApprovalUpdatesResult {
       void queryClient.invalidateQueries({ queryKey: queryKeys.permissionRules });
     };
 
-    sdk.streams
+    platformClient.streams
       .open(
         APPROVAL_UPDATE_EVENTS_PATH,
         {

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { GATE_PRESETS } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { GATE_PRESETS } from '@goodvibes-jev/engine/platform/platform/gate';
 import { describePermissionMode, describeConfiguredPermissions } from '../../permissions/configured-posture.ts';
 import { configGetStub } from '../helpers/config-manager-stub.ts';
 

@@ -1,25 +1,25 @@
 /**
  * session-spine-rest-transport.ts
  *
- * The REST transport, probe, and receipt consumer live in the SDK itself
- * (`@goodvibes-jev/engine/sdk/platform/runtime/session-spine`,
+ * The REST transport, probe, and receipt consumer live in the platform itself
+ * (`@goodvibes-jev/engine/platform/platform/runtime/session-spine`,
  * `rest-transport.ts`, adopted from this agent's own implementation
  * verbatim, per that module's "Hoist provenance" doc comment). Callers import
  * `createSessionSpineRestTransport` / `createSessionSpineRestProbe` /
  * `createSessionSpineReceiptConsumer` / `extractSessionSpineReceipts`
  * directly from there now.
  *
- * What stays here, per the SDK module's own explicit carve-out ("Kept out of
+ * What stays here, per the platform module's own explicit carve-out ("Kept out of
  * this hoist: the agent's `createSpineConnectionResolver`... a consumer
- * trust-boundary concern the SDK core deliberately never reaches into"):
+ * trust-boundary concern the platform core deliberately never reaches into"):
  * building the daemon base URL from ConfigManager and reading the
  * connected-host operator token off THIS home directory's
  * operator-tokens.json. That is agent-local trust-boundary wiring, not
- * transport logic, and it is exactly what every SDK rest-transport factory's
+ * transport logic, and it is exactly what every platform rest-transport factory's
  * `resolveConnection` option expects a consumer to supply.
  */
 
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { readConnectedHostOperatorToken } from './connected-host-auth.ts';
 import { connectedHostBaseUrl } from '../config/connected-host-dial.ts';
 

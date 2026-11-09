@@ -1,5 +1,5 @@
 /**
- * relay-connection.ts, the transport ROUTE the SDK client dispatches requests over.
+ * relay-connection.ts, the transport ROUTE the platform client dispatches requests over.
  *
  * Two transports can answer a request:
  *   - direct: an ordinary `fetch` against GOODVIBES_BASE_URL (the LAN/co-located path,
@@ -28,7 +28,7 @@
  * server reports no verifier is available, the original 401 surfaces honestly, never a
  * silent skip of verification.
  *
- * `routedFetch` is the one `fetch` implementation the SDK client is built with
+ * `routedFetch` is the one `fetch` implementation the platform client is built with
  * (lib/goodvibes.ts). It always exists and behaves exactly like the plain global fetch
  * when no relay pairing is stored, this file changes nothing for the common LAN/
  * co-located case.
@@ -122,7 +122,7 @@ export async function probeRelayReachability(): Promise<boolean> {
 }
 
 // ---------------------------------------------------------------------------
-// routedFetch, the fetch the SDK client is built with.
+// routedFetch, the fetch the platform client is built with.
 // ---------------------------------------------------------------------------
 
 const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
@@ -218,7 +218,7 @@ async function relayFetchWithStepUp(relayClient: RelayClient, input: RequestInfo
 }
 
 /**
- * The fetch implementation the SDK client dispatches every call through. Routes to
+ * The fetch implementation the platform client dispatches every call through. Routes to
  * the relay's tunneled fetch when the active route is 'relay'; otherwise behaves
  * exactly like the platform's native fetch (the pre-relay default).
  */
@@ -230,7 +230,7 @@ function routedFetchImpl(input: RequestInfo | URL, init?: RequestInit): Promise<
   return relayFetchWithStepUp(relayClient, input, init);
 }
 
-// The runtime's `fetch` carries a `preconnect` static (a Bun extension the SDK's
+// The runtime's `fetch` carries a `preconnect` static (a Bun extension the platform's
 // `typeof fetch` option type inherits from this project's global types) that a plain
 // function value structurally lacks. Delegate it straight to the real fetch's own
 // implementation so routedFetch is a genuine drop-in, not just a same-shaped cast.

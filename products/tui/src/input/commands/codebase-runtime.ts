@@ -2,7 +2,7 @@
 // codebase-runtime.ts, /codebase
 //
 // Explicit-query + transparency surface over the repo source-tree code index
-// (CodeIndexStore, @goodvibes-jev/engine/sdk/platform/state, landed on SDK main
+// (CodeIndexStore, @goodvibes-jev/engine/platform/platform/state, landed on platform main
 // with explicit-query build/status/search) via the TUI's own wiring in
 // src/runtime/code-index-services.ts, threaded through
 // CommandContext.session.codeIndexStore exactly like wrfcController/
@@ -19,9 +19,9 @@
 // auto-injection flag+setting gate, and the last reindex activity).
 // ---------------------------------------------------------------------------
 
-import type { CodeIndexStats, CodeContextResult, CodeIndexReindexActivity } from '@goodvibes-jev/engine/sdk/platform/state';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { isCodeIndexAutoStartEnabled, CODE_INDEX_MAX_FILES, CODE_INDEX_MAX_FILE_BYTES, CODE_INDEX_MAX_TOTAL_BYTES } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import type { CodeIndexStats, CodeContextResult, CodeIndexReindexActivity } from '@goodvibes-jev/engine/platform/platform/state';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { isCodeIndexAutoStartEnabled, CODE_INDEX_MAX_FILES, CODE_INDEX_MAX_FILE_BYTES, CODE_INDEX_MAX_TOTAL_BYTES } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 
 // ---------------------------------------------------------------------------
@@ -94,7 +94,7 @@ function renderCodeIndexStatus(stats: CodeIndexStats, configManager: Pick<Config
     );
   }
 
-  // Provider-space honesty (SDK finding): vectors embedded under a different
+  // Provider-space honesty (platform finding): vectors embedded under a different
   // provider than the current default disable the vector search path until a
   // rebuild re-embeds, say so, in the store's own words.
   if (stats.embeddingProviderMismatch) {

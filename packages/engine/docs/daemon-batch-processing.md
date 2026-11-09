@@ -34,7 +34,7 @@ The `/api/batch/jobs` endpoint itself never executes a live response. It only qu
 
 ## Provider support
 
-The SDK exposes provider Batch API adapters for:
+The platform exposes provider Batch API adapters for:
 
 - `openai` with API-key credentials, using OpenAI Batch API `/v1/chat/completions`.
 - `anthropic` with API-key credentials, using Anthropic Message Batches `/v1/messages/batches`.
@@ -122,9 +122,9 @@ Jobs are persisted under the daemon config directory in `batch-jobs.json`.
 
 Cloudflare is optional. The daemon works without Cloudflare, and `cloudflare.enabled` defaults to `false`.
 
-The SDK owns Cloudflare service interaction. TUI/onboarding clients should gather user choices and call the daemon Cloudflare routes; they should not implement Cloudflare API calls themselves.
+The platform owns Cloudflare service interaction. TUI/onboarding clients should gather user choices and call the daemon Cloudflare routes; they should not implement Cloudflare API calls themselves.
 
-Cloudflare remains opt-in. The default provisioning target is still the batch Worker plus Queue/DLQ path, but callers can enable additional SDK-managed components with the `components` object:
+Cloudflare remains opt-in. The default provisioning target is still the batch Worker plus Queue/DLQ path, but callers can enable additional platform-managed components with the `components` object:
 
 ```json
 {
@@ -146,7 +146,7 @@ Unset component keys use safe defaults: `workers` and `queues` are on for the ex
 
 ### Provisioning requirements
 
-The SDK provisioning flow needs:
+The platform provisioning flow needs:
 
 - A Cloudflare account id.
 - A Cloudflare API token. Pass `apiToken`, configure `cloudflare.apiTokenRef`, store `CLOUDFLARE_API_TOKEN` in `SecretsManager`, or set the `CLOUDFLARE_API_TOKEN` environment variable.
@@ -156,26 +156,26 @@ The SDK provisioning flow needs:
 - For DNS automation, a selected Cloudflare zone via `zoneId` or `zoneName`.
 - For Tunnel or Access automation, `daemonHostname` identifies the hostname to route/protect. Access application and service-token APIs are account-scoped; a zone is only required when GoodVibes should also create DNS records.
 
-When a zone is selected, DNS and Access hostnames must belong to that zone. The SDK treats common onboarding placeholders such as `daemon.example.com` and `goodvibes.example.com` as stale placeholders and replaces them with zone-owned hostnames before provisioning. With zone `buzznet.dev`, the default daemon hostname becomes `daemon.buzznet.dev`, and the default Worker custom hostname becomes `goodvibes-batch-worker.buzznet.dev`. Non-placeholder hostnames outside the selected zone are skipped with warning steps before any DNS, Tunnel-ingress, or Access-app request is sent to Cloudflare.
+When a zone is selected, DNS and Access hostnames must belong to that zone. The platform treats common onboarding placeholders such as `daemon.example.com` and `goodvibes.example.com` as stale placeholders and replaces them with zone-owned hostnames before provisioning. With zone `buzznet.dev`, the default daemon hostname becomes `daemon.buzznet.dev`, and the default Worker custom hostname becomes `goodvibes-batch-worker.buzznet.dev`. Non-placeholder hostnames outside the selected zone are skipped with warning steps before any DNS, Tunnel-ingress, or Access-app request is sent to Cloudflare.
 
 Secrets are stored as `goodvibes://secrets/...` references when the provisioning route is asked to persist them. Raw Cloudflare tokens are never written into config.
 
 ### Token bootstrap
 
-Onboarding clients can either collect a manually-created operational Cloudflare API token or use the SDK bootstrap flow:
+Onboarding clients can either collect a manually-created operational Cloudflare API token or use the platform bootstrap flow:
 
 1. Call `GET /api/cloudflare/token/requirements` or `POST /api/cloudflare/token/requirements` with the desired `components`.
 2. Ask the user to create a temporary user-owned bootstrap token from Cloudflare's **Create additional tokens** API token template, or with `User > API Tokens Write`.
 3. Send that temporary token to `POST /api/cloudflare/token/create` as `bootstrapToken`.
-4. The SDK uses Cloudflare's `/user/tokens` API to create a narrower operational user token with the returned GoodVibes permission list, stores it as `goodvibes://secrets/goodvibes/CLOUDFLARE_API_TOKEN` when `storeApiToken` is not `false`, and never persists the bootstrap token.
+4. The platform uses Cloudflare's `/user/tokens` API to create a narrower operational user token with the returned GoodVibes permission list, stores it as `goodvibes://secrets/goodvibes/CLOUDFLARE_API_TOKEN` when `storeApiToken` is not `false`, and never persists the bootstrap token.
 
-The returned permission list describes the operational token the SDK will create. It is not a list of permissions to add to the temporary bootstrap token. If DNS automation should be scoped to one zone, pass `zoneId` during token creation; otherwise the SDK may create a broader zone-scoped operational token so later provisioning can discover/select the zone.
+The returned permission list describes the operational token the platform will create. It is not a list of permissions to add to the temporary bootstrap token. If DNS automation should be scoped to one zone, pass `zoneId` during token creation; otherwise the platform may create a broader zone-scoped operational token so later provisioning can discover/select the zone.
 
-The SDK resolves Cloudflare permission groups dynamically through the official Cloudflare TypeScript SDK. It resolves each required permission by `name` and Cloudflare scope, with aliases for Cloudflare's `Write`/`Edit` naming variants, before falling back to a broad catalog scan. If Cloudflare still returns account-specific permission names that do not match the SDK candidates, token creation fails with the missing permission names so the client can guide the user to create the operational token manually.
+The platform resolves Cloudflare permission groups dynamically through the official Cloudflare TypeScript SDK. It resolves each required permission by `name` and Cloudflare scope, with aliases for Cloudflare's `Write`/`Edit` naming variants, before falling back to a broad catalog scan. If Cloudflare still returns account-specific permission names that do not match the platform candidates, token creation fails with the missing permission names so the client can guide the user to create the operational token manually.
 
 Token policies are emitted per Cloudflare resource scope. Account permissions are placed in an account policy, DNS permissions are placed in a zone policy, and R2 uses a separate bucket policy when Cloudflare exposes `Workers R2 Storage Write/Edit` as `com.cloudflare.edge.r2.bucket` scoped. This matches Cloudflare's documented token policy model where permission groups only apply to matching resource types.
 
-After token creation, the SDK asks Cloudflare for the created token policy and refuses to store the token if no expected permission groups were persisted. If the dashboard shows a generated `GoodVibes Cloudflare Operational` token with `-` for permissions/resources, delete that unusable token and rerun the wizard with this SDK version.
+After token creation, the platform asks Cloudflare for the created token policy and refuses to store the token if no expected permission groups were persisted. If the dashboard shows a generated `GoodVibes Cloudflare Operational` token with `-` for permissions/resources, delete that unusable token and rerun the wizard with this platform version.
 
 Operational-token permissions are scoped to the selected account except for DNS, which uses the selected zone:
 
@@ -192,7 +192,7 @@ Operational-token permissions are scoped to the selected account except for DNS,
 | Secrets Store | `Account Secrets Store Write`, and alternates `Account Secrets Store Edit`, `Secrets Store Write`, `Secrets Store Edit` | Account |
 | R2 | `Workers R2 Storage Write`, and alternates `R2 Storage Write`, `Workers R2 Storage Edit` | Account or R2 bucket, depending on Cloudflare's permission-group scope |
 
-For each component, the SDK requests the first-listed permission and falls back through its alternates when Cloudflare's account exposes the same capability under a different name; a client never needs to guess which name a given account uses.
+For each component, the platform requests the first-listed permission and falls back through its alternates when Cloudflare's account exposes the same capability under a different name; a client never needs to guess which name a given account uses.
 
 R2 provisioning uses Cloudflare's account-scoped R2 API for bucket creation/listing. Most Cloudflare accounts expose the R2 storage permission as account-scoped; accounts that expose it as `com.cloudflare.edge.r2.bucket` receive a separate `com.cloudflare.edge.r2.bucket.*` token policy so the permission group has a matching resource.
 
@@ -215,11 +215,11 @@ All Cloudflare routes require daemon authentication and admin privileges.
 | `/api/cloudflare/verify` | `POST` | Calls the Worker health endpoint and the Worker-to-daemon batch proxy. |
 | `/api/cloudflare/disable` | `POST` | Disables local Cloudflare usage, returns queue backend to `local`, and can remove Worker cron/subdomain settings. |
 
-Provisioning is idempotent for SDK-managed Cloudflare resources. The SDK checks for existing resources before creating Queues, queue consumers, KV namespaces, R2 buckets, Secrets Stores, Zero Trust Tunnels, Access service tokens/apps, DNS CNAMEs, account workers.dev subdomains, workers.dev script routes, and the `GoodVibesCoordinator` Durable Object namespace. Worker cron provisioning reads the current schedule before rewriting it, and disable flows check current schedule/subdomain state before removing settings. Hostname-bound DNS and Access operations are preflighted against the selected zone before Cloudflare receives create/update calls.
+Provisioning is idempotent for platform-managed Cloudflare resources. The platform checks for existing resources before creating Queues, queue consumers, KV namespaces, R2 buckets, Secrets Stores, Zero Trust Tunnels, Access service tokens/apps, DNS CNAMEs, account workers.dev subdomains, workers.dev script routes, and the `GoodVibesCoordinator` Durable Object namespace. Worker cron provisioning reads the current schedule before rewriting it, and disable flows check current schedule/subdomain state before removing settings. Hostname-bound DNS and Access operations are preflighted against the selected zone before Cloudflare receives create/update calls.
 
 Saved ids such as `cloudflare.kvNamespaceId`, `cloudflare.secretsStoreId`, `cloudflare.tunnelId`, `cloudflare.accessAppId`, and `cloudflare.accessServiceTokenId` are reused on later onboarding runs; every `cloudflare.*` key is documented in the [configuration defaults table](./defaults.md). This lets clients rerun provisioning after enabling extra Cloudflare features without recreating resources that already exist.
 
-If Cloudflare returns an exists/quota-style create error after discovery, the SDK performs a second discovery pass and reuses a matching resource when it can:
+If Cloudflare returns an exists/quota-style create error after discovery, the platform performs a second discovery pass and reuses a matching resource when it can:
 
 - **Secrets Store.** For the account-level `maximum_stores_exceeded` response: if the requested store already exists, or Cloudflare exposes a single existing store on the account, provisioning records and reuses that store instead of failing the entire onboarding pass.
 - **Account workers.dev subdomains.** A failed subdomain create/update (including Cloudflare's `10036` "Account already has an associated subdomain" error) is recovered by re-reading the existing account subdomain and using it as the canonical Worker URL base; if no subdomain exists after that re-read, the original error is raised instead of being swallowed.
@@ -264,36 +264,36 @@ When enabled, the optional components do the following:
 - `zeroTrustAccess`: creates or reuses an Access service token and self-hosted application for `daemonHostname`; service-token credentials are stored as JSON under `cloudflare.accessServiceTokenRef`.
 - `dns`: creates/updates proxied CNAMEs for `daemonHostname` to `<tunnelId>.cfargotunnel.com` and `workerHostname` to the Worker host.
 - `kv`: creates or reuses `cloudflare.kvNamespaceName` and binds it to the Worker as `GOODVIBES_KV`.
-- `durableObjects`: adds the `GoodVibesCoordinator` Durable Object class and Worker binding. The SDK applies the SQLite class migration only when the class is not already present.
+- `durableObjects`: adds the `GoodVibesCoordinator` Durable Object class and Worker binding. The platform applies the SQLite class migration only when the class is not already present.
 - `secretsStore`: creates or reuses a Cloudflare Secrets Store for future Cloudflare-native secret placement.
 - `r2`: creates or reuses a Standard storage class bucket and binds it to the Worker as `GOODVIBES_ARTIFACTS`.
 
-The SDK exports `@goodvibes-jev/engine/sdk/workers` for Worker deployments:
+The platform exports `@goodvibes-jev/engine/platform/workers` for Worker deployments:
 
 ```ts
-import { createGoodVibesCloudflareWorker } from '@goodvibes-jev/engine/sdk/workers';
+import { createGoodVibesCloudflareWorker } from '@goodvibes-jev/engine/platform/workers';
 
 // Reads GOODVIBES_DAEMON_URL, GOODVIBES_OPERATOR_TOKEN, and
 // GOODVIBES_WORKER_TOKEN from Worker environment bindings.
 export default createGoodVibesCloudflareWorker();
 ```
 
-Manual Worker deployments can still use that entry point, but SDK provisioning uploads its own Worker module automatically so a client never has to build or upload one by hand. The two are close but not byte-identical: the auto-uploaded module skips daemon-URL hardening (scheme, private-host, and format checks) and the request-size and content-type checks that `createGoodVibesCloudflareWorker` adds, because provisioning always sets `daemonBaseUrl` itself and always installs `GOODVIBES_WORKER_TOKEN`, which makes those checks redundant on the path the SDK controls. Deployments that import `createGoodVibesCloudflareWorker` directly get the fuller check set. The Worker bridge can:
+Manual Worker deployments can still use that entry point, but platform provisioning uploads its own Worker module automatically so a client never has to build or upload one by hand. The two are close but not byte-identical: the auto-uploaded module skips daemon-URL hardening (scheme, private-host, and format checks) and the request-size and content-type checks that `createGoodVibesCloudflareWorker` adds, because provisioning always sets `daemonBaseUrl` itself and always installs `GOODVIBES_WORKER_TOKEN`, which makes those checks redundant on the path the platform controls. Deployments that import `createGoodVibesCloudflareWorker` directly get the fuller check set. The Worker bridge can:
 
 - Proxy `/batch/*` requests to the daemon's `/api/batch/*` routes.
 - Queue small tick signals with `/batch/tick/enqueue`.
 - Run scheduled events that call `/api/batch/tick`.
 - Consume Cloudflare Queue messages and retry failures so Cloudflare dead-letter queues can capture exhausted messages.
 
-Every Worker route except `/health` and `/batch/health` requires `Authorization: Bearer <token>` by default. Set the token with the Worker secret `GOODVIBES_WORKER_TOKEN` or `createGoodVibesCloudflareWorker({ workerAuthToken })`. The SDK provisioning flow generates and installs `GOODVIBES_WORKER_TOKEN` automatically. With `createGoodVibesCloudflareWorker`, if no token is configured the Worker refuses every non-health route with `WORKER_AUTH_TOKEN_REQUIRED` rather than silently allowing requests through; manual deployments that intentionally put the Worker behind another trusted auth layer must pass `allowUnauthenticated: true` as an explicit opt-out.
+Every Worker route except `/health` and `/batch/health` requires `Authorization: Bearer <token>` by default. Set the token with the Worker secret `GOODVIBES_WORKER_TOKEN` or `createGoodVibesCloudflareWorker({ workerAuthToken })`. The platform provisioning flow generates and installs `GOODVIBES_WORKER_TOKEN` automatically. With `createGoodVibesCloudflareWorker`, if no token is configured the Worker refuses every non-health route with `WORKER_AUTH_TOKEN_REQUIRED` rather than silently allowing requests through; manual deployments that intentionally put the Worker behind another trusted auth layer must pass `allowUnauthenticated: true` as an explicit opt-out.
 
 By default, the Worker does not queue full prompt/job payloads. Queue messages should be small signals, not prompt archives or secrets. This keeps usage free-tier friendly and avoids putting sensitive prompt bodies into Cloudflare Queues. Full job payload queueing requires `createGoodVibesCloudflareWorker({ queueJobPayloads: true })` or the Worker environment binding `GOODVIBES_QUEUE_JOB_PAYLOADS=true`.
 
-The SDK provisioning route configures the queue consumer with `dead_letter_queue`. Manual deployments must configure the dead-letter queue in Cloudflare or Wrangler for the queue binding; the SDK Worker consumes retries and allows failed messages to flow to the configured DLQ.
+The platform provisioning route configures the queue consumer with `dead_letter_queue`. Manual deployments must configure the dead-letter queue in Cloudflare or Wrangler for the queue binding; the platform Worker consumes retries and allows failed messages to flow to the configured DLQ.
 
 **Worker HTTP error codes**
 
-The full set below is what `createGoodVibesCloudflareWorker` returns; the module SDK provisioning uploads only ever returns `NOT_FOUND`, `QUEUE_PAYLOADS_DISABLED`, and `QUEUE_NOT_CONFIGURED` from this list, since provisioning guarantees the daemon URL and auth token are already valid.
+The full set below is what `createGoodVibesCloudflareWorker` returns; the module platform provisioning uploads only ever returns `NOT_FOUND`, `QUEUE_PAYLOADS_DISABLED`, and `QUEUE_NOT_CONFIGURED` from this list, since provisioning guarantees the daemon URL and auth token are already valid.
 
 | Status | `code` | Meaning |
 |--------|--------|---------|

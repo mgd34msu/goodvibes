@@ -6,9 +6,9 @@ import { createInteractionModeCommand } from '@goodvibes-jev/engine/terminal-she
 import { agentResearchSourceOwner } from '../../agent/protected-research-report.ts';
 import { captureTranscriptSource } from './transcript-reading.ts';
 import type { CommandContext, CommandRegistry, SlashCommand } from '../command-registry.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
-import '@goodvibes-jev/engine/sdk/platform/utils';
-import '@goodvibes-jev/engine/sdk/platform/utils';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import '@goodvibes-jev/engine/platform/platform/utils';
+import '@goodvibes-jev/engine/platform/platform/utils';
 import { requireYesFlag, stripYesFlag } from './confirmation.ts';
 import { handleContextWindowSubcommand } from './context-window.ts';
 import { isAgentHostSettingKey } from '../../config/host-settings.ts';

@@ -1,8 +1,8 @@
 # @goodvibes-jev/engine/contracts
 
-Public runtime-neutral GoodVibes contract package for operator and peer artifacts, generated ids, lookup helpers, and schema exports.
+Public runtime-neutral GoodVibes contract module for operator and peer artifacts, generated ids, lookup helpers, and schema exports.
 
-Most applications should install `@goodvibes-jev/engine` and import `@goodvibes-jev/engine/sdk/contracts`. These modules are subpath exports of the engine package.
+Most applications should install `@goodvibes-jev/engine` and import `@goodvibes-jev/engine/platform/contracts`. These modules are subpath exports of the engine package.
 
 Consumer import:
 
@@ -11,7 +11,7 @@ import {
   getOperatorContract,
   getOperatorMethod,
   type OperatorMethodOutput,
-} from '@goodvibes-jev/engine/sdk/contracts';
+} from '@goodvibes-jev/engine/platform/contracts';
 ```
 
 This surface provides:
@@ -29,7 +29,7 @@ import {
   getOperatorContract,
   getOperatorMethod,
   type OperatorMethodOutput,
-} from '@goodvibes-jev/engine/sdk/contracts';
+} from '@goodvibes-jev/engine/platform/contracts';
 
 const contract = getOperatorContract();
 const loginMethod = getOperatorMethod('control.auth.login');
@@ -43,7 +43,7 @@ import {
   getPeerContract,
   getPeerEndpoint,
   listPeerEndpoints,
-} from '@goodvibes-jev/engine/sdk/contracts';
+} from '@goodvibes-jev/engine/platform/contracts';
 
 const peerContract = getPeerContract();
 const pairEndpoint = getPeerEndpoint('pair.request');
@@ -59,7 +59,7 @@ import {
   isPeerEndpointId,
   RUNTIME_EVENT_DOMAINS,
   isRuntimeEventDomain,
-} from '@goodvibes-jev/engine/sdk/contracts';
+} from '@goodvibes-jev/engine/platform/contracts';
 
 listOperatorMethods(); // readonly OperatorMethodContract[]
 isOperatorMethodId('control.auth.login'); // true
@@ -67,7 +67,7 @@ isPeerEndpointId('pair.request'); // true
 RUNTIME_EVENT_DOMAINS.forEach((domain) => isRuntimeEventDomain(domain));
 ```
 
-The package also exports the generated `OPERATOR_CONTRACT` and `PEER_CONTRACT`
+This surface also exports the generated `OPERATOR_CONTRACT` and `PEER_CONTRACT`
 manifests directly (for callers that want the raw data instead of the lookup
 helpers above), the core-verb classification used to lint operator method ids
 (`CORE_VERBS`, `BANNED_VERBS`, `EXEMPT_VERB_CATEGORIES`, `classifyVerb`), and
@@ -81,7 +81,7 @@ Node-only artifact path helpers:
 import {
   getOperatorContractPath,
   getPeerContractPath,
-} from '@goodvibes-jev/engine/sdk/contracts/node';
+} from '@goodvibes-jev/engine/platform/contracts/node';
 ```
 
 For direct contract imports from the engine package, use

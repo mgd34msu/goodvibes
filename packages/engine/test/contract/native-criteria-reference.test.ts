@@ -4,12 +4,12 @@ import * as crypto from 'node:crypto';
 import { SqliteDecisionLog, withDecisionLog, type EntryType } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { criteriaSetIdForWork, durablePayloadRevision, type DurableContractRequest } from '../../sdk/src/platform/contract/durable-admission.js';
-import * as admissionModule from '../../sdk/src/platform/contract/durable-admission.js';
-import { decideNativeContract } from '../../sdk/src/platform/contract/native-decisions.js';
-import { captureNativeContractSource, nativeSourceCriteria } from '../../sdk/src/platform/contract/native-source.js';
-import type { Contract, NativeContractSource } from '../../sdk/src/platform/contract/types.js';
-import { judgmentInputProblem } from '../../sdk/src/platform/gate/judgment-input.js';
+import { criteriaSetIdForWork, durablePayloadRevision, type DurableContractRequest } from '../../platform/src/platform/contract/durable-admission.js';
+import * as admissionModule from '../../platform/src/platform/contract/durable-admission.js';
+import { decideNativeContract } from '../../platform/src/platform/contract/native-decisions.js';
+import { captureNativeContractSource, nativeSourceCriteria } from '../../platform/src/platform/contract/native-source.js';
+import type { Contract, NativeContractSource } from '../../platform/src/platform/contract/types.js';
+import { judgmentInputProblem } from '../../platform/src/platform/gate/judgment-input.js';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 
 const workId = 'work-a73a83d8-d064-4be3-8217-012ebfe72275';

@@ -3,7 +3,7 @@
  *
  * Every platform capability renders as ONE unit in its settings DOMAIN, the
  * feature's real enablement row as a named header plus the settings keys that
- * tune it, sourced from the SDK's FEATURE_SETTINGS surface. This locks:
+ * tune it, sourced from the platform's FEATURE_SETTINGS surface. This locks:
  *   - every feature is reachable in the settings structure;
  *   - a header IS the real config row for its enablement key (boolean toggle
  *     or enum mode choices), never a synthetic key;
@@ -16,8 +16,8 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { FEATURE_SETTINGS, deriveFeatureStates } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { FEATURE_SETTINGS, deriveFeatureStates } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
 import { buildSettingGroups } from '../../input/settings-modal-data.ts';
@@ -169,7 +169,7 @@ describe('settings modal: feature units', () => {
       if (category === 'network') continue; // combined cross-list view keeps plain copies
       for (const entry of entries) {
         if (entry.flag) continue;
-        if (entry.kind === 'host') throw new Error('The bare SDK fixture must contain only builtin rows');
+        if (entry.kind === 'host') throw new Error('The bare platform fixture must contain only builtin rows');
         expect(ENABLEMENT_KEYS.has(entry.setting.key)).toBe(false);
       }
     }

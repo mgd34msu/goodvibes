@@ -22,7 +22,7 @@ import { activeTokens } from './theme.js';
 import { beginModal, finishModal, scrollCountText, type SurfaceLayer } from './surface-kit.js';
 import { drawList, type KitRow } from './surface-kit-list.js';
 import { drawTextBlock } from './surface-kit-extra.js';
-import type { NotificationFeedEntry } from '@goodvibes-jev/engine/sdk/platform/runtime/notification-feed';
+import type { NotificationFeedEntry } from '@goodvibes-jev/engine/platform/platform/runtime/notification-feed';
 
 /** What the renderer reads from the modal. */
 export interface NotificationsModalView {

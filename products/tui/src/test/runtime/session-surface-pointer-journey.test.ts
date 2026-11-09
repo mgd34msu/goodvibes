@@ -20,11 +20,11 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, rmSync } from 'node:fs';
-import { SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
+import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { readLastSessionPointer, writeLastSessionPointer } from '@/runtime/index.ts';
 import { wireTurnEventHandlers, type WireTurnEventHandlersOptions } from '../../core/turn-event-wiring.ts';
 import { announceResumeState } from '../../runtime/resume-notice.ts';
-import { bindWriteLastSessionPointerToSurface } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { bindWriteLastSessionPointerToSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { applyInitialTuiCliState } from '../../cli/tui-startup.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { makeTestSurface } from '../helpers/session-surface.ts';
@@ -184,7 +184,7 @@ describe('the resume seam writes the pointer through a bound closure, not a bare
     expect(readLastSessionPointer({ surface: makeTestSurface(tmpDir) })).toBe('resumed-session');
   });
 
-  test('the raw SDK function in the same one-argument slot writes NOTHING; the shape of the original bug', () => {
+  test('the raw platform function in the same one-argument slot writes NOTHING; the shape of the original bug', () => {
     // Structurally assignable to `(sessionId: string) => void`, so this
     // compiles; at runtime `options` is undefined, the legacy compat path
     // throws on the missing workingDirectory, and writeLastSessionPointer

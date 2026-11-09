@@ -1,4 +1,4 @@
-import type { KnowledgeApi } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import type { KnowledgeApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { readFlag, readStringListFlag, readJsonObjectFlag, positionalArgs } from './command-arguments.js';
 export const KNOWLEDGE_REVIEW_ACTIONS = ['accept', 'reject', 'resolve', 'reopen', 'edit', 'forget'] as const;
 export type KnowledgeReviewAction = (typeof KNOWLEDGE_REVIEW_ACTIONS)[number];

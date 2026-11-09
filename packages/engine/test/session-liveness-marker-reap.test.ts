@@ -7,14 +7,14 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { makeTestSurface } from './_helpers/session-surface.ts';
-import type { SessionSurface } from '../sdk/src/platform/runtime/session-surface.ts';
+import type { SessionSurface } from '../platform/src/platform/runtime/session-surface.ts';
 import {
   LIVENESS_STALE_AFTER_MS,
   livenessMarkerDirFor,
   livenessMarkerPathFor,
   reapStaleLivenessMarkers,
   writeLivenessMarker,
-} from '../sdk/src/platform/runtime/session-liveness-marker.ts';
+} from '../platform/src/platform/runtime/session-liveness-marker.ts';
 
 let tmpHome: string;
 let surface: SessionSurface;

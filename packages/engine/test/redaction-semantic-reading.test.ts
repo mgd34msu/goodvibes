@@ -5,11 +5,11 @@ import {
   prepareProfileRedactionRoles, redactSensitiveData, redactSensitiveDataAsync,
   redactStructuredData, redactStructuredDataAsync, registerAccountIdentityRedaction,
   registerProfileRedactionValues,
-} from '../sdk/src/platform/utils/redaction.js';
-import { exportToHTML, exportToJSON, exportToMarkdownExtended } from '../sdk/src/platform/export/session-export.js';
-import type { ExportMessage } from '../sdk/src/platform/export/markdown.js';
-import { captureStructuredCredentialReferenceConfigValue } from '../sdk/src/platform/config/structured-credential-config.js';
-import { redactionCredential } from '../sdk/src/platform/utils/batteries/redaction.js';
+} from '../platform/src/platform/utils/redaction.js';
+import { exportToHTML, exportToJSON, exportToMarkdownExtended } from '../platform/src/platform/export/session-export.js';
+import type { ExportMessage } from '../platform/src/platform/export/markdown.js';
+import { captureStructuredCredentialReferenceConfigValue } from '../platform/src/platform/config/structured-credential-config.js';
+import { redactionCredential } from '../platform/src/platform/utils/batteries/redaction.js';
 
 let previous: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previous = installJudgmentPort(undefined); });

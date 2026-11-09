@@ -16,17 +16,17 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OPERATOR_CONTRACT } from '../contracts/src/generated/operator-contract.ts';
-import { SharedSessionBroker } from '../sdk/src/platform/control-plane/session-broker.ts';
+import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.ts';
 import {
   PRODUCT_SURFACE_KINDS,
   SURFACE_KINDS,
   TRANSPORT_SURFACE_KINDS,
-} from '../sdk/src/events/surfaces.ts';
-import { RouteBindingManager } from '../sdk/src/platform/channels/index.ts';
-import type { SharedSessionKind, SharedSessionParticipant } from '../sdk/src/platform/control-plane/index.ts';
-// Cross-package import: the daemon-sdk route validators are ALSO kind-declaration
+} from '../platform/src/events/surfaces.ts';
+import { RouteBindingManager } from '../platform/src/platform/channels/index.ts';
+import type { SharedSessionKind, SharedSessionParticipant } from '../platform/src/platform/control-plane/index.ts';
+// Cross-package import: the daemon-api route validators are ALSO kind-declaration
 // sites and must stay in lockstep with the type / broker / wire schema.
-import { SHARED_SESSION_KINDS } from '../daemon-sdk/src/runtime-session-routes.ts';
+import { SHARED_SESSION_KINDS } from '../daemon-api/src/runtime-session-routes.ts';
 import { trackDisposables } from './_helpers/disposables.ts';
 
 const disposables = trackDisposables();
@@ -124,7 +124,7 @@ describe('SharedSessionKind lockstep (type ↔ validator ↔ wire schema)', () =
     expect(new Set(kindEnum)).toEqual(new Set(ALL_KINDS));
   });
 
-  test('the daemon-sdk route validators (register + list) enumerate exactly the declared kinds', () => {
+  test('the daemon-api route validators (register + list) enumerate exactly the declared kinds', () => {
     // A kind added to the type + broker + wire schema but not here would silently
     // drift out of lockstep with the daemon route validation. handleRegisterSharedSession
     // now shares this single set (no duplicate register-only set), so both the

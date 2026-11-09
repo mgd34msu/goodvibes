@@ -1,8 +1,8 @@
 import {
-  categoryForCode, categoryForStatus, GoodVibesSdkError, httpStatusOf,
-  isKnownErrorCode, readFailure, SDKErrorCodes, type ErrorCategory,
+  categoryForCode, categoryForStatus, GoodVibesError, httpStatusOf,
+  isKnownErrorCode, readFailure, EngineErrorCodes, type ErrorCategory,
 } from '@goodvibes-jev/engine/errors';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { AgentConnectedHostConnection } from './routine-schedule-promotion.ts';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -56,25 +56,25 @@ async function connectedHostFailureCategory(error: unknown, message: string, sit
   const code = readString(record, 'code') ?? undefined;
   const cause = isRecord(record.cause) ? record.cause : {};
   // Cancellation is an explicit stop, never evidence of a dead host or permission to retry.
-  if (code === SDKErrorCodes.CANCELLED || record.name === 'AbortError'
-    || cause.code === SDKErrorCodes.CANCELLED || cause.name === 'AbortError') return 'unknown';
+  if (code === EngineErrorCodes.CANCELLED || record.name === 'AbortError'
+    || cause.code === EngineErrorCodes.CANCELLED || cause.name === 'AbortError') return 'unknown';
   const status = httpStatusOf(error);
   if (status !== undefined) return categoryForStatus(status) ?? 'unknown';
   switch (code) {
-    case SDKErrorCodes.AUTH_REQUIRED:
-    case SDKErrorCodes.TOKEN_EXPIRED: return 'authentication';
-    case SDKErrorCodes.PERMISSION_DENIED: return 'authorization';
-    case SDKErrorCodes.NOT_FOUND:
-    case SDKErrorCodes.METHOD_NOT_FOUND: return 'not_found';
-    case SDKErrorCodes.NETWORK_UNREACHABLE: return 'network';
-    case SDKErrorCodes.TIMEOUT: return 'timeout';
+    case EngineErrorCodes.AUTH_REQUIRED:
+    case EngineErrorCodes.TOKEN_EXPIRED: return 'authentication';
+    case EngineErrorCodes.PERMISSION_DENIED: return 'authorization';
+    case EngineErrorCodes.NOT_FOUND:
+    case EngineErrorCodes.METHOD_NOT_FOUND: return 'not_found';
+    case EngineErrorCodes.NETWORK_UNREACHABLE: return 'network';
+    case EngineErrorCodes.TIMEOUT: return 'timeout';
   }
-  if (error instanceof GoodVibesSdkError && error.category !== 'unknown') return error.category;
+  if (error instanceof GoodVibesError && error.category !== 'unknown') return error.category;
   const errnoCategory = categoryForCode(code) ?? categoryForCode(readString(cause, 'code') ?? undefined);
   if (errnoCategory !== undefined) return errnoCategory;
   if (record.name === 'TimeoutError') return 'timeout';
-  // Other declared SDK failures (validation, billing, conflict, etc.) are not transport failures.
-  if (code !== undefined && isKnownErrorCode(code) && code !== SDKErrorCodes.UNKNOWN) return 'unknown';
+  // Other declared platform failures (validation, billing, conflict, etc.) are not transport failures.
+  if (code !== undefined && isKnownErrorCode(code) && code !== EngineErrorCodes.UNKNOWN) return 'unknown';
   if (!message.trim()) return 'unknown';
   try {
     return (await readFailure({

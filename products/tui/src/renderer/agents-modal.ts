@@ -19,7 +19,7 @@
  * the best-of-N candidate picker.
  */
 
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { activeTokens } from './theme.ts';
 import { beginModal, finishModal, clipText, scrollCountText, searchRow, wrapLines, type KitHint, type ModalFrame, type SurfaceCanvas, type SurfaceLayer } from './surface-kit.ts';
 import { drawList, type KitRow } from './surface-kit-list.ts';

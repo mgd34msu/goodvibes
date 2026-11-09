@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { loadSqliteVecExtension, SqliteVecPlatformUnsupportedError } from '../sdk/src/platform/state/sqlite-vec-loader.ts';
+import { loadSqliteVecExtension, SqliteVecPlatformUnsupportedError } from '../platform/src/platform/state/sqlite-vec-loader.ts';
 
 describe('sqlite-vec platform-limit classification', () => {
   test('the typed platform error carries the honest literal-fallback wording', () => {

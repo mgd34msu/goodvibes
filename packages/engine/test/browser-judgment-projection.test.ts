@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { BrowserJudgmentError, BROWSER_JUDGMENT_BATTERY_VERSIONS, type BrowserJudgmentBatteryId, type BrowserJudgmentRequest } from '../daemon-sdk/src/index.ts';
-import { validateBrowserJudgmentProjection } from '../sdk/src/platform/judgment-browser/projection.ts';
-import type { BrowserJudgmentProjection } from '../sdk/src/platform/judgment-browser/types.ts';
-import { WEBUI_CODE_LANGUAGES } from '../daemon-sdk/src/index.ts';
+import { BrowserJudgmentError, BROWSER_JUDGMENT_BATTERY_VERSIONS, type BrowserJudgmentBatteryId, type BrowserJudgmentRequest } from '../daemon-api/src/index.ts';
+import { validateBrowserJudgmentProjection } from '../platform/src/platform/judgment-browser/projection.ts';
+import type { BrowserJudgmentProjection } from '../platform/src/platform/judgment-browser/types.ts';
+import { WEBUI_CODE_LANGUAGES } from '../daemon-api/src/index.ts';
 
 const unknownReading = { kind: 'yes-no', probability: 0.5, verdict: 'uncertain', outcome: 'escalate' } as const;
 const request = (battery: BrowserJudgmentBatteryId, input: unknown) => ({ protocolVersion: 1, requestId: crypto.randomUUID(), battery, batteryVersion: BROWSER_JUDGMENT_BATTERY_VERSIONS[battery], input }) as BrowserJudgmentRequest;

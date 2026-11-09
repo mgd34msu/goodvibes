@@ -4,10 +4,10 @@ import { join, resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { describe, expect, test } from 'bun:test';
 import { withTestTimeout } from './_helpers/test-timeout.ts';
-import * as browserPolicy from '../sdk/src/platform/payments/browser.js';
+import * as browserPolicy from '../platform/src/platform/payments/browser.js';
 
 const ENGINE_ROOT = resolve(import.meta.dir, '..');
-const PUBLIC_ENTRY = '@goodvibes-jev/engine/sdk/platform/payments/browser';
+const PUBLIC_ENTRY = '@goodvibes-jev/engine/platform/platform/payments/browser';
 const BUNDLE_CEILING_MS = 30_000;
 
 /** Bundle an installed-package consumer without aliases, externals or host shims. */
@@ -72,7 +72,7 @@ for (const source of [true, false]) {
 }
 
 test('the existing host entry keeps the same policy functions and warning', async () => {
-  const host = await import('../sdk/src/platform/payments/index.js');
+  const host = await import('../platform/src/platform/payments/index.js');
   expect(host.mayEnterCardDetails).toBe(browserPolicy.mayEnterCardDetails);
   expect(host.mayOfferCardEntryFlow).toBe(browserPolicy.mayOfferCardEntryFlow);
   expect(host.describeCardEntryRefusal).toBe(browserPolicy.describeCardEntryRefusal);

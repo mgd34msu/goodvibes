@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SessionManager } from '../sdk/src/platform/sessions/manager.js';
-import { logger } from '../sdk/src/platform/utils/logger.js';
+import { SessionManager } from '../platform/src/platform/sessions/manager.js';
+import { logger } from '../platform/src/platform/utils/logger.js';
 
 type WarningLog = {
   message: string;

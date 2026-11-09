@@ -15,7 +15,7 @@ import {
   createSessionSurface,
   type SessionSurface,
   type SurfaceIdentity,
-} from '../sdk/src/platform/runtime/session-surface.ts';
+} from '../platform/src/platform/runtime/session-surface.ts';
 
 function identity(overrides: Partial<SurfaceIdentity> = {}): SurfaceIdentity {
   return {

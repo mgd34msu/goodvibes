@@ -4,8 +4,8 @@
  * no residue (env restored, provider left honestly unconfigured) once it has.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { createLaunchTolerantProviderRegistry } from '../sdk/src/platform/providers/launch-tolerant-registry.ts';
-import { ProviderRegistry } from '../sdk/src/platform/providers/registry.ts';
+import { createLaunchTolerantProviderRegistry } from '../platform/src/platform/providers/launch-tolerant-registry.ts';
+import { ProviderRegistry } from '../platform/src/platform/providers/registry.ts';
 
 type RegistryOptions = ConstructorParameters<typeof ProviderRegistry>[0];
 

@@ -10,15 +10,15 @@
  * sidecar a rewind could only reach turns from the current run, and a resumed
  * session's earlier turns would resolve to nothing.
  *
- * The registry, the sidecar and the sweep are all the SDK's
+ * The registry, the sidecar and the sweep are all the platform's
  * (platform/rewind, platform/runtime durability-housekeeping). What is here is
  * this product's wiring of them: which handle they run against, and when.
  *
  * Every path is best-effort. A missed anchor must never break the turn that
  * produced it, and a sweep must never break boot.
  */
-import { persistTurnAnchors, recordTurnAnchor, restoreTurnAnchors, summarizeTurnLabel } from '@goodvibes-jev/engine/sdk/platform/rewind';
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { persistTurnAnchors, recordTurnAnchor, restoreTurnAnchors, summarizeTurnLabel } from '@goodvibes-jev/engine/platform/platform/rewind';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { startDurabilityHousekeeping } from '@/runtime/index.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
 

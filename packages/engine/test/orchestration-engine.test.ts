@@ -9,15 +9,15 @@ import { describe, expect, test, beforeEach, afterEach } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createOrchestrationEngine, type OrchestrationEngineDeps } from '../sdk/src/platform/orchestration/engine.js';
-import { loadWorkstreamSnapshot } from '../sdk/src/platform/orchestration/persistence.js';
-import type { PhaseRunnerAgentManagerLike, WorktreeOps } from '../sdk/src/platform/orchestration/phase-runner.js';
-import type { OrchestrationEvent, PhaseSpec, WorkItemSpec } from '../sdk/src/platform/orchestration/types.js';
-import { emptyWorkItemUsage, mergeWorkItemUsage } from '../sdk/src/platform/orchestration/types.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { createEventEnvelope } from '../sdk/src/platform/runtime/event-envelope.js';
-import type { AgentRecord } from '../sdk/src/platform/tools/agent/manager.js';
-import { AgentCapacityError } from '../sdk/src/platform/tools/agent/capacity-error.js';
+import { createOrchestrationEngine, type OrchestrationEngineDeps } from '../platform/src/platform/orchestration/engine.js';
+import { loadWorkstreamSnapshot } from '../platform/src/platform/orchestration/persistence.js';
+import type { PhaseRunnerAgentManagerLike, WorktreeOps } from '../platform/src/platform/orchestration/phase-runner.js';
+import type { OrchestrationEvent, PhaseSpec, WorkItemSpec } from '../platform/src/platform/orchestration/types.js';
+import { emptyWorkItemUsage, mergeWorkItemUsage } from '../platform/src/platform/orchestration/types.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { createEventEnvelope } from '../platform/src/platform/runtime/event-envelope.js';
+import type { AgentRecord } from '../platform/src/platform/tools/agent/manager.js';
+import { AgentCapacityError } from '../platform/src/platform/tools/agent/capacity-error.js';
 
 async function flushMicrotasks(rounds = 12): Promise<void> {
   for (let i = 0; i < rounds; i++) await Promise.resolve();
@@ -69,7 +69,7 @@ interface Harness {
   readonly spawnedTasks: string[];
   readonly cancelCalls: Array<{ id: string; kind: 'interrupt' | 'kill' }>;
   readonly registeredSignals: Map<string, AbortSignal>;
-  readonly configManager: Pick<import('../sdk/src/platform/config/manager.js').ConfigManager, 'get' | 'getCategory'>;
+  readonly configManager: Pick<import('../platform/src/platform/config/manager.js').ConfigManager, 'get' | 'getCategory'>;
   readonly commitCalls: Array<{ message: string; paths?: string[] | undefined }>;
   readonly mergeCalls: string[];
   readonly cleanupCalls: string[];
@@ -120,7 +120,7 @@ function makeHarness(projectRoot: string): Harness {
       }
       return undefined;
     },
-  } as unknown as Pick<import('../sdk/src/platform/config/manager.js').ConfigManager, 'get' | 'getCategory'>;
+  } as unknown as Pick<import('../platform/src/platform/config/manager.js').ConfigManager, 'get' | 'getCategory'>;
 
   const agentManager: PhaseRunnerAgentManagerLike = {
     spawn: (input) => {

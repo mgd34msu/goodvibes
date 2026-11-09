@@ -29,7 +29,7 @@ let memoryGetImpl: (id: string) => Promise<{ record: { summary: string; cls: str
   Promise.resolve({ record: { summary: `Record ${id}`, cls: 'preference', scope: 'user' } });
 
 mock.module('../../lib/goodvibes', () => ({
-  sdk: {
+  client: {
     operator: {
       memory: {
         get: (id: string) => {

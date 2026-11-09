@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { HostDistributedRuntime } from '../sdk/src/platform/runtime/remote/host/service.ts';
-import type { RemoteDispatcher, DispatchRequest } from '../sdk/src/platform/runtime/remote/host/dispatcher.ts';
+import { HostDistributedRuntime } from '../platform/src/platform/runtime/remote/host/service.ts';
+import type { RemoteDispatcher, DispatchRequest } from '../platform/src/platform/runtime/remote/host/dispatcher.ts';
 
 interface Call {
   method: string;

@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.ts';
-import type { Tool, ToolExecuteOptions } from '../sdk/src/platform/types/tools.ts';
-import { installAgentToolPolicyGuard } from '../sdk/src/platform/gate/policy/index.ts';
-import { forgetReadSecrets, readTouchesSecrets } from '../sdk/src/platform/permissions/credential-read-defaults.ts';
-import { ToolError } from '../sdk/src/platform/types/errors.ts';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
+import type { Tool, ToolExecuteOptions } from '../platform/src/platform/types/tools.ts';
+import { installAgentToolPolicyGuard } from '../platform/src/platform/gate/policy/index.ts';
+import { forgetReadSecrets, readTouchesSecrets } from '../platform/src/platform/permissions/credential-read-defaults.ts';
+import { ToolError } from '../platform/src/platform/types/errors.ts';
 
 const readings = () => fakePort((name, question) => {
   if (name === 'hazard') return choiceAnswer(question, 'none', 0.99);

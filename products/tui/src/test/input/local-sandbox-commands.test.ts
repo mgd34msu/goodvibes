@@ -2,14 +2,14 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { SandboxSessionRegistry } from '@goodvibes-jev/engine/sdk/platform/runtime/sandbox';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { SandboxSessionRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/sandbox';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerLocalSetupCommands } from '../../input/commands/local-setup.ts';
 import { registerPlatformSandboxRuntimeCommands } from '../../input/commands/platform-sandbox-runtime.ts';
 import { withPublicErrorText } from '../helpers/user-error-reading.ts';
 
-// Exercise the command adapters with public SDK config/session objects and
+// Exercise the command adapters with public platform config/session objects and
 // synthetic service/read-model data. No full runtime, providers or daemons.
 describe('local sandbox and setup commands', () => {
   let root: string;

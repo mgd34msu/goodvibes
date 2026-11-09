@@ -1,5 +1,5 @@
 /**
- * TaskGraphPanel, the fix-phase task graph (fleet.graph.get, SDK 1.8.0).
+ * TaskGraphPanel, the fix-phase task graph (fleet.graph.get, platform 1.8.0).
  * Covers every state tell the brief calls out (ready/running/blocked/at-cap/
  * stalled), the pool summary line, loading/error states, and phone-width
  * legibility (a vertical list, not a diagram).
@@ -27,7 +27,7 @@ let graphImpl: (workstreamId: string) => Promise<unknown> = (workstreamId) => Pr
 mock.module('../../lib/goodvibes', () => ({
   getCurrentAuth: () => Promise.resolve({}),
   invokeMethod: () => Promise.resolve({}),
-  sdk: {
+  client: {
     operator: {
       fleet: {
         graph: {

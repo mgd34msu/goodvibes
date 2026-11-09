@@ -2,8 +2,8 @@
 import { expect, test } from 'bun:test';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { createOperatorSdk } from '@goodvibes-jev/engine/operator-sdk';
-import { createOperatorNativeWorkExecutionClient, type NativeWorkExecutionSnapshot } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
+import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
+import { createOperatorNativeWorkExecutionClient, type NativeWorkExecutionSnapshot } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
 import { TuiConfigManager } from '../../config/host-settings.ts';
 import { beginTuiHostPairing, completeTuiHostPairing } from '../../runtime/tui-host-credential-store.ts';
 import { launchNativeIntegrationHost } from '../helpers/native-integration-host.ts';
@@ -85,8 +85,8 @@ async function fixture(withoutInspection = false) {
     })).status).toBe('paired');
     home.setTuiSetting('controlPlane.publicBaseUrl', origin);
     home.setTuiSetting('daemon.enabled', true);
-    const sdk = createOperatorSdk({ baseUrl: ready.baseUrl, authToken: ready.token, retry: { maxAttempts: 1 } });
-    client = createOperatorNativeWorkExecutionClient(sdk, 'project');
+    const platformClient = createOperatorApiClient({ baseUrl: ready.baseUrl, authToken: ready.token, retry: { maxAttempts: 1 } });
+    client = createOperatorNativeWorkExecutionClient(platformClient, 'project');
     const start = async () => {
       tui = launchTui(home, { cols: 180, rows: 55, env: { GOODVIBES_TEST_NETWORK_VIOLATIONS: networkViolations } });
       await tui.waitForScreen('compiled native input area', inputAreaVisible, 45_000);
@@ -121,7 +121,7 @@ async function fixture(withoutInspection = false) {
     return { host, home, ready, start, open, close, integration, status, refresh, snapshot, paths, assertPrivate,
       terminal: () => tui!,
       async probeStatusThroughProxy() {
-        const probe = createOperatorNativeWorkExecutionClient(createOperatorSdk({ baseUrl: origin, authToken: ready.token, retry: { maxAttempts: 1 } }), 'project');
+        const probe = createOperatorNativeWorkExecutionClient(createOperatorApiClient({ baseUrl: origin, authToken: ready.token, retry: { maxAttempts: 1 } }), 'project');
         try { return await probe.status(ready.identity, { signal: AbortSignal.timeout(15_000) }); }
         finally { probe.dispose(); }
       },

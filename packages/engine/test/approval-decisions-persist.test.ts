@@ -14,16 +14,16 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PermissionManager } from '../sdk/src/platform/permissions/manager.js';
-import type { PermissionConfigReader } from '../sdk/src/platform/permissions/manager.js';
-import type { PermissionPromptDecision, PermissionPromptRequest } from '../sdk/src/platform/permissions/prompt.js';
-import { UserPermissionRuleStore } from '../sdk/src/platform/permissions/user-rule-store.js';
-import { buildRememberOptions, buildDurableRuleForDecision } from '../sdk/src/platform/permissions/approval-rules.js';
-import { buildDenialErrorMessage, buildToolDenial } from '../sdk/src/platform/permissions/denial.js';
-import { ApprovalBroker } from '../sdk/src/platform/control-plane/approval-broker.js';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.js';
-import { registerPermissionRulesGatewayMethods } from '../sdk/src/platform/control-plane/routes/permission-rules.js';
-import type { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.js';
+import { PermissionManager } from '../platform/src/platform/permissions/manager.js';
+import type { PermissionConfigReader } from '../platform/src/platform/permissions/manager.js';
+import type { PermissionPromptDecision, PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.js';
+import { UserPermissionRuleStore } from '../platform/src/platform/permissions/user-rule-store.js';
+import { buildRememberOptions, buildDurableRuleForDecision } from '../platform/src/platform/permissions/approval-rules.js';
+import { buildDenialErrorMessage, buildToolDenial } from '../platform/src/platform/permissions/denial.js';
+import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-broker.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
+import { registerPermissionRulesGatewayMethods } from '../platform/src/platform/control-plane/routes/permission-rules.js';
+import type { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.js';
 
 useGateReadings();
 

@@ -15,8 +15,8 @@
 
 import { describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { createDaemonRuntimeSessionRouteHandlers } from '../daemon-sdk/src/runtime-session-routes.js';
-import type { DaemonRuntimeRouteContext } from '../daemon-sdk/src/runtime-route-types.js';
+import { createDaemonRuntimeSessionRouteHandlers } from '../daemon-api/src/runtime-session-routes.js';
+import type { DaemonRuntimeRouteContext } from '../daemon-api/src/runtime-route-types.js';
 
 function makeRequest(body: unknown): Request {
   return new Request('http://localhost/api/sessions/s-1/steer', {

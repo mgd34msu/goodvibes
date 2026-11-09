@@ -6,9 +6,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import { run as runHttpHook } from '../sdk/src/platform/hooks/runners/http.ts';
-import type { HookDefinition, HookEvent } from '../sdk/src/platform/hooks/types.ts';
-import { WebhookNotifier } from '../sdk/src/platform/integrations/webhooks.ts';
+import { run as runHttpHook } from '../platform/src/platform/hooks/runners/http.ts';
+import type { HookDefinition, HookEvent } from '../platform/src/platform/hooks/types.ts';
+import { WebhookNotifier } from '../platform/src/platform/integrations/webhooks.ts';
 
 const MOCK_EVENT: HookEvent = {
   path: 'Post:tool:test' as HookEvent['path'],

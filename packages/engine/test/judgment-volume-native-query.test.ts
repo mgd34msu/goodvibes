@@ -1,8 +1,8 @@
 /** Native metadata projection regressions, UNRUN until coding is complete. */
 import { expect, spyOn, test } from 'bun:test';
 import { SqliteDecisionLog, isoTime, type JudgmentLineage, type NewDecisionEntry, type StateHash } from '@goodvibes-jev/judgment';
-import { judgmentVolume, judgmentVolumeBreaches } from '../sdk/src/platform/observe/judgment-volume.ts';
-import { startJudgmentVolumeMonitor, type JudgmentVolumeAlert } from '../sdk/src/platform/observe/judgment-volume-monitor.ts';
+import { judgmentVolume, judgmentVolumeBreaches } from '../platform/src/platform/observe/judgment-volume.ts';
+import { startJudgmentVolumeMonitor, type JudgmentVolumeAlert } from '../platform/src/platform/observe/judgment-volume-monitor.ts';
 
 const at = new Date('2026-11-09T12:00:00.000Z');
 function entry(lineage?: JudgmentLineage, site = 'native.volume'): NewDecisionEntry {

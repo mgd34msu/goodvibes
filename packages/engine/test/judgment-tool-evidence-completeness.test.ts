@@ -1,16 +1,16 @@
 import { expect, test } from 'bun:test';
-import { registryCandidateView } from '../sdk/src/platform/tools/batteries/registry-rank.ts';
-import { credentialValueState } from '../sdk/src/platform/tools/batteries/credential-value.ts';
-import { childFailureView } from '../sdk/src/platform/tools/batteries/child-failure-reason.ts';
-import { contentMatchView } from '../sdk/src/platform/tools/batteries/content-rank.ts';
-import { execFailureView } from '../sdk/src/platform/tools/batteries/exec-retry.ts';
-import { entryPointView } from '../sdk/src/platform/tools/batteries/project-tooling.ts';
-import { paragraphCandidate } from '../sdk/src/platform/tools/batteries/page-summary.ts';
-import { scanCandidateView } from '../sdk/src/platform/tools/batteries/secret-finding.ts';
-import { envTemplateCandidate } from '../sdk/src/platform/tools/batteries/env-template.ts';
-import { handlerView, routeLineView } from '../sdk/src/platform/tools/batteries/api-routes.ts';
-import { frontendLineView } from '../sdk/src/platform/tools/batteries/frontend-finding.ts';
-import { semanticDiffView } from '../sdk/src/platform/tools/batteries/semantic-diff.ts';
+import { registryCandidateView } from '../platform/src/platform/tools/batteries/registry-rank.ts';
+import { credentialValueState } from '../platform/src/platform/tools/batteries/credential-value.ts';
+import { childFailureView } from '../platform/src/platform/tools/batteries/child-failure-reason.ts';
+import { contentMatchView } from '../platform/src/platform/tools/batteries/content-rank.ts';
+import { execFailureView } from '../platform/src/platform/tools/batteries/exec-retry.ts';
+import { entryPointView } from '../platform/src/platform/tools/batteries/project-tooling.ts';
+import { paragraphCandidate } from '../platform/src/platform/tools/batteries/page-summary.ts';
+import { scanCandidateView } from '../platform/src/platform/tools/batteries/secret-finding.ts';
+import { envTemplateCandidate } from '../platform/src/platform/tools/batteries/env-template.ts';
+import { handlerView, routeLineView } from '../platform/src/platform/tools/batteries/api-routes.ts';
+import { frontendLineView } from '../platform/src/platform/tools/batteries/frontend-finding.ts';
+import { semanticDiffView } from '../platform/src/platform/tools/batteries/semantic-diff.ts';
 
 const correction = 'The earlier example is obsolete; the actual behavior is the opposite.';
 const evidence = `${'Context continues.\n'.repeat(2_000)}${correction}`;

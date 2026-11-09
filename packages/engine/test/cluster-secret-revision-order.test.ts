@@ -1,11 +1,11 @@
 /** UNRUN: real signed frames, sealed recipients and persisted metadata ordering. */
 import { expect, spyOn, test } from 'bun:test';
-import { createGroup, joinGroup } from '../sdk/src/platform/cluster/group-operations.ts';
-import { CONFIG_MESSAGE_TYPES } from '../sdk/src/platform/cluster/config-replication.ts';
-import { sealForMember } from '../sdk/src/platform/cluster/group-crypto.ts';
-import { encodeEnvelope } from '../sdk/src/platform/cluster/protocol-envelope.ts';
-import { replicatedSecretKeyFor } from '../sdk/src/platform/cluster/config-replication-policy.ts';
-import { findReplicaEntry } from '../sdk/src/platform/cluster/config-replica.ts';
+import { createGroup, joinGroup } from '../platform/src/platform/cluster/group-operations.ts';
+import { CONFIG_MESSAGE_TYPES } from '../platform/src/platform/cluster/config-replication.ts';
+import { sealForMember } from '../platform/src/platform/cluster/group-crypto.ts';
+import { encodeEnvelope } from '../platform/src/platform/cluster/protocol-envelope.ts';
+import { replicatedSecretKeyFor } from '../platform/src/platform/cluster/config-replication-policy.ts';
+import { findReplicaEntry } from '../platform/src/platform/cluster/config-replica.ts';
 import { addGroupNode, createGroupWorld, destroyGroupWorld, settle, stopGroupWorld, MemorySecretStore } from './cluster-group-harness.ts';
 const path = 'surfaces.telegram.botToken', key = replicatedSecretKeyFor(path), context = 'goodvibes-cluster-config-secret-v1';
 async function paired(secrets?: MemorySecretStore) {

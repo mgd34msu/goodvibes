@@ -1,6 +1,6 @@
 /** Private bridge across the runtime/server construction order; no authority escapes. */
-import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import type { DaemonHostedSessionsOptions } from '@goodvibes-jev/engine/sdk/platform/daemon';
+import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import type { DaemonHostedSessionsOptions } from '@goodvibes-jev/engine/platform/platform/daemon';
 type Owner = NonNullable<DaemonHostedSessionsOptions['nativeConversation']>;
 const owners = new WeakMap<GatewayMethodCatalog, Owner>();
 export function installNativeHostedConversationOwner(catalog: GatewayMethodCatalog, owner: Owner): () => void {

@@ -13,7 +13,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import { createLazyMcpRegistry } from '../../runtime/mcp-lazy-start.ts';
-import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
+import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
 
 /** A registry that records whether anything would have been spawned. */
 function fakeRegistry(): { registry: McpRegistry; connects: number; calls: string[] } {

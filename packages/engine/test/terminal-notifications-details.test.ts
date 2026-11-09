@@ -1,6 +1,6 @@
 /** Shared terminal regression source; execution deferred during coding. */
 import { expect, test } from 'bun:test';
-import { NotificationFeed } from '../sdk/src/platform/runtime/notifications/feed.ts';
+import { NotificationFeed } from '../platform/src/platform/runtime/notifications/feed.ts';
 import { NotificationsModal } from '../terminal-shell/src/notifications-modal.ts';
 import { SurfaceModalHost } from '../terminal-shell/src/surface-modal-host.ts';
 

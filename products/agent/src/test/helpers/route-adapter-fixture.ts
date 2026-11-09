@@ -1,6 +1,6 @@
 import { afterAll, expect } from 'bun:test';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { ProviderListing } from '@goodvibes-jev/engine/sdk/platform/routing';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ProviderListing } from '@goodvibes-jev/engine/platform/platform/routing';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { createAgentRouteTool } from '../../tools/agent-route-tool.ts';
 import type { AgentTaskRouteSources } from '../../tools/agent-route-planner.ts';

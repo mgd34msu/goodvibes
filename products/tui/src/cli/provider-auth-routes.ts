@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/sdk/platform/providers/auth-route-presentation';
+export * from '@goodvibes-jev/engine/platform/platform/providers/auth-route-presentation';

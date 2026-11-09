@@ -1,4 +1,4 @@
-import type { RepairSubjectSelectionInput } from '../../sdk/src/platform/knowledge/semantic/repair-subject-selection/types.js';
+import type { RepairSubjectSelectionInput } from '../../platform/src/platform/knowledge/semantic/repair-subject-selection/types.js';
 /** Exact authored synthetic subjects used by the existing consumer fixtures.
  * This supplies mock model answers, never an evaluator or production fallback.
  * Unlisted candidates receive no; callers may override with an exact table.

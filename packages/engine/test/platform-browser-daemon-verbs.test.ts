@@ -3,7 +3,7 @@
  *
  * The daemon driving a browser with no surface process attached.
  *
- * The engine was hoisted into the SDK and the daemon could link it, but there
+ * The engine was hoisted into the platform and the daemon could link it, but there
  * was no `browser.*` verb and no `/api/browser` route, so a schedule, a
  * trigger or a channel reply had nothing to invoke. These tests cover the half
  * that closed that: the verbs are served from a narrow port (so no driver,
@@ -14,19 +14,19 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
 import {
   registerBrowserGatewayMethods,
   type BrowserGatewayResult,
   type BrowserGatewayService,
-} from '../sdk/src/platform/control-plane/routes/browser.ts';
-import { createDaemonBrowserGatewayService } from '../sdk/src/platform/control-plane/routes/browser-composition.ts';
-import { createEmailSendHandler } from '../sdk/src/platform/control-plane/routes/email.ts';
-import { isGatewayVerbError } from '../sdk/src/platform/control-plane/routes/gateway-verb-error.ts';
+} from '../platform/src/platform/control-plane/routes/browser.ts';
+import { createDaemonBrowserGatewayService } from '../platform/src/platform/control-plane/routes/browser-composition.ts';
+import { createEmailSendHandler } from '../platform/src/platform/control-plane/routes/email.ts';
+import { isGatewayVerbError } from '../platform/src/platform/control-plane/routes/gateway-verb-error.ts';
 import {
   UntrustedContentLedger,
   createUntrustedContentPort,
-} from '../sdk/src/platform/security/untrusted-content.ts';
+} from '../platform/src/platform/security/untrusted-content.ts';
 import { useSecurityReadings } from './helpers/security-readings.ts';
 
 useSecurityReadings();

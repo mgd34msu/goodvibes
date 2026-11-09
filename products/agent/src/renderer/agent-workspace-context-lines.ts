@@ -1,4 +1,4 @@
-import { presetForMode } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { presetForMode } from '@goodvibes-jev/engine/platform/platform/gate';
 import { nativeWorkLedgerLines } from './native-work-ledger.ts';
 import type { AgentWorkspace, AgentWorkspaceCategory, AgentWorkspaceLocalEditor, AgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace.ts';
 import { buildAssistantCockpitFromWorkspaceSnapshot, type AssistantCockpitLane, type AssistantCockpitLaneState, type AssistantCockpitStatus } from '../agent/assistant-cockpit.ts';

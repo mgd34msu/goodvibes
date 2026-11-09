@@ -7,11 +7,11 @@ import {
   loadMcpEffectiveConfig,
   removeMcpServerConfig,
   upsertMcpServerConfig,
-} from '@goodvibes-jev/engine/sdk/platform/mcp';
+} from '@goodvibes-jev/engine/platform/platform/mcp';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort } from '@goodvibes-jev/judgment/testing';
-import { redactSensitiveDataAsync } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { redactSensitiveDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
 import { authoredPrivacyAnswer, errorSpan, errorText } from '../helpers/authored-diagnostic-readings.ts';
 
 function makeShellPaths(root: string) {

@@ -2,7 +2,7 @@
 
 Shared GoodVibes CI/CD toolchain. One published home for the release, publish,
 and verification scripts that used to live as parallel copies across the
-`goodvibes-tui`, `goodvibes-agent`, `goodvibes-webui`, and `goodvibes-sdk`
+`goodvibes-tui`, `goodvibes-agent`, `goodvibes-webui`, and `goodvibes`
 repos. Repo-specific values live in each repo's `toolchain.config.json`; the
 behavior lives here, so every repo maintains one implementation instead of
 several drifting ones.
@@ -12,7 +12,7 @@ several drifting ones.
 Each tool ships as a library policy function (with injectable I/O for testing)
 and a thin CLI (`bin` entry):
 
-- **sdk-pin-gate.** Pin ⇄ lockfile ⇄ installed tri-agreement plus a non-npm
+- **engine-pin-gate.** Pin ⇄ lockfile ⇄ installed tri-agreement plus a non-npm
   import sweep and an optional exports-map check.
 - **build-binaries.** `bun build --compile` across a target matrix, with an
   optional daemon leg and native-addon copy/cross-fetch, all config-driven.
@@ -30,7 +30,7 @@ and a thin CLI (`bin` entry):
 - **changelog-gate.** Asserts CHANGELOG carries a section for a version.
 - **sha256sums.** Generate or verify a `SHA256SUMS` manifest over release assets.
 - **train-status.** Read-only: one table per release-train cycle across the
-  family's local checkouts (versions, SDK pin drift, unreleased/unpushed
+  family's local checkouts (versions, engine pin drift, unreleased/unpushed
   commits, suggested action). Never mutates anything.
 
 `runPostBuildSmoke` returns `Promise<SmokeResult>`. An exact version banner with
@@ -43,17 +43,17 @@ The default CLI sends no diagnostic output to a provider.
 
 ## Config
 
-See `docs/release-and-publishing.md` in the SDK repo for the full
+See `docs/release-and-publishing.md` in the engine repo for the full
 `toolchain.config.json` contract and per-repo examples. Import the
 `ToolchainConfig` type from `@goodvibes-jev/engine/toolchain` for editor help.
 
 ## Usage
 
 ```ts
-import { runSdkPinGate, realFsReader, loadToolchainConfig } from '@goodvibes-jev/engine/toolchain';
+import { runEnginePinGate, realFsReader, loadToolchainConfig } from '@goodvibes-jev/engine/toolchain';
 
 const config = loadToolchainConfig();
-const results = runSdkPinGate(realFsReader(process.cwd()), config.sdkPin);
+const results = runEnginePinGate(realFsReader(process.cwd()), config.enginePin);
 ```
 
 Every function accepts its effects (exec, fs, http, sleep, logger) as

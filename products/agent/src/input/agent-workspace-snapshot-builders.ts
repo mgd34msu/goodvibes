@@ -7,7 +7,7 @@ import { readExecutionMode } from '../permissions/execution-mode.ts';
 // moved unchanged so the top-level snapshot builder now composes named sub-builders
 // instead of assembling everything inline. No behavior changes: same context reads,
 // same try/catch fallbacks, same field shapes.
-import { listAvailableSubscriptionProviders } from '@goodvibes-jev/engine/sdk/platform/config';
+import { listAvailableSubscriptionProviders } from '@goodvibes-jev/engine/platform/platform/config';
 import type { CommandContext } from './command-registry.ts';
 import { AgentNoteRegistry } from '../agent/note-registry.ts';
 import { AgentPersonaRegistry } from '../agent/persona-registry.ts';
@@ -25,9 +25,9 @@ import { GOODVIBES_AGENT_PAIRING_SURFACE } from '../config/surface.ts';
 import { readConnectedHostOperatorToken, type ConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
 import { summarizePersonaItem, summarizeNoteItem, summarizeResearchRunItem, summarizeRoutineScheduleReceipt, summarizeSkillBundleItem, summarizeSkillItem } from './agent-workspace-local-library-snapshot.ts';
 import { isReviewerHandoffArtifact, summarizeReviewerHandoffArtifact } from './agent-workspace-review-packet-utils.ts';
-import { ensureEmailConfigDefaults, readEmailConfig, validateEmailConfig } from '@goodvibes-jev/engine/sdk/platform/email';
+import { ensureEmailConfigDefaults, readEmailConfig, validateEmailConfig } from '@goodvibes-jev/engine/platform/platform/email';
 import { CALENDAR_OAUTH_CLIENT_ID_KEYS } from '../agent/calendar/calendar-oauth-service.ts';
-import { ensureCalendarConfigDefaults } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ensureCalendarConfigDefaults } from '@goodvibes-jev/engine/platform/platform/config';
 import { readConfigBoolean, readConfigNumber, readConfigString } from './agent-workspace-snapshot-config.ts';
 import type { AgentWorkspaceCalendarOAuthConfigStatus } from './agent-workspace-calendar-oauth-editor.ts';
 import type { AgentWorkspaceEmailConnectStatus } from './agent-workspace-types.ts';
@@ -298,7 +298,7 @@ export function buildAgentWorkspaceEmailConnectStatus(context: CommandContext): 
  * Honest calendar-OAuth build state per provider for the advanced connect
  * cards (F1c), config read only, no network I/O. "Configured" means a
  * config-override client id has been stored (through this same card);
- * "not configured" means the build still ships only the bundled SDK
+ * "not configured" means the build still ships only the bundled platform
  * placeholder client id, the state in which a bare /calendar connect always
  * fails at the config stage. Best-effort: never throws, returns null on any
  * read failure.

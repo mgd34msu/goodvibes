@@ -18,7 +18,7 @@
 // is served rather than a fabricated one.
 // ---------------------------------------------------------------------------
 
-import type { PowerState } from '@goodvibes-jev/engine/sdk/platform/power';
+import type { PowerState } from '@goodvibes-jev/engine/platform/platform/power';
 import { IDLE_POWER_STATE, powerSurfaceFromEvent, powerSurfaceFromState, type PowerStateChangedPayload, type PowerSurfaceState } from './power-status.ts';
 
 export interface PowerChipSourceDeps {

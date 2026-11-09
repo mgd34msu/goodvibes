@@ -16,20 +16,20 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ProviderRegistry } from '../sdk/src/platform/providers/registry.js';
-import { buildProviderNativeModelDefinition } from '../sdk/src/platform/providers/live-model-discovery.js';
-import { resolvePricing, setModelPricingResolver, setPricingSource } from '../sdk/src/platform/providers/session-cost.js';
+import { ProviderRegistry } from '../platform/src/platform/providers/registry.js';
+import { buildProviderNativeModelDefinition } from '../platform/src/platform/providers/live-model-discovery.js';
+import { resolvePricing, setModelPricingResolver, setPricingSource } from '../platform/src/platform/providers/session-cost.js';
 import {
   getCatalogCachePath,
   getCatalogTmpPath,
   getCostFromPricingCatalog,
   saveCatalogCache,
   type CatalogModel,
-} from '../sdk/src/platform/providers/model-catalog.js';
-import { computeUsageCostUsd, computeUsageCostUsdCents } from '../sdk/src/platform/providers/model-pricing.js';
-import { CostAttributionService, type ResolvePricing } from '../sdk/src/platform/runtime/cost/attribution.js';
-import { checkBudget, budgetBlindSpot } from '../sdk/src/platform/orchestration/budget.js';
-import type { WorkItem, Workstream } from '../sdk/src/platform/orchestration/types.js';
+} from '../platform/src/platform/providers/model-catalog.js';
+import { computeUsageCostUsd, computeUsageCostUsdCents } from '../platform/src/platform/providers/model-pricing.js';
+import { CostAttributionService, type ResolvePricing } from '../platform/src/platform/runtime/cost/attribution.js';
+import { checkBudget, budgetBlindSpot } from '../platform/src/platform/orchestration/budget.js';
+import type { WorkItem, Workstream } from '../platform/src/platform/orchestration/types.js';
 
 // ---------------------------------------------------------------------------
 // Harness (mirrors provider-registry-canonical-api.test.ts)
@@ -453,8 +453,8 @@ describe('dollar budget on non-frontier actuals', () => {
 
 describe('emit-site cost stamping', () => {
   test('a ToolLLM call emits costUsdCents = usage x resolved price with its source', async () => {
-    const { RuntimeEventBus } = await import('../sdk/src/platform/runtime/events/index.ts');
-    const { ToolLLM } = await import('../sdk/src/platform/config/tool-llm.ts');
+    const { RuntimeEventBus } = await import('../platform/src/platform/runtime/events/index.ts');
+    const { ToolLLM } = await import('../platform/src/platform/config/tool-llm.ts');
     const bus = new RuntimeEventBus();
     const events: Array<Record<string, unknown>> = [];
     bus.onDomain('turn', (envelope) => {
@@ -495,8 +495,8 @@ describe('emit-site cost stamping', () => {
   });
 
   test('an unknown-price ToolLLM call emits NO costUsdCents and costSource unknown', async () => {
-    const { RuntimeEventBus } = await import('../sdk/src/platform/runtime/events/index.ts');
-    const { ToolLLM } = await import('../sdk/src/platform/config/tool-llm.ts');
+    const { RuntimeEventBus } = await import('../platform/src/platform/runtime/events/index.ts');
+    const { ToolLLM } = await import('../platform/src/platform/config/tool-llm.ts');
     const bus = new RuntimeEventBus();
     const events: Array<Record<string, unknown>> = [];
     bus.onDomain('turn', (envelope) => {

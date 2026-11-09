@@ -20,7 +20,7 @@
  * `<homeDirectory>/.goodvibes/<surfaceRoot>/recovery-decisions.json`, home-
  * anchored, matching session-liveness-marker.ts, and deliberately NOT the
  * project-anchored `surface.stateDir`. The snapshots this defends against
- * include the ones in the SDK's legacy shared recovery directory, which is
+ * include the ones in the platform's legacy shared recovery directory, which is
  * itself home-anchored and shared by every project that ever used this
  * surfaceRoot; the current build dual-reads it, so ONE such snapshot is
  * offered at the launch of EVERY project. A project-scoped record could only
@@ -32,7 +32,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { SessionSurface } from '@/runtime/index.ts';
 
 /** One "the user removed this snapshot" decision. */

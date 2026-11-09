@@ -1,10 +1,10 @@
 import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { SecretsManager } from '../sdk/src/platform/config/secrets.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { SubscriptionManager, type ProviderSubscription } from '../sdk/src/platform/config/subscriptions.js';
-import { decryptStore } from '../sdk/src/platform/config/secrets-keyfile.js';
+import { SecretsManager } from '../platform/src/platform/config/secrets.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { SubscriptionManager, type ProviderSubscription } from '../platform/src/platform/config/subscriptions.js';
+import { decryptStore } from '../platform/src/platform/config/secrets-keyfile.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

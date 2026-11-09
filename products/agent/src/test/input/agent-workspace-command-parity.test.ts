@@ -206,11 +206,11 @@ describe('Agent workspace command parity', () => {
     // workspaces (owner ruling, 2026-07-10) is a narrow, rarely-used admin
     // surface, register/unregister the checkpoint-gating workspace list, with
     // no TUI workspace editor yet, same shape as compat/doctor/pair above.
-    // fleet (SDK 1.6.1 best-of-N attempts: list/pick/judge held-merge groups)
+    // fleet (platform 1.6.1 best-of-N attempts: list/pick/judge held-merge groups)
     // is the same kind of narrow admin surface, this Agent's own
     // orchestration engine state, not a connected-host call, with no TUI
     // workspace editor yet.
-    // relay (SDK 1.6.1 outbound zero-knowledge relay): reports the connected
+    // relay (platform 1.6.1 outbound zero-knowledge relay): reports the connected
     // host's imported relay.* configuration and always honestly refuses to
     // mint a pairing payload (see relay-command.ts), a diagnostics/refusal
     // surface with no mutating action a TUI workspace editor would expose,

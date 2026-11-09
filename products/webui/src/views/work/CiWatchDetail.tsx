@@ -9,7 +9,7 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ExternalLink, Play, Trash2 } from 'lucide-react';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import type { OperatorMethodOutput } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { formatError, isMethodUnavailableError } from '../../lib/errors';
@@ -82,7 +82,7 @@ export function CiWatchDetail({ watch, onClose, onOpenSession }: {
   const invalidate = () => queryClient.invalidateQueries({ queryKey: queryKeys.ciWatches });
 
   const run = useMutation({
-    mutationFn: (watchId: string) => sdk.operator.ci.watches.run(watchId),
+    mutationFn: (watchId: string) => platformClient.operator.ci.watches.run(watchId),
     onSuccess: async (result) => {
       setRunResult(result);
       await invalidate();
@@ -97,7 +97,7 @@ export function CiWatchDetail({ watch, onClose, onOpenSession }: {
   });
 
   const remove = useMutation({
-    mutationFn: (watchId: string) => sdk.operator.ci.watches.delete(watchId),
+    mutationFn: (watchId: string) => platformClient.operator.ci.watches.delete(watchId),
     onSuccess: async (result) => {
       if (!result.deleted) toast({ title: 'Watch already gone', description: 'No watch with that id existed.', tone: 'info' });
       onClose();

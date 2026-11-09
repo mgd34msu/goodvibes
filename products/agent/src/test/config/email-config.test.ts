@@ -9,8 +9,8 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, rmSync, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { ensureEmailConfigDefaults } from '@goodvibes-jev/engine/sdk/platform/email';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { ensureEmailConfigDefaults } from '@goodvibes-jev/engine/platform/platform/email';
 import type { ConfigKey } from '../../config/index.ts';
 import { persistSecretBackedConfigValue } from '../../config/secret-config.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';

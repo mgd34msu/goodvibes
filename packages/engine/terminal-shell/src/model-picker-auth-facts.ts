@@ -1,4 +1,4 @@
-import type { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
 export function deriveConfiguredVia(
   providerId: string,
   configuredIds: Set<string>,

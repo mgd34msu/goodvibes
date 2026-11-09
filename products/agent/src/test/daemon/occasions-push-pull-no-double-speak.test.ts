@@ -8,7 +8,7 @@
  * the agent is a configured push destination `occasions.pending` leaves stamped
  * items out.
  *
- * That guard is the SDK's, so this file does not re-implement it, it proves this
+ * That guard is the platform's, so this file does not re-implement it, it proves this
  * product is on the right side of it, end to end: a real composed runtime, the
  * real `occasions.*` verb handlers, the real ChannelDeliveryRouter with its real
  * agent strategy, a real owner-profile file on disk, and this repo's own sender
@@ -23,7 +23,7 @@
  *
  *  1. sender registered  → the push lands verbatim, the pull then goes quiet, and
  *     the answer/interview loop is reached exactly as it is after a pull.
- *  2. no sender          → the SDK's NAMED error is recorded, nothing lands, and
+ *  2. no sender          → the platform's NAMED error is recorded, nothing lands, and
  *     the pull STILL raises it. This is the case the stamp must not cover: a send
  *     that could not land may not cost him the nudge, and a guard that got this
  *     wrong would fail silently.
@@ -49,7 +49,7 @@ import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/test
 import { buildDaemonGatewayCatalog } from '../helpers/daemon-gateway.ts';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { makeLongLivedProjectTempDir } from '../helpers/project-temp.ts';
 import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
 import { RuntimeEventBus } from '@/runtime/index.ts';
@@ -107,14 +107,14 @@ function harness(): Harness {
   configManager.set('profile.path', profilePath);
   // The agent as the ONLY push destination, so the stamp's effect on the pull is
   // unambiguous. His real configuration is `telegram,agent`; the list mechanics
-  // belong to the SDK and are tested there.
+  // belong to the platform and are tested there.
   configManager.set('occasions.nudgeChannel', 'agent');
   // An always-active window, because this suite's subject is push/pull
   // coordination and not quiet hours. Left at the default 08:00-22:00 these tests
   // pass or fail on the wall clock of whoever runs them, which is how the first
   // draft of this file "proved" the guard while actually observing a held sweep.
-  // start === end is the SDK's own documented "no restriction" form. Quiet hours
-  // are a real rule with their own tests in the SDK.
+  // start === end is the platform's own documented "no restriction" form. Quiet hours
+  // are a real rule with their own tests in the platform.
   configManager.set('occasions.activeHours', '00:00-00:00');
 
   const said: string[] = [];
@@ -295,7 +295,7 @@ describe('sender registered: the push lands and the pull goes quiet', () => {
 describe('no sender registered: the push is refused BY NAME and the pull still raises', () => {
   const h = harness();
 
-  test('the sweep records the SDK\'s named failure and lands nothing', async () => {
+  test('the sweep records the platform\'s named failure and lands nothing', async () => {
     expect(h.services.channelDeliveryRouter.agentDelivery.registered).toBe(false);
 
     const outcome = await h.invoke('occasions.sweep') as {
@@ -346,7 +346,7 @@ describe('sender registered but unable to land: this repo\'s own throw keeps the
   const h = harness();
 
   test('a sender with no conversation refuses, and the sweep records ITS reason', async () => {
-    // The previous block covers the SDK's refusal (nothing registered). This one
+    // The previous block covers the platform's refusal (nothing registered). This one
     // covers OURS: registered, called, and unable to land. It is the case where
     // this repo's code decides whether the nudge survives.
     h.services.channelDeliveryRouter.agentDelivery.register(

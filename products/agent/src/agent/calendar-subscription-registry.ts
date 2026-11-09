@@ -11,7 +11,7 @@ import {
   type CalendarUntrustedIngestRecorder,
   type FeedFetcher,
   type SubscriptionHealth,
-} from '@goodvibes-jev/engine/sdk/platform/calendar';
+} from '@goodvibes-jev/engine/platform/platform/calendar';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { resolveCredentialWriteScope } from '../config/credential-scope.ts';
 import type { SecretScope } from '../config/secrets.ts';
@@ -20,8 +20,8 @@ import type { SecretScope } from '../config/secrets.ts';
  * Agent-side registry for READ-ONLY external calendar SUBSCRIPTIONS (iCalendar
  * feeds, Google "secret address", Outlook published .ics, or any .ics URL).
  *
- * The parse/RRULE/fetch-status engine is the SDK's `platform/calendar`
- * (SubscriptionStore + expandEvent). This class owns the two things the SDK
+ * The parse/RRULE/fetch-status engine is the platform's `platform/calendar`
+ * (SubscriptionStore + expandEvent). This class owns the two things the platform
  * deliberately leaves to the consumer:
  *  - PERSISTENCE. Feed events are cached to a JSON store next to the local
  *    calendar so `/calendar list` merges them with no network call; subscription
@@ -58,7 +58,7 @@ import type { SecretScope } from '../config/secrets.ts';
  * whatever turn happened to be open and refuse that turn's outward action over
  * an event no turn read and nobody asked for. That hands anyone who can get an
  * event onto a subscribed feed a remote off switch for the agent's outward
- * actions. Both paths therefore keep the SDK's plain `events()` accessor rather
+ * actions. Both paths therefore keep the platform's plain `events()` accessor rather
  * than a recording one.
  */
 
@@ -66,7 +66,7 @@ import type { SecretScope } from '../config/secrets.ts';
 // Types
 // ──────────────────────────────────────────────────────────────────
 
-/** The SDK CalendarEvent as cached on disk (structurally identical; JSON-safe). */
+/** The platform CalendarEvent as cached on disk (structurally identical; JSON-safe). */
 export type CachedFeedEvent = CalendarEvent;
 
 interface SubscriptionMeta {
@@ -472,7 +472,7 @@ export class CalendarSubscriptionRegistry {
   /**
    * All subscribed occurrences within [fromDate, toDate] (inclusive, 'YYYY-MM-DD'),
    * flattened and source-labeled for a merged read-only view. Recurring events are
-   * expanded through the SDK; an unsupported RRULE surfaces its seed with a marker.
+   * expanded through the platform; an unsupported RRULE surfaces its seed with a marker.
    */
   public occurrencesInWindow(fromDate: string, toDate: string): readonly SubscribedOccurrence[] {
     const file = this.readStore();
@@ -506,7 +506,7 @@ export class CalendarSubscriptionRegistry {
    *
    * Called ONLY from `seeds()` and `occurrencesInWindow()`. One entry per event
    * rather than one per feed, because an origin names the party whose words an
-   * outward action might turn out to repeat; the SDK drops events whose readable
+   * outward action might turn out to repeat; the platform drops events whose readable
    * fields are all empty, so an event with nothing an outsider wrote records
    * nothing.
    *

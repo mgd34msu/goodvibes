@@ -21,10 +21,10 @@ import { describe, expect, test, beforeEach, afterEach } from 'bun:test';
 import { mkdtemp, writeFile, rm, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { runPermissions, runSecurity, runDeadCode, runEnvAudit, runTestFind } from '../sdk/src/platform/tools/analyze/scan-modes.js';
-import { scanBlocks, SCAN_BLOCK_LINES } from '../sdk/src/platform/tools/analyze/scan-lines.js';
-import { JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.js';
-import { TEST_CANDIDATES_PER_READING } from '../sdk/src/platform/tools/batteries/test-of-source.js';
+import { runPermissions, runSecurity, runDeadCode, runEnvAudit, runTestFind } from '../platform/src/platform/tools/analyze/scan-modes.js';
+import { scanBlocks, SCAN_BLOCK_LINES } from '../platform/src/platform/tools/analyze/scan-lines.js';
+import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input.js';
+import { TEST_CANDIDATES_PER_READING } from '../platform/src/platform/tools/batteries/test-of-source.js';
 import { useToolReadings } from './_helpers/tool-readings.ts';
 
 // Jev finds the lines to read in each block and reads each found line; these

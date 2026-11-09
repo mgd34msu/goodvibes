@@ -12,7 +12,7 @@
  * with the literal `'conversationGate'`, and `ConfigManager.getCategory` is
  * generic over `keyof GoodVibesConfig`, a union `conversationGate` only joins
  * through a module augmentation in config/schema-domain-conversation-gate.ts.
- * Inside the SDK's own program that augmentation is always loaded, so the SDK's
+ * Inside the platform's own program that augmentation is always loaded, so the platform's
  * composition root compiled and the defect was invisible here. A consumer's
  * program loads only the declarations its own imports reach, so there the
  * literal was not assignable and passing a ConfigManager was rejected:
@@ -25,8 +25,8 @@
  *
  * Checked by `bun run types:check`.
  */
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ConversationGateConfigReader } from '@goodvibes-jev/engine/sdk/platform/agents';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConversationGateConfigReader } from '@goodvibes-jev/engine/platform/platform/agents';
 
 // The assignment under test: a ConfigManager IS a gate config reader.
 declare const configManager: ConfigManager;
@@ -36,7 +36,7 @@ export const reader: ConversationGateConfigReader = configManager;
 // broker's optional `conversationGateConfig`. Typed against the constructor's
 // own parameter so a rename or a narrowing of that field fails here too.
 type SharedSessionBrokerConfig = ConstructorParameters<
-  typeof import('@goodvibes-jev/engine/sdk/platform/control-plane').SharedSessionBroker
+  typeof import('@goodvibes-jev/engine/platform/platform/control-plane').SharedSessionBroker
 >[0];
 
 export const brokerGateConfig: SharedSessionBrokerConfig['conversationGateConfig'] = configManager;

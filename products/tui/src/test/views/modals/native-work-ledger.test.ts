@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import type { WorkLedgerReadClient, WorkLedgerReadSnapshot, WorkLedgerEvent } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger';
+import type { WorkLedgerReadClient, WorkLedgerReadSnapshot, WorkLedgerEvent } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 import { NativeWorkLedgerModel, type NativeWorkLedgerSelection } from '../../../runtime/native-work-ledger.ts';
 import { createNativeWorkLedgerModalSurface } from '../../../views/modals/native-work-ledger-modal.ts';
 import { ConfigModal } from '../../../input/config-modal.ts';
@@ -232,7 +232,7 @@ test('real native modal actions target the selected ledger row, display typed pr
   const f = fixture(); const value = snapshot(); const target = value.works[0]!;
   f.update({ ...value, works: [{ ...target, work: { ...target.work, reportedState: 'in_progress' }, attempt: { ...target.attempt!, state: 'active' } }] });
   const calls: string[] = [];
-  const invoke = (action: string): import('@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client').OperatorNativeWorkExecutionClient['start'] => async identity => {
+  const invoke = (action: string): import('@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client').OperatorNativeWorkExecutionClient['start'] => async identity => {
     calls.push(action); expect(identity).toEqual({ workId: 'work-1', attemptId: 'attempt-1', expectedRevision: { work: 3, criteria: 2, attempt: 2 } });
     return { kind: 'execution', projectId: 'host-project', ...identity, currentRevision: identity.expectedRevision, currentAttempt: true, stale: false, state: 'launch-claimed', recovery: 'required', receipt: { contractId: 'contract-modal', ownerAgentId: 'worker-modal' }, progress: { status: 'running', sessionMode: true, semanticState: 'deferred', stage: 'verify', retrying: true, units: { total: 2, passed: 1, failed: 0 }, criteria: { total: 1, met: 0, unmet: 0, unshown: 1 } } };
   };
@@ -268,7 +268,7 @@ test('a captured old-host control row cannot dispatch after replacement, even fo
 test('first status/cancel stays on the displayed attempt if a fresh read observes a handoff', async () => {
   for (const key of ['i', 'c']) {
     const f = fixture(); const captured: string[] = [];
-    const invoke: import('@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client').OperatorNativeWorkExecutionClient['start'] = async identity => {
+    const invoke: import('@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client').OperatorNativeWorkExecutionClient['start'] = async identity => {
       captured.push(identity.attemptId);
       return { kind: 'execution', projectId: 'host-project', ...identity, currentRevision: null, currentAttempt: false, stale: true, state: 'launch-claimed', recovery: 'required', receipt: null, progress: null };
     };
@@ -282,7 +282,7 @@ test('first status/cancel stays on the displayed attempt if a fresh read observe
 
 test('native modal renders intent variants honestly with stable rows and no implicit recovery', async () => {
   const f = fixture(); let state: 'admitting' | 'refused' | 'cancelled' = 'admitting'; const calls: string[] = [];
-  const execution: import('@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client').OperatorNativeWorkExecutionClient = {
+  const execution: import('@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client').OperatorNativeWorkExecutionClient = {
     start: async () => { calls.push('start'); throw new Error('must not start'); },
     resume: async () => { calls.push('resume'); throw new Error('must not resume'); },
     cancel: async () => { calls.push('cancel'); throw new Error('must not cancel while inspecting'); },

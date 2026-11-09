@@ -22,15 +22,15 @@ import {
   authenticateOperatorToken,
   OPERATOR_SESSION_COOKIE_NAME,
   buildOperatorSessionCookie,
-} from '../sdk/src/platform/security/http-auth.js';
-import { UserAuthManager } from '../sdk/src/platform/security/user-auth.js';
+} from '../platform/src/platform/security/http-auth.js';
+import { UserAuthManager } from '../platform/src/platform/security/user-auth.js';
 import {
   createDaemonControlRouteHandlers,
-} from '../daemon-sdk/dist/index.js';
-import { dispatchCompanionChatRoutes } from '../sdk/src/platform/companion/companion-chat-routes.js';
-import type { CompanionChatRouteContext } from '../sdk/src/platform/companion/companion-chat-route-types.js';
-import type { CompanionLLMProvider, CompanionChatEventPublisher, CompanionProviderChunk } from '../sdk/src/platform/companion/companion-chat-manager.js';
-import { CompanionChatManager } from '../sdk/src/platform/companion/companion-chat-manager.js';
+} from '../daemon-api/dist/index.js';
+import { dispatchCompanionChatRoutes } from '../platform/src/platform/companion/companion-chat-routes.js';
+import type { CompanionChatRouteContext } from '../platform/src/platform/companion/companion-chat-route-types.js';
+import type { CompanionLLMProvider, CompanionChatEventPublisher, CompanionProviderChunk } from '../platform/src/platform/companion/companion-chat-manager.js';
+import { CompanionChatManager } from '../platform/src/platform/companion/companion-chat-manager.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -394,7 +394,7 @@ describe('companion-chat session creation via session-cookie auth', () => {
     // directly calling dispatchCompanionChatRoutes (companion routes trust the
     // outer auth gate, as documented in the route file header).
     // First verify the auth check itself passes with the session cookie:
-    const { authenticateOperatorRequest } = await import('../sdk/src/platform/security/http-auth.js');
+    const { authenticateOperatorRequest } = await import('../platform/src/platform/security/http-auth.js');
     const companionReq = new Request('http://127.0.0.1/api/companion/chat/sessions', {
       method: 'POST',
       headers: {
@@ -434,7 +434,7 @@ describe('companion-chat session creation via session-cookie auth', () => {
     const userAuth = makeUserAuth(dir);
     const sharedToken = 'daemon-operator-shared-token';
 
-    const { authenticateOperatorRequest } = await import('../sdk/src/platform/security/http-auth.js');
+    const { authenticateOperatorRequest } = await import('../platform/src/platform/security/http-auth.js');
     const req = new Request('http://127.0.0.1/api/companion/chat/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

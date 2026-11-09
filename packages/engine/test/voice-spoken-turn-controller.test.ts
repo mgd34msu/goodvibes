@@ -1,14 +1,14 @@
 import { isProxy } from 'node:util/types';
 import { bundleBrowserEntrypoint } from './_helpers/browser-bundle.ts';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { TurnEvent } from '../sdk/src/events/turn.js';
-import type { VoiceAudioChunk, VoiceSynthesisRequest, VoiceSynthesisStreamResult } from '../sdk/src/platform/voice/types.js';
-import { SpokenTurnController } from '../sdk/src/platform/voice/spoken-turn/controller.js';
-import type { AudioSink } from '../sdk/src/platform/voice/spoken-turn/audio-sink.js';
+import type { TurnEvent } from '../platform/src/events/turn.js';
+import type { VoiceAudioChunk, VoiceSynthesisRequest, VoiceSynthesisStreamResult } from '../platform/src/platform/voice/types.js';
+import { SpokenTurnController } from '../platform/src/platform/voice/spoken-turn/controller.js';
+import type { AudioSink } from '../platform/src/platform/voice/spoken-turn/audio-sink.js';
 
 import { bindJudgmentPortAuthority, installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { configureDecisionModelPolicy, type DecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
+import { configureDecisionModelPolicy, type DecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 
 function failurePort(category = 'rate_limit', yes: readonly string[] = []) {
@@ -880,7 +880,7 @@ describe('SpokenTurnController complete failure admission', () => {
 
 test('shared spoken controller still bundles for browsers without Node admission imports', async () => {
   const output = await bundleBrowserEntrypoint(
-    `${import.meta.dir}/../sdk/src/platform/voice/spoken-turn/controller.ts`, { conditions: ['bun'] },
+    `${import.meta.dir}/../platform/src/platform/voice/spoken-turn/controller.ts`, { conditions: ['bun'] },
   );
   expect(output).not.toContain('node:util/types');
   expect(output).not.toContain('require("node:');

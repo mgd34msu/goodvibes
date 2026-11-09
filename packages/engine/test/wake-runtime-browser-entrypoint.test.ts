@@ -7,17 +7,17 @@ import { withTestTimeout } from './_helpers/test-timeout.ts';
 
 const ENGINE_ROOT = resolve(import.meta.dir, '..');
 const JUDGMENT_ROOT = resolve(ENGINE_ROOT, '../judgment');
-const PUBLIC_ENTRY = '@goodvibes-jev/engine/sdk/platform/voice/wake/runtime';
+const PUBLIC_ENTRY = '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
 const BUNDLE_CEILING_MS = 30_000;
 
 interface BrowserSurface {
-  readonly wake: typeof import('../sdk/src/platform/voice/wake/runtime.js');
-  readonly display: typeof import('../sdk/src/platform/utils/batteries/display-payload.js');
-  readonly retry: typeof import('../sdk/src/platform/types/batteries/retry-wait.js');
-  readonly provider: typeof import('../sdk/src/platform/routing/batteries/provider.js');
+  readonly wake: typeof import('../platform/src/platform/voice/wake/runtime.js');
+  readonly display: typeof import('../platform/src/platform/utils/batteries/display-payload.js');
+  readonly retry: typeof import('../platform/src/platform/types/batteries/retry-wait.js');
+  readonly provider: typeof import('../platform/src/platform/routing/batteries/provider.js');
   readonly judgment: typeof import('@goodvibes-jev/judgment/decisions');
-  readonly nativeSummary: typeof import('../sdk/src/platform/utils/native-error-summary.js');
-  readonly nativeErrors: typeof import('../sdk/src/platform/types/error-values.js');
+  readonly nativeSummary: typeof import('../platform/src/platform/utils/native-error-summary.js');
+  readonly nativeErrors: typeof import('../platform/src/platform/types/error-values.js');
 }
 
 interface BuildMetafile {

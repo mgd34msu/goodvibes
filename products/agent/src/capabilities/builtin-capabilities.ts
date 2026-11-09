@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { DRIVER_REQUIRED_FILES } from '@goodvibes-jev/engine/sdk/platform/browser';
+import { DRIVER_REQUIRED_FILES } from '@goodvibes-jev/engine/platform/platform/browser';
 import { driverRemediation } from '../runtime/browser-driver-profile.ts';
 import { agentDriverSearchDirectories } from '../runtime/agent-browser.ts';
 import { registerCapability, registerFallbackCapability } from './capability-index.ts';

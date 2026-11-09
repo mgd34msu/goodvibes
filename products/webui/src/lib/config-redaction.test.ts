@@ -9,7 +9,7 @@ import {
   SECRET_CONFIG_KEYS,
 } from "./config-redaction";
 import { CONFIG_SCHEMA_ENTRIES } from "./generated/config-schema";
-import { SECRET_BEARING_CONFIG_PATHS } from "@goodvibes-jev/engine/sdk/platform/judgment-browser/catalogs";
+import { SECRET_BEARING_CONFIG_PATHS } from "@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs";
 
 describe("isSecretConfigKey", () => {
   test("recognizes canonical declared secret keys", () => {

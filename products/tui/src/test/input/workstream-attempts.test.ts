@@ -9,10 +9,10 @@ import type {
   AttemptPickResult,
   HeldMergeGroup,
   OrchestrationEngine,
-} from '@goodvibes-jev/engine/sdk/platform/orchestration';
-import { AttemptError } from '@goodvibes-jev/engine/sdk/platform/orchestration';
+} from '@goodvibes-jev/engine/platform/platform/orchestration';
+import { AttemptError } from '@goodvibes-jev/engine/platform/platform/orchestration';
 import type { CommandContext } from '../../input/command-registry.ts';
-import type { WorkstreamCommandService } from '@goodvibes-jev/engine/sdk/platform/orchestration';
+import type { WorkstreamCommandService } from '@goodvibes-jev/engine/platform/platform/orchestration';
 import { handleAttemptsSubcommand } from '../../input/commands/workstream-attempts.ts';
 
 // ---- /workstream attempts subcommands ------------------------------------

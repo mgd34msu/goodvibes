@@ -14,10 +14,10 @@ import {
   validateKnownEvent,
   type ContractEvent,
   type ContractEventType,
-} from '../../sdk/src/events/index.js';
-import { RuntimeEventBus } from '../../sdk/src/platform/runtime/events/index.js';
-import { builtinGatewayEventDescriptors } from '../../sdk/src/platform/control-plane/method-catalog-events.js';
-import { CONTRACT_EVENT_SOURCE, contractTraceId, emitContractEvent } from '../../sdk/src/platform/contract/index.js';
+} from '../../platform/src/events/index.js';
+import { RuntimeEventBus } from '../../platform/src/platform/runtime/events/index.js';
+import { builtinGatewayEventDescriptors } from '../../platform/src/platform/control-plane/method-catalog-events.js';
+import { CONTRACT_EVENT_SOURCE, contractTraceId, emitContractEvent } from '../../platform/src/platform/contract/index.js';
 import { ALL_CONTRACT_EVENTS, CTR, SAMPLES } from './event-samples.js';
 
 const ALL = ALL_CONTRACT_EVENTS;

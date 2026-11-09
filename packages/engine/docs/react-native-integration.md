@@ -4,12 +4,12 @@ This is the **companion surface** for React Native (Hermes). See [Published Surf
 
 React Native apps cannot run the full agentic surface (tool execution, LSP, MCP, workflows, daemon HTTP). Those require Bun. This guide covers auth, transport, realtime events, and error handling for the companion surface.
 
-Use `@goodvibes-jev/engine/sdk/react-native` for Android and iOS apps.
+Use `@goodvibes-jev/engine/platform/react-native` for Android and iOS apps.
 
 ```ts
-import { createReactNativeGoodVibesSdk } from '@goodvibes-jev/engine/sdk/react-native';
+import { createReactNativeGoodVibesPlatform } from '@goodvibes-jev/engine/platform/react-native';
 
-const sdk = createReactNativeGoodVibesSdk({
+const platformClient = createReactNativeGoodVibesPlatform({
   baseUrl: 'https://goodvibes.example.com',
   authToken: token,
 });
@@ -18,18 +18,18 @@ const sdk = createReactNativeGoodVibesSdk({
 ## Installation
 
 ```bash
-npm install @goodvibes-jev/engine/sdk
+npm install @goodvibes-jev/engine
 ```
 
 See [Getting started](./getting-started.md#install) for the canonical install command and version. For persistent secure token storage on bare React Native, also install the optional peer dependency [`react-native-keychain`](https://github.com/oblador/react-native-keychain) (`>=8.0.0`); it is only needed when you use `createIOSKeychainTokenStore` / `createAndroidKeystoreTokenStore`.
 
 ## Realtime
 
-The React Native realtime surface is WebSocket-only. `sdk.realtime` exposes `runtime()` and `viaWebSocket()`. There is no `viaSse()`. SSE is unavailable on this surface, so the inherited `realtime.sseReconnect` option is a no-op here. Only `webSocketReconnect` applies.
+The React Native realtime surface is WebSocket-only. `platformClient.realtime` exposes `runtime()` and `viaWebSocket()`. There is no `viaSse()`. SSE is unavailable on this surface, so the inherited `realtime.sseReconnect` option is a no-op here. Only `webSocketReconnect` applies.
 
 The daemon authenticates the WebSocket upgrade request itself and answers 401
 when it carries neither an `Authorization` header nor an operator session
-cookie. The SDK's in-band auth frame is only read after an authenticated
+cookie. The platform's in-band auth frame is only read after an authenticated
 upgrade. React Native's `WebSocket` accepts a headers option, so pass a
 wrapper as the `WebSocketImpl` that attaches the bearer token to the upgrade:
 
@@ -52,38 +52,38 @@ const AuthorizedWebSocket = function (url: string | URL): WebSocket {
   );
 } as unknown as typeof WebSocket;
 
-const events = sdk.realtime.viaWebSocket(AuthorizedWebSocket);
+const events = platformClient.realtime.viaWebSocket(AuthorizedWebSocket);
 const unsubscribe = events.agents.on('AGENT_COMPLETED', (event) => {
   console.log(event);
 });
 ```
 
-The factory applies React-Native-tuned defaults that you can override through `GoodVibesSdkOptions`:
+The factory applies React-Native-tuned defaults that you can override through `GoodVibesPlatformOptions`:
 
 - `realtime.webSocketReconnect`: `{ enabled: true, baseDelayMs: 500, maxDelayMs: 5000 }`
 - `retry` (HTTP): `{ maxAttempts: 3, baseDelayMs: 250, maxDelayMs: 2000 }`
 - `realtime.onError`: called when the realtime transport hits an unrecoverable error
 
-To scope a feed to a single session, wrap it with `forSession` (re-exported from `@goodvibes-jev/engine/sdk/react-native`):
+To scope a feed to a single session, wrap it with `forSession` (re-exported from `@goodvibes-jev/engine/platform/react-native`):
 
 ```ts
-import { createReactNativeGoodVibesSdk, forSession } from '@goodvibes-jev/engine/sdk/react-native';
+import { createReactNativeGoodVibesPlatform, forSession } from '@goodvibes-jev/engine/platform/react-native';
 
-const sessionEvents = forSession(sdk.realtime.viaWebSocket(AuthorizedWebSocket), sessionId);
+const sessionEvents = forSession(platformClient.realtime.viaWebSocket(AuthorizedWebSocket), sessionId);
 sessionEvents.agents.on('AGENT_COMPLETED', (event) => console.log(event));
 ```
 
 ## Token storage
 
-Pass a `tokenStore` to persist and rotate the bearer token. `tokenStore` is the highest-precedence auth option. It overrides both `getAuthToken` and the static `authToken`. Use `createIOSKeychainTokenStore` (iOS Keychain) or `createAndroidKeystoreTokenStore` (Android Keystore), both exported from `@goodvibes-jev/engine/sdk/react-native`, rather than rolling a custom `GoodVibesTokenStore`:
+Pass a `tokenStore` to persist and rotate the bearer token. `tokenStore` is the highest-precedence auth option. It overrides both `getAuthToken` and the static `authToken`. Use `createIOSKeychainTokenStore` (iOS Keychain) or `createAndroidKeystoreTokenStore` (Android Keystore), both exported from `@goodvibes-jev/engine/platform/react-native`, rather than rolling a custom `GoodVibesTokenStore`:
 
 ```ts
 import {
-  createReactNativeGoodVibesSdk,
+  createReactNativeGoodVibesPlatform,
   createIOSKeychainTokenStore,
-} from '@goodvibes-jev/engine/sdk/react-native';
+} from '@goodvibes-jev/engine/platform/react-native';
 
-const sdk = createReactNativeGoodVibesSdk({
+const platformClient = createReactNativeGoodVibesPlatform({
   baseUrl: 'https://goodvibes.example.com',
   tokenStore: createIOSKeychainTokenStore(),
 });
@@ -93,15 +93,15 @@ On Android, use `createAndroidKeystoreTokenStore()` in place of the Keychain sto
 
 ## Error handling
 
-All SDK errors extend `GoodVibesSdkError`. See [Error Kinds](./error-kinds.md) for the full taxonomy.
+All platform errors extend `GoodVibesError`. See [Error Kinds](./error-kinds.md) for the full taxonomy.
 
 ```ts
-import { GoodVibesSdkError } from '@goodvibes-jev/engine/sdk/errors';
+import { GoodVibesError } from '@goodvibes-jev/engine/platform/errors';
 
 try {
-  await sdk.operator.control.snapshot();
+  await platformClient.operator.control.snapshot();
 } catch (err) {
-  if (err instanceof GoodVibesSdkError) {
+  if (err instanceof GoodVibesError) {
     switch (err.kind) {
       case 'auth':
         // token expired, refresh and retry
@@ -113,7 +113,7 @@ try {
         // daemon or upstream service returned 5xx, log and degrade gracefully
         break;
       case 'protocol':
-        // SDK/client and daemon disagreed about the wire contract
+        // client and daemon disagreed about the wire contract
         break;
       default:
         throw err;
@@ -124,12 +124,12 @@ try {
 
 ## Observability
 
-`SDKObserver` and `createConsoleObserver` work from React Native exactly like from the full surface. They are imported from `@goodvibes-jev/engine/sdk` root, which is companion-safe. See [Observability](./observability.md) for the full observer API.
+`PlatformObserver` and `createConsoleObserver` work from React Native exactly like from the full surface. They are imported from `@goodvibes-jev/engine/platform` root, which is companion-safe. See [Observability](./observability.md) for the full observer API.
 
 ```ts
-import { createConsoleObserver } from '@goodvibes-jev/engine/sdk';
+import { createConsoleObserver } from '@goodvibes-jev/engine/platform';
 
-const sdk = createReactNativeGoodVibesSdk({
+const platformClient = createReactNativeGoodVibesPlatform({
   baseUrl: 'https://goodvibes.example.com',
   authToken: token,
   observer: createConsoleObserver(),

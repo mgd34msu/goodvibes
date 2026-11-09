@@ -8,8 +8,8 @@
  * install the npm package silently changes their install method, and it is not
  * the fix for their situation. The fix has to name the thing they did.
  *
- * The wording now lives in the SDK, because every surface that drives a browser
- * needs the same answer. What stayed here is what the SDK cannot know: which
+ * The wording now lives in the platform, because every surface that drives a browser
+ * needs the same answer. What stayed here is what the platform cannot know: which
  * install kinds THIS build has, what its release calls the driver asset, where
  * that asset is published, and the two commands that reinstall it. The install
  * kind comes from the same detector `/update` uses (runtime/update-check.ts),
@@ -22,7 +22,7 @@ import {
   type BrowserDriverInstallKind,
   type BrowserDriverInstallProfile,
   type DriverRemediationOptions,
-} from '@goodvibes-jev/engine/sdk/platform/browser';
+} from '@goodvibes-jev/engine/platform/platform/browser';
 import { detectInstallKind } from './update-check.ts';
 import { BROWSER_DRIVER_ARCHIVE_NAME, BROWSER_DRIVER_DIR_NAME } from './release-artifacts.ts';
 
@@ -31,9 +31,9 @@ export const RELEASES_LATEST_URL = 'https://github.com/mgd34msu/goodvibes/releas
 export type { DriverRemediationOptions };
 
 /**
- * This repo's particulars, as the SDK's remediation renderer asks for them.
+ * This repo's particulars, as the platform's remediation renderer asks for them.
  *
- * `detectInstallKind` reports `bun-global-package` where the SDK's vocabulary
+ * `detectInstallKind` reports `bun-global-package` where the platform's vocabulary
  * says `global-package`; the two name the same install method, and that
  * mapping is the only translation in this file.
  */

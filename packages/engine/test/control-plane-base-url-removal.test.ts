@@ -17,13 +17,13 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { migrateControlPlaneBaseUrlRemoval } from '../sdk/src/platform/config/migrations.js';
-import { applyControlPlaneBaseUrlMigrationPass } from '../sdk/src/platform/config/manager-migration-passes.js';
+import { migrateControlPlaneBaseUrlRemoval } from '../platform/src/platform/config/migrations.js';
+import { applyControlPlaneBaseUrlMigrationPass } from '../platform/src/platform/config/manager-migration-passes.js';
 import {
   deriveControlPlaneBaseUrl,
   describeDerivedBindMismatch,
   readControlPlaneBinding,
-} from '../sdk/src/platform/config/control-plane-base-url.js';
+} from '../platform/src/platform/config/control-plane-base-url.js';
 
 describe('migrateControlPlaneBaseUrlRemoval (pure function)', () => {
   test('removes a stored baseUrl and reports the value it dropped', () => {

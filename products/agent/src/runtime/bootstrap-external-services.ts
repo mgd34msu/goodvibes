@@ -11,7 +11,7 @@ import {
  * keep this concern, and the Agent's daemon-lifecycle boundary, in one
  * small, readable place.
  *
- * Discovery routes through the SDK-shared adopt-or-spawn policy
+ * Discovery routes through the platform-shared adopt-or-spawn policy
  * (decideDaemonAdoption/classifyDaemonProbe) with `adoptOnly: true`, so a
  * reachable, version-compatible daemon is adopted and anything else (absent,
  * blocked, or on an incompatible wire version) is reported honestly. The
@@ -20,7 +20,7 @@ import {
  * on the configured port but the host's service entry IS installed on this
  * machine, the Agent issues a single start through the platform service
  * manager, waits a bounded time for the daemon to answer, re-probes, and
- * reports what it did (the SDK's autostartInstalledDaemon decides and acts;
+ * reports what it did (the platform's autostartInstalledDaemon decides and acts;
  * the wording below is the Agent's). A machine with the host installed but
  * stopped must not hand the user homework.
  */
@@ -29,8 +29,8 @@ import {
   autostartInstalledDaemon,
   createDaemonServiceControl,
   type DaemonServiceControl,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/client';
-import type { SpineReachability } from '@goodvibes-jev/engine/sdk/platform/runtime/session-spine';
+} from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import type { SpineReachability } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
 import type {
   DeferredStartupCoordinator,
   ExternalServicesHandle,
@@ -38,8 +38,8 @@ import type {
   HostServicesConfig,
   RuntimeEventBus,
 } from '@/runtime/index.ts';
-import type { HookDispatcher } from '@goodvibes-jev/engine/sdk/platform/hooks';
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { HookDispatcher } from '@goodvibes-jev/engine/platform/platform/hooks';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
 import type { RuntimeServices } from './services.ts';
 import type { UiRuntimeServices } from './ui-services.ts';
@@ -98,7 +98,7 @@ export function wireAgentExternalServices(options: {
   readonly deferredStartup: DeferredStartupCoordinator;
   readonly systemMessageRouter: SystemMessageRouter;
   readonly requestRender: () => void;
-  /** Injectable discovery implementation (tests); defaults to the SDK-shared policy. */
+  /** Injectable discovery implementation (tests); defaults to the platform-shared policy. */
   readonly startServices?: typeof startExternalServices;
   readonly connectedHostAutostart?: ConnectedHostAutostartSeams;
 }): AgentExternalServicesController {
@@ -148,7 +148,7 @@ export function wireAgentExternalServices(options: {
   // whichever host it adopts. The agent's OWN binary updates at launch through
   // its launch auto-update path instead (src/cli/launch-auto-update.ts).
   const startAgentExternalServices = (): Promise<ExternalServicesHandle> =>
-    // The daemon-grade view, because this SDK entry point still takes that
+    // The daemon-grade view, because this platform entry point still takes that
     // whole shape. Under `adoptOnly: true` it reads `localUserAuthManager` and
     // `configManager` and never constructs a DaemonServer, see the view's own
     // doc comment in runtime/services.ts for exactly which two members it

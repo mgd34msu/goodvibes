@@ -5,7 +5,7 @@ import {
   resolveSecretRef,
   type LiteralSecretsManager,
   type SecretScope,
-} from '@goodvibes-jev/engine/sdk/platform/config';
+} from '@goodvibes-jev/engine/platform/platform/config';
 import { formatJsonOrText, yesNo } from './cli-output.js';
 interface CliSecretRuntime {
   readonly cli: { readonly commandArgs: readonly string[]; readonly flags: { readonly outputFormat?: string | undefined } };

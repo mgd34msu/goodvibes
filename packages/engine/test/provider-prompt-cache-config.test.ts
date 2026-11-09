@@ -20,13 +20,13 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { forgetModelLimitReadings } from '../sdk/src/platform/routing/model-limit-readings.js';
-import { AnthropicProvider } from '../sdk/src/platform/providers/anthropic.js';
+import { forgetModelLimitReadings } from '../platform/src/platform/routing/model-limit-readings.js';
+import { AnthropicProvider } from '../platform/src/platform/providers/anthropic.js';
 import {
   getDefaultStrategy,
   resolveCacheStrategy,
   type CachePolicyReader,
-} from '../sdk/src/platform/providers/cache-strategy.js';
+} from '../platform/src/platform/providers/cache-strategy.js';
 
 const originalFetch = globalThis.fetch;
 

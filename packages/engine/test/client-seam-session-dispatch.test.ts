@@ -19,9 +19,9 @@
  * surface products inherit the pins rather than each writing their own.
  */
 import { describe, expect, test } from 'bun:test';
-import type { SharedSessionContinuationResult } from '../sdk/src/platform/control-plane/session-intents.ts';
-import { createWireSessionDispatch, readSurfaceAgentOutcome } from '../sdk/src/platform/runtime/client/session-dispatch.ts';
-import type { SessionInputsWireClient, SurfaceAgentOutcome } from '../sdk/src/platform/runtime/client/session-dispatch.ts';
+import type { SharedSessionContinuationResult } from '../platform/src/platform/control-plane/session-intents.ts';
+import { createWireSessionDispatch, readSurfaceAgentOutcome } from '../platform/src/platform/runtime/client/session-dispatch.ts';
+import type { SessionInputsWireClient, SurfaceAgentOutcome } from '../platform/src/platform/runtime/client/session-dispatch.ts';
 
 interface QueuedInput { id: string; intent: string; body: string }
 

@@ -47,7 +47,7 @@ describe('stale server error-kind docs gate', () => {
     const text = "Handle `kind: 'server'` with a retry banner.\n";
     const findings = staleServerKindFindings(rootWith(text), [DOC], stored(text, { verdict: 'yes', outcome: 'act', probability: 0.91 }));
     expect(findings).toHaveLength(1);
-    expect(findings[0]).toContain(`${DOC} still documents stale SDKErrorKind 'server'`);
+    expect(findings[0]).toContain(`${DOC} still documents stale EngineErrorKind 'server'`);
   });
 
   test('an uncertain reading and a no below act both fail closed', () => {

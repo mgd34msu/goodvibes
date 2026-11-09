@@ -20,7 +20,7 @@ are ignored by the knowledge ingest path.
 ## Ingest behavior
 
 Browser entries are folded by canonical URL. If a page appears in both history
-and bookmarks, the SDK writes one source with both provenance kinds instead of
+and bookmarks, the platform writes one source with both provenance kinds instead of
 creating duplicate records. The resulting source metadata carries the folded
 provenance so later reads can tell exactly where a URL was seen.
 
@@ -35,9 +35,9 @@ provenance so later reads can tell exactly where a URL was seen.
 | `browserFirstRecordedAt` / `browserLastRecordedAt` | The earliest and latest times the URL was recorded |
 | `browserObservations` | Up to 32 per-entry records with source kind, browser, family, profile, and title |
 
-For new browser-only records, the SDK creates a synthetic `browser-history`
+For new browser-only records, the platform creates a synthetic `browser-history`
 extraction with title, summary, sections, and links. If the same canonical URL
-already exists from a richer URL or artifact ingest, the SDK preserves the
+already exists from a richer URL or artifact ingest, the platform preserves the
 existing connector, source type, artifact, content hash, and extraction, then
 adds browser provenance and graph links.
 
@@ -77,7 +77,7 @@ rolled back or duplicated just because compilation needs another attempt.
 The background job carries these outcomes and separate captured, partial/failed
 capture, held-compilation, and failed-compilation counts in its result.
 
-## SDK usage
+## platform usage
 
 ```ts
 const result = await knowledge.ingest.browserHistory({
@@ -130,7 +130,7 @@ navigation chrome while leaving non-HTML extraction behavior unchanged.
 ## Privacy notes
 
 Browser history is local user data. Clients should present this as an explicit
-opt-in action, show which browsers will be scanned, and disclose that the SDK
+opt-in action, show which browsers will be scanned, and disclose that the platform
 stores URL, title, timestamp, profile, folder, and visit-count metadata in the
 GoodVibes knowledge database. Some platforms may require extra filesystem
 permission, such as macOS Full Disk Access for Safari history.

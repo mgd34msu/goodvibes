@@ -5,8 +5,8 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { ensureBuiltinVoiceProviders } from '../sdk/src/platform/voice/builtin-providers.js';
-import { VoiceProviderRegistry } from '../sdk/src/platform/voice/provider-registry.js';
+import { ensureBuiltinVoiceProviders } from '../platform/src/platform/voice/builtin-providers.js';
+import { VoiceProviderRegistry } from '../platform/src/platform/voice/provider-registry.js';
 
 const MOCK_PROVIDER = {
   id: 'test-stt-provider',

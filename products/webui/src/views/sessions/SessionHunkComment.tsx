@@ -4,7 +4,7 @@ import {
   nativeSelectedDiffSelectorSchema,
   selectNativeDiffHunk,
   type NativeSelectedDiffSelector,
-} from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
+} from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 import { Dialog } from '../../components/ui/Dialog';
 import { Button } from '../../components/ui/Button';
 import { formatError } from '../../lib/errors';

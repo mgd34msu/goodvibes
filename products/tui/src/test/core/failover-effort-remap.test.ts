@@ -15,7 +15,7 @@ afterEach(() => { restoreUserErrorReading(); });
 //
 // Both halves of a failover go through switchNarrated, so the re-resolution
 // hooks in there: the level is snapped DOWN against the serving model and the
-// SDK's own sentence explaining the remap is surfaced verbatim.
+// platform's own sentence explaining the remap is surfaced verbatim.
 //
 // The retryTurn double below models the REAL rollback (see main.ts): the failed
 // turn's transcript is erased and only the notice handed in is re-posted. It
@@ -26,7 +26,7 @@ afterEach(() => { restoreUserErrorReading(); });
 // ---------------------------------------------------------------------------
 
 import { describe, expect, test } from 'bun:test';
-import type { ReasoningEffortSpec } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ReasoningEffortSpec } from '@goodvibes-jev/engine/platform/platform/providers';
 import { wireStreamEventMetrics, type WireStreamEventMetricsOptions } from '../../core/stream-event-wiring.ts';
 
 /** No curated family row matches these ids, so the attached spec governs. */

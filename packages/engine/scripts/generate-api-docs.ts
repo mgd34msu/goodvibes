@@ -2,8 +2,8 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { CONTRACT_EVENT_FIELD_SPECS, CONTRACT_EVENT_TYPES } from '../sdk/src/events/index.ts';
-import type { FieldSpec } from '../sdk/src/events/contracts/shared.ts';
+import { CONTRACT_EVENT_FIELD_SPECS, CONTRACT_EVENT_TYPES } from '../platform/src/events/index.ts';
+import type { FieldSpec } from '../platform/src/events/contracts/shared.ts';
 import type {
   OperatorContractManifest,
   OperatorEventContract,
@@ -12,7 +12,7 @@ import type {
 } from '../contracts/src/types.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SDK_ROOT = resolve(__dirname, '..');
+const ENGINE_ROOT = resolve(__dirname, '..');
 const CHECK_ONLY = process.argv.includes('--check');
 
 // The artifacts are generated FROM these types by refresh-contract-artifacts.ts,
@@ -20,10 +20,10 @@ const CHECK_ONLY = process.argv.includes('--check');
 // compile when the contract shape moves under it. Until this file was brought
 // under `tsc`, every field access below was `any`.
 const operatorContract = JSON.parse(
-  readFileSync(resolve(SDK_ROOT, 'contracts/artifacts/operator-contract.json'), 'utf8'),
+  readFileSync(resolve(ENGINE_ROOT, 'contracts/artifacts/operator-contract.json'), 'utf8'),
 ) as OperatorContractManifest;
 const peerContract = JSON.parse(
-  readFileSync(resolve(SDK_ROOT, 'contracts/artifacts/peer-contract.json'), 'utf8'),
+  readFileSync(resolve(ENGINE_ROOT, 'contracts/artifacts/peer-contract.json'), 'utf8'),
 ) as PeerContractManifest;
 
 /** One table row per field, nested object fields under their parent's path. */
@@ -291,9 +291,9 @@ function renderRuntimeEventReference(): string {
 }
 
 let changed = false;
-changed = writeIfChanged(resolve(SDK_ROOT, 'docs/reference-operator.md'), renderOperatorReference()) || changed;
-changed = writeIfChanged(resolve(SDK_ROOT, 'docs/reference-peer.md'), renderPeerReference()) || changed;
-changed = writeIfChanged(resolve(SDK_ROOT, 'docs/reference-runtime-events.md'), renderRuntimeEventReference()) || changed;
+changed = writeIfChanged(resolve(ENGINE_ROOT, 'docs/reference-operator.md'), renderOperatorReference()) || changed;
+changed = writeIfChanged(resolve(ENGINE_ROOT, 'docs/reference-peer.md'), renderPeerReference()) || changed;
+changed = writeIfChanged(resolve(ENGINE_ROOT, 'docs/reference-runtime-events.md'), renderRuntimeEventReference()) || changed;
 
 if (CHECK_ONLY) {
   console.log('generated API docs are in sync');

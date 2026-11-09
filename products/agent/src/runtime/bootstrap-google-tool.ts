@@ -12,13 +12,13 @@
  * so this is the route the capability index points at.
  */
 
-import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { registerAgentGoogleTool } from '../tools/agent-google-tool.ts';
-import { startLoopbackListener } from '@goodvibes-jev/engine/sdk/platform/google/node';
+import { startLoopbackListener } from '@goodvibes-jev/engine/platform/platform/google/node';
 import { getOutwardApprovalStore, OUTWARD_APPROVAL_GESTURE } from '../trust/outward-approvals.ts';
-import type { ConfigManager, SecretsManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager, SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { retainGoogleConnectionOwners } from '../tools/agent-google-admission.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 
 /** The slice of the runtime this wiring needs. Nothing wider. */
 export interface GoogleToolWiringDeps {

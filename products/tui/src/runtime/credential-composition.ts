@@ -17,8 +17,8 @@
  */
 
 import { SecretsManager } from '../config/secrets.ts';
-import { StepUpService } from '@goodvibes-jev/engine/sdk/daemon';
-import { PairingTokenManager } from '@goodvibes-jev/engine/sdk/platform/pairing';
+import { StepUpService } from '@goodvibes-jev/engine/platform/daemon';
+import { PairingTokenManager } from '@goodvibes-jev/engine/platform/platform/pairing';
 
 interface CredentialCompositionInput {
   readonly workingDirectory: string;

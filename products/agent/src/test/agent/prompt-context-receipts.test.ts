@@ -2,9 +2,9 @@ import { useMemoryReadings } from '../helpers/memory-readings.ts';
 import { describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/sdk/platform/state';
-import { buildRecallSnapshot, createLocalMemoryAccess } from '@goodvibes-jev/engine/sdk/platform/runtime/memory-spine';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/platform/platform/state';
+import { buildRecallSnapshot, createLocalMemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import { AgentPromptContextReceiptStore, composeRuntimePromptWithReceipt } from '../../agent/prompt-context-receipts.ts';
 import { importVibeFilesIntoMemoryOnce } from '../../agent/vibe-file.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
@@ -214,7 +214,7 @@ describe('prompt context receipts', () => {
     });
   });
 
-  // Cross-checks the SDK's reworded recall-snapshot note (recall-snapshot.ts:
+  // Cross-checks the platform's reworded recall-snapshot note (recall-snapshot.ts:
   // humanized age, honest "browse set (unfiltered)" vs "recall-eligible" count
   // clause) against the memory segment's own activeCount/suppressedCount, for
   // the exact wire-sourced shape services.memorySpineClient.recallSnapshot()
@@ -226,7 +226,7 @@ describe('prompt context receipts', () => {
   // suppressed and WHY, rather than pre-filtering at the recall floor and
   // losing the "eligible but outside the top-10 slice" vs "ineligible"
   // distinction the suppressed list reports per record.
-  describe('memory recall snapshot note coherence (2026-07 SDK reword)', () => {
+  describe('memory recall snapshot note coherence (2026-07 platform reword)', () => {
     test('a wire-sourced (mode: client) unfiltered snapshot note and the memory segment counts tell one coherent story', async () => {
       await withReceiptFixture(async ({ shellPaths, memoryRegistry }) => {
         const reviewed = await memoryRegistry.add({
@@ -248,7 +248,7 @@ describe('prompt context receipts', () => {
         // honestSearch, then hand the snapshot in as mode 'client', the
         // agent stamps 'client' whenever a daemon is adopted; this fixture
         // has no daemon, so the mode is set explicitly to exercise that path
-        // (recallSnapshotNote only surfaces the SDK note for 'client' or
+        // (recallSnapshotNote only surfaces the platform note for 'client' or
         // stale snapshots, see memoryRecallSnapshotNote in
         // prompt-context-receipts.ts).
         const browseSet = await memoryRegistry.honestSearch({}, { recall: false });

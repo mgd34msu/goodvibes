@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { REASONING_BUDGET_MAP } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { REASONING_BUDGET_MAP } from '@goodvibes-jev/engine/platform/platform/providers';
 
 // ---------------------------------------------------------------------------
 // REASONING_BUDGET_MAP constant

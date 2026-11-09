@@ -12,12 +12,12 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { adaptContract, repriceContractOwnerNode } from '../sdk/src/platform/runtime/fleet/adapters/contract.js';
-import { createProcessRegistry } from '../sdk/src/platform/runtime/fleet/index.js';
-import type { ProcessNode, ProcessRegistry } from '../sdk/src/platform/runtime/fleet/index.js';
-import type { ProcessRegistryDeps } from '../sdk/src/platform/runtime/fleet/registry.js';
-import type { AgentRecord } from '../sdk/src/platform/tools/agent/manager.js';
-import type { ContractView } from '../sdk/src/platform/contract/types.js';
+import { adaptContract, repriceContractOwnerNode } from '../platform/src/platform/runtime/fleet/adapters/contract.js';
+import { createProcessRegistry } from '../platform/src/platform/runtime/fleet/index.js';
+import type { ProcessNode, ProcessRegistry } from '../platform/src/platform/runtime/fleet/index.js';
+import type { ProcessRegistryDeps } from '../platform/src/platform/runtime/fleet/registry.js';
+import type { AgentRecord } from '../platform/src/platform/tools/agent/manager.js';
+import type { ContractView } from '../platform/src/platform/contract/types.js';
 import { makeContract, makeGroup, makeUnit } from './contract/fixtures.js';
 
 const T0 = 1_750_000_000_000;

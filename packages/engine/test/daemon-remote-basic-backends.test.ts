@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import { createDockerBackend } from '../sdk/src/platform/runtime/remote/host/backends/docker.ts';
-import { createLocalProcessBackend, tokenizeCommand } from '../sdk/src/platform/runtime/remote/host/backends/local-process.ts';
-import { BackendDispatchError, buildRemoteShellCommand, resolveTimeout, DEFAULT_SYNC_TIMEOUT_MS, MAX_SYNC_TIMEOUT_MS, type BackendContext } from '../sdk/src/platform/runtime/remote/host/backends/types.ts';
-import type { PeerRecord } from '../sdk/src/platform/runtime/remote/host/peer-registry.ts';
+import { createDockerBackend } from '../platform/src/platform/runtime/remote/host/backends/docker.ts';
+import { createLocalProcessBackend, tokenizeCommand } from '../platform/src/platform/runtime/remote/host/backends/local-process.ts';
+import { BackendDispatchError, buildRemoteShellCommand, resolveTimeout, DEFAULT_SYNC_TIMEOUT_MS, MAX_SYNC_TIMEOUT_MS, type BackendContext } from '../platform/src/platform/runtime/remote/host/backends/types.ts';
+import type { PeerRecord } from '../platform/src/platform/runtime/remote/host/peer-registry.ts';
 
 const captures: Array<{ args: string[]; options: Record<string, unknown>; stdin: string[] }> = [];
 const resolutions: string[] = [];

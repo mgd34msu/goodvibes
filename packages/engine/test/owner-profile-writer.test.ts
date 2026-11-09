@@ -1,4 +1,4 @@
-import type { ProfileProjection } from '../sdk/src/platform/owner-profile/types.ts';
+import type { ProfileProjection } from '../platform/src/platform/owner-profile/types.ts';
 /**
  * owner-profile-writer.test.ts
  *
@@ -13,15 +13,15 @@ import { afterEach, describe, expect, test, beforeEach } from 'bun:test';
 import { mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { OwnerProfileStore } from '../sdk/src/platform/owner-profile/store.ts';
-import { parseProfileDocument } from '../sdk/src/platform/owner-profile/document.ts';
+import { OwnerProfileStore } from '../platform/src/platform/owner-profile/store.ts';
+import { parseProfileDocument } from '../platform/src/platform/owner-profile/document.ts';
 import {
   persistProfileText,
   setField,
   type ProfilePersistIo,
-} from '../sdk/src/platform/owner-profile/writer.ts';
+} from '../platform/src/platform/owner-profile/writer.ts';
 import { useSecurityReadings } from './helpers/security-readings.ts';
-import { resetProcessUntrustedContentLedgerForTests } from '../sdk/src/platform/security/untrusted-content.ts';
+import { resetProcessUntrustedContentLedgerForTests } from '../platform/src/platform/security/untrusted-content.ts';
 
 useSecurityReadings();
 

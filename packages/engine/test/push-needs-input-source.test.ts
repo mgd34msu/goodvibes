@@ -7,8 +7,8 @@
  * notices and capture the composed PushMessage by overriding deliver().
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { PushService } from '../sdk/src/platform/push/index.js';
-import type { FleetNotice, PushMessage, VapidManager, PushSubscriptionStore } from '../sdk/src/platform/push/index.js';
+import { PushService } from '../platform/src/platform/push/index.js';
+import type { FleetNotice, PushMessage, VapidManager, PushSubscriptionStore } from '../platform/src/platform/push/index.js';
 import { trackDisposables } from './_helpers/disposables.ts';
 import { cancellableEscalationScheduler } from './_helpers/push-escalation.ts';
 

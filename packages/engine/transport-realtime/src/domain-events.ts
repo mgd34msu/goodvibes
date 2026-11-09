@@ -332,7 +332,7 @@ function createFilteredFeed<TEvent extends EventLike>(
  * to the underlying connection.
  *
  * @example
- * const events = sdk.realtime.viaSse();
+ * const events = client.realtime.viaSse();
  * // Without forSession, manual filter:
  * events.turn.onEnvelope('STREAM_DELTA', (e) => {
  *   if (e.sessionId !== mySessionId) return;

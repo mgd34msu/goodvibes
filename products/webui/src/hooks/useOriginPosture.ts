@@ -1,6 +1,6 @@
 /**
  * useOriginPosture, the honest TLS/capability posture of THIS surface's own origin
- * (SDK 1.8.0's LAN-http posture work, pairing.posture.get).
+ * (platform 1.8.0's LAN-http posture work, pairing.posture.get).
  *
  * A plain-http origin on a private network (a LAN IP, a .local name, localhost) is a
  * supported posture: the app works, but three browser-gated capabilities, service
@@ -17,7 +17,7 @@
  * mount post-sign-in (MicButton, NotificationSettings).
  */
 import { useQuery } from '@tanstack/react-query';
-import { sdk } from '../lib/goodvibes';
+import { client as platformClient } from '../lib/goodvibes';
 import type { OriginPosture } from '../lib/goodvibes';
 import { queryKeys } from '../lib/queries';
 
@@ -29,7 +29,7 @@ export interface UseOriginPosture {
 export function useOriginPosture(enabled = true): UseOriginPosture {
   const query = useQuery({
     queryKey: queryKeys.originPosture,
-    queryFn: () => sdk.operator.pairing.posture.get(
+    queryFn: () => platformClient.operator.pairing.posture.get(
       typeof window === 'undefined' ? undefined : window.location.origin,
     ),
     enabled,

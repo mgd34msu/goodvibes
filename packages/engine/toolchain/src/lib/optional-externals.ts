@@ -5,7 +5,7 @@
  * ── The gap this closes ───────────────────────────────────────────────────
  *
  * `@goodvibes-jev/engine` declares thirty packages under
- * `optionalDependencies`. The SDK now reaches every one of them through a
+ * `optionalDependencies`. The engine now reaches every one of them through a
  * dynamic import, so a RUNNING process without them reports the affected
  * feature unavailable and carries on. Measured against the real daemon binary
  * with `jsdom` and `@mozilla/readability` unresolvable at runtime: exit 1 with
@@ -21,7 +21,7 @@
  *     → error: Could not resolve: "jsdom"
  *
  * So an install that legitimately skipped an optional package could not
- * produce a binary at all, and the lazy runtime resolution the SDK had just
+ * produce a binary at all, and the lazy runtime resolution the engine had just
  * gained never got the chance to govern. The declaration only becomes true
  * when the compile honours it too.
  *
@@ -29,7 +29,7 @@
  *
  * For every package a manifest declares OPTIONAL and that is not installed,
  * the compile passes `--external <pkg>`: bun leaves the specifier for runtime,
- * the binary is produced, and the SDK's own unavailability report is what the
+ * the binary is produced, and the engine's own unavailability report is what the
  * operator sees. An optional package that IS installed is left alone and gets
  * bundled, which is what makes a normal build byte-for-byte what it was.
  *

@@ -14,7 +14,7 @@
  *     refusals are written sentences that must be READ, not summarised.
  *
  * So blockers and limitations are rendered VERBATIM from the resolver. They are the
- * SDK's own wording about why a row is not in force, and re-phrasing them here would
+ * platform's own wording about why a row is not in force, and re-phrasing them here would
  * be this surface inventing an explanation for a decision it did not make.
  *
  * The model's recall qualification rides `recallIsSyntheticOnly` from
@@ -27,7 +27,7 @@
 import { Button } from '../ui/Button';
 import { Checkbox } from '../ui/Checkbox';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import { formatError, isMethodNotInvokableError, isMethodUnavailableError } from '../../lib/errors';
 import { formatBytes } from '../../lib/object';
 import {
@@ -53,7 +53,7 @@ export function WakeWordSettings({ open }: WakeWordSettingsProps) {
   const { status, provision } = useWakeProvisioning(open);
 
   const setKey = useMutation({
-    mutationFn: ({ key, value }: { key: string; value: unknown }) => sdk.operator.config.set(key, value),
+    mutationFn: ({ key, value }: { key: string; value: unknown }) => platformClient.operator.config.set(key, value),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['voice', 'config'] });
     },

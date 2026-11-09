@@ -1,5 +1,5 @@
 /**
- * Coverage backfill for packages/sdk/src/observer/index.ts
+ * Coverage backfill for packages/platform/src/observer/index.ts
  *
  * Targets uncovered lines 147-165:
  * - createConsoleObserver debug-level: onTransportActivity, onEvent actually log
@@ -11,13 +11,13 @@ import {
   createConsoleObserver,
   createOpenTelemetryObserver,
   invokeObserver,
-} from '../sdk/src/observer/index.js';
+} from '../platform/src/observer/index.js';
 import type {
   OtelTracer,
   OtelMeter,
   OtelSpan,
-} from '../sdk/src/observer/index.js';
-import { GoodVibesSdkError } from '../errors/src/index.js';
+} from '../platform/src/observer/index.js';
+import { GoodVibesError } from '../errors/src/index.js';
 import { captureConsole } from './_helpers/test-timeout.js';
 
 // ---------------------------------------------------------------------------
@@ -94,7 +94,7 @@ describe('createConsoleObserver: debug level', () => {
     const obs = createConsoleObserver({ level: 'info' });
     const capture = captureConsole('error', /rate-limit/);
     try {
-      const err = new GoodVibesSdkError('test error', { category: 'rate_limit' });
+      const err = new GoodVibesError('test error', { category: 'rate_limit' });
       obs.onError?.(err);
       expect(capture.messages).toHaveLength(1);
       expect(capture.messages[0]?.join(' ')).toMatch(/rate-limit/);
@@ -154,15 +154,15 @@ describe('createOpenTelemetryObserver: onError', () => {
   test('onError increments error counter and ends span with ERROR status', () => {
     const { tracer, meter, spans, counters } = makeMockOtel();
     const obs = createOpenTelemetryObserver(tracer, meter);
-    const err = new GoodVibesSdkError('something failed', { category: 'rate_limit' });
+    const err = new GoodVibesError('something failed', { category: 'rate_limit' });
     obs.onError?.(err);
-    expect(counters.some((c) => c.name === 'sdk.errors' && c.value === 1)).toBe(true);
-    const errSpan = spans.find((s) => s.name === 'sdk.error');
-    expect(errSpan?.name).toBe('sdk.error');
+    expect(counters.some((c) => c.name === 'platform.errors' && c.value === 1)).toBe(true);
+    const errSpan = spans.find((s) => s.name === 'platform.error');
+    expect(errSpan?.name).toBe('platform.error');
     expect(errSpan!.ended).toBe(true);
-    expect(errSpan!.attrs['sdk.error.kind']).toBe('rate-limit');
-    expect(errSpan!.attrs['sdk.error.category']).toBe('rate_limit');
-    expect(errSpan!.attrs['sdk.error.recoverable']).toBe(false);
+    expect(errSpan!.attrs['platform.error.kind']).toBe('rate-limit');
+    expect(errSpan!.attrs['platform.error.category']).toBe('rate_limit');
+    expect(errSpan!.attrs['platform.error.recoverable']).toBe(false);
     expect(errSpan!.exceptions).toContain(err);
     expect((errSpan!.status as { code: number }).code).toBe(2); // SPAN_STATUS_ERROR
   });
@@ -239,12 +239,12 @@ describe('createOpenTelemetryObserver: onAuthTransition', () => {
     const { tracer, meter, spans, counters } = makeMockOtel();
     const obs = createOpenTelemetryObserver(tracer, meter);
     obs.onAuthTransition?.({ from: 'anonymous', to: 'token', reason: 'login' });
-    expect(counters.some((c) => c.name === 'sdk.auth.transitions' && c.value === 1)).toBe(true);
-    const authSpan = spans.find((s) => s.name === 'sdk.auth.transition');
+    expect(counters.some((c) => c.name === 'platform.auth.transitions' && c.value === 1)).toBe(true);
+    const authSpan = spans.find((s) => s.name === 'platform.auth.transition');
     expect(authSpan?.ended).toBe(true);
-    expect(authSpan?.attrs['sdk.auth.from']).toBe('anonymous');
-    expect(authSpan?.attrs['sdk.auth.to']).toBe('token');
-    expect(authSpan?.attrs['sdk.auth.reason']).toBe('login');
+    expect(authSpan?.attrs['platform.auth.from']).toBe('anonymous');
+    expect(authSpan?.attrs['platform.auth.to']).toBe('token');
+    expect(authSpan?.attrs['platform.auth.reason']).toBe('login');
   });
 });
 

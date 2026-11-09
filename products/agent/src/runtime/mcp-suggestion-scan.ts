@@ -3,7 +3,7 @@
  * mcp.json" advice, without the boot-time server spawn that used to come with
  * it.
  *
- * The SDK's `scheduleBackgroundMcpDiscovery()` does two unrelated things: it
+ * The platform's `scheduleBackgroundMcpDiscovery()` does two unrelated things: it
  * calls `connectAll()`, spawning every configured server the moment the agent
  * launches, and, two seconds later, it scans for INSTALLED-but-unconfigured
  * servers and prints suggestions. The suggestions are useful. The eager spawn
@@ -15,9 +15,9 @@
  * only looks at the filesystem.
  */
 
-import { scanMcpServers } from '@goodvibes-jev/engine/sdk/platform/discovery';
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
-import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
+import { scanMcpServers } from '@goodvibes-jev/engine/platform/platform/discovery';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
 
 /** How long after boot the scan runs, so it never competes with startup. */
 const SCAN_DELAY_MS = 2000;

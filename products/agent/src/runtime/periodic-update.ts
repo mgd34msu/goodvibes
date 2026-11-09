@@ -29,8 +29,8 @@ import { IS_WORKSPACE_DISTRIBUTION } from './workspace-update-policy.ts';
  * logic is provable without a network, a real swap, or real time passing.
  */
 import { retainSuiteUpdateConfiguration, type SuiteUpdateConfigurationSource } from '@goodvibes-jev/engine/terminal-shell/release-update-preflight';
-import { installedSuiteNeedsRepair, suiteUpdateRequiresRecovery, PeriodicUpdateLoop, type SuiteUpdateResult, type PeriodicCheckOutcome } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { installedSuiteNeedsRepair, suiteUpdateRequiresRecovery, PeriodicUpdateLoop, type SuiteUpdateResult, type PeriodicCheckOutcome } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { channelDeliveriesInFlight } from '../agent/channel-delivery.ts';
 import { applyUpdate, checkForUpdate, type ApplyUpdateOptions, type CheckForUpdateResult } from '../input/commands/update-runtime.ts';
 import { restartOntoUpdatedBinary } from '../cli/launch-auto-update.ts';

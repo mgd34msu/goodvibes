@@ -32,7 +32,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
-import { classifyInputSchema } from '../sdk/src/platform/control-plane/invoke-input-validation.js';
+import { classifyInputSchema } from '../platform/src/platform/control-plane/invoke-input-validation.js';
 import {
   EXPECTED_ROUTE_REGISTRARS,
   buildProbeCatalog,
@@ -42,7 +42,7 @@ import {
 
 const ROUTES_DIR = resolve(
   dirname(fileURLToPath(import.meta.url)),
-  '../sdk/src/platform/control-plane/routes',
+  '../platform/src/platform/control-plane/routes',
 );
 
 /** Registrar names follow this shape; the parser decides what is a declaration. */

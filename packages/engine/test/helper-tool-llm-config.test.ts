@@ -6,11 +6,11 @@ import {
   resolveToolLLM,
   ToolLLM,
   ToolLLMUnavailableError,
-} from '../sdk/src/platform/config/index.js';
-import type { LLMProvider } from '../sdk/src/platform/providers/interface.js';
-import type { ModelDefinition } from '../sdk/src/platform/providers/registry-types.js';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import type { ResolvedModelPricing } from '../sdk/src/platform/providers/model-pricing.js';
+} from '../platform/src/platform/config/index.js';
+import type { LLMProvider } from '../platform/src/platform/providers/interface.js';
+import type { ModelDefinition } from '../platform/src/platform/providers/registry-types.js';
+import type { ConfigManager } from '../platform/src/platform/config/manager.js';
+import type { ResolvedModelPricing } from '../platform/src/platform/providers/model-pricing.js';
 
 /** None of these tests exercise cost attribution, every route reports unpriced. */
 function resolveModelPricingStub(): ResolvedModelPricing {

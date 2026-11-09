@@ -10,13 +10,13 @@ import { EXTERNAL_SURFACE_SPECS, getExternalSurfaceAutoStartFieldId } from '../.
 import { buildGoodVibesSecretKey, buildGoodVibesSecretRef } from '../../input/onboarding/onboarding-wizard-helpers.ts';
 import { handleOnboardingWizardToken } from '../../input/onboarding/handler-onboarding-routes.ts';
 import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
-import { DEFAULT_CONFIG } from '@goodvibes-jev/engine/sdk/platform/config';
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { DEFAULT_CONFIG } from '@goodvibes-jev/engine/platform/platform/config';
+import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
 import { readOnboardingCheckMarker, type OnboardingSnapshotState } from '../../runtime/onboarding/index.ts';
 import { createDefaultUiRuntimeServices } from '../helpers/ui-services.ts';
 import { resetTestRuntimeServices, disposeTestRuntimeServicesAfterAll } from '../helpers/runtime-services.ts';
 import type { UiRuntimeServices } from '../../runtime/ui-services.ts';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { HostServiceStatus } from '@/runtime/index.ts';
 
 // Stop the shared test runtime graph when this file ends. Called here, not
@@ -694,7 +694,7 @@ describe('OnboardingWizardController', () => {
     // Daemon-by-default (docs/decisions/2026-07-05-daemon-by-default.md): onboarding
     // no longer writes daemon.enabled/danger.daemon at all, the loopback session
     // daemon is ambient infrastructure independent of these network-exposing
-    // capabilities, so the SDK's own default (or an existing explicit override)
+    // capabilities, so the platform's own default (or an existing explicit override)
     // governs untouched.
     expect(configValues.has('danger.daemon')).toBe(false);
     expect(configValues.has('daemon.enabled')).toBe(false);
@@ -755,7 +755,7 @@ describe('OnboardingWizardController', () => {
   });
 
   // behavior.hitlMode is gated by the hitl-ux-modes feature flag: ModeManager
-  // (SDK-owned, test-guarded there) only applies the chosen preset to the
+  // (platform-owned, test-guarded there) only applies the chosen preset to the
   // notification router when that flag is enabled. The TUI's job at the apply
   // seam is to never emit a hitlMode choice without its gating flag, otherwise
   // the choice is silently inert. These two tests pin that seam.

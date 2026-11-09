@@ -2,11 +2,11 @@
 import { expect, test } from 'bun:test';
 import { strictObject, string } from 'zod/v4';
 import { firstJsonSchemaFailure } from '@goodvibes-jev/engine/transport-http';
-import { workLedgerJsonSchema } from '../sdk/src/platform/control-plane/work-ledger-json-schema.js';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.js';
-import { buildOperatorContract } from '../sdk/src/platform/control-plane/operator-contract.js';
-import { legacyWorkLedgerManifestSchema, workLedgerCommandSchema } from '../sdk/src/platform/workflow/work-ledger/types.js';
-import { prepareLegacyWorkLedgerMigration, LEGACY_IMPORT_MAX_BYTES } from '../sdk/src/platform/workflow/work-ledger/legacy-import.js';
+import { workLedgerJsonSchema } from '../platform/src/platform/control-plane/work-ledger-json-schema.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
+import { buildOperatorContract } from '../platform/src/platform/control-plane/operator-contract.js';
+import { legacyWorkLedgerManifestSchema, workLedgerCommandSchema } from '../platform/src/platform/workflow/work-ledger/types.js';
+import { prepareLegacyWorkLedgerMigration, LEGACY_IMPORT_MAX_BYTES } from '../platform/src/platform/workflow/work-ledger/legacy-import.js';
 
 function manifest() {
   const prepared = prepareLegacyWorkLedgerMigration({ hostId: 'host', projectId: 'project', expectedLedgerRevision: 0,

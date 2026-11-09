@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { globToRegex, buildGlobMatcher } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { globToRegex, buildGlobMatcher } from '@goodvibes-jev/engine/platform/platform/utils';
 
 describe('globToRegex', () => {
   test('matches exact filename', () => {

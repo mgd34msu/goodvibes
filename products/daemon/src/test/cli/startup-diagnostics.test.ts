@@ -6,11 +6,11 @@ import * as fs from 'node:fs';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { applyRuntimeConfigValue } from '@goodvibes-jev/engine/terminal-shell';
-import { describeDerivedBindMismatch, readControlPlaneBinding } from '@goodvibes-jev/engine/sdk/platform/config';
-import { DaemonServer } from '@goodvibes-jev/engine/sdk/platform/daemon';
-import { registerInboxSurface } from '@goodvibes-jev/engine/sdk/platform/intake';
-import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
+import { describeDerivedBindMismatch, readControlPlaneBinding } from '@goodvibes-jev/engine/platform/platform/config';
+import { DaemonServer } from '@goodvibes-jev/engine/platform/platform/daemon';
+import { registerInboxSurface } from '@goodvibes-jev/engine/platform/platform/intake';
+import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
 import { isKnownConfigKey } from '../../config/config-key-guard.js';
 import { createDaemonCliConfiguration } from '../../cli/configuration.js';
 import { getPackageVersion } from '../../cli/help.js';
@@ -451,7 +451,7 @@ test('startup maintenance failures are non-fatal and diagnostics contain no raw 
 
 function inertConfiguredNativeServer(): hosts.DaemonHostServer {
   let running = false;
-  return { enable() { return true; }, async start() { running = true; }, async stop() { running = false; }, fenceRestartAdmission() {},
+  return { enable() { return true; }, async start() { running = true; }, completeHostStartup() {}, async stop() { running = false; }, fenceRestartAdmission() {},
     async waitForRestart() {}, get isRunning() { return running; }, boundHost: '127.0.0.1', boundPort: 3499, boundScheme: 'http' };
 }
 

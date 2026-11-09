@@ -20,17 +20,17 @@ import {
   HeadlineTable,
   headlineSource,
   deriveStallTell,
-} from '../sdk/src/platform/runtime/fleet/index.js';
-import type { ProcessNode } from '../sdk/src/platform/runtime/fleet/index.js';
-import type { ProcessRegistryDeps } from '../sdk/src/platform/runtime/fleet/registry.js';
-import type { AgentRecord } from '../sdk/src/platform/tools/agent/manager.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
+} from '../platform/src/platform/runtime/fleet/index.js';
+import type { ProcessNode } from '../platform/src/platform/runtime/fleet/index.js';
+import type { ProcessRegistryDeps } from '../platform/src/platform/runtime/fleet/registry.js';
+import type { AgentRecord } from '../platform/src/platform/tools/agent/manager.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
 import {
   emitAgentAwaitingTool,
   emitAgentProgress,
   emitAgentStreamDelta,
-} from '../sdk/src/platform/runtime/emitters/agents.js';
-import type { EmitterContext } from '../sdk/src/platform/runtime/emitters/index.js';
+} from '../platform/src/platform/runtime/emitters/agents.js';
+import type { EmitterContext } from '../platform/src/platform/runtime/emitters/index.js';
 
 const T0 = 1_750_000_000_000;
 const emitterCtx: EmitterContext = { sessionId: 'sess-1', traceId: 'trace-1', source: 'test' };

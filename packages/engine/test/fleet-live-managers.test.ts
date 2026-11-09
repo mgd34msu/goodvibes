@@ -7,12 +7,12 @@
  * without any stubbed read surface.
  */
 import { describe, expect, test } from 'bun:test';
-import { createProcessRegistry } from '../sdk/src/platform/runtime/fleet/index.js';
-import { AgentManager } from '../sdk/src/platform/tools/agent/manager.js';
-import { ProcessManager } from '../sdk/src/platform/tools/shared/process-manager.js';
-import { createWorkflowServices } from '../sdk/src/platform/tools/workflow/index.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.js';
+import { createProcessRegistry } from '../platform/src/platform/runtime/fleet/index.js';
+import { AgentManager } from '../platform/src/platform/tools/agent/manager.js';
+import { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.js';
+import { createWorkflowServices } from '../platform/src/platform/tools/workflow/index.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import type { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { useToolReadings } from './_helpers/tool-readings.ts';
 
 // Background spawns read which environment variable names are credentials;

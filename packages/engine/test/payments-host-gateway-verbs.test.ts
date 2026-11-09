@@ -1,4 +1,4 @@
-import { PaymentReplyInbox } from '../sdk/src/platform/payments/reply-inbox.js';
+import { PaymentReplyInbox } from '../platform/src/platform/payments/reply-inbox.js';
 /**
  * payments.* over a composed gateway catalog, called the way the control plane calls it.
  *
@@ -44,33 +44,33 @@ import { PaymentReplyInbox } from '../sdk/src/platform/payments/reply-inbox.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.js';
-import type { BrowserCheckoutSeam } from '../sdk/src/platform/control-plane/routes/browser-composition.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
+import type { BrowserCheckoutSeam } from '../platform/src/platform/control-plane/routes/browser-composition.js';
 import {
   DaemonControlPlaneHelper,
   type DaemonControlPlaneContext,
-} from '../sdk/src/platform/daemon/control-plane.js';
-import { BudgetLedger } from '../sdk/src/platform/payments/budget.js';
-import { CardMaterialRedactor } from '../sdk/src/platform/payments/card-redaction.js';
-import { MemoryCheckoutJournal } from '../sdk/src/platform/payments/checkout-registry.js';
-import type { CheckoutPageDriver } from '../sdk/src/platform/payments/checkout-page.js';
-import type { MerchantJudgePort } from '../sdk/src/platform/payments/merchant-recourse.js';
-import type { PaymentNotifier } from '../sdk/src/platform/payments/payment-ports.js';
-import type { PaymentsConfigReader } from '../sdk/src/platform/payments/payments-config.js';
-import { getProcessUntrustedContentLedger } from '../sdk/src/platform/security/untrusted-content.js';
-import { configBackedAddressStore } from '../sdk/src/platform/payments/host/address-store.js';
-import { DaemonApprovalStore } from '../sdk/src/platform/payments/host/approval-store.js';
-import { DaemonCardStore, type PaymentsSecretStore } from '../sdk/src/platform/payments/host/card-store.js';
-import { DaemonPurchaseLedger } from '../sdk/src/platform/payments/host/purchase-ledger.js';
-import { DurablePaymentOperations } from '../sdk/src/platform/payments/host/operation-store.js';
-import { ProtectedPaymentRequests } from '../sdk/src/platform/payments/host/protected-requests.js';
-import { PairingTokenManager } from '../sdk/src/platform/pairing/pairing-token-store.js';
-import { readPaymentWindowStatus } from '../sdk/src/platform/payments/browser.js';
+} from '../platform/src/platform/daemon/control-plane.js';
+import { BudgetLedger } from '../platform/src/platform/payments/budget.js';
+import { CardMaterialRedactor } from '../platform/src/platform/payments/card-redaction.js';
+import { MemoryCheckoutJournal } from '../platform/src/platform/payments/checkout-registry.js';
+import type { CheckoutPageDriver } from '../platform/src/platform/payments/checkout-page.js';
+import type { MerchantJudgePort } from '../platform/src/platform/payments/merchant-recourse.js';
+import type { PaymentNotifier } from '../platform/src/platform/payments/payment-ports.js';
+import type { PaymentsConfigReader } from '../platform/src/platform/payments/payments-config.js';
+import { getProcessUntrustedContentLedger } from '../platform/src/platform/security/untrusted-content.js';
+import { configBackedAddressStore } from '../platform/src/platform/payments/host/address-store.js';
+import { DaemonApprovalStore } from '../platform/src/platform/payments/host/approval-store.js';
+import { DaemonCardStore, type PaymentsSecretStore } from '../platform/src/platform/payments/host/card-store.js';
+import { DaemonPurchaseLedger } from '../platform/src/platform/payments/host/purchase-ledger.js';
+import { DurablePaymentOperations } from '../platform/src/platform/payments/host/operation-store.js';
+import { ProtectedPaymentRequests } from '../platform/src/platform/payments/host/protected-requests.js';
+import { PairingTokenManager } from '../platform/src/platform/pairing/pairing-token-store.js';
+import { readPaymentWindowStatus } from '../platform/src/platform/payments/browser.js';
 import {
   ATTACHED_PAYMENTS_METHOD_IDS,
   UNATTACHED_PAYMENTS_METHOD_IDS,
   registerPaymentsMethods,
-} from '../sdk/src/platform/payments/host/register.js';
+} from '../platform/src/platform/payments/host/register.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { usePaymentsReadings } from './helpers/payments-readings.ts';
 
@@ -440,7 +440,7 @@ describe('payments.* over the live HTTP routes', () => {
     // `isMaster` was the tempting answer and it means "this node holds at least
     // one inbound surface", which every node of a two-node cluster sharing a
     // mailbox and a Slack workspace satisfies. It would have answered true on
-    // both, and the SDK's gates.ts is explicit that exactly one node may act:
+    // both, and the platform's gates.ts is explicit that exactly one node may act:
     // today's spend does not replicate, so a second spender starts from a clean
     // daily budget. False everywhere is the safe direction and the honest one,
     // no payments election has been held.

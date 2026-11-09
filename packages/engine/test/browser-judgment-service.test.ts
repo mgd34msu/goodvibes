@@ -1,7 +1,7 @@
 import { describe, expect, spyOn, test } from 'bun:test';
 import { createSystemOnePort, SqliteDecisionLog, withDecisionLog, noul, readYesNo, STAKES_BANDS, type JudgmentPort, type YesNoReading } from '@goodvibes-jev/judgment';
-import { BrowserJudgmentError, type AuthenticatedPrincipal } from '../daemon-sdk/src/index.ts';
-import { BrowserJudgmentRegistry, BrowserJudgmentReferences, BrowserJudgmentService, type BrowserJudgmentAuthorization, type BrowserJudgmentRoute, type BrowserJudgmentResolvedInput } from '../sdk/src/platform/judgment-browser/index.ts';
+import { BrowserJudgmentError, type AuthenticatedPrincipal } from '../daemon-api/src/index.ts';
+import { BrowserJudgmentRegistry, BrowserJudgmentReferences, BrowserJudgmentService, type BrowserJudgmentAuthorization, type BrowserJudgmentRoute, type BrowserJudgmentResolvedInput } from '../platform/src/platform/judgment-browser/index.ts';
 
 const ID = 'webui.errors.daemon-refusal' as const;
 const names = ['session_not_found', 'session_closed', 'session_active', 'session_not_local', 'method_unknown'] as const;

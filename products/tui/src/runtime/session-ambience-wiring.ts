@@ -5,8 +5,8 @@
  * config, a notify line, a repaint) and main() only needs their teardowns and
  * the bounded exit-path audio stop.
  */
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { Orchestrator } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { Orchestrator } from '@goodvibes-jev/engine/platform/platform/core';
 import { wireSpokenTurnRuntime } from '../audio/spoken-turn-wiring.ts';
 import { attachSpokenTurnModelRouting } from '../audio/spoken-turn-model-routing.ts';
 import { createScriptableStatusline } from '../core/scriptable-statusline.ts';

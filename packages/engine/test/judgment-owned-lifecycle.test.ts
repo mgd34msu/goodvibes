@@ -4,9 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { installJudgmentPort, judgmentPort } from '@goodvibes-jev/engine/errors';
 import { noul, SqliteDecisionLog } from '@goodvibes-jev/judgment';
-import { createAsyncDisposalScope, createDisposalScope } from '../sdk/src/platform/runtime/disposal.ts';
-import { composeJudgment, type JudgmentSettingsSource } from '../sdk/src/platform/runtime/judgment-services.ts';
-import { decisionLogPath } from '../sdk/src/platform/state/decision-log.ts';
+import { createAsyncDisposalScope, createDisposalScope } from '../platform/src/platform/runtime/disposal.ts';
+import { composeJudgment, type JudgmentSettingsSource } from '../platform/src/platform/runtime/judgment-services.ts';
+import { decisionLogPath } from '../platform/src/platform/state/decision-log.ts';
 
 const request = { state: { fixture: 'native lifecycle' }, questions: { yes: noul('Is this a lifecycle fixture?') }, context: { site: 'test.native-lifecycle' } };
 const source = (endpoint: string, secrets: JudgmentSettingsSource['secrets'] = { get: async () => 'synthetic-key' }): JudgmentSettingsSource => ({

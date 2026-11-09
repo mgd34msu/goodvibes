@@ -15,8 +15,8 @@
  * ring-management methods and public accessor directly, without needing a live turn loop.
  */
 import { describe, expect, test } from 'bun:test';
-import { Orchestrator } from '../sdk/src/platform/core/orchestrator.js';
-import type { TurnInjectionRecord } from '../sdk/src/platform/agents/turn-knowledge-injection.js';
+import { Orchestrator } from '../platform/src/platform/core/orchestrator.js';
+import type { TurnInjectionRecord } from '../platform/src/platform/agents/turn-knowledge-injection.js';
 
 type OrchestratorPrivateSurface = {
   turnKnowledgeIdsAlreadySurfaced: Set<string>;

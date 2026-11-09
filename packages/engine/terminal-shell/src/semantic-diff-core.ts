@@ -11,12 +11,12 @@
  * unsupported, callers should treat null as "no semantic info available".
  */
 
-import { TreeSitterService } from '@goodvibes-jev/engine/sdk/platform/intelligence';
-import { extractSymbols } from '@goodvibes-jev/engine/sdk/platform/intelligence';
-import type { SymbolInfo } from '@goodvibes-jev/engine/sdk/platform/intelligence';
-import { detectLanguage } from '@goodvibes-jev/engine/sdk/platform/intelligence';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { TreeSitterService } from '@goodvibes-jev/engine/platform/platform/intelligence';
+import { extractSymbols } from '@goodvibes-jev/engine/platform/platform/intelligence';
+import type { SymbolInfo } from '@goodvibes-jev/engine/platform/platform/intelligence';
+import { detectLanguage } from '@goodvibes-jev/engine/platform/platform/intelligence';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 // ---------------------------------------------------------------------------
 // Public types

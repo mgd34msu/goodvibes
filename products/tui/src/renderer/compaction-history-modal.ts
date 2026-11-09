@@ -1,17 +1,17 @@
 /**
  * Compaction history text builder.
  *
- * Renders a read-only list of past compaction events sourced from the SDK's
+ * Renders a read-only list of past compaction events sourced from the platform's
  * module-level compaction event log (`getCompactionEvents()`).
  *
- * The SDK records CompactionEvent data (timestamps, token counts,
+ * The platform records CompactionEvent data (timestamps, token counts,
  * trigger, message counts) but does not expose a snapshot restore API.
  * Restore is list-only; users can view what compactions ran but cannot roll back.
  */
 
-import { getCompactionEvents } from '@goodvibes-jev/engine/sdk/platform/core';
+import { getCompactionEvents } from '@goodvibes-jev/engine/platform/platform/core';
 import { getCompactionQualityScore } from './compaction-quality.ts';
-import type { CompactionEvent } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { CompactionEvent } from '@goodvibes-jev/engine/platform/platform/core';
 import type { CompactionQualityScore } from './compaction-quality.ts';
 
 // ─── formatCompactionEvent ────────────────────────────────────────────────────
@@ -56,7 +56,7 @@ function fmtN(n: number): string {
 export function buildCompactionHistoryText(): string {
   const events = getCompactionEvents();
   if (events.length === 0) {
-    return '[Context] No compactions recorded this session. (Restore is not available: the SDK does not yet expose a snapshot restore API.)';
+    return '[Context] No compactions recorded this session. (Restore is not available: the platform does not yet expose a snapshot restore API.)';
   }
   const lines: string[] = [
     `[Context] Compaction history (${events.length} total, most recent first):`,
@@ -66,6 +66,6 @@ export function buildCompactionHistoryText(): string {
     const ev = ordered[i]!;
     lines.push('  ' + formatCompactionEvent(ev, ordered.length - i, getCompactionQualityScore(ev.timestamp)));
   }
-  lines.push('  (Restore not available: the SDK does not yet expose a snapshot restore API.)');
+  lines.push('  (Restore not available: the platform does not yet expose a snapshot restore API.)');
   return lines.join('\n');
 }

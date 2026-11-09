@@ -12,11 +12,11 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FakeMailboxServer } from './fake-imap-mailbox.ts';
-import { MailboxCursorStore } from '../../sdk/src/platform/email/inbound/cursor-store.ts';
-import type { CursorResolution } from '../../sdk/src/platform/email/inbound/cursor-store.ts';
-import { imapMailboxConnectionPort } from '../../sdk/src/platform/email/inbound/index.ts';
-import type { ImapMailboxConnectionOptions } from '../../sdk/src/platform/email/inbound/connection.ts';
-import type { MailboxCursor } from '../../sdk/src/platform/email/inbound/types.ts';
+import { MailboxCursorStore } from '../../platform/src/platform/email/inbound/cursor-store.ts';
+import type { CursorResolution } from '../../platform/src/platform/email/inbound/cursor-store.ts';
+import { imapMailboxConnectionPort } from '../../platform/src/platform/email/inbound/index.ts';
+import type { ImapMailboxConnectionOptions } from '../../platform/src/platform/email/inbound/connection.ts';
+import type { MailboxCursor } from '../../platform/src/platform/email/inbound/types.ts';
 import type {
   InboundCapabilityTransition,
   InboundMailNote,
@@ -30,7 +30,7 @@ import type {
   MailboxCursorPort,
   MailboxWire,
   WatcherClock,
-} from '../../sdk/src/platform/email/inbound/ports.ts';
+} from '../../platform/src/platform/email/inbound/ports.ts';
 
 // ---------------------------------------------------------------------------
 // Time

@@ -3,27 +3,27 @@
 
   "projectFolder": ".",
 
-  "mainEntryPointFilePath": "<projectFolder>/sdk/dist/index.d.ts",
+  "mainEntryPointFilePath": "<projectFolder>/platform/dist/index.d.ts",
 
   "bundledPackages": [
     "@goodvibes-jev/engine/contracts",
-    "@goodvibes-jev/engine/daemon-sdk",
+    "@goodvibes-jev/engine/daemon-api",
     "@goodvibes-jev/engine/errors",
-    "@goodvibes-jev/engine/operator-sdk",
-    "@goodvibes-jev/engine/peer-sdk",
+    "@goodvibes-jev/engine/operator-client",
+    "@goodvibes-jev/engine/peer-client",
     "@goodvibes-jev/engine/transport-core",
     "@goodvibes-jev/engine/transport-http",
     "@goodvibes-jev/engine/transport-realtime"
   ],
 
   "compiler": {
-    "tsconfigFilePath": "<projectFolder>/sdk/tsconfig.api-extractor.json",
+    "tsconfigFilePath": "<projectFolder>/platform/tsconfig.api-extractor.json",
     "overrideTsconfig": {
-      "extends": "./sdk/tsconfig.api-extractor.json",
+      "extends": "./platform/tsconfig.api-extractor.json",
       // Analyze one canonical sql.js declaration, alongside source-only ambient types.
-      "files": ["./sdk/dist/platform/types/sql-js.d.ts"],
-      "include": ["./sdk/src/platform/types/*.d.ts"],
-      "exclude": ["./sdk/src/platform/types/sql-js.d.ts"],
+      "files": ["./platform/dist/platform/types/sql-js.d.ts"],
+      "include": ["./platform/src/platform/types/*.d.ts"],
+      "exclude": ["./platform/src/platform/types/sql-js.d.ts"],
       "compilerOptions": {
         "customConditions": [],
         // The old packages resolved each other through their own package.json
@@ -31,23 +31,23 @@
         // one package whose exports name source files, so the same declaration
         // files are named here.
         "paths": {
-          "@goodvibes-jev/engine/sdk/browser/agent": [
-            "./sdk/dist/browser-agent.d.ts"
+          "@goodvibes-jev/engine/platform/browser/agent": [
+            "./platform/dist/browser-agent.d.ts"
           ],
-          "@goodvibes-jev/engine/sdk/browser/homeassistant": [
-            "./sdk/dist/browser-homeassistant.d.ts"
+          "@goodvibes-jev/engine/platform/browser/homeassistant": [
+            "./platform/dist/browser-homeassistant.d.ts"
           ],
-          "@goodvibes-jev/engine/sdk/browser/knowledge": [
-            "./sdk/dist/browser-knowledge.d.ts"
+          "@goodvibes-jev/engine/platform/browser/knowledge": [
+            "./platform/dist/browser-knowledge.d.ts"
           ],
-          "@goodvibes-jev/engine/sdk/contracts/node": [
-            "./sdk/dist/contracts-node.d.ts"
+          "@goodvibes-jev/engine/platform/contracts/node": [
+            "./platform/dist/contracts-node.d.ts"
           ],
-          "@goodvibes-jev/engine/sdk/platform/runtime/fleet/observed": [
-            "./sdk/dist/platform/runtime/fleet/observed/source.d.ts"
+          "@goodvibes-jev/engine/platform/platform/runtime/fleet/observed": [
+            "./platform/dist/platform/runtime/fleet/observed/source.d.ts"
           ],
-          "@goodvibes-jev/engine/sdk/sql-js": [
-            "./sdk/dist/platform/types/sql-js.d.ts"
+          "@goodvibes-jev/engine/platform/sql-js": [
+            "./platform/dist/platform/types/sql-js.d.ts"
           ],
           "@goodvibes-jev/engine/contracts": [
             "./contracts/dist/index.d.ts"
@@ -56,12 +56,12 @@
             "./contracts/dist/*.d.ts",
             "./contracts/dist/*/index.d.ts"
           ],
-          "@goodvibes-jev/engine/daemon-sdk": [
-            "./daemon-sdk/dist/index.d.ts"
+          "@goodvibes-jev/engine/daemon-api": [
+            "./daemon-api/dist/index.d.ts"
           ],
-          "@goodvibes-jev/engine/daemon-sdk/*": [
-            "./daemon-sdk/dist/*.d.ts",
-            "./daemon-sdk/dist/*/index.d.ts"
+          "@goodvibes-jev/engine/daemon-api/*": [
+            "./daemon-api/dist/*.d.ts",
+            "./daemon-api/dist/*/index.d.ts"
           ],
           "@goodvibes-jev/engine/errors": [
             "./errors/dist/index.d.ts"
@@ -70,26 +70,26 @@
             "./errors/dist/*.d.ts",
             "./errors/dist/*/index.d.ts"
           ],
-          "@goodvibes-jev/engine/operator-sdk": [
-            "./operator-sdk/dist/index.d.ts"
+          "@goodvibes-jev/engine/operator-client": [
+            "./operator-client/dist/index.d.ts"
           ],
-          "@goodvibes-jev/engine/operator-sdk/*": [
-            "./operator-sdk/dist/*.d.ts",
-            "./operator-sdk/dist/*/index.d.ts"
+          "@goodvibes-jev/engine/operator-client/*": [
+            "./operator-client/dist/*.d.ts",
+            "./operator-client/dist/*/index.d.ts"
           ],
-          "@goodvibes-jev/engine/peer-sdk": [
-            "./peer-sdk/dist/index.d.ts"
+          "@goodvibes-jev/engine/peer-client": [
+            "./peer-client/dist/index.d.ts"
           ],
-          "@goodvibes-jev/engine/peer-sdk/*": [
-            "./peer-sdk/dist/*.d.ts",
-            "./peer-sdk/dist/*/index.d.ts"
+          "@goodvibes-jev/engine/peer-client/*": [
+            "./peer-client/dist/*.d.ts",
+            "./peer-client/dist/*/index.d.ts"
           ],
-          "@goodvibes-jev/engine/sdk": [
-            "./sdk/dist/index.d.ts"
+          "@goodvibes-jev/engine/platform": [
+            "./platform/dist/index.d.ts"
           ],
-          "@goodvibes-jev/engine/sdk/*": [
-            "./sdk/dist/*.d.ts",
-            "./sdk/dist/*/index.d.ts"
+          "@goodvibes-jev/engine/platform/*": [
+            "./platform/dist/*.d.ts",
+            "./platform/dist/*/index.d.ts"
           ],
           "@goodvibes-jev/engine/terminal-shell": [
             "./terminal-shell/dist/index.d.ts"
@@ -133,7 +133,7 @@
 
   "apiReport": {
     "enabled": true,
-    "reportFileName": "goodvibes-sdk.api.md",
+    "reportFileName": "goodvibes-platform.api.md",
     "reportFolder": "<projectFolder>/etc/",
     "reportTempFolder": "<projectFolder>/temp/"
   },
@@ -156,7 +156,7 @@
         "logLevel": "warning"
       },
       // TS1259: Module can only be default-imported using 'esModuleInterop'.
-      // Triggered by: type-only star-re-exports in sdk/src/transport-core.ts,
+      // Triggered by: type-only star-re-exports in platform/src/transport-core.ts,
       // transport-http.ts, and transport-realtime.ts that re-export from bundledPackages
       // without a default import reference (e.g. `export * from '@goodvibes-jev/engine/transport-core'`).
       // Re-evaluate when api-extractor upgrades to a TS6+ bundled compiler.
@@ -169,11 +169,11 @@
       "TS2305": { "logLevel": "none" },
       // TS2307: Cannot find module or its corresponding type declarations.
       // Triggered by: optional peer deps declared as ambient modules but not installed:
-      //   - expo-secure-store, react-native-keychain (sdk/src/platform/types/peer-deps.d.ts)
-      //   - pdfjs-dist/legacy/build/pdf.mjs (sdk/src/platform/types/pdfjs-dist.d.ts)
-      //   - sql.js (sdk/src/platform/types/sql-js.d.ts)
-      //   - WASM path modules (sdk/src/platform/types/wasm-files.d.ts)
-      // Re-evaluate if any of these deps is promoted to a direct SDK dependency or bundledPackage.
+      //   - expo-secure-store, react-native-keychain (platform/src/platform/types/peer-deps.d.ts)
+      //   - pdfjs-dist/legacy/build/pdf.mjs (platform/src/platform/types/pdfjs-dist.d.ts)
+      //   - sql.js (platform/src/platform/types/sql-js.d.ts)
+      //   - WASM path modules (platform/src/platform/types/wasm-files.d.ts)
+      // Re-evaluate if any of these deps is promoted to a direct platform dependency or bundledPackage.
       "TS2307": { "logLevel": "none" },
       // TS2344: Type does not satisfy the constraint.
       // Triggered by: conditional type narrowing in api-extractor's reduced checker against
@@ -183,16 +183,16 @@
       "TS2344": { "logLevel": "none" },
       // TS2694: Namespace has no exported member.
       // Triggered by: ambient `declare module` blocks in
-      //   - sdk/src/platform/types/peer-deps.d.ts (expo-secure-store, react-native-keychain)
-      //   - sdk/src/platform/types/sql-js.d.ts (sql.js Database/SqlJsStatic)
-      //   - sdk/src/platform/types/wasm-files.d.ts (WASM path modules)
+      //   - platform/src/platform/types/peer-deps.d.ts (expo-secure-store, react-native-keychain)
+      //   - platform/src/platform/types/sql-js.d.ts (sql.js Database/SqlJsStatic)
+      //   - platform/src/platform/types/wasm-files.d.ts (WASM path modules)
       // api-extractor cannot resolve namespace members from ambient module augmentations.
       // Re-evaluate when these type files migrate to direct package exports or bundledPackages.
       "TS2694": { "logLevel": "none" },
       // TS2707: Generic type requires between N and M type arguments.
       // Triggered by: ReadableStream<Uint8Array> uses in
-      // sdk/src/platform/runtime/integration/helpers.ts:617 and
-      // sdk/src/platform/runtime/telemetry/api-stream.ts:44,
+      // platform/src/platform/runtime/integration/helpers.ts:617 and
+      // platform/src/platform/runtime/telemetry/api-stream.ts:44,
       // api-extractor's bundled lib.dom.d.ts omits default type parameter values
       // present in the full TypeScript lib.
       // Re-evaluate when api-extractor ships a TS6-compatible bundled compiler with

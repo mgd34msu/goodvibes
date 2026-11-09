@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { redactConfigValue, redactObjectByPath } from '../sdk/src/platform/tools/goodvibes-runtime/credential-redaction.js';
+import { redactConfigValue, redactObjectByPath } from '../platform/src/platform/tools/goodvibes-runtime/credential-redaction.js';
 let previous: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previous = installJudgmentPort(undefined); });
 afterEach(() => { installJudgmentPort(previous); });

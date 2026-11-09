@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { autonomyIntake, readAutonomyIntake, type AutonomyIntakeOptions } from '@goodvibes-jev/engine/sdk/platform/routing';
+import { autonomyIntake, readAutonomyIntake, type AutonomyIntakeOptions } from '@goodvibes-jev/engine/platform/platform/routing';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { cleanupResearchScreeningFixtures, researchScreeningFixture } from '../helpers/research-screening.ts';

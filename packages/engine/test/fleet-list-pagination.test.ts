@@ -24,13 +24,13 @@ import { describe, expect, test } from 'bun:test';
 import {
   createFleetListHandler,
   type FleetQueryOnlyRegistry,
-} from '../sdk/src/platform/control-plane/routes/fleet.js';
+} from '../platform/src/platform/control-plane/routes/fleet.js';
 import type {
   FleetQueryFilter,
   FleetSnapshot,
   ProcessNode,
-} from '../sdk/src/platform/runtime/fleet/types.js';
-import type { GatewayMethodInvocation } from '../sdk/src/platform/control-plane/method-catalog-shared.js';
+} from '../platform/src/platform/runtime/fleet/types.js';
+import type { GatewayMethodInvocation } from '../platform/src/platform/control-plane/method-catalog-shared.js';
 
 function node(id: string, startedAt: number | undefined): ProcessNode {
   return {

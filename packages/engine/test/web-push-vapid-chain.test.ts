@@ -39,17 +39,17 @@ import {
   verify as cryptoVerify,
   type KeyObject,
 } from 'node:crypto';
-import { bootDaemon, type BootedDaemon } from '../sdk/src/platform/daemon/boot.ts';
-import { SecretsManager } from '../sdk/src/platform/config/secrets.ts';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { VapidManager, VAPID_SECRET_KEY } from '../sdk/src/platform/push/index.ts';
-import { attachFleetEmitBridge } from '../sdk/src/platform/runtime/fleet/index.ts';
+import { bootDaemon, type BootedDaemon } from '../platform/src/platform/daemon/boot.ts';
+import { SecretsManager } from '../platform/src/platform/config/secrets.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { VapidManager, VAPID_SECRET_KEY } from '../platform/src/platform/push/index.ts';
+import { attachFleetEmitBridge } from '../platform/src/platform/runtime/fleet/index.ts';
 import type {
   FleetSnapshot,
   ProcessAttentionReason,
   ProcessNode,
   ProcessState,
-} from '../sdk/src/platform/runtime/fleet/index.ts';
+} from '../platform/src/platform/runtime/fleet/index.ts';
 
 const TOKEN = 'vapid-chain-token';
 let home: string;

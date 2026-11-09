@@ -2,7 +2,7 @@
  * sandbox-exec-config.ts, TUI-local synthetic settings entries for
  * sandbox.egressAllowlist / sandbox.workspaceWritable.
  *
- * The SDK's per-command exec sandbox (bubblewrap on Linux, gated by the
+ * The platform's per-command exec sandbox (bubblewrap on Linux, gated by the
  * graduation-tracked `exec-sandbox` feature flag) reads its full configuration
  * straight off `configManager.getCategory('sandbox')` inside
  * `registerAllTools` (platform/tools/index.ts), `sandbox.enabled`,
@@ -27,7 +27,7 @@
  * comma-separated list and parsed back into an array on commit (see
  * isSandboxExecListConfigKey's use in settings-modal.ts#commitEdit).
  */
-import type { ConfigKey, ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigKey, ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
 import type { SettingEntry, SettingsCategory } from './settings-modal-types.ts';
 
 export const SANDBOX_EGRESS_ALLOWLIST_CONFIG_KEY = 'sandbox.egressAllowlist' as ConfigKey;

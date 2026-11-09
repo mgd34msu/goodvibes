@@ -1,14 +1,14 @@
 import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
-import { decisionOrClassic, isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { decisionOrClassic, isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import type { AgentNoteRecord } from '../agent/note-registry.ts';
 import { type AgentResearchRunRecord } from '../agent/research-run-registry.ts';
-import type { WorkPlanItem } from '@goodvibes-jev/engine/sdk/platform/workflow';
+import type { WorkPlanItem } from '@goodvibes-jev/engine/platform/platform/workflow';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { acquireLearningCuratorSource, type LearningRecord, type LearningCuratorSource, type LearningCandidateCollection, type LearningCuratorNativeContext } from './agent-harness-learning-curator-source.ts';
 import { readLearningGrade, readLearningProposalTarget, readLearningMemoryClass } from './agent-harness-learning-curator-readings.ts';
 import { captureCatalogData, captureCatalogMethods, captureCatalogSnapshotGuard, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { LearningCandidate, LearningCandidateDraft, LearningProposalTarget, SessionInfoLike, VibeCandidateKind, LocalLearningCandidateDomain } from './agent-harness-learning-curator-types.ts';
 import { candidateBase, isReviewed, learningPromotionReference, recordedPromotionReferences, localRegistryModelRoute, localRegistryRoute, missingRequirementCount, routeValue } from './agent-harness-learning-curator-common.ts';
 import { consolidationCandidatesForDomain } from './agent-harness-learning-curator-consolidation.ts';

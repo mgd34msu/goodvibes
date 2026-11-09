@@ -34,7 +34,7 @@ const WS_ONLY_METHOD_IDS = [
   'sessions.search',
   'push.vapid.get',
   'push.subscriptions.list',
-  // Durable remembered-approval rules (SDK round adopting the pricing
+  // Durable remembered-approval rules (platform round adopting the pricing
   // resolver / approval-rule store): read/delete only by design, rules are
   // written by remembered approval decisions, never by a verb.
   'permissions.rules.list',

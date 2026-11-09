@@ -1,4 +1,4 @@
-import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
 
 export interface AgentHarnessToolArgs {

@@ -39,14 +39,14 @@ export const { handleSettingsModalToken } = createSettingsModalRoute<
 });
 import '@goodvibes-jev/engine/terminal-shell/runtime-setting-reset';
 export { handleSelectionModalToken, handleBookmarkModalToken } from '@goodvibes-jev/engine/terminal-shell/modal-input-routes';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import '../providers/reasoning-effort-surface.ts';
 import type { CommandContext } from './command-registry.ts';
 import type { ConfigModal } from './config-modal.ts';
 import { openTtsProviderPicker, openTtsVoicePicker } from './tts-settings-actions.ts';
 import { openThemePicker } from './theme-settings-actions.ts';
 import { isTextBackspace } from './delete-key-policy.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 type SessionPickerRouteState = {
   sessionPickerModal: {

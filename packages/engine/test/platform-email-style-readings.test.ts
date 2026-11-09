@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { DecisionModelsDisabledError, decisionModelPolicyState, installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { classifyTone, composeDraftReply, countSentences, extractSenderName, extractStyleProfile, StyleReplyReadingError } from '../sdk/src/platform/email/style-reply.js';
+import { classifyTone, composeDraftReply, countSentences, extractSenderName, extractStyleProfile, StyleReplyReadingError } from '../platform/src/platform/email/style-reply.js';
 import { taskRouteSourceFixture, exactRouteSourceSpans } from './_helpers/task-route-source.ts';
 
 let prior: ReturnType<typeof installJudgmentPort>;

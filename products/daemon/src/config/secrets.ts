@@ -7,16 +7,16 @@ export type {
   SecretStorageMode,
   SecretStorageReview,
   SecretWriteOptions,
-} from '@goodvibes-jev/engine/sdk/platform/config';
+} from '@goodvibes-jev/engine/platform/platform/config';
 
 import {
-  SecretsManager as SdkSecretsManager,
-  type SecretsManagerOptions as SdkSecretsManagerOptions,
-} from '@goodvibes-jev/engine/sdk/platform/config';
-import { isSecretRefInput } from '@goodvibes-jev/engine/sdk/platform/config';
+  SecretsManager as PlatformSecretsManager,
+  type SecretsManagerOptions as PlatformSecretsManagerOptions,
+} from '@goodvibes-jev/engine/platform/platform/config';
+import { isSecretRefInput } from '@goodvibes-jev/engine/platform/platform/config';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from './surface.ts';
 
-export type SecretsManagerOptions = Omit<SdkSecretsManagerOptions, 'surfaceRoot'>;
+export type SecretsManagerOptions = Omit<PlatformSecretsManagerOptions, 'surfaceRoot'>;
 
 const RAW_SECRET_LITERAL_PREFIX = '__GOODVIBES_LITERAL_V1__';
 
@@ -46,7 +46,7 @@ function decodeLiteralSecret(value: string): string | null {
   }
 }
 
-export class SecretsManager extends SdkSecretsManager {
+export class SecretsManager extends PlatformSecretsManager {
   constructor(options: SecretsManagerOptions) {
     super({
       ...options,
@@ -65,13 +65,13 @@ export class SecretsManager extends SdkSecretsManager {
     return decodeLiteralSecret(value) ?? value;
   }
 
-  override resolveLocalCredentialSnapshot(key: string): ReturnType<SdkSecretsManager['resolveLocalCredentialSnapshot']> {
+  override resolveLocalCredentialSnapshot(key: string): ReturnType<PlatformSecretsManager['resolveLocalCredentialSnapshot']> {
     const snapshot = super.resolveLocalCredentialSnapshot(key);
     if (snapshot.state !== 'resolved') return snapshot;
     return { ...snapshot, value: decodeLiteralSecret(snapshot.value) ?? snapshot.value };
   }
 
-  override async set(key: string, value: string, options?: Parameters<SdkSecretsManager['set']>[2]): Promise<void> {
+  override async set(key: string, value: string, options?: Parameters<PlatformSecretsManager['set']>[2]): Promise<void> {
     await super.set(key, shouldStoreAsLiteral(value) ? encodeLiteralSecret(value) : value, options);
   }
 }

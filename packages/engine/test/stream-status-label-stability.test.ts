@@ -14,10 +14,10 @@
  * and the status label depends only on the tool name.
  */
 import { describe, expect, test } from 'bun:test';
-import { createInitialConversationState } from '../sdk/src/platform/runtime/store/domains/conversation.ts';
-import { updateConversationState } from '../sdk/src/platform/runtime/store/helpers/reducers/conversation.ts';
-import { formatPartialToolPreview } from '../sdk/src/platform/runtime/store/helpers/reducers/shared.ts';
-import type { ConversationDomainState } from '../sdk/src/platform/runtime/store/domains/conversation.ts';
+import { createInitialConversationState } from '../platform/src/platform/runtime/store/domains/conversation.ts';
+import { updateConversationState } from '../platform/src/platform/runtime/store/helpers/reducers/conversation.ts';
+import { formatPartialToolPreview } from '../platform/src/platform/runtime/store/helpers/reducers/shared.ts';
+import type { ConversationDomainState } from '../platform/src/platform/runtime/store/domains/conversation.ts';
 
 const TURN_ID = 'turn-1';
 

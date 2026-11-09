@@ -1,7 +1,7 @@
-import type { ArtifactDescriptor, ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { ArtifactDescriptor, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { agentArtifactEffectGuard, assertAgentArtifactBytes, captureAgentArtifactSource, captureAgentExportPath } from './agent-artifact-effect.ts';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';

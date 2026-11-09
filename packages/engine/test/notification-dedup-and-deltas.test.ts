@@ -15,16 +15,16 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { ChannelReplyPipeline } from '../sdk/src/platform/channels/reply-pipeline.ts';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
-import { emitAgentProgress } from '../sdk/src/platform/runtime/emitters/index.ts';
+import { ChannelReplyPipeline } from '../platform/src/platform/channels/reply-pipeline.ts';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
+import { emitAgentProgress } from '../platform/src/platform/runtime/emitters/index.ts';
 import {
   findRoutableHostAddress,
   isWildcardHost,
   normalizeReachableBaseUrl,
   resolveReachableBaseUrl,
   type NetworkInterfaceReader,
-} from '../sdk/src/platform/utils/reachable-base-url.ts';
+} from '../platform/src/platform/utils/reachable-base-url.ts';
 
 // ---------------------------------------------------------------------------
 // Delta-only progress + duplicate suppression

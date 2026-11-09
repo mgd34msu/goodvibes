@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { createDomainDispatch, createRuntimeStore } from '../sdk/src/platform/runtime/store/index.js';
-import { SchedulerTaskAdapter } from '../sdk/src/platform/runtime/tasks/adapters/scheduler-adapter.js';
-import type { ScheduledTask, TaskRunRecord } from '../sdk/src/platform/scheduler/scheduler.js';
+import { createDomainDispatch, createRuntimeStore } from '../platform/src/platform/runtime/store/index.js';
+import { SchedulerTaskAdapter } from '../platform/src/platform/runtime/tasks/adapters/scheduler-adapter.js';
+import type { ScheduledTask, TaskRunRecord } from '../platform/src/platform/scheduler/scheduler.js';
 
 describe('runtime store lifecycle seams', () => {
   test('task events do not synthesize records or double-count terminal state', () => {

@@ -1,12 +1,12 @@
 /** Owned process: queue a real source2 attempt behind a running native body, then exit without cleanup. */
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { nativeConversationIntakeLookupResultSchema, type NativeConversationIntakeCaptureRequest } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
-import { nativeWorkExecutionSnapshotSchema } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
+import { nativeConversationIntakeLookupResultSchema, type NativeConversationIntakeCaptureRequest } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
+import { nativeWorkExecutionSnapshotSchema } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
 import { createNativeIntakeExecutionHttpFixture, type NativeIntakeExecutionHttpWire } from './native-intake-execution-http-fixture.js';
 import { intakeBarrier } from './native-intake-http-fixture.js';
 
-if (process.env.GOODVIBES_SDK_TEST_RUNNER !== '1') throw new Error('Only the owned guarded parent can run this fixture child');
+if (process.env.GOODVIBES_ENGINE_TEST_RUNNER !== '1') throw new Error('Only the owned guarded parent can run this fixture child');
 const root = process.argv[2], serializedInput = process.argv[3];
 if (!root || !serializedInput) throw new Error('Owned root and synthetic source required');
 const input = JSON.parse(serializedInput) as NativeConversationIntakeCaptureRequest;

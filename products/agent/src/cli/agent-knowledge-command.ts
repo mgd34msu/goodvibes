@@ -31,7 +31,7 @@ import {
 } from './agent-knowledge-format.ts';
 import { AGENT_KNOWLEDGE_METHODS, DELEGATION_METHOD } from './agent-knowledge-methods.ts';
 import {
-  createAgentSdk,
+  createAgentPlatform,
   fetchConnectedHostStatus,
   findDisallowedKnowledgeScopeFlag,
   formatScopeFlagRejection,
@@ -91,7 +91,7 @@ export async function handleAgentKnowledgeCommand(runtime: CliCommandRuntime): P
 
   if (normalized === 'status') {
     const result = await runKnowledgeCall(runtime, AGENT_KNOWLEDGE_METHODS.status, async (connection) => (
-      await createAgentSdk(connection).knowledge.status()
+      await createAgentPlatform(connection).knowledge.status()
     ));
     if (!result.ok) return { output: formatFailure(result, json), exitCode: 1 };
     return {
@@ -107,7 +107,7 @@ export async function handleAgentKnowledgeCommand(runtime: CliCommandRuntime): P
     const selectedMode = mode === 'concise' || mode === 'standard' || mode === 'detailed' ? mode : 'standard';
     const limit = readPositiveInt(rest, '--limit', 8);
     const result = await runKnowledgeCall(runtime, AGENT_KNOWLEDGE_METHODS.ask, async (connection) => (
-      await createAgentSdk(connection).knowledge.ask({
+      await createAgentPlatform(connection).knowledge.ask({
         query,
         limit,
         mode: selectedMode,
@@ -128,7 +128,7 @@ export async function handleAgentKnowledgeCommand(runtime: CliCommandRuntime): P
     if (!query) return { output: 'Usage: goodvibes-agent knowledge search <query> [--limit <n>]', exitCode: 2 };
     const limit = readPositiveInt(rest, '--limit', 10);
     const result = await runKnowledgeCall(runtime, AGENT_KNOWLEDGE_METHODS.search, async (connection) => (
-      await createAgentSdk(connection).knowledge.search({ query, limit })
+      await createAgentPlatform(connection).knowledge.search({ query, limit })
     ));
     if (!result.ok) return { output: formatFailure(result, json), exitCode: 1 };
     return {
@@ -528,7 +528,7 @@ export async function handleCompatCommand(runtime: CliCommandRuntime): Promise<C
   const metadata = readPackageMetadata();
   const connectedHost = await fetchConnectedHostStatus(connection);
   const knowledgeRoute = await runKnowledgeCall(runtime, AGENT_KNOWLEDGE_METHODS.status, async (routeConnection) => (
-    await createAgentSdk(routeConnection).knowledge.status()
+    await createAgentPlatform(routeConnection).knowledge.status()
   ));
   const knowledgeRouteReady = knowledgeRoute.ok;
   const hostCompatible = connectedHost.ok && knowledgeRouteReady;
@@ -576,8 +576,8 @@ export async function handleDelegateCommand(runtime: CliCommandRuntime): Promise
     };
   }
   const result = await runKnowledgeCall<DelegationResult>(runtime, DELEGATION_METHOD, async (connection) => {
-    const sdk = createAgentSdk(connection);
-    const created = await sdk.operator.invoke('sessions.create', {
+    const platformClient = createAgentPlatform(connection);
+    const created = await platformClient.operator.invoke('sessions.create', {
       title: `Agent delegation: ${task.slice(0, 72)}`,
       surfaceKind: 'goodvibes-agent',
       surfaceId: 'goodvibes-agent-cli',
@@ -586,7 +586,7 @@ export async function handleDelegateCommand(runtime: CliCommandRuntime): Promise
       ? created.session.id
       : null;
     if (!sessionId) throw new Error('sessions.create returned no session id.');
-    const message = await sdk.operator.invoke('sessions.messages.create', {
+    const message = await platformClient.operator.invoke('sessions.messages.create', {
       sessionId,
       body: buildDelegationBody(task, reviewRequested),
       surfaceKind: 'goodvibes-agent',

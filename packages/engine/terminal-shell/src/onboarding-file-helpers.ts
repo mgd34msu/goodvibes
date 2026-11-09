@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, unlinkSync } from 'node:fs';
-import { atomicWriteFileSync } from '@goodvibes-jev/engine/sdk/platform/config';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/config';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 export type RollbackAction = () => Promise<void> | void;
 export function createOnboardingFileHelpers(
   ports: {

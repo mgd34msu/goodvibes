@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { validatePluginError } from '../sdk/src/events/contracts.ts';
+import { validatePluginError } from '../platform/src/events/contracts.ts';
 
 describe('PLUGIN_ERROR validator', () => {
   test('accepts the payload the plugin manager emits', () => {

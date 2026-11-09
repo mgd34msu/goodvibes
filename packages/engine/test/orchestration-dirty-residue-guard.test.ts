@@ -12,11 +12,11 @@ import { join } from 'node:path';
 import {
   excludeUntouchedLaunchResidue,
   snapshotDirtyTree,
-} from '../sdk/src/platform/orchestration/dirty-guard.js';
-import { runPhase } from '../sdk/src/platform/orchestration/phase-runner.js';
-import { createCancellationRegistry } from '../sdk/src/platform/orchestration/cancellation.js';
-import { emptyWorkItemUsage, type Phase, type WorkItem, type Workstream } from '../sdk/src/platform/orchestration/types.js';
-import { AgentWorktree } from '../sdk/src/platform/agents/worktree.js';
+} from '../platform/src/platform/orchestration/dirty-guard.js';
+import { runPhase } from '../platform/src/platform/orchestration/phase-runner.js';
+import { createCancellationRegistry } from '../platform/src/platform/orchestration/cancellation.js';
+import { emptyWorkItemUsage, type Phase, type WorkItem, type Workstream } from '../platform/src/platform/orchestration/types.js';
+import { AgentWorktree } from '../platform/src/platform/agents/worktree.js';
 import {
   createOrchestrationHarness,
   engineerReportOutput,

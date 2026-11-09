@@ -16,7 +16,7 @@ import { AgentNoteRegistry } from '../agent/note-registry.ts';
 import { AgentPersonaRegistry } from '../agent/persona-registry.ts';
 import { AgentRoutineRegistry } from '../agent/routine-registry.ts';
 import { AgentSkillRegistry } from '../agent/skill-registry.ts';
-import type { MemoryApi } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { deleteAgentWorkspaceMemoryEditor } from './agent-workspace-memory-editor.ts';
 import type { AgentWorkspaceLocalEditor, AgentWorkspaceLocalEditorKind } from './agent-workspace-types.ts';
 

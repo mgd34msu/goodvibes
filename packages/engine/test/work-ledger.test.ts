@@ -4,7 +4,7 @@ import {
   WorkLedgerAccessError, type WorkEvidenceTarget, type WorkLedgerActor, type WorkLedgerClock,
   type WorkLedgerDecision, type WorkLedgerEvent, type WorkLedgerResult,
   type WorkLedgerState, type WorkLedgerStorage, type WorkLedgerRejection,
-} from '../sdk/src/platform/workflow/work-ledger/index.ts';
+} from '../platform/src/platform/workflow/work-ledger/index.ts';
 
 const PROJECT = 'native-ledger-test';
 

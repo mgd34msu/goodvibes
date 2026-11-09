@@ -39,7 +39,7 @@
  *   vs dark. With `probePalette` unset the bytes written and the filtering are
  *   exactly as described above.
  */
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { PALETTE_QUERIES, type PaletteProbeResolution } from '../terminal-palette-probe.js';
 import { TerminalPaletteReader, type TerminalPaletteReaderOptions } from '../terminal-palette-reader.js';
 import { setTerminalPalette } from '../terminal-palette-store.js';

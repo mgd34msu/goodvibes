@@ -55,7 +55,7 @@ import {
   type AudioCaptureHandlers,
   type CaptureChildProcess,
   type VoiceInputStopReason,
-} from '../sdk/src/platform/voice/capture/index.js';
+} from '../platform/src/platform/voice/capture/index.js';
 
 /** A recorder subprocess stand-in the test drives byte by byte. */
 function fakeProcess(): CaptureChildProcess & {

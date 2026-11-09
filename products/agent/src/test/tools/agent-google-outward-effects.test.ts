@@ -36,7 +36,7 @@ import { useSecurityReadings } from '../helpers/security-readings.ts';
  */
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '@goodvibes-jev/engine/sdk/platform/google';
+import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '@goodvibes-jev/engine/platform/platform/google';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
@@ -45,7 +45,7 @@ import {
   getSessionUntrustedContentLedger,
   resetSessionUntrustedContentLedgerForTests,
 } from '../../trust/untrusted-content.ts';
-import { startTurnForOwnerInput } from '@goodvibes-jev/engine/sdk/platform/security';
+import { startTurnForOwnerInput } from '@goodvibes-jev/engine/platform/platform/security';
 
 let home = '';
 

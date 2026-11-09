@@ -18,13 +18,13 @@
  * unaffected.
  */
 import { describe, expect, test } from 'bun:test';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
 import {
   GatewayVerbError,
   readGatewayVerbRefusal,
-} from '../sdk/src/platform/control-plane/routes/gateway-verb-error.ts';
-import { methodDescriptor, objectSchema, STRING_SCHEMA } from '../sdk/src/platform/control-plane/method-catalog-shared.ts';
-import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../sdk/src/platform/daemon/control-plane.ts';
+} from '../platform/src/platform/control-plane/routes/gateway-verb-error.ts';
+import { methodDescriptor, objectSchema, STRING_SCHEMA } from '../platform/src/platform/control-plane/method-catalog-shared.ts';
+import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../platform/src/platform/daemon/control-plane.ts';
 
 /** A refusal class a consuming runtime defines for itself, not our class. */
 class HandlerError extends Error {

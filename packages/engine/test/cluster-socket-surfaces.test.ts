@@ -15,9 +15,9 @@
  * workspace it has not won.
  */
 import { describe, expect, test } from 'bun:test';
-import { SocketSurfaceSupervisor } from '../sdk/src/platform/daemon/facade-cluster-sockets.js';
-import { providerSurface, surfaceIdFor } from '../sdk/src/platform/cluster/surface-id.js';
-import type { ClusterSurfaceKey } from '../sdk/src/platform/cluster/surface-id.js';
+import { SocketSurfaceSupervisor } from '../platform/src/platform/daemon/facade-cluster-sockets.js';
+import { providerSurface, surfaceIdFor } from '../platform/src/platform/cluster/surface-id.js';
+import type { ClusterSurfaceKey } from '../platform/src/platform/cluster/surface-id.js';
 import {
   addNode,
   advance,

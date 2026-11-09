@@ -20,20 +20,20 @@ import {
   readFailureTransience,
   structuredTransience,
   type TransienceBasis,
-} from '../sdk/src/platform/integrations/delivery.ts';
-import { AutomationDeliveryManager } from '../sdk/src/platform/automation/delivery-manager.ts';
+} from '../platform/src/platform/integrations/delivery.ts';
+import { AutomationDeliveryManager } from '../platform/src/platform/automation/delivery-manager.ts';
 import {
   readAutomationRunTransience,
   scheduleAutomationFailureFollowUp,
-} from '../sdk/src/platform/automation/manager-runtime-delivery.ts';
-import { AutomationManager } from '../sdk/src/platform/automation/manager-runtime.ts';
-import type { AutomationJob } from '../sdk/src/platform/automation/jobs.ts';
-import type { AutomationRun } from '../sdk/src/platform/automation/runs.ts';
-import type { AutomationJobStore } from '../sdk/src/platform/automation/store/jobs.ts';
-import type { AutomationRunStore } from '../sdk/src/platform/automation/store/runs.ts';
-import type { RouteBindingManager } from '../sdk/src/platform/channels/index.ts';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
+} from '../platform/src/platform/automation/manager-runtime-delivery.ts';
+import { AutomationManager } from '../platform/src/platform/automation/manager-runtime.ts';
+import type { AutomationJob } from '../platform/src/platform/automation/jobs.ts';
+import type { AutomationRun } from '../platform/src/platform/automation/runs.ts';
+import type { AutomationJobStore } from '../platform/src/platform/automation/store/jobs.ts';
+import type { AutomationRunStore } from '../platform/src/platform/automation/store/runs.ts';
+import type { RouteBindingManager } from '../platform/src/platform/channels/index.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

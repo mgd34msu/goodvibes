@@ -11,8 +11,8 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { EntryType, Question } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { readBundleRisk, type ManagedBundleChange } from '../sdk/src/platform/runtime/settings/control-plane-store.ts';
-import type { ConfigKey } from '../sdk/src/platform/config/index.ts';
+import { readBundleRisk, type ManagedBundleChange } from '../platform/src/platform/runtime/settings/control-plane-store.ts';
+import type { ConfigKey } from '../platform/src/platform/config/index.ts';
 
 type RiskState = { readonly key: string };
 

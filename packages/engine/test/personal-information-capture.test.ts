@@ -14,11 +14,11 @@ import {
   parseOwnerChannelList,
   resolveCaptureAuthority,
   PersonalCaptureHolder,
-} from '../sdk/src/platform/personal-capture/index.js';
-import { buildSharedSessionAgentSpawnRoutingInput } from '../sdk/src/platform/control-plane/session-intents.js';
-import { proposePlan, confirmPlan } from '../sdk/src/platform/occasions/capture.js';
-import { normalizePlanDetail, parsePlanLine } from '../sdk/src/platform/occasions/grammar.js';
-import { createProfileTool } from '../sdk/src/platform/tools/profile/index.js';
+} from '../platform/src/platform/personal-capture/index.js';
+import { buildSharedSessionAgentSpawnRoutingInput } from '../platform/src/platform/control-plane/session-intents.js';
+import { proposePlan, confirmPlan } from '../platform/src/platform/occasions/capture.js';
+import { normalizePlanDetail, parsePlanLine } from '../platform/src/platform/occasions/grammar.js';
+import { createProfileTool } from '../platform/src/platform/tools/profile/index.js';
 
 /** The itinerary as the owner actually pasted it. */
 const ITINERARY_DETAILS = [

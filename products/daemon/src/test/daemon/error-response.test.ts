@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { jsonErrorResponse } from '@goodvibes-jev/engine/sdk/platform/daemon';
-import { ProviderError } from '@goodvibes-jev/engine/sdk/platform/types';
+import { jsonErrorResponse } from '@goodvibes-jev/engine/platform/platform/daemon';
+import { ProviderError } from '@goodvibes-jev/engine/platform/platform/types';
 const failure = () => new ProviderError('inceptionlabs chat request failed 401: token rejected', {
   statusCode: 401, provider: 'inceptionlabs', operation: 'chat', phase: 'request', requestId: 'req-401', providerCode: 'invalid_api_key',
 });

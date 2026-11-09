@@ -4,7 +4,7 @@
 //
 // A best-of-N item may be NON-LEAF: other items can depend on it. The scheduler
 // holds each such dependent until the group's winner is picked AND merged, then
-// resolves the dependency to that winner (SDK scheduler.ts attemptGroup
+// resolves the dependency to that winner (platform scheduler.ts attemptGroup
 // DependencyStatus). This module mirrors that status computation as a pure
 // function so the /workstream attempts surface can show, honestly, which
 // dependents are held/waiting/released for a group, and reflect the losing
@@ -25,7 +25,7 @@ export interface AttemptGraphItem {
 export type AttemptGroupDependencyStatus = 'waiting' | 'satisfied' | 'failed' | 'not-a-group';
 
 /**
- * Mirror of the SDK scheduler's attemptGroupDependencyStatus: resolve a
+ * Mirror of the platform scheduler's attemptGroupDependencyStatus: resolve a
  * best-of-N source id to the status of its sibling group.
  *   - a picked winner that has merged   → 'satisfied' (dependents release)
  *   - a picked winner not yet merged     → 'waiting'

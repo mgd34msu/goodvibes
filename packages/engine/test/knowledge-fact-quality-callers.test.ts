@@ -8,13 +8,13 @@ import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { upsertObservedKnowledgeNode } from '../sdk/src/platform/knowledge/store-node-observation.js';
-import { createKnowledgeFactQualityReader } from '../sdk/src/platform/knowledge/semantic/fact-quality.js';
-import { enrichKnowledgeSource } from '../sdk/src/platform/knowledge/semantic/enrichment.js';
-import { classifyGap } from '../sdk/src/platform/knowledge/semantic/self-improvement-gap-context.js';
-import { JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.js';
-import type { KnowledgeSemanticLlm } from '../sdk/src/platform/knowledge/semantic/types.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { upsertObservedKnowledgeNode } from '../platform/src/platform/knowledge/store-node-observation.js';
+import { createKnowledgeFactQualityReader } from '../platform/src/platform/knowledge/semantic/fact-quality.js';
+import { enrichKnowledgeSource } from '../platform/src/platform/knowledge/semantic/enrichment.js';
+import { classifyGap } from '../platform/src/platform/knowledge/semantic/self-improvement-gap-context.js';
+import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input.js';
+import type { KnowledgeSemanticLlm } from '../platform/src/platform/knowledge/semantic/types.js';
 const spaceId = 'fact-quality-callers';
 const sourceText = 'Model K has a mass of 12 kg. Model K does not support Bluetooth. Replace its filter every six months.';
 const roots: string[] = [];
@@ -144,7 +144,7 @@ describe('shared fact quality at live callers', () => {
 
 test('active graph-only provenance is read rather than silently filtered', async () => {
   const item = await fixture(); readings();
-  const { reviewKnowledgeNodeRecord } = await import('../sdk/src/platform/knowledge/service-node-admin.js');
+  const { reviewKnowledgeNodeRecord } = await import('../platform/src/platform/knowledge/service-node-admin.js');
   const draft = await item.store.upsertNode({ id: 'graph-only', kind: 'fact', slug: 'graph-only', title: 'Mass', summary: 'Model K has a mass of 12 kg.', status: 'draft',
     metadata: { knowledgeSpaceId: spaceId, semanticKind: 'fact', factKind: 'specification', value: '12 kg', evidence: 'Model K has a mass of 12 kg.' } });
   await reviewKnowledgeNodeRecord(item.store, { id: draft.id, decision: 'accept' });
@@ -164,7 +164,7 @@ test('acknowledged proposal writes advance only their own rows and retain unrela
   quality.acknowledgeWritten(written);
   const edge = await item.store.upsertEdge({ fromKind: 'source', fromId: item.source.id, toKind: 'node', toId: written.id, relation: 'supports_fact' });
   quality.acknowledgeEdgeWritten(edge); quality.assertCurrent();
-  const { reviewKnowledgeNodeRecord } = await import('../sdk/src/platform/knowledge/service-node-admin.js');
+  const { reviewKnowledgeNodeRecord } = await import('../platform/src/platform/knowledge/service-node-admin.js');
   await reviewKnowledgeNodeRecord(item.store, { id: item.fact.id, decision: 'reject' });
   expect(() => quality.assertCurrent()).toThrow();
   expect(item.store.getNode(written.id)).toBe(written);
@@ -174,8 +174,8 @@ test('unavailable repaired-gap quality leaves preexisting refinement task untouc
   const item = await fixture();
   await item.store.upsertEdge({ fromKind: 'source', fromId: item.source.id, toKind: 'node', toId: item.fact.id, relation: 'supports_fact' });
   await item.store.upsertEdge({ fromKind: 'source', fromId: item.source.id, toKind: 'node', toId: item.gap.id, relation: 'repairs_gap' });
-  const { runKnowledgeSemanticSelfImprovement } = await import('../sdk/src/platform/knowledge/semantic/self-improvement.js');
-  const { upsertRefinementTaskForGap } = await import('../sdk/src/platform/knowledge/semantic/self-improvement-tasks.js');
+  const { runKnowledgeSemanticSelfImprovement } = await import('../platform/src/platform/knowledge/semantic/self-improvement.js');
+  const { upsertRefinementTaskForGap } = await import('../platform/src/platform/knowledge/semantic/self-improvement-tasks.js');
   await upsertRefinementTaskForGap(item.store, spaceId, { gap: item.gap, sources: [item.source], linkedObjects: [item.subject] }, 'manual', 'blocked', 'Existing task must remain unchanged.');
   const before = JSON.stringify(item.store.listRefinementTasks());
   installJudgmentPort(undefined);
@@ -187,7 +187,7 @@ test('unavailable repaired-gap quality leaves preexisting refinement task untouc
 
 test('repaired gap classification preserves an existing terminal task after positive reading', async () => {
   const item = await fixture();
-  const { upsertRefinementTaskForGap } = await import('../sdk/src/platform/knowledge/semantic/self-improvement-tasks.js');
+  const { upsertRefinementTaskForGap } = await import('../platform/src/platform/knowledge/semantic/self-improvement-tasks.js');
   const context = { gap: item.gap, sources: [item.source], linkedObjects: [item.subject], facts: [item.fact], repairSourceIds: [item.source.id] };
   const terminal = await upsertRefinementTaskForGap(item.store, spaceId, context, 'manual', 'closed', 'Already completed.');
   const classification = await classifyGap(context, false, [], item.store);
@@ -198,7 +198,7 @@ test('repaired gap classification preserves an existing terminal task after posi
 
 test('original usefulness retirement during task upsert await preserves previous task', async () => {
   const item = await fixture(); const fake = readings();
-  const { upsertRefinementTaskForGap } = await import('../sdk/src/platform/knowledge/semantic/self-improvement-tasks.js');
+  const { upsertRefinementTaskForGap } = await import('../platform/src/platform/knowledge/semantic/self-improvement-tasks.js');
   const context = { gap: item.gap, sources: [item.source], linkedObjects: [item.subject], facts: [item.fact], repairSourceIds: [item.source.id] };
   const previous = await upsertRefinementTaskForGap(item.store, spaceId, context, 'manual', 'blocked', 'Existing state.');
   const classification = await classifyGap(context, false, [], item.store);
@@ -216,7 +216,7 @@ test('negative usefulness classification retains authority through task commit',
   const context = { gap: item.gap, sources: [item.source], linkedObjects: [item.subject], facts: [item.fact], repairSourceIds: [item.source.id] };
   const classification = await classifyGap(context, false, [], item.store);
   expect(classification.action).toBe('repair'); expect(classification.assertCurrent).toBeDefined();
-  const { upsertRefinementTaskForGap } = await import('../sdk/src/platform/knowledge/semantic/self-improvement-tasks.js');
+  const { upsertRefinementTaskForGap } = await import('../platform/src/platform/knowledge/semantic/self-improvement-tasks.js');
   const original = item.store.upsertRefinementTask.bind(item.store);
   const write = spyOn(item.store, 'upsertRefinementTask').mockImplementation(async (...args) => { installJudgmentPort({ ...fake.port }); return original(...args); });
   try { await expect(upsertRefinementTaskForGap(item.store, spaceId, context, 'manual', 'detected', 'Negative evidence requires repair.', {}, classification.assertCurrent)).rejects.toThrow(); }

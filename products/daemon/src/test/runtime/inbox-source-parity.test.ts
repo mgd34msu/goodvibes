@@ -1,8 +1,8 @@
 /** Exact missing pinned-daemon assertions through the real product graph/registrar. */
 import { expect, spyOn, test } from 'bun:test';
-import { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { registerInboxSurface, type InboxListOutput, type InboundProviderAdapter } from '@goodvibes-jev/engine/sdk/platform/intake';
+import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { registerInboxSurface, type InboxListOutput, type InboundProviderAdapter } from '@goodvibes-jev/engine/platform/platform/intake';
 import { startDaemonFixture, type DaemonFixture } from '../../testing/daemon-fixture.js';
 
 const method = 'channels.inbox.list';

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { captureOwnedJson, retainOwnedJson, retainStrictJudgmentJson } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { captureOwnedJson, retainOwnedJson, retainStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
 
 test('retained snapshots reuse canonical complete capture and keep original data mutable', () => {
   const shared = { value: 'ordinary' };

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import {
   installEcosystemCatalogEntry,
   loadEcosystemCatalog,
-} from '../sdk/dist/platform/runtime/ecosystem/catalog.js';
+} from '../platform/dist/platform/runtime/ecosystem/catalog.js';
 
 describe('ecosystem catalog paths', () => {
   const testTmpRoot = join(import.meta.dir, '.tmp-tests');

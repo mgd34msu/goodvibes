@@ -140,7 +140,7 @@ export function createTerminalCommandRegistry<
       return Array.from(this.commands.values());
     }
     /**
-     * list - Compatibility alias for the simpler SDK registry surface.
+     * list - Compatibility alias for the simpler platform registry surface.
      */
     list(): TerminalSlashCommand<Context>[] {
       return this.getAll();

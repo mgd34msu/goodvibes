@@ -6,7 +6,7 @@
  *  1. A daemon-grade `RuntimeServices` still satisfies the SHARED part of the
  *     client shape (`ClientRuntimeServicesFromHost`), field for field, with no
  *     change to `RuntimeServices` at all. This is what makes the split additive
- *     rather than a fork: SDK code that only needs "a composition that can run a
+ *     rather than a fork: platform code that only needs "a composition that can run a
  *     turn" takes the narrow view and accepts either graph.
  *
  *  2. The client shape does NOT require the daemon furniture, the gateway
@@ -26,9 +26,9 @@
  * Everything resolves through the package NAME so the exports map is exercised
  * exactly as a consumer install would (checked by `bun run types:check`).
  */
-import type { bootstrap } from '@goodvibes-jev/engine/sdk/platform/runtime';
-import type { SharedSessionBroker } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import type { UserPermissionRuleStore } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import type { bootstrap } from '@goodvibes-jev/engine/platform/platform/runtime';
+import type { SharedSessionBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import type { UserPermissionRuleStore } from '@goodvibes-jev/engine/platform/platform/permissions';
 
 declare function stub<T>(): T;
 
@@ -37,7 +37,7 @@ declare const full: bootstrap.RuntimeServices;
 const sharedView: bootstrap.ClientRuntimeServicesFromHost = full;
 
 // ...and the runtime helper agrees (it is the same assignment, given a name).
-declare const asView: typeof import('@goodvibes-jev/engine/sdk/platform/runtime').bootstrap.asClientRuntimeView;
+declare const asView: typeof import('@goodvibes-jev/engine/platform/platform/runtime').bootstrap.asClientRuntimeView;
 const sharedViewViaHelper: bootstrap.ClientRuntimeServicesFromHost = asView(full);
 
 // (2) The client shape carries none of the daemon furniture. Each of these is a

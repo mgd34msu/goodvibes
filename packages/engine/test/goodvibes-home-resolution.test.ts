@@ -20,7 +20,7 @@ import {
   resolveGoodVibesHome,
   resolveGoodVibesHomeOwnership,
   resolveGoodVibesTreeDirectory,
-} from '../sdk/src/platform/config/goodvibes-home.ts';
+} from '../platform/src/platform/config/goodvibes-home.ts';
 
 describe('the tree root every surface shares', () => {
   test('an unset, blank, or whitespace value means the login home, never the filesystem root', () => {

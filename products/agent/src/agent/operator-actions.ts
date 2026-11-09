@@ -1,4 +1,4 @@
-import type { OperatorMethodInput } from '@goodvibes-jev/engine/sdk/contracts';
+import type { OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
 import { requireOperatorHttpBinding } from './operator-contract-routes.ts';
 import { scheduleNextRouteLines } from './schedule-next-routes.ts';
 

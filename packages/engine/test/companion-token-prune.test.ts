@@ -2,7 +2,7 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { pruneStaleOperatorTokens } from '../sdk/src/platform/pairing/companion-token.ts';
+import { pruneStaleOperatorTokens } from '../platform/src/platform/pairing/companion-token.ts';
 
 const roots: string[] = [];
 afterEach(() => {

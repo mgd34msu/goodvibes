@@ -29,11 +29,11 @@
  * The table below is the single source of truth for "does family X register
  * live here". Two properties make it one rather than a sample:
  *
- *   1. Every family carries the REASON it registers, read from the SDK's
+ *   1. Every family carries the REASON it registers, read from the platform's
  *      register-gateway-verb-groups.ts and this repo's service-graph.ts, not
  *      inferred. A family is either always registered (built internally from
  *      shellPaths/config) or gated on a dep this composition threads. When a
- *      future SDK bump stops wiring one, the failure names the dep.
+ *      future platform bump stops wiring one, the failure names the dep.
  *   2. `no handler-attached verb in this composition is missing from this
  *      table` sweeps the other direction: a verb that gains a handler here and
  *      is named nowhere fails, so a new family arrives with a stated reason
@@ -150,7 +150,7 @@ const VERB_FAMILIES: readonly VerbFamily[] = [
   },
   {
     family: 'push.*',
-    reason: 'Always registered: the SDK builds the push subscription service internally from shellPaths and config.',
+    reason: 'Always registered: the platform builds the push subscription service internally from shellPaths and config.',
     methodIds: [
       'push.vapid.get', 'push.subscriptions.list', 'push.subscriptions.create',
       'push.subscriptions.delete', 'push.subscriptions.verify', 'push.subscriptions.reconcile',
@@ -163,7 +163,7 @@ const VERB_FAMILIES: readonly VerbFamily[] = [
   },
   {
     family: 'workspaces.registrations.* / workspaces.resolve',
-    reason: 'Always registered: the SDK constructs the shared WorkspaceRegistrationStore internally from shellPaths.',
+    reason: 'Always registered: the platform constructs the shared WorkspaceRegistrationStore internally from shellPaths.',
     methodIds: [
       'workspaces.registrations.list', 'workspaces.registrations.add',
       'workspaces.registrations.remove', 'workspaces.resolve',
@@ -185,12 +185,12 @@ const VERB_FAMILIES: readonly VerbFamily[] = [
   },
   {
     family: 'skills.*',
-    reason: 'Always registered: the SDK constructs a FileSystemSkillStore-backed SkillService internally from shellPaths.',
+    reason: 'Always registered: the platform constructs a FileSystemSkillStore-backed SkillService internally from shellPaths.',
     methodIds: ['skills.list', 'skills.get', 'skills.create', 'skills.update', 'skills.delete'],
   },
   {
     family: 'principals.*',
-    reason: 'Always registered: the SDK constructs the PrincipalRegistry internally from shellPaths. Deeper round-trip: gateway-ci-principals-channel-profiles-round-trip.test.ts.',
+    reason: 'Always registered: the platform constructs the PrincipalRegistry internally from shellPaths. Deeper round-trip: gateway-ci-principals-channel-profiles-round-trip.test.ts.',
     methodIds: [
       'principals.list', 'principals.get', 'principals.create',
       'principals.update', 'principals.delete', 'principals.resolve',
@@ -198,7 +198,7 @@ const VERB_FAMILIES: readonly VerbFamily[] = [
   },
   {
     family: 'channels.profiles.*',
-    reason: 'Always registered: the SDK constructs the ChannelProfileRegistry internally from shellPaths. Deeper round-trip: gateway-ci-principals-channel-profiles-round-trip.test.ts.',
+    reason: 'Always registered: the platform constructs the ChannelProfileRegistry internally from shellPaths. Deeper round-trip: gateway-ci-principals-channel-profiles-round-trip.test.ts.',
     methodIds: [
       'channels.profiles.list', 'channels.profiles.get',
       'channels.profiles.set', 'channels.profiles.delete',
@@ -236,7 +236,7 @@ const VERB_FAMILIES: readonly VerbFamily[] = [
   },
   {
     family: 'sessions.permissionMode.* / sessions.contextUsage.get',
-    reason: "Always registered: the SDK's createSessionRuntimeControls is built internally from configManager plus runtimeStore, both always present in this composition.",
+    reason: "Always registered: the platform's createSessionRuntimeControls is built internally from configManager plus runtimeStore, both always present in this composition.",
     methodIds: ['sessions.permissionMode.get', 'sessions.permissionMode.set', 'sessions.contextUsage.get'],
   },
   {
@@ -249,7 +249,7 @@ const VERB_FAMILIES: readonly VerbFamily[] = [
   },
   {
     family: 'profile.*',
-    reason: "Always registered: the SDK's composeOwnerProfile builds the OwnerProfileStore internally from configManager plus the resolved daemon home. One Markdown file at daemon scope, and this is the process that owns it.",
+    reason: "Always registered: the platform's composeOwnerProfile builds the OwnerProfileStore internally from configManager plus the resolved daemon home. One Markdown file at daemon scope, and this is the process that owns it.",
     methodIds: [
       'profile.read', 'profile.get', 'profile.person', 'profile.provenance',
       'profile.set', 'profile.append', 'profile.forget', 'profile.undo', 'profile.status',
@@ -360,7 +360,7 @@ const VERB_FAMILIES: readonly VerbFamily[] = [
   },
   {
     family: 'browser.*',
-    reason: 'Registered because the SDK builds a browser gateway for this composition; the disposal scope service-graph.ts threads is what shuts the sessions down.',
+    reason: 'Registered because the platform builds a browser gateway for this composition; the disposal scope service-graph.ts threads is what shuts the sessions down.',
     methodIds: [
       'browser.provision', 'browser.status', 'browser.snapshot', 'browser.navigate',
       'browser.click', 'browser.type', 'browser.press', 'browser.select', 'browser.scroll',
@@ -373,15 +373,15 @@ const VERB_FAMILIES: readonly VerbFamily[] = [
   },
 
   // ── This repository's OWN handler surfaces, attached by
-  //    runtime/daemon-handler-composition.ts rather than by the SDK. ─────────
+  //    runtime/daemon-handler-composition.ts rather than by the platform. ─────────
   {
     family: 'channels.routing.*',
-    reason: "This repo's own handler surface (daemon/handlers/routing), attached over the SDK's canonical descriptors by daemon-handler-composition.ts.",
+    reason: "This repo's own handler surface (daemon/handlers/routing), attached over the platform's canonical descriptors by daemon-handler-composition.ts.",
     methodIds: ['channels.routing.list', 'channels.routing.assign', 'channels.routing.delete'],
   },
   {
     family: 'channels.inbox.list',
-    reason: "This repo's own inbox surface (daemon/handlers/inbox), wrapped by the triage pipeline (daemon/handlers/triage) so every returned item carries its score. It answers for real now rather than only registering: the SDK descriptor carried `invokable: false` until this daemon's aggregator served it, so the handler counted here was one no client could reach. Behaviour lives in daemon/inbox/aggregator.test.ts, reachability over both transports in gateway-inbox-list-reachable.test.ts.",
+    reason: "This repo's own inbox surface (daemon/handlers/inbox), wrapped by the triage pipeline (daemon/handlers/triage) so every returned item carries its score. It answers for real now rather than only registering: the platform descriptor carried `invokable: false` until this daemon's aggregator served it, so the handler counted here was one no client could reach. Behaviour lives in daemon/inbox/aggregator.test.ts, reachability over both transports in gateway-inbox-list-reachable.test.ts.",
     methodIds: ['channels.inbox.list'],
   },
   {
@@ -393,16 +393,16 @@ const VERB_FAMILIES: readonly VerbFamily[] = [
     family: 'payments.* (budget / cards / purchases / checkout)',
     reason:
       "This repo's own payments surface (daemon/handlers/payments), composed by runtime/payments-composition.ts. "
-      + 'budget.status/cards.list/cards.delete attach through the SDK\'s own registerPaymentsGatewayMethods '
-      + '(published from control-plane/index.ts since sdk 2.0.18); cards.create/purchases.list keep local '
-      + 'wrappers for field-shape validation the SDK route does not do (see register.ts). checkout.begin/'
-      + 'checkout.fillCard attach through local wrappers too, over the sdk 2.0.19 browser-checkout seam '
+      + 'budget.status/cards.list/cards.delete attach through the platform\'s own registerPaymentsGatewayMethods '
+      + '(published from control-plane/index.ts since platform 2.0.18); cards.create/purchases.list keep local '
+      + 'wrappers for field-shape validation the platform route does not do (see register.ts). checkout.begin/'
+      + 'checkout.fillCard attach through local wrappers too, over the platform 2.0.19 browser-checkout seam '
       + '(composeDaemonBrowser/onBrowserCheckout/BrowserCheckoutSeam), because context.explicitUserRequest, '
       + "the signal this daemon's owner-approval ruling needs, only reaches a handler attached this way; see "
       + 'register.ts\'s header and gateway-payments-verbs.test.ts, which exercises the ruling over real routes. '
       + 'checkout.approve is the one PRODUCT-authored descriptor in the family (register.ts\'s '
       + 'CHECKOUT_APPROVE_DESCRIPTOR): the id is this daemon\'s own, ws-only with no REST binding since the '
-      + 'gateway REST table is the daemon-sdk\'s, and it mints the persisted single-use approval record '
+      + 'gateway REST table is the daemon-api\'s, and it mints the persisted single-use approval record '
       + 'checkout.begin spends (daemon/handlers/payments/approval-store.ts).',
     methodIds: [
       'payments.budget.status',

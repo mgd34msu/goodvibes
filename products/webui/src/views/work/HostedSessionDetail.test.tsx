@@ -14,7 +14,7 @@ mock.module('../../lib/goodvibes', () => ({
   hasStoredTokenSync: () => true,
   GOODVIBES_BASE_URL: 'http://localhost', WEBUI_VERSION: 'test', runBrowserJudgment: async () => { throw new Error('No judgments in this fixture'); },
   getCurrentAuth: async () => ({}), invokeMethod: async () => ({}), hostedSessionDetachBeacon: beacon,
-  sdk: { operator: { sessions: { hosted: {
+  client: { operator: { sessions: { hosted: {
     attach: (id: string, client: string) => new Promise(resolve => pending.push({ id, client, resolve })),
     detach, kill: async () => ({}),
   } } } },

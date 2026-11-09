@@ -23,9 +23,9 @@ import { describe, expect, test } from 'bun:test';
 import {
   InlineReasoningStreamSplitter,
   splitInlineReasoning,
-} from '../sdk/src/platform/providers/inline-reasoning.ts';
-import { buildRenderedText } from '../sdk/src/platform/channels/reply-render.ts';
-import type { ChannelRenderPolicy } from '../sdk/src/platform/channels/types.ts';
+} from '../platform/src/platform/providers/inline-reasoning.ts';
+import { buildRenderedText } from '../platform/src/platform/channels/reply-render.ts';
+import type { ChannelRenderPolicy } from '../platform/src/platform/channels/types.ts';
 
 function policy(overrides: Partial<ChannelRenderPolicy>): ChannelRenderPolicy {
   return {

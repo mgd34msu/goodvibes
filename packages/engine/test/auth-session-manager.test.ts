@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { SessionManager } from '../sdk/src/client-auth/session-manager.js';
-import { TokenStore } from '../sdk/src/client-auth/token-store.js';
-import type { OperatorSdk } from '../operator-sdk/src/index.js';
+import { SessionManager } from '../platform/src/client-auth/session-manager.js';
+import { TokenStore } from '../platform/src/client-auth/token-store.js';
+import type { OperatorApiClient } from '../operator-client/src/index.js';
 
 function makeRawStore(initial: string | null = null) {
   let current = initial;
@@ -20,7 +20,7 @@ function makeOperator(loginResult: Record<string, unknown> = { token: 'test-toke
         login: async (_input: unknown) => loginResult,
       },
     },
-  } as unknown as OperatorSdk;
+  } as unknown as OperatorApiClient;
 }
 
 describe('SessionManager', () => {

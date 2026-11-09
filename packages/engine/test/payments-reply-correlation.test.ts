@@ -1,14 +1,14 @@
 import { afterEach, expect, test } from 'bun:test';
-import { PaymentReplyInbox, PaymentReplyWindowError } from '../sdk/src/platform/payments/reply-inbox.js';
-import { channelBackedPaymentNotifier } from '../sdk/src/platform/payments/host/notifier.js';
-import { tryResolvePaymentReplyFromChannel } from '../sdk/src/platform/daemon/payment-reply.js';
-import { createTelegramSourceAccountOwner } from '../sdk/src/platform/channels/telegram/source-account.js';
-import { TelegramBotApi } from '../sdk/src/platform/channels/telegram/api.js';
-import { handleTelegramSurfaceWebhook, processTelegramUpdate } from '../sdk/src/platform/adapters/telegram/index.js';
-import { BuiltinChannelRuntime } from '../sdk/src/platform/channels/builtin-runtime.js';
-import { ChannelPluginRegistry } from '../sdk/src/platform/channels/plugin-registry.js';
-import type { SurfaceAdapterContext } from '../sdk/src/platform/adapters/types.js';
-import type { ChannelPolicyDecision, ChannelIngressPolicyInput } from '../sdk/src/platform/channels/types.js';
+import { PaymentReplyInbox, PaymentReplyWindowError } from '../platform/src/platform/payments/reply-inbox.js';
+import { channelBackedPaymentNotifier } from '../platform/src/platform/payments/host/notifier.js';
+import { tryResolvePaymentReplyFromChannel } from '../platform/src/platform/daemon/payment-reply.js';
+import { createTelegramSourceAccountOwner } from '../platform/src/platform/channels/telegram/source-account.js';
+import { TelegramBotApi } from '../platform/src/platform/channels/telegram/api.js';
+import { handleTelegramSurfaceWebhook, processTelegramUpdate } from '../platform/src/platform/adapters/telegram/index.js';
+import { BuiltinChannelRuntime } from '../platform/src/platform/channels/builtin-runtime.js';
+import { ChannelPluginRegistry } from '../platform/src/platform/channels/plugin-registry.js';
+import type { SurfaceAdapterContext } from '../platform/src/platform/adapters/types.js';
+import type { ChannelPolicyDecision, ChannelIngressPolicyInput } from '../platform/src/platform/channels/types.js';
 import { usePaymentsReadings, withPaymentsReadings } from './helpers/payments-readings.ts';
 
 const readings = usePaymentsReadings(), cleanup: (() => void | Promise<void>)[] = [];

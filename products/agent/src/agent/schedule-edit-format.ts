@@ -1,4 +1,4 @@
-import { formatEveryInterval } from '@goodvibes-jev/engine/sdk/platform/automation';
+import { formatEveryInterval } from '@goodvibes-jev/engine/platform/platform/automation';
 import type {
   ScheduleEditFailure,
   ScheduleEditPreview,

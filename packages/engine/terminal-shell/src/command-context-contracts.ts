@@ -1,15 +1,15 @@
 import type { ModelPickerTarget } from './model-picker-types.js';
-import type { PermissionRequestHandler } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import type { PermissionRequestHandler } from '@goodvibes-jev/engine/platform/platform/permissions';
 import type { OpenSelection } from '@goodvibes-jev/engine/terminal-shell/selection-modal';
-import type { ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { FileUndoManager } from '@goodvibes-jev/engine/sdk/platform/state';
-import type { DeepReadonly } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { GoodVibesConfig } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { VoiceProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/voice';
-import type { VoiceService } from '@goodvibes-jev/engine/sdk/platform/voice';
-import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
+import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { FileUndoManager } from '@goodvibes-jev/engine/platform/platform/state';
+import type { DeepReadonly } from '@goodvibes-jev/engine/platform/platform/config';
+import type { GoodVibesConfig } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { VoiceProviderRegistry } from '@goodvibes-jev/engine/platform/platform/voice';
+import type { VoiceService } from '@goodvibes-jev/engine/platform/platform/voice';
+import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
 /** Shared command capabilities; products extend these contracts with their own policy and UI actions. */
 export interface TerminalCommandRuntimeState {
   model: string;
@@ -24,7 +24,7 @@ export interface TerminalCommandUiActions<Target extends ModelPickerTarget> {
   renderRequest: () => void;
   print: (text: string) => void;
   exit: () => void;
-  submitSpokenInput?: (text: string, content?: import('@goodvibes-jev/engine/sdk/platform/providers').ContentPart[]) => void;
+  submitSpokenInput?: (text: string, content?: import('@goodvibes-jev/engine/platform/platform/providers').ContentPart[]) => void;
   stopSpokenOutput?: () => void;
   pasteFromClipboard?: () => {
     pasted: boolean;
@@ -79,27 +79,27 @@ export interface TerminalCommandShellUiOpeners<Target extends ModelPickerTarget>
 }
 
 export interface TerminalCommandSessionServices {
-  readonly sessionManager?: import('@goodvibes-jev/engine/sdk/platform/sessions').SessionManager;
-  readonly sessionMemoryStore?: import('@goodvibes-jev/engine/sdk/platform/core').SessionMemoryStore;
-  readonly sessionLineageTracker?: import('@goodvibes-jev/engine/sdk/platform/core').SessionLineageTracker;
-  readonly changeTracker?: import('@goodvibes-jev/engine/sdk/platform/sessions').SessionChangeTracker;
+  readonly sessionManager?: import('@goodvibes-jev/engine/platform/platform/sessions').SessionManager;
+  readonly sessionMemoryStore?: import('@goodvibes-jev/engine/platform/platform/core').SessionMemoryStore;
+  readonly sessionLineageTracker?: import('@goodvibes-jev/engine/platform/platform/core').SessionLineageTracker;
+  readonly changeTracker?: import('@goodvibes-jev/engine/platform/platform/sessions').SessionChangeTracker;
   readonly hydrateSessionUsage?: () => void;
 }
 
 export interface TerminalCommandProviderServices {
   readonly providerRegistry: ProviderRegistry;
-  readonly providerOptimizer?: import('@goodvibes-jev/engine/sdk/platform/providers').ProviderOptimizer;
-  readonly favoritesStore?: import('@goodvibes-jev/engine/sdk/platform/providers').FavoritesStore;
-  readonly benchmarkStore?: import('@goodvibes-jev/engine/sdk/platform/providers').BenchmarkStore;
+  readonly providerOptimizer?: import('@goodvibes-jev/engine/platform/platform/providers').ProviderOptimizer;
+  readonly favoritesStore?: import('@goodvibes-jev/engine/platform/platform/providers').FavoritesStore;
+  readonly benchmarkStore?: import('@goodvibes-jev/engine/platform/platform/providers').BenchmarkStore;
 }
 
 export interface TerminalCommandWorkspaceUiServices {
   fileUndoManager?: FileUndoManager;
-  profileManager?: import('@goodvibes-jev/engine/sdk/platform/profiles').ProfileManager;
-  bookmarkManager?: import('@goodvibes-jev/engine/sdk/platform/bookmarks').BookmarkManager;
-  projectPlanningService?: import('@goodvibes-jev/engine/sdk/platform/knowledge').ProjectPlanningService;
+  profileManager?: import('@goodvibes-jev/engine/platform/platform/profiles').ProfileManager;
+  bookmarkManager?: import('@goodvibes-jev/engine/platform/platform/bookmarks').BookmarkManager;
+  projectPlanningService?: import('@goodvibes-jev/engine/platform/platform/knowledge').ProjectPlanningService;
   projectPlanningProjectId?: string;
-  workPlanStore?: import('@goodvibes-jev/engine/sdk/platform/workflow').WorkPlanStore;
+  workPlanStore?: import('@goodvibes-jev/engine/platform/platform/workflow').WorkPlanStore;
 }
 
 export interface TerminalCommandPlatformConfigServices {

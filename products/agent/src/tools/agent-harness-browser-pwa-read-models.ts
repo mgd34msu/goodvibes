@@ -1,4 +1,4 @@
-import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureCatalogProducerSources, withModelReadingSource } from './agent-harness-model-reading-source.ts';
@@ -36,7 +36,7 @@ export interface BrowserPwaCategoryRouteRecord {
   readonly controlRoutes: Readonly<Record<string, string>>;
   readonly modelRoute: string;
   readonly sourcePath: string;
-  readonly source: 'daemon-read-model' | 'sdk-read-model';
+  readonly source: 'daemon-read-model' | 'platform-read-model';
   readonly certification: BrowserPwaRecordCertification;
 }
 
@@ -55,7 +55,7 @@ export interface BrowserPwaFirstRunReceiptRecord {
   readonly controlRoutes: Readonly<Record<string, string>>;
   readonly modelRoute: string;
   readonly sourcePath: string;
-  readonly source: 'daemon-read-model' | 'sdk-read-model';
+  readonly source: 'daemon-read-model' | 'platform-read-model';
   readonly certification: BrowserPwaRecordCertification;
 }
 
@@ -70,12 +70,12 @@ export interface BrowserPwaReadModelSnapshot {
 interface SourceCandidate {
   readonly path: string;
   readonly source: unknown;
-  readonly kind: 'daemon-read-model' | 'sdk-read-model';
+  readonly kind: 'daemon-read-model' | 'platform-read-model';
 }
 
 interface CollectedRecord {
   readonly path: string;
-  readonly kind: 'daemon-read-model' | 'sdk-read-model';
+  readonly kind: 'daemon-read-model' | 'platform-read-model';
   readonly record: Record<string, unknown>;
 }
 
@@ -305,7 +305,7 @@ function certification(input: {
     ...(base.receiptId ? { receiptId: safePreview(base.receiptId, 96) } : {}),
     ...(base.cursor ? { cursor: safePreview(base.cursor, 96) } : {}),
     missingSignals,
-    policy: 'Browser/PWA read models certify release readiness only when the SDK or daemon publishes schema, durable ids, ready status, publication guarantee, publisher/provenance, freshness cursor, exact inspect/open routes, mobile/touch evidence, PWA runtime evidence where relevant, and redacted receipt metadata.',
+    policy: 'Browser/PWA read models certify release readiness only when the platform or daemon publishes schema, durable ids, ready status, publication guarantee, publisher/provenance, freshness cursor, exact inspect/open routes, mobile/touch evidence, PWA runtime evidence where relevant, and redacted receipt metadata.',
   };
 }
 
@@ -322,7 +322,7 @@ function callMethod(source: Record<string, unknown>, method: string): unknown {
 function collectFromSource(
   source: unknown,
   path: string,
-  kind: 'daemon-read-model' | 'sdk-read-model',
+  kind: 'daemon-read-model' | 'platform-read-model',
   wrapperKeys: readonly string[],
   methods: readonly string[],
   visited = new WeakSet<object>(),
@@ -548,9 +548,9 @@ function categorySources(native: ReturnType<typeof captureCatalogProducerSources
     { path: 'context.platform.readModels.pwa.workspaceRoutes', source: native.source('context.platform.readModels.pwa.workspaceRoutes'), kind: 'daemon-read-model' },
     { path: 'context.platform.readModels.browser.categoryRoutes', source: native.source('context.platform.readModels.browser.categoryRoutes'), kind: 'daemon-read-model' },
     { path: 'context.platform.readModels.browserPwaRoutes', source: native.source('context.platform.readModels.browserPwaRoutes'), kind: 'daemon-read-model' },
-    { path: 'context.ops.browserPwa.categoryRoutes', source: native.source('context.ops.browserPwa.categoryRoutes'), kind: 'sdk-read-model' },
-    { path: 'context.clients.operator.browserPwa.categoryRoutes', source: native.source('context.clients.operator.browserPwa.categoryRoutes'), kind: 'sdk-read-model' },
-    { path: 'context.clients.operatorSdk.browserPwa.categoryRoutes', source: native.source('context.clients.operatorSdk.browserPwa.categoryRoutes'), kind: 'sdk-read-model' },
+    { path: 'context.ops.browserPwa.categoryRoutes', source: native.source('context.ops.browserPwa.categoryRoutes'), kind: 'platform-read-model' },
+    { path: 'context.clients.operator.browserPwa.categoryRoutes', source: native.source('context.clients.operator.browserPwa.categoryRoutes'), kind: 'platform-read-model' },
+    { path: 'context.clients.operatorApiClient.browserPwa.categoryRoutes', source: native.source('context.clients.operatorApiClient.browserPwa.categoryRoutes'), kind: 'platform-read-model' },
   ];
 }
 
@@ -563,9 +563,9 @@ function receiptSources(native: ReturnType<typeof captureCatalogProducerSources>
     { path: 'context.platform.readModels.browserCockpit.firstRunReceipts', source: native.source('context.platform.readModels.browserCockpit.firstRunReceipts'), kind: 'daemon-read-model' },
     { path: 'context.platform.readModels.pwa.firstRunReceipts', source: native.source('context.platform.readModels.pwa.firstRunReceipts'), kind: 'daemon-read-model' },
     { path: 'context.platform.readModels.firstRun.browserPwaReceipts', source: native.source('context.platform.readModels.firstRun.browserPwaReceipts'), kind: 'daemon-read-model' },
-    { path: 'context.ops.browserPwa.firstRunReceipts', source: native.source('context.ops.browserPwa.firstRunReceipts'), kind: 'sdk-read-model' },
-    { path: 'context.clients.operator.browserPwa.firstRunReceipts', source: native.source('context.clients.operator.browserPwa.firstRunReceipts'), kind: 'sdk-read-model' },
-    { path: 'context.clients.operatorSdk.browserPwa.firstRunReceipts', source: native.source('context.clients.operatorSdk.browserPwa.firstRunReceipts'), kind: 'sdk-read-model' },
+    { path: 'context.ops.browserPwa.firstRunReceipts', source: native.source('context.ops.browserPwa.firstRunReceipts'), kind: 'platform-read-model' },
+    { path: 'context.clients.operator.browserPwa.firstRunReceipts', source: native.source('context.clients.operator.browserPwa.firstRunReceipts'), kind: 'platform-read-model' },
+    { path: 'context.clients.operatorApiClient.browserPwa.firstRunReceipts', source: native.source('context.clients.operatorApiClient.browserPwa.firstRunReceipts'), kind: 'platform-read-model' },
   ];
 }
 
@@ -606,7 +606,7 @@ export async function browserPwaReadModelSnapshot(context: CommandContext,
 async function ownedBrowserPwaReadModelSnapshot(context: CommandContext, options: CatalogRankingOptions): Promise<BrowserPwaReadModelSnapshot> {
   const beganClassic = isClassicOperation();
   options.signal?.throwIfAborted(); options.assertCurrent?.();
-  const native = captureCatalogProducerSources(context, ["context.platform.readModels.browserPwa.categoryRoutes", "context.platform.readModels.browserPwa.workspaceRoutes", "context.platform.readModels.browserPwa.agentWorkspaceRoutes", "context.platform.readModels.webDashboard.categoryRoutes", "context.platform.readModels.webDashboard.workspaceRoutes", "context.platform.readModels.browserCockpit.categoryRoutes", "context.platform.readModels.pwa.workspaceRoutes", "context.platform.readModels.browser.categoryRoutes", "context.platform.readModels.browserPwaRoutes", "context.ops.browserPwa.categoryRoutes", "context.clients.operator.browserPwa.categoryRoutes", "context.clients.operatorSdk.browserPwa.categoryRoutes", "context.platform.readModels.browserPwa.firstRunReceipts", "context.platform.readModels.browserPwa.receipts", "context.platform.readModels.browserPwa.runtimeReceipts", "context.platform.readModels.webDashboard.firstRunReceipts", "context.platform.readModels.browserCockpit.firstRunReceipts", "context.platform.readModels.pwa.firstRunReceipts", "context.platform.readModels.firstRun.browserPwaReceipts", "context.ops.browserPwa.firstRunReceipts", "context.clients.operator.browserPwa.firstRunReceipts", "context.clients.operatorSdk.browserPwa.firstRunReceipts"], ["getSnapshot", "snapshot", "toJSON", "listCategoryRoutes", "listWorkspaceRoutes", "listAgentWorkspaceRoutes", "listRoutes", "listFirstRunReceipts", "listReceipts", "listRuntimeReceipts", "listEvents", "list"]);
+  const native = captureCatalogProducerSources(context, ["context.platform.readModels.browserPwa.categoryRoutes", "context.platform.readModels.browserPwa.workspaceRoutes", "context.platform.readModels.browserPwa.agentWorkspaceRoutes", "context.platform.readModels.webDashboard.categoryRoutes", "context.platform.readModels.webDashboard.workspaceRoutes", "context.platform.readModels.browserCockpit.categoryRoutes", "context.platform.readModels.pwa.workspaceRoutes", "context.platform.readModels.browser.categoryRoutes", "context.platform.readModels.browserPwaRoutes", "context.ops.browserPwa.categoryRoutes", "context.clients.operator.browserPwa.categoryRoutes", "context.clients.operatorApiClient.browserPwa.categoryRoutes", "context.platform.readModels.browserPwa.firstRunReceipts", "context.platform.readModels.browserPwa.receipts", "context.platform.readModels.browserPwa.runtimeReceipts", "context.platform.readModels.webDashboard.firstRunReceipts", "context.platform.readModels.browserCockpit.firstRunReceipts", "context.platform.readModels.pwa.firstRunReceipts", "context.platform.readModels.firstRun.browserPwaReceipts", "context.ops.browserPwa.firstRunReceipts", "context.clients.operator.browserPwa.firstRunReceipts", "context.clients.operatorApiClient.browserPwa.firstRunReceipts"], ["getSnapshot", "snapshot", "toJSON", "listCategoryRoutes", "listWorkspaceRoutes", "listAgentWorkspaceRoutes", "listRoutes", "listFirstRunReceipts", "listReceipts", "listRuntimeReceipts", "listEvents", "list"]);
   const categoryEntries = categorySources(native).flatMap((candidate) =>
     collectFromSource(candidate.source, candidate.path, candidate.kind, CATEGORY_WRAPPER_KEYS, CATEGORY_METHODS)
   );

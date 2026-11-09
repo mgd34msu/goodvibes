@@ -1,9 +1,9 @@
 # Secret references
 
 GoodVibes config values can point at secrets without embedding secret material
-directly in config files. The SDK-owned URI form is `goodvibes://`.
+directly in config files. The platform-owned URI form is `goodvibes://`.
 
-**Public subpath:** `@goodvibes-jev/engine/sdk/platform/config` (daemon embedders).
+**Public subpath:** `@goodvibes-jev/engine/platform/platform/config` (daemon embedders).
 
 ## Supported sources
 
@@ -19,7 +19,7 @@ directly in config files. The SDK-owned URI form is `goodvibes://`.
 | `bitwarden-secrets-manager` / `bws` | Resolve through Bitwarden Secrets Manager |
 
 The removed generic `secret://` scheme is not supported. Use
-`goodvibes://secrets/...` for SDK-owned secret references.
+`goodvibes://secrets/...` for platform-owned secret references.
 
 ## URI shape
 

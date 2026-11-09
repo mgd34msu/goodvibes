@@ -5,7 +5,7 @@ import { withLocalModelRegistry, localModelDetection, localModelServerFacts, loc
 import { deferredModelReadiness, deferredRecipeFit, localHardwareProfile, localRecipeReadinessScore, localRecipeStackId, scoreLocalModelRecipe } from './agent-harness-model-readiness.ts';
 import { localModelBenchmarkHistory, localModelBenchmarkHistoryFrom, localModelBenchmarkPlan, readLocalModelBenchmarkSnapshot, type LocalModelBenchmarkSnapshot, type LocalModelBenchmarkHistory } from './agent-harness-local-model-benchmarks.ts';
 import type { LocalModelDetection, LocalModelHardwareProfile, LocalModelRecipe, LocalModelRecipeFit, LocalModelSetupPlan, LocalModelBenchmarkEvidence, LocalModelServerHealthMap, ModelReadinessScore } from './agent-harness-model-routing-types.ts';
-import { routeReadiness } from '@goodvibes-jev/engine/sdk/platform/routing';
+import { routeReadiness } from '@goodvibes-jev/engine/platform/platform/routing';
 import { withModelReadingSource, type ModelReadingOptions } from './agent-harness-model-reading-source.ts';
 import { readRecord, readString } from './agent-harness-model-routing-utils.ts';
 

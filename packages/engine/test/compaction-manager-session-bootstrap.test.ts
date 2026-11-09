@@ -13,15 +13,15 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
-import { createRuntimeStore } from '../sdk/src/platform/runtime/store/index.ts';
-import { createClientRuntimeServices, type ClientRuntimeServices } from '../sdk/src/platform/runtime/client-services.ts';
-import { createHostedSessionRuntime } from '../sdk/src/platform/hosted-sessions/session-runtime.ts';
-import { CompactionManager } from '../sdk/src/platform/runtime/compaction/index.ts';
-import type { ChatResponse, LLMProvider } from '../sdk/src/platform/providers/interface.ts';
-import type { ModelDefinition } from '../sdk/src/platform/providers/registry.ts';
-import type { PermissionPromptDecision } from '../sdk/src/platform/permissions/prompt.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
+import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.ts';
+import { createClientRuntimeServices, type ClientRuntimeServices } from '../platform/src/platform/runtime/client-services.ts';
+import { createHostedSessionRuntime } from '../platform/src/platform/hosted-sessions/session-runtime.ts';
+import { CompactionManager } from '../platform/src/platform/runtime/compaction/index.ts';
+import type { ChatResponse, LLMProvider } from '../platform/src/platform/providers/interface.ts';
+import type { ModelDefinition } from '../platform/src/platform/providers/registry.ts';
+import type { PermissionPromptDecision } from '../platform/src/platform/permissions/prompt.ts';
 import { installHostedSessionReadings } from './_helpers/hosted-session-readings.ts';
 
 const PROVIDER = 'stub';

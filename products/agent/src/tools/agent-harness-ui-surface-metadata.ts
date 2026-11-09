@@ -4,8 +4,8 @@ import { withModelReadingSource } from './agent-harness-model-reading-source.ts'
 import { captureStatefulCatalogRequest, rankStatefulCatalog } from './agent-harness-stateful-catalog-source.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { openTtsProviderPicker, openTtsVoicePicker } from '../input/tts-settings-actions.ts';
-import { openExternalUrl } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { captureVoiceListReadSource, captureVoiceProviderReadSource } from '@goodvibes-jev/engine/sdk/platform/voice';
+import { openExternalUrl } from '@goodvibes-jev/engine/platform/platform/utils';
+import { captureVoiceListReadSource, captureVoiceProviderReadSource } from '@goodvibes-jev/engine/platform/platform/voice';
 import { connectedBrowserCockpitRoute } from './agent-harness-browser-cockpit-route.ts';
 import type { AgentHarnessUiSurfaceArgs, UiSurfaceDefinition, UiSurfaceLookup, UiSurfaceResolution } from './agent-harness-ui-surface-types.ts';
 export type { AgentHarnessUiSurfaceArgs } from './agent-harness-ui-surface-types.ts';

@@ -1,9 +1,9 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { GitService, readGitWorktreeCreation } from '../sdk/src/platform/git/service.js';
-import { IsolatedWorktree, readIsolatedWorktreeCreation } from '../sdk/src/platform/agents/worktree.js';
-import type { HookDispatcher } from '../sdk/src/platform/hooks/dispatcher.js';
+import { GitService, readGitWorktreeCreation } from '../platform/src/platform/git/service.js';
+import { IsolatedWorktree, readIsolatedWorktreeCreation } from '../platform/src/platform/agents/worktree.js';
+import type { HookDispatcher } from '../platform/src/platform/hooks/dispatcher.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const roots: string[] = [];

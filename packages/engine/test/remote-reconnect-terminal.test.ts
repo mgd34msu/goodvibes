@@ -9,7 +9,7 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { forgetFailureReadings, installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { ReconnectEngine, type ConnectOutcome, type TransportAdapter } from '../sdk/src/platform/runtime/remote/reconnect.js';
+import { ReconnectEngine, type ConnectOutcome, type TransportAdapter } from '../platform/src/platform/runtime/remote/reconnect.js';
 import { authoredErrorReadingsPort, errorText, type AuthoredPrivacy } from './_helpers/authored-error-readings.js';
 
 const FAST = { maxAttempts: 4, initialDelayMs: 1, maxDelayMs: 1, backoffMultiplier: 1, jitter: 0 };

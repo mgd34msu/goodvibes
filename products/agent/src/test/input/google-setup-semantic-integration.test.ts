@@ -1,8 +1,8 @@
-import { acquireCrossProcessLock } from '@goodvibes-jev/engine/sdk/platform/workspace';
+import { acquireCrossProcessLock } from '@goodvibes-jev/engine/platform/platform/workspace';
 import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
-import { ConfigManager, SecretsManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { createJudgmentSourceLifetime } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { ConfigManager, SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { createJudgmentSourceLifetime } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 /** Real agent command action -> setup runner -> browser flow, all I/O synthetic. */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
@@ -10,7 +10,7 @@ import { bindJudgmentPortAuthority, judgmentPort, installJudgmentPort } from '@g
 import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { runGoogleSetup } from '../../input/commands/google-connection-actions.ts';
 import type { CommandContext } from '../../input/command-registry.ts';
-import { GOOGLE_SECRET_KEYS, type GoogleBrowserPort, type GoogleProgressPort } from '@goodvibes-jev/engine/sdk/platform/google';
+import { GOOGLE_SECRET_KEYS, type GoogleBrowserPort, type GoogleProgressPort } from '@goodvibes-jev/engine/platform/platform/google';
 
 let previous: ReturnType<typeof installJudgmentPort>;
 const disposals: (() => void)[] = [];

@@ -194,7 +194,7 @@ describe('workspace-registration: checkpoint-eligibility boundary', () => {
 
   test('a TUI-shaped self-record (plain store.add, no flag) is registered but NOT checkpoint-eligible', async () => {
     const { shellPaths, work } = makeShellPaths();
-    // The TUI's first-open self-recording is a plain SDK store.add, no flag.
+    // The TUI's first-open self-recording is a plain platform store.add, no flag.
     await createWorkspaceRegistrationStore(shellPaths).add(work);
 
     // Registered in the shared store...
@@ -221,11 +221,11 @@ describe('workspace-registration: checkpoint-eligibility boundary', () => {
     expect(resolveCheckpointEligibilitySync(shellPaths, work, {}).status).toBe('covered');
   });
 
-  test('a later SDK store write (a TUI self-record of another dir) does not wipe an explicit record\'s eligibility', async () => {
+  test('a later platform store write (a TUI self-record of another dir) does not wipe an explicit record\'s eligibility', async () => {
     const { shellPaths, work } = makeShellPaths();
     await registerWorkspaceForCheckpoints(shellPaths, work);
-    // A subsequent plain SDK add (as the TUI does) rewrites the shared file; the
-    // SDK preserves existing records' extra fields, so `work` stays eligible.
+    // A subsequent plain platform add (as the TUI does) rewrites the shared file; the
+    // platform preserves existing records' extra fields, so `work` stays eligible.
     const otherDir = makeProjectTempDir('goodvibes-agent-workspace-registration-other');
     await createWorkspaceRegistrationStore(shellPaths).add(otherDir);
 

@@ -4,7 +4,7 @@
  * The memory-spine wire discriminator: given a caught wire error, decide whether a
  * 404 means "no such record" (fold to null) or "this daemon does not serve this
  * verb" (reject honestly). Exercises the ACTUAL error shapes the three transports
- * throw, an SDK HttpStatusError (TUI transport, via createTransportError) and an
+ * throw, an platform HttpStatusError (TUI transport, via createTransportError) and an
  * agent-style plain Error with an attached status/code, not a contrived stand-in.
  */
 
@@ -14,7 +14,7 @@ import {
   classifyMemoryWireError,
   foldMemoryWireExtendedError,
   memoryVerbUnavailableError,
-} from '../sdk/src/platform/runtime/memory-spine/index.ts';
+} from '../platform/src/platform/runtime/memory-spine/index.ts';
 
 const URL_UPDATE = 'http://daemon.test/api/memory/records/mem_x/update';
 

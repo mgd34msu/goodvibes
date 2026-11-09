@@ -15,9 +15,9 @@
  */
 
 import type { SlashCommand, CommandContext } from '../command-registry.ts';
-import type { RouteExplanation } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { FallbackTestResult, FallbackTransition } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { ProviderApiModelRecord } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { RouteExplanation } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { FallbackTestResult, FallbackTransition } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { ProviderApiModelRecord } from '@goodvibes-jev/engine/platform/platform/providers';
 import { requireProviderApi } from './runtime-services.ts';
 import { featureEnablementWrite } from '@goodvibes-jev/engine/terminal-shell';
 

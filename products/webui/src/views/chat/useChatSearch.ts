@@ -6,7 +6,7 @@
  * decision, not an oversight):
  *
  *   1. SESSION search (`sessionResults`), backend-side, via
- *      `sdk.operator.sessions.search({ query, kind: 'companion-chat', ... })`.
+ *      `platform.operator.sessions.search({ query, kind: 'companion-chat', ... })`.
  *      Matches session id/title/project only (not message bodies) but reaches
  *      FULL history, not just the ~100 most-recently-fetched sessions the
  *      caller passed in. This is the new capability sessions.search unlocks.
@@ -20,7 +20,7 @@
  * THE includeClosed DIVERGENCE (load-bearing, name it wherever this is read):
  * sessions.search defaults `includeClosed` to FALSE, the OPPOSITE of
  * SharedSessionBroker.listSessions' own default (session-search.ts's handler
- * comment on the SDK side calls this out explicitly; sessions-union.ts's
+ * comment on the platform side calls this out explicitly; sessions-union.ts's
  * consumer, SessionsView, defaults its own includeClosed toggle to TRUE for
  * exactly the same reason it should NOT be true here). A search surface
  * hides dead sessions by default; a full list surface shows them. Do not
@@ -35,7 +35,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import {
   companionMessagesFromListResponse,
   extractMessageId,
@@ -144,7 +144,7 @@ function messageText(msg: ChatMessage): string {
 
 /** Fetch messages for a single session, returning typed ChatMessage[]. */
 async function fetchMessages(sessionId: string): Promise<ChatMessage[]> {
-  const raw = await sdk.operator.sessions.messages.list(sessionId);
+  const raw = await platformClient.operator.sessions.messages.list(sessionId);
   const items = companionMessagesFromListResponse(raw);
   return items.map((item) => item as ChatMessage);
 }
@@ -188,7 +188,7 @@ async function fetchSessionSearchPage(
   includeClosed: boolean,
   cursor?: string,
 ): Promise<{ sessions: ChatSessionSearchResult[]; nextCursor?: string; hasMore: boolean }> {
-  const page = await sdk.operator.sessions.search({
+  const page = await platformClient.operator.sessions.search({
     query,
     kind: COMPANION_CHAT_KIND,
     includeClosed,

@@ -8,10 +8,10 @@ import {
   scanHosts,
   scanLocalhost,
   loadPersistedProviders,
-} from '../sdk/src/platform/discovery/scanner.js';
+} from '../platform/src/platform/discovery/scanner.js';
 import {
   scanMcpServers,
-} from '../sdk/src/platform/discovery/mcp-scanner.js';
+} from '../platform/src/platform/discovery/mcp-scanner.js';
 
 describe('platform/discovery: behavior smoke', () => {
   test('loadPersistedProviders returns empty array for non-existent persist path', () => {
@@ -42,7 +42,7 @@ describe('platform/discovery: behavior smoke', () => {
           address: '192.0.2.10', netmask: '255.255.255.0', family: 'IPv4',
           mac: '00:00:00:00:00:00', internal: false, cidr: '192.0.2.10/24',
         }] }) }));
-        const { scan } = await import(${JSON.stringify(new URL('../sdk/src/platform/discovery/scanner.ts', import.meta.url).href)});
+        const { scan } = await import(${JSON.stringify(new URL('../platform/src/platform/discovery/scanner.ts', import.meta.url).href)});
         test('all fixture probes finish', async () => {
           let requests = 0;
           globalThis.fetch = Object.assign(async () => { requests++; return new Response('', { status: 404 }); }, { preconnect() {} });

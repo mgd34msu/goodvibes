@@ -10,11 +10,11 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createCancellationRegistry } from '../sdk/src/platform/orchestration/cancellation.js';
-import { createOrchestrationEngine } from '../sdk/src/platform/orchestration/engine.js';
-import type { PhaseRunnerAgentManagerLike } from '../sdk/src/platform/orchestration/phase-runner.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import type { OrchestrationEvent, PhaseSpec } from '../sdk/src/platform/orchestration/types.js';
+import { createCancellationRegistry } from '../platform/src/platform/orchestration/cancellation.js';
+import { createOrchestrationEngine } from '../platform/src/platform/orchestration/engine.js';
+import type { PhaseRunnerAgentManagerLike } from '../platform/src/platform/orchestration/phase-runner.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import type { OrchestrationEvent, PhaseSpec } from '../platform/src/platform/orchestration/types.js';
 import { makeFakeConfigManager, makeRecord } from './_helpers/orchestration-harness.js';
 
 const roots: string[] = [];

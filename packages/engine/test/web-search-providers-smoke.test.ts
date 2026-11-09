@@ -7,13 +7,13 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { createBraveSearchProvider } from '../sdk/src/platform/web-search/providers/brave.js';
-import { createDuckDuckGoProvider } from '../sdk/src/platform/web-search/providers/duckduckgo.js';
-import { createExaSearchProvider } from '../sdk/src/platform/web-search/providers/exa.js';
-import { createFirecrawlSearchProvider } from '../sdk/src/platform/web-search/providers/firecrawl.js';
-import { createPerplexitySearchProvider } from '../sdk/src/platform/web-search/providers/perplexity.js';
-import { createSearxngSearchProvider } from '../sdk/src/platform/web-search/providers/searxng.js';
-import { createTavilySearchProvider } from '../sdk/src/platform/web-search/providers/tavily.js';
+import { createBraveSearchProvider } from '../platform/src/platform/web-search/providers/brave.js';
+import { createDuckDuckGoProvider } from '../platform/src/platform/web-search/providers/duckduckgo.js';
+import { createExaSearchProvider } from '../platform/src/platform/web-search/providers/exa.js';
+import { createFirecrawlSearchProvider } from '../platform/src/platform/web-search/providers/firecrawl.js';
+import { createPerplexitySearchProvider } from '../platform/src/platform/web-search/providers/perplexity.js';
+import { createSearxngSearchProvider } from '../platform/src/platform/web-search/providers/searxng.js';
+import { createTavilySearchProvider } from '../platform/src/platform/web-search/providers/tavily.js';
 
 /** Minimal SearchProviderContext with no env and a noop serviceRegistry. */
 function makeContext() {

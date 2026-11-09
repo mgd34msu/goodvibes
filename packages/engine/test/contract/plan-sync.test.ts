@@ -12,7 +12,7 @@ import {
   unitTaskId,
   type ExecutionPlans,
   type WorkPlanService,
-} from '../../sdk/src/platform/contract/index.js';
+} from '../../platform/src/platform/contract/index.js';
 import { makeHarness, oneUnitPlan, startContract, waitFor, type Harness } from './runner-support.js';
 import { contractOf, finishes, keepsFailing, routeAnswer, terminal } from './steps-support.js';
 

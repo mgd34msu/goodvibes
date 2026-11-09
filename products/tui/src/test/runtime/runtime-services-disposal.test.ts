@@ -3,7 +3,7 @@ import { seedBenchmarkCacheFixture } from '../helpers/benchmark-cache-fixture.ts
  * runtime-services-disposal.test.ts
  *
  * This surface composes its own runtime graph and hands the SAME object to
- * DaemonServer. By the SDK's ownership rule the facade disposes only a graph it
+ * DaemonServer. By the platform's ownership rule the facade disposes only a graph it
  * built itself, so nothing upstream will ever stop these pollers for us, the
  * shutdown paths here (daemon/cli.ts, main.ts's teardown registry, the one-shot
  * CLI commands) are the only thing that can.
@@ -20,7 +20,7 @@ import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 
@@ -35,7 +35,7 @@ import { makeProjectTempDir } from '../helpers/project-temp.ts';
  * only while the checkpoint manager's async init holds a cross-process lock and
  * ends when that lock is released. It belongs to an operation that was
  * genuinely in flight, not to a subsystem the graph left running, the same
- * distinction the SDK's own daemon-shutdown test draws.
+ * distinction the platform's own daemon-shutdown test draws.
  */
 const POLLER_OWNERS = [
   'config/config-file-watcher',

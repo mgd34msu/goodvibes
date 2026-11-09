@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { useToolReadings } from './_helpers/tool-readings.ts';
-import { repairToolCall } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { ToolDefinition } from '@goodvibes-jev/engine/sdk/platform/types';
+import { repairToolCall } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ToolDefinition } from '@goodvibes-jev/engine/platform/platform/types';
 
 // Jev picks which spare argument fills a missing parameter and which boolean a
 // non-literal string means; these fakes stand in for it. A call no entry names

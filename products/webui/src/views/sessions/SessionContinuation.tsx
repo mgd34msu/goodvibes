@@ -1,6 +1,6 @@
 /** Authoritative session classification shared by conversation and Fleet text actions. */
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
-import type { NativeHostedSessionLookup } from '@goodvibes-jev/engine/sdk/platform/hosted-sessions/native-turn-client';
+import type { NativeHostedSessionLookup } from '@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client';
 import { inspectNativeSession } from '../../lib/native-session';
 import { formatError } from '../../lib/errors';
 import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime, type ClientLifetime } from '../../lib/client-lifetime';

@@ -15,12 +15,12 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { createServer as createHttpServer } from 'node:http';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { DaemonServer } from '@goodvibes-jev/engine/sdk/platform/daemon';
-import { UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { DaemonServer } from '@goodvibes-jev/engine/platform/platform/daemon';
+import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
-import type { MemoryAccess } from '@goodvibes-jev/engine/sdk/platform/runtime/memory-spine';
+import type { MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { createMemorySpineRestTransport, type MemorySpineRestTransportOptions } from '../../runtime/memory-spine-rest-transport.ts';
@@ -30,7 +30,7 @@ import { makeProjectTempDir } from '../helpers/project-temp.ts';
 /**
  * `createMemorySpineRestTransport` returns `MemoryTransport`, whose EXTENDED verbs
  * (list/update/link/linksFor/searchSemantic/exportBundle/importBundle) are typed
- * optional so an older transport still satisfies the type (see the SDK's version-
+ * optional so an older transport still satisfies the type (see the platform's version-
  * tolerance ruling). This concrete transport implements every one of them, so
  * these tests, which exercise the raw transport directly rather than routing
  * through a MemorySpineClient, assert that structurally instead of null-checking

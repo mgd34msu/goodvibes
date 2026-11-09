@@ -55,25 +55,25 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) fail(message);
 }
 
-function extractSdkErrorKindUnion(source: string): string {
-  const match = source.match(/export\s+type\s+SDKErrorKind\s*=\s*([\s\S]*?);/);
-  assert(match, 'errors/src/index.ts must export SDKErrorKind');
+function extractPlatformErrorKindUnion(source: string): string {
+  const match = source.match(/export\s+type\s+EngineErrorKind\s*=\s*([\s\S]*?);/);
+  assert(match, 'errors/src/index.ts must export EngineErrorKind');
   const union = match[1];
-  assert(union !== undefined, 'SDKErrorKind export matched but its union body did not capture');
+  assert(union !== undefined, 'EngineErrorKind export matched but its union body did not capture');
   return union;
 }
 
 function assertErrorKindContract(): void {
   const source = read('errors/src/index.ts');
-  const union = extractSdkErrorKindUnion(source);
+  const union = extractPlatformErrorKindUnion(source);
 
   for (const kind of requiredKinds) {
     assert(
       union.includes(`'${kind}'`) || union.includes(`"${kind}"`),
-      `SDKErrorKind is missing '${kind}'`,
+      `EngineErrorKind is missing '${kind}'`,
     );
   }
-  assert(!union.includes("'server'") && !union.includes('"server"'), "SDKErrorKind must not include stale 'server'");
+  assert(!union.includes("'server'") && !union.includes('"server"'), "EngineErrorKind must not include stale 'server'");
 
   for (const kind of ['service', 'protocol', 'internal', 'tool'] as const) {
     assert(
@@ -101,7 +101,7 @@ async function assertRetryContract(): Promise<void> {
   // package's index exports it as RETRYABLE_STATUS_CODES. Both files are the
   // errors package, which is what this contract requires to own the list.
   const transienceSource = read('errors/src/failure-transience.ts');
-  const sdkTypesSource = read('sdk/src/platform/types/errors.ts');
+  const engineTypesSource = read('platform/src/platform/types/errors.ts');
   const transportRetrySource = read('transport-http/src/retry.ts');
   const retryLiteralPattern = new RegExp(String.raw`\[\s*408,\s*429,\s*500,\s*502,\s*503,\s*504,\s*529\s*\]`);
   const retryLiteralAllowedFiles = new Set([
@@ -117,8 +117,8 @@ async function assertRetryContract(): Promise<void> {
   );
   const canonicalRetryImport = /import\s*\{[^}]*\bRETRYABLE_STATUS_CODES\b[^}]*\}\s*from\s*'@goodvibes-jev\/engine\/errors'/;
   assert(
-    canonicalRetryImport.test(sdkTypesSource),
-    'SDK platform errors must import the canonical retryable status list',
+    canonicalRetryImport.test(engineTypesSource),
+    'engine platform errors must import the canonical retryable status list',
   );
   assert(
     canonicalRetryImport.test(transportRetrySource),
@@ -126,7 +126,7 @@ async function assertRetryContract(): Promise<void> {
   );
   // The old packages are the engine's top-level package directories.
   const packageRoots = [
-    'contracts', 'daemon-sdk', 'errors', 'operator-sdk', 'peer-sdk', 'sdk',
+    'contracts', 'daemon-api', 'errors', 'operator-client', 'peer-client', 'platform',
     'terminal-shell', 'toolchain', 'transport-core', 'transport-http', 'transport-realtime',
   ];
   for (const root of [...packageRoots, 'scripts', 'test', 'examples']) {

@@ -2,9 +2,9 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadSqlJsEngine, SQLiteObservationRetiredError, SQLiteStore, type SqlDatabase } from '../sdk/src/platform/state/sqlite-store.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import * as observations from '../sdk/src/platform/state/sqlite-local-observation.js';
+import { loadSqlJsEngine, SQLiteObservationRetiredError, SQLiteStore, type SqlDatabase } from '../platform/src/platform/state/sqlite-store.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import * as observations from '../platform/src/platform/state/sqlite-local-observation.js';
 
 const stores: SQLiteStore[] = [], knowledge: KnowledgeStore[] = [], peers: SqlDatabase[] = [], roots: string[] = [];
 afterEach(async () => {

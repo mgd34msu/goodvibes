@@ -19,7 +19,7 @@ import { PALETTE_QUERIES, sweepPaletteReplies } from '../../renderer/terminal-pa
 import { TerminalPaletteReader } from '../../renderer/terminal-palette-reader.ts';
 import { getTerminalPalette, resetTerminalPaletteForTests, type TerminalPalette } from '../../renderer/terminal-palette.ts';
 import { activeTokens, getActiveThemeMode as activeThemeMode, getActiveThemeName, refreshForTerminalPalette, setActiveThemeMode, setActiveThemeName } from '../../renderer/theme.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 
 const readers: TerminalPaletteReader[] = [];
 

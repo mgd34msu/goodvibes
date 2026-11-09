@@ -19,24 +19,24 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import {
   DAEMON_OWNED_NON_SCHEMA_CONFIG_PATHS,
   configKeyScope,
   isClientOwnedConfigKey,
   isDaemonOwnedConfigKey,
   listDaemonOwnedConfigPaths,
-} from '../sdk/src/platform/config/config-ownership.js';
+} from '../platform/src/platform/config/config-ownership.js';
 import {
   DaemonConfigRejectedError,
   DaemonConfigUnreachableError,
   applyConfigWrite,
   resolveConfigWriteRoute,
-} from '../sdk/src/platform/config/daemon-config-route.js';
+} from '../platform/src/platform/config/daemon-config-route.js';
 import {
   deriveControlPlaneBaseUrl,
   describeBaseUrlDrift,
-} from '../sdk/src/platform/config/control-plane-base-url.js';
+} from '../platform/src/platform/config/control-plane-base-url.js';
 
 const roots: string[] = [];
 function home(): string {

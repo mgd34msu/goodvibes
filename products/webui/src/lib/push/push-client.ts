@@ -13,7 +13,7 @@
  * pointer; denied → how to re-enable in browser settings; unsupported → plain).
  */
 
-import { sdk } from '../goodvibes';
+import { client as platformClient } from '../goodvibes';
 import type { PublicPushSubscription, PushReconcileDrift } from '../goodvibes';
 import { formatError } from '../errors';
 import { randomUuid } from '../uuid';
@@ -92,7 +92,7 @@ function forgetSubscriptionId(): void {
   }
 }
 
-// A stable per-install device identity (SDK 1.8.0's deviceId), so a browser
+// A stable per-install device identity (platform 1.8.0's deviceId), so a browser
 // whose push endpoint rotates presents the SAME identity with a NEW endpoint,
 // the daemon heals its one record in place (push.subscriptions.reconcile)
 // instead of accumulating a stale duplicate. Generated once and persisted;
@@ -180,7 +180,7 @@ export async function ensureBrowserPushSubscription(): Promise<PushSubscriptionP
   // a new one against the daemon's VAPID key otherwise.
   let subscription = await registration.pushManager.getSubscription();
   if (!subscription) {
-    const { publicKey } = await sdk.operator.push.vapidKey();
+    const { publicKey } = await platformClient.operator.push.vapidKey();
     if (!publicKey) {
       throw new PushSubscribeError('subscribe-failed', 'The daemon returned no VAPID key.');
     }
@@ -204,7 +204,7 @@ export async function ensureBrowserPushSubscription(): Promise<PushSubscriptionP
  */
 export async function subscribeToPush(): Promise<PublicPushSubscription> {
   const payload = await ensureBrowserPushSubscription();
-  const { subscription: stored } = await sdk.operator.push.subscribe({ ...payload, deviceId: ensureDeviceId() });
+  const { subscription: stored } = await platformClient.operator.push.subscribe({ ...payload, deviceId: ensureDeviceId() });
   rememberSubscriptionId(stored.id);
   return stored;
 }
@@ -225,7 +225,7 @@ export async function unsubscribeFromPush(): Promise<void> {
   }
   if (storedId) {
     try {
-      await sdk.operator.push.unsubscribe(storedId);
+      await platformClient.operator.push.unsubscribe(storedId);
     } finally {
       forgetSubscriptionId();
     }
@@ -275,7 +275,7 @@ export async function reconcilePushSubscriptionOnOpen(): Promise<PushReconcileOn
   const deviceId = ensureDeviceId();
   const payload = extractSubscriptionPayload(subscription.toJSON());
 
-  const { subscription: stored, drift } = await sdk.operator.push.reconcile({ ...payload, deviceId });
+  const { subscription: stored, drift } = await platformClient.operator.push.reconcile({ ...payload, deviceId });
   rememberSubscriptionId(stored.id);
   return { drift, subscription: stored };
 }
@@ -286,5 +286,5 @@ export async function sendTestPush(): Promise<void> {
   if (!storedId) {
     throw new PushSubscribeError('no-registration', 'This device is not registered for push yet.');
   }
-  await sdk.operator.push.verify(storedId);
+  await platformClient.operator.push.verify(storedId);
 }

@@ -9,7 +9,7 @@
  * text exist to prevent.
  */
 import { describe, expect, test } from 'bun:test';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   RUNTIME_ENDPOINT_DEFAULT_PORTS,
   formatRuntimeEndpointBinding,
@@ -93,7 +93,7 @@ describe('resolveRuntimeEndpointBinding', () => {
     expect(binding.port).toBe(RUNTIME_ENDPOINT_DEFAULT_PORTS.httpListener);
   });
 
-  test('the web endpoint resolves its port through the SDK resolveWebPort, not the raw stored value', () => {
+  test('the web endpoint resolves its port through the platform resolveWebPort, not the raw stored value', () => {
     const binding = resolveRuntimeEndpointBinding(
       fakeConfig({ 'web.hostMode': 'local', 'web.port': 4568 }),
       'web',

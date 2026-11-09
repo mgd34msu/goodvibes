@@ -22,8 +22,8 @@ import {
   buildStandardProviderAuthRoutes,
   deriveProviderApiKeyEnvVar,
   summarizeProviderAuth,
-} from '../sdk/src/platform/providers/runtime-metadata.ts';
-import type { ProviderAuthRouteDescriptor, ProviderRuntimeMetadataDeps } from '../sdk/src/platform/providers/interface.ts';
+} from '../platform/src/platform/providers/runtime-metadata.ts';
+import type { ProviderAuthRouteDescriptor, ProviderRuntimeMetadataDeps } from '../platform/src/platform/providers/interface.ts';
 
 function emptyDeps(): ProviderRuntimeMetadataDeps {
   return {

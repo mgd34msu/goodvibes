@@ -11,10 +11,10 @@
  * catastrophic block, and the parser still structures every shape below.
  */
 import { describe, expect, test } from 'bun:test';
-import { normalizeCommandWithVerdicts } from '../sdk/src/platform/runtime/permissions/normalization/index.js';
-import { parseCommandAST } from '../sdk/src/platform/runtime/permissions/normalization/parser.js';
-import { collectCommandNodes } from '../sdk/src/platform/runtime/permissions/normalization/ast.js';
-import type { CommandNode } from '../sdk/src/platform/runtime/permissions/normalization/ast.js';
+import { normalizeCommandWithVerdicts } from '../platform/src/platform/runtime/permissions/normalization/index.js';
+import { parseCommandAST } from '../platform/src/platform/runtime/permissions/normalization/parser.js';
+import { collectCommandNodes } from '../platform/src/platform/runtime/permissions/normalization/ast.js';
+import type { CommandNode } from '../platform/src/platform/runtime/permissions/normalization/ast.js';
 
 /** The first command node, asserted present so the test fails loudly if absent. */
 function expectFirst(nodes: CommandNode[]): CommandNode {

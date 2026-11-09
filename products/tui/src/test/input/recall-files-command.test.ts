@@ -3,10 +3,10 @@ import { existsSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'no
 import { join } from 'node:path';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { recallCommand } from '../../input/commands/memory.ts';
-import { MemoryRegistry } from '@goodvibes-jev/engine/sdk/platform/state';
-import type { MemoryAddOptions } from '@goodvibes-jev/engine/sdk/platform/state';
-import { createMemoryApi } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import { MemorySpineClient, createLocalMemoryAccess, type LocalMemoryStore } from '@goodvibes-jev/engine/sdk/platform/runtime/memory-spine';
+import { MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
+import type { MemoryAddOptions } from '@goodvibes-jev/engine/platform/platform/state';
+import { createMemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { MemorySpineClient, createLocalMemoryAccess, type LocalMemoryStore } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import { ForensicsRegistry, createShellPathService } from '@/runtime/index.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 

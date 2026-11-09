@@ -1,9 +1,9 @@
 import { afterEach, expect, test } from 'bun:test';
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { TelegramOffsetStore } from '../sdk/src/platform/channels/telegram/offset-store.js';
-import { TelegramCursorMigration } from '../sdk/src/platform/channels/telegram/cursor-migration.js';
-import { readTelegramCursorPreview } from '../sdk/src/platform/channels/telegram/cursor-migration-data.js';
+import { TelegramOffsetStore } from '../platform/src/platform/channels/telegram/offset-store.js';
+import { TelegramCursorMigration } from '../platform/src/platform/channels/telegram/cursor-migration.js';
+import { readTelegramCursorPreview } from '../platform/src/platform/channels/telegram/cursor-migration-data.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const cleanups: Array<() => Promise<void>> = [];

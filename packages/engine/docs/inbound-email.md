@@ -5,7 +5,7 @@ Its source can use IMAP or Gmail, with persisted cursors, received-message recor
 and verification expectations. Arrival is untrusted input; the watcher cannot
 start an agent or a session merely because a message arrived.
 
-The composition in `sdk/src/platform/daemon/facade-inbound-mail.ts` reads
+The composition in `platform/src/platform/daemon/facade-inbound-mail.ts` reads
 `surfaces.email.inbound.*` settings and stores its state through the daemon's
 user-path resolver. `facade-builtin-channels.ts` supplies the adopted Gmail reader
 and includes inbound email in the runtime's health reporting. An enabled mailbox

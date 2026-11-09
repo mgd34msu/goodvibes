@@ -1,16 +1,16 @@
 /** Explicit production boot operations. The executable opts in separately. */
-import type { ServiceRegistry } from '@goodvibes-jev/engine/sdk/platform/config';
-import { Notifier } from '@goodvibes-jev/engine/sdk/platform/integrations';
-import { synchronizeConfiguredServices } from '@goodvibes-jev/engine/sdk/platform/runtime/bootstrap';
-import { foldLegacyProjectMemory, NOTIFICATIONS_METADATA_ONLY_KEY, readNotificationsMetadataOnly } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
+import { Notifier } from '@goodvibes-jev/engine/platform/platform/integrations';
+import { synchronizeConfiguredServices } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+import { foldLegacyProjectMemory, NOTIFICATIONS_METADATA_ONLY_KEY, readNotificationsMetadataOnly } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { DaemonBootOperations } from './boot-tasks.js';
 import { createDaemonPluginLoaderDeps } from './plugin-composition.js';
 import type { RuntimeServices } from './runtime-services-types.js';
 
 
 /**
- * SDK factories use fail-fast joins. Keep every admitted credential/inspection
+ * platform factories use fail-fast joins. Keep every admitted credential/inspection
  * read owned after a sibling rejects, without mutating the shared registry.
  * The borrowed view delegates to the real methods and persisted configuration.
  */

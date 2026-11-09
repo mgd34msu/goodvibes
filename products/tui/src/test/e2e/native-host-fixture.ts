@@ -1,9 +1,9 @@
 /** Owned real daemon, native capture/admission and host-bound paired principal. */
 import { dirname, join } from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { getProviderModelsCachePath } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { registerInboxSurface } from '@goodvibes-jev/engine/sdk/platform/intake';
-import { WorkspaceRegistrationStore, sharedWorkspaceRegisterPath } from '@goodvibes-jev/engine/sdk/platform/workspace';
+import { getProviderModelsCachePath } from '@goodvibes-jev/engine/platform/platform/providers';
+import { registerInboxSurface } from '@goodvibes-jev/engine/platform/platform/intake';
+import { WorkspaceRegistrationStore, sharedWorkspaceRegisterPath } from '@goodvibes-jev/engine/platform/platform/workspace';
 import { startDaemonFixture } from '@goodvibes-jev/daemon/testing';
 import { TuiConfigManager } from '../../config/host-settings.ts';
 import { beginTuiHostPairing, completeTuiHostPairing } from '../../runtime/tui-host-credential-store.ts';

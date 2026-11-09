@@ -2,13 +2,13 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CONFIG_SCHEMA, ConfigManager, SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { CONFIG_SCHEMA, ConfigManager, SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
 import { SettingsModal, SETTINGS_CATEGORY_GROUPS } from '../../input/settings-modal.ts';
 import { renderSettingsModal } from '../../renderer/settings-modal.ts';
 import { frameFromLayer, frameText } from '../helpers/surface-frame.ts';
 
-// Exercise the real SDK schema and local config write path, with no service or
+// Exercise the real platform schema and local config write path, with no service or
 // provider requests. Adding a category must not replace its schema metadata.
 describe('contract and judgment settings workspace', () => {
   let root: string;

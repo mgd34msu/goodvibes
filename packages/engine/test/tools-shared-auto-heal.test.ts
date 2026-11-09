@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ToolLLM } from '@goodvibes-jev/engine/sdk/platform/config';
-import { AutoHealer } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ToolLLM } from '@goodvibes-jev/engine/platform/platform/config';
+import { AutoHealer } from '@goodvibes-jev/engine/platform/platform/tools';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { useToolReadings } from './_helpers/tool-readings.ts';

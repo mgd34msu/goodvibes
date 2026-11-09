@@ -29,11 +29,11 @@
  * de-dup, an input already advanced past 'queued' is not returned again).
  */
 
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import type {
   SharedSessionInputIntent,
   SharedSessionInputRecord,
-} from '@goodvibes-jev/engine/sdk/platform/control-plane';
+} from '@goodvibes-jev/engine/platform/platform/control-plane';
 
 /** The TUI's own participant surfaceId, inputs it authored are never re-injected. */
 export const TUI_SURFACE_ID = 'surface:tui';

@@ -44,7 +44,7 @@ import {
   type HostedSessionsClient,
 } from '../../runtime/client/hosted-sessions.ts';
 import { watchHostedSession, type HostedSessionSubscription } from '../../runtime/client/hosted-session-stream.ts';
-import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/sdk/platform/pairing';
+import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { getSharedHostedSessionFeed, type HostedSessionFeed } from '../../views/hosted-session-feed.ts';
 import { getSharedHostedSessionRoster } from '../../runtime/client/hosted-roster.ts';
 

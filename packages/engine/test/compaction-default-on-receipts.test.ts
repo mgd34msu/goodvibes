@@ -8,19 +8,19 @@
  * event shape, and the live context-usage readable for a context chip.
  */
 import { describe, expect, test } from 'bun:test';
-import { DEFAULT_CONFIG } from '../sdk/src/platform/config/schema.js';
-import { computeQualityScore, LOW_QUALITY_THRESHOLD } from '../sdk/src/platform/runtime/compaction/quality-score.js';
+import { DEFAULT_CONFIG } from '../platform/src/platform/config/schema.js';
+import { computeQualityScore, LOW_QUALITY_THRESHOLD } from '../platform/src/platform/runtime/compaction/quality-score.js';
 import { useCompactionQuality } from './_helpers/compaction-quality.ts';
-import { compactConversation, type ConversationCompactionHost } from '../sdk/src/platform/core/conversation-compaction.js';
-import { CompactionQualityError } from '../sdk/src/platform/core/compaction-types.js';
-import { emitCompactionReceipt } from '../sdk/src/platform/runtime/emitters/compaction.js';
-import { createCoreReadModels } from '../sdk/src/platform/runtime/ui-read-models-core.js';
-import type { ProviderRegistry } from '../sdk/src/platform/providers/registry.js';
-import type { ProviderMessage } from '../sdk/src/platform/providers/interface.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { emitModelChanged } from '../sdk/src/platform/runtime/emitters/providers.js';
-import { createRuntimeStore } from '../sdk/src/platform/runtime/store/index.js';
-import type { RuntimeServices } from '../sdk/src/platform/runtime/services.js';
+import { compactConversation, type ConversationCompactionHost } from '../platform/src/platform/core/conversation-compaction.js';
+import { CompactionQualityError } from '../platform/src/platform/core/compaction-types.js';
+import { emitCompactionReceipt } from '../platform/src/platform/runtime/emitters/compaction.js';
+import { createCoreReadModels } from '../platform/src/platform/runtime/ui-read-models-core.js';
+import type { ProviderRegistry } from '../platform/src/platform/providers/registry.js';
+import type { ProviderMessage } from '../platform/src/platform/providers/interface.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { emitModelChanged } from '../platform/src/platform/runtime/emitters/providers.js';
+import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.js';
+import type { RuntimeServices } from '../platform/src/platform/runtime/services.js';
 
 /**
  * A minimal RuntimeEventBus whose emit() records (channel, payload) into the

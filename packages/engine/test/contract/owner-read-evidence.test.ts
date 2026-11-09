@@ -1,13 +1,13 @@
 import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createOwnerReadEvidenceReader } from '../../sdk/src/platform/runtime/owner-read-evidence.js';
+import { createOwnerReadEvidenceReader } from '../../platform/src/platform/runtime/owner-read-evidence.js';
 import { makeContract } from './fixtures.js';
 import { makeRepo } from './runner-support.js';
 import { git } from './steps-support.js';
-import type { Contract } from '../../sdk/src/platform/contract/types.js';
-import { contractWorkReceipts, workReceiptIdentity } from '../../sdk/src/platform/contract/work-receipts.js';
-import { observeReadContent } from '../../sdk/src/platform/tools/read/observation.js';
+import type { Contract } from '../../platform/src/platform/contract/types.js';
+import { contractWorkReceipts, workReceiptIdentity } from '../../platform/src/platform/contract/work-receipts.js';
+import { observeReadContent } from '../../platform/src/platform/tools/read/observation.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

@@ -17,13 +17,13 @@
  * WHERE THIS RULE LIVES
  *
  * The comparison itself (`evaluateClientCompatibility`, the header name, the
- * verdict shape) is owned by the SDK, platform/control-plane/client-compatibility.ts,
+ * verdict shape) is owned by the platform, platform/control-plane/client-compatibility.ts,
  * public since the 1.21.0 re-pin, and imported below rather than duplicated.
  *
  * `ClientBuildGuard` stays local. It is not a second comparison; it is this
- * process's state around the SDK's: the latch, and the once-only notification.
+ * process's state around the platform's: the latch, and the once-only notification.
  * Both are facts about THIS process's lifetime, how long it has been attached,
- * whether the owner has already been told, and neither is a value the SDK
+ * whether the owner has already been told, and neither is a value the platform
  * could hold on its behalf.
  */
 
@@ -32,7 +32,7 @@ import {
   evaluateClientCompatibility,
   readClientCompatibilityFloor,
   type ClientCompatibilityVerdict,
-} from '@goodvibes-jev/engine/sdk/platform/control-plane';
+} from '@goodvibes-jev/engine/platform/platform/control-plane';
 
 export { CLIENT_COMPATIBILITY_FLOOR_HEADER, evaluateClientCompatibility, readClientCompatibilityFloor };
 export type { ClientCompatibilityVerdict };

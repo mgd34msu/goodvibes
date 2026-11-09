@@ -1,8 +1,8 @@
 import { lstatSync, realpathSync, statSync } from 'node:fs';
 import { resolve, relative, sep } from 'node:path';
-import type { ArtifactDescriptor, ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import { assertCurrentToolEffect, ToolInputProjectionError, type ToolExecuteOptions } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { resolveAndValidatePath } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { ArtifactDescriptor, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import { assertCurrentToolEffect, ToolInputProjectionError, type ToolExecuteOptions } from '@goodvibes-jev/engine/platform/platform/tools';
+import { resolveAndValidatePath } from '@goodvibes-jev/engine/platform/platform/utils';
 
 export function agentArtifactEffectGuard(args: Record<string, unknown>, options: ToolExecuteOptions | undefined, effect: 'write' | 'send' = 'write'): () => void {
   return () => {

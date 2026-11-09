@@ -1,6 +1,6 @@
-import { CONFIG_SCHEMA, isDeclaredSecretBearingConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { StructuredRedactionOptions } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { captureOwnedJson } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { CONFIG_SCHEMA, isDeclaredSecretBearingConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import type { StructuredRedactionOptions } from '@goodvibes-jev/engine/platform/platform/utils';
+import { captureOwnedJson } from '@goodvibes-jev/engine/platform/platform/gate';
 
 type Declaration = NonNullable<StructuredRedactionOptions['declaredFields']>[number];
 

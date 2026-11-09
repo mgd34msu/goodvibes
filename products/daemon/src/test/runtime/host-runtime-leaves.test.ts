@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { GatewayMethodCatalog, type SharedSessionRecord } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import type { AgentManager, ProcessManager } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { ArchivableProcessRegistry } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { GatewayMethodCatalog, type SharedSessionRecord } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import type { AgentManager, ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ArchivableProcessRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import { RuntimeEventBus, type ShellPathService } from '../../runtime/index.js';
 import { createDevicePostureServices, DAEMON_DEVICE_ACTOR } from '../../runtime/device-posture-composition.js';
 import { createTriggerServices } from '../../runtime/trigger-services.js';

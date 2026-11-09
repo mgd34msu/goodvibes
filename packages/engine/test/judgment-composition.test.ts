@@ -12,11 +12,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { forgetFailureReadings, installJudgmentPort, judgmentPort, JudgmentPortMissingError, readFailure } from '@goodvibes-jev/engine/errors';
 import { DEFAULT_MODEL, readingsOf, SqliteDecisionLog } from '@goodvibes-jev/judgment';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { bootDaemon, type BootedDaemon } from '../sdk/src/platform/daemon/boot.ts';
-import { createDisposalScope } from '../sdk/src/platform/runtime/disposal.ts';
-import { composeJudgment, judgmentConfigFromSettings, type JudgmentSettingsSource } from '../sdk/src/platform/runtime/judgment-services.ts';
-import { decisionLogPath } from '../sdk/src/platform/state/decision-log.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { bootDaemon, type BootedDaemon } from '../platform/src/platform/daemon/boot.ts';
+import { createDisposalScope } from '../platform/src/platform/runtime/disposal.ts';
+import { composeJudgment, judgmentConfigFromSettings, type JudgmentSettingsSource } from '../platform/src/platform/runtime/judgment-services.ts';
+import { decisionLogPath } from '../platform/src/platform/state/decision-log.ts';
 
 const KEY = 'test-judgment-key';
 

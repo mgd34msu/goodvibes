@@ -16,7 +16,7 @@
  *     silent auto-restore path here, and this module never loads a snapshot
  *     just to look at it, `checkRecoveryFile` reports, and only an explicit
  *     yes reaches the code that opens the file.
- *   - The SDK's `applyRecoverySnapshot` is what runs on that yes, and it will
+ *   - The platform's `applyRecoverySnapshot` is what runs on that yes, and it will
  *     not run without the confirmation token this flow hands it. It reads,
  *     retires and applies in one operation, load-then-delete: the file is
  *     retired only after a successful load, so a failed read can never destroy
@@ -55,10 +55,10 @@
  */
 import { statSync } from 'node:fs';
 import { checkRecoveryFile, checkRecoveryForSession, removeRecoveryPoint } from '@/runtime/index.ts';
-import type { ApplyRecoverySnapshotResult } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import type { ApplyRecoverySnapshotResult } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { RecoveryFileInfo, SessionSurface } from '@/runtime/index.ts';
 import { isRecoveryRemovalRecorded, pruneRecoveryDecisions, recordRecoveryRemoval } from './recovery-decisions.ts';
-import { checkSessionLiveness } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { checkSessionLiveness } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { SelectionItem, SelectionResult } from '../input/selection-modal.ts';
 
 /** How the offer ended. Returned so startup wiring (and tests) can assert the real outcome. */
@@ -87,7 +87,7 @@ export interface RecoveryPromptDeps {
    * into conversation state itself.
    *
    * It takes a session id, not a loaded snapshot: reading the snapshot and
-   * retiring it are one operation in the SDK's `applyRecoverySnapshot`, so this
+   * retiring it are one operation in the platform's `applyRecoverySnapshot`, so this
    * flow cannot load one and then leave it behind. That is why "could not read
    * it" arrives here as a refusal in the result rather than as a separate
    * consume step this module runs first.
@@ -231,7 +231,7 @@ function defaultSnapshotBytes(surface: SessionSurface, sessionId: string): numbe
   try {
     return statSync(surface.recoveryFile(sessionId)).size;
   } catch {
-    // The snapshot may have come from the SDK's legacy dual-read location,
+    // The snapshot may have come from the platform's legacy dual-read location,
     // which this path cannot address. Report no size rather than a wrong one.
     return null;
   }

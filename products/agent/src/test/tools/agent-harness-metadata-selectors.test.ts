@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:tes
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { KeybindingsManager } from '../../input/keybindings.ts';
 import { describeHarnessCliCommand, listHarnessCliCommands, totalHarnessCliCommands } from '../../tools/agent-harness-cli-metadata.ts';

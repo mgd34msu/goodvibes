@@ -33,14 +33,14 @@
 
 import { performance } from 'node:perf_hooks';
 import { heapStats } from 'bun:jsc';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { appendConversationMessages } from '../src/core/conversation-rendering.ts';
 import { ConversationManager } from '../src/core/conversation.ts';
 import { renderMarkdownTracked } from '../src/renderer/markdown.ts';
 import { renderCodeBlock } from '../src/renderer/code-block.ts';
 import { renderHelpOverlay } from '../src/renderer/help-overlay.ts';
 import { KeybindingsManager } from '../src/input/keybindings.ts';
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
 
 // ---------------------------------------------------------------------------
 // Config

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { RuntimeEventBus, createEventEnvelope } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
+import { RuntimeEventBus, createEventEnvelope } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import {
   createNotificationDispatcher, wireRuntimeNotificationBridge,
   personFacingEvent, NOTIFICATION_BRIDGE_DOMAINS,

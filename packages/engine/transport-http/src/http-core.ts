@@ -1,4 +1,4 @@
-import { ConfigurationError, ContractError, GoodVibesSdkError, HttpStatusError, createHttpStatusError } from '@goodvibes-jev/engine/errors';
+import { ConfigurationError, ContractError, GoodVibesError, HttpStatusError, createHttpStatusError } from '@goodvibes-jev/engine/errors';
 import { sleepWithSignal } from './backoff.js';
 import { mergeHeaderRecord, normalizeAuthToken, resolveHeaders, type AuthTokenResolver, type HeaderResolver } from './auth.js';
 import {
@@ -373,7 +373,7 @@ export function createHttpJsonTransport(options: HttpJsonTransportOptions): Http
     // only generate an idempotency key when the call is actually idempotent
     // (contract-marked or has a per-method policy override). Sending keys on all
     // mutating methods could cause duplicate suppression for a non-retried request
-    // if a proxy retries it outside the SDK's control.
+    // if a proxy retries it outside the platform's control.
     const hasPerMethodOverride = methodId !== undefined && baseRetry.perMethodPolicy[methodId] !== undefined;
     const idempotencyKey = isMutatingMethod && (contractIdempotent || hasPerMethodOverride)
       ? generateIdempotencyKey()
@@ -465,7 +465,7 @@ export function createHttpJsonTransport(options: HttpJsonTransportOptions): Http
           await composed(ctx);
           if (ctx.error) throw ctx.error;
           if (!ctx.response) {
-            throw new GoodVibesSdkError('HTTP middleware chain completed without producing a response.', {
+            throw new GoodVibesError('HTTP middleware chain completed without producing a response.', {
               category: 'protocol',
               source: 'transport',
               recoverable: false,
@@ -497,14 +497,14 @@ export function createHttpJsonTransport(options: HttpJsonTransportOptions): Http
         }), observer?.onObserverError);
         return result;
       } catch (error) {
-        // Wrap middleware errors as SDKError{kind:'unknown'} with middleware identity in cause.
+        // Wrap middleware errors as GoodVibesError{kind:'unknown'} with middleware identity in cause.
         // ALL errors originating from the middleware chain are wrapped, including HttpStatusError.
         const wrappedError = (() => {
           if (ctx.middlewareError) {
             // Error came from within the middleware chain, wrap regardless of error type.
             const msg = transportErrorFromUnknown(error, 'transport middleware error').message;
             const middlewareName = ctx.activeMiddlewareName ?? 'unknown';
-            const wrapped = new GoodVibesSdkError(`Transport middleware error: ${msg}`, {
+            const wrapped = new GoodVibesError(`Transport middleware error: ${msg}`, {
               category: 'unknown',
               source: 'transport',
               recoverable: false,
@@ -512,7 +512,7 @@ export function createHttpJsonTransport(options: HttpJsonTransportOptions): Http
             });
             return wrapped;
           }
-          if (error instanceof GoodVibesSdkError) return error;
+          if (error instanceof GoodVibesError) return error;
           return error;
         })();
         // Notify observer of the transport error before deciding to retry or rethrow.

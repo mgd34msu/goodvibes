@@ -15,16 +15,16 @@
  *
  * So the daemon's build is checked once per attach against a floor this product
  * declares, using the `version` that `/status` has returned since the route
- * existed. The comparison is the SDK's (`evaluateDaemonStatusCompatibility`);
+ * existed. The comparison is the platform's (`evaluateDaemonStatusCompatibility`);
  * what lives here is this process's state around it, the latch, and the
  * once-only notification, for the same reason the forward guard's does.
  *
  * ON THE FLOOR VALUE
  *
- * `AGENT_DAEMON_BUILD_FLOOR` is '1.28.0'. The SDK is explicit that the floor
+ * `AGENT_DAEMON_BUILD_FLOOR` is '1.28.0'. The platform is explicit that the floor
  * belongs to the consumer, not the platform: "the TUI, the agent and the web
  * UI need different daemon behaviors at different times, and a single
- * SDK-wide constant would either over-refuse for one of them or under-refuse
+ * platform-wide constant would either over-refuse for one of them or under-refuse
  * for another. Each consumer passes its own and states, in its own release
  * notes, what it raised the floor for."
  *
@@ -50,7 +50,7 @@
 import {
   evaluateDaemonStatusCompatibility,
   type DaemonCompatibilityVerdict,
-} from '@goodvibes-jev/engine/sdk/platform/control-plane';
+} from '@goodvibes-jev/engine/platform/platform/control-plane';
 
 export type { DaemonCompatibilityVerdict };
 export { evaluateDaemonStatusCompatibility };

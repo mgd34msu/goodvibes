@@ -3,7 +3,7 @@
  * /principals, and /channel profiles commands drive must be present AND
  * invokable on the runtime this package vendors.
  *
- * Regression context: the SDK's registerGatewayVerbGroups (reached through the
+ * Regression context: the platform's registerGatewayVerbGroups (reached through the
  * terminal-shell's attachWsOnlyGatewayVerbHandlers wrapper) registers
  * principals.*, channels.profiles.*, and ci.* unconditionally, but the
  * check-in family (checkin.config.get/set, checkin.run, checkin.receipts.list)
@@ -19,7 +19,7 @@
  * a check-in descriptor left handler-less is silently skipped. This test pins
  * the four families explicitly, descriptor present, handler attached, and a
  * read-only invoke round-trip returning the honest empty/disabled default, so
- * a future SDK verb-group addition (or a dep that silently drops out of this
+ * a future platform verb-group addition (or a dep that silently drops out of this
  * composition) turns a test red instead of shipping a dead command.
  */
 import { describe, expect, test } from 'bun:test';

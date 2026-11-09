@@ -1,8 +1,8 @@
 import { afterAll, afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
-import type { ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
+import type { ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { recordedEffectFixture } from '../helpers/recorded-effect-admission.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';

@@ -12,10 +12,10 @@ import {
   DaemonAutoUpdater,
   defaultDownloadBaseUrl,
   type AutoUpdateServiceActions,
-} from '../sdk/src/platform/daemon/auto-updater.js';
-import { DaemonLifecycleRuntime, type DaemonLifecycleRuntimeOptions } from '../sdk/src/platform/daemon/facade-lifecycle.js';
-import { DaemonReceiptStore } from '../sdk/src/platform/daemon/receipts.js';
-import type { ServiceHandoverOutcome } from '../sdk/src/platform/daemon/service-handover.js';
+} from '../platform/src/platform/daemon/auto-updater.js';
+import { DaemonLifecycleRuntime, type DaemonLifecycleRuntimeOptions } from '../platform/src/platform/daemon/facade-lifecycle.js';
+import { DaemonReceiptStore } from '../platform/src/platform/daemon/receipts.js';
+import type { ServiceHandoverOutcome } from '../platform/src/platform/daemon/service-handover.js';
 import {
   BOOT_SETTLE_CHECK_DELAY_MS,
   PREVIOUS_FILE_SUFFIX,
@@ -26,11 +26,11 @@ import {
   type NativeReaderCapabilities,
   type UpdateFetchLike,
   type UpdateFileIo,
-} from '../sdk/src/platform/runtime/self-update.js';
+} from '../platform/src/platform/runtime/self-update.js';
 
 import { createSystemOnePort, DEFAULT_MODEL, SqliteDecisionLog, withDecisionLog, type Questions } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { redactSensitiveDataAsync } from '../sdk/src/platform/utils/redaction.ts';
+import { redactSensitiveDataAsync } from '../platform/src/platform/utils/redaction.ts';
 import { installJudgmentPort, forgetFailureReadings } from '@goodvibes-jev/engine/errors';
 import { failureReadingsPort } from './_helpers/failure-readings.ts';
 import { nativeCohortFixture, nativeMemoryIo } from './_helpers/daemon-native-cohort.ts';
@@ -378,6 +378,28 @@ describe('DaemonAutoUpdater', () => {
     } finally {
       rmSync(unsupervised.scratch, { recursive: true, force: true });
     }
+  });
+
+  for (const supervised of [false, true]) test(`${supervised ? 'restart' : 'adoption'} is refused after actual owned-stop failure without inspecting its rejection`, async () => {
+    let inspected = 0, supervisionReads = 0;
+    const privateFailure = { get message() { inspected++; return 'private credential in a rejected owner'; },
+      toString() { inspected++; return 'private credential in a rejected owner'; } };
+    const h = makeHarness({ idle: () => true, supervised, serviceActions: { isSupervised: () => { supervisionReads++; return supervised; } },
+      stopGracefully: async () => { throw privateFailure; } });
+    try {
+      await h.updater.tick();
+      expect(h.sequence).toEqual(['stop']); expect(supervisionReads).toBe(0); expect(h.actions.restarted).toBe(0); expect(h.actions.adopted).toBe(0); expect(h.exits).toEqual([]);
+      expect(h.files.get(EXEC_PATH)?.toString()).toBe('daemon-v2');
+      expect(h.files.get(`${EXEC_PATH}${PREVIOUS_FILE_SUFFIX}`)?.toString()).toBe('daemon-v1');
+      expect(h.updater.snapshot().appliedVersion).toBe('2.0.0');
+      expect(h.updater.snapshot().handover).toEqual({ status: 'failed', detail: 'owned runtime cleanup did not complete; no service handover was requested' });
+      const receipts = readFileSync(join(h.scratch, 'receipts.json'), 'utf8');
+      expect(receipts).toContain('updated from 1.0.0 to 2.0.0'); expect(receipts).toContain('service handover is incomplete (failed');
+      expect(receipts).toContain('no service handover was requested'); expect(receipts).not.toContain('private credential');
+      expect(h.alerts.join('')).toContain('owned runtime cleanup did not complete'); expect(inspected).toBe(0);
+      const requests = h.requests.length; await h.updater.tick(); expect(h.requests).toHaveLength(requests);
+      expect(h.files.get(`${EXEC_PATH}${PREVIOUS_FILE_SUFFIX}`)?.toString()).toBe('daemon-v1');
+    } finally { rmSync(h.scratch, { recursive: true, force: true }); }
   });
 
   test('stop() halts the loop', async () => {

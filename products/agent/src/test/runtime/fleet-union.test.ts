@@ -1,14 +1,14 @@
 /**
  * The Agent's fleet union: this process's registry rows plus the adopted
- * daemon's, over the SDK's poll + local-wins merge policy.
+ * daemon's, over the platform's poll + local-wins merge policy.
  *
  * Driven through the real seam (a DaemonVerbCaller double), so what is proven
  * here is the binding the sidebar actually reads, not a restatement of the
- * SDK's merge rule.
+ * platform's merge rule.
  */
 import { describe, expect, test } from 'bun:test';
-import type { DaemonReachability, DaemonVerbCaller } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
-import type { ProcessNode } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
+import type { DaemonReachability, DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import type { ProcessNode } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import { createAgentFleetUnion } from '../../runtime/client/fleet-union.ts';
 
 function nodeOf(id: string, overrides: Partial<ProcessNode> = {}): ProcessNode {

@@ -22,7 +22,7 @@
  */
 import type { CommandContext } from './command-registry.ts';
 import { isAffirmative } from './agent-workspace-editors.ts';
-import { renderGoogleSetupReport } from '@goodvibes-jev/engine/sdk/platform/google';
+import { renderGoogleSetupReport } from '@goodvibes-jev/engine/platform/platform/google';
 import {
   adoptGoogleCredentials,
   connectGoogle,
@@ -31,8 +31,8 @@ import {
   describeGoogleConnection,
   runGoogleSetup,
 } from './commands/google-connection-actions.ts';
-import type { GoogleClientIntakeChoice } from '@goodvibes-jev/engine/sdk/platform/google';
-import type { GoogleProgressPort, GoogleSetupPath, GoogleSetupStepSpec, GoogleStepResult } from '@goodvibes-jev/engine/sdk/platform/google';
+import type { GoogleClientIntakeChoice } from '@goodvibes-jev/engine/platform/platform/google';
+import type { GoogleProgressPort, GoogleSetupPath, GoogleSetupStepSpec, GoogleStepResult } from '@goodvibes-jev/engine/platform/platform/google';
 import type { AgentWorkspaceActionResult, AgentWorkspaceLocalEditor } from './agent-workspace-types.ts';
 
 type FieldReader = (id: string) => string;

@@ -11,8 +11,8 @@
 import { describe, expect, test, afterEach } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { GoodVibesSdkError } from '@goodvibes-jev/engine/sdk';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { GoodVibesError } from '@goodvibes-jev/engine/platform';
 import type { CommandContext } from '@/input/command-registry.ts';
 import { describeOperatorRpcError, getOperatorRpc } from '@/input/commands/operator-rpc.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
@@ -48,31 +48,31 @@ describe('getOperatorRpc', () => {
     }
   });
 
-  test('resolves an operator SDK client when the daemon is enabled with a reachable base URL', () => {
+  test('resolves an operator platform client when the daemon is enabled with a reachable base URL', () => {
     const configManager = makeConfigManager();
     const homeDirectory = makeProjectTempDir('gv-operator-rpc-home');
     tempDirs.push(homeDirectory);
     const result = getOperatorRpc(makeCtx(configManager, homeDirectory));
     expect(result.available).toBe(true);
     if (result.available) {
-      expect(result.sdk.operator).toBeDefined();
+      expect(result.platformClient.operator).toBeDefined();
     }
   });
 });
 
 describe('describeOperatorRpcError', () => {
   test('renders a 404 as an honest "not wired up" message', () => {
-    const error = new GoodVibesSdkError('not found', { status: 404 });
+    const error = new GoodVibesError('not found', { status: 404 });
     expect(describeOperatorRpcError(error)).toContain('404');
     expect(describeOperatorRpcError(error)).toContain('not wired up');
   });
 
   test('renders a 401/403 as a rejection', () => {
-    const error = new GoodVibesSdkError('nope', { status: 401 });
+    const error = new GoodVibesError('nope', { status: 401 });
     expect(describeOperatorRpcError(error)).toContain('rejected');
   });
 
-  test('falls back to the plain error message for a non-SDK error', () => {
+  test('falls back to the plain error message for a non-platform error', () => {
     expect(describeOperatorRpcError(new Error('boom'))).toBe('boom');
   });
 });

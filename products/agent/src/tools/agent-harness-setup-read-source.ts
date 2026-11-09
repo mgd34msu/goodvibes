@@ -1,4 +1,4 @@
-import { captureSecretsReadSource, captureSubscriptionReadSource, captureServiceReadSource, listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/sdk/platform/config';
+import { captureSecretsReadSource, captureSubscriptionReadSource, captureServiceReadSource, listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/platform/platform/config';
 import { retainCliConfig } from '@goodvibes-jev/engine/terminal-shell';
 import type { CommandContext } from '../input/command-registry.ts';
 import { requireShellPaths } from '../input/commands/runtime-services.ts';
@@ -6,7 +6,7 @@ import { setupWizardCheckpointPath } from '../agent/setup-wizard-checkpoint.ts';
 import { getOnboardingRuntimeStatePath, getOnboardingCheckMarkerPath, getOnboardingCompletionMarkerPath } from '../runtime/onboarding/index.ts';
 import { captureCatalogMethods, captureCatalogSnapshot } from './agent-harness-catalog-ranking.ts';
 import { setupSmokeArtifactStore } from './agent-harness-setup-posture-utils.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogContextPaths, captureCatalogFile } from './agent-harness-stateful-catalog-source.ts';
 
 const nativeDateRoot = globalThis;

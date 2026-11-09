@@ -14,19 +14,19 @@ import { describe, expect, test, afterAll, beforeEach, mock } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConversationManager } from '../sdk/src/platform/core/conversation.js';
-import { ControlPlaneGateway } from '../sdk/src/platform/control-plane/gateway.js';
+import { ConversationManager } from '../platform/src/platform/core/conversation.js';
+import { ControlPlaneGateway } from '../platform/src/platform/control-plane/gateway.js';
 
 // ---------------------------------------------------------------------------
 // ProviderRegistry cache invalidation
 // ---------------------------------------------------------------------------
 // ProviderRegistry has a heavy constructor; we test the invariants by importing
 // the class directly from source and constructing a minimal stub.
-import { ProviderRegistry, type ProviderRegistryOptions } from '../sdk/src/platform/providers/registry.js';
-import type { DiscoveredServer } from '../sdk/src/platform/discovery/scanner.js';
-import type { DomainDispatch } from '../sdk/src/platform/runtime/store/index.js';
-import type { ControlPlaneDomainState } from '../sdk/src/platform/runtime/store/domains/control-plane.js';
-import { ProviderCapabilityRegistry } from '../sdk/src/platform/providers/capabilities.js';
+import { ProviderRegistry, type ProviderRegistryOptions } from '../platform/src/platform/providers/registry.js';
+import type { DiscoveredServer } from '../platform/src/platform/discovery/scanner.js';
+import type { DomainDispatch } from '../platform/src/platform/runtime/store/index.js';
+import type { ControlPlaneDomainState } from '../platform/src/platform/runtime/store/domains/control-plane.js';
+import { ProviderCapabilityRegistry } from '../platform/src/platform/providers/capabilities.js';
 
 // Each registry gets its own persistence root: setModelContextCap persists
 // context-window overrides under the control-plane config dir, so a shared
@@ -170,7 +170,7 @@ describe('registerRuntimeProvider unregister callback invalidates cache', () => 
     const provider = {
       name: 'plugin-provider',
       complete: async () => { throw new Error('not implemented'); },
-    } as unknown as import('../sdk/src/platform/providers/interface.js').LLMProvider;
+    } as unknown as import('../platform/src/platform/providers/interface.js').LLMProvider;
     const model = makeCustomModel('plugin-model', 'plugin-provider:plugin-model');
 
     const unregister = registry.registerRuntimeProvider({ provider, models: [model] });
@@ -261,7 +261,7 @@ describe('_syncScheduled coalesces burst of rememberEvent calls', () => {
       getState: () => ({}),
       dispatch: (fn: (slice: Partial<DomainDispatch>) => void) => fn({ syncControlPlaneState: mockDispatch.syncControlPlaneState }),
       subscribe: () => () => {},
-    } as unknown as import('../sdk/src/platform/runtime/store/index.js').RuntimeStore;
+    } as unknown as import('../platform/src/platform/runtime/store/index.js').RuntimeStore;
 
     // We use the internal attach mechanism to inject dispatch
     const gw = new ControlPlaneGateway({});
@@ -367,11 +367,11 @@ describe('getMessagesForLLM reference identity', () => {
     ['mergeBranch', (c) => {
       // Fork current state, then add a message to the branch so merge actually appends
       c.forkBranch('merge-src');
-      const branchMsgs = (c as unknown as { branches: Map<string, import('../sdk/src/platform/core/conversation.js').ConversationMessageSnapshot[]> }).branches.get('merge-src')!;
+      const branchMsgs = (c as unknown as { branches: Map<string, import('../platform/src/platform/core/conversation.js').ConversationMessageSnapshot[]> }).branches.get('merge-src')!;
       branchMsgs.push({ role: 'assistant', content: 'merged-reply' });
       c.mergeBranch('merge-src');
     }],
-    ['fromJSON', (c) => c.fromJSON({ messages: [{ role: 'user', content: 'from-json' }] as import('../sdk/src/platform/core/conversation.js').ConversationMessageSnapshot[] })],
+    ['fromJSON', (c) => c.fromJSON({ messages: [{ role: 'user', content: 'from-json' }] as import('../platform/src/platform/core/conversation.js').ConversationMessageSnapshot[] })],
     ['undo', (c) => { c.addUserMessage('extra'); c.undo(); }],
     ['redo', (c) => { c.addUserMessage('extra'); c.undo(); c.redo(); }],
     ['markLastUserMessageCancelled', (c) => c.markLastUserMessageCancelled()],

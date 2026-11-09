@@ -1,6 +1,6 @@
 /** Adapted from goodvibes-daemon 254699bf; explicit one-shot send contract. */
-import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ChannelDeliverySurfaceKind } from '@goodvibes-jev/engine/sdk/platform/channels';
+import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ChannelDeliverySurfaceKind } from '@goodvibes-jev/engine/platform/platform/channels';
 import { SURFACE_CONFIGS } from '../../cli/surface-catalog.ts';
 import { canRenderInert } from './inert-text.ts';
 

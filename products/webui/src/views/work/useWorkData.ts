@@ -12,7 +12,7 @@
  */
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import type { FleetAttemptGroup } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { isMethodUnavailableError } from '../../lib/errors';
@@ -46,18 +46,18 @@ export function useWorkData({ contractScope, subscriptionActive, archived, inclu
 
   const snapshot = useQuery({
     queryKey: queryKeys.fleet,
-    queryFn: () => sdk.operator.fleet.snapshot(),
+    queryFn: () => platformClient.operator.fleet.snapshot(),
     refetchInterval: pollInterval,
   });
   const archivedList = useQuery({
     queryKey: queryKeys.fleetArchived,
-    queryFn: () => sdk.operator.fleet.archivedList(),
+    queryFn: () => platformClient.operator.fleet.archivedList(),
     refetchInterval: pollInterval,
     enabled: archived,
   });
   const attempts = useQuery({
     queryKey: queryKeys.fleetAttempts,
-    queryFn: () => sdk.operator.fleet.attempts.list(),
+    queryFn: () => platformClient.operator.fleet.attempts.list(),
     refetchInterval: pollInterval,
     retry: false,
   });
@@ -65,7 +65,7 @@ export function useWorkData({ contractScope, subscriptionActive, archived, inclu
   const approvalUpdates = useApprovalUpdates(true);
   const approvals = useQuery({
     queryKey: queryKeys.approvals,
-    queryFn: () => sdk.operator.approvals.list(),
+    queryFn: () => platformClient.operator.approvals.list(),
     refetchInterval: approvalUpdates.connected ? false : 15_000,
   });
 
@@ -78,7 +78,7 @@ export function useWorkData({ contractScope, subscriptionActive, archived, inclu
 
   const hosted = useQuery({
     queryKey: queryKeys.hostedSessions(includeFinished),
-    queryFn: () => sdk.operator.sessions.hosted.list({ includeTerminated: includeFinished }),
+    queryFn: () => platformClient.operator.sessions.hosted.list({ includeTerminated: includeFinished }),
     refetchInterval: hostedStreamConnected ? 60_000 : 15_000,
     retry: false,
   });
@@ -86,14 +86,14 @@ export function useWorkData({ contractScope, subscriptionActive, archived, inclu
   const tasks = useQuery({
     queryKey: queryKeys.tasks,
     refetchInterval: pollInterval,
-    queryFn: () => sdk.operator.tasks.list(),
+    queryFn: () => platformClient.operator.tasks.list(),
     retry: false,
   });
 
   const ciWatches = useQuery({
     queryKey: queryKeys.ciWatches,
     refetchInterval: pollInterval,
-    queryFn: () => sdk.operator.ci.watches.list(),
+    queryFn: () => platformClient.operator.ci.watches.list(),
     retry: false,
   });
 

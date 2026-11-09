@@ -22,9 +22,9 @@ import {
   type ExecSandboxConfig,
   type ExecSandboxPlan,
   type SandboxAvailability,
-} from '../sdk/src/platform/tools/exec/sandbox.js';
-import { formatResult } from '../sdk/src/platform/tools/exec/result-format.js';
-import type { ExecCommandResult } from '../sdk/src/platform/tools/exec/schema.js';
+} from '../platform/src/platform/tools/exec/sandbox.js';
+import { formatResult } from '../platform/src/platform/tools/exec/result-format.js';
+import type { ExecCommandResult } from '../platform/src/platform/tools/exec/schema.js';
 
 const AVAILABLE: SandboxAvailability = {
   available: true,
@@ -84,7 +84,7 @@ describe('buildSandboxNote: names the isolation that actually applies', () => {
     // has just been told the daemon is unreachable keeps reaching for it, curl,
     // then systemctl, then a port check, because nothing named a route that
     // works. These two tool names are the route, and they are the registry's
-    // real names (packages/sdk/src/platform/tools/goodvibes-runtime/index.ts),
+    // real names (packages/platform/src/platform/tools/goodvibes-runtime/index.ts),
     // not a description of one: a near-miss name spends the same turns.
     const note = buildSandboxNote(isolatedPlan());
 

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { resolveDaemonNativePayloads } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { resolveDaemonNativePayloads } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { admitNativeReleaseArchive } from '../../../.github/scripts/stage-native-release-assets.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');

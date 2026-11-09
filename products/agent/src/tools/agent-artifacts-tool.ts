@@ -1,11 +1,11 @@
 import { existsSync } from 'node:fs';
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import type { ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { ToolRegistry, ToolExecuteOptions } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { captureOwnedJson } from '@goodvibes-jev/engine/sdk/platform/gate';
+import type { ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import type { ToolRegistry, ToolExecuteOptions } from '@goodvibes-jev/engine/platform/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { captureOwnedJson } from '@goodvibes-jev/engine/platform/platform/gate';
 import { agentArtifactEffectGuard, assertAgentArtifactBytes, captureAgentArtifactSource, captureAgentExportPath } from './agent-artifact-effect.ts';
 import {
   createZipArchive,
@@ -602,7 +602,7 @@ export function createAgentArtifactsTool(
       const assertCurrent = agentArtifactEffectGuard(rawArgs, executionOptions);
       const mode = readString(args.mode);
       if (!artifactStore?.list && !artifactStore?.get && !artifactStore?.readContent) {
-        return failure('Artifact browsing is unavailable because this runtime did not provide the SDK artifact store.');
+        return failure('Artifact browsing is unavailable because this runtime did not provide the platform artifact store.');
       }
       try {
         if (mode === 'list') {

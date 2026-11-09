@@ -2,10 +2,10 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { KnowledgeNodeActivationHeldError } from '../sdk/src/platform/knowledge/activation/types.js';
-import { createKnowledgeNodeOperatorMutation, KnowledgeNodeMutationHeldError } from '../sdk/src/platform/knowledge/store-node-authority.js';
-import type { SQLiteStore } from '../sdk/src/platform/state/sqlite-store.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { KnowledgeNodeActivationHeldError } from '../platform/src/platform/knowledge/activation/types.js';
+import { createKnowledgeNodeOperatorMutation, KnowledgeNodeMutationHeldError } from '../platform/src/platform/knowledge/store-node-authority.js';
+import type { SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
 import { useFailureReadings } from './_helpers/failure-readings.js';
 
 const readings = useFailureReadings([]);

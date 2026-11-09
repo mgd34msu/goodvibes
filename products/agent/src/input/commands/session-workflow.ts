@@ -4,7 +4,7 @@ import '@goodvibes-jev/engine/terminal-shell/transcript-review';
 
 import '@goodvibes-jev/engine/terminal-shell/transcript-kinds';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
-import { findSessionCandidates } from '@goodvibes-jev/engine/sdk/platform/sessions';
+import { findSessionCandidates } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { captureTranscriptSource, transcriptReadingCanceled } from './transcript-reading.ts';
 import 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
@@ -15,11 +15,11 @@ import type { CommandContext } from '../command-registry.ts';
 import type { ConversationMessageSnapshot } from '../../core/conversation.ts';
 import { formatReturnContextForDisplay, getReturnContextMode, maybeAssistReturnContextSummary } from '@/runtime/index.ts';
 import { requireProviderApi, requireSessionManager } from './runtime-services.ts';
-import { redactSensitiveDataAsync, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { captureOwnedJson, retainOwnedJson } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { TranscriptSourceChangedError } from '@goodvibes-jev/engine/sdk/platform/core';
+import { redactSensitiveDataAsync, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { captureOwnedJson, retainOwnedJson } from '@goodvibes-jev/engine/platform/platform/gate';
+import { TranscriptSourceChangedError } from '@goodvibes-jev/engine/platform/platform/core';
 import { captureJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { activateClassicFallback, isClassicOperation } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { activateClassicFallback, isClassicOperation } from '@goodvibes-jev/engine/platform/platform/runtime';
 import './confirmation.ts';
 import { readConversationMessageSnapshots } from '../../core/conversation-message-snapshot.ts';
 import { copySessionSidecars, restoreLoadedSession } from '../../core/session-resume-core.ts';
@@ -204,22 +204,6 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
     ['Session saved', '  name ' + name, ...(sanitized !== name ? ['  saved as ' + sanitized] : []), '  path ' + path].join('\n'),
   forked: (id, name, source, title, count) =>
     ['Session forked', '  id ' + id, '  name ' + name, '  from ' + (title || source), '  messages ' + count].join('\n'),
-  prepareRename(ctx, sm) {
-    const existingMeta = sm.getMeta(ctx.session.runtime.sessionId);
-    if (!existingMeta) {
-      sm.save(ctx.session.runtime.sessionId, ctx.session.conversationManager.getMessageSnapshot(), {
-        title: ctx.session.conversationManager.title || '',
-        model: ctx.session.runtime.model,
-        provider: ctx.session.runtime.provider,
-        timestamp: Date.now(),
-        titleSource: ctx.session.conversationManager.getTitleSource(),
-        // Backfilling a save so /session rename has a file to rename is still
-        // user-directed (the user typed /session rename), stamp 'user' so
-        // retention never reclaims it. See saveSource's doc comment on SessionMeta.
-        saveSource: 'user',
-      });
-    }
-  },
   async productCommand(args, ctx, sm, sub) {
     if (sub === 'resume') {
       const target = args.slice(1).join(' ').trim();

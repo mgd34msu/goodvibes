@@ -9,7 +9,7 @@
  *
  * Why a fetch stub and not a real refused connection: this file used to rely on
  * GOODVIBES_BASE_URL (http://127.0.0.1:3421 outside a browser) having nothing
- * listening, so `sdk.auth.current()`'s real `fetch()` call rejected with
+ * listening, so `platform.auth.current()`'s real `fetch()` call rejected with
  * ECONNREFUSED and that rejection was what setExplicitAuthToken's catch saw. That
  * real TCP connection attempt raced the test's own lifetime: the fetch promise our
  * code awaits resolves/rejects on the turn we expect, but the underlying socket
@@ -29,9 +29,9 @@ const realFetch = globalThis.fetch;
 
 /**
  * Stand-in for the daemon's control-plane/auth endpoint: always answers (no socket,
- * no async gap) with a 401 so `sdk.auth.current()` rejects the same way a real daemon
+ * no async gap) with a 401 so `platform.auth.current()` rejects the same way a real daemon
  * would for a token it does not recognize. Carries `preconnect` so the stub still
- * structurally matches `typeof fetch` (the SDK's fetch option type requires it).
+ * structurally matches `typeof fetch` (the platform's fetch option type requires it).
  */
 function createRejectingFetchStub(): typeof fetch {
   const impl = async (): Promise<Response> =>

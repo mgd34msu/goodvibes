@@ -4,10 +4,10 @@
  * event; it never reads the error wording to tell the two apart.
  */
 import { describe, expect, test } from 'bun:test';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
-import { registerBootstrapHookBridge } from '../sdk/src/platform/runtime/bootstrap-hook-bridge.ts';
-import type { HookEvent } from '../sdk/src/platform/hooks/types.ts';
-import { emitAgentCancelled, emitAgentFailed } from '../sdk/src/platform/runtime/emitters/agents.ts';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
+import { registerBootstrapHookBridge } from '../platform/src/platform/runtime/bootstrap-hook-bridge.ts';
+import type { HookEvent } from '../platform/src/platform/hooks/types.ts';
+import { emitAgentCancelled, emitAgentFailed } from '../platform/src/platform/runtime/emitters/agents.ts';
 
 function bridge(): { bus: RuntimeEventBus; fired: Array<Pick<HookEvent, 'path' | 'specific' | 'payload'>>; stop(): void } {
   const bus = new RuntimeEventBus();

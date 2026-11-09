@@ -7,8 +7,8 @@
  * - shouldFireAlert: per-class on/off, master gate on/off, focus state interactions
  */
 import { describe, test, expect } from 'bun:test';
-import { readBooleanConfig, readNotifyOnlyWhenUnfocused, shouldFireAlert } from '../sdk/src/platform/runtime/alert-gating.ts';
-import { FocusTracker } from '../sdk/src/platform/runtime/focus-tracker.ts';
+import { readBooleanConfig, readNotifyOnlyWhenUnfocused, shouldFireAlert } from '../platform/src/platform/runtime/alert-gating.ts';
+import { FocusTracker } from '../platform/src/platform/runtime/focus-tracker.ts';
 
 function makeConfigGet(overrides: Record<string, unknown> = {}) {
   return (key: string): unknown => overrides[key];

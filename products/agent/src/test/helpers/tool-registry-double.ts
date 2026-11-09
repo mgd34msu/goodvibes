@@ -1,12 +1,12 @@
-import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { Tool, ToolDefinition } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool, ToolDefinition } from '@goodvibes-jev/engine/platform/platform/types';
 
 /**
- * A minimal stand-in for the SDK tool registry.
+ * A minimal stand-in for the platform tool registry.
  *
  * Unit tests for Agent-owned tools only need register/has/list/getToolDefinitions.
  * Using a double instead of constructing the real registry keeps these tests
- * from loading the SDK's runtime barrel, so a tool's own behavior is verified
+ * from loading the platform's runtime barrel, so a tool's own behavior is verified
  * even when an unrelated part of the platform cannot be imported.
  */
 export class ToolRegistryDouble {

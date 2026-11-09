@@ -181,7 +181,7 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
       await (hooks.stage ?? stage)(ROOT, release, options, commit, execute);
       let unit = '';
       if (options.service) {
-        unit = hooks.renderUnit ? await hooks.renderUnit(options) : (await import(pathToFileURL(join(ROOT, 'packages/engine/sdk/src/platform/daemon/service-manager.ts')).href)).renderSystemdUnit({
+        unit = hooks.renderUnit ? await hooks.renderUnit(options) : (await import(pathToFileURL(join(ROOT, 'packages/engine/platform/src/platform/daemon/service-manager.ts')).href)).renderSystemdUnit({
           name: 'goodvibes-jev', description: 'GoodVibes Jev daemon and WebUI', workingDirectory: options.workspace ?? ROOT,
           command: join(options.prefix, 'commands/goodvibes-daemon'), args: ['serve', '--hostname', '127.0.0.1', '--port', String(options.port)], env: {}, restartOnFailure: true });
       }

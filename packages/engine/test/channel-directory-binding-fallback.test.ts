@@ -14,8 +14,8 @@
  * conversation as a target.
  */
 import { describe, expect, test } from 'bun:test';
-import { lookupBuiltinProviderDirectory } from '../sdk/src/platform/channels/builtin/targets.ts';
-import type { ManagedSurface } from '../sdk/src/platform/channels/builtin/shared.ts';
+import { lookupBuiltinProviderDirectory } from '../platform/src/platform/channels/builtin/targets.ts';
+import type { ManagedSurface } from '../platform/src/platform/channels/builtin/shared.ts';
 
 const SURFACES: readonly ManagedSurface[] = [
   'slack',

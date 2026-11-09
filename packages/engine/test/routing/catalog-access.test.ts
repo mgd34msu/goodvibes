@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import type { EntryType } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { ProviderAccessReadings, providerAccessFrom } from '../../sdk/src/platform/routing/catalog-access.js';
-import { transformModelsDevResponse } from '../../sdk/src/platform/providers/model-catalog-cache.js';
+import { ProviderAccessReadings, providerAccessFrom } from '../../platform/src/platform/routing/catalog-access.js';
+import { transformModelsDevResponse } from '../../platform/src/platform/providers/model-catalog-cache.js';
 
 let previous: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previous = installJudgmentPort(undefined); });

@@ -325,12 +325,12 @@ not serve memory" state, never a blank panel that reads as empty.
 
 Knowledge is the regular GoodVibes Knowledge/Wiki surface. It is for asking
 the knowledge base, searching it, viewing sources, nodes, issues and maps,
-rendering projections when the SDK/daemon exposes them, and ingesting URLs or
+rendering projections when the platform/daemon exposes them, and ingesting URLs or
 artifacts where supported.
 
 Home Assistant Home Graph is not part of this page. If Home Graph data appears
 in regular Knowledge results by default, that is an upstream scoping issue and
-should be fixed in SDK/daemon, not filtered in the WebUI.
+should be fixed in platform/daemon, not filtered in the WebUI.
 
 ### Review
 

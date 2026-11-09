@@ -2,11 +2,11 @@ import { executeAdmitted } from '../helpers/admitted-tool.ts';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import type { ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import type { PermissionMode } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { PermissionMode } from '@goodvibes-jev/engine/platform/platform/config';
 import { getSessionUntrustedContentLedger, resetSessionUntrustedContentLedgerForTests } from '../../trust/untrusted-content.ts';
-import type { ChannelDeliveryRequest } from '@goodvibes-jev/engine/sdk/platform/channels';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { ChannelDeliveryRequest } from '@goodvibes-jev/engine/platform/platform/channels';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import {
   createAgentReviewPacketShareTool,
   registerAgentReviewPacketShareTool,

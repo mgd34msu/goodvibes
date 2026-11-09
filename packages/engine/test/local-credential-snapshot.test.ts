@@ -2,8 +2,8 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SecretsManager } from '../sdk/src/platform/config/secrets.ts';
-import { acquireCrossProcessLock } from '../sdk/src/platform/workspace/checkpoint/cross-process-lock.ts';
+import { SecretsManager } from '../platform/src/platform/config/secrets.ts';
+import { acquireCrossProcessLock } from '../platform/src/platform/workspace/checkpoint/cross-process-lock.ts';
 const roots: string[] = [];
 afterEach(() => { delete process.env.SYNTHETIC_ALIAS; for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function fixture() {

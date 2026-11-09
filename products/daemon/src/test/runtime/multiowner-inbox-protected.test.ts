@@ -5,12 +5,12 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Socket } from 'node:net';
 import { Client } from 'undici/index.js';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { EmailService } from '@goodvibes-jev/engine/sdk/platform/email';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { EmailService } from '@goodvibes-jev/engine/platform/platform/email';
 import { createEmailInboxOwner, createSlackInboxOwner, digestSender,
-  type EmailInboxAccount, type InboxListOutput, type InboxPollingControl } from '@goodvibes-jev/engine/sdk/platform/intake';
-import type { ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/sdk/platform/security';
+  type EmailInboxAccount, type InboxListOutput, type InboxPollingControl } from '@goodvibes-jev/engine/platform/platform/intake';
+import type { ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/platform/platform/security';
 import type { HandlerContext } from '../../daemon/handlers/context.js';
 import { createEmailDaemonInboxSourceFactory } from '../../runtime/email-inbox-composition.js';
 import { composeMailDeps } from '../../runtime/mail-composition.js';

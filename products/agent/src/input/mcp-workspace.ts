@@ -24,10 +24,10 @@ export {
 export interface McpWorkspaceForm extends McpWorkspaceFormBase {
   confirm: string;
 }
-import { prepareSystemMessagePresentation } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { prepareSystemMessagePresentation } from '@goodvibes-jev/engine/platform/platform/runtime';
 
-import type { McpServerConfig } from '@goodvibes-jev/engine/sdk/platform/mcp';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { McpServerConfig } from '@goodvibes-jev/engine/platform/platform/mcp';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { CommandContext } from './command-registry.ts';
 import { requireMcpApi, requireShellPaths } from './commands/runtime-services.ts';
 
@@ -45,7 +45,7 @@ function serverConfigToForm(server?: McpServerConfig): McpWorkspaceForm {
 
 // The workspace form edits stdio (command-launched) servers only, so the
 // converted config always carries a command; streamable-HTTP (url) servers
-// from the SDK's widened McpServerConfig appear in the list but are managed
+// from the platform's widened McpServerConfig appear in the list but are managed
 // through the /mcp command line.
 
 export class McpWorkspace extends McpWorkspaceState<CommandContext, McpWorkspaceForm, 'reload-confirm'> {

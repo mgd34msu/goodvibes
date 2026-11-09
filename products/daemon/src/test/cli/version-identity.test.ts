@@ -14,7 +14,7 @@ const source = fileURLToPath(new URL('../../version.ts', import.meta.url));
 const fallback = /let _version = '([^']+)'/.exec(readFileSync(source, 'utf8'))?.[1];
 
 async function fixtureVersion(name: string, version: string): Promise<string> {
-  if (process.env.GOODVIBES_SDK_TEST_RUNNER !== '1') throw new Error('Run this fixture through the guarded test script.');
+  if (process.env.GOODVIBES_ENGINE_TEST_RUNNER !== '1') throw new Error('Run this fixture through the guarded test script.');
   const directory = await mkdtemp(join(tmpdir(), 'daemon-version-identity-'));
   fixtures.push(directory);
   await mkdir(join(directory, 'src'));

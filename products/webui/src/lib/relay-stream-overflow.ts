@@ -2,7 +2,7 @@
  * relay-stream-overflow.ts, honest accounting of live events dropped over the relay tunnel.
  *
  * When the webui is connected to the daemon over the relay, live event streams are tunnelled
- * through the relay's bounded send buffer (see the SDK's relay-transport). If that buffer
+ * through the relay's bounded send buffer (see the platform's relay-transport). If that buffer
  * overflows, the daemon does NOT silently drop frames, it emits an honest `relay-overflow`
  * SSE event carrying the count of chunks dropped since the last notice. Every stream consumer
  * (session updates, control-plane invalidation, chat turns) routes that event here.

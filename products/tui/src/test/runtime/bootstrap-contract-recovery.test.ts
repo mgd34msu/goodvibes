@@ -1,7 +1,7 @@
 import { expect, spyOn, test } from 'bun:test';
 import { PassThrough } from 'node:stream';
 import { join } from 'node:path';
-import * as contractRuntime from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import * as contractRuntime from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { TuiConfigManager } from '../../config/host-settings.ts';
 import { bootstrapRuntime, type BootstrapContext } from '../../runtime/bootstrap.ts';
 import { makeHome, startStubModel } from '../e2e/harness.ts';

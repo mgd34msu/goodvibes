@@ -61,16 +61,16 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { normalizeForMatch, SqliteDecisionLog, type DecisionEntry } from '@goodvibes-jev/judgment';
-import { openContractRunner, readContracts, type HostedContractRunner } from '../sdk/src/bin/contract-cli-host.ts';
-import { openEscalation } from '../sdk/src/platform/contract/intake-route.ts';
-import { runContractCli, type ContractCliIo } from '../sdk/src/platform/contract/cli.ts';
-import type { ContractUnitView, ContractView, CriterionView, UnitCheck } from '../sdk/src/platform/contract/types.ts';
-import { decisionLogPath } from '../sdk/src/platform/state/decision-log.ts';
+import { openContractRunner, readContracts, type HostedContractRunner } from '../platform/src/bin/contract-cli-host.ts';
+import { openEscalation } from '../platform/src/platform/contract/intake-route.ts';
+import { runContractCli, type ContractCliIo } from '../platform/src/platform/contract/cli.ts';
+import type { ContractUnitView, ContractView, CriterionView, UnitCheck } from '../platform/src/platform/contract/types.ts';
+import { decisionLogPath } from '../platform/src/platform/state/decision-log.ts';
 import { sweepStaleTmpDirs } from './stale-tmp-sweep.ts';
 import { PROOF_RETAINED_MARKER, STALE_PROOF_TMP_MS, retainProofOutput } from './proof-temp.ts';
 import { describeRequestedModel, describeProofResult } from './contract-proof-model.ts';
 
-const BIN = resolve(dirname(new URL(import.meta.url).pathname), '..', 'sdk', 'src', 'bin', 'goodvibes-contract.ts');
+const BIN = resolve(dirname(new URL(import.meta.url).pathname), '..', 'platform', 'src', 'bin', 'goodvibes-contract.ts');
 /** The longest either contract may run before the proof gives up on it. */
 const RUN_DEADLINE_MS = 90 * 60_000;
 

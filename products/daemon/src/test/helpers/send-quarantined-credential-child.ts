@@ -1,11 +1,11 @@
 /** Isolated source-command fixture: the child owns its synthetic environment. */
 import { spyOn } from 'bun:test';
-import { ServiceRegistry } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
 import { runDaemonCli } from '../../cli/run.js';
 import { SecretsManager } from '../../config/secrets.js';
 import * as composition from '../../daemon/send/composition.js';
 
-if (process.env.GOODVIBES_SDK_TEST_RUNNER !== '1') throw new Error('Guarded send fixture required');
+if (process.env.GOODVIBES_ENGINE_TEST_RUNNER !== '1') throw new Error('Guarded send fixture required');
 let secretLookups = 0; let serviceLookups = 0; let fetches = 0; let stacks = 0;
 const originalStack = composition.createSendStack;
 spyOn(composition, 'createSendStack').mockImplementation((configuration) => { stacks += 1; return originalStack(configuration); });

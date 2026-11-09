@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { linkSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readFileObservation } from '../sdk/src/platform/utils/file-observation.js';
+import { readFileObservation } from '../platform/src/platform/utils/file-observation.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

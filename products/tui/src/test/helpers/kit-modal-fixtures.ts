@@ -9,7 +9,7 @@
 
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { ProfileManager } from '@goodvibes-jev/engine/sdk/platform/profiles';
+import { ProfileManager } from '@goodvibes-jev/engine/platform/platform/profiles';
 import type { SurfaceLayer } from '../../renderer/surface-kit.ts';
 import { ConfigModal } from '../../input/config-modal.ts';
 import type { ConfigModalSurface } from '../../input/config-modal-types.ts';

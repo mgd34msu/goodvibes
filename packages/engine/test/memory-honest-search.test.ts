@@ -9,10 +9,10 @@ import {
   resolveCanonicalMemoryDbPath,
   foldMemoryStores,
   runHonestMemorySearch,
-} from '../sdk/src/platform/state/index.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
+} from '../platform/src/platform/state/index.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { useMemoryReadings } from './_helpers/memory-readings.ts';
-import { fieldKind } from '../sdk/src/platform/utils/batteries/field-kind.js';
+import { fieldKind } from '../platform/src/platform/utils/batteries/field-kind.js';
 
 function memoryRequests(readings: Pick<ReturnType<typeof useMemoryReadings>, 'requests'>, battery: 'engine.state.memory-search' | 'engine.state.memory-review-priority') {
   for (const request of readings.requests) {

@@ -9,8 +9,8 @@ import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import { CommandPalette, formatShortcut } from './CommandPalette';
 import { getCommands, registerCommand, unregisterCommand, type CommandDef } from '../../lib/commands';
-import type { BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-sdk';
-import { clearStoredAuthToken, sdk, tokenStore } from '../../lib/goodvibes';
+import type { BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-api';
+import { clearStoredAuthToken, client as platformClient, tokenStore } from '../../lib/goodvibes';
 import { setActiveRoute } from '../../lib/relay-connection';
 import { browserDecisionPolicy } from '../../lib/decision-policy';
 
@@ -387,7 +387,7 @@ describe('CommandPalette: admitted semantic search', () => {
     }) as typeof fetch;
     renderPalette(true); type('begin afresh');
     await until(() => options().length === 1);
-    await sdk.auth.setToken('offline-account-b');
+    await platformClient.auth.setToken('offline-account-b');
     observeEnabledPolicy();
     key('Enter'); expect(ran).toEqual([]);
     type('new account request');

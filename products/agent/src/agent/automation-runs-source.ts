@@ -19,7 +19,7 @@
  * offline-tolerant, matching the away-digest's existing silent-failure
  * contract. It never falls back to the local automation manager.
  */
-import { createBrowserGoodVibesSdk } from '@goodvibes-jev/engine/sdk/browser';
+import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
 import {
   resolveAgentConnectedHostConnection,
   type AgentConnectedHostConfigReader,
@@ -30,11 +30,11 @@ export const AUTOMATION_RUNS_LIST_METHOD = 'automation.runs.list';
 
 /**
  * The full run status enum per the operator contract (packages/contracts
- * artifacts), including the 'missed' status. NOTE: the SDK's generated
+ * artifacts), including the 'missed' status. NOTE: the platform's generated
  * client type (OperatorMethodOutput<'automation.runs.list'>) has NOT been
- * regenerated to include 'missed' in its status union as of SDK commit
+ * regenerated to include 'missed' in its status union as of platform commit
  * 3bddf143 even though the raw contract JSON and the runtime both carry it
- * (packages/sdk/src/platform/automation/manager-runtime-missed.js), so this
+ * (packages/engine/platform/src/platform/automation/manager-runtime-missed.js), so this
  * module parses the wire response as `unknown` and narrows locally rather
  * than trusting that generated type.
  */
@@ -123,8 +123,8 @@ export async function listAutomationRunsSince(
 ): Promise<AutomationRunsSinceResult> {
   if (!connection.token) return EMPTY_RESULT;
   try {
-    const sdk = createBrowserGoodVibesSdk({ baseUrl: connection.baseUrl, authToken: connection.token });
-    const output: unknown = await sdk.operator.invoke(AUTOMATION_RUNS_LIST_METHOD, { since });
+    const platformClient = createBrowserGoodVibesPlatform({ baseUrl: connection.baseUrl, authToken: connection.token });
+    const output: unknown = await platformClient.operator.invoke(AUTOMATION_RUNS_LIST_METHOD, { since });
     const record = isRecord(output) ? output : {};
     const rawRuns: readonly unknown[] = Array.isArray(record.runs) ? record.runs : [];
     const runs: AutomationRunOutcome[] = [];

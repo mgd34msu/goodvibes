@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // checkpoint-runtime-command.test.ts, /checkpoints, /checkpoint
 //
-// Exercises the real WorkspaceCheckpointManager (@goodvibes-jev/engine/sdk,
+// Exercises the real WorkspaceCheckpointManager (@goodvibes-jev/engine/platform,
 // installed in node_modules, no mock needed for the manager itself) against
 // a scratch workspace directory. Only the TUI context plumbing (print/render)
 // is mocked, per the project's existing command-test pattern.
@@ -14,7 +14,7 @@
 import { describe, expect, test, afterEach } from 'bun:test';
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/sdk/platform/workspace';
+import { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/platform/platform/workspace';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerCheckpointRuntimeCommands } from '../../input/commands/checkpoint-runtime.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';

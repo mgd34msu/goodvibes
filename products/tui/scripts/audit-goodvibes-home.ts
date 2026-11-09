@@ -4,7 +4,7 @@ import {
   renderGoodVibesHomeAuditMarkdown,
   writeAuditReportFiles,
 } from '../src/config/goodvibes-home-audit.ts';
-import { resolveGoodVibesTreeDirectory } from '@goodvibes-jev/engine/sdk/platform/config';
+import { resolveGoodVibesTreeDirectory } from '@goodvibes-jev/engine/platform/platform/config';
 
 function readArgValue(args: readonly string[], flag: string): string | undefined {
   const index = args.indexOf(flag);

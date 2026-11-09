@@ -10,12 +10,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { MemoryEmbeddingProviderRegistry, MemoryStore } from '../sdk/src/platform/state/index.js';
-import type { MemoryRecord } from '../sdk/src/platform/state/index.js';
-import { SqliteVecMemoryIndex } from '../sdk/src/platform/state/memory-vector-store.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
+import { MemoryEmbeddingProviderRegistry, MemoryStore } from '../platform/src/platform/state/index.js';
+import type { MemoryRecord } from '../platform/src/platform/state/index.js';
+import { SqliteVecMemoryIndex } from '../platform/src/platform/state/memory-vector-store.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { useMemoryReadings } from './_helpers/memory-readings.ts';
-import { fieldKind } from '../sdk/src/platform/utils/batteries/field-kind.js';
+import { fieldKind } from '../platform/src/platform/utils/batteries/field-kind.js';
 
 function memoryRequests(readings: Pick<ReturnType<typeof useMemoryReadings>, 'requests'>, battery: 'engine.state.memory-search' | 'engine.state.memory-review-priority') {
   for (const request of readings.requests) {

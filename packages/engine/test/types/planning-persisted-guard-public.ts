@@ -5,8 +5,8 @@ import {
   type ProjectPlanningStateActionInput,
   type ProjectPlanningStateActionResult,
   type KnowledgeSourceWriteResult,
-} from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import { SQLiteStore } from '@goodvibes-jev/engine/sdk/platform/state';
+} from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { SQLiteStore } from '@goodvibes-jev/engine/platform/platform/state';
 
 declare const store: KnowledgeStore;
 declare const service: ProjectPlanningService;

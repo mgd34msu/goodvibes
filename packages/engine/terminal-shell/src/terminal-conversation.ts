@@ -1,15 +1,15 @@
-import type { RuntimeEventProvenance } from '@goodvibes-jev/engine/sdk/platform/runtime/bootstrap';
-import { readTreeGlyphSet, TREE_GLYPHS_CONFIG_KEY } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import type { RuntimeEventProvenance } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+import { readTreeGlyphSet, TREE_GLYPHS_CONFIG_KEY } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { InfiniteBuffer } from './conversation-history.js';
-import { createEmptyLine, type Line, type Cell } from '@goodvibes-jev/engine/sdk/platform/types';
+import { createEmptyLine, type Line, type Cell } from '@goodvibes-jev/engine/platform/platform/types';
 import type { SplashOptions } from './splash-lines.js';
-import type { ToolCall, ToolResult } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { ProviderMessage, ContentPart } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { TranscriptEventKind, TranscriptReadingOptions } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { ToolCall, ToolResult } from '@goodvibes-jev/engine/platform/platform/types';
+import type { ProviderMessage, ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { TranscriptEventKind, TranscriptReadingOptions } from '@goodvibes-jev/engine/platform/platform/core';
 // SystemMessageKind imported from runtime directly to avoid cycle: conversation.ts → system-message-router.ts → conversation.ts
-import type { SystemMessageKind } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
-import { ConversationManager as SdkConversationManager, TranscriptReadingLifetime, type BlockMeta as SdkBlockMeta, } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { SystemMessageKind } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { ConversationManager as PlatformConversationManager, TranscriptReadingLifetime, type BlockMeta as PlatformBlockMeta, } from '@goodvibes-jev/engine/platform/platform/core';
 import type { BlockMeta } from './work-tree-types.js';
 import type { ConversationRenderContext } from './conversation-render-context.js';
 import type { createConversationRenderer } from './conversation-rendering.js';
@@ -40,19 +40,19 @@ import { isWorkTreeFoldKey } from './work-tree-fold-store.js';
 import { type TreeGlyphSetName } from './renderer/lane-graph-glyphs.js';
 import { probeUnicodeSupport } from './renderer/lane-graph-glyphs.js';
 /**
- * TerminalConversationManager - terminal subclass of the SDK's ConversationManager.
+ * TerminalConversationManager - terminal subclass of the platform's ConversationManager.
  * Adds InfiniteBuffer history, block registry, collapse state, width tracking,
  * dirty flag, display methods, splash screen, error/event navigation, and
- * Line[]-based rendering atop the SDK's message management.
+ * Line[]-based rendering atop the platform's message management.
  */
-// Re-export SDK types for backward compatibility
-export type { TokenUsage, ConversationMessageSnapshot, ConversationTitleSource, } from '@goodvibes-jev/engine/sdk/platform/core';
-export type { SdkBlockMeta };
+// Re-export platform types for backward compatibility
+export type { TokenUsage, ConversationMessageSnapshot, ConversationTitleSource, } from '@goodvibes-jev/engine/platform/platform/core';
+export type { PlatformBlockMeta };
 // BlockMeta is defined in ./conversation-types.ts to avoid a circular dep
 // with conversation-rendering.ts; re-exported here for backward compatibility.
 export type { BlockMeta };
 // Import internal types needed for rendering helpers
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
 type Message = ConversationMessageSnapshot;
 /**
  * `Orchestrator.usage`'s own type, re-exported under the name this module's
@@ -60,10 +60,10 @@ type Message = ConversationMessageSnapshot;
  * was an inferred object literal on the class with no name to import; it has
  * one now.
  */
-import type { OrchestratorUsageTotals } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { OrchestratorUsageTotals } from '@goodvibes-jev/engine/platform/platform/core';
 export type { OrchestratorUsageTotals };
-export { sumConversationUsage } from '@goodvibes-jev/engine/sdk/platform/core';
-export class TerminalConversationManager extends SdkConversationManager {
+export { sumConversationUsage } from '@goodvibes-jev/engine/platform/platform/core';
+export class TerminalConversationManager extends PlatformConversationManager {
     public history = new InfiniteBuffer();
     /** Replacement identity for asynchronous presentation tied to this history. */
     private replacementGeneration = 0;
@@ -244,7 +244,7 @@ export class TerminalConversationManager extends SdkConversationManager {
         toolCalls?: ToolCall[] | undefined;
         reasoningContent?: string | undefined;
         reasoningSummary?: string | undefined;
-        usage?: import('@goodvibes-jev/engine/sdk/platform/core').TokenUsage | undefined;
+        usage?: import('@goodvibes-jev/engine/platform/platform/core').TokenUsage | undefined;
         model?: string | undefined;
         provider?: string | undefined;
     } | undefined): void {
@@ -301,7 +301,7 @@ export class TerminalConversationManager extends SdkConversationManager {
         }
         return result;
     }
-    public override removeMessagesAfter(count: number, options: Parameters<SdkConversationManager['removeMessagesAfter']>[1] = {}): void {
+    public override removeMessagesAfter(count: number, options: Parameters<PlatformConversationManager['removeMessagesAfter']>[1] = {}): void {
         if (count < this.getMessageCount())
             this.retireNoticePublications();
         super.removeMessagesAfter(count, options);
@@ -404,7 +404,7 @@ export class TerminalConversationManager extends SdkConversationManager {
         this.workTree.reset();
         this._displayFromMessageIndex = 0; // full reset, show everything on next render
     }
-    /** Compaction's replace: the SDK keeps every kept message whole (tool calls, model, reasoning); the display rebuilds. */
+    /** Compaction's replace: the platform keeps every kept message whole (tool calls, model, reasoning); the display rebuilds. */
     public override replaceMessagesForLLM(newMessages: ProviderMessage[]): void {
         this.retireNoticePublications();
         super.replaceMessagesForLLM(newMessages);
@@ -445,7 +445,7 @@ export class TerminalConversationManager extends SdkConversationManager {
         branches?: Record<string, Message[]> | undefined;
         currentBranch?: string | undefined;
         title?: string | undefined;
-        titleSource?: import('@goodvibes-jev/engine/sdk/platform/core').ConversationTitleSource | undefined;
+        titleSource?: import('@goodvibes-jev/engine/platform/platform/core').ConversationTitleSource | undefined;
     }): void {
         this.retireNoticePublications();
         this.replacementGeneration++;
@@ -810,4 +810,4 @@ export class TerminalConversationManager extends SdkConversationManager {
     public markSearchExpanded(key: string): void { this.searchExpansion.markSearchExpanded(key); }
     public restoreSearchExpansions(): void { this.searchExpansion.restoreOnto(this); }
 }
-export { parseDiffForApply, applyDiffContent } from '@goodvibes-jev/engine/sdk/platform/core';
+export { parseDiffForApply, applyDiffContent } from '@goodvibes-jev/engine/platform/platform/core';

@@ -8,7 +8,7 @@ import { createCanonicalLiveCodeSource } from './_helpers/code-injection-reading
  * Drives the REAL turn loop (`runAgentTask`) against a scripted fake LLMProvider and a
  * real `AgentMessageBus` (so `messageBus.send(..., {kind:'steer'})` exercises the exact
  * same drain path as orchestrator-runner-steer-drain.test.ts), with a fake memory
- * registry standing in for the SDK's MemoryRegistry (module-level retrieval behavior is
+ * registry standing in for the platform's MemoryRegistry (module-level retrieval behavior is
  * already covered by test/turn-knowledge-injection.test.ts). Covers the brief's
  * integration test matrix:
  *  - the systemPrompt sent to provider.chat on the turn a steer lands contains a block
@@ -27,21 +27,21 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { runAgentTask, type AgentOrchestratorRunContext } from '../sdk/src/platform/agents/orchestrator-runner.js';
-import { buildOrchestratorSystemPrompt, resolveSpawnKnowledgeInjections } from '../sdk/src/platform/agents/orchestrator-prompts.js';
-import { AgentMessageBus } from '../sdk/src/platform/agents/message-bus.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { createProcessRegistry } from '../sdk/src/platform/runtime/fleet/index.js';
-import { createFeatureFlagManager } from '../sdk/src/platform/runtime/feature-flags/manager.js';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.js';
-import { estimateConversationTokens, estimateTokens } from '../sdk/src/platform/core/context-compaction.js';
-import { appendGoodVibesRuntimeAwarenessPrompt } from '../sdk/src/platform/tools/goodvibes-runtime/index.js';
-import type { AgentRecord } from '../sdk/src/platform/tools/agent/manager.js';
-import type { LLMProvider, ChatResponse, ProviderMessage } from '../sdk/src/platform/providers/interface.js';
-import { ModelLimitsService } from '../sdk/src/platform/providers/model-limits.js';
-import type { ModelDefinition } from '../sdk/src/platform/providers/registry-types.js';
-import type { ProviderRegistry } from '../sdk/src/platform/providers/registry.js';
-import type { MemoryRecord } from '../sdk/src/platform/state/memory-store.js';
+import { runAgentTask, type AgentOrchestratorRunContext } from '../platform/src/platform/agents/orchestrator-runner.js';
+import { buildOrchestratorSystemPrompt, resolveSpawnKnowledgeInjections } from '../platform/src/platform/agents/orchestrator-prompts.js';
+import { AgentMessageBus } from '../platform/src/platform/agents/message-bus.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { createProcessRegistry } from '../platform/src/platform/runtime/fleet/index.js';
+import { createFeatureFlagManager } from '../platform/src/platform/runtime/feature-flags/manager.js';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.js';
+import { estimateConversationTokens, estimateTokens } from '../platform/src/platform/core/context-compaction.js';
+import { appendGoodVibesRuntimeAwarenessPrompt } from '../platform/src/platform/tools/goodvibes-runtime/index.js';
+import type { AgentRecord } from '../platform/src/platform/tools/agent/manager.js';
+import type { LLMProvider, ChatResponse, ProviderMessage } from '../platform/src/platform/providers/interface.js';
+import { ModelLimitsService } from '../platform/src/platform/providers/model-limits.js';
+import type { ModelDefinition } from '../platform/src/platform/providers/registry-types.js';
+import type { ProviderRegistry } from '../platform/src/platform/providers/registry.js';
+import type { MemoryRecord } from '../platform/src/platform/state/memory-store.js';
 import { DEFAULT_MEMORY_READINGS, useMemoryReadings } from './_helpers/memory-readings.ts';
 
 // Knowledge ranking reads through the judgment port. The fake reads a record as

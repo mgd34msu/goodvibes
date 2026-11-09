@@ -26,10 +26,10 @@ import {
   TONE_TOKENS,
   resolveTones,
   waitingPhrase,
-} from '../sdk/src/platform/presentation/index.ts';
+} from '../platform/src/platform/presentation/index.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PRESENTATION_DIR = resolve(__dirname, '../sdk/src/platform/presentation');
+const PRESENTATION_DIR = resolve(__dirname, '../platform/src/platform/presentation');
 
 describe('resolveTones', () => {
   test('dark is reference-identical to TONE_TOKENS', () => {

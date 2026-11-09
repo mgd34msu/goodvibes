@@ -10,15 +10,15 @@ import { afterEach, describe, expect, test, beforeEach } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { createShellPathService } from '../sdk/src/platform/runtime/shell-paths.ts';
-import { controlPlaneStorePath } from '../sdk/src/platform/control-plane/control-plane-store-paths.ts';
-import { resolveWorkspaceRegisterReadPath } from '../sdk/src/platform/workspace/registration/shared-register-path.ts';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { installOccasions } from '../sdk/src/platform/control-plane/routes/occasions-composition.ts';
-import { OwnerProfileStore } from '../sdk/src/platform/owner-profile/index.ts';
-import { WorkspaceRegistrationManager } from '../sdk/src/platform/runtime/workspace-registration.ts';
-import { resetProcessUntrustedContentLedgerForTests } from '../sdk/src/platform/security/untrusted-content.ts';
+import { createShellPathService } from '../platform/src/platform/runtime/shell-paths.ts';
+import { controlPlaneStorePath } from '../platform/src/platform/control-plane/control-plane-store-paths.ts';
+import { resolveWorkspaceRegisterReadPath } from '../platform/src/platform/workspace/registration/shared-register-path.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { installOccasions } from '../platform/src/platform/control-plane/routes/occasions-composition.ts';
+import { OwnerProfileStore } from '../platform/src/platform/owner-profile/index.ts';
+import { WorkspaceRegistrationManager } from '../platform/src/platform/runtime/workspace-registration.ts';
+import { resetProcessUntrustedContentLedgerForTests } from '../platform/src/platform/security/untrusted-content.ts';
 
 // Profile writes ask the content-derivation reading whenever the process
 // ledger holds untrusted text; another test file's reads must not reach these.

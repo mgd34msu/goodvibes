@@ -5,10 +5,10 @@ import { unlinkSync } from 'node:fs';
 import 'node:fs/promises';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import type { SelectionItem } from '../selection-modal.ts';
-import '@goodvibes-jev/engine/sdk/platform/export';
-import { TemplateManager, parseTemplateArgs } from '@goodvibes-jev/engine/sdk/platform/templates';
+import '@goodvibes-jev/engine/platform/platform/export';
+import { TemplateManager, parseTemplateArgs } from '@goodvibes-jev/engine/platform/platform/templates';
 import { requireSessionManager, requireSessionMemoryStore, requireShellPaths } from './runtime-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { sessionCommand } from './session.ts';
 import { undoLastRewind, redoLastRewind } from './rewind-runtime.ts';
 import { filterUserFacingSessions } from './session-picker-filter.ts';
@@ -250,7 +250,7 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
   // from /recall's durable records). /memory is now registered as an alias
   // of /recall below (memory.ts), matching the agent, so the word means the
   // same thing on both surfaces. See
-  // docs/decisions/2026-07-06-core-verb-spec.md (in the SDK repo) for the
+  // docs/decisions/2026-07-06-core-verb-spec.md (in the platform repo) for the
   // full writeup.
   registry.register({
     name: 'note',
@@ -299,9 +299,9 @@ const contentCommands = createSessionContentCommands<CommandContext, Record<stri
     return messages.map((m) => ({
       role: String(m.role ?? 'user') as 'user' | 'assistant' | 'system' | 'tool',
       content: Array.isArray(m.content)
-        ? (m.content as import('@goodvibes-jev/engine/sdk/platform/providers').ContentPart[])
+        ? (m.content as import('@goodvibes-jev/engine/platform/platform/providers').ContentPart[])
         : String(m.content ?? ''),
-      toolCalls: m.toolCalls as import('@goodvibes-jev/engine/sdk/platform/types').ToolCall[] | undefined,
+      toolCalls: m.toolCalls as import('@goodvibes-jev/engine/platform/platform/types').ToolCall[] | undefined,
       callId: m.callId as string | undefined,
       toolName: m.toolName as string | undefined,
       reasoningContent: m.reasoningContent as string | undefined,

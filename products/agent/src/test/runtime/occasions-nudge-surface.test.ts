@@ -2,7 +2,7 @@
  * The Agent as a nudge channel: what actually reaches the transcript.
  *
  * docs/occasions.md §4.2 names Telegram AND the agent, and excludes the TUI in
- * the owner's own words. The agent's half of that is a PULL, the SDK's own
+ * the owner's own words. The agent's half of that is a PULL, the platform's own
  * docstring on `occasions.pending` says so, and this suite pins the properties
  * that make the pull safe to run on every turn:
  *

@@ -10,9 +10,9 @@
  * This mirrors the daemon's own /status?receipts=consume fold, done in-process
  * for the embedded daemon.
  */
-import { FeatureAnnouncementStore, featureAnnouncementsPath, createSandboxContainmentAnnouncer } from '@goodvibes-jev/engine/sdk/platform/runtime/feature-announcements';
-import { readClientCompatibilityFloor } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { FeatureAnnouncementStore, featureAnnouncementsPath, createSandboxContainmentAnnouncer } from '@goodvibes-jev/engine/platform/platform/runtime/feature-announcements';
+import { readClientCompatibilityFloor } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 
 /** A daemon receipt line (already a human one-liner, e.g. "restarted after a crash at 14:32"). */
 export interface DaemonReceiptLike {

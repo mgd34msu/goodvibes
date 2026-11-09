@@ -2,7 +2,7 @@
 //
 // Runtime-neutral building blocks for the zero-knowledge, self-hostable relay:
 // the hop protocol the relay operator can read, and the end-to-end crypto it
-// cannot. Consumed by the relay server (daemon-sdk), the client relay transport
+// cannot. Consumed by the relay server (daemon-api), the client relay transport
 // (transport-realtime), and the daemon-side termination. Kept off the main
 // transport-core barrel so it stays an explicit, opt-in subpath import.
 

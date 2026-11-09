@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
-import type { NativeHostedTurnSnapshot } from "@goodvibes-jev/engine/sdk/platform/hosted-sessions/native-turn-client";
+import type { NativeHostedTurnSnapshot } from "@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client";
 import type { NativeTurnObservation } from "../../lib/native-turn";
 import { NativeTurnStatus } from "./NativeTurnStatus";
 

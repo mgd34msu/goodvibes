@@ -18,7 +18,7 @@
  * rows are hidden above and below (drawn as a muted "12 more ↓" count).
  */
 
-import { getDisplayWidth } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils';
 import { activeTokens } from './theme.js';
 import { MODAL_MARK_INSET, SurfaceCanvas, scrollCountText, wrapLines, type KitStyle } from './surface-kit.js';
 

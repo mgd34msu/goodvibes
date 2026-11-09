@@ -12,7 +12,7 @@ import {
   SERVICE_STATUS_EXIT_RUNNING,
   type ManagedServiceActionRunner,
 } from '../../daemon/service-commands.js';
-import type { ManagedServiceStatus } from '@goodvibes-jev/engine/sdk/platform/daemon';
+import type { ManagedServiceStatus } from '@goodvibes-jev/engine/platform/platform/daemon';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 
 /**

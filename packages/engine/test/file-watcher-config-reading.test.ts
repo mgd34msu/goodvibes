@@ -5,9 +5,9 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { FileWatcher } from '../sdk/src/platform/state/file-watcher.ts';
-import type { FileStateCache } from '../sdk/src/platform/state/file-cache.ts';
-import type { ProjectIndex } from '../sdk/src/platform/state/project-index.ts';
+import { FileWatcher } from '../platform/src/platform/state/file-watcher.ts';
+import type { FileStateCache } from '../platform/src/platform/state/file-cache.ts';
+import type { ProjectIndex } from '../platform/src/platform/state/project-index.ts';
 
 const ROOT_FILES = ['package.json', '.env.staging', 'pyproject.toml', 'README.md'];
 

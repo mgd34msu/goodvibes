@@ -8,8 +8,8 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PluginManager } from '../sdk/src/platform/plugins/manager.ts';
-import type { PluginLoaderDeps } from '../sdk/src/platform/plugins/loader.ts';
+import { PluginManager } from '../platform/src/platform/plugins/manager.ts';
+import type { PluginLoaderDeps } from '../platform/src/platform/plugins/loader.ts';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

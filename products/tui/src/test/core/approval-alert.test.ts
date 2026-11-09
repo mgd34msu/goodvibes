@@ -12,8 +12,8 @@ import { makeTestWebhookNotifier, settleTestWebhookNotifications } from '../help
  */
 import { describe, test, expect, mock } from 'bun:test';
 import { wrapRequestPermissionWithAlert } from '../../core/approval-alert.ts';
-import { FocusTracker } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import type { PermissionPromptRequest } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import type { PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
 
 function makeRequest(overrides: Partial<PermissionPromptRequest> = {}): PermissionPromptRequest {
   return {

@@ -31,7 +31,7 @@
  *
  * What is NOT simulated: the driver, the guard, the composition, the service,
  * the verbs, their handlers, the decision order, the fill order or the redaction.
- * These are primitive SDK route/service seam tests. Native detached admission,
+ * These are primitive platform route/service seam tests. Native detached admission,
  * paired authority and status/restart handling have separate host suites.
  */
 import { mkdtempSync } from 'node:fs';
@@ -47,28 +47,28 @@ import {
   type CheckoutGuardHandle,
   type CheckoutSubmission,
   type CheckoutSubmissionDescription,
-} from '../sdk/src/platform/payments/browser-checkout-driver.js';
-import { CheckoutSubmitRefused, type CheckoutPageDriver, type CheckoutTerms } from '../sdk/src/platform/payments/checkout-page.js';
-import { CardMaterialRedactor, REDACTED_MARKER } from '../sdk/src/platform/payments/card-redaction.js';
-import { PaymentsGatewayServiceImpl } from '../sdk/src/platform/payments/payments-gateway-service.js';
-import { BudgetLedger } from '../sdk/src/platform/payments/budget.js';
-import { MemoryCheckoutJournal } from '../sdk/src/platform/payments/checkout-registry.js';
-import { createChannelPaymentNotifier } from '../sdk/src/platform/payments/notice-delivery.js';
-import type { CurrencyCode, PostalAddress } from '../sdk/src/platform/payments/types.js';
-import { parseCurrencyCode } from '../sdk/src/platform/payments/types.js';
-import type { PurchaseRecord } from '../sdk/src/platform/payments/checkout-flow.js';
-import { UntrustedContentLedger } from '../sdk/src/platform/security/untrusted-content.js';
-import { grantOwnerApproval } from '../sdk/src/platform/security/owner-approval.js';
+} from '../platform/src/platform/payments/browser-checkout-driver.js';
+import { CheckoutSubmitRefused, type CheckoutPageDriver, type CheckoutTerms } from '../platform/src/platform/payments/checkout-page.js';
+import { CardMaterialRedactor, REDACTED_MARKER } from '../platform/src/platform/payments/card-redaction.js';
+import { PaymentsGatewayServiceImpl } from '../platform/src/platform/payments/payments-gateway-service.js';
+import { BudgetLedger } from '../platform/src/platform/payments/budget.js';
+import { MemoryCheckoutJournal } from '../platform/src/platform/payments/checkout-registry.js';
+import { createChannelPaymentNotifier } from '../platform/src/platform/payments/notice-delivery.js';
+import type { CurrencyCode, PostalAddress } from '../platform/src/platform/payments/types.js';
+import { parseCurrencyCode } from '../platform/src/platform/payments/types.js';
+import type { PurchaseRecord } from '../platform/src/platform/payments/checkout-flow.js';
+import { UntrustedContentLedger } from '../platform/src/platform/security/untrusted-content.js';
+import { grantOwnerApproval } from '../platform/src/platform/security/owner-approval.js';
 import {
   composeDaemonBrowser,
   createDaemonBrowserGatewayService,
   type BrowserCheckoutSeam,
-} from '../sdk/src/platform/control-plane/routes/browser-composition.js';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.js';
+} from '../platform/src/platform/control-plane/routes/browser-composition.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
 import {
   registerPaymentsGatewayMethods,
   type PaymentsGatewayService,
-} from '../sdk/src/platform/control-plane/routes/payments.js';
+} from '../platform/src/platform/control-plane/routes/payments.js';
 import { usePaymentsReadings } from './helpers/payments-readings.ts';
 
 usePaymentsReadings();
@@ -898,7 +898,7 @@ interface SevenVerbCompositionOptions {
 
 /**
  * The daemon's own shape: five verbs answered from stores it owns, and the two
- * checkout verbs answered by the SDK service over the browser seam.
+ * checkout verbs answered by the platform service over the browser seam.
  */
 async function sevenVerbComposition(options: SevenVerbCompositionOptions = {}): Promise<SevenVerbHarness> {
   const guard = new CardMaterialRedactor();

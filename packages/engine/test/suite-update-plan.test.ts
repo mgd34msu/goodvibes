@@ -3,7 +3,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { resolveSuiteUpdatePlan } from '../sdk/src/platform/runtime/suite-update-plan.js';
+import { resolveSuiteUpdatePlan } from '../platform/src/platform/runtime/suite-update-plan.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

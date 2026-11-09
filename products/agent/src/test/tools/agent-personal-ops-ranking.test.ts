@@ -5,7 +5,7 @@ import { ordinaryResearchOwner, cleanupResearchScreeningFixtures, researchScreen
 import { bindAgentResearchSourceOwner } from '../../agent/protected-research-report.ts';
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import type { CommandContext, CommandRegistry } from '../../input/command-registry.ts';

@@ -6,7 +6,7 @@
  * 78 of the 140 published subpaths, `./platform/email` among them, appear in
  * neither. Measured, not assumed: changing `EmailSummary.subject` from `string`
  * to `string | null`, rebuilding and running `bunx api-extractor run --local`
- * produced no diff in `etc/goodvibes-sdk.api.md` at all.
+ * produced no diff in `etc/goodvibes-platform.api.md` at all.
  *
  * Every assertion below drives a REJECT path and its matching ACCEPT path. A
  * detector that only ever ran against input it accepts is the failure this
@@ -30,8 +30,8 @@ import {
 } from '../scripts/subpath-api-surface-rule.ts';
 import { subpackageExports } from '../scripts/export-conditions.ts';
 
-const SDK_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const PACKAGE_DIR = join(SDK_ROOT, 'sdk');
+const ENGINE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const PACKAGE_DIR = join(ENGINE_ROOT, 'platform');
 
 const alwaysExists = (): boolean => true;
 const neverExists = (): boolean => false;
@@ -226,14 +226,14 @@ describe('class members', () => {
 });
 
 describe('the committed report', () => {
-  const committed = JSON.parse(readFileSync(join(SDK_ROOT, 'etc', 'subpath-api-surface.json'), 'utf8')) as Snapshot;
-  // The old sdk package's export map is the engine manifest's ./sdk/* entries,
-  // whose "types" conditions name the declarations tsc emits under sdk/dist
+  const committed = JSON.parse(readFileSync(join(ENGINE_ROOT, 'etc', 'subpath-api-surface.json'), 'utf8')) as Snapshot;
+  // The old platform package's export map is the engine manifest's ./platform/* entries,
+  // whose "types" conditions name the declarations tsc emits under platform/dist
   // (the same derivation check-subpath-api-surface.ts makes).
-  const engine = JSON.parse(readFileSync(join(SDK_ROOT, 'package.json'), 'utf8')) as {
+  const engine = JSON.parse(readFileSync(join(ENGINE_ROOT, 'package.json'), 'utf8')) as {
     exports: Record<string, unknown>;
   };
-  const manifest = { exports: subpackageExports(engine.exports, 'sdk') };
+  const manifest = { exports: subpackageExports(engine.exports, 'platform') };
 
   test('every subpath that publishes types has a non-empty section', () => {
     const { entryPoints, problems } = resolveSubpathEntryPoints(manifest, PACKAGE_DIR);
@@ -280,9 +280,9 @@ describe('the committed report', () => {
   });
 
   test('those same names are absent from the api-extractor rollups: the rollups are not this gate', () => {
-    const rollup = readFileSync(join(SDK_ROOT, 'etc', 'goodvibes-sdk.api.md'), 'utf8')
-      + readFileSync(join(SDK_ROOT, 'etc', 'goodvibes-sdk-embed.api.md'), 'utf8');
-    // If this ever fails it is good news, it means `sdk/src/index.ts`
+    const rollup = readFileSync(join(ENGINE_ROOT, 'etc', 'goodvibes-platform.api.md'), 'utf8')
+      + readFileSync(join(ENGINE_ROOT, 'etc', 'goodvibes-platform-embed.api.md'), 'utf8');
+    // If this ever fails it is good news, it means `platform/src/index.ts`
     // started re-exporting the platform tree and the rollup covers it too. Fix
     // by deleting this assertion, not by narrowing the report.
     expect(rollup).not.toContain('EmailInboxListResult');

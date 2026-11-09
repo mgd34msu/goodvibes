@@ -28,10 +28,10 @@ import { describe, expect, test, afterAll } from 'bun:test';
 import type { Server } from 'bun';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { OpenAICompatProvider } from '../sdk/src/platform/providers/openai-compat.js';
-import { createDiscoveredProvider } from '../sdk/src/platform/providers/discovered-factory.js';
-import type { DiscoveredServer } from '../sdk/src/platform/discovery/scanner.js';
-import type { ProviderRuntimeMetadataDeps } from '../sdk/src/platform/providers/interface.js';
+import { OpenAICompatProvider } from '../platform/src/platform/providers/openai-compat.js';
+import { createDiscoveredProvider } from '../platform/src/platform/providers/discovered-factory.js';
+import type { DiscoveredServer } from '../platform/src/platform/discovery/scanner.js';
+import type { ProviderRuntimeMetadataDeps } from '../platform/src/platform/providers/interface.js';
 
 /** Minimal describeRuntime() dependency stub, no stored secrets, no
  * services, no subscriptions. Enough to exercise the auth-mode/configured
@@ -43,10 +43,10 @@ const STUB_RUNTIME_DEPS: ProviderRuntimeMetadataDeps = {
 };
 
 // Resolve relative to openai-compat.ts (not this test file), `openai` is a
-// dependency of packages/sdk, and Bun's workspace hoisting doesn't guarantee
+// dependency of packages/platform, and Bun's workspace hoisting doesn't guarantee
 // it's reachable via require.resolve() from the repo root.
 const providerModuleRequire = createRequire(
-  new URL('../sdk/src/platform/providers/openai-compat.ts', import.meta.url),
+  new URL('../platform/src/platform/providers/openai-compat.ts', import.meta.url),
 );
 function resolveInstalledOpenAIVersion(): string {
   try {
@@ -246,7 +246,7 @@ describe('OpenAICompatProvider.chat: error diagnostic message format', () => {
         };
         const stream = new ReadableStream({
           start(controller) {
-            // First chunk is well-formed so the SDK's stream genuinely opens
+            // First chunk is well-formed so the platform's stream genuinely opens
             // (streamOpened = true) before the failure.
             controller.enqueue(encoder.encode(`data: ${JSON.stringify(validChunk)}\n\n`));
             // Second "chunk" is malformed (no `choices` field), our own

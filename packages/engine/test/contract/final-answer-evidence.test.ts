@@ -1,13 +1,13 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
-import { completionEvidenceCommitment } from '../../sdk/src/platform/contract/completion-evidence-binding.js';
-import { contractWorkReceipts, workReceiptIdentity } from '../../sdk/src/platform/contract/work-receipts.js';
+import { completionEvidenceCommitment } from '../../platform/src/platform/contract/completion-evidence-binding.js';
+import { contractWorkReceipts, workReceiptIdentity } from '../../platform/src/platform/contract/work-receipts.js';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { currentFileObservations } from '../../sdk/src/platform/contract/evidence.js';
-import { finalAnswerEvidence, finalContentEvidence } from '../../sdk/src/platform/contract/final-answer-evidence.js';
-import { commandObservation } from '../../sdk/src/platform/contract/command-observation.js';
+import { currentFileObservations } from '../../platform/src/platform/contract/evidence.js';
+import { finalAnswerEvidence, finalContentEvidence } from '../../platform/src/platform/contract/final-answer-evidence.js';
+import { commandObservation } from '../../platform/src/platform/contract/command-observation.js';
 import { makeContract, makeUnit } from './fixtures.js';
 
 

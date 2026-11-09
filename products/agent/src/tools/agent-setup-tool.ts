@@ -1,5 +1,5 @@
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { randomUUID } from 'node:crypto';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
 import { createSetupSmokeReferenceCapture, executeNestedSetupSmoke } from './agent-setup-smoke-reference.ts';

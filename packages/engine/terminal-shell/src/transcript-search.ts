@@ -1,5 +1,5 @@
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
+import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
 import type { BlockMeta } from './work-tree-types.js';
 export interface SearchHistory {
     getAllLines(): readonly Line[];

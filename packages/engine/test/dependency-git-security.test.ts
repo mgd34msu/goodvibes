@@ -3,9 +3,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { createSimpleGit } from '../sdk/src/platform/git/optional-simple-git.js';
-import { GitService } from '../sdk/src/platform/git/service.js';
-import { SideGitRunner, detectGitToplevel } from '../sdk/src/platform/workspace/checkpoint/side-git.js';
+import { createSimpleGit } from '../platform/src/platform/git/optional-simple-git.js';
+import { GitService } from '../platform/src/platform/git/service.js';
+import { SideGitRunner, detectGitToplevel } from '../platform/src/platform/workspace/checkpoint/side-git.js';
 
 const require = createRequire(import.meta.url);
 

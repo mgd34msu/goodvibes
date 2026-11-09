@@ -16,7 +16,7 @@
 import { useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import { useToast } from '../../lib/toast';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import {
   clearRegisteredCredential,
   describeStepUpError,
@@ -49,7 +49,7 @@ export function StepUpSettings() {
         userDisplayName: 'GoodVibes operator',
         label: label.trim() || undefined,
       });
-      const result = await sdk.operator.stepup.registerCredential({
+      const result = await platformClient.operator.stepup.registerCredential({
         rpId: ceremony.rpId,
         origin: ceremony.origin,
         credentialId: ceremony.credentialId,
@@ -78,7 +78,7 @@ export function StepUpSettings() {
     setBusy('verify');
     setError(null);
     try {
-      const challenge = await sdk.operator.stepup.mintChallenge({});
+      const challenge = await platformClient.operator.stepup.mintChallenge({});
       await runAssertion({ challenge: challenge.challenge, credentialId: registered?.credentialId });
       toast({
         title: 'Passkey verified',

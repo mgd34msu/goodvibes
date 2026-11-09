@@ -1,6 +1,6 @@
 import { types as nodeTypes } from 'node:util';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { ToolInputProjectionError, type ToolInputProjector, type ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
+import { ToolInputProjectionError, type ToolInputProjector, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { createHarnessCatalogInputProjector } from './agent-harness-catalog-ingress.ts';
 
 /** Reuse the complete-input screening lease before generic registry readers. */

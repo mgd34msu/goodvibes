@@ -1,22 +1,22 @@
 /**
  * config-ownership.test.ts: the daemon-owned badge predicate. The local predicate must
- * agree with the SDK's own isDaemonOwnedConfigKey for every schema key and every
+ * agree with the platform's own isDaemonOwnedConfigKey for every schema key and every
  * non-schema path, and the listed rulings are the classifications a user sees.
  */
 import { describe, expect, test } from 'bun:test';
 import {
-  DAEMON_OWNED_CONFIG_KEYS as SDK_KEYS,
-  DAEMON_OWNED_NON_SCHEMA_CONFIG_PATHS as SDK_NON_SCHEMA_PATHS,
-  isDaemonOwnedConfigKey as sdkIsDaemonOwnedConfigKey,
-} from '@goodvibes-jev/engine/sdk/platform/config';
+  DAEMON_OWNED_CONFIG_KEYS as ENGINE_KEYS,
+  DAEMON_OWNED_NON_SCHEMA_CONFIG_PATHS as ENGINE_NON_SCHEMA_PATHS,
+  isDaemonOwnedConfigKey as engineIsDaemonOwnedConfigKey,
+} from '@goodvibes-jev/engine/platform/platform/config';
 import { isDaemonOwnedConfigKey } from './config-ownership';
 import { CONFIG_SCHEMA_ENTRIES } from './generated/config-schema';
 
-describe('the local predicate agrees with the SDK predicate', () => {
+describe('the local predicate agrees with the platform predicate', () => {
   const corpus = [
     ...CONFIG_SCHEMA_ENTRIES.map((entry) => entry.key),
-    ...SDK_NON_SCHEMA_PATHS,
-    ...SDK_KEYS,
+    ...ENGINE_NON_SCHEMA_PATHS,
+    ...ENGINE_KEYS,
     // Keys that share a prefix WORD but not the dotted prefix, and keys under no namespace.
     'webhookRetryLimit',
     'relayed.enabled',
@@ -26,7 +26,7 @@ describe('the local predicate agrees with the SDK predicate', () => {
   ];
 
   test('for every schema key, every non-schema path, and the prefix-collision shapes', () => {
-    const disagreements = corpus.filter((key) => isDaemonOwnedConfigKey(key) !== sdkIsDaemonOwnedConfigKey(key));
+    const disagreements = corpus.filter((key) => isDaemonOwnedConfigKey(key) !== engineIsDaemonOwnedConfigKey(key));
     expect(disagreements).toEqual([]);
     // Both answers occur in the corpus, so agreement is not "everything is false".
     expect(corpus.some((key) => isDaemonOwnedConfigKey(key))).toBe(true);

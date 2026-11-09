@@ -8,7 +8,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadMcpConfig, upsertMcpServerConfig } from '../sdk/src/platform/mcp/config.ts';
+import { loadMcpConfig, upsertMcpServerConfig } from '../platform/src/platform/mcp/config.ts';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

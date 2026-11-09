@@ -2,8 +2,8 @@ import type {
   WorkLedgerReadEvent,
   WorkLedgerReadBinding,
   WorkLedgerReadSnapshot,
-} from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger';
-import type { OperatorNativeWorkExecutionClient } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
+} from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
+import type { OperatorNativeWorkExecutionClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
 export type NativeWorkLedgerBinding = WorkLedgerReadBinding & { readonly execution?: OperatorNativeWorkExecutionClient };
 /** Purge legacy manifests as soon as read authority narrows, including already displayed history. */
 export function projectWorkLedgerHistory(

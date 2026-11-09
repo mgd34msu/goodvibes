@@ -1,7 +1,7 @@
 import { interactiveRuntimeSchemaStatus, interactiveRuntimeKind, interactiveRuntimeStatus, interactiveRuntimeRouteRole,
-  type InteractiveRuntimeRouteRole } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { booleanValue, ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { declaredClassicRuntimeMetadata } from '@goodvibes-jev/engine/sdk/platform/runtime';
+  type InteractiveRuntimeRouteRole } from '@goodvibes-jev/engine/platform/platform/gate';
+import { booleanValue, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { declaredClassicRuntimeMetadata } from '@goodvibes-jev/engine/platform/platform/runtime';
 import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { personalOpsEntry } from './agent-harness-personal-ops-source.ts';
 import { withCanonicalReading } from './agent-harness-canonical-reading.ts';

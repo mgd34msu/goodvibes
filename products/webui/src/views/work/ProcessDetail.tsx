@@ -17,7 +17,7 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Archive, ArchiveRestore, OctagonX, SendHorizontal } from 'lucide-react';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import type { ApprovalRecord, FleetProcessNode } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import {
@@ -61,7 +61,7 @@ function ObservedSteer({ node, observed }: { node: FleetProcessNode; observed: N
   const { toast } = useToast();
   const [draft, setDraft] = useState('');
   const steer = useMutation({
-    mutationFn: (text: string) => sdk.operator.fleet.observed.steer(node.id, text),
+    mutationFn: (text: string) => platformClient.operator.fleet.observed.steer(node.id, text),
     onSuccess: (result) => {
       if (result.queued) {
         toast({ title: 'Sent', description: 'Message delivered over the external session’s channel.', tone: 'success' });
@@ -139,7 +139,7 @@ export function ProcessDetail({ node, archived, approvals, onOpenItem, onClose, 
   };
 
   const archiveNode = useMutation({
-    mutationFn: (id: string) => sdk.operator.fleet.archive(id),
+    mutationFn: (id: string) => platformClient.operator.fleet.archive(id),
     onSuccess: async (result) => {
       if (result.archived) {
         toast({ title: `Archived (${result.count} node${result.count === 1 ? '' : 's'})`, tone: 'info' });
@@ -155,7 +155,7 @@ export function ProcessDetail({ node, archived, approvals, onOpenItem, onClose, 
   });
 
   const restoreNode = useMutation({
-    mutationFn: (id: string) => sdk.operator.fleet.unarchive(id),
+    mutationFn: (id: string) => platformClient.operator.fleet.unarchive(id),
     onSuccess: async (result) => {
       toast({
         title: result.restored > 0
@@ -172,7 +172,7 @@ export function ProcessDetail({ node, archived, approvals, onOpenItem, onClose, 
   });
 
   const stopWatcher = useMutation({
-    mutationFn: (watcherId: string) => sdk.operator.watchers.stop(watcherId),
+    mutationFn: (watcherId: string) => platformClient.operator.watchers.stop(watcherId),
     onSuccess: async () => {
       toast({ title: 'Stop requested', tone: 'info' });
       await queryClient.invalidateQueries({ queryKey: queryKeys.fleet });

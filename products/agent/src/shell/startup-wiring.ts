@@ -1,5 +1,5 @@
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
-import type { HookDispatcher, HookEventPath, HookPhase, HookCategory } from '@goodvibes-jev/engine/sdk/platform/hooks';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { HookDispatcher, HookEventPath, HookPhase, HookCategory } from '@goodvibes-jev/engine/platform/platform/hooks';
 import {
   checkRecoveryFile,
   createShellPathService,

@@ -21,7 +21,7 @@ import {
   type TriggerObservation,
   type TriggerRule,
   type TriggerRuleState,
-} from '../sdk/src/platform/triggers/index.ts';
+} from '../platform/src/platform/triggers/index.ts';
 
 function observations(samples: ReadonlyArray<[number, unknown]>): TriggerObservation[] {
   return samples.map(([at, value]) => toObservation(value as never, at));

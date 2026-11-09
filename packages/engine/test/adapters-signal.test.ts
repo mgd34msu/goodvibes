@@ -2,7 +2,7 @@
  * Adapter behavioral coverage, Signal adapter.
  */
 import { describe, expect, test } from 'bun:test';
-import { handleSignalSurfaceWebhook } from '../sdk/src/platform/adapters/signal/index.js';
+import { handleSignalSurfaceWebhook } from '../platform/src/platform/adapters/signal/index.js';
 
 function makeSignalContext(overrides: Partial<Record<string, unknown>> = {}) {
   const calls: Array<{ kind: string; input: unknown }> = [];

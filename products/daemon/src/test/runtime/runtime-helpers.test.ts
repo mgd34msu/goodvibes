@@ -1,10 +1,10 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { createFleetServices as canonicalFleetServices } from '@goodvibes-jev/engine/terminal-shell';
-import { ObservedAgentSource } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet/observed';
-import { WorktreeRegistry as CanonicalWorktrees } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
-import { GlobalNetworkTransportInstaller as CanonicalTransport } from '@goodvibes-jev/engine/sdk/platform/runtime/transport';
-import { CardMaterialRedactor } from '@goodvibes-jev/engine/sdk/platform/payments';
-import type { BrowserCheckoutSeam } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import { ObservedAgentSource } from '@goodvibes-jev/engine/platform/platform/runtime/fleet/observed';
+import { WorktreeRegistry as CanonicalWorktrees } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { GlobalNetworkTransportInstaller as CanonicalTransport } from '@goodvibes-jev/engine/platform/platform/runtime/transport';
+import { CardMaterialRedactor } from '@goodvibes-jev/engine/platform/platform/payments';
+import type { BrowserCheckoutSeam } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { createFleetServices, type FleetServicesDeps } from '../../runtime/fleet-services.ts';
 import { createBrowserCheckoutSeamHolder } from '../../runtime/browser-checkout-seam-holder.ts';
 import { WorktreeRegistry, GlobalNetworkTransportInstaller } from '../../runtime/index.ts';

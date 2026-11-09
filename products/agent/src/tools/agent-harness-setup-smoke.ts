@@ -1,7 +1,7 @@
-import type { ArtifactDescriptor } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import { containsIssuerCredential, redactIssuerCredentials } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import { containsIssuerCredential, redactIssuerCredentials } from '@goodvibes-jev/engine/platform/platform/utils';
+import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { SetupSmokeNativeEvidence } from './agent-setup-smoke-reference.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { requireShellPaths } from '../input/commands/runtime-services.ts';

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { GoodVibesSdkError } from '@goodvibes-jev/engine/sdk';
+import { GoodVibesError } from '@goodvibes-jev/engine/platform';
 import {
   classifyVoiceProvisionError,
   createVoiceProvisionGateway,
@@ -9,7 +9,7 @@ import {
   type VoiceProvisionGatewayResolution,
 } from '../../core/voice-provision-gateway.ts';
 import type { VoiceRuntimeStatusResult, VoiceLocalInstallResult } from '../../core/voice-provision-status.ts';
-import { resolveWakeRuntimeSettings } from '@goodvibes-jev/engine/sdk/platform/voice/wake/runtime';
+import { resolveWakeRuntimeSettings } from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
 import { terminalWakeCapabilities, WAKE_SETUP_ANNOUNCEMENT } from '../../core/wake-provision-status.ts';
 import { printWakeStatus, runWakeProvision } from '../../core/wake-provision-runner.ts';
 import { CommandRegistry } from '../../input/command-registry.ts';
@@ -55,11 +55,11 @@ function failingResolution(error: unknown): VoiceProvisionGatewayResolution {
 
 describe('classifyVoiceProvisionError', () => {
   test('501 and 404 are "verb unavailable" (daemon predates managed voice)', () => {
-    expect(classifyVoiceProvisionError(new GoodVibesSdkError('x', { status: 501 })).kind).toBe('unavailable');
-    expect(classifyVoiceProvisionError(new GoodVibesSdkError('x', { status: 404 })).kind).toBe('unavailable');
+    expect(classifyVoiceProvisionError(new GoodVibesError('x', { status: 501 })).kind).toBe('unavailable');
+    expect(classifyVoiceProvisionError(new GoodVibesError('x', { status: 404 })).kind).toBe('unavailable');
   });
   test('500 / network errors are a generic error, not "unavailable"', () => {
-    expect(classifyVoiceProvisionError(new GoodVibesSdkError('boom', { status: 500 })).kind).toBe('error');
+    expect(classifyVoiceProvisionError(new GoodVibesError('boom', { status: 500 })).kind).toBe('error');
     expect(classifyVoiceProvisionError(new Error('connection reset')).kind).toBe('error');
   });
 });
@@ -84,7 +84,7 @@ describe('renderVoiceProvision: mocked daemon (injected resolution)', () => {
   });
 
   test('a 501 during install renders "does not serve managed voice provisioning yet"', async () => {
-    const out = await renderVoiceProvision('setup', failingResolution(new GoodVibesSdkError('no handler', { status: 501 })));
+    const out = await renderVoiceProvision('setup', failingResolution(new GoodVibesError('no handler', { status: 501 })));
     expect(out).toContain('does not serve managed voice provisioning yet');
   });
 
@@ -160,7 +160,7 @@ describe('runVoiceSetupWithProgress: live progress polling (no real timers)', ()
     const resolution: VoiceProvisionGatewayResolution = {
       available: true,
       gateway: {
-        runInstall: async () => { throw new GoodVibesSdkError('no handler', { status: 501 }); },
+        runInstall: async () => { throw new GoodVibesError('no handler', { status: 501 }); },
         fetchStatus: async () => STATUS,
       },
     };

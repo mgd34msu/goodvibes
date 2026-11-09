@@ -3,18 +3,18 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../sdk/src/platform/daemon/control-plane.js';
-import { PairingTokenManager } from '../sdk/src/platform/pairing/pairing-token-store.js';
-import { UserAuthManager } from '../sdk/src/platform/security/user-auth.js';
-import { createDaemonSystemRouteHandlers } from '../daemon-sdk/src/system-routes.js';
-import { DaemonServer } from '../sdk/src/platform/daemon/facade.js';
-import { WorkProposalStore } from '../sdk/src/platform/agents/work-proposal-store.js';
-import { DaemonLifecycleRuntime } from '../sdk/src/platform/daemon/facade-lifecycle.js';
-import { DaemonHttpRouter } from '../sdk/src/platform/daemon/http/router.js';
-import { createServingSettingsPrecondition } from '../sdk/src/platform/daemon/http/settings-precondition.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../platform/src/platform/daemon/control-plane.js';
+import { PairingTokenManager } from '../platform/src/platform/pairing/pairing-token-store.js';
+import { UserAuthManager } from '../platform/src/platform/security/user-auth.js';
+import { createDaemonSystemRouteHandlers } from '../daemon-api/src/system-routes.js';
+import { DaemonServer } from '../platform/src/platform/daemon/facade.js';
+import { WorkProposalStore } from '../platform/src/platform/agents/work-proposal-store.js';
+import { DaemonLifecycleRuntime } from '../platform/src/platform/daemon/facade-lifecycle.js';
+import { DaemonHttpRouter } from '../platform/src/platform/daemon/http/router.js';
+import { createServingSettingsPrecondition } from '../platform/src/platform/daemon/http/settings-precondition.js';
 import { captureRemoteSettingsPrecondition, applyRemoteSettingsPrecondition, inspectRemoteSettingsPrecondition,
-  resolvePreparedConfigWriteRoute, assertPreparedConfigWriteRoute } from '../sdk/src/platform/config/settings-precondition-client.js';
+  resolvePreparedConfigWriteRoute, assertPreparedConfigWriteRoute } from '../platform/src/platform/config/settings-precondition-client.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -114,7 +114,7 @@ test('route changes during probe await refuse instead of choosing an unobserved 
 test('source-extracted facade enable cannot reopen SETTINGS during an awaited stop', () => {
   // Execute only the production enable body against a data-only facade stand-in.
   // No DaemonServer constructor, service graph, socket or native module is used.
-  const source = readFileSync(new URL('../sdk/src/platform/daemon/facade.ts', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../platform/src/platform/daemon/facade.ts', import.meta.url), 'utf8');
   const start = source.indexOf('  enable(dangerConfig:');
   const open = source.indexOf('{', start);
   const end = source.indexOf('\n  }\n', open);

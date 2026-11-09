@@ -1,10 +1,10 @@
 /** Native listener lifecycle; provider discovery/transport is explicitly synthetic here. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { dirname } from 'node:path';
-import { HostedSessionManager } from '@goodvibes-jev/engine/sdk/platform/hosted-sessions';
-import { CompanionChatManager } from '@goodvibes-jev/engine/sdk/platform/companion';
-import { captureRemoteSettingsPrecondition, applyRemoteSettingsPrecondition, type ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { WorkspaceRegistrationStore, sharedWorkspaceRegisterPath, legacyWorkspaceRegisterPath } from '@goodvibes-jev/engine/sdk/platform/workspace';
+import { HostedSessionManager } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
+import { CompanionChatManager } from '@goodvibes-jev/engine/platform/platform/companion';
+import { captureRemoteSettingsPrecondition, applyRemoteSettingsPrecondition, type ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { WorkspaceRegistrationStore, sharedWorkspaceRegisterPath, legacyWorkspaceRegisterPath } from '@goodvibes-jev/engine/platform/platform/workspace';
 import type { DaemonFixture } from '../../testing/daemon-fixture.js';
 import type { TransportEvent } from '../../runtime/index.js';
 import { startGatewayFixture } from '../helpers/gateway-route-fixture.js';

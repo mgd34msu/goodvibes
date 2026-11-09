@@ -22,8 +22,8 @@
  * worst case is the session keeping a stale attachment, which the daemon's own
  * housekeeping is what resolves, not this process.
  */
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createDaemonVerbCaller } from './operator-endpoint.ts';
 import { closeHostedAttachments } from './hosted-attachments.ts';
 import { createHostedSessionsClient } from './hosted-sessions.ts';

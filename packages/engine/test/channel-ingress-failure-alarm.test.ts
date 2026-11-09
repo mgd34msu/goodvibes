@@ -23,14 +23,14 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { ChannelIngressAlarm } from '../sdk/src/platform/channels/ingress-alarm.ts';
-import { observeTelegramRuntime } from '../sdk/src/platform/channels/builtin/health.ts';
-import { resolveChannelHealthState } from '../sdk/src/platform/channels/health.ts';
-import { orderOwnerAlertRoutes, deliverOwnerAlert } from '../sdk/src/platform/daemon/owner-alert.ts';
-import type { AutomationRouteBinding } from '../sdk/src/platform/automation/routes.ts';
-import type { ChannelSurface } from '../sdk/src/platform/channels/types.ts';
-import type { RouteBindingManager } from '../sdk/src/platform/channels/route-manager.ts';
-import type { DaemonSurfaceDeliveryHelper } from '../sdk/src/platform/daemon/surface-delivery.ts';
+import { ChannelIngressAlarm } from '../platform/src/platform/channels/ingress-alarm.ts';
+import { observeTelegramRuntime } from '../platform/src/platform/channels/builtin/health.ts';
+import { resolveChannelHealthState } from '../platform/src/platform/channels/health.ts';
+import { orderOwnerAlertRoutes, deliverOwnerAlert } from '../platform/src/platform/daemon/owner-alert.ts';
+import type { AutomationRouteBinding } from '../platform/src/platform/automation/routes.ts';
+import type { ChannelSurface } from '../platform/src/platform/channels/types.ts';
+import type { RouteBindingManager } from '../platform/src/platform/channels/route-manager.ts';
+import type { DaemonSurfaceDeliveryHelper } from '../platform/src/platform/daemon/surface-delivery.ts';
 
 interface Sent { readonly surface: ChannelSurface; readonly text: string }
 

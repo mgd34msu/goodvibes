@@ -5,7 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SDK_ROOT = resolve(__dirname, '..');
+const ENGINE_ROOT = resolve(__dirname, '..');
 
 /**
  * Where the lock lives, the SHARED git directory, not this checkout.
@@ -15,7 +15,7 @@ const SDK_ROOT = resolve(__dirname, '..');
  * raced over one output tree: `build.ts` deletes the `dist` directory of every
  * workspace package before `tsc -b --force` regenerates it, so a second builder
  * could be reading a tree the first had just removed, and any consumer
- * dev-linked at that tree saw no SDK at all for the length of a rebuild.
+ * dev-linked at that tree saw no engine at all for the length of a rebuild.
  *
  * `git rev-parse --git-common-dir` resolves to the SAME directory from the main
  * checkout and from every worktree of it, which is exactly the scope the build
@@ -25,7 +25,7 @@ const SDK_ROOT = resolve(__dirname, '..');
 function lockRoot(): string {
   try {
     const commonDir = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], {
-      cwd: SDK_ROOT,
+      cwd: ENGINE_ROOT,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
@@ -33,7 +33,7 @@ function lockRoot(): string {
   } catch {
     // Not a git checkout, or no git on PATH.
   }
-  return resolve(SDK_ROOT, '.tmp');
+  return resolve(ENGINE_ROOT, '.tmp');
 }
 
 const TMP_ROOT = lockRoot();

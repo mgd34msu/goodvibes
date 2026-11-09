@@ -1,5 +1,5 @@
 import { handleSimplePermissionInput } from '@goodvibes-jev/engine/terminal-shell/blocking-permission-input';
-import type { PermissionRequest, RememberTier } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import type { PermissionRequest, RememberTier } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { applyHunkKey, buildModifiedEditArgs, type HunkSelectionState } from '../permissions/hunk-selection.ts';
 import { permissionButtons } from '../permissions/prompt-card.ts';
 
@@ -137,7 +137,7 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
       if (data === '\r' || data === '\n') {
         if (req.replyMode === 'exec-answer') {
           // The typed answer feeds the running command's stdin via the
-          // decision's modifiedArgs (SDK exec-prompt wiring contract).
+          // decision's modifiedArgs (platform exec-prompt wiring contract).
           req.resolve(true, false, { answer: buffer });
         } else {
           // Deny is feedback: the reason rides the structured "user declined"
@@ -256,7 +256,7 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
     )
       return { handled: true, pendingPermission: null };
 
-    // Numbered remember tiers ([1]..[N], most specific first) from the SDK's
+    // Numbered remember tiers ([1]..[N], most specific first) from the platform's
     // rememberOptions: approve AND remember at that tier. A generalizing tier
     // writes a durable user-origin rule; 'session' only caches in memory.
     if (/^[1-9]$/.test(key) && req.rememberOptions && req.rememberOptions.length > 0) {

@@ -2,7 +2,7 @@
  * contract-bridge-types.ts, contract-typed bridges for the operator method families the
  * webui facade calls (fleet.*, checkpoints.*, sessions.search).
  *
- * As of the SDK 1.0.0 pin-bump (see CHANGELOG.md), the SDK's generated
+ * As of the platform 1.0.0 pin-bump (see CHANGELOG.md), the platform's generated
  * `OperatorMethodInputMap`/`OperatorMethodOutputMap` (foundation-client-types.ts)
  * carry real entries for every id below, so each bridge type now flows straight from
  * `OperatorMethodInput<M>`/`OperatorMethodOutput<M>`. This is the `// SWAP:` seam the
@@ -12,12 +12,12 @@
  *
  * goodvibes.ts imports these names ONLY from this module (never redefines them), so the
  * facade's exported names (FleetProcessNode, WorkspaceCheckpoint, ...) do not change,
- * only their definition now derives from the SDK contract. The item-level aliases
+ * only their definition now derives from the platform contract. The item-level aliases
  * (FleetProcessNode = FleetSnapshotResult['nodes'][number], etc.) keep every existing
  * consumer import compiling unchanged.
  *
  * `bridge-matches-schema` in goodvibes.test.ts pins these shapes against the installed
- * SDK's `operator-contract.json` artifact, so any future drift (including a later pin
+ * platform's `operator-contract.json` artifact, so any future drift (including a later pin
  * bump silently changing a shape) fails the test immediately.
  */
 import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/contracts';
@@ -64,7 +64,7 @@ export type FleetSnapshotResult = OperatorMethodOutput<'fleet.snapshot'>;
 export type FleetListInput = OperatorMethodInput<'fleet.list'>;
 export type FleetListResult = OperatorMethodOutput<'fleet.list'>;
 export type FleetProcessNode = FleetSnapshotResult['nodes'][number];
-// Fleet archive (SDK 1.6.0): move finished subtrees out of the live fleet
+// Fleet archive (platform 1.6.0): move finished subtrees out of the live fleet
 // view into the session archive and back; list what is archived.
 export type FleetArchiveInput = OperatorMethodInput<'fleet.archive'>;
 export type FleetArchiveResult = OperatorMethodOutput<'fleet.archive'>;
@@ -83,14 +83,14 @@ export type CheckpointsDiffInput = OperatorMethodInput<'checkpoints.diff'>;
 export type CheckpointsDiffResult = OperatorMethodOutput<'checkpoints.diff'>;
 export type CheckpointsRestoreInput = OperatorMethodInput<'checkpoints.restore'>;
 export type CheckpointsRestoreResult = OperatorMethodOutput<'checkpoints.restore'>;
-// checkpoints.restorePreview (SDK 1.6.1): non-destructive preview of what a
+// checkpoints.restorePreview (platform 1.6.1): non-destructive preview of what a
 // restore would change, plus a short-lived single-use confirmToken the restore
 // call passes back instead of a blind confirm:true.
 export type CheckpointsRestorePreviewInput = OperatorMethodInput<'checkpoints.restorePreview'>;
 export type CheckpointsRestorePreviewResult = OperatorMethodOutput<'checkpoints.restorePreview'>;
 export type WorkspaceCheckpoint = CheckpointsListResult['checkpoints'][number];
 
-// checkpoints.revertHunkPreview / checkpoints.revertHunk (SDK 1.6.1's per-hunk
+// checkpoints.revertHunkPreview / checkpoints.revertHunk (platform 1.6.1's per-hunk
 // reverse-apply): the review-cockpit's REJECT→REVERT flow. revertHunkPreview is read-only
 // (validates the hunk still reverse-applies, mints a ~2min single-use confirmToken, or
 // answers applies:false with a human conflict string and a null token); revertHunk consumes
@@ -103,7 +103,7 @@ export type CheckpointsRevertHunkInput = OperatorMethodInput<'checkpoints.revert
 export type CheckpointsRevertHunkResult = OperatorMethodOutput<'checkpoints.revertHunk'>;
 
 // ─── Rewind (rewind.plan / rewind.apply) ──────────────────────────────────────
-// SDK 1.6.1's unified message-anchored rewind: a terraform-style dry-run/apply pair over
+// platform 1.6.1's unified message-anchored rewind: a terraform-style dry-run/apply pair over
 // the platform's history stores. plan is read-only (previews what restoring files and/or
 // conversation to a turn anchor would change, mints a single-use confirmToken); apply
 // consumes it, records an undo point (a pre-restore safety checkpoint and/or a captured
@@ -115,7 +115,7 @@ export type RewindApplyInput = OperatorMethodInput<'rewind.apply'>;
 export type RewindApplyResult = OperatorMethodOutput<'rewind.apply'>;
 
 // ─── Best-of-N attempts (fleet.attempts.list / pick / judge) ──────────────────
-// SDK 1.6.1's best-of-N sibling-attempt resolution over held-merge candidate groups.
+// platform 1.6.1's best-of-N sibling-attempt resolution over held-merge candidate groups.
 // list is read-only (held groups with per-candidate diffs + any prior judge proposal);
 // judge PROPOSES a winner with reasons, explicitly model judgment (scoredBy:'model'), never
 // an auto-pick; pick accepts one candidate as the winner (merging it, cleaning losers) and
@@ -132,7 +132,7 @@ export type FleetAttemptsJudgeInput = OperatorMethodInput<'fleet.attempts.judge'
 export type FleetAttemptsJudgeResult = OperatorMethodOutput<'fleet.attempts.judge'>;
 
 // ─── Observed foreign agents (fleet.observed.steer) ───────────────────────────
-// SDK 1.8.0's read-only visibility of externally-launched coding-agent sessions
+// platform 1.8.0's read-only visibility of externally-launched coding-agent sessions
 // (an `observed-external` fleet.snapshot node, see the ProcessObserved fields on
 // FleetProcessNode). Steer is the ONE verb offered, and only via the row's
 // drill-in detail (steerDrillInOnly:true, an owner-ruled UX weight), never a
@@ -161,15 +161,15 @@ export type SessionParticipant = SessionsDetachResult['session']['participants']
 
 // ─── Session workspace changes (sessions.changes.get) ─────────────────────────
 // SWAP applied from day one: sessions.changes.get shipped with a real
-// OperatorMethodInputMap/OutputMap entry (SDK 1.6.1's session-changes repack).
+// OperatorMethodInputMap/OutputMap entry (platform 1.6.1's session-changes repack).
 // `transport: ["ws"]` only, no `http` route, same generic-invoke-only shape as
 // checkpoints.*/sessions.search, routed through invokeGatewayMethod in goodvibes.ts's
-// sdk.operator.sessions.changes.get.
+// platform.operator.sessions.changes.get.
 export type SessionsChangesGetInput = OperatorMethodInput<'sessions.changes.get'>;
 export type SessionsChangesGetResult = OperatorMethodOutput<'sessions.changes.get'>;
 
 // ─── Cost attribution (cost.attribution.get) ───────────────────────────────────
-// SDK 1.6.1: windowed (24h/7d), cache-aware-priced cost attribution grouped by a
+// platform 1.6.1: windowed (24h/7d), cache-aware-priced cost attribution grouped by a
 // dimension (agent/tool/hook/mcp/model/provider/session). Real generated I/O map entry,
 // `transport: ["ws"]` only, same generic-invoke-only shape as sessions.changes.get
 // above, routed through invokeGatewayMethod. Honest-unpriced: a row's costUsd is `null`
@@ -192,7 +192,7 @@ export type CostAttributionRow = CostAttributionGetResult['rows'][number];
 // this file, invokeGatewayMethodUncheckedInput (its pre-SWAP escape hatch) is gone.
 //
 // Deliberately NOT bridged here: a hosted-specific steer/cancel verb. There is none,
-// see the SDK's method-catalog-hosted-sessions.ts header comment. A hosted session is
+// see the platform's method-catalog-hosted-sessions.ts header comment. A hosted session is
 // steered with the ORDINARY sessions.steer/followUp/toolCalls.cancel, which resolve a
 // hosted id the same way they resolve any other session.
 export type SessionsHostedListInput = OperatorMethodInput<'sessions.hosted.list'>;

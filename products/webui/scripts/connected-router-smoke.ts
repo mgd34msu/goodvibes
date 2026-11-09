@@ -29,11 +29,11 @@ globalThis.fetch = Object.assign(async (input: string | URL | Request, options?:
   return nativeFetch(input, { ...options, redirect: 'error' });
 }, { preconnect: nativeFetch.preconnect });
 const { startDaemonFixture } = await import('@goodvibes-jev/daemon/testing');
-const { registerInboxSurface } = await import('@goodvibes-jev/engine/sdk/platform/intake');
-const { OpenAICompatProvider, BenchmarkStore, getProviderModelsCachePath } = await import('@goodvibes-jev/engine/sdk/platform/providers');
-const { createShellPathService } = await import('@goodvibes-jev/engine/sdk/platform/runtime/shell');
-const { DEFAULT_DECISION_ROUTER_SETTINGS } = await import('@goodvibes-jev/engine/sdk/browser/decision-router');
-type ModelDefinition = import('@goodvibes-jev/engine/sdk/platform/providers').ModelDefinition;
+const { registerInboxSurface } = await import('@goodvibes-jev/engine/platform/platform/intake');
+const { OpenAICompatProvider, BenchmarkStore, getProviderModelsCachePath } = await import('@goodvibes-jev/engine/platform/platform/providers');
+const { createShellPathService } = await import('@goodvibes-jev/engine/platform/platform/runtime/shell');
+const { DEFAULT_DECISION_ROUTER_SETTINGS } = await import('@goodvibes-jev/engine/platform/browser/decision-router');
+type ModelDefinition = import('@goodvibes-jev/engine/platform/platform/providers').ModelDefinition;
 type WireJudgment = { state: { context: { request: { text: string; omittedChars: number }; recent: unknown[] }; candidates: { id: string }[] }; questions: Record<string, { type: string; criteria?: Record<string, unknown> }> };
 type WireAnswer = { model: string; messages: { role: string; content: unknown }[]; reasoning_effort?: string };
 const judgments: WireJudgment[] = [], answers: WireAnswer[] = [], unexpectedJudgments: string[] = [];

@@ -2,7 +2,7 @@
  * Adapter behavioral coverage, Telegram adapter.
  */
 import { describe, expect, test } from 'bun:test';
-import { handleTelegramSurfaceWebhook } from '../sdk/src/platform/adapters/telegram/index.js';
+import { handleTelegramSurfaceWebhook } from '../platform/src/platform/adapters/telegram/index.js';
 
 function makeTelegramContext(overrides: Partial<Record<string, unknown>> = {}) {
   const calls: Array<{ kind: string; input: unknown }> = [];

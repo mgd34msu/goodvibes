@@ -19,9 +19,9 @@ import {
   buildRunningAgents,
   buildAgentActivityTable,
   buildOlderAgentSummaryPrompt,
-} from '../sdk/src/platform/core/compaction-sections.ts';
-import { resolveLineageOriginalTask } from '../sdk/src/platform/core/context-compaction.ts';
-import type { AgentRecord } from '../sdk/src/platform/tools/agent/manager.ts';
+} from '../platform/src/platform/core/compaction-sections.ts';
+import { resolveLineageOriginalTask } from '../platform/src/platform/core/context-compaction.ts';
+import type { AgentRecord } from '../platform/src/platform/tools/agent/manager.ts';
 import { makeContract, makeCriterion, makeUnit } from './contract/fixtures.ts';
 
 /** Build a minimal AgentRecord. */

@@ -75,7 +75,7 @@ export function buildCloudflareStep(controller: OnboardingWizardControllerLike):
         kind: 'radio',
         id: 'cloudflare.setup-source',
         label: 'Cloudflare token setup path',
-        hint: 'Choose whether the daemon SDK route creates/stores an operational token, uses an existing token, or only saves settings.',
+        hint: 'Choose whether the daemon route creates/stores an operational token, uses an existing token, or only saves settings.',
         options: CLOUDFLARE_SETUP_SOURCE_OPTIONS,
         defaultValue: getCloudflareSetupSource(controller),
       },
@@ -86,7 +86,7 @@ export function buildCloudflareStep(controller: OnboardingWizardControllerLike):
         kind: 'masked',
         id: 'cloudflare.bootstrap-token',
         label: 'Temporary bootstrap token',
-        hint: 'Used once by the SDK route to create a narrower GoodVibes operational token. It is never persisted.',
+        hint: 'Used once by the platform route to create a narrower GoodVibes operational token. It is never persisted.',
         placeholder: 'temporary Cloudflare token',
         defaultValue: '',
       });
@@ -96,7 +96,7 @@ export function buildCloudflareStep(controller: OnboardingWizardControllerLike):
         kind: 'text',
         id: 'cloudflare.bootstrap-env-name',
         label: 'Bootstrap token environment variable',
-        hint: 'The TUI reads this environment variable once and passes the value to the SDK token-create route. It is not persisted.',
+        hint: 'The TUI reads this environment variable once and passes the value to the platform token-create route. It is not persisted.',
         placeholder: 'GOODVIBES_CLOUDFLARE_BOOTSTRAP_TOKEN',
         defaultValue: 'GOODVIBES_CLOUDFLARE_BOOTSTRAP_TOKEN',
       });
@@ -116,7 +116,7 @@ export function buildCloudflareStep(controller: OnboardingWizardControllerLike):
         kind: 'text',
         id: 'cloudflare.operational-env-name',
         label: 'Operational token environment variable',
-        hint: 'Defaults to CLOUDFLARE_API_TOKEN. The SDK can also resolve goodvibes://secrets/env/<name>.',
+        hint: 'Defaults to CLOUDFLARE_API_TOKEN. The platform can also resolve goodvibes://secrets/env/<name>.',
         placeholder: 'CLOUDFLARE_API_TOKEN',
         defaultValue: config?.apiTokenRef?.startsWith('goodvibes://secrets/env/')
           ? decodeURIComponent(config.apiTokenRef.slice('goodvibes://secrets/env/'.length))
@@ -394,7 +394,7 @@ export function buildCloudflareStep(controller: OnboardingWizardControllerLike):
         kind: 'radio',
         id: 'cloudflare.provision-on-apply',
         label: 'Provision Cloudflare on final apply',
-        hint: 'If yes, final Apply calls SDK daemon routes to create/update resources and verify them. Failure is reported as a warning; settings still save.',
+        hint: 'If yes, final Apply calls platform daemon routes to create/update resources and verify them. Failure is reported as a warning; settings still save.',
         options: CLOUDFLARE_PROVISION_OPTIONS,
         defaultValue: 'no',
       },
@@ -410,7 +410,7 @@ export function buildCloudflareStep(controller: OnboardingWizardControllerLike):
         id: 'cloudflare.requirements',
         action: 'cloudflare-token-requirements',
         label: 'Show token requirements',
-        hint: 'Calls the daemon SDK route and displays the required token permissions for the selected components.',
+        hint: 'Calls the daemon route and displays the required token permissions for the selected components.',
         defaultValue: 'Action',
       },
       {
@@ -418,7 +418,7 @@ export function buildCloudflareStep(controller: OnboardingWizardControllerLike):
         id: 'cloudflare.create-token',
         action: 'cloudflare-create-operational-token',
         label: 'Create operational token from bootstrap token',
-        hint: 'Uses a pasted or environment bootstrap token once. The SDK stores the generated operational token as a goodvibes:// secret.',
+        hint: 'Uses a pasted or environment bootstrap token once. The platform stores the generated operational token as a goodvibes:// secret.',
         defaultValue: 'Action',
       },
       {
@@ -426,7 +426,7 @@ export function buildCloudflareStep(controller: OnboardingWizardControllerLike):
         id: 'cloudflare.discover',
         action: 'cloudflare-discover',
         label: 'Discover accounts, zones, and resources',
-        hint: 'Calls the daemon SDK route using the configured or supplied token and summarizes discoverable Cloudflare resources.',
+        hint: 'Calls the daemon route using the configured or supplied token and summarizes discoverable Cloudflare resources.',
         defaultValue: 'Action',
       },
       {
@@ -434,7 +434,7 @@ export function buildCloudflareStep(controller: OnboardingWizardControllerLike):
         id: 'cloudflare.validate',
         action: 'cloudflare-validate',
         label: 'Validate Cloudflare token',
-        hint: 'Calls the daemon SDK route to validate account access with the configured or supplied token.',
+        hint: 'Calls the daemon route to validate account access with the configured or supplied token.',
         defaultValue: 'Action',
       },
       {
@@ -442,7 +442,7 @@ export function buildCloudflareStep(controller: OnboardingWizardControllerLike):
         id: 'cloudflare.provision',
         action: 'cloudflare-provision',
         label: 'Provision and verify now',
-        hint: 'Calls the daemon SDK route immediately with the current wizard values. This creates/updates selected Cloudflare resources.',
+        hint: 'Calls the daemon route immediately with the current wizard values. This creates/updates selected Cloudflare resources.',
         defaultValue: 'Action',
       },
       {
@@ -450,7 +450,7 @@ export function buildCloudflareStep(controller: OnboardingWizardControllerLike):
         id: 'cloudflare.verify',
         action: 'cloudflare-verify',
         label: 'Verify Worker now',
-        hint: 'Calls the daemon SDK route to verify Worker health and daemon batch proxy readiness.',
+        hint: 'Calls the daemon route to verify Worker health and daemon batch proxy readiness.',
         defaultValue: 'Action',
       },
       {
@@ -458,7 +458,7 @@ export function buildCloudflareStep(controller: OnboardingWizardControllerLike):
         id: 'cloudflare.disable',
         action: 'cloudflare-disable',
         label: 'Disable Cloudflare integration',
-        hint: 'Calls the daemon SDK route to disable local Cloudflare usage and return the batch queue backend to local behavior.',
+        hint: 'Calls the daemon route to disable local Cloudflare usage and return the batch queue backend to local behavior.',
         defaultValue: 'Action',
       },
     );

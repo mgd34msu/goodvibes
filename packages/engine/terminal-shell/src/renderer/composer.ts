@@ -19,9 +19,9 @@
  * model and the failover marker are in the header.
  */
 
-import { type Line, createEmptyLine } from '@goodvibes-jev/engine/sdk/platform/types';
-import { getDisplayWidth, truncateDisplay } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { GLYPHS } from '@goodvibes-jev/engine/sdk/platform/presentation';
+import { type Line, createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types';
+import { getDisplayWidth, truncateDisplay } from '@goodvibes-jev/engine/platform/platform/utils';
+import { GLYPHS } from '@goodvibes-jev/engine/platform/platform/presentation';
 import { activeTokens } from './theme.js';
 
 /** Column of the mode bar. */

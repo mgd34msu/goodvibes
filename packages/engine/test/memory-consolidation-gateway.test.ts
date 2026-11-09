@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { createGoodVibesSdk, GoodVibesSdkError } from '@goodvibes-jev/engine/sdk';
+import { createGoodVibesPlatform, GoodVibesError } from '@goodvibes-jev/engine/platform';
 import {
   createMemoryConsolidationGateway,
   classifyConsolidationFetchError,
   type MemoryConsolidationReceiptsResult,
-} from '@goodvibes-jev/engine/sdk/platform/knowledge';
+} from '@goodvibes-jev/engine/platform/platform/knowledge';
 
 const receipts: MemoryConsolidationReceiptsResult = {
   receipts: [{
@@ -31,11 +31,11 @@ describe('canonical memory consolidation receipt seam', () => {
 
   test('uses the typed receipt HTTP route lazily and preserves a retained run and all proposals', async () => {
     const requests: Array<{ url: string; method: string }> = [];
-    const sdk = createGoodVibesSdk({ baseUrl: 'https://fixture.invalid', fetch: async (input, init) => {
+    const platformClient = createGoodVibesPlatform({ baseUrl: 'https://fixture.invalid', fetch: async (input, init) => {
       requests.push({ url: String(input), method: init?.method ?? 'GET' });
       return Response.json(receipts);
     } });
-    const resolution = createMemoryConsolidationGateway({ available: true, sdk });
+    const resolution = createMemoryConsolidationGateway({ available: true, platformClient });
     expect(requests).toEqual([]);
     if (!resolution.available) throw new Error('fixture connection must resolve');
     expect(await resolution.gateway.fetchReceipts()).toEqual(receipts);
@@ -43,8 +43,8 @@ describe('canonical memory consolidation receipt seam', () => {
   });
 
   for (const status of [401, 403, 404, 500, 501]) {
-    test(`classifies SDK ${status} while preserving caller wording`, () => {
-      const error = new GoodVibesSdkError('fixture failure', { category: 'service', source: 'runtime', recoverable: false, status });
+    test(`classifies platform ${status} while preserving caller wording`, () => {
+      const error = new GoodVibesError('fixture failure', { category: 'service', source: 'runtime', recoverable: false, status });
       let described: unknown;
       const result = classifyConsolidationFetchError(error, value => { described = value; return `surface ${status}`; });
       expect(described).toBe(error);
@@ -63,8 +63,8 @@ describe('canonical memory consolidation receipt seam', () => {
 
   test('propagates transport rejection rather than fabricating empty receipts', async () => {
     const error = new Error('offline');
-    const sdk = createGoodVibesSdk({ baseUrl: 'https://fixture.invalid', fetch: async () => { throw error; } });
-    const resolution = createMemoryConsolidationGateway({ available: true, sdk });
+    const platformClient = createGoodVibesPlatform({ baseUrl: 'https://fixture.invalid', fetch: async () => { throw error; } });
+    const resolution = createMemoryConsolidationGateway({ available: true, platformClient });
     if (!resolution.available) throw new Error('fixture connection must resolve');
     await expect(resolution.gateway.fetchReceipts()).rejects.toThrow();
   });

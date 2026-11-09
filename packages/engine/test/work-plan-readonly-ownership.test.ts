@@ -3,8 +3,8 @@ import { afterEach, expect, test } from 'bun:test';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { WorkPlanStore } from '../sdk/src/platform/workflow/work-plan-store.ts';
-import { resolveWorkPlanLocation } from '../sdk/src/platform/workflow/work-plan-location.ts';
+import { WorkPlanStore } from '../platform/src/platform/workflow/work-plan-store.ts';
+import { resolveWorkPlanLocation } from '../platform/src/platform/workflow/work-plan-location.ts';
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function fixture() { const root = mkdtempSync(join(tmpdir(), 'work-plan-readonly-')); roots.push(root); const options = { homeDirectory: root, surfaceRoot: 'test', projectId: 'actual-project', projectRoot: '/actual/workspace' }; return { root, options, directory: join(root, '.goodvibes', 'test', 'work-plans') }; }

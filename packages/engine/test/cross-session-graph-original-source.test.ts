@@ -4,9 +4,9 @@ import * as nativeFs from 'node:fs';
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { CrossSessionTaskRegistry, CrossSessionGraphUnavailableError } from '../sdk/src/platform/sessions/orchestration/registry.js';
-import { GRAPH_SCHEMA_VERSION, QUARANTINE_RETENTION_MS } from '../sdk/src/platform/sessions/orchestration/registry-housekeeping.js';
-import type { CrossSessionTaskRef } from '../sdk/src/platform/sessions/orchestration/types.js';
+import { CrossSessionTaskRegistry, CrossSessionGraphUnavailableError } from '../platform/src/platform/sessions/orchestration/registry.js';
+import { GRAPH_SCHEMA_VERSION, QUARANTINE_RETENTION_MS } from '../platform/src/platform/sessions/orchestration/registry-housekeeping.js';
+import type { CrossSessionTaskRef } from '../platform/src/platform/sessions/orchestration/types.js';
 
 const roots: string[] = [], owners: CrossSessionTaskRegistry[] = [];
 afterEach(() => { for (const owner of owners.splice(0)) { try { owner.dispose(); } catch { /* Retired owners still detach their listeners/timers. */ } } for (const path of roots.splice(0)) rmSync(path, { recursive: true, force: true }); });

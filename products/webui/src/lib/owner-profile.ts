@@ -582,7 +582,7 @@ export function deletedWhat(outcome: ProfileWriteOutcome, fallbackLabel: string)
  * ambiguous. The file is exactly as the page showed it there. Claiming "the file changed"
  * would be a confident false statement in that case, and this note is appended without
  * classifying the cause on purpose, deciding which branch fired would mean sniffing a
- * reason string the SDK is free to reword, and re-reading is correct after any of them.
+ * reason string the platform is free to reword, and re-reading is correct after any of them.
  */
 export const STALE_VIEW_NOTE =
   'This page may no longer match the file; reloading it so you can see what is actually there.';
@@ -640,6 +640,6 @@ export const WEBUI_PROFILE_SURFACE = 'webui';
  *
  * This is the honest answer for THIS surface only. The agent must not hardcode it: it can
  * genuinely receive a purported fact from an email, a web page or a channel message, and
- * it has to state which so the SDK can refuse.
+ * it has to state which so the platform can refuse.
  */
 export const WEBUI_PROFILE_AUTHORITY = 'owner-direct';

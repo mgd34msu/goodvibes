@@ -1,4 +1,4 @@
-import { DEFAULT_CONFIG } from '@goodvibes-jev/engine/sdk/platform/config';
+import { DEFAULT_CONFIG } from '@goodvibes-jev/engine/platform/platform/config';
 
 export function getProviderIdFromModel(model: unknown): string {
   const raw = String(model ?? '').trim();

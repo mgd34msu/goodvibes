@@ -3,9 +3,9 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { captureContractInput, contractInputPath, materializeContractInput } from '../sdk/src/platform/contract/input-snapshot.js';
-import { assertContractInputReadAccess, authorizeContractInputPath, createContractInputAuthority, withContractInputReadBatch } from '../sdk/src/platform/contract/input-authority.js';
-import type { Contract } from '../sdk/src/platform/contract/types.js';
+import { captureContractInput, contractInputPath, materializeContractInput } from '../platform/src/platform/contract/input-snapshot.js';
+import { assertContractInputReadAccess, authorizeContractInputPath, createContractInputAuthority, withContractInputReadBatch } from '../platform/src/platform/contract/input-authority.js';
+import type { Contract } from '../platform/src/platform/contract/types.js';
 
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'captured-read-sweep-'));

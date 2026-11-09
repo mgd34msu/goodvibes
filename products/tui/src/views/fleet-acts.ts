@@ -14,10 +14,10 @@
 //     Confirmation rechecks that record and preserves the gateway receipt.
 // ---------------------------------------------------------------------------
 
-import type { ProcessNode } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
-import { isTerminalContractStatus, type ContractView, type ContractUnitView } from '@goodvibes-jev/engine/sdk/platform/contract';
-import type { WorkItem } from '@goodvibes-jev/engine/sdk/platform/orchestration';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { ProcessNode } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+import { isTerminalContractStatus, type ContractView, type ContractUnitView } from '@goodvibes-jev/engine/platform/platform/contract';
+import type { WorkItem } from '@goodvibes-jev/engine/platform/platform/orchestration';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { isViewSearchBackspace, isViewSearchCancel, isViewSearchCommit, isViewSearchPrintable } from './search-focus.ts';
 import { appendSteerText } from './fleet-session-tabs.ts';
 import { isObservedExternalNode, observedKindLabel, type ObservedNode } from './fleet-observed-render.ts';
@@ -408,7 +408,7 @@ export class FleetActs {
       const files = result.files.length > 0 ? ` over ${result.files.length} conflicted file(s)` : '';
       this.deps.notify(`[Fleet] Conflict resolution session started for ${shortId(itemId)}${files}; press j to jump to it.`);
       // Reuse the CI fix-session machinery: hand the STAMPED session id to the
-      // shared one-key jump affordance. The kept tree is reclaimed by the SDK on
+      // shared one-key jump affordance. The kept tree is reclaimed by the platform on
       // a successful re-merge, and the flagged row clears on the next snapshot.
       gateway.armFixSessionAttach(result.sessionId);
     } catch (err) {

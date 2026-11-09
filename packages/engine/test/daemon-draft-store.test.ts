@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
-import { historicalChannelDraftWireReference } from '../sdk/src/platform/channels/host-drafts/wire-reference.js';
+import { historicalChannelDraftWireReference } from '../platform/src/platform/channels/host-drafts/wire-reference.js';
 import { rmSync } from 'node:fs';
-import type { AtRestCipher } from '../sdk/src/platform/config/daemon-credential-store.js';
-import { HandlerSqliteStore } from '../sdk/src/platform/state/daemon-handler-sqlite-store.js';
+import type { AtRestCipher } from '../platform/src/platform/config/daemon-credential-store.js';
+import { HandlerSqliteStore } from '../platform/src/platform/state/daemon-handler-sqlite-store.js';
 import {
   DraftSyncStore,
   MAX_DRAFT_LIST_LIMIT,
-} from '../sdk/src/platform/channels/host-drafts/draft-store.js';
+} from '../platform/src/platform/channels/host-drafts/draft-store.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 // Deterministic reversible cipher: NOT real crypto, but exercises the

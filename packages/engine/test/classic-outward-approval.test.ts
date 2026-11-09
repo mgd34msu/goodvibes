@@ -2,9 +2,9 @@ import { afterEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { fakePort } from '@goodvibes-jev/judgment/testing';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
-import { assessOutwardContent, evaluateOutwardEffect, UntrustedContentLedger } from '../sdk/src/platform/security/untrusted-content.js';
-import { grantOwnerApproval } from '../sdk/src/platform/security/owner-approval.js';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
+import { assessOutwardContent, evaluateOutwardEffect, UntrustedContentLedger } from '../platform/src/platform/security/untrusted-content.js';
+import { grantOwnerApproval } from '../platform/src/platform/security/owner-approval.js';
 
 let restore: (() => void) | undefined;
 afterEach(() => { restore?.(); restore = undefined; });

@@ -1,4 +1,4 @@
-import type { ArtifactDescriptor } from '@goodvibes-jev/engine/sdk/platform/artifacts';
+import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { AgentWorkspaceRecentReviewerHandoffArtifact, AgentWorkspaceReviewPacketPresetLineage } from './agent-workspace-types.ts';
 import { readArtifactMetadataNumber, readArtifactMetadataString, readArtifactMetadataStringList } from './agent-workspace-artifact-metadata.ts';
 

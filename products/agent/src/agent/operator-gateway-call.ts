@@ -3,9 +3,9 @@
  * Failure reporting shares the engine contract used by schedule commands;
  * classification never retries an operator mutation.
  */
-import { createBrowserGoodVibesSdk } from '@goodvibes-jev/engine/sdk/browser';
+import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import type { OperatorMethodId, OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/sdk/contracts';
+import type { OperatorMethodId, OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
 import { classifyConnectedHostError } from './connected-host-failure.ts';
 import type { AgentConnectedHostConnection } from './routine-schedule-promotion.ts';
 
@@ -37,7 +37,7 @@ export type OperatorGatewayCallResult<T> = OperatorGatewayCallSuccess<T> | Opera
 /**
  * Invoke one operator gateway method against the connected host, returning a
  * discriminated result instead of throwing. `route` is an informational HTTP
- * route label used in error/preview output; the SDK's operator.invoke resolves
+ * route label used in error/preview output; the platform's operator.invoke resolves
  * the actual HTTP method/path from the operator contract itself.
  *
  * ## Why the payload is typed against the method id
@@ -49,7 +49,7 @@ export type OperatorGatewayCallResult<T> = OperatorGatewayCallSuccess<T> | Opera
  * verbs, then `profile.forget` dropping `lineIndex`, and both compiled clean
  * here and were caught only by reading the platform source.
  *
- * The SDK's typed overload was correct all along. The escape is the loose one
+ * The platform's typed overload was correct all along. The escape is the loose one
  * beneath it (`invoke<T>(methodId: string, input?: Record<string, unknown>)`):
  * a known method id carrying a wrong body fails the typed overload and silently
  * matches the loose one, and `as never` guaranteed the typed overload was never
@@ -90,7 +90,7 @@ export async function invokeOperatorGatewayMethod<TMethodId extends OperatorMeth
     assertCurrent(); return { ...failure, methodId };
   };
   try {
-    const sdk = createBrowserGoodVibesSdk({ baseUrl: connection.baseUrl, authToken: connection.token,
+    const platformClient = createBrowserGoodVibesPlatform({ baseUrl: connection.baseUrl, authToken: connection.token,
       ...(options.assertCurrent || options.signal ? { retry: { maxAttempts: 1, baseDelayMs: 0, maxDelayMs: 0 },
         fetch: async (input, init) => {
           assertCurrent();
@@ -100,7 +100,7 @@ export async function invokeOperatorGatewayMethod<TMethodId extends OperatorMeth
           assertCurrent(); return response;
         } } : {}),
     });
-    // The SDK's typed overload takes a CONDITIONAL argument tuple
+    // The platform's typed overload takes a CONDITIONAL argument tuple
     // (`MethodArgs` makes the input optional when every key is optional), and a
     // conditional type cannot be resolved against a still-generic `TMethodId`
     // inside this function. So the tuple shape, and only the tuple shape, is
@@ -108,7 +108,7 @@ export async function invokeOperatorGatewayMethod<TMethodId extends OperatorMeth
     // `TMethodId`. Every caller is checked: a wrong body or a wrong expected
     // output is a compile error at the call site, which is exactly what the old
     // `payload as never` gave away.
-    const invokeTyped = sdk.operator.invoke as unknown as (
+    const invokeTyped = platformClient.operator.invoke as unknown as (
       methodId: TMethodId,
       input: OperatorMethodInput<TMethodId>,
     ) => Promise<OperatorMethodOutput<TMethodId>>;

@@ -9,14 +9,14 @@ import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PermissionManager, type PermissionConfigReader } from '../sdk/src/platform/permissions/manager.js';
-import type { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.js';
-import type { PermissionMode } from '../sdk/src/platform/config/schema.js';
+import { PermissionManager, type PermissionConfigReader } from '../platform/src/platform/permissions/manager.js';
+import type { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.js';
+import type { PermissionMode } from '../platform/src/platform/config/schema.js';
 import { useGateReadings } from './_helpers/gate-readings.ts';
-import { createFindTool } from '../sdk/src/platform/tools/find/executor.js';
-import { createRepoMapTool } from '../sdk/src/platform/tools/repo-map/index.js';
-import { partitionByReadAccess, type ReadAccessFilter } from '../sdk/src/platform/tools/shared/read-access.js';
-import { guardExecCommand } from '../sdk/src/platform/tools/exec/ast-guard.js';
+import { createFindTool } from '../platform/src/platform/tools/find/executor.js';
+import { createRepoMapTool } from '../platform/src/platform/tools/repo-map/index.js';
+import { partitionByReadAccess, type ReadAccessFilter } from '../platform/src/platform/tools/shared/read-access.js';
+import { guardExecCommand } from '../platform/src/platform/tools/exec/ast-guard.js';
 
 // ── PermissionManager harness ────────────────────────────────────────────────
 

@@ -9,7 +9,7 @@ const WIDTH = 80;
 const lineText = lineToString;
 
 /** Get all non-empty text lines from a render result. */
-function textLines(lines: import('@goodvibes-jev/engine/sdk/platform/types').Line[]): string[] {
+function textLines(lines: import('@goodvibes-jev/engine/platform/platform/types').Line[]): string[] {
   return linesToText(lines).filter((t) => t.length > 0);
 }
 
@@ -210,7 +210,7 @@ describe('renderMarkdown', () => {
     // Border positions are read from the Cell array, not the joined string: a
     // wide glyph occupies two array slots (the second is the placeholder cell
     // whose char is ''), so buffer columns and string offsets differ.
-    const barCols = (line: import('@goodvibes-jev/engine/sdk/platform/types').Line): number[] => {
+    const barCols = (line: import('@goodvibes-jev/engine/platform/platform/types').Line): number[] => {
       const cols: number[] = [];
       for (let i = 0; i < line.length; i++) if (line[i].char === '│') cols.push(i);
       return cols;
@@ -413,9 +413,9 @@ describe('renderInlineMarkdown', () => {
 });
 
 describe('transcript columns (the Measurements table)', () => {
-  const firstTextCol = (line: import('@goodvibes-jev/engine/sdk/platform/types').Line): number =>
+  const firstTextCol = (line: import('@goodvibes-jev/engine/platform/platform/types').Line): number =>
     line.findIndex((cell) => cell.char !== ' ' && cell.char !== '');
-  const lastTextCol = (line: import('@goodvibes-jev/engine/sdk/platform/types').Line): number => {
+  const lastTextCol = (line: import('@goodvibes-jev/engine/platform/platform/types').Line): number => {
     for (let x = line.length - 1; x >= 0; x--) if (line[x]!.char !== ' ' && line[x]!.char !== '') return x;
     return -1;
   };

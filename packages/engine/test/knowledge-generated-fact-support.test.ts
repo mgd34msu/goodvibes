@@ -1,14 +1,14 @@
 import crypto from 'node:crypto';
-import { generatedFactSupportMetadata } from '../sdk/src/platform/knowledge/semantic/fact-support-write-plan.js';
+import { generatedFactSupportMetadata } from '../platform/src/platform/knowledge/semantic/fact-support-write-plan.js';
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.js';
-import { createSupportOriginalValues, projectSupportInput, originalSupportValues, releaseOriginalSupportValues } from '../sdk/src/platform/knowledge/semantic/verification/projection.js';
-import { prepareGeneratedFactSupport, KnowledgeGeneratedFactSupportHeldError, type GeneratedFactSupportInput, type GeneratedFactSupportHoldReason } from '../sdk/src/platform/knowledge/semantic/verification/generated-fact-support.js';
-import { registry } from '../sdk/src/platform/knowledge/semantic/verification/judgment-registry.js';
-import { generatedFactFieldSupport, generatedFactSubjectAttachment } from '../sdk/src/platform/knowledge/semantic/verification/batteries.js';
+import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input.js';
+import { createSupportOriginalValues, projectSupportInput, originalSupportValues, releaseOriginalSupportValues } from '../platform/src/platform/knowledge/semantic/verification/projection.js';
+import { prepareGeneratedFactSupport, KnowledgeGeneratedFactSupportHeldError, type GeneratedFactSupportInput, type GeneratedFactSupportHoldReason } from '../platform/src/platform/knowledge/semantic/verification/generated-fact-support.js';
+import { registry } from '../platform/src/platform/knowledge/semantic/verification/judgment-registry.js';
+import { generatedFactFieldSupport, generatedFactSubjectAttachment } from '../platform/src/platform/knowledge/semantic/verification/batteries.js';
 
 let previous: JudgmentPort | undefined;
 beforeEach(() => { previous = installJudgmentPort(undefined); });

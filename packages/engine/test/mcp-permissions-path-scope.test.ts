@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { McpPermissionManager } from '../sdk/src/platform/runtime/mcp/index.ts';
+import { McpPermissionManager } from '../platform/src/platform/runtime/mcp/index.ts';
 import { useGateReadings } from './_helpers/gate-readings.ts';
 
 // Which arguments name a path or a destination is read by Jev per argument

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { AgentAccountRegistry } from '@goodvibes-jev/engine/sdk/platform/google';
+import { AgentAccountRegistry } from '@goodvibes-jev/engine/platform/platform/google';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { createAgentAccountsTool, registerAgentAccountsTool, type AgentAccountsToolOptions } from '../../tools/agent-accounts-tool.ts';
@@ -11,7 +11,7 @@ import { getSessionExpectationBook, resetSessionExpectationBookForTests } from '
 import { getSessionUntrustedContentLedger, resetSessionUntrustedContentLedgerForTests } from '../../trust/untrusted-content.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { recordedEffectFixture } from '../helpers/recorded-effect-admission.ts';
-import { createShellPathService } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
+import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { createAgentAccountsInputProjector } from '../../tools/agent-accounts-admission.ts';
 
 const VALID = { action: 'record', serviceDomain: 'example.com', serviceUrl: 'https://example.com/signup',

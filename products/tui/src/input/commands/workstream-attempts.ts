@@ -19,11 +19,11 @@ import type {
   AttemptJudgment,
   AttemptPickResult,
   HeldMergeGroup,
-} from '@goodvibes-jev/engine/sdk/platform/orchestration';
-import { AttemptError } from '@goodvibes-jev/engine/sdk/platform/orchestration';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+} from '@goodvibes-jev/engine/platform/platform/orchestration';
+import { AttemptError } from '@goodvibes-jev/engine/platform/platform/orchestration';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { CommandContext } from '../command-registry.ts';
-import type { WorkstreamCommandService } from '@goodvibes-jev/engine/sdk/platform/orchestration';
+import type { WorkstreamCommandService } from '@goodvibes-jev/engine/platform/platform/orchestration';
 import { describeFailureReason, isTurnBudgetReason } from '../../core/turn-budget-outcome.ts';
 import { type AttemptGraphItem, renderDependentHoldLines } from './workstream-attempt-dependents.ts';
 

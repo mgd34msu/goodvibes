@@ -1,4 +1,4 @@
-import type { PermissionAttribution, PermissionPromptRequest, RememberTier } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import type { PermissionAttribution, PermissionPromptRequest, RememberTier } from '@goodvibes-jev/engine/platform/platform/permissions';
 
 /**
  * Per-hunk accept/reject at the approval gate (v1).
@@ -7,12 +7,12 @@ import type { PermissionAttribution, PermissionPromptRequest, RememberTier } fro
  * independent, atomic find/replace units (each a natural "hunk"), so no
  * diff/hunk-apply primitive is needed here. The `write` (whole-file
  * overwrite) tool stays whole-payload accept/reject, true whole-file hunk
- * splitting would require a genuinely new SDK diff/patch-apply primitive,
+ * splitting would require a genuinely new platform diff/patch-apply primitive,
  * flagged as an explicit v2 follow-up, not built here.
  *
- * NOTE ON SDK TYPES: the installed @goodvibes-jev/engine/sdk (0.36.0) does not
+ * NOTE ON platform TYPES: the installed @goodvibes-jev/engine/platform (0.36.0) does not
  * yet export `EditItem`/`EditInput` from its `platform/tools` subpath (that
- * export is added in the in-flight SDK change for this work order, landing
+ * export is added in the in-flight platform change for this work order, landing
  * in 0.37). Until then this module reads `request.args.edits` defensively
  * off a narrow local structural type rather than importing a not-yet-published
  * symbol, per the cross-repo compile contract for this wave.
@@ -35,10 +35,10 @@ export interface HunkSelectionState {
 export type HunkCommit = 'apply' | 'cancel' | null;
 
 /**
- * Structural widening of the installed SDK's `PermissionPromptDecision`
+ * Structural widening of the installed platform's `PermissionPromptDecision`
  * (0.36.0, no `modifiedArgs` field yet) so main.ts can resolve a decision
  * carrying `modifiedArgs` without a nominal import of a not-yet-published
- * SDK symbol. Assign to a variable of this type before calling the SDK's
+ * platform symbol. Assign to a variable of this type before calling the platform's
  * typed `resolve(decision: PermissionPromptDecision)`, passing a variable
  * (not an object literal) sidesteps TypeScript's excess-property check, and
  * the extra field is invisible to 0.36.0 callers, structurally compatible
@@ -180,7 +180,7 @@ export interface ApprovalRequesterLookup {
 /**
  * Human label for a `mcp-server` or `sandbox-escalation` attribution, the two
  * non-agent origins the approval broker can name (see PermissionAttribution in
- * the SDK). `background-agent` deliberately falls through to the
+ * the platform). `background-agent` deliberately falls through to the
  * broker-metadata lookup below instead, which resolves a richer label
  * (agentId/session) than the attribution alone carries.
  */

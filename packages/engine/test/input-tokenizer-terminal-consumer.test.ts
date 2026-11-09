@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
-import { InputTokenizer } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import { InputTokenizer } from '@goodvibes-jev/engine/platform/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 
 describe('InputTokenizer', () => {
   let tokenizer: InputTokenizer;

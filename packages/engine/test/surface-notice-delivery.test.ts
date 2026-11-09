@@ -13,9 +13,9 @@
  * can carry a proposal.
  */
 import { describe, expect, test } from 'bun:test';
-import { DaemonSurfaceDeliveryHelper } from '../sdk/src/platform/daemon/surface-delivery.ts';
-import type { AutomationRouteBinding } from '../sdk/src/platform/automation/routes.ts';
-import type { ChannelRenderRequest } from '../sdk/src/platform/channels/types.ts';
+import { DaemonSurfaceDeliveryHelper } from '../platform/src/platform/daemon/surface-delivery.ts';
+import type { AutomationRouteBinding } from '../platform/src/platform/automation/routes.ts';
+import type { ChannelRenderRequest } from '../platform/src/platform/channels/types.ts';
 
 interface RenderCall {
   readonly surface: string;

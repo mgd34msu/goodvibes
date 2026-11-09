@@ -40,7 +40,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { getOperatorContract } from '@goodvibes-jev/engine/sdk/contracts';
+import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
 import { createAgentOperatorMethodTool } from '../../tools/agent-operator-method-tool.ts';
 import {
   describeHarnessOperatorMethod,
@@ -163,7 +163,7 @@ describe('capability-advertisement honesty (agent side)', () => {
    *
    * email.* was the original subject of this test precisely BECAUSE nothing
    * served it. The IMAP/SMTP service is platform capability now
-   * (@goodvibes-jev/engine/sdk/platform/email) and the daemon attaches a real
+   * (@goodvibes-jev/engine/platform/platform/email) and the daemon attaches a real
    * handler to each id (platform/control-plane/routes/email.ts), so these are
    * live routes. Asserting that here is what stops the degradation logic from
    * quietly going on describing them as broken after they were fixed.

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { resolveDaemonCompanionToken, workspaceOperatorTokenCandidates } from '../sdk/src/platform/runtime/operator-token-cleanup.ts';
+import { resolveDaemonCompanionToken, workspaceOperatorTokenCandidates } from '../platform/src/platform/runtime/operator-token-cleanup.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 describe('workspaceOperatorTokenCandidates', () => {

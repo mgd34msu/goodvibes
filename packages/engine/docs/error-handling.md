@@ -2,19 +2,19 @@
 
 > Consumer guidance. For internal error architecture see [Error Architecture](./errors.md).
 
-All public client packages normalize transport failures into structured SDK errors.
+All public client packages normalize transport failures into structured platform errors.
 
 ## Typed error discrimination
 
-Consumers should switch on `err.kind` rather than `instanceof` chains or message parsing. Every error thrown from the public API surface is a `GoodVibesSdkError` with a stable `kind` discriminant.
+Consumers should switch on `err.kind` rather than `instanceof` chains or message parsing. Every error thrown from the public API surface is a `GoodVibesError` with a stable `kind` discriminant.
 
 ```ts
-import { GoodVibesSdkError } from '@goodvibes-jev/engine/sdk/errors';
+import { GoodVibesError } from '@goodvibes-jev/engine/platform/errors';
 
 try {
-  await sdk.operator.control.snapshot();
+  await platformClient.operator.control.snapshot();
 } catch (err) {
-  if (err instanceof GoodVibesSdkError) {
+  if (err instanceof GoodVibesError) {
     switch (err.kind) {
       case 'auth':
         // Redirect to login or surface auth UI
@@ -30,7 +30,7 @@ try {
         }
         break;
       case 'config':
-        // Fix SDK initialization options, do not retry
+        // Fix platform initialization options, do not retry
         break;
       case 'contract':
       case 'protocol':
@@ -53,15 +53,15 @@ See [error-kinds.md](./error-kinds.md) for the full reference on each kind.
 ## TUI and consumer example
 
 ```ts
-import type { GoodVibesSdk } from '@goodvibes-jev/engine/sdk';
-import { GoodVibesSdkError } from '@goodvibes-jev/engine/sdk/errors';
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/sdk/contracts';
+import type { GoodVibesPlatform } from '@goodvibes-jev/engine/platform';
+import { GoodVibesError } from '@goodvibes-jev/engine/platform/errors';
+import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
 
-async function safeSnapshot(sdk: GoodVibesSdk): Promise<OperatorMethodOutput<'control.snapshot'> | null> {
+async function safeSnapshot(platformClient: GoodVibesPlatform): Promise<OperatorMethodOutput<'control.snapshot'> | null> {
   try {
-    return await sdk.operator.control.snapshot();
+    return await platformClient.operator.control.snapshot();
   } catch (err) {
-    if (!(err instanceof GoodVibesSdkError)) throw err;
+    if (!(err instanceof GoodVibesError)) throw err;
     if (err.kind === 'auth') {
       // surface login prompt in TUI
       return null;
@@ -80,10 +80,10 @@ async function safeSnapshot(sdk: GoodVibesSdk): Promise<OperatorMethodOutput<'co
 The `HttpStatusError`, `ConfigurationError`, and `ContractError` subclasses remain available when callers need class-specific handling. Prefer `err.kind` for broad control flow.
 
 ```ts
-import { HttpStatusError } from '@goodvibes-jev/engine/sdk/errors';
+import { HttpStatusError } from '@goodvibes-jev/engine/platform/errors';
 
 try {
-  await sdk.operator.accounts.snapshot();
+  await platformClient.operator.accounts.snapshot();
 } catch (error) {
   if (error instanceof HttpStatusError) {
     if (error.status === 401) {
@@ -97,25 +97,25 @@ try {
 
 ## Useful fields
 
-Every error exposes the full set of 18 structured fields. See the canonical [Useful fields on every `GoodVibesSdkError`](./error-kinds.md#useful-fields-on-every-goodvibessdkerror) table for the complete list and types.
+Every error exposes the full set of 18 structured fields. See the canonical [Useful fields on every `GoodVibesError`](./error-kinds.md#useful-fields-on-every-goodvibeserror) table for the complete list and types.
 
 Do not parse `message` strings when the structured fields are available.
 
 ## Core error classes
 
-Four classes cover everything the SDK throws; the three specialized classes
-extend the base, so an `instanceof GoodVibesSdkError` check catches them all.
+Four classes cover everything the platform throws; the three specialized classes
+extend the base, so an `instanceof GoodVibesError` check catches them all.
 
 | Class | When you get it |
 | --- | --- |
-| `GoodVibesSdkError` | The base class for every SDK error; carries the structured fields above |
-| `ConfigurationError` | The SDK was constructed or configured incorrectly (`SDK_CONFIGURATION_ERROR`, kind `config`) |
-| `ContractError` | Client and daemon disagree about the contract (`SDK_CONTRACT_ERROR`, kind `contract`) |
-| `HttpStatusError` | An HTTP failure with no more specific mapping (`SDK_HTTP_STATUS_ERROR`, source `transport`) |
+| `GoodVibesError` | The base class for every platform error; carries the structured fields above |
+| `ConfigurationError` | The platform was constructed or configured incorrectly (`ENGINE_CONFIGURATION_ERROR`, kind `config`) |
+| `ContractError` | Client and daemon disagree about the contract (`ENGINE_CONTRACT_ERROR`, kind `contract`) |
+| `HttpStatusError` | An HTTP failure with no more specific mapping (`ENGINE_HTTP_STATUS_ERROR`, source `transport`) |
 
 ## Category guidance
 
-`ErrorCategory` has 16 values: the 15 daemon wire categories plus `contract`, which is added by the SDK and is never marshalled over the wire.
+`ErrorCategory` has 16 values: the 15 daemon wire categories plus `contract`, which is added by the platform and is never marshalled over the wire.
 
 - `authentication`
   Missing or invalid credentials.
@@ -138,14 +138,14 @@ extend the base, so an `instanceof GoodVibesSdkError` check catches them all.
 - `tool`
   Tool execution failure.
 - `config`
-  Local SDK misconfiguration.
+  Local platform misconfiguration.
 - `protocol`
   Wire-format or protocol-level failure.
 - `service`
   Remote failure or server instability.
 - `internal`
-  Daemon or SDK internal failure.
+  Daemon or platform internal failure.
 - `unknown`
   Unclassified error.
 - `contract`
-  Contract drift or invalid method/endpoint usage (SDK-local; not a wire category).
+  Contract drift or invalid method/endpoint usage (platform-local; not a wire category).

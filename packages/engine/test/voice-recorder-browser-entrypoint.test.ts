@@ -10,7 +10,7 @@ describe('browser-safe recorder semantic capture', () => {
     const dir = mkdtempSync(join(tmpdir(), 'gv-recorder-browser-'));
     try {
       const entry = join(dir, 'consumer.ts');
-      const source = resolve(import.meta.dir, '../sdk/src/platform/voice/capture/recorder-source.ts');
+      const source = resolve(import.meta.dir, '../platform/src/platform/voice/capture/recorder-source.ts');
       writeFileSync(entry, `import { createRecorderCaptureOpener } from ${JSON.stringify(source)}; globalThis.recorder = createRecorderCaptureOpener;`);
       const output = join(dir, 'consumer.js'); const metadata = join(dir, 'meta.json');
       const child = Bun.spawn([process.execPath, 'build', entry, '--target=browser', '--conditions=bun', '--format=iife',

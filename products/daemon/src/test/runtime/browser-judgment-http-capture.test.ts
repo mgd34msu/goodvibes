@@ -2,10 +2,10 @@
 import { expect, spyOn, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { registerInboxSurface } from '@goodvibes-jev/engine/sdk/platform/intake';
-import { WEBUI_BUILTIN_COMMANDS, WEBUI_COMMAND_CATALOG_VERSION } from '@goodvibes-jev/engine/sdk/platform/judgment-browser/catalogs';
-import type { BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-sdk';
+import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { registerInboxSurface } from '@goodvibes-jev/engine/platform/platform/intake';
+import { WEBUI_BUILTIN_COMMANDS, WEBUI_COMMAND_CATALOG_VERSION } from '@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs';
+import type { BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-api';
 import { startDaemonFixture } from '../../testing/daemon-fixture.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 

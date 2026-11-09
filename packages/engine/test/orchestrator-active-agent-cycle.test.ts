@@ -19,9 +19,9 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { isActiveAgent } from '../sdk/src/platform/tools/agent/predicates.ts';
+import { isActiveAgent } from '../platform/src/platform/tools/agent/predicates.ts';
 
-const CORE = join(import.meta.dir, '..', 'sdk', 'src', 'platform', 'core');
+const CORE = join(import.meta.dir, '..', 'platform', 'src', 'platform', 'core');
 
 describe('isActiveAgent (tools/agent/predicates leaf)', () => {
   test('is true only for running and pending agents', () => {

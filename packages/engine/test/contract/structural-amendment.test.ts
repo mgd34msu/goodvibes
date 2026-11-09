@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { amendedCriteria, parseAmendment } from '../../sdk/src/platform/contract/amendment.js';
-import { deserializeContract, serializeContract } from '../../sdk/src/platform/contract/store.js';
+import { amendedCriteria, parseAmendment } from '../../platform/src/platform/contract/amendment.js';
+import { deserializeContract, serializeContract } from '../../platform/src/platform/contract/store.js';
 import { makeContract, makeCriterion } from './fixtures.js';
 
 test('repeating an unchanged structural root in an amendment preserves it exactly once', () => {

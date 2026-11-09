@@ -4,9 +4,9 @@ import { readFileSync } from 'node:fs';
 import * as syncFs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { InboxCursorStore } from '../sdk/src/platform/intake/cursor-store.ts';
-import type { ImapUidCheckpoint, ImapUidCheckpointAdvance, InboundChannelItem } from '../sdk/src/platform/intake/provider-adapter.ts';
-import { HandlerSqliteStore } from '../sdk/src/platform/state/daemon-handler-sqlite-store.ts';
+import { InboxCursorStore } from '../platform/src/platform/intake/cursor-store.ts';
+import type { ImapUidCheckpoint, ImapUidCheckpointAdvance, InboundChannelItem } from '../platform/src/platform/intake/provider-adapter.ts';
+import { HandlerSqliteStore } from '../platform/src/platform/state/daemon-handler-sqlite-store.ts';
 
 const cleanup: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });

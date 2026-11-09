@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { MediaProviderRegistry, captureMediaProviderReadSource, type MediaProvider } from '@goodvibes-jev/engine/sdk/platform/media';
+import { MediaProviderRegistry, captureMediaProviderReadSource, type MediaProvider } from '@goodvibes-jev/engine/platform/platform/media';
 
 describe('MediaProviderRegistry', () => {
   test('registers media providers and dispatches capability lookups', async () => {

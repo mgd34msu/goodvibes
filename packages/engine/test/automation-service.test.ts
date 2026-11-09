@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { AutomationJobStore, AutomationRouteStore, AutomationRunStore, AutomationService, AutomationSourceStore } from '@goodvibes-jev/engine/sdk/platform/automation';
-import { AutomationManager } from '@goodvibes-jev/engine/sdk/platform/automation';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { RouteBindingManager } from '@goodvibes-jev/engine/sdk/platform/channels';
-import { SharedSessionBroker } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { PersistentStore } from '@goodvibes-jev/engine/sdk/platform/state';
-import type { AutomationJob } from '@goodvibes-jev/engine/sdk/platform/automation';
-import type { AutomationRouteBinding } from '@goodvibes-jev/engine/sdk/platform/automation';
-import type { AutomationSourceRecord } from '@goodvibes-jev/engine/sdk/platform/automation';
+import { AutomationJobStore, AutomationRouteStore, AutomationRunStore, AutomationService, AutomationSourceStore } from '@goodvibes-jev/engine/platform/platform/automation';
+import { AutomationManager } from '@goodvibes-jev/engine/platform/platform/automation';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { RouteBindingManager } from '@goodvibes-jev/engine/platform/platform/channels';
+import { SharedSessionBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { PersistentStore } from '@goodvibes-jev/engine/platform/platform/state';
+import type { AutomationJob } from '@goodvibes-jev/engine/platform/platform/automation';
+import type { AutomationRouteBinding } from '@goodvibes-jev/engine/platform/platform/automation';
+import type { AutomationSourceRecord } from '@goodvibes-jev/engine/platform/platform/automation';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 describe('automation service', () => {

@@ -296,7 +296,7 @@ test('speex is honoured rather than blocked: the tab listens with the filter on'
   await installChatMockDaemon(page);
   await installVoiceRoutes(page, {
     wake: { provisioned: true },
-    // The filter is a WebAssembly module the SDK carries, so a browser runs it.
+    // The filter is a WebAssembly module the platform carries, so a browser runs it.
     wakeConfig: { ...WAKE_ON, noiseSuppression: 'speex' },
   });
 

@@ -5,7 +5,7 @@
  * crashing (or snapshotting) at once clobbered each other, which is exactly why
  * the consuming surface grew a `.preserved` collision workaround. Recovery is
  * now `recovery-<sessionId>.jsonl` per session; restore is silent and receipted;
- * no `.preserved` path exists in SDK code.
+ * no `.preserved` path exists in platform code.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -22,7 +22,7 @@ import {
   loadRecoveryConversation,
   writeRecoveryFile,
   type SessionSnapshot,
-} from '../sdk/src/platform/runtime/session-persistence.ts';
+} from '../platform/src/platform/runtime/session-persistence.ts';
 
 const roots: string[] = [];
 
@@ -167,11 +167,11 @@ describe('per-session recovery snapshots', () => {
   });
 });
 
-describe('no .preserved collision machinery in SDK code', () => {
-  test('the SDK source tree contains no recovery .preserved path suffix', () => {
+describe('no .preserved collision machinery in platform code', () => {
+  test('the platform source tree contains no recovery .preserved path suffix', () => {
     // The `.preserved` file-suffix workaround was a consumer-side response to
     // the shared recovery file colliding. A `.preserved` used as a path suffix
-    // (a string literal boundary follows it) must never exist in SDK code.
+    // (a string literal boundary follows it) must never exist in platform code.
     // (`.preservedCommit`, a worktree property name, is deliberately not a
     // match, a letter, not a string boundary, follows it.)
     // grep exits 1 (no matches) → clean; exits 0 with a file list → matches found.

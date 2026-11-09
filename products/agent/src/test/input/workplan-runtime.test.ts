@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { WorkPlanStore } from '@goodvibes-jev/engine/sdk/platform/workflow';
+import { WorkPlanStore } from '@goodvibes-jev/engine/platform/platform/workflow';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerBuiltinCommands } from '../../input/commands.ts';
 import { createAgentWorkspaceBasicCommandEditor } from '../../input/agent-workspace-basic-command-editors.ts';

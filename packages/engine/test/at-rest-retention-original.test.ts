@@ -3,7 +3,7 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { enforceFileRetention, enforceJournalDirectoryRetention, type AtRestPolicy } from '../sdk/src/platform/runtime/at-rest-persistence.js';
+import { enforceFileRetention, enforceJournalDirectoryRetention, type AtRestPolicy } from '../platform/src/platform/runtime/at-rest-persistence.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });

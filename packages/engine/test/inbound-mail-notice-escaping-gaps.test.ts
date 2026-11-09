@@ -18,9 +18,9 @@ import {
   renderNoticeAsPlainText,
   renderNoticeForChannel,
   renderNoticeForSurface,
-} from '../sdk/src/platform/email/inbound-notice-channels.ts';
-import { receiptTimestamp, renderInboundMailNotice } from '../sdk/src/platform/email/inbound-notice.ts';
-import type { StructuredNotice } from '../sdk/src/platform/email/inbound-notice.ts';
+} from '../platform/src/platform/email/inbound-notice-channels.ts';
+import { receiptTimestamp, renderInboundMailNotice } from '../platform/src/platform/email/inbound-notice.ts';
+import type { StructuredNotice } from '../platform/src/platform/email/inbound-notice.ts';
 import { useSecurityReadings } from './helpers/security-readings.ts';
 
 useSecurityReadings();

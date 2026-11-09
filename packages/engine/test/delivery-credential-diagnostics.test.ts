@@ -2,11 +2,11 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { resolveSecretInput } from '../sdk/src/platform/config/secret-refs.js';
-import { ServiceRegistry } from '../sdk/src/platform/config/service-registry.js';
-import { SecretsManager } from '../sdk/src/platform/config/secrets.js';
-import { SubscriptionManager } from '../sdk/src/platform/config/subscriptions.js';
-import { logger } from '../sdk/src/platform/utils/logger.js';
+import { resolveSecretInput } from '../platform/src/platform/config/secret-refs.js';
+import { ServiceRegistry } from '../platform/src/platform/config/service-registry.js';
+import { SecretsManager } from '../platform/src/platform/config/secrets.js';
+import { SubscriptionManager } from '../platform/src/platform/config/subscriptions.js';
+import { logger } from '../platform/src/platform/utils/logger.js';
 
 const sentinel = 'OWNED_PRIVATE_PROVIDER_SOURCE_7D6EA2';
 const roots: string[] = [];

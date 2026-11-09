@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { escapeAppleScript } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { escapeAppleScript } from '@goodvibes-jev/engine/platform/platform/utils';
 
 describe('escapeAppleScript', () => {
   test('escapes double quotes', () => {

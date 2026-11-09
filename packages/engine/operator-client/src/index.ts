@@ -1,0 +1,20 @@
+export type {
+  OperatorInvokeOptions,
+  OperatorApiClient,
+  OperatorApiClientOptions,
+  OperatorStreamOptions,
+} from './client.js';
+export { createOperatorApiClient } from './client.js';
+export {
+  createOperatorRemoteClient,
+} from './client-core.js';
+export type {
+  OperatorRemoteClient,
+  OperatorRemoteClientInvokeOptions,
+  OperatorRemoteClientOptions,
+  OperatorRemoteClientStreamOptions,
+  KnownMethodArgs,
+  KnownPathMethodArgs,
+  KnownStreamArgs,
+} from './client-core.js';
+export { OPERATOR_WORK_CANCEL_REASON, createOperatorContractWorkAdapter } from './contract-work-adapter.js';

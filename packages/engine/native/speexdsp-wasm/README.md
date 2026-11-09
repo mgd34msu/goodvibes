@@ -2,7 +2,7 @@
 
 `voice.wake.noiseSuppression: "speex"` runs SpeexDSP's preprocessor over every
 captured frame. This directory holds everything needed to rebuild the module the
-SDK ships, and `scripts/build-speexdsp-wasm.ts` is the build.
+platform ships, and `scripts/build-speexdsp-wasm.ts` is the build.
 
 ## Why WebAssembly and not a native binding
 
@@ -58,7 +58,7 @@ bun packages/engine/scripts/build-speexdsp-wasm.ts --check    # verifies the com
 
 The build downloads the pinned tarball, refuses to continue unless its sha256
 matches, compiles, and rewrites
-`packages/engine/sdk/src/platform/voice/capture/vendor/speexdsp-wasm.ts`, writing the
+`packages/engine/platform/src/platform/voice/capture/vendor/speexdsp-wasm.ts`, writing the
 base64 of the module, its byte count, and the pins above. `--check` validates the
 base64 encoding, recorded byte count and WebAssembly format without a compiler.
 The noise-suppression tests run the embedded filter and measure its effect on

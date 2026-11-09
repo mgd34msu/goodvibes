@@ -16,7 +16,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Camera, History, RotateCcw } from 'lucide-react';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import type { WorkspaceCheckpoint } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import {
@@ -58,7 +58,7 @@ export function CheckpointsPanel() {
 
   const list = useQuery({
     queryKey: queryKeys.checkpoints,
-    queryFn: () => sdk.operator.checkpoints.list(),
+    queryFn: () => platformClient.operator.checkpoints.list(),
   });
   const checkpoints = useMemo(() => sortCheckpointsNewestFirst(list.data?.checkpoints ?? []), [list.data]);
   const selected = useMemo(() => checkpoints.find((c) => c.id === selectedId) ?? null, [checkpoints, selectedId]);
@@ -70,14 +70,14 @@ export function CheckpointsPanel() {
 
   const diff = useQuery({
     queryKey: [...queryKeys.checkpoints, selectedId, 'diff', compareToId || 'working-tree'],
-    queryFn: () => sdk.operator.checkpoints.diff(compareToId ? { a: selectedId, b: compareToId } : { a: selectedId }),
+    queryFn: () => platformClient.operator.checkpoints.diff(compareToId ? { a: selectedId, b: compareToId } : { a: selectedId }),
     enabled: Boolean(selectedId),
   });
 
   const create = useMutation({
     mutationFn: () => {
       const trimmed = labelDraft.trim();
-      return sdk.operator.checkpoints.create({ kind: 'manual', label: trimmed ? trimmed : undefined });
+      return platformClient.operator.checkpoints.create({ kind: 'manual', label: trimmed ? trimmed : undefined });
     },
     onSuccess: async (result) => {
       if (result.noop) {
@@ -99,7 +99,7 @@ export function CheckpointsPanel() {
 
   const restore = useMutation({
     mutationFn: ({ checkpoint, confirmToken }: { checkpoint: WorkspaceCheckpoint; confirmToken?: string }) =>
-      sdk.operator.checkpoints.restore(confirmToken ? { id: checkpoint.id, confirmToken } : { id: checkpoint.id, confirm: true }),
+      platformClient.operator.checkpoints.restore(confirmToken ? { id: checkpoint.id, confirmToken } : { id: checkpoint.id, confirm: true }),
     onSuccess: async (result, { checkpoint }) => {
       if (result.refused || result.result === null) {
         toast({
@@ -127,7 +127,7 @@ export function CheckpointsPanel() {
     let confirmToken: string | undefined;
     let description = restoreConfirmMessage();
     try {
-      const preview = await sdk.operator.checkpoints.restorePreview({ id: checkpoint.id });
+      const preview = await platformClient.operator.checkpoints.restorePreview({ id: checkpoint.id });
       confirmToken = preview.token;
       description = restoreConfirmMessageWithPreview(preview.preview);
     } catch (error) {

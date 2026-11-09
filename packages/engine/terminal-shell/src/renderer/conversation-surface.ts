@@ -1,7 +1,7 @@
-import { type Line, createEmptyLine, createStyledCell } from '@goodvibes-jev/engine/sdk/platform/types';
-import { getDisplayWidth, truncateDisplay, wrapText } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { type Line, createEmptyLine, createStyledCell } from '@goodvibes-jev/engine/platform/platform/types';
+import { getDisplayWidth, truncateDisplay, wrapText } from '@goodvibes-jev/engine/platform/platform/utils';
 import { LAYOUT } from './layout.js';
-import { GLYPHS } from '@goodvibes-jev/engine/sdk/platform/presentation';
+import { GLYPHS } from '@goodvibes-jev/engine/platform/platform/presentation';
 import { foldPreviewText } from '@goodvibes-jev/engine/terminal-shell';
 import { activeTokens } from './theme.js';
 /** Column of a transcript event row's marker (the ● of a flush row). */

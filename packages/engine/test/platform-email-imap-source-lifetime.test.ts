@@ -4,11 +4,11 @@ import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { describe, expect, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import type { Socket } from 'node:net';
-import { createInboundMailSourceFactory, type InboundMailSourceFactoryDeps } from '../sdk/src/platform/email/inbound/source-factory.js';
-import { InboundMailboxWatcher } from '../sdk/src/platform/email/inbound/watcher.js';
-import { InboundMailSupervisor, type InboundMailSupervisorDeps } from '../sdk/src/platform/email/inbound/supervisor.js';
-import { resolveWatcherSettings, type MailboxCursorPort, type MailboxConnection, type WatcherClock } from '../sdk/src/platform/email/inbound/ports.js';
-import { DedupingInboundMailSink, createInboundMailDedup } from '../sdk/src/platform/email/inbound/sink.js';
+import { createInboundMailSourceFactory, type InboundMailSourceFactoryDeps } from '../platform/src/platform/email/inbound/source-factory.js';
+import { InboundMailboxWatcher } from '../platform/src/platform/email/inbound/watcher.js';
+import { InboundMailSupervisor, type InboundMailSupervisorDeps } from '../platform/src/platform/email/inbound/supervisor.js';
+import { resolveWatcherSettings, type MailboxCursorPort, type MailboxConnection, type WatcherClock } from '../platform/src/platform/email/inbound/ports.js';
+import { DedupingInboundMailSink, createInboundMailDedup } from '../platform/src/platform/email/inbound/sink.js';
 import { imapMessageFixture, waitFor } from './_helpers/inbound-watcher-harness.js';
 
 class Wire extends EventEmitter {

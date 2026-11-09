@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { forgetReadSecrets } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import { forgetReadSecrets } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { isBlockedReadPath } from '@/tools/agent-read-policy.ts';
 import { recordAgentSessionWrite, wasWrittenInAgentSession, clearAgentSessionWrites, agentSessionWriteCount } from '@/tools/agent-session-write-ledger.ts';
 

@@ -1,4 +1,4 @@
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { InputHandler } from '../input/handler.ts';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
 import type { ConversationManager } from '../core/conversation.ts';

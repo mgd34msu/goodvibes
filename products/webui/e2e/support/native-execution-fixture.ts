@@ -10,12 +10,12 @@ import {
   nativeConversationIntakeTransitionRequestSchema,
   type NativeConversationIntakeCaptureRequest,
   type NativeConversationIntakeTransitionRequest,
-} from "@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client";
+} from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client";
 import {
   nativeWorkExecutionRequestSchema,
   nativeWorkExecutionSnapshotSchema,
   type NativeWorkExecutionRequest,
-} from "@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client";
+} from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client";
 import type { NativeExecutionBrowserRecord } from "../../src/lib/native-execution-journal";
 import type { NativeIntakeBrowserRecord } from "../../src/lib/native-intake-journal";
 import { installMockDaemon } from "./mock-daemon";

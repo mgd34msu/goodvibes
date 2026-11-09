@@ -28,7 +28,7 @@ mock.module('../lib/goodvibes', () => ({
   // mock must provide them even though this test never invokes them.
   getCurrentAuth: () => Promise.resolve({}),
   invokeMethod: () => Promise.resolve({}),
-  sdk: {
+  client: {
     streams: {
       open: (pathOrUrl: string, handlers: ServerSentEventHandlers) => {
         openCalls.push(pathOrUrl);

@@ -2,12 +2,12 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { EntryType, Question } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer, scoreAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { composeTier, readRequest, type RequestReading } from '../../sdk/src/platform/routing/request-reading.js';
-import { createRoutePlanner, eligibleModels, NoRouteError, shortlistOrder, type RoutePlannerCatalog } from '../../sdk/src/platform/routing/route-planner.js';
-import { ModelTierStore, modelTierFrom, type ModelFacts } from '../../sdk/src/platform/routing/model-tiers.js';
-import { tierSearchOrder } from '../../sdk/src/platform/routing/tiers.js';
-import type { ModelDefinition } from '../../sdk/src/platform/providers/registry-types.js';
-import type { ResolvedModelPricing } from '../../sdk/src/platform/providers/model-pricing.js';
+import { composeTier, readRequest, type RequestReading } from '../../platform/src/platform/routing/request-reading.js';
+import { createRoutePlanner, eligibleModels, NoRouteError, shortlistOrder, type RoutePlannerCatalog } from '../../platform/src/platform/routing/route-planner.js';
+import { ModelTierStore, modelTierFrom, type ModelFacts } from '../../platform/src/platform/routing/model-tiers.js';
+import { tierSearchOrder } from '../../platform/src/platform/routing/tiers.js';
+import type { ModelDefinition } from '../../platform/src/platform/providers/registry-types.js';
+import type { ResolvedModelPricing } from '../../platform/src/platform/providers/model-pricing.js';
 
 let previous: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previous = installJudgmentPort(undefined); });

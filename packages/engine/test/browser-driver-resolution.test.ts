@@ -10,18 +10,18 @@ import {
   DRIVER_VERSION,
   driverSearchDirectories,
   managedDriverRoot,
-} from '../sdk/src/platform/browser/browser-provision-io.js';
-import { browserHostScriptPath } from '../sdk/src/platform/browser/browser-host-client.js';
+} from '../platform/src/platform/browser/browser-provision-io.js';
+import { browserHostScriptPath } from '../platform/src/platform/browser/browser-host-client.js';
 import {
   browserProfileRoot,
   browserScreenshotRoot,
   BrowserSessionManager,
-} from '../sdk/src/platform/browser/browser-sessions.js';
-import type { BrowserProvisionIo } from '../sdk/src/platform/browser/browser-types.js';
+} from '../platform/src/platform/browser/browser-sessions.js';
+import type { BrowserProvisionIo } from '../platform/src/platform/browser/browser-types.js';
 import { withTestTimeout } from './_helpers/test-timeout.js';
 
-// The old sdk package's manifest is the engine manifest, packages/engine/package.json.
-const sdkPackageDir = join(import.meta.dir, '..');
+// The old platform package's manifest is the engine manifest, packages/engine/package.json.
+const enginePackageDir = join(import.meta.dir, '..');
 
 function hostProvisionIo(): BrowserProvisionIo {
   return {
@@ -39,13 +39,13 @@ describe('driver resolution for a compiled binary', () => {
    * look up which driver it needs. The version is a constant in the source, and
    * this keeps it honest against the dependency the package actually declares.
    *
-   * The agent asserted this against its own package.json. The SDK is where the
-   * dependency now lives, so the SDK's manifest is what it must agree with,
-   * and it is declared optional, alongside every other heavy runtime the SDK
+   * The agent asserted this against its own package.json. The platform is where the
+   * dependency now lives, so the platform's manifest is what it must agree with,
+   * and it is declared optional, alongside every other heavy runtime the platform
    * loads only when a capability is used.
    */
   test('the pinned driver version matches the declared dependency', () => {
-    const manifest = JSON.parse(readFileSync(join(sdkPackageDir, 'package.json'), 'utf8')) as {
+    const manifest = JSON.parse(readFileSync(join(enginePackageDir, 'package.json'), 'utf8')) as {
       readonly optionalDependencies?: Record<string, string>;
     };
     expect(manifest.optionalDependencies?.['playwright-core']).toBe(DRIVER_VERSION);
@@ -305,7 +305,7 @@ describe('the node-hosted browser host', () => {
   }, 60_000);
 
   /**
-   * The agent asserted the script sat beside `dist/goodvibes-agent`. The SDK
+   * The agent asserted the script sat beside `dist/goodvibes-agent`. The platform
    * equivalent was that the published package carried it. The engine is not
    * published: it runs from source, and tsc emits only what it compiles, so
    * the hand-written .mjs never reaches dist. What must hold is that the
@@ -313,7 +313,7 @@ describe('the node-hosted browser host', () => {
    * output would fail.
    */
   test('the compiled client finds the host script', async () => {
-    const compiled = await import('../sdk/dist/platform/browser/browser-host-client.js') as {
+    const compiled = await import('../platform/dist/platform/browser/browser-host-client.js') as {
       readonly browserHostScriptPath: () => string;
     };
     const path = compiled.browserHostScriptPath();

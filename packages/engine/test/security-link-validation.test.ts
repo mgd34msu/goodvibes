@@ -13,17 +13,17 @@
 import { describe, expect, test } from 'bun:test';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
 import { useSecurityReadings, withSecurityReadings } from './helpers/security-readings.ts';
 import {
   MAX_REDIRECT_HOPS,
   followValidatedRedirects,
   validateLinkTarget,
-} from '../sdk/src/platform/security/link-validation.ts';
+} from '../platform/src/platform/security/link-validation.ts';
 import {
   registrableDomain,
   sameRegistrableDomain,
-} from '../sdk/src/platform/security/public-suffix.ts';
+} from '../platform/src/platform/security/public-suffix.ts';
 
 const TARGET = 'google.com';
 

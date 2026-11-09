@@ -1,8 +1,8 @@
 /** Complete gate inputs and standalone readings retain their own source snapshots. */
 import { expect, test } from 'bun:test';
 import { useGateReadings } from './_helpers/gate-readings.ts';
-import { readingArguments, readingState, readToolCall, readCatastrophic } from '../sdk/src/platform/gate/reading.ts';
-import { guardExecCommand } from '../sdk/src/platform/tools/exec/ast-guard.ts';
+import { readingArguments, readingState, readToolCall, readCatastrophic } from '../platform/src/platform/gate/reading.ts';
+import { guardExecCommand } from '../platform/src/platform/tools/exec/ast-guard.ts';
 
 const marker = 'TAIL_SCOPE_SENTINEL';
 const original = 'git status --original-scope-fixture';

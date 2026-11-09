@@ -1,7 +1,7 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
-import { loadSqlJsEngine, type SqlDatabase } from '../sdk/src/platform/state/sqlite-store.js';
+import { loadSqlJsEngine, type SqlDatabase } from '../platform/src/platform/state/sqlite-store.js';
 import * as crypto from 'node:crypto';
-import { sqliteLocalObservation } from '../sdk/src/platform/state/sqlite-local-observation.js';
+import { sqliteLocalObservation } from '../platform/src/platform/state/sqlite-local-observation.js';
 
 const databases: SqlDatabase[] = [];
 afterEach(() => { for (const db of databases.splice(0)) db.close(); });

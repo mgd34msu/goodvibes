@@ -4,8 +4,8 @@ import * as fs from 'node:fs';
 import { existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { JsonFileStore } from '../sdk/src/platform/state/json-file-store.ts';
-import { writeJsonFileAtomic } from '../sdk/src/platform/utils/atomic-json-store.ts';
+import { JsonFileStore } from '../platform/src/platform/state/json-file-store.ts';
+import { writeJsonFileAtomic } from '../platform/src/platform/utils/atomic-json-store.ts';
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function fixture() { const root = mkdtempSync(join(tmpdir(), 'json-owned-write-')); roots.push(root); const path = join(root, 'state.json'); writeFileSync(path, '{"old":true}'); return { root, path }; }

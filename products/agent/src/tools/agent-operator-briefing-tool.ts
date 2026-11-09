@@ -1,8 +1,8 @@
-import { createBrowserGoodVibesSdk } from '@goodvibes-jev/engine/sdk/browser';
-import { getOperatorWorkLedgerProject } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
-import { createOperatorWorkLedgerReadClient } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/operator-read-client';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
+import { getOperatorWorkLedgerProject } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
+import { createOperatorWorkLedgerReadClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/operator-read-client';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { ShellPathService } from '@/runtime/index.ts';
 import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
 import { resolveAgentConnectedHostConnection } from '../agent/routine-schedule-promotion.ts';
@@ -257,9 +257,9 @@ export function createAgentOperatorBriefingTool(
       async function run(): Promise<string> {
         current();
         // No streams, subscriptions, retries, history, or lifecycle calls. This
-        // SDK instance owns no persistent resources; its requests are aborted
+        // platform instance owns no persistent resources; its requests are aborted
         // below, and the snapshot reader is always disposed.
-        const sdk = createBrowserGoodVibesSdk({ baseUrl: connection.baseUrl,
+        const platformClient = createBrowserGoodVibesPlatform({ baseUrl: connection.baseUrl,
           getAuthToken: () => { current(); return connection.token; }, retry: { maxAttempts: 1 },
           fetch: async (input, init) => {
             current();
@@ -269,9 +269,9 @@ export function createAgentOperatorBriefingTool(
           } });
         let nativeWork = '  native work: unavailable (read failed; no historical fallback)';
         try {
-          const projectId = await getOperatorWorkLedgerProject(sdk.operator, { signal: controller.signal });
+          const projectId = await getOperatorWorkLedgerProject(platformClient.operator, { signal: controller.signal });
           current();
-          reader = createOperatorWorkLedgerReadClient(sdk.operator, projectId, { requestTimeoutMs: 5_000 });
+          reader = createOperatorWorkLedgerReadClient(platformClient.operator, projectId, { requestTimeoutMs: 5_000 });
           const snapshot = await reader.readSnapshot();
           current();
           nativeWork = formatNativeWork(snapshot);

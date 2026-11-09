@@ -10,7 +10,7 @@ import type {
   PluginManager,
   PluginManagerObserver,
   PluginStatus,
-} from '@goodvibes-jev/engine/sdk/platform/plugins';
+} from '@goodvibes-jev/engine/platform/platform/plugins';
 
 // ---------------------------------------------------------------------------
 // Plugins → config-modal surface (group-B port). Mirrors the retired

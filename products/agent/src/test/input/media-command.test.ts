@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { ArtifactCreateInput, ArtifactDescriptor } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import { MediaProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/media';
+import type { ArtifactCreateInput, ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import { MediaProviderRegistry } from '@goodvibes-jev/engine/platform/platform/media';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerLocalRuntimeCommands } from '../../input/commands/local-runtime.ts';
 

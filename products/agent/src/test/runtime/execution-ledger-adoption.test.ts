@@ -1,11 +1,11 @@
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import type { JevDecision } from '@goodvibes-jev/judgment/decisions';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { executeToolCalls } from '@goodvibes-jev/engine/sdk/platform/core';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { executeToolCalls } from '@goodvibes-jev/engine/platform/platform/core';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { AgentExecutionLedger, forgetLedgerArgRoles } from '@goodvibes-jev/engine/sdk/platform/gate/policy';
-import { emitToolReceived, emitToolPermissioned, emitToolSucceeded, emitToolCancelled } from '@goodvibes-jev/engine/sdk/platform/runtime/emitters';
+import { AgentExecutionLedger, forgetLedgerArgRoles } from '@goodvibes-jev/engine/platform/platform/gate/policy';
+import { emitToolReceived, emitToolPermissioned, emitToolSucceeded, emitToolCancelled } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { nativeMemoryWorkPrivacy } from '../helpers/native-memory-work-readings.ts';
 import { getTestRuntimeServices, resetTestRuntimeServices } from '../helpers/runtime-services.ts';

@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { ConfigManager } from '../../config/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 import { createShellPathService } from '../../runtime/index.ts';
@@ -10,7 +10,7 @@ import { mockFetch } from '../helpers/typed-fetch-mock.ts';
 import { makeHome, removeHome, startStubModel } from './harness.ts';
 import { startE2ENativeHost } from './native-host-fixture.ts';
 
-/** Actual public Agent tool, SDK, authenticated routes and daemon-owned ledger.
+/** Actual public Agent tool, platform, authenticated routes and daemon-owned ledger.
  * Only model/Jev providers are synthetic, and this read must not invoke them. */
 test('registered operator briefing reads native daemon work without mutation or provider calls and honors revocation', async () => {
   const model = startStubModel(() => ({ text: 'unused' }));

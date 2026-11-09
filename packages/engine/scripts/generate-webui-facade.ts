@@ -40,10 +40,10 @@ import { sampleFromSchema } from '../contracts/src/testing/mock-daemon.ts';
 import type { OperatorContractManifest, OperatorMethodContract } from '../contracts/src/types.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SDK_ROOT = resolve(__dirname, '..');
+const ENGINE_ROOT = resolve(__dirname, '..');
 
-export const WEBUI_FACADE_CONTRACT_PATH = resolve(SDK_ROOT, 'contracts/artifacts/operator-contract.json');
-export const WEBUI_FACADE_OUT_PATH = resolve(SDK_ROOT, 'contracts/src/generated/webui-facade.ts');
+export const WEBUI_FACADE_CONTRACT_PATH = resolve(ENGINE_ROOT, 'contracts/artifacts/operator-contract.json');
+export const WEBUI_FACADE_OUT_PATH = resolve(ENGINE_ROOT, 'contracts/src/generated/webui-facade.ts');
 
 /** JSON.stringify with stable 2-space indent for a plain (already-cloned) value. */
 function stable(value: unknown): string {
@@ -159,7 +159,7 @@ export function render(contract: OperatorContractManifest): string {
     `/**`,
     ` * Every operator method that advertises a plain-REST http binding, keyed by`,
     ` * method id. The webui derives its EXTRA_METHOD_ROUTES from this by removing`,
-    ` * the ids its pinned browser SDK route maps already cover.`,
+    ` * the ids its pinned browser engine route maps already cover.`,
     ` */`,
     `export const WEBUI_METHOD_ROUTES: Readonly<Record<string, WebuiRouteDefinition>> = ${stable(routes)} as const;`,
     ``,

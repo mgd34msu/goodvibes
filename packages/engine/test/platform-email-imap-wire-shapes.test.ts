@@ -16,23 +16,23 @@
  */
 
 import { afterAll, afterEach, describe, expect, test } from 'bun:test';
-import { ImapClient } from '../sdk/src/platform/email/imap-client.ts';
+import { ImapClient } from '../platform/src/platform/email/imap-client.ts';
 import {
   fetchSection,
   parseFetchResponses,
-} from '../sdk/src/platform/email/imap-fetch-response.ts';
+} from '../platform/src/platform/email/imap-fetch-response.ts';
 import {
   drainMailboxDelta,
   resolveWatcherSettings,
-} from '../sdk/src/platform/email/inbound/index.ts';
+} from '../platform/src/platform/email/inbound/index.ts';
 import type {
   MailboxReader,
   MailboxWire,
-} from '../sdk/src/platform/email/inbound/ports.ts';
+} from '../platform/src/platform/email/inbound/ports.ts';
 import type {
   ImapEnvelope,
   ImapEnvelopeBatch,
-} from '../sdk/src/platform/email/imap-client.ts';
+} from '../platform/src/platform/email/imap-client.ts';
 import {
   makeFakeMailbox,
   openMailboxSocket,

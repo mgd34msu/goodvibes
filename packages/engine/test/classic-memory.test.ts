@@ -2,10 +2,10 @@ import { afterEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { fakePort } from '@goodvibes-jev/judgment/testing';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
-import { detectReferencedMemoryIds } from '../sdk/src/platform/state/memory-usage-detection.js';
-import { runMemoryConsolidation } from '../sdk/src/platform/state/memory-consolidation.js';
-import { DEFAULT_MEMORY_CONSOLIDATION_CONFIG } from '../sdk/src/platform/state/memory-consolidation-config.js';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
+import { detectReferencedMemoryIds } from '../platform/src/platform/state/memory-usage-detection.js';
+import { runMemoryConsolidation } from '../platform/src/platform/state/memory-consolidation.js';
+import { DEFAULT_MEMORY_CONSOLIDATION_CONFIG } from '../platform/src/platform/state/memory-consolidation-config.js';
 
 let restore: (() => void) | undefined;
 afterEach(() => { restore?.(); restore = undefined; });

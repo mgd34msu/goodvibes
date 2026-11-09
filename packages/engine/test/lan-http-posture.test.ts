@@ -5,7 +5,7 @@
  *  - the transport accepts private-network http origins (RFC 1918, .local,
  *    localhost) with NO env escape hatch, including in a browser-like runtime
  *    where process.env does not exist, while genuinely public http origins
- *    keep the SDK_TRANSPORT_INSECURE_BASE_URL wall;
+ *    keep the ENGINE_TRANSPORT_INSECURE_BASE_URL wall;
  *  - the origin posture labels browser-gated capability gaps ("needs https,
  *    available via tailscale") instead of leaving dead buttons, keeps all
  *    three on localhost, and states the one honest LAN notice line;
@@ -14,9 +14,9 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { createTransportPaths, isPrivateNetworkHost, normalizeBaseUrl } from '../transport-http/src/paths.ts';
-import { describeOriginPosture, LAN_PLAIN_HTTP_NOTICE } from '../sdk/src/platform/pairing/origin-posture.ts';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { registerPairingHandoffGatewayMethods } from '../sdk/src/platform/control-plane/routes/pairing-handoff.ts';
+import { describeOriginPosture, LAN_PLAIN_HTTP_NOTICE } from '../platform/src/platform/pairing/origin-posture.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { registerPairingHandoffGatewayMethods } from '../platform/src/platform/control-plane/routes/pairing-handoff.ts';
 
 describe('transport: private-network http origins are a supported posture', () => {
   test('RFC 1918 / .local / localhost http origins normalize without throwing', () => {
@@ -35,7 +35,7 @@ describe('transport: private-network http origins are a supported posture', () =
     }
   });
 
-  test('a genuinely public http origin keeps the wall (SDK_TRANSPORT_INSECURE_BASE_URL)', () => {
+  test('a genuinely public http origin keeps the wall (ENGINE_TRANSPORT_INSECURE_BASE_URL)', () => {
     for (const origin of ['http://example.com', 'http://8.8.8.8:3421', 'http://172.15.0.1:3421', 'http://172.32.0.1:3421']) {
       expect(() => normalizeBaseUrl(origin)).toThrow(/insecure PUBLIC/i);
     }

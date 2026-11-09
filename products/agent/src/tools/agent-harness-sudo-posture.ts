@@ -57,7 +57,7 @@ export function sudoExecutionPosture(context?: CommandContext): AgentHarnessSudo
       valueUsableForBackgroundProcess: false,
       guidance: sudoPasswordPresent
         ? 'SUDO_PASSWORD is present in the current environment, but Agent only reports presence and does not read, print, or pass the value to hidden background sudo.'
-        : 'If future SDK/daemon mediation supports sudo credentials, GoodVibes can load SUDO_PASSWORD from ~/.goodvibes/.env; Agent does not write or display that value.',
+        : 'If future platform/daemon mediation supports sudo credentials, GoodVibes can load SUDO_PASSWORD from ~/.goodvibes/.env; Agent does not write or display that value.',
     },
     supportedRoutes: [
       {
@@ -94,8 +94,8 @@ export function sudoExecutionPosture(context?: CommandContext): AgentHarnessSudo
       },
     ],
     missingContracts: [
-      'SDK ProcessManager stdin write',
-      'SDK ProcessManager PTY session',
+      'platform ProcessManager stdin write',
+      'platform ProcessManager PTY session',
       'daemon credential-prompt mediation',
       'model-visible credential-use receipt without secret value disclosure',
     ],
@@ -107,7 +107,7 @@ export function sudoExecutionPosture(context?: CommandContext): AgentHarnessSudo
       'raw sudo password returned: never',
     ],
     nextAction: sudoPasswordPresent
-      ? 'Review sudo posture before escalation; use only visible foreground sudo until the SDK/daemon publishes safe credential mediation.'
+      ? 'Review sudo posture before escalation; use only visible foreground sudo until the platform/daemon publishes safe credential mediation.'
       : 'Use visible foreground sudo for explicit escalation; configure SUDO_PASSWORD outside Agent only if a future safe credential contract requires it.',
     policy: 'Agent reports only credential presence and safe routes. It never reads, stores, prints, or injects raw sudo passwords, and it blocks hidden background sudo prompts.',
   };

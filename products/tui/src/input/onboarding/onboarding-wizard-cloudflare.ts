@@ -20,17 +20,17 @@ export const CLOUDFLARE_SETUP_SOURCE_OPTIONS: readonly OnboardingWizardRadioOpti
   {
     id: 'bootstrap-token',
     label: 'Paste temporary bootstrap token',
-    hint: 'Use a short-lived Cloudflare token once. The SDK creates and stores a narrower GoodVibes operational token.',
+    hint: 'Use a short-lived Cloudflare token once. The platform creates and stores a narrower GoodVibes operational token.',
   },
   {
     id: 'bootstrap-env',
     label: 'Read bootstrap token from environment',
-    hint: 'Read a temporary token from an environment variable and pass it once to the SDK. The value is not stored.',
+    hint: 'Read a temporary token from an environment variable and pass it once to the platform. The value is not stored.',
   },
   {
     id: 'operational-token',
     label: 'Paste final operational token',
-    hint: 'Use a token you already created. The SDK can store it as a GoodVibes secret during provisioning.',
+    hint: 'Use a token you already created. The platform can store it as a GoodVibes secret during provisioning.',
   },
   {
     id: 'operational-env',
@@ -71,7 +71,7 @@ export const CLOUDFLARE_PROVISION_OPTIONS: readonly OnboardingWizardRadioOption[
   {
     id: 'yes',
     label: 'Yes, create or update Cloudflare resources',
-    hint: 'Final Apply asks the daemon SDK route to create/update selected Cloudflare resources and verify the Worker when possible.',
+    hint: 'Final Apply asks the daemon route to create/update selected Cloudflare resources and verify the Worker when possible.',
   },
 ];
 

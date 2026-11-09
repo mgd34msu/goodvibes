@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { captureStructuredCredentialReferenceConfigValue, ConfigManager, type JudgmentFallbackSettings } from '@goodvibes-jev/engine/sdk/platform/config';
+import { captureStructuredCredentialReferenceConfigValue, ConfigManager, type JudgmentFallbackSettings } from '@goodvibes-jev/engine/platform/platform/config';
 import { installJudgmentPort, judgmentPort } from '@goodvibes-jev/engine/errors';
 import { handleBundleCommand } from '../../cli/bundle-command.ts';
 import { parseGoodVibesCli } from '../../cli/parser.ts';

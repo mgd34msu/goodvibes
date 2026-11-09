@@ -3,8 +3,8 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { prepareKnowledgeSourceRecord } from '../sdk/src/platform/knowledge/store-evidence-writes.js';
-import { ArtifactStore } from '../sdk/src/platform/artifacts/store.js';
+import { prepareKnowledgeSourceRecord } from '../platform/src/platform/knowledge/store-evidence-writes.js';
+import { ArtifactStore } from '../platform/src/platform/artifacts/store.js';
 
 const cleanup: (() => void)[] = [];
 afterEach(() => { for (const close of cleanup.splice(0).reverse()) close(); });

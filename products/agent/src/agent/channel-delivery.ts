@@ -3,7 +3,7 @@ import type {
   ChannelDeliveryRouter,
   ChannelDeliverySurfaceKind,
   ChannelDeliveryTarget,
-} from '@goodvibes-jev/engine/sdk/platform/channels';
+} from '@goodvibes-jev/engine/platform/platform/channels';
 import {
   CardMaterialRefusedError,
   resolveDeliverySurfaceName,
@@ -172,7 +172,7 @@ export async function deliverAgentChannelMessage(
   //
   // It refuses BEFORE router.deliver, so nothing reaches a provider, and it
   // throws rather than returning a result, so no caller can treat a refusal as
-  // a successful send. The thrown message is the SDK's refusal wording and
+  // a successful send. The thrown message is the platform's refusal wording and
   // contains no part of what was refused, see agent/payments-channel-guard.ts.
   const refusal = await screenOutboundForCardMaterial({
     surface: resolveDeliverySurfaceName(preview.target),

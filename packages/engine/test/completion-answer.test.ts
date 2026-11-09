@@ -5,7 +5,7 @@
  * for a run that did not complete.
  */
 import { describe, expect, test } from 'bun:test';
-import { CONTRACT_CHECKS_FOLLOW, renderAgentCompletionAnswer } from '../sdk/src/platform/agents/completion-answer.js';
+import { CONTRACT_CHECKS_FOLLOW, renderAgentCompletionAnswer } from '../platform/src/platform/agents/completion-answer.js';
 
 describe('renderAgentCompletionAnswer', () => {
   test('a completed run says its output, then its streamed content', () => {

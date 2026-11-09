@@ -20,10 +20,10 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { DaemonServer } from '@goodvibes-jev/engine/sdk/platform/daemon';
-import { UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { createRuntimeStore } from '@goodvibes-jev/engine/sdk/platform/runtime/store';
+import { DaemonServer } from '@goodvibes-jev/engine/platform/platform/daemon';
+import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
 import { RuntimeEventBus } from '../../runtime/index.ts';
 import { createFeatureFlagManager, deriveFeatureStates } from '../../runtime/index.ts';
 import { createRuntimeServices } from '../../runtime/services.ts';

@@ -2,12 +2,12 @@ import { expect, test } from 'bun:test';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.ts';
-import { ToolInputProjectionError, type ToolInputProjector } from '../sdk/src/platform/tools/input-projection.ts';
-import type { Tool } from '../sdk/src/platform/types/tools.ts';
-import { executeToolCalls, type ToolExecutionDeps } from '../sdk/src/platform/core/orchestrator-tool-runtime.ts';
-import { PermissionManager, type PermissionConfigReader } from '../sdk/src/platform/permissions/manager.ts';
-import { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.ts';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
+import { ToolInputProjectionError, type ToolInputProjector } from '../platform/src/platform/tools/input-projection.ts';
+import type { Tool } from '../platform/src/platform/types/tools.ts';
+import { executeToolCalls, type ToolExecutionDeps } from '../platform/src/platform/core/orchestrator-tool-runtime.ts';
+import { PermissionManager, type PermissionConfigReader } from '../platform/src/platform/permissions/manager.ts';
+import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
 import { forgetGateReadings, gateReadingsPort } from './_helpers/gate-readings.ts';
 
 const TOOL_NAME = 'registry_freshness_fixture';

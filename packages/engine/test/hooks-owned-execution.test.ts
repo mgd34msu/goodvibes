@@ -4,15 +4,15 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { run as runCommand } from '../sdk/src/platform/hooks/runners/command.ts';
-import { run as runPrompt } from '../sdk/src/platform/hooks/runners/prompt.ts';
-import { run as runHttp } from '../sdk/src/platform/hooks/runners/http.ts';
-import { run as runTypeScript } from '../sdk/src/platform/hooks/runners/typescript.ts';
-import { OwnedProcessGroupUnsupportedError, runProcess } from '../sdk/src/platform/runtime/remote/host/backends/process-runner.ts';
-import type { HookEvent } from '../sdk/src/platform/hooks/types.ts';
-import { ToolLLM } from '../sdk/src/platform/config/tool-llm.ts';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import type { LLMProvider } from '../sdk/src/platform/providers/interface.ts';
+import { run as runCommand } from '../platform/src/platform/hooks/runners/command.ts';
+import { run as runPrompt } from '../platform/src/platform/hooks/runners/prompt.ts';
+import { run as runHttp } from '../platform/src/platform/hooks/runners/http.ts';
+import { run as runTypeScript } from '../platform/src/platform/hooks/runners/typescript.ts';
+import { OwnedProcessGroupUnsupportedError, runProcess } from '../platform/src/platform/runtime/remote/host/backends/process-runner.ts';
+import type { HookEvent } from '../platform/src/platform/hooks/types.ts';
+import { ToolLLM } from '../platform/src/platform/config/tool-llm.ts';
+import type { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import type { LLMProvider } from '../platform/src/platform/providers/interface.ts';
 
 const event: HookEvent = { path: 'Pre:tool:read', phase: 'Pre', category: 'tool', specific: 'read', sessionId: 'owned-hook', timestamp: 0, payload: {} };
 const roots: string[] = [];

@@ -1,9 +1,9 @@
 import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager, createDaemonCredentialStore } from '@goodvibes-jev/engine/sdk/platform/config';
-import { acquireDiscordInboxIdentity, createDiscordInboxOwner } from '@goodvibes-jev/engine/sdk/platform/intake';
-import { acquireCrossProcessLock } from '@goodvibes-jev/engine/sdk/platform/state/durable-file-io';
+import { ConfigManager, createDaemonCredentialStore } from '@goodvibes-jev/engine/platform/platform/config';
+import { acquireDiscordInboxIdentity, createDiscordInboxOwner } from '@goodvibes-jev/engine/platform/platform/intake';
+import { acquireCrossProcessLock } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
 import { SecretsManager } from '../../config/secrets.js';
 import { acquireHostedInboxScreening } from '../../runtime/hosted-source-screening-composition.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
@@ -147,7 +147,7 @@ async function nativeDiscordOwner(f: Awaited<ReturnType<typeof fixture>>,
 test('unchanged native Discord account and registry retain one physical mirror and election scope across genuine admissions', async () => {
   const f = await fixture(), first = await f.acquire(), second = await f.acquire();
   const firstOwner = await nativeDiscordOwner(f, first), secondOwner = await nativeDiscordOwner(f, second);
-  // Preserve the independent opposing assertion, using real acquisitions and SDK constructors.
+  // Preserve the independent opposing assertion, using real acquisitions and platform constructors.
   expect(firstOwner.scopeId).toBe(secondOwner.scopeId);
   expect(first.options.authority.ownerId).not.toBe(second.options.authority.ownerId);
   expect(first.options.authority.revision).not.toBe(second.options.authority.revision);

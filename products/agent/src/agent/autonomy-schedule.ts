@@ -1,5 +1,5 @@
-import { createBrowserGoodVibesSdk } from '@goodvibes-jev/engine/sdk/browser';
-import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/sdk/contracts';
+import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
+import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
 import {
   classifyConnectedHostScheduleError,
   resolveAgentConnectedHostConnection,
@@ -334,8 +334,8 @@ export async function createAutonomySchedule(
     };
   }
   try {
-    const sdk = createBrowserGoodVibesSdk({ baseUrl: connection.baseUrl, authToken: connection.token });
-    const schedule = await sdk.operator.invoke(AUTONOMY_SCHEDULE_METHOD, preview.payload);
+    const platformClient = createBrowserGoodVibesPlatform({ baseUrl: connection.baseUrl, authToken: connection.token });
+    const schedule = await platformClient.operator.invoke(AUTONOMY_SCHEDULE_METHOD, preview.payload);
     return {
       ok: true,
       kind: AUTONOMY_SCHEDULE_METHOD,

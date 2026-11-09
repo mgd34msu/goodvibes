@@ -1,17 +1,17 @@
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { WorkProposalStore } from '../sdk/src/platform/agents/work-proposal-store.js';
-import { markWorkAuthorized } from '../sdk/src/platform/agents/conversation-continuation.js';
-import type { AutomationRouteBinding } from '../sdk/src/platform/automation/routes.js';
-import type { SharedSessionBroker } from '../sdk/src/platform/control-plane/session-broker.js';
-import type { SharedSessionContinuationRunner, SharedSessionInputRecord } from '../sdk/src/platform/control-plane/session-intents.js';
-import { configureDaemonSessionContinuation } from '../sdk/src/platform/daemon/facade-composition.js';
-import { gateSurfaceSpawn, type ConversationGateDeps, type SpawnInput } from '../sdk/src/platform/daemon/surface-conversation-gate.js';
-import { resolveCaptureAuthority } from '../sdk/src/platform/personal-capture/authority.js';
-import { conversationalTurnConfigReaderFrom } from '../sdk/src/platform/personal-capture/spawn-contract.js';
-import type { AgentRecord } from '../sdk/src/platform/tools/agent/record.js';
-import { createProfileTool } from '../sdk/src/platform/tools/profile/index.js';
+import { WorkProposalStore } from '../platform/src/platform/agents/work-proposal-store.js';
+import { markWorkAuthorized } from '../platform/src/platform/agents/conversation-continuation.js';
+import type { AutomationRouteBinding } from '../platform/src/platform/automation/routes.js';
+import type { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.js';
+import type { SharedSessionContinuationRunner, SharedSessionInputRecord } from '../platform/src/platform/control-plane/session-intents.js';
+import { configureDaemonSessionContinuation } from '../platform/src/platform/daemon/facade-composition.js';
+import { gateSurfaceSpawn, type ConversationGateDeps, type SpawnInput } from '../platform/src/platform/daemon/surface-conversation-gate.js';
+import { resolveCaptureAuthority } from '../platform/src/platform/personal-capture/authority.js';
+import { conversationalTurnConfigReaderFrom } from '../platform/src/platform/personal-capture/spawn-contract.js';
+import type { AgentRecord } from '../platform/src/platform/tools/agent/record.js';
+import { createProfileTool } from '../platform/src/platform/tools/profile/index.js';
 import { trackDisposables } from './_helpers/disposables.ts';
 
 let prior: ReturnType<typeof installJudgmentPort>;

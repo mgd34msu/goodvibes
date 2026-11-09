@@ -7,7 +7,7 @@ import {
   type BrokerApprovalCardBroker,
 } from '../../permissions/broker-approval-card.ts';
 import type { PendingPermissionState } from '../../shell/blocking-input.ts';
-import type { RememberTier } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import type { RememberTier } from '@goodvibes-jev/engine/platform/platform/permissions';
 
 function makeRequest(callId: string, tool = 'ci-fix') {
   return { callId, tool, reason: 'Fix the failing CI run?', args: {} } as never;

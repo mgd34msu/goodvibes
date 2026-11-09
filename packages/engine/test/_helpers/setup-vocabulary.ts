@@ -9,7 +9,7 @@
  * that is a fixed vocabulary: a shipped setup string names none of the
  * product's command roots and none of its config keys.
  */
-import { CONFIG_KEYS } from '../../sdk/src/platform/config/schema.ts';
+import { CONFIG_KEYS } from '../../platform/src/platform/config/schema.ts';
 
 /** A character that continues a token: a slash after it is a path, not a command. */
 function continuesToken(char: string): boolean {

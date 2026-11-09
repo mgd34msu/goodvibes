@@ -1,4 +1,4 @@
-import { presetForMode, PERMISSION_MODE_CYCLE } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { presetForMode, PERMISSION_MODE_CYCLE } from '@goodvibes-jev/engine/platform/platform/gate';
 import type { OnboardingStep1CapabilityItem } from '../../runtime/onboarding/index.ts';
 import type { OnboardingWizardRadioOption, OnboardingWizardStepId } from './onboarding-wizard-types.ts';
 

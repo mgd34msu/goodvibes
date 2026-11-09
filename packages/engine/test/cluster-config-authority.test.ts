@@ -1,11 +1,11 @@
 /** UNRUN: real authenticated group traffic and controlled storage awaits. */
 import { expect, test } from 'bun:test';
-import { createGroup, joinGroup } from '../sdk/src/platform/cluster/group-operations.js';
-import { CONFIG_MESSAGE_TYPES } from '../sdk/src/platform/cluster/config-replication.js';
-import { encodeEnvelope } from '../sdk/src/platform/cluster/protocol-envelope.js';
-import { findReplicaEntry } from '../sdk/src/platform/cluster/config-replica.js';
-import { listReplicatedConfigPaths, replicatedSecretKeyFor } from '../sdk/src/platform/cluster/config-replication-policy.js';
-import { admitMember, removeMember, touchMember } from '../sdk/src/platform/cluster/group-state.js';
+import { createGroup, joinGroup } from '../platform/src/platform/cluster/group-operations.js';
+import { CONFIG_MESSAGE_TYPES } from '../platform/src/platform/cluster/config-replication.js';
+import { encodeEnvelope } from '../platform/src/platform/cluster/protocol-envelope.js';
+import { findReplicaEntry } from '../platform/src/platform/cluster/config-replica.js';
+import { listReplicatedConfigPaths, replicatedSecretKeyFor } from '../platform/src/platform/cluster/config-replication-policy.js';
+import { admitMember, removeMember, touchMember } from '../platform/src/platform/cluster/group-state.js';
 import { addGroupNode, createGroupWorld, destroyGroupWorld, MemorySecretStore, settle, stopGroupWorld } from './cluster-group-harness.js';
 function barrier() {
   let resolve!: () => void;

@@ -16,10 +16,10 @@ import { CATEGORY_INFO, describeUiRouting, formatValue, getSettingLabel } from '
 import { buildConnectionContext } from './settings-modal-connections.ts';
 import { isSecretConfigKey } from '../config/secret-config.ts';
 import '../input/concealed-input.ts';
-import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/sdk/platform/payments';
-import '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/platform/platform/payments';
+import '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { GLYPHS } from './ui-primitives.ts';
-import { GATE_PRESETS } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { GATE_PRESETS } from '@goodvibes-jev/engine/platform/platform/gate';
 
 const ENUM_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
   'display.themeMode': {
@@ -134,7 +134,7 @@ function buildFeatureOptionLines(entry: SettingEntry): string[] {
 
 /**
  * Under-cursor documentation for a feature-unit header, rendered entirely
- * from the SDK's per-feature settings metadata: full behavior description,
+ * from the platform's per-feature settings metadata: full behavior description,
  * the real option shape, every settings key that tunes the feature, and the
  * honest live/restart state from the gate manager.
  */

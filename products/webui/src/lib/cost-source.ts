@@ -2,7 +2,7 @@
  * cost-source.ts, honest price provenance for cost displays, read straight
  * from the wire.
  *
- * What the daemon now serves (verified against the SDK snapshot's operator
+ * What the daemon now serves (verified against the platform snapshot's operator
  * contract):
  *   - cost.attribution.get rows AND its aggregate carry `costSource`
  *     ('user' | 'provider' | 'catalog' | 'mixed', or absent) plus a dated

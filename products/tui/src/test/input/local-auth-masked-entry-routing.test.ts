@@ -12,9 +12,9 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
-import { UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
-import { InputTokenizer } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
+import { InputTokenizer } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { CommandRegistry } from '../../input/command-registry.ts';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { registerLocalAuthRuntimeCommands } from '../../input/commands/local-auth-runtime.ts';

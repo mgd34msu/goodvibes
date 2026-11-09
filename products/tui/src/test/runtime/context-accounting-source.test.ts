@@ -1,7 +1,7 @@
 /**
  * Context-accounting binding tests.
  *
- * The SDK's `context_accounting` tool is always registered on the shared
+ * The platform's `context_accounting` tool is always registered on the shared
  * roster, but only reports real data once a consumer binds a
  * ContextAccountingSource onto the RuntimeServices-level
  * ContextAccountingHolder passed into registerAllTools (see
@@ -13,17 +13,17 @@
  *     count, and the compaction-activity tracker driven by real runtime-bus
  *     event types (not fabricated).
  *  2. The full path through the REAL tool (createContextAccountingTool +
- *     ContextAccountingHolder from the SDK), bound source returns real
+ *     ContextAccountingHolder from the platform), bound source returns real
  *     data, unbound holder returns the honest "not available" message.
  */
 import { describe, expect, test } from 'bun:test';
 import { createContextAccountingSource } from '../../runtime/context-accounting-source.ts';
-import { ContextAccountingHolder, createContextAccountingTool } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { Orchestrator } from '@goodvibes-jev/engine/sdk/platform/core';
+import { ContextAccountingHolder, createContextAccountingTool } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { Orchestrator } from '@goodvibes-jev/engine/platform/platform/core';
 
 /**
- * TurnInjectionRecord is not exported from the SDK's public entry points;
+ * TurnInjectionRecord is not exported from the platform's public entry points;
  * the orchestrator's real getTurnInjections() return type is the source of
  * truth here, so tests borrow it structurally through Orchestrator instead
  * of importing a type the package barrel doesn't expose.

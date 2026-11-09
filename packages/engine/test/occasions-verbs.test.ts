@@ -22,16 +22,16 @@ import { afterEach, describe, expect, test, beforeEach } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { registerOccasionsGatewayMethods } from '../sdk/src/platform/control-plane/routes/occasions.ts';
-import { OwnerProfileStore } from '../sdk/src/platform/owner-profile/index.ts';
-import { OccasionStateStore } from '../sdk/src/platform/occasions/state-store.ts';
-import { OccasionsService } from '../sdk/src/platform/occasions/service.ts';
-import { OCCASIONS_DEFAULTS } from '../sdk/src/platform/occasions/policy.ts';
-import { resetProcessUntrustedContentLedgerForTests } from '../sdk/src/platform/security/untrusted-content.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { registerOccasionsGatewayMethods } from '../platform/src/platform/control-plane/routes/occasions.ts';
+import { OwnerProfileStore } from '../platform/src/platform/owner-profile/index.ts';
+import { OccasionStateStore } from '../platform/src/platform/occasions/state-store.ts';
+import { OccasionsService } from '../platform/src/platform/occasions/service.ts';
+import { OCCASIONS_DEFAULTS } from '../platform/src/platform/occasions/policy.ts';
+import { resetProcessUntrustedContentLedgerForTests } from '../platform/src/platform/security/untrusted-content.ts';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort } from '@goodvibes-jev/judgment/testing';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
 
 // Profile writes ask the content-derivation reading whenever the process
 // ledger holds untrusted text; another test file's reads must not reach these.

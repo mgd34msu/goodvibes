@@ -2,11 +2,11 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AutomationJobStore, getNextAutomationOccurrence, type AutomationJob } from '../sdk/src/platform/automation/index.ts';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.ts';
-import { KnowledgeScheduleService } from '../sdk/src/platform/knowledge/scheduling.ts';
-import { KNOWLEDGE_SCHEMA_VERSION } from '../sdk/src/platform/knowledge/store-schema-version.ts';
-import { SQLiteStore } from '../sdk/src/platform/state/sqlite-store.ts';
+import { AutomationJobStore, getNextAutomationOccurrence, type AutomationJob } from '../platform/src/platform/automation/index.ts';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.ts';
+import { KnowledgeScheduleService } from '../platform/src/platform/knowledge/scheduling.ts';
+import { KNOWLEDGE_SCHEMA_VERSION } from '../platform/src/platform/knowledge/store-schema-version.ts';
+import { SQLiteStore } from '../platform/src/platform/state/sqlite-store.ts';
 
 function oldJob(): AutomationJob {
   return {

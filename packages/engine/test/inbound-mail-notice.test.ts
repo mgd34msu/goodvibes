@@ -20,14 +20,14 @@ import {
   type InboundOutcome,
   type StructuredNotice,
   type ValidatedLinkSummary,
-} from '../sdk/src/platform/email/inbound-notice.ts';
+} from '../platform/src/platform/email/inbound-notice.ts';
 import {
   renderNoticeAsPlainText,
   renderNoticeForChannel,
   // NoticeChannel lives with the channel renderers, not with the notice type.
   type NoticeChannel,
-} from '../sdk/src/platform/email/inbound-notice-channels.ts';
-import { deliveredRecipientFromAliasMailbox } from '../sdk/src/platform/google/delivery-evidence.ts';
+} from '../platform/src/platform/email/inbound-notice-channels.ts';
+import { deliveredRecipientFromAliasMailbox } from '../platform/src/platform/google/delivery-evidence.ts';
 import { useSecurityReadings } from './helpers/security-readings.ts';
 
 useSecurityReadings();
@@ -502,7 +502,7 @@ describe('outcome rendering distinguishes matched / inert / refused-link / capab
     // This asserted the opposite, that the whole Outcome line is literal, on
     // the grounds that the capability is daemon-generated. That was true by
     // accident rather than by construction: `missingCapability` has no
-    // producer anywhere in `sdk/src`, so the claim held only because
+    // producer anywhere in `platform/src`, so the claim held only because
     // the field is never populated at all. Nothing builds `capability-degraded`
     // today.
     //

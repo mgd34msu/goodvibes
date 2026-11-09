@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createShellPathService, type ShellPathService } from '@/runtime/index.ts';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { ConfigManager } from '../../config/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 import { createAgentAutonomyScheduleTool } from '../../tools/agent-autonomy-schedule-tool.ts';

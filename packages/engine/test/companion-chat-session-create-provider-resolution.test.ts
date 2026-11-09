@@ -10,15 +10,15 @@
 
 import { describe, expect, test, beforeEach } from 'bun:test';
 import { trackDisposables } from './_helpers/disposables.ts';
-import { CompanionChatManager } from '../sdk/src/platform/companion/companion-chat-manager.js';
-import { dispatchCompanionChatRoutes } from '../sdk/src/platform/companion/companion-chat-routes.js';
+import { CompanionChatManager } from '../platform/src/platform/companion/companion-chat-manager.js';
+import { dispatchCompanionChatRoutes } from '../platform/src/platform/companion/companion-chat-routes.js';
 import type {
   CompanionChatEventPublisher,
   CompanionChatManagerConfig,
   CompanionLLMProvider,
   CompanionProviderChunk,
-} from '../sdk/src/platform/companion/companion-chat-manager.js';
-import type { CompanionChatRouteContext } from '../sdk/src/platform/companion/companion-chat-route-types.js';
+} from '../platform/src/platform/companion/companion-chat-manager.js';
+import type { CompanionChatRouteContext } from '../platform/src/platform/companion/companion-chat-route-types.js';
 
 const disposables = trackDisposables();
 

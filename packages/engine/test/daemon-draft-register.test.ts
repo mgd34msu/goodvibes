@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/index.js';
-import type { GatewayMethodInvocation } from '../sdk/src/platform/control-plane/index.js';
-import type { DraftHostContext as HandlerContext } from '../sdk/src/platform/channels/host-drafts/types.js';
-import type { AtRestCipher } from '../sdk/src/platform/config/daemon-credential-store.js';
-import type { Unregister } from '../sdk/src/platform/control-plane/host-handlers.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/index.js';
+import type { GatewayMethodInvocation } from '../platform/src/platform/control-plane/index.js';
+import type { DraftHostContext as HandlerContext } from '../platform/src/platform/channels/host-drafts/types.js';
+import type { AtRestCipher } from '../platform/src/platform/config/daemon-credential-store.js';
+import type { Unregister } from '../platform/src/platform/control-plane/host-handlers.js';
 import {
   DraftSyncStore,
   registerDraftMethods,
-} from '../sdk/src/platform/channels/host-drafts/index.js';
+} from '../platform/src/platform/channels/host-drafts/index.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const LIST = 'channels.drafts.list';
@@ -47,7 +47,7 @@ function makeContext(catalog: GatewayMethodCatalog, workingDirectory: string): H
   };
 }
 
-/** Build an SDK invocation envelope. explicitUserRequest rides in context.metadata. */
+/** Build an platform invocation envelope. explicitUserRequest rides in context.metadata. */
 function invocation(
   body: unknown,
   opts: { explicit?: boolean } = {},
@@ -115,14 +115,14 @@ describe('registerDraftMethods', () => {
     expect(store.get(privateId)).toBeNull();
   });
 
-  test('attaches handlers to the four canonical SDK descriptors', () => {
+  test('attaches handlers to the four canonical platform descriptors', () => {
     for (const id of [LIST, GET, SAVE, DELETE]) {
       expect(catalog.get(id)).not.toBeNull();
       expect(catalog.hasHandler(id)).toBe(true);
     }
   });
 
-  test('does not re-author the SDK descriptors (scopes/access preserved)', () => {
+  test('does not re-author the platform descriptors (scopes/access preserved)', () => {
     expect(catalog.get(SAVE)?.access).toBe('admin');
     expect(catalog.get(DELETE)?.dangerous).toBe(true);
     expect(catalog.get(LIST)?.scopes).toContain('read:channels');

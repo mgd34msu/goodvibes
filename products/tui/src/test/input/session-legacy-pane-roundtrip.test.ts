@@ -15,8 +15,8 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
-import { SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
-import { journalPathFor, openTranscriptJournal } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
+import { journalPathFor, openTranscriptJournal } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { ConversationManager } from '../../core/conversation.ts';
 import { handleSessionWorkflowCommand } from '../../input/commands/session-workflow.ts';

@@ -1,5 +1,5 @@
 import { sourceLabel } from './knowledge-labels.js';
-import type { KnowledgeService } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import type { KnowledgeService } from '@goodvibes-jev/engine/platform/platform/knowledge';
 type KnowledgeAskResult = Awaited<ReturnType<KnowledgeService['ask']>>;
 export function createKnowledgeAnswerRenderer(presentation: {
   readonly nodeLabel: (node: KnowledgeAskResult['answer']['facts'][number]) => string;

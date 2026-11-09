@@ -1,10 +1,10 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/api-extractor/v7/api-extractor.schema.json",
   "extends": "./api-extractor.json",
-  "mainEntryPointFilePath": "<projectFolder>/sdk/dist/embed.d.ts",
+  "mainEntryPointFilePath": "<projectFolder>/platform/dist/embed.d.ts",
   "apiReport": {
     "enabled": true,
-    "reportFileName": "goodvibes-sdk-embed.api.md",
+    "reportFileName": "goodvibes-platform-embed.api.md",
     "reportFolder": "<projectFolder>/etc/",
     "reportTempFolder": "<projectFolder>/temp/"
   }

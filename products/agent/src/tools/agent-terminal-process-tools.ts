@@ -1,7 +1,7 @@
 import { processClassificationOptions } from './agent-harness-process-launch.ts';
 import { createProcessInputProjector } from './agent-process-ingress.ts';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import { assertCurrentToolExecution, type ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { assertCurrentToolExecution, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext } from '../input/command-registry.ts';
 import { backgroundProcessSummary, describeBackgroundProcess, runBackgroundProcessAction } from './agent-harness-background-processes.ts';
 import { harnessCatalogExecutionGuard, retainHarnessCatalogCurrent } from './agent-harness-catalog-ingress.ts';
@@ -89,7 +89,7 @@ export function createAgentTerminalTool(commandContext: CommandContext, registry
             description: 'command: an ordinary job, terminated when timeoutMs expires. long_lived: an interactive application or a server whose lifetime is the user\'s, it keeps running past timeoutMs and must be stopped explicitly. Read from the complete command by Jev when omitted; an unsettled reading prevents launch.',
           },
           killOnTimeout: { type: 'boolean', description: 'Overrides processClass: true terminates this process when timeoutMs expires, false leaves it running. Set true deliberately before a timeout may destroy something the user is using.' },
-          pty: { type: 'boolean', description: 'Request PTY mode; returns unsupported until the SDK publishes a typed PTY contract.' },
+          pty: { type: 'boolean', description: 'Request PTY mode; returns unsupported until the platform publishes a typed PTY contract.' },
           confirm: { type: 'boolean', description: 'Optional historical provenance; does not grant process authority.' },
           explicitUserRequest: { type: 'string', description: 'Optional human request provenance; does not grant process authority.' },
         },

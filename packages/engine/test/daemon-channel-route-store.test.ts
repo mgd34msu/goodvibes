@@ -3,8 +3,8 @@ import {
   buildChannelId,
   parseChannelId,
   RouteStore,
-} from '../sdk/src/platform/channels/host-routing/route-store.ts';
-import { GatewayVerbError as HandlerError } from '../sdk/src/platform/control-plane/routes/gateway-verb-error.ts';
+} from '../platform/src/platform/channels/host-routing/route-store.ts';
+import { GatewayVerbError as HandlerError } from '../platform/src/platform/control-plane/routes/gateway-verb-error.ts';
 import { makeTmpWorkingDir } from './_helpers/daemon-routing-temp.ts';
 
 describe('parseChannelId', () => {

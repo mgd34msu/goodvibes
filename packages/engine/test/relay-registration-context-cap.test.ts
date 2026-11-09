@@ -16,7 +16,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   createRelayDaemonRegistration,
   type RelayClientWebSocket,
-} from '../daemon-sdk/src/index.js';
+} from '../daemon-api/src/index.js';
 import {
   encodeTunnelFrame,
   exportRawPublicKey,

@@ -2,16 +2,16 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { withExecutionModeOwner, type GatePresetName } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { resolveAndValidatePath } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { withExecutionModeOwner, type GatePresetName } from '@goodvibes-jev/engine/platform/platform/gate';
+import { resolveAndValidatePath } from '@goodvibes-jev/engine/platform/platform/utils';
 import { wrapExecToolForAgentPolicy, wrapFetchToolForAgentPolicy, wrapModeRestrictedToolForAgentPolicy } from '../../tools/agent-tool-policy-guard.ts';
 import { createAgentLocalStateInputProjector } from '../../tools/agent-local-state-admission.ts';
 import { assertAgentMemoryInput } from '../../tools/agent-memory-input-guard.ts';
 import { assertNoSecretLikeMemoryText } from '../../agent/memory-safety.ts';
 import { assertNoSecretLikeText } from '../../agent/persona-registry.ts';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 
 const withMode = <T>(mode: GatePresetName, run: () => T): T =>
   withExecutionModeOwner({ getMode: () => mode, getRevision: () => 0 }, run);

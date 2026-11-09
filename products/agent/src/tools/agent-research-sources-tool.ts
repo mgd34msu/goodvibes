@@ -1,6 +1,6 @@
 import type { ShellPathService } from '@/runtime/index.ts';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import { assertCurrentToolEffect, type ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { assertCurrentToolEffect, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import {
   AgentResearchSourceRegistry,
   researchSourceReportLine,

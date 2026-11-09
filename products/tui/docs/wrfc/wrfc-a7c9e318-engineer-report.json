@@ -39,6 +39,6 @@
   ],
   "issues": [],
   "uncertainties": [
-    "The upstream SDK-owned WRFC implementation is consumed from a package, so this fix focuses on repository evidence and regression coverage rather than patching vendored SDK sources."
+    "The upstream platform-owned WRFC implementation is consumed from a package, so this fix focuses on repository evidence and regression coverage rather than patching vendored platform sources."
   ]
 }

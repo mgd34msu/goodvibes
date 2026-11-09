@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { redactSensitiveDataAsync } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { redactSensitiveDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
 import { createKnowledgeModalSurface, type KnowledgeModalDeps } from '../../../views/modals/knowledge-modal.ts';
 import { actionCtx, captureCommands, findAction, open, tabText } from './modal-surface-test-helpers.ts';
 

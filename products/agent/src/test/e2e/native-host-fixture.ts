@@ -1,9 +1,9 @@
 /** A real daemon + paired authority; only external Jev/model replies are synthetic. */
 import { dirname, join } from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { BenchmarkStore } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { registerInboxSurface } from '@goodvibes-jev/engine/sdk/platform/intake';
-import { WorkspaceRegistrationStore, sharedWorkspaceRegisterPath } from '@goodvibes-jev/engine/sdk/platform/workspace';
+import { BenchmarkStore } from '@goodvibes-jev/engine/platform/platform/providers';
+import { registerInboxSurface } from '@goodvibes-jev/engine/platform/platform/intake';
+import { WorkspaceRegistrationStore, sharedWorkspaceRegisterPath } from '@goodvibes-jev/engine/platform/platform/workspace';
 import { startDaemonFixture } from '@goodvibes-jev/daemon/testing';
 import { seedProviderMetadataCacheFixture, seedProviderModelListCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
 import type { E2EHome } from './harness.ts';

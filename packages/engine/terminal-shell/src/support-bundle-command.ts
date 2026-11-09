@@ -1,13 +1,13 @@
 import { retainCliConfig } from './cli-config-owner.js';
-import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { decisionOrClassic, isClassicOperation, withDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
-import { captureOwnedJson } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { createShellPathService, type ShellPathService } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
-import { listProviderRuntimeSnapshots, type ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { decisionOrClassic, isClassicOperation, withDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
+import { captureOwnedJson } from '@goodvibes-jev/engine/platform/platform/gate';
+import { createShellPathService, type ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { listProviderRuntimeSnapshots, type ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { CliCommandOutput } from './cli-types.js';
 import { REDACTED_VALUE, prepareConfigRedaction, redactSerializedSecrets } from './cli-redaction.js';
 import {

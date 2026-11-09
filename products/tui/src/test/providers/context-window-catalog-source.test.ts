@@ -1,6 +1,6 @@
 /**
  * /context window and /status name where the window came from, end to end
- * through the SDK registry.
+ * through the platform registry.
  *
  * Live incident (abacusai): the provider file written by the old
  * `/provider add` says `contextWindow: 8192` for every model; the models.dev
@@ -10,7 +10,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ProviderRegistry, describeContextWindowSource } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { ProviderRegistry, describeContextWindowSource } from '@goodvibes-jev/engine/platform/platform/providers';
 import { handleContextWindowSubcommand } from '../../input/commands/context-window.ts';
 import { formatStatusReport } from '../../shell/status-report.ts';
 import type { CommandContext } from '../../input/command-registry.ts';
@@ -104,7 +104,7 @@ function statusText(registry: ProviderRegistry): string {
   });
 }
 
-describe('the window source, end to end through the SDK registry', () => {
+describe('the window source, end to end through the platform registry', () => {
   test('abacusai route-llm: 128,000 from the catalog, not the guessed 8,192', async () => {
     const registry = await registryOn('abacusai:route-llm');
     const window = contextWindowText(registry);

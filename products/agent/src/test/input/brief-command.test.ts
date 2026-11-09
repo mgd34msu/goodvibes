@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import type { MemoryApi } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import type { MemoryRecord } from '@goodvibes-jev/engine/sdk/platform/state';
+import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import type { MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
 import { AgentPersonaRegistry } from '../../agent/persona-registry.ts';
 import { AgentRoutineRegistry } from '../../agent/routine-registry.ts';
 import { AgentSkillRegistry } from '../../agent/skill-registry.ts';
@@ -9,7 +9,7 @@ import type { CommandContext } from '../../input/command-registry.ts';
 import { CommandRegistry } from '../../input/command-registry.ts';
 import { registerBuiltinCommands } from '../../input/commands.ts';
 import { formatAgentOperatorBriefing } from '../../input/commands/brief-runtime.ts';
-import type { WorkPlanItem, WorkPlanStore } from '@goodvibes-jev/engine/sdk/platform/workflow';
+import type { WorkPlanItem, WorkPlanStore } from '@goodvibes-jev/engine/platform/platform/workflow';
 import { createShellPathService } from '@/runtime/index.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 

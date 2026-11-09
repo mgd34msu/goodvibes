@@ -2,8 +2,8 @@
 import { spawnSync } from 'node:child_process';
 import { lstatSync, readdirSync, unlinkSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { AgentAccountRegistry } from '../../sdk/src/platform/google/account-registry.ts';
-import { AsyncAgentAccountRegistry } from '../../sdk/src/platform/google/async-account-registry.ts';
+import { AgentAccountRegistry } from '../../platform/src/platform/google/account-registry.ts';
+import { AsyncAgentAccountRegistry } from '../../platform/src/platform/google/async-account-registry.ts';
 
 const [mode, storePath] = process.argv.slice(2);
 if (!mode || !storePath) throw new Error('Fixture mode and path required');

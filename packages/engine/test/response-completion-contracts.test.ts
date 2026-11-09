@@ -7,15 +7,15 @@ import { fakePort as baseFakePort, noulAnswer } from '@goodvibes-jev/judgment/te
 function fakePort(answer: Parameters<typeof baseFakePort>[0]) {
   return baseFakePort((name, question, state) => name === 'completion_required' ? noulAnswer(.99) : answer(name, question, state));
 }
-import { completedContractEvidence, isNativeCompletedWorkReceipt } from '../sdk/src/platform/core/response-completion-contracts.js';
-import type { ContractView, UnitCheck } from '../sdk/src/platform/contract/types.js';
-import { CompletionEvidenceProjection } from '../sdk/src/platform/core/response-completion-evidence.js';
-import { verificationSources } from '../sdk/src/platform/core/verification/source.js';
-import { ConversationManager } from '../sdk/src/platform/core/conversation.js';
-import { ResponseCompletionGuard } from '../sdk/src/platform/core/response-completion.js';
+import { completedContractEvidence, isNativeCompletedWorkReceipt } from '../platform/src/platform/core/response-completion-contracts.js';
+import type { ContractView, UnitCheck } from '../platform/src/platform/contract/types.js';
+import { CompletionEvidenceProjection } from '../platform/src/platform/core/response-completion-evidence.js';
+import { verificationSources } from '../platform/src/platform/core/verification/source.js';
+import { ConversationManager } from '../platform/src/platform/core/conversation.js';
+import { ResponseCompletionGuard } from '../platform/src/platform/core/response-completion.js';
 import { hashState } from '@goodvibes-jev/judgment';
-import { goalObligationSource } from '../sdk/src/platform/contract/goal-obligation-proof.js';
-import { originalObligationSource } from '../sdk/src/platform/contract/batteries/original-obligation-coverage.js';
+import { goalObligationSource } from '../platform/src/platform/contract/goal-obligation-proof.js';
+import { originalObligationSource } from '../platform/src/platform/contract/batteries/original-obligation-coverage.js';
 
 const originalPort = installJudgmentPort(undefined);
 afterEach(() => installJudgmentPort(originalPort));

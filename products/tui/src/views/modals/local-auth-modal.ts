@@ -1,7 +1,7 @@
 import type { ConfigModalAction, ConfigModalActionContext, ConfigModalRow, ConfigModalSurface, ConfigModalView } from '../../input/config-modal-types.ts';
 import type { LocalAuthInspectionQuery } from '@/runtime/index.ts';
-import type { UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { postureLine, kv } from './modal-surface-helpers.ts';
 
 /** Mutation surface the surface needs to gate p/d/b on, a subset of UserAuthManager,

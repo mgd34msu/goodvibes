@@ -1,7 +1,7 @@
 import {
   nativeConversationIntakeCaptureRequestSchema,
   type NativeConversationIntakeCaptureRequest,
-} from "@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client";
+} from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client";
 
 /** Public authority only. Never include a bearer token or relay rendezvous credential. */
 export interface NativeIntakeBrowserBinding {

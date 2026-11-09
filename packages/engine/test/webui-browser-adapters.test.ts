@@ -1,14 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort, type JudgmentRequest, type Questions } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer, type Answerer } from '@goodvibes-jev/judgment/testing';
-import { BrowserJudgmentError, type AuthenticatedPrincipal, type BrowserJudgmentInputMap, type BrowserJudgmentRequest } from '../daemon-sdk/src/index.ts';
-import { BrowserJudgmentReferences, BrowserJudgmentRegistry, BrowserJudgmentService } from '../sdk/src/platform/judgment-browser/index.ts';
-import { createWebuiCommandRankAdapter, webuiDaemonRefusalAdapter, webuiStatusToneAdapter, type WebuiPaletteSources } from '../sdk/src/platform/judgment-browser/batteries/webui-adapters.ts';
-import { withWebuiAnswerBoundary } from '../sdk/src/platform/judgment-browser/batteries/webui-answers.ts';
-import { WEBUI_BUILTIN_COMMANDS, WEBUI_COMMAND_CATALOG_VERSION } from '../sdk/src/platform/judgment-browser/batteries/webui-command-catalog.ts';
-import { readStructuredDaemonRefusal } from '../sdk/src/platform/judgment-browser/batteries/webui-readers.ts';
-import { readWebuiStatusCatalog } from '../sdk/src/platform/judgment-browser/batteries/webui-status-catalog.ts';
-import type { ResolvedCommandRank } from '../sdk/src/platform/judgment-browser/batteries/webui-types.ts';
+import { BrowserJudgmentError, type AuthenticatedPrincipal, type BrowserJudgmentInputMap, type BrowserJudgmentRequest } from '../daemon-api/src/index.ts';
+import { BrowserJudgmentReferences, BrowserJudgmentRegistry, BrowserJudgmentService } from '../platform/src/platform/judgment-browser/index.ts';
+import { createWebuiCommandRankAdapter, webuiDaemonRefusalAdapter, webuiStatusToneAdapter, type WebuiPaletteSources } from '../platform/src/platform/judgment-browser/batteries/webui-adapters.ts';
+import { withWebuiAnswerBoundary } from '../platform/src/platform/judgment-browser/batteries/webui-answers.ts';
+import { WEBUI_BUILTIN_COMMANDS, WEBUI_COMMAND_CATALOG_VERSION } from '../platform/src/platform/judgment-browser/batteries/webui-command-catalog.ts';
+import { readStructuredDaemonRefusal } from '../platform/src/platform/judgment-browser/batteries/webui-readers.ts';
+import { readWebuiStatusCatalog } from '../platform/src/platform/judgment-browser/batteries/webui-status-catalog.ts';
+import type { ResolvedCommandRank } from '../platform/src/platform/judgment-browser/batteries/webui-types.ts';
 
 const ERRORS = 'webui.errors.daemon-refusal';
 const STATUS = 'webui.status.badge-tone';

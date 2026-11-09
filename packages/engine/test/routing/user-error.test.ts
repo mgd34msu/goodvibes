@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { EntryType, Question } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { readUserErrorClass, readUserFacingError, readUserFacingErrorLine, type ErrorClass } from '../../sdk/src/platform/routing/user-error.js';
+import { readUserErrorClass, readUserFacingError, readUserFacingErrorLine, type ErrorClass } from '../../platform/src/platform/routing/user-error.js';
 
 let previous: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previous = installJudgmentPort(undefined); });

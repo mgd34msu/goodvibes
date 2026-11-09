@@ -37,8 +37,8 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import {
   getProcessUntrustedContentLedger,
   resetProcessUntrustedContentLedgerForTests,
-} from '../sdk/src/platform/security/untrusted-content.ts';
-import { startTurnForOwnerInput } from '../sdk/src/platform/security/turn-boundary.ts';
+} from '../platform/src/platform/security/untrusted-content.ts';
+import { startTurnForOwnerInput } from '../platform/src/platform/security/turn-boundary.ts';
 
 /**
  * The turn-start funnel's boundary call, as the manager makes it.
@@ -116,7 +116,7 @@ describe('the wiring itself, so this cannot pass while the manager forgets', () 
    */
   test('the turn-start funnel opens the boundary from the queued entry', async () => {
     const source = await Bun.file(
-      new URL('../sdk/src/platform/companion/companion-chat-manager.ts', import.meta.url),
+      new URL('../platform/src/platform/companion/companion-chat-manager.ts', import.meta.url),
     ).text();
 
     const funnel = source.slice(source.indexOf('private _startNextTurn('));
@@ -130,15 +130,15 @@ describe('the wiring itself, so this cannot pass while the manager forgets', () 
 
   test('only the authenticated route attests', async () => {
     const routes = await Bun.file(
-      new URL('../sdk/src/platform/companion/companion-chat-routes.ts', import.meta.url),
+      new URL('../platform/src/platform/companion/companion-chat-routes.ts', import.meta.url),
     ).text();
     expect(routes).toContain('ownerDirect: true');
 
     // The two relays must not. If either grows an attestation, a stranger's
     // channel message gains the ability to end the owner's turn.
     for (const relative of [
-      '../sdk/src/platform/daemon/surface-actions.ts',
-      '../sdk/src/platform/daemon/homeassistant-chat.ts',
+      '../platform/src/platform/daemon/surface-actions.ts',
+      '../platform/src/platform/daemon/homeassistant-chat.ts',
     ]) {
       const relay = await Bun.file(new URL(relative, import.meta.url)).text();
       expect(relay).not.toContain('ownerDirect: true');

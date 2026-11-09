@@ -2,9 +2,9 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { KnowledgeStore, type KnowledgeSourceRecord } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import { prepareLegacyWorkLedgerMigration, projectLegacyImportWorks } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger';
-import type { NativeConversationIntakeCaptureRequest, NativeConversationIntakeResult } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
+import { KnowledgeStore, type KnowledgeSourceRecord } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { prepareLegacyWorkLedgerMigration, projectLegacyImportWorks } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
+import type { NativeConversationIntakeCaptureRequest, NativeConversationIntakeResult } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 import { pairNativeTestHost } from '../helpers/native-host-pairing.ts';
 import historicalFixture from '../fixtures/legacy-ledger/preparation.json';
 

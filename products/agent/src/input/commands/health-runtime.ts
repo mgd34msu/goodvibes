@@ -6,9 +6,9 @@ import {
   collectContinuityIssues,
   formatHealthStatusValue,
 } from '@goodvibes-jev/engine/terminal-shell/health-findings';
-import '@goodvibes-jev/engine/sdk/platform/config';
+import '@goodvibes-jev/engine/platform/platform/config';
 import { evaluateSessionMaintenance, formatSessionMaintenanceLines } from '@/runtime/index.ts';
-import { estimateConversationTokens } from '@goodvibes-jev/engine/sdk/platform/core';
+import { estimateConversationTokens } from '@goodvibes-jev/engine/platform/platform/core';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { buildSetupReviewSnapshot } from './local-setup-review.ts';
 import { describeApprovalsUnavailable } from '../../runtime/client/approvals-view.ts';

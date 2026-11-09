@@ -20,7 +20,7 @@ import { describe, expect, test } from 'bun:test';
  */
 describe('summarizePromptContent helper', () => {
   test('returns PromptSummary by default (redacted)', async () => {
-    const { summarizePromptContent } = await import('../sdk/src/platform/runtime/llm-observability.js');
+    const { summarizePromptContent } = await import('../platform/src/platform/runtime/llm-observability.js');
     const content = 'Tell me about the weather in Paris.';
     const result = summarizePromptContent(content, false);
     const summary = result as { length: number; first100chars: string };
@@ -29,14 +29,14 @@ describe('summarizePromptContent helper', () => {
   });
 
   test('returns raw string when includeRaw is true', async () => {
-    const { summarizePromptContent } = await import('../sdk/src/platform/runtime/llm-observability.js');
+    const { summarizePromptContent } = await import('../platform/src/platform/runtime/llm-observability.js');
     expect(summarizePromptContent('secret', true)).toBe('secret');
   });
 });
 
 describe('redaction-config module', () => {
   test('setTelemetryIncludeRawPrompts and getTelemetryIncludeRawPrompts round-trip', async () => {
-    const { setTelemetryIncludeRawPrompts, getTelemetryIncludeRawPrompts } = await import('../sdk/src/platform/runtime/telemetry/redaction-config.js');
+    const { setTelemetryIncludeRawPrompts, getTelemetryIncludeRawPrompts } = await import('../platform/src/platform/runtime/telemetry/redaction-config.js');
     setTelemetryIncludeRawPrompts(false);
     expect(getTelemetryIncludeRawPrompts()).toBe(false);
     setTelemetryIncludeRawPrompts(true);
@@ -47,7 +47,7 @@ describe('redaction-config module', () => {
 
 describe('existing redactor strips prompt/response at safe view', () => {
   test('redactStructuredData redacts TURN_SUBMITTED.prompt key', async () => {
-    const { redactStructuredData } = await import('../sdk/src/platform/utils/redaction.js');
+    const { redactStructuredData } = await import('../platform/src/platform/utils/redaction.js');
     const payload = {
       type: 'TURN_SUBMITTED',
       turnId: 't1',
@@ -64,7 +64,7 @@ describe('existing redactor strips prompt/response at safe view', () => {
   });
 
   test('redactStructuredData redacts STREAM_DELTA.content/accumulated/reasoning keys', async () => {
-    const { redactStructuredData } = await import('../sdk/src/platform/utils/redaction.js');
+    const { redactStructuredData } = await import('../platform/src/platform/utils/redaction.js');
     const payload = {
       type: 'STREAM_DELTA',
       turnId: 't2',
@@ -80,7 +80,7 @@ describe('existing redactor strips prompt/response at safe view', () => {
   });
 
   test('redactStructuredData redacts TURN_COMPLETED.response key', async () => {
-    const { redactStructuredData } = await import('../sdk/src/platform/utils/redaction.js');
+    const { redactStructuredData } = await import('../platform/src/platform/utils/redaction.js');
     const payload = {
       type: 'TURN_COMPLETED',
       turnId: 't3',
@@ -94,10 +94,10 @@ describe('existing redactor strips prompt/response at safe view', () => {
 
 describe('end-to-end through TelemetryApiService safe view', () => {
   test('TURN_SUBMITTED raw prompt → safe-view listEvents redacts prompt field', async () => {
-    const { RuntimeEventBus } = await import('../sdk/src/platform/runtime/events/index.js');
-    const { TelemetryApiService } = await import('../sdk/src/platform/runtime/telemetry/api.js');
-    const { createRuntimeStore } = await import('../sdk/src/platform/runtime/store/index.js');
-    const { emitTurnSubmitted } = await import('../sdk/src/platform/runtime/emitters/turn.js');
+    const { RuntimeEventBus } = await import('../platform/src/platform/runtime/events/index.js');
+    const { TelemetryApiService } = await import('../platform/src/platform/runtime/telemetry/api.js');
+    const { createRuntimeStore } = await import('../platform/src/platform/runtime/store/index.js');
+    const { emitTurnSubmitted } = await import('../platform/src/platform/runtime/emitters/turn.js');
 
     const bus = new RuntimeEventBus();
     const runtimeStore = createRuntimeStore();
@@ -120,10 +120,10 @@ describe('end-to-end through TelemetryApiService safe view', () => {
   });
 
   test('TURN_SUBMITTED raw prompt → raw-view listEvents returns unredacted', async () => {
-    const { RuntimeEventBus } = await import('../sdk/src/platform/runtime/events/index.js');
-    const { TelemetryApiService } = await import('../sdk/src/platform/runtime/telemetry/api.js');
-    const { createRuntimeStore } = await import('../sdk/src/platform/runtime/store/index.js');
-    const { emitTurnSubmitted } = await import('../sdk/src/platform/runtime/emitters/turn.js');
+    const { RuntimeEventBus } = await import('../platform/src/platform/runtime/events/index.js');
+    const { TelemetryApiService } = await import('../platform/src/platform/runtime/telemetry/api.js');
+    const { createRuntimeStore } = await import('../platform/src/platform/runtime/store/index.js');
+    const { emitTurnSubmitted } = await import('../platform/src/platform/runtime/emitters/turn.js');
 
     const bus = new RuntimeEventBus();
     const runtimeStore = createRuntimeStore();

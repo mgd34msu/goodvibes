@@ -70,7 +70,7 @@ confidential registration only if you specifically want one.
 
 The scopes requested are `calendar.readonly` and `calendar.events`, which together
 grant read access plus event creation. There is no config key that narrows this from
-the CLI. An embedder calling the SDK's calendar connector directly can pass its own
+the CLI. An embedder calling the platform's calendar connector directly can pass its own
 scope list to ask for read-only access instead, but a `goodvibes config set` install
 always gets both.
 

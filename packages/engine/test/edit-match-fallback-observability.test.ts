@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   computeAstEdit,
   computeAstPatternEdit,
-} from '../sdk/src/platform/tools/edit/match.ts';
+} from '../platform/src/platform/tools/edit/match.ts';
 
 describe('edit match fallback observability', () => {
   test('ast mode reports exact fallback when tree-sitter is unavailable for the file type', async () => {

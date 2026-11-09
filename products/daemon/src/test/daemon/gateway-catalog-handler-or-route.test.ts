@@ -49,7 +49,7 @@ import { makeOwnedTempDir as makeProjectTempDir } from '../helpers/owned-temp.js
  * ahead of the generic API dispatch, and which answer 404 to an anonymous
  * request for a path they do serve (they resolve the target before they
  * authenticate). Kept as an explicit, short allowlist so growth here is a
- * decision somebody made rather than scope creep, the same treatment the SDK's
+ * decision somebody made rather than scope creep, the same treatment the platform's
  * own route reconcile gives its sub-router list.
  *
  * Empty until a probe result proves an entry is needed; each entry must carry

@@ -3,13 +3,13 @@
  * settings dialog can render each config namespace inside the section it
  * belongs to (sections.ts). The mechanism is unchanged:
  *
- * Rows are driven by the SDK's CONFIG_SCHEMA (types / enums / defaults /
+ * Rows are driven by the platform's CONFIG_SCHEMA (types / enums / defaults /
  * descriptions / validation hints), merged with the daemon's live config.get()
  * values, so each key gets a TYPED editor: booleans toggle, enums select,
  * numbers validate, strings text, secrets stay masked/write-only
  * (config-redaction.ts). Every platform capability renders as ONE unit in its
  * DOMAIN group, its enablement control in its real shape (boolean toggle /
- * enum mode select / constant, per SDK FEATURE_SETTINGS) together with the
+ * enum mode select / constant, per platform FEATURE_SETTINGS) together with the
  * settings keys it owns (settings-model.ts). Owned keys never double-list as
  * orphan rows in their namespace.
  *
@@ -34,7 +34,7 @@ import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tan
 import { isDeclaredCardMaterialKey } from '../../../lib/card-material';
 import { readConfigKey, type ConfigKeyResult } from '../../../lib/config-key-judgment';
 import { subscribeClientLifetime } from '../../../lib/client-lifetime';
-import { sdk, type ConfigSetOutcome } from '../../../lib/goodvibes';
+import { client as platformClient, type ConfigSetOutcome } from '../../../lib/goodvibes';
 import { formatError, serializeError } from '../../../lib/errors';
 import { asRecord } from '../../../lib/object';
 import { useToast } from '../../../lib/toast';
@@ -92,7 +92,7 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
 
   const config = useQuery({
     queryKey: ['config'],
-    queryFn: () => sdk.operator.config.get(),
+    queryFn: () => platformClient.operator.config.get(),
     enabled,
     retry: false,
   });
@@ -174,7 +174,7 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
   const commit = useCallback(
     async (key: string, value: unknown): Promise<void> => {
       try {
-        const outcome = await sdk.operator.config.set(key, value);
+        const outcome = await platformClient.operator.config.set(key, value);
         setPersistedByKey((prev) => ({ ...prev, [key]: outcome }));
         await queryClient.invalidateQueries({ queryKey: ['config'] });
         toast({
@@ -272,7 +272,7 @@ export function ConfigGroupList({
             and windows that govern how it gets used. It is not a schema-driven
             row and cannot be: card material is deliberately absent from
             CONFIG_SCHEMA (it lives in the daemon secret store). The panel gates
-            itself on the SDK's entry-surface allowlist.
+            itself on the platform's entry-surface allowlist.
           */}
           {group.id === 'payments' && <PaymentCardEntry currency={currency} />}
           {group.id === 'payments' && <PaymentWindows />}
@@ -370,7 +370,7 @@ export function RawConfigEditor() {
           parsed = rawValue;
         }
       }
-      return sdk.operator.config.set(key, parsed);
+      return platformClient.operator.config.set(key, parsed);
     },
     onSuccess: async () => {
       const key = rawKey.trim();

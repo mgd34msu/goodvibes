@@ -13,15 +13,15 @@
  * What this file does NOT cover, deliberately: the guard decision itself.
  * `evaluateOutwardEffect` and the ledger live in the surface that owns the
  * trust boundary, and that surface keeps the test composing them with a read.
- * Asserted here is everything on the SDK's side of the port, that the ingest
+ * Asserted here is everything on the platform's side of the port, that the ingest
  * is recorded, for every message, with the claimed origin, before checkInbox
  * returns, and that the describer is handed the top-most verdict and no other.
  */
 
 import { afterEach, describe, expect, test } from 'bun:test';
 import { createServer, connect, type Server, type Socket } from 'node:net';
-import { EmailService } from '../sdk/src/platform/email/email-service.ts';
-import type { SenderAuthenticationChecks } from '../sdk/src/platform/google/sender-authentication.ts';
+import { EmailService } from '../platform/src/platform/email/email-service.ts';
+import type { SenderAuthenticationChecks } from '../platform/src/platform/google/sender-authentication.ts';
 import {
   testDescribeSenderClaim,
   throwingEmailTransport,

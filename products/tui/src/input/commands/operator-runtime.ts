@@ -6,11 +6,11 @@ import { createInteractionModeCommand } from '@goodvibes-jev/engine/terminal-she
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { ToolContractVerifier } from '@/runtime/index.ts';
 import type { ReplaySnapshotInput } from '@/runtime/index.ts';
-import '@goodvibes-jev/engine/sdk/platform/utils';
+import '@goodvibes-jev/engine/platform/platform/utils';
 import { registerLegacyPanelCommand } from './legacy-panel-command.ts';
 import { requireOpsApi, requireProfileManager, requireReplayEngine } from './runtime-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { estimateConversationTokens } from '@goodvibes-jev/engine/sdk/platform/core';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { estimateConversationTokens } from '@goodvibes-jev/engine/platform/platform/core';
 import { handleContextWindowSubcommand } from './context-window.ts';
 
 export function registerOperatorRuntimeCommands(registry: CommandRegistry): void {

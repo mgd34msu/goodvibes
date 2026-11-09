@@ -1,11 +1,11 @@
 import { types as nodeTypes } from 'node:util';
 import { judgmentPort, captureJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { gateJudgmentRegistry, prepareJudgmentResult, snapshotJudgmentEvidence, snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { SOURCE_SCREENING_LIMITS, type ProtectedSourceOwner, type ProtectedSource, type SourceScreeningReceipt, type SourceScreeningHold } from '@goodvibes-jev/engine/sdk/platform/security';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { gateJudgmentRegistry, prepareJudgmentResult, snapshotJudgmentEvidence, snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
+import { SOURCE_SCREENING_LIMITS, type ProtectedSourceOwner, type ProtectedSource, type SourceScreeningReceipt, type SourceScreeningHold } from '@goodvibes-jev/engine/platform/platform/security';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Ranked, Rerank } from '@goodvibes-jev/judgment';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
-import { decisionOrClassic, isClassicOperation, rankClassicCatalog } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { decisionOrClassic, isClassicOperation, rankClassicCatalog } from '@goodvibes-jev/engine/platform/platform/runtime';
 
 const ownDescriptor = Object.getOwnPropertyDescriptor;
 const ownDescriptors = Object.getOwnPropertyDescriptors;

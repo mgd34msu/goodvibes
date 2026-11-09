@@ -8,12 +8,12 @@ import { describe, expect, test } from 'bun:test';
 import {
   inspectInboundTls,
   resolveInboundTlsContext,
-} from '../sdk/src/platform/runtime/network/inbound.js';
+} from '../platform/src/platform/runtime/network/inbound.js';
 import {
   inspectOutboundTls,
   applyOutboundTlsToFetchInit,
   GlobalNetworkTransportInstaller,
-} from '../sdk/src/platform/runtime/network/outbound.js';
+} from '../platform/src/platform/runtime/network/outbound.js';
 
 /** Minimal config reader that returns undefined for all keys. */
 function makeConfig() {

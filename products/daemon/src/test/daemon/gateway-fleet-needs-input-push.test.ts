@@ -1,8 +1,8 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { createDecipheriv, createECDH, createHmac, randomBytes } from 'node:crypto';
-import { CURRENT_CONTRACT_SCHEMA_VERSION, serializeContract, type Contract } from '@goodvibes-jev/engine/sdk/platform/contract';
-import { emptyWorkItemUsage } from '@goodvibes-jev/engine/sdk/platform/orchestration';
-import type { ProcessNode } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
+import { CURRENT_CONTRACT_SCHEMA_VERSION, serializeContract, type Contract } from '@goodvibes-jev/engine/platform/platform/contract';
+import { emptyWorkItemUsage } from '@goodvibes-jev/engine/platform/platform/orchestration';
+import type { ProcessNode } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import { useGatewayFixture } from '../helpers/gateway-fixture.js';
 import { wireFleetNeedsInputPush } from '../../runtime/fleet-needs-input-push.ts';
 import { RuntimeEventBus } from '../../runtime/index.js';
@@ -14,7 +14,7 @@ const fixture = useGatewayFixture();
 
 // ---------------------------------------------------------------------------
 // A local fake push sink standing in for a browser vendor's push service,
-// never the real network. Mirrors the SDK's own web-push-daemon-wire.test.ts.
+// never the real network. Mirrors the platform's own web-push-daemon-wire.test.ts.
 // ---------------------------------------------------------------------------
 interface CapturedPush {
   readonly path: string;
@@ -230,7 +230,7 @@ describe('wireFleetNeedsInputPush', () => {
     expect(received[0]).toMatchObject({ type: 'FLEET_NODE_BLOCKED_ON_USER', nodeId: 'n1', sessionId: 's1' });
   });
 
-  test('sessionPresence.isAttached mirrors the SDK daemon composition: true for a freshly-seen participant, false otherwise', () => {
+  test('sessionPresence.isAttached mirrors the platform daemon composition: true for a freshly-seen participant, false otherwise', () => {
     const now = Date.now();
     const attachedSession = { participants: [{ surfaceKind: 'tui', surfaceId: 's', lastSeenAt: now }] };
     const staleSession = { participants: [{ surfaceKind: 'tui', surfaceId: 's', lastSeenAt: now - 10 * 60 * 1000 }] };

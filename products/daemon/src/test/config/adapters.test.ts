@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { SecretsManager as EngineSecretsManager, daemonConfigPath, type ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { SecretsManager as EngineSecretsManager, daemonConfigPath, type ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { readCheckpointGuardSettings, readCheckpointRegistrationSetting } from '../../config/checkpoint-settings.ts';
 import { runDaemonConfigMigration } from '../../config/run-daemon-config-migration.ts';
 import { SecretsManager } from '../../config/secrets.ts';

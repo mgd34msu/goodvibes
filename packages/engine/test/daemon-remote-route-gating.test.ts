@@ -5,11 +5,11 @@
  * `payload.args` contract documented on buildRemoteShellCommand (types.ts):
  *
  *  1. GATING IS IN FORCE. `remote.peers.invoke` is not a catalog method; it is
- *     published by the SDK as `POST /api/remote/peers/:peerId/invoke` and routed
- *     through `createDaemonRemoteRouteHandlers(...).invokeRemotePeer`. That SDK
+ *     published by the platform as `POST /api/remote/peers/:peerId/invoke` and routed
+ *     through `createDaemonRemoteRouteHandlers(...).invokeRemotePeer`. That platform
  *     handler calls `context.requireAdmin(req)` and returns its Response BEFORE
  *     ever reaching `context.distributedRuntime.invokePeer(...)`. We import the
- *     real SDK route factory and prove a denied admin check short-circuits: our
+ *     real platform route factory and prove a denied admin check short-circuits: our
  *     injected `invokePeer` is never called. This is the admin gate that makes
  *     the un-escaped arg passthrough below safe to rely on.
  *
@@ -21,15 +21,15 @@
  *     documented asymmetry vs. the tokenized local-process backend.
  */
 import { describe, expect, it, spyOn, afterEach } from 'bun:test';
-import { createDaemonRemoteRouteHandlers } from '../daemon-sdk/src/remote-routes.ts';
+import { createDaemonRemoteRouteHandlers } from '../daemon-api/src/remote-routes.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { createDockerBackend } from '../sdk/src/platform/runtime/remote/host/backends/docker.ts';
-import { createSshBackend as createSshBackendImpl } from '../sdk/src/platform/runtime/remote/host/backends/ssh.ts';
-import { createCloudTerminalBackend as createCloudTerminalBackendImpl } from '../sdk/src/platform/runtime/remote/host/backends/cloud-terminal.ts';
-import { BackendDispatchError, type BackendContext } from '../sdk/src/platform/runtime/remote/host/backends/types.ts';
-import type { RemoteHostCredentialStore as DaemonCredentialStore } from '../sdk/src/platform/runtime/remote/host/context.ts';
-import type { RemoteHostLogger as HandlerLogger } from '../sdk/src/platform/runtime/remote/host/context.ts';
-import type { PeerRecord } from '../sdk/src/platform/runtime/remote/host/peer-registry.ts';
+import { createDockerBackend } from '../platform/src/platform/runtime/remote/host/backends/docker.ts';
+import { createSshBackend as createSshBackendImpl } from '../platform/src/platform/runtime/remote/host/backends/ssh.ts';
+import { createCloudTerminalBackend as createCloudTerminalBackendImpl } from '../platform/src/platform/runtime/remote/host/backends/cloud-terminal.ts';
+import { BackendDispatchError, type BackendContext } from '../platform/src/platform/runtime/remote/host/backends/types.ts';
+import type { RemoteHostCredentialStore as DaemonCredentialStore } from '../platform/src/platform/runtime/remote/host/context.ts';
+import type { RemoteHostLogger as HandlerLogger } from '../platform/src/platform/runtime/remote/host/context.ts';
+import type { PeerRecord } from '../platform/src/platform/runtime/remote/host/peer-registry.ts';
 
 const ownedBackends: Array<ReturnType<typeof createSshBackendImpl>> = [];
 function createSshBackend(ctx: BackendContext) {
@@ -91,10 +91,10 @@ afterEach(async () => {
 });
 
 // ---------------------------------------------------------------------------
-// 1. Admin gating is enforced by the SDK route before invokePeer runs.
+// 1. Admin gating is enforced by the platform route before invokePeer runs.
 // ---------------------------------------------------------------------------
 
-describe('remote.peers.invoke admin gating (SDK route)', () => {
+describe('remote.peers.invoke admin gating (platform route)', () => {
   it('short-circuits on a denied requireAdmin and never reaches invokePeer', async () => {
     let invokeCalls = 0;
     const denial = new Response('forbidden', { status: 403 });
@@ -145,7 +145,7 @@ describe('remote.peers.invoke admin gating (SDK route)', () => {
       body: JSON.stringify({ command: 'uptime' }),
     });
     const response = await handlers.invokeRemotePeer('peer-1', req);
-    // 202 Accepted is the SDK's success status for an admitted invoke.
+    // 202 Accepted is the platform's success status for an admitted invoke.
     expect(response.status).toBe(202);
     expect(seenCommand).toBe('uptime');
   });

@@ -1,8 +1,8 @@
 import { createNativeHostFetch } from './native-host-fetch.js';
 import { realpathSync } from 'node:fs';
-import { createOperatorSdk } from '@goodvibes-jev/engine/operator-sdk';
-import { getOperatorWorkLedgerProject, nativeWorkExecutionSnapshotSchema } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
-import { nativeConversationIntakeResultSchema } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
+import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
+import { getOperatorWorkLedgerProject, nativeWorkExecutionSnapshotSchema } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
+import { nativeConversationIntakeResultSchema } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 import { NativeConversationIntakeControls, type NativeConversationIntakeSelection, type NativeConversationIntakeState, type NativeConversationIntakePolicy } from './native-conversation-intake.js';
 import { NativeConversationIntakeJournal, type NativeIntakeJournalRecord } from './native-conversation-intake-journal.js';
 import { createNativeConversationIntakeBinding } from './native-conversation-intake-host.js';
@@ -140,7 +140,7 @@ export async function executeNativeHeadless(options: NativeHeadlessOptions, poli
             const before = nativeSubmissionIdentity(host, '');
             const currentHost = () => { const current = options.resolveHost(); return !('reason' in current) && nativeSubmissionIdentity(current, '') === before; };
             const discovery = new AbortController();
-            const operator = createOperatorSdk({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: createNativeHostFetch({ current: () => !options.signal.aborted && !discovery.signal.aborted && currentHost() }) });
+            const operator = createOperatorApiClient({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: createNativeHostFetch({ current: () => !options.signal.aborted && !discovery.signal.aborted && currentHost() }) });
             const guard = () => { try {
                 if (!currentHost())
                     discovery.abort();

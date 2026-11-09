@@ -2,7 +2,7 @@
  * auth-auto-refresh-transport-integration.test.ts
  *
  * Integration tests for the auto-refresh transport middleware wired into
- * createGoodVibesSdk. Verifies that ALL typed operator/peer calls benefit
+ * createGoodVibesPlatform. Verifies that ALL typed operator/peer calls benefit
  * from automatic token refresh, not only auth.current().
  *
  * Assertion discipline: exact literal assertions, no regex unions, no auto-pass,
@@ -11,12 +11,12 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import {
-  createGoodVibesSdk,
-} from '../sdk/src/client.js';
+  createGoodVibesPlatform,
+} from '../platform/src/client.js';
 import {
   createMemoryTokenStore,
-} from '../sdk/src/auth.js';
-import { GoodVibesSdkError } from '../errors/src/index.js';
+} from '../platform/src/auth.js';
+import { GoodVibesError } from '../errors/src/index.js';
 import { installFrozenNow } from './_helpers/test-timeout.js';
 
 // ---------------------------------------------------------------------------
@@ -92,7 +92,7 @@ describe('transport integration: reactive 401 retry via middleware', () => {
     const store = createMemoryTokenStore('stale-token');
     const { fetch: mockFetch, callCount } = makeStatefulFetch(makeSnapshotResponse());
 
-    const sdk = createGoodVibesSdk({
+    const platformClient = createGoodVibesPlatform({
       baseUrl: 'https://daemon.example.com',
       tokenStore: store,
       fetch: mockFetch,
@@ -105,7 +105,7 @@ describe('transport integration: reactive 401 retry via middleware', () => {
       },
     });
 
-    const result = await sdk.operator.accounts.snapshot();
+    const result = await platformClient.operator.accounts.snapshot();
 
     // Two HTTP calls: initial (401) + retry (200).
     expect(callCount()).toBe(2);
@@ -119,18 +119,18 @@ describe('transport integration: reactive 401 retry via middleware', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Test 2: Refresh fails → caller sees SDKError{kind:'auth'} (no infinite loop)
+// Test 2: Refresh fails → caller sees GoodVibesError{kind:'auth'} (no infinite loop)
 // ---------------------------------------------------------------------------
 
 describe('transport integration: failed refresh produces terminal auth error', () => {
-  it('throws GoodVibesSdkError with kind=auth when refresh fails', async () => {
+  it('throws GoodVibesError with kind=auth when refresh fails', async () => {
     // Mock fetch always returns 401.
     const alwaysUnauthorized = withPreconnect(async () =>
       jsonResponse({ error: 'Unauthorized' }, 401));
 
     const store = createMemoryTokenStore('bad-token');
 
-    const sdk = createGoodVibesSdk({
+    const platformClient = createGoodVibesPlatform({
       baseUrl: 'https://daemon.example.com',
       tokenStore: store,
       fetch: alwaysUnauthorized,
@@ -143,16 +143,16 @@ describe('transport integration: failed refresh produces terminal auth error', (
       },
     });
 
-    const caught = await sdk.operator.accounts.snapshot().catch((err: unknown) => err);
+    const caught = await platformClient.operator.accounts.snapshot().catch((err: unknown) => err);
 
-    expect(caught).toBeInstanceOf(GoodVibesSdkError);
-    const sdkErr = caught as GoodVibesSdkError;
-    expect(sdkErr.kind).toBe('auth');
-    expect(sdkErr.category).toBe('authentication');
-    expect(sdkErr.status).toBe(401);
-    expect(sdkErr.recoverable).toBe(false);
+    expect(caught).toBeInstanceOf(GoodVibesError);
+    const engineErr = caught as GoodVibesError;
+    expect(engineErr.kind).toBe('auth');
+    expect(engineErr.category).toBe('authentication');
+    expect(engineErr.status).toBe(401);
+    expect(engineErr.recoverable).toBe(false);
     // Three-part message: contains "Authentication failed"
-    expect(sdkErr.message).toContain('Authentication failed');
+    expect(engineErr.message).toContain('Authentication failed');
   });
 });
 
@@ -168,7 +168,7 @@ describe('transport integration: pre-flight refresh fires within leeway', () => 
     // Token expires in 10s, well inside 60s leeway.
     const store = createMemoryTokenStore('expiring-token', Date.now() + 10_000);
 
-    const sdk = createGoodVibesSdk({
+    const platformClient = createGoodVibesPlatform({
       baseUrl: 'https://daemon.example.com',
       tokenStore: store,
       fetch: withPreconnect(async (_input, init) => {
@@ -188,7 +188,7 @@ describe('transport integration: pre-flight refresh fires within leeway', () => 
       },
     });
 
-    await sdk.operator.accounts.snapshot();
+    await platformClient.operator.accounts.snapshot();
 
     // Pre-flight refresh ran before the request.
     expect(refreshCount).toBe(1);
@@ -222,7 +222,7 @@ describe('transport integration: concurrent 401s collapse to one refresh', () =>
       return jsonResponse(makeSnapshotResponse());
     });
 
-    const sdk = createGoodVibesSdk({
+    const platformClient = createGoodVibesPlatform({
       baseUrl: 'https://daemon.example.com',
       tokenStore: store,
       fetch: mockFetch,
@@ -237,8 +237,8 @@ describe('transport integration: concurrent 401s collapse to one refresh', () =>
     });
 
     // Fire two concurrent calls.
-    const p1 = sdk.operator.accounts.snapshot();
-    const p2 = sdk.operator.accounts.snapshot();
+    const p1 = platformClient.operator.accounts.snapshot();
+    const p2 = platformClient.operator.accounts.snapshot();
 
     // Unblock the refresh.
     refreshResolve!();
@@ -254,16 +254,16 @@ describe('transport integration: concurrent 401s collapse to one refresh', () =>
 });
 
 // ---------------------------------------------------------------------------
-// Test 5: Consumer middleware registered via sdk.use() sees fresh token
+// Test 5: Consumer middleware registered via platform.use() sees fresh token
 // ---------------------------------------------------------------------------
 
 describe('transport integration: consumer middleware sees fresh token after pre-flight', () => {
-  it('sdk.use(mw) middleware sees refreshed Bearer token in ctx.headers.Authorization', async () => {
+  it('platform.use(mw) middleware sees refreshed Bearer token in ctx.headers.Authorization', async () => {
     const seenAuthorizations: string[] = [];
     // Token expires in 5s, well within 60s leeway → pre-flight refresh will fire.
     const store = createMemoryTokenStore('expiring-token', Date.now() + 5_000);
 
-    const sdk = createGoodVibesSdk({
+    const platformClient = createGoodVibesPlatform({
       baseUrl: 'https://daemon.example.com',
       tokenStore: store,
       fetch: withPreconnect(async () => jsonResponse(makeSnapshotResponse())),
@@ -277,13 +277,13 @@ describe('transport integration: consumer middleware sees fresh token after pre-
       },
     });
 
-    // Register a consumer middleware AFTER construction via sdk.use().
-    sdk.use(async (ctx, next) => {
+    // Register a consumer middleware AFTER construction via platform.use().
+    platformClient.use(async (ctx, next) => {
       seenAuthorizations.push(ctx.headers['Authorization'] ?? ctx.headers['authorization'] ?? '(none)');
       await next();
     });
 
-    await sdk.operator.accounts.snapshot();
+    await platformClient.operator.accounts.snapshot();
 
     // The consumer middleware should see the FRESH token (auto-refresh ran first).
     expect(seenAuthorizations).toHaveLength(1);

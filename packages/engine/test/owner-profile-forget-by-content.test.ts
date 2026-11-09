@@ -26,11 +26,11 @@ import { afterEach, describe, expect, test, beforeEach } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { registerOwnerProfileGatewayMethods } from '../sdk/src/platform/control-plane/routes/owner-profile.ts';
-import { OwnerProfileStore } from '../sdk/src/platform/owner-profile/index.ts';
-import type { ProfileWriteResult } from '../sdk/src/platform/owner-profile/index.ts';
-import { resetProcessUntrustedContentLedgerForTests } from '../sdk/src/platform/security/untrusted-content.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { registerOwnerProfileGatewayMethods } from '../platform/src/platform/control-plane/routes/owner-profile.ts';
+import { OwnerProfileStore } from '../platform/src/platform/owner-profile/index.ts';
+import type { ProfileWriteResult } from '../platform/src/platform/owner-profile/index.ts';
+import { resetProcessUntrustedContentLedgerForTests } from '../platform/src/platform/security/untrusted-content.ts';
 
 // Profile writes ask the content-derivation reading whenever the process
 // ledger holds untrusted text; another test file's reads must not reach these.

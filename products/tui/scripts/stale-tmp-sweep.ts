@@ -89,7 +89,7 @@ export function sweepStaleTestTmp(root: string, options: SweepOptions = {}): str
 //
 // Matched ONLY by the exact literal prefixes this project is known to pass
 // to mkdtemp, never a blanket "gv-" or "goodvibes-" wildcard. A wildcard
-// would also catch sibling repos in the same family (goodvibes-sdk,
+// would also catch sibling repos in the same family (goodvibes,
 // goodvibes-agent, …) running their own test suites in their own worktrees
 // on the same shared host; those are unrelated processes with unrelated
 // scratch and must never be touched. Confirmed live: a broad `^(gv-|

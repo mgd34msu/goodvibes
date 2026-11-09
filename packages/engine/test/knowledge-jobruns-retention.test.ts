@@ -14,15 +14,15 @@ const answerReadings = useKnowledgeAnswerReadings();
 import { describe, expect, test } from 'bun:test';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { reviewKnowledgeNodeRecord } from '../sdk/src/platform/knowledge/service-node-admin.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { reviewKnowledgeNodeRecord } from '../platform/src/platform/knowledge/service-node-admin.js';
 import { seedKnowledgeResearchTask } from './_helpers/knowledge-semantic-activation-fixtures.js';
-import { KnowledgeSemanticService } from '../sdk/src/platform/knowledge/semantic/service.js';
+import { KnowledgeSemanticService } from '../platform/src/platform/knowledge/semantic/service.js';
 import {
   enrichAndImproveHomeGraphSource,
   enrichHomeGraphSpaceSources,
   runHomeGraphSyncSelfImprovementPump,
-} from '../sdk/src/platform/knowledge/home-graph/sync-self-improvement.js';
+} from '../platform/src/platform/knowledge/home-graph/sync-self-improvement.js';
 import { createStores } from './_helpers/knowledge-semantic-fixtures.js';
 
 describe('job-run history retention (bounded memory + disk)', () => {
@@ -64,7 +64,7 @@ describe('job-run history retention (bounded memory + disk)', () => {
 });
 
 describe('no self-improve scheduler bypasses (gate)', () => {
-  test('every .selfImprove( caller in the SDK source is on the governed allowlist', () => {
+  test('every .selfImprove( caller in the platform source is on the governed allowlist', () => {
     const root = 'sdk/src';
     // Files allowed to call selfImprove directly:
     //  - semantic/service.ts: the scheduler itself + the answer path (deferRepair task-queue pass)

@@ -10,7 +10,7 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import { AlertCircle, Gift } from 'lucide-react';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { formatError } from '../../lib/errors';
 import { formatRelative } from '../../lib/object';
@@ -24,7 +24,7 @@ export interface DatesGiftHistoryProps {
 export function DatesGiftHistoryBody({ occasionId }: DatesGiftHistoryProps) {
   const gifts = useQuery({
     queryKey: queryKeys.occasionsGifts(occasionId),
-    queryFn: () => sdk.operator.occasions.gifts(occasionId),
+    queryFn: () => platformClient.operator.occasions.gifts(occasionId),
   });
 
   if (gifts.isPending) return <SkeletonRows count={2} label="Loading gift history" />;

@@ -4,12 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DecisionModelsDisabledError, decisionModelPolicyState, installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { PostalAddressHeldError, readConfigSettingForDisplay } from '../sdk/src/platform/config/postal-address.ts';
-import { OwnerProfileStore } from '../sdk/src/platform/owner-profile/store.ts';
-import { createProfilePostalReader } from '../sdk/src/platform/owner-profile/postal-reading.ts';
-import type { PostalProviders } from '../sdk/src/platform/owner-profile/postal-proposer.ts';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { PostalAddressHeldError, readConfigSettingForDisplay } from '../platform/src/platform/config/postal-address.ts';
+import { OwnerProfileStore } from '../platform/src/platform/owner-profile/store.ts';
+import { createProfilePostalReader } from '../platform/src/platform/owner-profile/postal-reading.ts';
+import type { PostalProviders } from '../platform/src/platform/owner-profile/postal-proposer.ts';
 
 const roots: string[] = [];
 let previous: JudgmentPort | undefined;

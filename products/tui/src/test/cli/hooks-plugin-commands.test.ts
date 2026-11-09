@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { parseGoodVibesCli } from '@goodvibes-jev/engine/terminal-shell';
 import { handleHooksCommand } from '../../cli/hooks-command.ts';
 import { handlePluginCommand } from '../../cli/plugin-command.ts';

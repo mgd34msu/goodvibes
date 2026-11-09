@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
-import { scoreInboxTriage } from '../sdk/src/platform/intake/triage/scorer.js';
-import { captureTriageInputs, checkTriageReceipt } from '../sdk/src/platform/intake/triage/evidence.js';
-import { inboxTriage, TRIAGE_MODEL } from '../sdk/src/platform/intake/triage/battery.js';
-import { enrichItemsWithTriage, readTriageMetadataBatch, runInboxTriage } from '../sdk/src/platform/intake/triage/pipeline.js';
-import type { TriageInput, TriageReceipt, TriageStore, TriageStoredRecord } from '../sdk/src/platform/intake/triage/types.js';
+import { scoreInboxTriage } from '../platform/src/platform/intake/triage/scorer.js';
+import { captureTriageInputs, checkTriageReceipt } from '../platform/src/platform/intake/triage/evidence.js';
+import { inboxTriage, TRIAGE_MODEL } from '../platform/src/platform/intake/triage/battery.js';
+import { enrichItemsWithTriage, readTriageMetadataBatch, runInboxTriage } from '../platform/src/platform/intake/triage/pipeline.js';
+import type { TriageInput, TriageReceipt, TriageStore, TriageStoredRecord } from '../platform/src/platform/intake/triage/types.js';
 const item = (id = 'fixture-a', subject = 'Synthetic message'): TriageInput => ({ id, surface: 'synthetic', subject, snippet: 'A synthetic offline fixture.', unread: true });
 const answer = (spam = .01, urgency = .01) => fakePort(name => noulAnswer(name.endsWith('spam') ? spam : urgency));
 const memory = (): TriageStore & { rows: Map<string, TriageStoredRecord>; calls: string[] } => {
@@ -168,10 +168,10 @@ describe('typed inbox triage', () => {
 
 
 test('late triage imports keep earlier native decision policies current while triage bands stay immutable', async () => {
-  const benchmarkUrl = new URL('../sdk/src/platform/routing/batteries/local-benchmark-prompt.ts', import.meta.url).href;
-  const booleanUrl = new URL('../sdk/src/platform/tools/batteries/boolean-value.ts', import.meta.url).href;
-  const triageUrl = new URL('../sdk/src/platform/intake/triage/battery.ts', import.meta.url).href;
-  const meaningUrl = new URL('../sdk/src/platform/intake/triage/tagger/meaning.ts', import.meta.url).href;
+  const benchmarkUrl = new URL('../platform/src/platform/routing/batteries/local-benchmark-prompt.ts', import.meta.url).href;
+  const booleanUrl = new URL('../platform/src/platform/tools/batteries/boolean-value.ts', import.meta.url).href;
+  const triageUrl = new URL('../platform/src/platform/intake/triage/battery.ts', import.meta.url).href;
+  const meaningUrl = new URL('../platform/src/platform/intake/triage/tagger/meaning.ts', import.meta.url).href;
   const script = `
     import assert from 'node:assert/strict';
     const { STAKES_BANDS } = await import('@goodvibes-jev/judgment');

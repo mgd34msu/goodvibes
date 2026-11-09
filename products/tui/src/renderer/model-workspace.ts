@@ -29,7 +29,7 @@ import {
  * embedding-provider steps use the same frame.
  */
 
-import type { ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { ModelPickerModal, ModelPickerTargetInfo } from '../input/model-picker.ts';
 import { abbreviateCount } from '../utils/format-number.ts';
 import { activeTokens } from './theme.ts';

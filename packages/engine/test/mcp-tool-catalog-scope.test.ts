@@ -1,11 +1,11 @@
 import { expect, test } from 'bun:test';
-import { McpClient, captureMcpClientToolCatalog } from '../sdk/src/platform/mcp/client.js';
-import { McpHttpConnection } from '../sdk/src/platform/mcp/http-connection.js';
-import { McpRegistry } from '../sdk/src/platform/mcp/registry.js';
-import { createMcpApi } from '../sdk/src/platform/mcp/mcp-api.js';
-import type { McpServerConfig } from '../sdk/src/platform/mcp/config.js';
-import { MCP_STATELESS_REVISION } from '../sdk/src/platform/mcp/protocol.js';
-import { SandboxSessionRegistry } from '../sdk/src/platform/runtime/sandbox/session-registry.js';
+import { McpClient, captureMcpClientToolCatalog } from '../platform/src/platform/mcp/client.js';
+import { McpHttpConnection } from '../platform/src/platform/mcp/http-connection.js';
+import { McpRegistry } from '../platform/src/platform/mcp/registry.js';
+import { createMcpApi } from '../platform/src/platform/mcp/mcp-api.js';
+import type { McpServerConfig } from '../platform/src/platform/mcp/config.js';
+import { MCP_STATELESS_REVISION } from '../platform/src/platform/mcp/protocol.js';
+import { SandboxSessionRegistry } from '../platform/src/platform/runtime/sandbox/session-registry.js';
 import { useGateReadings } from './_helpers/gate-readings.ts';
 
 useGateReadings();

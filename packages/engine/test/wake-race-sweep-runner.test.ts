@@ -72,7 +72,7 @@ function expectCleaned(root: string, name: string): void {
   const paths = JSON.parse(readFileSync(join(root, name), 'utf8')) as {
     temp: string; home: string; leaked: string; pid: number;
   };
-  expect(paths.temp).toContain('goodvibes-sdk-testrun-');
+  expect(paths.temp).toContain('goodvibes-platform-testrun-');
   expect(paths.home).not.toBe(process.env.HOME);
   expect(existsSync(paths.temp)).toBe(false);
   expect(existsSync(paths.home)).toBe(false);
@@ -86,7 +86,7 @@ test('sweep preserves explicit perturbation, isolates children, and cleans a gre
     expect(process.env.GOODVIBES_WAKE_RACE_PROBE_MS).toBe('17');
     expect(process.env.OPENAI_API_KEY).toBeUndefined();
     expect(process.env.SWEEP_DOTENV_MARKER).toBeUndefined();
-    expect(process.env.GOODVIBES_SDK_TEST_RUNNER).toBe('1');
+    expect(process.env.GOODVIBES_ENGINE_TEST_RUNNER).toBe('1');
     ${recordPaths(root, 'pass-paths')}
   `);
   const result = await run(root);

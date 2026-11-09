@@ -3,7 +3,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { PersistentStore } from '../sdk/src/platform/state/persistent-store.js';
+import { PersistentStore } from '../platform/src/platform/state/persistent-store.js';
 const cleanup: (() => void)[] = [];
 afterEach(() => { for (const close of cleanup.splice(0).reverse()) close(); });
 test.each([0, 0o777])('persisted files ignore umask %i on their original exclusive descriptor', async mask => {

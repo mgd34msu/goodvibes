@@ -7,7 +7,7 @@ import { WEBUI_BINDING_QUERY, WEBUI_BINDING_RESULT } from '../../cli/machine-con
 import { parseDaemonCli } from '../../cli/parser.ts';
 import { runDaemonCli } from '../../cli/run.ts';
 import { makeOwnedTempDir } from '../helpers/owned-temp.ts';
-import { NATIVE_READER_REQUIREMENT_FILE, nativeReaderCapabilities } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { NATIVE_READER_REQUIREMENT_FILE, nativeReaderCapabilities } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { VERSION } from '../../version.js';
 
 async function invoke(args: string[], env: NodeJS.ProcessEnv = {}, cwd?: string) {

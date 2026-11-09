@@ -15,13 +15,13 @@ import { settleEvents, withTestTimeout } from './_helpers/test-timeout.js';
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CompanionChatManager } from '../sdk/src/platform/companion/companion-chat-manager.js';
-import { CompanionChatPersistence } from '../sdk/src/platform/companion/companion-chat-persistence.js';
-import type { PersistedChatSession } from '../sdk/src/platform/companion/companion-chat-persistence.js';
+import { CompanionChatManager } from '../platform/src/platform/companion/companion-chat-manager.js';
+import { CompanionChatPersistence } from '../platform/src/platform/companion/companion-chat-persistence.js';
+import type { PersistedChatSession } from '../platform/src/platform/companion/companion-chat-persistence.js';
 import type {
   CompanionLLMProvider,
   CompanionProviderChunk,
-} from '../sdk/src/platform/companion/companion-chat-manager.js';
+} from '../platform/src/platform/companion/companion-chat-manager.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

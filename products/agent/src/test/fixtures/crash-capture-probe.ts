@@ -11,7 +11,7 @@
  * argv[2] is the directory to treat as HOME.
  */
 import { join } from 'node:path';
-import { configureActivityLogger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { configureActivityLogger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { createProcessFaultHandlers } from '../../runtime/process-fault-capture.ts';
 
 const home = process.argv[2];

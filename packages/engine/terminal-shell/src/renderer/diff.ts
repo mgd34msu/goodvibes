@@ -1,6 +1,6 @@
 import { TerminalBuffer } from './buffer.js';
 import { safeTerminalLink } from '../ansi-sanitize.js';
-import { type Cell } from '@goodvibes-jev/engine/sdk/platform/types';
+import { type Cell } from '@goodvibes-jev/engine/platform/platform/types';
 import {
   type TermColorCaps,
   downsampleColor,

@@ -1,8 +1,8 @@
 /** Source-only synthetic HTTP protocol tests: no socket, model or real credential. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
-import { createDaemonSystemRouteHandlers } from '../daemon-sdk/src/system-routes.js';
-import { createSettingsPreconditionHandler } from '../daemon-sdk/src/settings-precondition.js';
-import { captureRemoteSettingsPrecondition, applyRemoteSettingsPrecondition, inspectRemoteSettingsPrecondition, resolvePreparedConfigWriteRoute } from '../sdk/src/platform/config/settings-precondition-client.js';
+import { createDaemonSystemRouteHandlers } from '../daemon-api/src/system-routes.js';
+import { createSettingsPreconditionHandler } from '../daemon-api/src/settings-precondition.js';
+import { captureRemoteSettingsPrecondition, applyRemoteSettingsPrecondition, inspectRemoteSettingsPrecondition, resolvePreparedConfigWriteRoute } from '../platform/src/platform/config/settings-precondition-client.js';
 
 const restores: (() => void)[] = [];
 afterEach(() => { for (const restore of restores.splice(0)) restore(); });

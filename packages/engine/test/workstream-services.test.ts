@@ -12,20 +12,20 @@
 import { describe, test, expect, afterEach, beforeEach } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AdaptivePlanner } from '../sdk/src/platform/core/index.ts';
-import type { PhaseRunnerAgentManagerLike } from '../sdk/src/platform/orchestration/index.ts';
-import type { AgentRecord } from '../sdk/src/platform/tools/index.ts';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
-import type { ConfigManager } from '../sdk/src/platform/config/index.ts';
+import { AdaptivePlanner } from '../platform/src/platform/core/index.ts';
+import type { PhaseRunnerAgentManagerLike } from '../platform/src/platform/orchestration/index.ts';
+import type { AgentRecord } from '../platform/src/platform/tools/index.ts';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
+import type { ConfigManager } from '../platform/src/platform/config/index.ts';
 import { configGetStub, configGetCategoryStub } from './_helpers/config-manager-stub.ts';
-import { createWorkstreamServices, type WorkstreamServicesDeps } from '../sdk/src/platform/orchestration/workstream-services.ts';
-import type { StartedContract } from '../sdk/src/platform/contract/runner.ts';
-import type { StartContractInput, StartFromPlanInput } from '../sdk/src/platform/contract/types.ts';
+import { createWorkstreamServices, type WorkstreamServicesDeps } from '../platform/src/platform/orchestration/workstream-services.ts';
+import type { StartedContract } from '../platform/src/platform/contract/runner.ts';
+import type { StartContractInput, StartFromPlanInput } from '../platform/src/platform/contract/types.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { choiceAnswer, fakePort, scoreAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { RemoteRunnerRegistry, RemoteSupervisor } from '../sdk/src/platform/runtime/remote/index.ts';
-import { createRuntimeStore } from '../sdk/src/platform/runtime/store/index.ts';
+import { RemoteRunnerRegistry, RemoteSupervisor } from '../platform/src/platform/runtime/remote/index.ts';
+import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.ts';
 
 /** A contract config category with commitScope 'off' and no gates, read by the draft's phase and by the engine. */
 function makeConfigManager(decomposition: 'heuristic' | 'agent' = 'heuristic'): Pick<ConfigManager, 'get' | 'getCategory'> {

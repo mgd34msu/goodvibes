@@ -7,8 +7,8 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { run } from '../sdk/src/platform/hooks/runners/typescript.ts';
-import type { HookDefinition, HookEvent } from '../sdk/src/platform/hooks/types.ts';
+import { run } from '../platform/src/platform/hooks/runners/typescript.ts';
+import type { HookDefinition, HookEvent } from '../platform/src/platform/hooks/types.ts';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

@@ -4,9 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { KnowledgeScheduleService } from '../sdk/src/platform/knowledge/scheduling.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { activateClassicFallback, withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
+import { KnowledgeScheduleService } from '../platform/src/platform/knowledge/scheduling.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { activateClassicFallback, withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
 
 const disposals: (() => void)[] = [];
 afterEach(() => { for (const dispose of disposals.splice(0).reverse()) dispose(); });

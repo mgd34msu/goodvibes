@@ -255,7 +255,7 @@ resolve_platform() {
   esac
   PLATFORM_SUFFIX="${os_tag}-${arch_tag}"
   # The sqlite-vec addon uses the Node-style platform tag (linux|darwin) and the
-  # shared-library suffix the SDK's loader resolves — distinct from the release
+  # shared-library suffix the platform's loader resolves — distinct from the release
   # binaries' os_tag (linux|macos).
   case "$os_tag" in
     linux) VEC_OS="linux"; VEC_SUFFIX="so" ;;
@@ -1927,7 +1927,7 @@ migrate_legacy_systemd_unit() {
 #   - an agent the user has booted out (NOT loaded) is never started by a
 #     migration: the file is updated, the agent stays stopped, and the load
 #     command is printed. Rewriting a file must never override a user's stop.
-# The PRODUCT's in-app LaunchAgent identity: the SDK writes
+# The PRODUCT's in-app LaunchAgent identity: the platform writes
 # ~/Library/LaunchAgents/<serviceName>.plist with serviceName 'goodvibes' —
 # a different path AND label from the installer's sh.goodvibes.daemon. Both
 # are platform-owned upgrade targets.
@@ -1956,9 +1956,9 @@ migrate_one_launchd_plist() {
   # Provenance: the installer marker is proof of platform ownership. Without
   # it, ProgramArguments[0] naming the goodvibes-managed binary inside
   # $INSTALL_DIR is strong structural evidence of a product-installed plist —
-  # the SDK's plist writer emits no marker and structurally CANNOT carry the
+  # the platform's plist writer emits no marker and structurally CANNOT carry the
   # product Description fingerprint (renderLaunchdPlist drops the definition
-  # description; an SDK-owned gap, reported upstream). Anything else is
+  # description; an platform-owned gap, reported upstream). Anything else is
   # indeterminable: an honest notice when pinned, never silence.
   plist_managed=0
   if grep -q "$INSTALLER_MARKER" "$plist_path" 2>/dev/null; then
@@ -2035,7 +2035,7 @@ install_daemon() {
 }
 
 # --- sqlite-vec native addon: restores semantic vector search ---
-# The SDK resolves the addon at <execDir>/lib/sqlite-vec-<os>-<arch>/vec0.<suffix>
+# The platform resolves the addon at <execDir>/lib/sqlite-vec-<os>-<arch>/vec0.<suffix>
 # next to the running binary, so one copy in $INSTALL_DIR/lib serves goodvibes,
 # goodvibes-daemon, and goodvibes-agent (they share $INSTALL_DIR). It is verified
 # against the suite's SHA256SUMS.txt, alongside the daemon binary it
@@ -2062,10 +2062,10 @@ install_sqlite_vec() {
 #
 # This runs the daemon binary that was just installed and verified, rather than
 # fetching the artifacts here, for one reason: the pinned URLs, byte counts and
-# checksums live in the SDK's wake-word manifest, and a second copy of a pin in
+# checksums live in the platform's wake-word manifest, and a second copy of a pin in
 # shell would drift silently the first time the model is retrained. The binary
 # reaches the one manifest. (This is also why there is no SHA256SUMS entry to
-# look up: these artifacts are hosted on the SDK's own append-only release tag,
+# look up: these artifacts are hosted on the platform's own append-only release tag,
 # not this repository's release.)
 #
 # NEVER FATAL. A wake-word model is not a reason to fail installing a coding
@@ -2396,7 +2396,7 @@ write_directory_release_marker() {
 # recognisably ours. An install that cannot be reached is a failed install, so
 # an unresolved shadow exits non-zero.
 #
-# The same rules live in the SDK as platform/runtime/path-shadow for the
+# The same rules live in the platform as platform/runtime/path-shadow for the
 # clients' startup check; this is their POSIX sh statement, because an
 # installer cannot import TypeScript.
 #

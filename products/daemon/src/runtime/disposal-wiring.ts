@@ -4,20 +4,20 @@
  * Teardown for every poller the daemon's runtime graph starts.
  *
  * The mechanics, the ordered, best-effort, idempotent scope and the
- * all-required owner list, live in the SDK (`platform/runtime/disposal`), so
- * the daemon and the SDK's own composition root cannot drift into two different
+ * all-required owner list, live in the platform (`platform/runtime/disposal`), so
+ * the daemon and the platform's own composition root cannot drift into two different
  * ideas of what "stop the graph" means. What lives here is only the mapping from
  * the daemon's assembled graph onto that list, plus the four pollers the daemon
- * owns that the SDK's composition does not have at all: the crash-residue sweep,
+ * owns that the platform's composition does not have at all: the crash-residue sweep,
  * the device housekeeping sweep, the wake-model recovery sweep, and the product
- * handler surfaces with their inbox timers. Calling the SDK's list alone would
+ * handler surfaces with their inbox timers. Calling the platform's list alone would
  * silently leave every one of them running.
  *
  * It is a separate module because `runtime/services.ts` sits against the repo's
  * 800-line source cap (check-architecture.ts) with no room for the wiring.
  *
  * Ownership note, and the reason any of this exists: this product builds the
- * graph and hands the SAME object to `DaemonServer`. The SDK facade disposes
+ * graph and hands the SAME object to `DaemonServer`. The platform facade disposes
  * only a graph it constructed itself, so it deliberately leaves this one alone
  *, nothing upstream will ever stop these pollers. The shutdown paths in
  * daemon/cli.ts and the one-shot CLI commands are the only things that can.
@@ -32,7 +32,7 @@ import {
   registerRuntimePollers,
   type AsyncDisposalRegistry,
   type RuntimePollerOwners,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/disposal';
+} from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
 
 /** Re-exported so the composition root reaches the whole seam through one import. */
 export { createAsyncDisposalScope as createDisposalScope };
@@ -54,7 +54,7 @@ export interface DaemonRuntimePollerOwners extends Omit<RuntimePollerOwners, 'st
    *
    * `close()` detaches gateway handlers and awaits the owned work of the pollers this
    * product's inbox surface owns, the retention sweep inside `InboxCursorStore`
-   * and the per-provider `InboundPoller` intervals. The SDK does not know either
+   * and the per-provider `InboundPoller` intervals. The platform does not know either
    * exists, so if this surface does not stop them nothing does.
    */
   readonly daemonHandlers: { readonly close: () => Promise<void> };

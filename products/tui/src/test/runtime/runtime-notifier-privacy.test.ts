@@ -1,9 +1,9 @@
-import * as webhookHttp from '@goodvibes-jev/engine/sdk/platform/utils';
+import * as webhookHttp from '@goodvibes-jev/engine/platform/platform/utils';
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import { Notifier, WebhookNotifier, SlackIntegration, DiscordIntegration } from '@goodvibes-jev/engine/sdk/platform/integrations';
-import { RuntimeEventBus, createEventEnvelope } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
-import { FocusTracker } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import type { PermissionPromptRequest } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import { Notifier, WebhookNotifier, SlackIntegration, DiscordIntegration } from '@goodvibes-jev/engine/platform/platform/integrations';
+import { RuntimeEventBus, createEventEnvelope } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import type { PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { attachTypedRuntimeNotifications, createRuntimeNotifier } from '../../runtime/bootstrap-notifier-sync.ts';
 import { maybeNotifyLongTask } from '../../core/long-task-notifier.ts';
 import { wrapRequestPermissionWithAlert } from '../../core/approval-alert.ts';
@@ -58,7 +58,7 @@ async function produce(kind: typeof producers[number], webhookNotifier: WebhookN
   }
 }
 
-describe('TUI typed producers use actual SDK delivery ownership', () => {
+describe('TUI typed producers use actual platform delivery ownership', () => {
   for (const kind of producers) {
     for (const privacy of [undefined, true, false]) {
       test(`${kind}: privacy=${privacy} admits only permitted getters`, async () => {

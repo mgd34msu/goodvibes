@@ -1,7 +1,7 @@
 /**
  * settings-model.ts, the schema-driven, domain-grouped model the settings
  * surface renders from. Pure and deterministic: it takes the daemon's live
- * config snapshot (config.get) and the SDK's generated schema + per-feature
+ * config snapshot (config.get) and the platform's generated schema + per-feature
  * settings metadata, and produces the ordered group / feature-unit / row
  * structure the SettingsModal walks. No React, no I/O, fully unit-testable.
  *
@@ -27,7 +27,7 @@
  *     material in the daemon's secret store only), so this filter only ever catches
  *     a stray live-config key the schema does not know about.
  *
- * Grouping SOURCE is SDK metadata (CONFIG_SCHEMA namespaces + each feature's
+ * Grouping SOURCE is platform metadata (CONFIG_SCHEMA namespaces + each feature's
  * domain), never a hand-copied category list, so cross-surface parity with the
  * TUI is structural. config-redaction.ts's CATEGORY_LABELS supplies only the
  * human display label for a namespace (special-casing acronyms), with a Title
@@ -219,7 +219,7 @@ export function groupLabelForNamespace(namespace: string): string {
 
 /**
  * Whether a feature is active for a given enablement-key value, per its
- * enablement shape. Mirrors the SDK's own state derivation: boolean keys are
+ * enablement shape. Mirrors the platform's own state derivation: boolean keys are
  * active when true; enum keys while the value is in enabledValues; constant
  * capabilities have no separate off switch (their own settings keys govern
  * runtime activation directly), so they report active.
@@ -329,7 +329,7 @@ export function buildSettingsModel(liveConfig: unknown, clearedKeys: ReadonlySet
       (e) => namespaceOf(e.key) === ns && !OWNED_CONFIG_KEYS.has(e.key) && !isCardMaterialKey(e.key),
     ).map((e) => buildField(e, liveConfig));
 
-    // Explicit card exclusions win even over declared-secret facts. Other SDK
+    // Explicit card exclusions win even over declared-secret facts. Other platform
     // secrets need no semantic clearance to render a deterministic masked row.
     const rawRows: RawRowModel[] = liveKeys
       .filter(

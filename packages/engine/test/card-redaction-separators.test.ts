@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   CardMaterialRedactor,
   REDACTED_MARKER,
-} from '../sdk/src/platform/payments/card-redaction.js';
+} from '../platform/src/platform/payments/card-redaction.js';
 
 /**
  * card-redaction-separators.test.ts, converted from a reviewer's reproduction

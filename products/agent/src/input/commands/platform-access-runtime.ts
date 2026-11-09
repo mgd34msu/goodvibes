@@ -3,7 +3,7 @@ import { createAuthReviewHandler } from '@goodvibes-jev/engine/terminal-shell/au
 import 'node:fs';
 import 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import '@goodvibes-jev/engine/sdk/platform/config';
+import '@goodvibes-jev/engine/platform/platform/config';
 import '@/runtime/index.ts';
 import { formatAgentRecordSource } from '../../agent/record-labels.ts';
 import { requireSecretsManager, requireServiceRegistry, requireShellPaths, requireSubscriptionManager } from './runtime-services.ts';

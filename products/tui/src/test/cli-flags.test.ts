@@ -7,7 +7,7 @@ import { publicErrorTextAnswer } from './helpers/user-error-reading.ts';
 import type { Questions } from '@goodvibes-jev/judgment';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { CONFIG_SCHEMA, ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { CONFIG_SCHEMA, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { isFeatureConfigEnabled } from '@goodvibes-jev/engine/terminal-shell';
 import {
   applyRuntimeConfigDefault,
@@ -918,7 +918,7 @@ describe('parseCliFlags', () => {
     // No files written, clean install scenario.
     const configManager = new ConfigManager({ surfaceRoot: 'tui', configDir, workingDir: root });
 
-    // SDK default is false; TUI default is true, the TUI default must be applied.
+    // platform default is false; TUI default is true, the TUI default must be applied.
     applyRuntimeConfigDefault(configManager, 'display.showTokenSpeed', true);
 
     expect(configManager.get('display.showTokenSpeed')).toBe(true);
@@ -927,7 +927,7 @@ describe('parseCliFlags', () => {
   });
 
   test('applyRuntimeConfigDefault: failed global reload retains accepted project false', () => {
-    // Construct ConfigManager with valid files first so the SDK initialises cleanly,
+    // Construct ConfigManager with valid files first so the platform initialises cleanly,
     // then overwrite the global settings file with malformed JSON to simulate on-disk
     // corruption that occurs after startup. The manager retains the last accepted
     // project value; default registration does not reread corrupt disk contents.
@@ -937,7 +937,7 @@ describe('parseCliFlags', () => {
     const projectConfigDir = join(projectRoot, '.goodvibes', 'tui');
     mkdirSync(configDir, { recursive: true });
     mkdirSync(projectConfigDir, { recursive: true });
-    // Construct with a valid (empty) global file so the SDK initialises cleanly.
+    // Construct with a valid (empty) global file so the platform initialises cleanly.
     writeFileSync(join(configDir, 'settings.json'), '{}', 'utf-8');
     // Project file explicitly sets the key to false.
     writeFileSync(join(projectConfigDir, 'settings.json'), JSON.stringify({ display: { showTokenSpeed: false } }), 'utf-8');
@@ -953,7 +953,7 @@ describe('parseCliFlags', () => {
   });
 
   test('applyRuntimeConfigDefault: failed project reload retains accepted global false', () => {
-    // Construct ConfigManager with valid files first so the SDK initialises cleanly,
+    // Construct ConfigManager with valid files first so the platform initialises cleanly,
     // then overwrite the project settings file with malformed JSON to simulate on-disk
     // corruption after startup. The global file explicitly sets the key to false:
     // the last accepted view must still retain and respect it.
@@ -965,7 +965,7 @@ describe('parseCliFlags', () => {
     mkdirSync(projectConfigDir, { recursive: true });
     // Global file explicitly sets the key to false.
     writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ display: { showTokenSpeed: false } }), 'utf-8');
-    // Construct with a valid (empty) project file so the SDK initialises cleanly.
+    // Construct with a valid (empty) project file so the platform initialises cleanly.
     writeFileSync(join(projectConfigDir, 'settings.json'), '{}', 'utf-8');
     const configManager = new ConfigManager({ surfaceRoot: 'tui', configDir, workingDir: projectRoot });
     // Now corrupt the project file on disk after construction.

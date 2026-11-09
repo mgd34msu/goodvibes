@@ -1,8 +1,8 @@
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
-import { composeDraftReply, extractStyleProfile, type StyleReplyMessage, type StyleSentMessage } from '@goodvibes-jev/engine/sdk/platform/email';
-import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
-import { assertJudgmentInput, retainStrictJudgmentJson } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { composeDraftReply, extractStyleProfile, type StyleReplyMessage, type StyleSentMessage } from '@goodvibes-jev/engine/platform/platform/email';
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
+import { assertJudgmentInput, retainStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogMethods, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import type { PersonalOpsLiveRecord, PersonalOpsWorkflow } from './agent-harness-personal-ops-types.ts';
 

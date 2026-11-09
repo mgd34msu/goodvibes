@@ -4,13 +4,13 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { fieldKind } from '../sdk/src/platform/utils/batteries/field-kind.ts';
+import { fieldKind } from '../platform/src/platform/utils/batteries/field-kind.ts';
 import { DecisionModelsDisabledError, decisionModelPolicyState, installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
-import { OwnerProfileStore } from '../sdk/src/platform/owner-profile/store.ts';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { registerOwnerProfileGatewayMethods, type OwnerProfileGatewayService } from '../sdk/src/platform/control-plane/routes/owner-profile.ts';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
+import { OwnerProfileStore } from '../platform/src/platform/owner-profile/store.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { registerOwnerProfileGatewayMethods, type OwnerProfileGatewayService } from '../platform/src/platform/control-plane/routes/owner-profile.ts';
 
 // Logger role readings carry only field names; count the actual content readers.
 function contentRequests(fake: Pick<ReturnType<typeof fakePort>, 'requests'>) {

@@ -1,15 +1,15 @@
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
-import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogData, captureCatalogMethods, captureCatalogSnapshotGuard, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import type { ArtifactDescriptor } from '@goodvibes-jev/engine/sdk/platform/artifacts';
+import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import { capturePersonalOpsData, capturePersonalOpsSnapshot, assertPersonalOpsDataCurrent, protectPersonalOpsData } from './agent-harness-personal-ops-source.ts';
-import { captureOwnedJson, judgmentInputCardProblem, snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { captureRedactionSource, containsIssuerCredential } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { captureOwnedJson, judgmentInputCardProblem, snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
+import { captureRedactionSource, containsIssuerCredential } from '@goodvibes-jev/engine/platform/platform/utils';
 import { modelReadingServicePath, withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { captureNativeReadModelObservation } from './agent-harness-autonomy-live-records.ts';
 import type { CommandContext } from '../input/command-registry.ts';
-import type { WorkPlanItem } from '@goodvibes-jev/engine/sdk/platform/workflow';
+import type { WorkPlanItem } from '@goodvibes-jev/engine/platform/platform/workflow';
 import { AGENT_TEMPLATES, AGENT_TOOL_MODES, agentOrchestrationDecisionCards } from './agent-harness-agent-orchestration-policy.ts';
 import { remoteReadModelSnapshot, captureNativeRemoteReadModelSnapshot, settleNativeRemotePublisherSemantics, currentNativeRemoteReadModelSnapshot, bindNativeRemoteWorkspaceDisplays, projectNativeRemoteWorkspaceDisplayReferences, captureNativeRemoteWorkspacePathSource, projectNativeRemoteWorkspacePathSource, type RemoteCaptureOutcomeRecord, type RemoteWorkspaceEvidenceRecord } from './agent-harness-remote-read-models.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
@@ -462,7 +462,7 @@ function closeoutCard(id: string, status: string, items: readonly WorkPlanItem[]
     autoAttachReason: artifacts.length > 0
       ? 'remote artifact or durable receipt runnerId matched the visible agent id'
       : hasReadModelEvidence
-        ? 'daemon/SDK remote read-model runnerId matched the visible agent id'
+        ? 'daemon/platform remote read-model runnerId matched the visible agent id'
         : null,
     workPlanItems: items.slice(0, includeParameters ? 8 : 3).map((item) => workPlanCloseoutItem(item, includeParameters)),
     autoAttachedRemoteArtifacts: artifacts.slice(0, includeParameters ? 8 : 3).map((artifact) => artifactSummary(artifact, includeParameters)),

@@ -32,7 +32,7 @@ This directory contains the current product documentation for `goodvibes-tui`.
   Session memory, durable memory, structured knowledge, connectors, extractors, embeddings, artifacts, and multimodal analysis.
 
 - [Project planning](project-planning.md)
-  TUI-owned conversational planning loop, passive SDK planning artifacts, project-scoped knowledge spaces, readiness evaluation, and the Planning modal.
+  TUI-owned conversational planning loop, passive platform planning artifacts, project-scoped knowledge spaces, readiness evaluation, and the Planning modal.
 
 - [Channels, remote runtime, and API](channels-remote-and-api.md)
   Omnichannel surfaces, reply routing, remote peers, node-host contracts, and the daemon/control-plane HTTP + streaming surfaces.
@@ -74,7 +74,7 @@ This directory contains the current product documentation for `goodvibes-tui`.
   Current release history. Older per-version release-note files remain under `docs/releases/` for historical releases, but `CHANGELOG.md` is the canonical current stream.
 
 - [Foundation artifacts](foundation-artifacts/README.md)
-  Checked-in operator and peer contract manifests plus canonical knowledge GraphQL and SQL artifacts for release-gate and SDK extraction work.
+  Checked-in operator and peer contract manifests plus canonical knowledge GraphQL and SQL artifacts for release-gate and platform extraction work.
 
 - [GitHub Action](github-action.md)
   The `run-goodvibes` composite action, which installs a pinned, checksum-verified release in CI and runs a non-interactive command or prompt against a workspace.

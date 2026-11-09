@@ -10,14 +10,14 @@
  */
 
 import { join } from 'node:path';
-import { createEmptyLine, type Line } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { SessionInfo, SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
-import type { BookmarkEntry, BookmarkManager } from '@goodvibes-jev/engine/sdk/platform/bookmarks';
-import type { ProfileManager } from '@goodvibes-jev/engine/sdk/platform/profiles';
-import type { PermissionRequest } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import { ConfigManager, ServiceRegistry, SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
+import { createEmptyLine, type Line } from '@goodvibes-jev/engine/platform/platform/types';
+import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { SessionInfo, SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
+import type { BookmarkEntry, BookmarkManager } from '@goodvibes-jev/engine/platform/platform/bookmarks';
+import type { ProfileManager } from '@goodvibes-jev/engine/platform/platform/profiles';
+import type { PermissionRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { ConfigManager, ServiceRegistry, SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
 import { UIFactory } from '../../renderer/ui-factory.ts';
 import { withHeaderGap } from '../../renderer/header-line.ts';

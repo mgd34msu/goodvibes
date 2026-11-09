@@ -10,20 +10,20 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { SharedSessionBroker } from '../sdk/src/platform/control-plane/session-broker.ts';
+import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.ts';
 import { trackDisposables } from './_helpers/disposables.ts';
-import { ApprovalBroker } from '../sdk/src/platform/control-plane/approval-broker.ts';
+import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-broker.ts';
 import {
   buildModifiedEditArgs,
   readApprovalEditHunks,
   resolveApprovalHunkSelection,
-} from '../sdk/src/platform/control-plane/approval-hunk-apply.ts';
-import { detachSharedSessionParticipant } from '../sdk/src/platform/control-plane/session-broker-sessions.ts';
-import { PersistentStore } from '../sdk/src/platform/state/persistent-store.ts';
-import { RouteBindingManager } from '../sdk/src/platform/channels/index.ts';
-import type { PermissionPromptRequest } from '../sdk/src/platform/permissions/prompt.ts';
-import type { SharedSessionRecord } from '../sdk/src/platform/control-plane/session-types.ts';
-import type { SurfaceKind } from '../sdk/src/events/surfaces.ts';
+} from '../platform/src/platform/control-plane/approval-hunk-apply.ts';
+import { detachSharedSessionParticipant } from '../platform/src/platform/control-plane/session-broker-sessions.ts';
+import { PersistentStore } from '../platform/src/platform/state/persistent-store.ts';
+import { RouteBindingManager } from '../platform/src/platform/channels/index.ts';
+import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.ts';
+import type { SharedSessionRecord } from '../platform/src/platform/control-plane/session-types.ts';
+import type { SurfaceKind } from '../platform/src/events/surfaces.ts';
 
 const disposables = trackDisposables();
 
@@ -232,7 +232,7 @@ describe('approval-hunk-apply pure functions', () => {
     expect(resolveApprovalHunkSelection(editRequest([], { edits: undefined }), [0]).ok).toBe(false);
   });
 
-  test('PARITY GOLDEN: SDK buildModifiedEditArgs === retired TUI reducer', () => {
+  test('PARITY GOLDEN: platform buildModifiedEditArgs === retired TUI reducer', () => {
     const req = editRequest([e0, e1, e2], { transaction: true, match: 'all' });
     const selections: number[][] = [[], [0], [1], [2], [0, 1], [0, 2], [1, 2], [0, 1, 2]];
     for (const sel of selections) {

@@ -1,41 +1,41 @@
-import { prepareConfiguredProjectContext } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import { createApprovalDerivedHandlers } from '@goodvibes-jev/engine/sdk/platform/runtime/bootstrap';
-import { FeatureAnnouncementStore, featureAnnouncementsPath } from '@goodvibes-jev/engine/sdk/platform/runtime/feature-announcements';
+import { prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { createApprovalDerivedHandlers } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+import { FeatureAnnouncementStore, featureAnnouncementsPath } from '@goodvibes-jev/engine/platform/platform/runtime/feature-announcements';
 import { createDaemonWorkspaceTrustResolver } from './workspace-trust-composition.js';
 import { installNativeHostedConversationOwner } from './native-hosted-conversation-composition.js';
-import { createNativeWorkSubmissionHost } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-submission';
-import { createNativeConversationIntakeHost, createNativeRequirementProposer, type NativeConversationContinuationOwner } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake';
-import { createLocalWorkLedgerReadBinding } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger';
-import { prepareGatewayScopePolicyOwner, registerNativeAutomationGatewayMethods, registerWorkLedgerGatewayMethods, registerWorkLedgerImportGatewayMethods, registerNativeWorkExecutionGatewayMethods, registerNativeWorkSubmissionGatewayMethods, registerNativeConversationIntakeGatewayMethods } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { WorkspaceRegistrationStore, sharedWorkspaceRegisterPath, legacyWorkspaceRegisterPath } from '@goodvibes-jev/engine/sdk/platform/workspace';
+import { createNativeWorkSubmissionHost } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-submission';
+import { createNativeConversationIntakeHost, createNativeRequirementProposer, type NativeConversationContinuationOwner } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake';
+import { createLocalWorkLedgerReadBinding } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
+import { prepareGatewayScopePolicyOwner, registerNativeAutomationGatewayMethods, registerWorkLedgerGatewayMethods, registerWorkLedgerImportGatewayMethods, registerNativeWorkExecutionGatewayMethods, registerNativeWorkSubmissionGatewayMethods, registerNativeConversationIntakeGatewayMethods } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { WorkspaceRegistrationStore, sharedWorkspaceRegisterPath, legacyWorkspaceRegisterPath } from '@goodvibes-jev/engine/platform/platform/workspace';
 import { join } from 'node:path';
-import { ServiceRegistry, SubscriptionManager, ToolLLM, sharedSubscriptionsPath } from '@goodvibes-jev/engine/sdk/platform/config';
-import { AutomationDeliveryManager, AutomationManager, automationActionBinding } from '@goodvibes-jev/engine/sdk/platform/automation';
-import { ChannelPolicyManager } from '@goodvibes-jev/engine/sdk/platform/channels';
-import { ApprovalBroker, GatewayMethodCatalog, SharedSessionBroker, buildSharedSessionAgentSpawnRoutingInput, controlPlaneStorePath } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { AcpHostService } from '@goodvibes-jev/engine/sdk/platform/acp';
-import { createMcpAutonomousElicitationHandler } from '@goodvibes-jev/engine/sdk/platform/mcp';
-import { continuationContractOptions } from '@goodvibes-jev/engine/sdk/platform/agents';
-import { PersonalCaptureHolder, conversationalTurnSpawnOptions } from '@goodvibes-jev/engine/sdk/platform/personal-capture';
-import { resolvePairingWebOrigin } from '@goodvibes-jev/engine/sdk/platform/pairing';
+import { ServiceRegistry, SubscriptionManager, ToolLLM, sharedSubscriptionsPath } from '@goodvibes-jev/engine/platform/platform/config';
+import { AutomationDeliveryManager, AutomationManager, automationActionBinding } from '@goodvibes-jev/engine/platform/platform/automation';
+import { ChannelPolicyManager } from '@goodvibes-jev/engine/platform/platform/channels';
+import { ApprovalBroker, GatewayMethodCatalog, SharedSessionBroker, buildSharedSessionAgentSpawnRoutingInput, controlPlaneStorePath } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { AcpHostService } from '@goodvibes-jev/engine/platform/platform/acp';
+import { createMcpAutonomousElicitationHandler } from '@goodvibes-jev/engine/platform/platform/mcp';
+import { continuationContractOptions } from '@goodvibes-jev/engine/platform/platform/agents';
+import { PersonalCaptureHolder, conversationalTurnSpawnOptions } from '@goodvibes-jev/engine/platform/platform/personal-capture';
+import { resolvePairingWebOrigin } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { attachWsOnlyGatewayVerbHandlers } from '@goodvibes-jev/engine/terminal-shell';
 import { createRuntimeAcquisitionScope } from './acquisition.js';
 import { composeMailDeps } from './mail-composition.js';
 import { composeCredentialServices } from './credential-composition.js';
 import { composeBrowserJudgment } from './browser-judgment-composition.js';
 import { registerDaemonRuntimeBasePollers } from './disposal-wiring.js';
-import { attachConfigEmitBridge } from '@goodvibes-jev/engine/sdk/platform/runtime/config';
-import { WatcherRegistry } from '@goodvibes-jev/engine/sdk/platform/watchers';
-import { ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import { createWebKnowledgeGapRepairer } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import { attachConfigEmitBridge } from '@goodvibes-jev/engine/platform/platform/runtime/config';
+import { WatcherRegistry } from '@goodvibes-jev/engine/platform/platform/watchers';
+import { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import { createWebKnowledgeGapRepairer } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { createKnowledgeServices } from './knowledge-services.js';
-import { MediaProviderRegistry, ensureBuiltinMediaProviders } from '@goodvibes-jev/engine/sdk/platform/media';
-import { MultimodalService } from '@goodvibes-jev/engine/sdk/platform/multimodal';
-import { OverflowHandler, ProcessManager, cancelAllAgentRuns, createWorkflowServices } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { FileStateCache, FileUndoManager, MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore, ModeManager, ProjectIndex, resolveCanonicalMemoryDbPath } from '@goodvibes-jev/engine/sdk/platform/state';
-import { createBrokeredPermissionManager } from '@goodvibes-jev/engine/sdk/platform/runtime/client-services';
+import { MediaProviderRegistry, ensureBuiltinMediaProviders } from '@goodvibes-jev/engine/platform/platform/media';
+import { MultimodalService } from '@goodvibes-jev/engine/platform/platform/multimodal';
+import { OverflowHandler, ProcessManager, cancelAllAgentRuns, createWorkflowServices } from '@goodvibes-jev/engine/platform/platform/tools';
+import { FileStateCache, FileUndoManager, MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore, ModeManager, ProjectIndex, resolveCanonicalMemoryDbPath } from '@goodvibes-jev/engine/platform/platform/state';
+import { createBrokeredPermissionManager } from '@goodvibes-jev/engine/platform/platform/runtime/client-services';
 import { wireMemoryPressureChannelNotice } from './notification-dispatch.js';
-import { operations } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { operations } from '@goodvibes-jev/engine/platform/platform/runtime';
 const {
   applyProviderOptimizerConfigMode, bindProviderOptimizerFeatureFlag, codeIndexDbPath,
   createAgentExecutionGraph, createChannelComposition, createCodeIndexServices, composeJudgment,
@@ -43,26 +43,26 @@ const {
   isCodeInjectionSettingEnabled, wireIdlePowerAndLiveTurn, wireVoiceSetup,
 } = operations;
 const { WorkspaceTrustManager } = operations;
-import { MemorySpineClient, createLocalMemoryAccess } from '@goodvibes-jev/engine/sdk/platform/runtime/memory-spine';
+import { MemorySpineClient, createLocalMemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import { createWorkspaceCheckpointing } from './workspace-checkpointing.js';
 import { createSessionConversationRewindPort } from './conversation-rewind-port.js';
-import { createDomainDispatch } from '@goodvibes-jev/engine/sdk/platform/runtime/store';
+import { createDomainDispatch } from '@goodvibes-jev/engine/platform/platform/runtime/store';
 import { DistributedRuntimeManager, IntegrationHelperService, IdempotencyStore, ComponentHealthMonitor, WorktreeRegistry, createShellPathService, createFeatureFlagManager, createNoopPanelManager, createNoopKeybindingsManager, PolicyRuntimeState } from './index.js';
-import { VoiceProviderRegistry, VoiceService, ensureBuiltinVoiceProviders } from '@goodvibes-jev/engine/sdk/platform/voice';
-import { CacheRegistry, PauseController, wireDaemonMemoryGovernance } from '@goodvibes-jev/engine/sdk/platform/runtime/memory';
-import { WebSearchProviderRegistry, WebSearchService } from '@goodvibes-jev/engine/sdk/platform/web-search';
-import { HookActivityTracker } from '@goodvibes-jev/engine/sdk/platform/hooks';
-import { HookDispatcher, createHookWorkbench } from '@goodvibes-jev/engine/sdk/platform/hooks';
-import { PluginManager } from '@goodvibes-jev/engine/sdk/platform/plugins';
-import { BookmarkManager } from '@goodvibes-jev/engine/sdk/platform/bookmarks';
-import { ProfileManager } from '@goodvibes-jev/engine/sdk/platform/profiles';
-import { CrossSessionTaskRegistry, SessionChangeTracker } from '@goodvibes-jev/engine/sdk/platform/sessions';
-import { ApiTokenAuditor, UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
-import { NOTIFICATIONS_METADATA_ONLY_KEY, readNotificationsMetadataOnly } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import { WebhookNotifier } from '@goodvibes-jev/engine/sdk/platform/integrations';
-import { BenchmarkStore, CacheHitTracker, FavoritesStore, ModelLimitsService, ProviderCapabilityRegistry, ProviderOptimizer, createLaunchTolerantProviderRegistry, ensureConfiguredModelIsRoutable } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { AdaptivePlanner, DeterministicReplayEngine, ExecutionPlanManager, SessionLineageTracker, SessionMemoryStore } from '@goodvibes-jev/engine/sdk/platform/core';
-import { deriveFeatureStates, bindFeatureSettingsBridge } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
+import { VoiceProviderRegistry, VoiceService, ensureBuiltinVoiceProviders } from '@goodvibes-jev/engine/platform/platform/voice';
+import { CacheRegistry, PauseController, wireDaemonMemoryGovernance } from '@goodvibes-jev/engine/platform/platform/runtime/memory';
+import { WebSearchProviderRegistry, WebSearchService } from '@goodvibes-jev/engine/platform/platform/web-search';
+import { HookActivityTracker } from '@goodvibes-jev/engine/platform/platform/hooks';
+import { HookDispatcher, createHookWorkbench } from '@goodvibes-jev/engine/platform/platform/hooks';
+import { PluginManager } from '@goodvibes-jev/engine/platform/platform/plugins';
+import { BookmarkManager } from '@goodvibes-jev/engine/platform/platform/bookmarks';
+import { ProfileManager } from '@goodvibes-jev/engine/platform/platform/profiles';
+import { CrossSessionTaskRegistry, SessionChangeTracker } from '@goodvibes-jev/engine/platform/platform/sessions';
+import { ApiTokenAuditor, UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
+import { NOTIFICATIONS_METADATA_ONLY_KEY, readNotificationsMetadataOnly } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
+import { BenchmarkStore, CacheHitTracker, FavoritesStore, ModelLimitsService, ProviderCapabilityRegistry, ProviderOptimizer, createLaunchTolerantProviderRegistry, ensureConfiguredModelIsRoutable } from '@goodvibes-jev/engine/platform/platform/providers';
+import { AdaptivePlanner, DeterministicReplayEngine, ExecutionPlanManager, SessionLineageTracker, SessionMemoryStore } from '@goodvibes-jev/engine/platform/platform/core';
+import { deriveFeatureStates, bindFeatureSettingsBridge } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { createFleetServices } from './fleet-services.js';
 import { createTriggerServices } from './trigger-services.js';
 import { wireFleetNeedsInputPush } from './fleet-needs-input-push.js';
@@ -77,7 +77,7 @@ import { createDevicePostureServices } from './device-posture-composition.js';
 // registry, and the daemon registers no tools, the sweep is the half it needs.
 export { startDeviceHousekeeping } from './device-posture-composition.js';
 import { createClusterServices, startClusterServices } from './cluster-group-composition.js';
-import { createWorkspaceTrustDecisionAsk, trustGatedApprovalRaiser } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { createWorkspaceTrustDecisionAsk, trustGatedApprovalRaiser } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import type { RuntimeServicesOptions, RuntimeServices } from './runtime-services-types.js';
 export type { RuntimeServicesOptions, RuntimeServices } from './runtime-services-types.js';
@@ -86,7 +86,7 @@ export type { RuntimeServicesOptions, RuntimeServices } from './runtime-services
  * Adapted from pinned daemon 443e5ee; shared capabilities use canonical factories.
  */
 export async function createRuntimeBaseServices(options: RuntimeServicesOptions): Promise<{ services: Omit<RuntimeServices, 'daemonHandlers'>; handlerOptions: Omit<DaemonHandlerCompositionOptions, 'distributedRuntimeReady'>; closeWorkLedger: () => Promise<void>; closeBrowserJudgment: () => Promise<void>; closeAutonomousPermissions: () => void; retireContinuationScope: () => void }> {
-  // The SDK's disposal scope and its all-required poller list, plus the four
+  // The platform's disposal scope and its all-required poller list, plus the four
   // pollers only the daemon has, see disposal-wiring.ts.
   const disposalScope = createRuntimeAcquisitionScope('RuntimeServices');
   let fenceWorkLedger: (() => Promise<void>) | undefined;
@@ -127,7 +127,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     const featureFlags = options.featureFlags ?? createFeatureFlagManager();
     if (options.featureFlags === undefined) {
       // Owned manager: gate states derive from domain settings keys + live bridge
-      // (mirrors the SDK composition root; a passed manager is the caller's to wire).
+      // (mirrors the platform composition root; a passed manager is the caller's to wire).
       featureFlags.loadFromConfig({ flags: deriveFeatureStates(configManager) });
       disposalScope.registry.add('feature settings bridge', bindFeatureSettingsBridge(configManager, featureFlags));
     }
@@ -144,11 +144,11 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     const gatewayMethods = new GatewayMethodCatalog();
     // The daemon has no screen. The facade's service-graph contract names a panel
     // manager and a keybindings manager because a surface that HAS a screen
-    // supplies real ones; the SDK ships no-ops for a host that does not, which is
+    // supplies real ones; the platform ships no-ops for a host that does not, which is
     // the honest answer rather than a stub that pretends to open panels.
     const panelManager = createNoopPanelManager();
     const keybindingsManager = createNoopKeybindingsManager();
-    // Channel/surface wiring, composed by the SDK helper.
+    // Channel/surface wiring, composed by the platform helper.
     const { routeBindings, surfaceRegistry, channelPlugins } = createChannelComposition({
       configManager,
       runtimeStore: options.runtimeStore,
@@ -219,7 +219,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     );
     disposalScope.ownUntilRegistered('cross-session task registry', () => sessionOrchestration.dispose());
     const hookActivityTracker = new HookActivityTracker();
-    // featureFlags is REQUIRED here in practice, even though the SDK types it
+    // featureFlags is REQUIRED here in practice, even though the platform types it
     // optional. isFeatureGateEnabled(null, ...) is permissive by design, a narrow
     // embed with no manager wired gets the capability rather than a silent off,
     // so omitting it did not disable the watcher framework when watchers.enabled
@@ -234,7 +234,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       runtimeBus: options.runtimeBus,
     });
     // The agent-execution graph, wired in both directions; see
-    // the SDK's agent-graph composition for why the six are built as one.
+    // the platform's agent-graph composition for why the six are built as one.
     const {
       agentMessageBus, archetypeLoader, agentOrchestrator,
       agentManager, contextAccountingHolder,
@@ -293,7 +293,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
         // a routing intent still wins, that builder emits `tools` only when it
         // actually has one.
         ...conversationalTurnSpawnOptions(input, { configReader: configManager }),
-        // Spawn routing through the SDK's shared model-reference resolver
+        // Spawn routing through the platform's shared model-reference resolver
         // (unique-across-registry auto-qualifies; ambiguous and unknown ids throw
         // errors naming real candidates), against the live registry's models.
         ...buildSharedSessionAgentSpawnRoutingInput(input.routing, { restrictTools: true, modelCandidates: providerRegistry.listModels() }),
@@ -311,7 +311,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     // The daemon is the memory spine's HOST: it always serves the local store.
     // Clients construct the same facade in wire mode against this process.
     const memorySpine = new MemorySpineClient({ local: createLocalMemoryAccess(memoryRegistry) });
-    // featureFlags is REQUIRED here in practice, even though the SDK types it
+    // featureFlags is REQUIRED here in practice, even though the platform types it
     // optional (same reasoning as the watcher registry above): without it,
     // integrations.deliveryTracking configured nothing.
     const deliveryManager = new AutomationDeliveryManager({
@@ -458,7 +458,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
 
 
     // Remote runners and the sandboxes tool calls are confined to; see
-    // the SDK's remote-execution composition for why the four are built as one.
+    // the platform's remote-execution composition for why the four are built as one.
     const { remoteRunnerRegistry, remoteSupervisor, sandboxSessionRegistry, mcpRegistry }
       = createRemoteExecutionServices({
         agentManager, workingDirectory, hookDispatcher, configManager, runtimeBus: options.runtimeBus,
@@ -499,7 +499,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     disposalScope.ownUntilRegistered('code-index reindex scheduler', () => codeIndexReindexScheduler.dispose());
     // Store snapshots, the periodic append-only sweep, durable remembered-approval rules + the live credential chain.
     const { storeSnapshotScheduler, appendOnlyRetentionScheduler, userPermissionRuleStore, stopDurabilityHousekeeping, stopConfigWatch } = operations.createDurabilityServices({
-      configManager, secretsManager, providerRegistry, memoryDbPath, codeIndexDbPath: codeIndexDbPath(workingDirectory, GOODVIBES_DAEMON_SURFACE_ROOT), surface, shellPaths, // + retention-sweep roots & live config watch (mirrors the SDK)
+      configManager, secretsManager, providerRegistry, memoryDbPath, codeIndexDbPath: codeIndexDbPath(workingDirectory, GOODVIBES_DAEMON_SURFACE_ROOT), surface, shellPaths, // + retention-sweep roots & live config watch (mirrors the platform)
       ...(options.currentSessionId ? { currentSessionId: options.currentSessionId } : {}), // exempts the running session from crash-residue reaping
     });
     disposalScope.ownUntilRegistered('config file watch', stopConfigWatch);
@@ -582,7 +582,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     const workspaceCheckpointManager = checkpointing.manager;
     // memory-consolidation honors governor backpressure: it ticks only when idle
     // AND the 'memory-consolidation' job is not paused AND expensive work is
-    // admitted (mirrors the SDK's own createRuntimeServices idle gate).
+    // admitted (mirrors the platform's own createRuntimeServices idle gate).
     const { memoryConsolidationScheduler, powerManager, sessionLiveTurnControls } = wireIdlePowerAndLiveTurn({ configManager, memoryRegistry, runtimeBus: options.runtimeBus, isIdle: () => sessionBroker.countBusySessions() === 0 && !pauseController.isPaused('memory-consolidation') && admitExpensiveWork('memory consolidation').allowed, snapshotTick: () => storeSnapshotScheduler.tick(), heartbeat: async () => { await automationManager.triggerHeartbeat({ source: 'wake-catchup' }); }, powerSeam: options.powerSeam });
     disposalScope.ownUntilRegistered('memory consolidation scheduler', () => memoryConsolidationScheduler.stop());
     disposalScope.registry.add('runtime power', () => powerManager.stop());
@@ -590,7 +590,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     // Construct + start the MemoryGovernor (default ON, a safety feature) with the
     // standard KNOWN cache adapters (knowledge stores + shared session broker),
     // then late-bind the admission gate the expensive entry points captured
-    // earlier. The SDK owns this wiring.
+    // earlier. The platform owns this wiring.
     const { memoryGovernor } = wireDaemonMemoryGovernance({
       config: {
         budgetMb: configManager.get('memory.budgetMb'),
@@ -624,7 +624,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       provisionWakeModelsAtBoot: options.provisionWakeModelsAtBoot === true });
     disposalScope.ownUntilRegistered('wake-word housekeeping', stopWakeHousekeeping);
 
-    // Terminal-shell wrapper over the SDK registerGatewayVerbGroups (gateway-verbs.ts); checkin.*/fleet-needs-input/pairing.* register only when their deps are present. memoryGovernor lights up ops.memory.get; voiceSetup lights up voice.local.status/install.
+    // Terminal-shell wrapper over the platform registerGatewayVerbGroups (gateway-verbs.ts); checkin.*/fleet-needs-input/pairing.* register only when their deps are present. memoryGovernor lights up ops.memory.get; voiceSetup lights up voice.local.status/install.
     // calendar.*/email.* are platform-served; these two let it register (mail-composition.ts).
     const { emailServiceDeps, describeEmailConfigProblem } = composeMailDeps({ configManager, secretsManager,
       registerDispose: (dispose) => { disposalScope.registry.add('mail reply subject sources', dispose); } });
@@ -634,7 +634,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     attachWsOnlyGatewayVerbHandlers(gatewayMethods, {
       triggerSupervisor: triggerManager,
       // The surface segment every control-plane store path is built from
-      // (SDK control-plane-store-paths.ts). Required, not defaulted: a default
+      // (platform control-plane-store-paths.ts). Required, not defaulted: a default
       // is what let these stores write to the unscoped orphan directory.
       surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT,
       homeDirectory, emailServiceDeps, describeEmailConfigProblem, processRegistry, browserJudgment,

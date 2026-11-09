@@ -223,7 +223,7 @@ export function renderProfileStatus(state: ProfileStateView): string {
 /**
  * Every field id present in the document, paired with the label written on its
  * line. Used to resolve `/profile where shipping address` to
- * `commerce.shippingAddress` without keeping a copy of the SDK's field registry
+ * `commerce.shippingAddress` without keeping a copy of the platform's field registry
  * here, the mapping comes from the live response, so it cannot drift.
  */
 export function collectFieldLabels(document: ProfileDocumentView): ReadonlyMap<string, string[]> {

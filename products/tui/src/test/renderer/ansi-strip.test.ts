@@ -21,7 +21,7 @@ function beadRow(call: ToolCall, status: 'done' | 'error', summary: string | und
   logConversationToolResult({ history: { addLine: (l) => { lines.push(l); }, addLines: (ls) => { lines.push(...ls); }, getLineCount: () => lines.length } }, width, call, status, summary ?? '', durationMs, errorMsg);
   return lines;
 }
-import type { Line, ToolCall } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line, ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
 import { lineToString } from '../setup.ts';
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
@@ -30,7 +30,7 @@ import { lineToString } from '../setup.ts';
  * Collect all cell characters from a rendered block into a single string.
  * Easier than joining individual lines for containment assertions.
  */
-function blockToText(lines: import('@goodvibes-jev/engine/sdk/platform/types').Line[]): string {
+function blockToText(lines: import('@goodvibes-jev/engine/platform/platform/types').Line[]): string {
   return lines.map((line) => line.map((c) => c.char).join('')).join('\n').trimEnd();
 }
 
@@ -183,7 +183,7 @@ describe('bead row ANSI sanitization', () => {
    * Collect printable cell text from rendered lines, excluding NUL padding.
    * Escape sequences should never appear in rendered output.
    */
-  function collectText(lines: import('@goodvibes-jev/engine/sdk/platform/types').Line[]): string {
+  function collectText(lines: import('@goodvibes-jev/engine/platform/platform/types').Line[]): string {
     return lines
       .map((line) => line.map((c) => c.char).join(''))
       .join('')

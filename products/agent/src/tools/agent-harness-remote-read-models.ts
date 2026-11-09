@@ -1,8 +1,8 @@
-import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { capturePersonalOpsData, capturePersonalOpsSnapshot, assertPersonalOpsDataCurrent } from './agent-harness-personal-ops-source.ts';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import { captureCatalogMethods, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { readRemotePublisherOutcomeKind, readRemotePublisherSchemaStatus } from './agent-harness-remote-publisher-readings.ts';
 import type { CommandContext } from '../input/command-registry.ts';
@@ -21,7 +21,7 @@ export interface RemoteCaptureOutcomeRecord {
   readonly exportId: string | null;
   readonly artifactId: string | null;
   readonly sourcePath: string;
-  readonly source: 'daemon-read-model' | 'sdk-read-model';
+  readonly source: 'daemon-read-model' | 'platform-read-model';
   readonly redaction: string;
   readonly startedAt: string | null;
   readonly completedAt: string | null;
@@ -41,7 +41,7 @@ export interface RemoteWorkspaceEvidenceRecord {
   readonly worktreeRef: string | null;
   readonly branch: string | null;
   readonly sourcePath: string;
-  readonly source: 'daemon-read-model' | 'sdk-read-model';
+  readonly source: 'daemon-read-model' | 'platform-read-model';
   readonly redaction: string;
   readonly modelRoute: string;
   readonly certification: RemoteRuntimeRecordCertification;
@@ -70,12 +70,12 @@ export interface RemoteRuntimeRecordCertification {
 interface SourceCandidate {
   readonly path: string;
   readonly source: unknown;
-  readonly kind: 'daemon-read-model' | 'sdk-read-model';
+  readonly kind: 'daemon-read-model' | 'platform-read-model';
 }
 
 interface CollectedRecord {
   readonly path: string;
-  readonly kind: 'daemon-read-model' | 'sdk-read-model';
+  readonly kind: 'daemon-read-model' | 'platform-read-model';
   readonly record: Record<string, unknown>;
 }
 
@@ -243,7 +243,7 @@ function remoteCertification(input: {
     ...(receiptId ? { receiptId: safePreview(receiptId, 96) } : {}),
     ...(cursor ? { cursor: safePreview(cursor, 96) } : {}),
     missingSignals,
-    policy: 'Remote runtime read models certify release readiness only when the SDK or daemon publishes schema, durable runner/evidence ids, publication guarantee, publisher/provenance, freshness cursor, exact inspect route, and redacted outcome or workspace isolation evidence.',
+    policy: 'Remote runtime read models certify release readiness only when the platform or daemon publishes schema, durable runner/evidence ids, publication guarantee, publisher/provenance, freshness cursor, exact inspect route, and redacted outcome or workspace isolation evidence.',
   };
 }
 
@@ -279,7 +279,7 @@ function callMethod(source: Record<string, unknown>, method: string): unknown {
 function collectFromSource(
   source: unknown,
   path: string,
-  kind: 'daemon-read-model' | 'sdk-read-model',
+  kind: 'daemon-read-model' | 'platform-read-model',
   wrapperKeys: readonly string[],
   methods: readonly string[],
   visited = new WeakSet<object>(),
@@ -558,8 +558,8 @@ function outcomeSources(context: CommandContext): readonly SourceCandidate[] {
     { path: 'context.platform.readModels.remote.captureOutcomes', source: remote.captureOutcomes, kind: 'daemon-read-model' },
     { path: 'context.platform.readModels.remoteCaptureOutcomes', source: readModels.remoteCaptureOutcomes, kind: 'daemon-read-model' },
     { path: 'context.platform.readModels.remoteRunnerOutcomes', source: readModels.remoteRunnerOutcomes, kind: 'daemon-read-model' },
-    { path: 'context.ops.remoteRuntime.readModels.captureOutcomes', source: opsReadModels.captureOutcomes, kind: 'sdk-read-model' },
-    { path: 'context.clients.operator.remoteRuntime.captureOutcomes', source: operatorRemote.captureOutcomes, kind: 'sdk-read-model' },
+    { path: 'context.ops.remoteRuntime.readModels.captureOutcomes', source: opsReadModels.captureOutcomes, kind: 'platform-read-model' },
+    { path: 'context.clients.operator.remoteRuntime.captureOutcomes', source: operatorRemote.captureOutcomes, kind: 'platform-read-model' },
   ];
 }
 
@@ -584,8 +584,8 @@ function workspaceSources(context: CommandContext): readonly SourceCandidate[] {
     { path: 'context.platform.readModels.remoteWorkspaces', source: readModels.remoteWorkspaces, kind: 'daemon-read-model' },
     { path: 'context.platform.readModels.remoteWorkspaceIsolation', source: readModels.remoteWorkspaceIsolation, kind: 'daemon-read-model' },
     { path: 'context.platform.readModels.worktrees.remote', source: worktrees.remote, kind: 'daemon-read-model' },
-    { path: 'context.ops.remoteRuntime.readModels.workspaces', source: opsReadModels.workspaces, kind: 'sdk-read-model' },
-    { path: 'context.clients.operator.remoteRuntime.workspaces', source: operatorRemote.workspaces, kind: 'sdk-read-model' },
+    { path: 'context.ops.remoteRuntime.readModels.workspaces', source: opsReadModels.workspaces, kind: 'platform-read-model' },
+    { path: 'context.clients.operator.remoteRuntime.workspaces', source: operatorRemote.workspaces, kind: 'platform-read-model' },
   ];
 }
 
@@ -945,9 +945,9 @@ export function projectNativeRemoteWorkspacePathSource(
     if (!Array.isArray(owned.snapshot)) throw new ToolInputProjectionError('held');
     for (const [index, pair] of owned.snapshot.entries()) {
       if (!Array.isArray(pair) || pair.length !== 2 || typeof pair[0] !== 'string') throw new ToolInputProjectionError('held');
-      entries.push(...collectFromSource(pair[1], `native-workspace-map[${index}]`, 'sdk-read-model', WORKSPACE_WRAPPER_KEYS, WORKSPACE_METHODS));
+      entries.push(...collectFromSource(pair[1], `native-workspace-map[${index}]`, 'platform-read-model', WORKSPACE_WRAPPER_KEYS, WORKSPACE_METHODS));
     }
-  } else entries.push(...collectFromSource(owned.snapshot, 'native-workspace-snapshot', 'sdk-read-model', WORKSPACE_WRAPPER_KEYS, WORKSPACE_METHODS));
+  } else entries.push(...collectFromSource(owned.snapshot, 'native-workspace-snapshot', 'platform-read-model', WORKSPACE_WRAPPER_KEYS, WORKSPACE_METHODS));
   const selected = new Map<object, Map<string, { readonly value: string; readonly record: RemoteWorkspaceEvidenceRecord }>>();
   for (const [index, entry] of entries.entries()) {
     const native = normalizeWorkspaceOwned(entry, index);

@@ -4,7 +4,7 @@ import { flushSync } from "react-dom";
 import type {
   NativeWorkExecutionIdentity,
   NativeWorkExecutionSnapshot,
-} from "@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client";
+} from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client";
 import type { NativeExecutionObservation } from "../../lib/native-execution";
 import { NativeExecutionStatus } from "./NativeExecutionStatus";
 

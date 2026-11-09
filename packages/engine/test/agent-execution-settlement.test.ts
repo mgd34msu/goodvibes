@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { AgentManager, type AgentRecord } from '../sdk/src/platform/tools/agent/manager.js';
+import type { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { AgentManager, type AgentRecord } from '../platform/src/platform/tools/agent/manager.js';
 
 function deferred() {
   let resolve!: () => void;

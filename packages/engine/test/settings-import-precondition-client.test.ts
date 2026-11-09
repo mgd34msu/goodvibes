@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { captureRemoteSettingsImportPrecondition, assertRemoteSettingsImportPrecondition, inspectRemoteSettingsImportPrecondition,
-  applyRemoteSettingsImportPrecondition, assertCompletedRemoteSettingsImportPrecondition } from '../sdk/src/platform/config/settings-import-precondition-client.js';
+  applyRemoteSettingsImportPrecondition, assertCompletedRemoteSettingsImportPrecondition } from '../platform/src/platform/config/settings-import-precondition-client.js';
 
 const endpoint = { baseUrl: 'http://127.0.0.1:4567', token: 'private-synthetic-owner-token', source: 'synthetic fixture' };
 const request = { settings: [{ key: 'controlPlane.port', value: 3434 }, { key: 'surfaces.slack.botToken', value: 'private-synthetic-import-token' }] };

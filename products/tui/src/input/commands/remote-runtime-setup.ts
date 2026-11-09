@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { getDefaultAcpAgentCommand } from '@goodvibes-jev/engine/sdk/platform/acp';
-import { resolveDaemonEnabled } from '@goodvibes-jev/engine/sdk/platform/config';
+import { getDefaultAcpAgentCommand } from '@goodvibes-jev/engine/platform/platform/acp';
+import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
 import type { CommandContext, RemoteCommandService } from '../command-registry.ts';
 import type { RemoteSessionBundle } from '@/runtime/index.ts';
 import { requireShellPaths } from './runtime-services.ts';

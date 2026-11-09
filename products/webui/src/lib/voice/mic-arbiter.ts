@@ -24,13 +24,13 @@
  * refusal is the invariant this file exists for: any future third consumer is
  * caught by it instead of quietly doubling the streams.
  */
-import { AudioCaptureError } from '@goodvibes-jev/engine/sdk/platform/voice/capture';
+import { AudioCaptureError } from '@goodvibes-jev/engine/platform/platform/voice/capture';
 import type {
   AudioCaptureHandlers,
   AudioCaptureOpener,
   AudioCaptureRequest,
   AudioCaptureStream,
-} from '@goodvibes-jev/engine/sdk/platform/voice/capture';
+} from '@goodvibes-jev/engine/platform/platform/voice/capture';
 import { createBrowserCaptureOpener } from './capture';
 
 /** What the arbiter needs from the always-on consumer to stand it down. */

@@ -9,7 +9,7 @@ import {
 } from './companion-chat';
 
 describe('companion chat helpers', () => {
-  test('extracts ids from companion chat SDK responses', () => {
+  test('extracts ids from companion chat platform responses', () => {
     expect(extractSessionId({ sessionId: 'sess-1' })).toBe('sess-1');
     expect(extractSessionId({ session: { id: 'sess-2' } })).toBe('sess-2');
     expect(extractMessageId({ messageId: 'msg-1' })).toBe('msg-1');

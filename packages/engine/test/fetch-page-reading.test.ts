@@ -10,11 +10,11 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { EntryType, Question } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { pageBlocks, pageTitle, pageUnits } from '../sdk/src/platform/tools/fetch/page-blocks.ts';
-import { NO_SUMMARY_NOTE } from '../sdk/src/platform/tools/fetch/page-reading.ts';
-import { applyExtract } from '../sdk/src/platform/tools/fetch/extract.ts';
-import { headersForOtherOrigin } from '../sdk/src/platform/tools/fetch/redirect-headers.ts';
-import { executeFetchInput } from '../sdk/src/platform/tools/fetch/index.ts';
+import { pageBlocks, pageTitle, pageUnits } from '../platform/src/platform/tools/fetch/page-blocks.ts';
+import { NO_SUMMARY_NOTE } from '../platform/src/platform/tools/fetch/page-reading.ts';
+import { applyExtract } from '../platform/src/platform/tools/fetch/extract.ts';
+import { headersForOtherOrigin } from '../platform/src/platform/tools/fetch/redirect-headers.ts';
+import { executeFetchInput } from '../platform/src/platform/tools/fetch/index.ts';
 
 const PAGE = `<!doctype html><html><head><title>Lemon Pasta &amp; More</title><style>p{}</style></head>
 <body>

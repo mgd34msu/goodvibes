@@ -46,7 +46,7 @@ mock.module('../../lib/goodvibes', () => ({
   // test never calls them (same gotcha CalendarView.test.tsx/MailView.test.tsx document).
   getCurrentAuth: () => Promise.resolve({}),
   invokeMethod: () => Promise.resolve({}),
-  sdk: {
+  client: {
     operator: {
       profile: {
         forget: (input: OperatorMethodInput<'profile.forget'>) => {

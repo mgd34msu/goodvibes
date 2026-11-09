@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { NativeWorkExecutionControls, nativeWorkExecutionLines, type NativeWorkExecutionAction } from '../../../runtime/native-work-execution.ts';
-import type { WorkLedgerReadClient, WorkLedgerReadSnapshot } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger';
-import type { OperatorNativeWorkExecutionClient, NativeWorkExecutionIdentity, NativeWorkExecutionSnapshot } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
+import type { WorkLedgerReadClient, WorkLedgerReadSnapshot } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
+import type { OperatorNativeWorkExecutionClient, NativeWorkExecutionIdentity, NativeWorkExecutionSnapshot } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
 
 const tick = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
 const ledger = (): WorkLedgerReadSnapshot => ({ projectId: 'p', revision: 0, cursor: 0, works: [{

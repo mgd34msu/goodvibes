@@ -13,7 +13,7 @@ import {
   DEFAULT_CONTEXT_WINDOW,
   LocalContextIngestionService,
   type ContextWindowProvenance,
-} from '@goodvibes-jev/engine/sdk/platform/providers';
+} from '@goodvibes-jev/engine/platform/platform/providers';
 
 // ---------------------------------------------------------------------------
 // resolveContextWindow, unit tests (pure function, no network)

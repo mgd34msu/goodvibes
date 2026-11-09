@@ -1,11 +1,11 @@
 import type { CommandRegistry, CommandContext } from '../command-registry.ts';
 import { join } from 'node:path';
-import { AGENT_TEMPLATES } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { captureArchetypeListing, readArchetypeFamilies, type AgentArchetype, type ArchetypeFamily, type ArchetypeFamilyReading } from '@goodvibes-jev/engine/sdk/platform/agents';
+import { AGENT_TEMPLATES } from '@goodvibes-jev/engine/platform/platform/tools';
+import { captureArchetypeListing, readArchetypeFamilies, type AgentArchetype, type ArchetypeFamily, type ArchetypeFamilyReading } from '@goodvibes-jev/engine/platform/platform/agents';
 import { requireOpsApi, requireReadModels, requireShellPaths } from './runtime-services.ts';
 import { beginCommandReading } from './command-reading-lifetime.ts';
-import { assertJudgmentInput, retainStrictJudgmentJson } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { assertJudgmentInput, retainStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 type TeamworkModeId =
   | 'local-engineer'

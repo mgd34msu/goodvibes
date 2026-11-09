@@ -3,7 +3,7 @@ import { isAbsolute, join } from 'node:path';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 
 function tempDir(label: string): string {
   const dir = join(tmpdir(), `gv-path-${label}-${randomUUID()}`);

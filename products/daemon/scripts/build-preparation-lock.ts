@@ -1,7 +1,7 @@
 /** One private checkout mutex for explicit native artifact readers and version writers. */
 import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
-import { acquireCrossProcessLock } from '@goodvibes-jev/engine/sdk/platform/workspace';
+import { acquireCrossProcessLock } from '@goodvibes-jev/engine/platform/platform/workspace';
 
 export function buildPreparationLockPath(root: string): string {
   return join(realpathSync(root), '.tmp', 'build-preparation.lock');

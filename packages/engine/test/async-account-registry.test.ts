@@ -2,8 +2,8 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AgentAccountRegistry, type AgentAccountCreateInput } from '../sdk/src/platform/google/account-registry.ts';
-import { AsyncAgentAccountRegistry, type AsyncSecretLikeTextReader, type SecretLikeTextReading } from '../sdk/src/platform/google/async-account-registry.ts';
+import { AgentAccountRegistry, type AgentAccountCreateInput } from '../platform/src/platform/google/account-registry.ts';
+import { AsyncAgentAccountRegistry, type AsyncSecretLikeTextReader, type SecretLikeTextReading } from '../platform/src/platform/google/async-account-registry.ts';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

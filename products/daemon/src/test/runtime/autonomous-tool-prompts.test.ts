@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { withDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { executeToolCalls, type ToolExecutionDeps } from '@goodvibes-jev/engine/sdk/platform/core';
+import { executeToolCalls, type ToolExecutionDeps } from '@goodvibes-jev/engine/platform/platform/core';
 import { useGatewayFixture } from '../helpers/gateway-fixture.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 function installNativeSandboxHost() {

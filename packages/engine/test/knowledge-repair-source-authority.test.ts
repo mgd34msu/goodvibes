@@ -7,17 +7,17 @@ import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { upsertObservedKnowledgeNode } from '../sdk/src/platform/knowledge/store-node-observation.js';
-import { prepareRepairSourceAuthorities } from '../sdk/src/platform/knowledge/semantic/repair-fact-selection.js';
-import { promoteRepairSources } from '../sdk/src/platform/knowledge/semantic/self-improvement-promotion.js';
-import { repairProfileSourceText } from '../sdk/src/platform/knowledge/semantic/repair-profile.js';
-import { isKnowledgeSourceQualityFailure } from '../sdk/src/platform/knowledge/source-quality.js';
-import { repairSourceAuthority } from '../sdk/src/platform/knowledge/semantic/repair-source-authority/battery.js';
-import { registry } from '../sdk/src/platform/knowledge/semantic/repair-source-authority/judgment-registry.js';
+import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { upsertObservedKnowledgeNode } from '../platform/src/platform/knowledge/store-node-observation.js';
+import { prepareRepairSourceAuthorities } from '../platform/src/platform/knowledge/semantic/repair-fact-selection.js';
+import { promoteRepairSources } from '../platform/src/platform/knowledge/semantic/self-improvement-promotion.js';
+import { repairProfileSourceText } from '../platform/src/platform/knowledge/semantic/repair-profile.js';
+import { isKnowledgeSourceQualityFailure } from '../platform/src/platform/knowledge/source-quality.js';
+import { repairSourceAuthority } from '../platform/src/platform/knowledge/semantic/repair-source-authority/battery.js';
+import { registry } from '../platform/src/platform/knowledge/semantic/repair-source-authority/judgment-registry.js';
 import { createRepairSourceAuthorityReader, KnowledgeRepairSourceAuthorityHeldError as Held, REPAIR_SOURCE_AUTHORITY_LIMITS as LIMITS,
-  type RepairSourceAuthorityInput, type RepairSourceAuthority, type RepairSourceAuthorityHoldReason } from '../sdk/src/platform/knowledge/semantic/repair-source-authority/reader.js';
+  type RepairSourceAuthorityInput, type RepairSourceAuthority, type RepairSourceAuthorityHoldReason } from '../platform/src/platform/knowledge/semantic/repair-source-authority/reader.js';
 
 let previous: JudgmentPort | undefined;
 const roots: string[] = [];

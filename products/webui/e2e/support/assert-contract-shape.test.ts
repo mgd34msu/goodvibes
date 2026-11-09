@@ -1,6 +1,6 @@
 /**
  * assert-contract-shape.test.ts, proves the e2e fixtures actually conform to
- * the SDK's operator-contract.json, and proves the assertion is not a rubber stamp: a
+ * the platform's operator-contract.json, and proves the assertion is not a rubber stamp: a
  * deliberately-drifted fixture (a renamed/dropped required field, exactly the shape of
  * the provider-pills incident this closes, see seed.ts's providersResponse() header)
  * must FAIL it.
@@ -35,7 +35,7 @@ import {
   voiceLocalStatusResponse,
 } from './mock-daemon';
 
-describe('e2e fixtures conform to the SDK operator contract', () => {
+describe('e2e fixtures conform to the platform operator contract', () => {
   test('workLedger.turn.session: the base mock explicitly identifies its synthetic legacy sessions', () => {
     const response = legacySessionDiscoveryResponse();
     expect(response).toEqual({ kind: 'legacy' });
@@ -116,7 +116,7 @@ describe('e2e fixtures conform to the SDK operator contract', () => {
     expect(() => assertFixtureMatchesOperatorContract('voice.local.install', voiceLocalInstallResponse('download-failed'))).not.toThrow();
   });
 
-  // sessions.permissionMode.get/set + sessions.contextUsage.get (SDK 1.6.1), the mock
+  // sessions.permissionMode.get/set + sessions.contextUsage.get (platform 1.6.1), the mock
   // daemon's own answer shapes for the local-session-only verbs, pinned against the
   // real installed contract the same way every other fixture above is.
   test('sessions.permissionMode.get: the mock daemon\'s response shape conforms', () => {
@@ -138,7 +138,7 @@ describe('e2e fixtures conform to the SDK operator contract', () => {
     })).not.toThrow();
   });
 
-  // sessions.changes.get + cost.attribution.get (SDK 1.6.1), the mock daemon's own
+  // sessions.changes.get + cost.attribution.get (platform 1.6.1), the mock daemon's own
   // answer shapes for these two new generic-invoke verbs, pinned against the real
   // installed contract the same way every other fixture above is.
   test('sessions.changes.get: the mock daemon\'s honest-empty response shape conforms', () => {
@@ -176,7 +176,7 @@ describe('e2e fixtures conform to the SDK operator contract', () => {
 
   test('fleet.snapshot: FLEET_SNAPSHOT conforms, including the derived needsAttention marker', () => {
     // FLEET_BLOCKED_NODE carries needsAttention: { reason:'input', detail }, the new
-    // SDK field this consumer round adopts. This pins the fixture against the real
+    // platform field this consumer round adopts. This pins the fixture against the real
     // fleet.snapshot output schema so a drift in the attention shape is caught here.
     expect(() => assertFixtureMatchesOperatorContract('fleet.snapshot', FLEET_SNAPSHOT)).not.toThrow();
     const blocked = FLEET_SNAPSHOT.nodes.find((n) => n.id === 'agent-blocked-7');

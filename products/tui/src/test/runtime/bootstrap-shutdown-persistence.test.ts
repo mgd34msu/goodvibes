@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { createDeferredStartupCoordinator, writeRecoveryFile } from '@/runtime/index.ts';
 import { createBootstrapShutdown, type BootstrapShutdownDeps } from '../../runtime/bootstrap-shutdown.ts';
 import { installProcessLifecycle, type ProcessLifecycleDeps } from '../../runtime/process-lifecycle.ts';
@@ -164,7 +164,7 @@ describe('bootstrap shutdown preserves durable persistence after owner failures'
     })));
   });
 
-  test('filesystem persistence failure remains visible, retains real recovery, and still releases SDK owners', async () => {
+  test('filesystem persistence failure remains visible, retains real recovery, and still releases platform owners', async () => {
     const h = fixture();
     // Obstruct the real sessions directory, making the real save fail on disk.
     mkdirSync(join(h.surface.sessionsDir, '..'), { recursive: true });
@@ -182,7 +182,7 @@ describe('bootstrap shutdown preserves durable persistence after owner failures'
     expect(exit.exitSpy).toHaveBeenCalledTimes(1);
   });
 
-  test('a clean actual exit saves through the SDK and removes the recovery snapshot', async () => {
+  test('a clean actual exit saves through the platform and removes the recovery snapshot', async () => {
     const h = fixture();
     const exit = exitComposition(h);
     await exit.handlers.exitApp();

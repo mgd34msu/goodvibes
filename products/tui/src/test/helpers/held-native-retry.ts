@@ -1,9 +1,9 @@
-import { Orchestrator, ConversationManager } from '@goodvibes-jev/engine/sdk/platform/core';
-import { DEFAULT_CONFIG, type ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { PermissionManager, type PermissionConfigReader } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import { PolicyRuntimeState } from '@goodvibes-jev/engine/sdk/platform/runtime/security';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { createOperatorNativeConversationIntakeClient, type NativeConversationIntakeResult } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
+import { Orchestrator, ConversationManager } from '@goodvibes-jev/engine/platform/platform/core';
+import { DEFAULT_CONFIG, type ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { PermissionManager, type PermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { PolicyRuntimeState } from '@goodvibes-jev/engine/platform/platform/runtime/security';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { createOperatorNativeConversationIntakeClient, type NativeConversationIntakeResult } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 import { runOwnedTurnRetry } from '../../core/turn-cancellation.ts';
 
 type NativeRetryPhase = 'prepared' | 'submit-entered' | 'admission-held' | 'cancel-requested' | 'abort-relayed' | 'released' | 'admission-returned';
@@ -31,7 +31,7 @@ export const nativeRetryConfigManager = {
   getWorkingDirectory: () => '/synthetic/native-retry',
 } as unknown as Pick<ConfigManager, 'get' | 'getCategory' | 'getWorkingDirectory'>;
 
-/** Real SDK admission held after the product's memory await, before submission. */
+/** Real platform admission held after the product's memory await, before submission. */
 export async function heldNativeRetry() {
   const phases: NativeRetryPhase[] = [];
   let releaseGate!: () => void; let entered!: () => void;

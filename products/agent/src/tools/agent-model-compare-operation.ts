@@ -1,9 +1,9 @@
 import { lstatSync, realpathSync, statSync, type BigIntStats } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
-import { captureOwnedJson } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { assertCurrentToolEffect, assertCurrentToolExecution } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { ArtifactStore, type ArtifactDescriptor } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import type { ToolExecuteOptions } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { captureOwnedJson } from '@goodvibes-jev/engine/platform/platform/gate';
+import { assertCurrentToolEffect, assertCurrentToolExecution } from '@goodvibes-jev/engine/platform/platform/tools';
+import { ArtifactStore, type ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { ToolExecuteOptions } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { AgentModelCompareArtifactStore, AgentModelCompareToolDeps } from './agent-model-compare-types.ts';
 import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
 import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';

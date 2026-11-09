@@ -87,7 +87,7 @@ jobs:
       contents: read
       actions: read
       checks: read
-    uses: mgd34msu/goodvibes-sdk/.github/workflows/reusable-release-verify.yml@deccd4836763493f826b0d96edf8d3c9ef58f3f6 # sdk 2.1.0 release
+    uses: mgd34msu/goodvibes-platform/.github/workflows/reusable-release-verify.yml@deccd4836763493f826b0d96edf8d3c9ef58f3f6 # sdk 2.1.0 release
     with:
       sha: ${{ github.sha }}
       workflow: ci.yml
@@ -223,7 +223,7 @@ jobs:
     name: Build binaries
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'release')
     needs: [release-verify]
-    uses: mgd34msu/goodvibes-sdk/.github/workflows/reusable-binary-matrix.yml@deccd4836763493f826b0d96edf8d3c9ef58f3f6 # sdk 2.1.0 release
+    uses: mgd34msu/goodvibes-platform/.github/workflows/reusable-binary-matrix.yml@deccd4836763493f826b0d96edf8d3c9ef58f3f6 # sdk 2.1.0 release
     with:
       # Each smoke leg carries its own suffixed artifact as `binary` so the
       # matrix smokes the binary that leg actually built (the reusable passes it
@@ -313,7 +313,7 @@ jobs:
     needs: [assemble-release-assets]
     permissions:
       contents: write
-    uses: mgd34msu/goodvibes-sdk/.github/workflows/reusable-gh-release.yml@deccd4836763493f826b0d96edf8d3c9ef58f3f6 # sdk 2.1.0 release
+    uses: mgd34msu/goodvibes-platform/.github/workflows/reusable-gh-release.yml@deccd4836763493f826b0d96edf8d3c9ef58f3f6 # sdk 2.1.0 release
     with:
       tag: ${{ github.ref_name }}
       artifact-name: release-assets
@@ -346,7 +346,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: mgd34msu/goodvibes-sdk/.github/workflows/reusable-npm-publish.yml@deccd4836763493f826b0d96edf8d3c9ef58f3f6 # sdk 2.1.0 release
+    uses: mgd34msu/goodvibes-platform/.github/workflows/reusable-npm-publish.yml@deccd4836763493f826b0d96edf8d3c9ef58f3f6 # sdk 2.1.0 release
     with:
       package-name: "@goodvibes-jev/agent"
       environment: production

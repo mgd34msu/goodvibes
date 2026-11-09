@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { MemoryConsolidationRunReceipt } from '../sdk/src/platform/state/index.ts';
-import { formatConsolidationReceipt } from '../sdk/src/platform/state/consolidation-receipt.ts';
+import type { MemoryConsolidationRunReceipt } from '../platform/src/platform/state/index.ts';
+import { formatConsolidationReceipt } from '../platform/src/platform/state/consolidation-receipt.ts';
 
 // ---------------------------------------------------------------------------
 // A consolidation run that changed something renders as one honest line; a run

@@ -11,14 +11,14 @@ surface level, not merely at the security-capability level. Distribution is
 **SHA-256 pinned**, and the marketplace index format is **governed by
 construction**. An unpinned or capability-opaque entry cannot be represented.
 
-Import from `@goodvibes-jev/engine/sdk/platform/runtime/ecosystem`.
+Import from `@goodvibes-jev/engine/platform/platform/runtime/ecosystem`.
 
 ## Plugin manifest signatures
 
-The plugin trust SDK verifies Ed25519 signatures with the publisher's PEM public
+The plugin trust platform verifies Ed25519 signatures with the publisher's PEM public
 key. Authors keep the private key in their signing environment and sign the bytes
 returned by `pluginManifestSignaturePayload(manifest)`, exported from
-`@goodvibes-jev/engine/sdk/platform/runtime/plugins`. Store the 64-byte signature
+`@goodvibes-jev/engine/platform/platform/runtime/plugins`. Store the 64-byte signature
 as canonical base64 in the manifest's `signature` field.
 
 The payload includes every JSON manifest field except `signature`; object keys

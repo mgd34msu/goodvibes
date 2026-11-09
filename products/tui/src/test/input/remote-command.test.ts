@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { CommandRegistry } from '../../input/command-registry.ts';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { registerBuiltinCommands } from '../../input/commands.ts';
-import { AgentManager } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { AgentManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import { createShellPathService } from '@/runtime/index.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import type { PeerClient } from '@/runtime/index.ts';
@@ -549,8 +549,8 @@ describe('remote command', () => {
   });
 });
 
-import { AcpManager } from '@goodvibes-jev/engine/sdk/platform/acp';
-import { PermissionManager, type PermissionConfigReader } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import { AcpManager } from '@goodvibes-jev/engine/platform/platform/acp';
+import { PermissionManager, type PermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { PolicyRuntimeState } from '@/runtime/index.ts';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';

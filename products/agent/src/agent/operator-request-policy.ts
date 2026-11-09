@@ -1,11 +1,11 @@
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { captureStrictJudgmentJson, judgmentInputBoundary } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { CONTENT_DERIVATION_SITE } from '@goodvibes-jev/engine/sdk/platform/security';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { captureStrictJudgmentJson, judgmentInputBoundary } from '@goodvibes-jev/engine/platform/platform/gate';
+import { CONTENT_DERIVATION_SITE } from '@goodvibes-jev/engine/platform/platform/security';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { isDeepStrictEqual } from 'node:util';
 import { evaluateOutwardEffect, getSessionUntrustedContentLedger } from '../trust/untrusted-content.ts';
 import { screenOutboundForCardMaterial } from './payments-channel-guard.ts';
-import { decisionOrClassic } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { decisionOrClassic } from '@goodvibes-jev/engine/platform/platform/runtime';
 import type { JudgmentPort } from '@goodvibes-jev/judgment/decisions';
 
 /** Retain the local source record; this does not mint execution or human authority. */

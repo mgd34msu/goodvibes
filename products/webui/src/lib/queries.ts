@@ -1,4 +1,4 @@
-import { getCurrentAuth, invokeMethod, sdk } from './goodvibes';
+import { getCurrentAuth, invokeMethod, client as platformClient } from './goodvibes';
 
 export const queryKeys = {
   auth: ['auth'] as const,
@@ -25,12 +25,12 @@ export const queryKeys = {
   permissionRules: ['permissions', 'rules'] as const,
   sessions: ['sessions'] as const,
   sessionList: (revision: number) => ['sessions', 'list', revision] as const,
-  // fleet.*/checkpoints.* (SDK 0.39.0-dev). Neither verb family emits a wire
-  // event yet (pinned by the SDK's own fleet/checkpoints search test suite,
+  // fleet.*/checkpoints.* (platform 0.39.0-dev). Neither verb family emits a wire
+  // event yet (pinned by the platform's own fleet/checkpoints search test suite,
   // "none of these verbs declares a wire event"), so these are NOT wired into
   // useRealtimeInvalidation's DOMAIN_INVALIDATIONS map; FleetView/CheckpointsView
   // poll on an interval and expose a manual refresh instead. Revisit once a
-  // fleet-update event (mentioned as a possibility in the SDK's fleet/checkpoints
+  // fleet-update event (mentioned as a possibility in the platform's fleet/checkpoints
   // design notes) lands.
   fleet: ['fleet'] as const,
   // Session archive of finished fleet subtrees (fleet.archived.list), same
@@ -51,7 +51,7 @@ export const queryKeys = {
   sessionMessages: (sessionId: string) => ['sessions', sessionId, 'messages'] as const,
   // Input receipts follow the same event invalidation, isolated by account/relay lifetime.
   sessionInputs: (revision: number, sessionId: string) => ['sessions', sessionId, 'inputs', revision] as const,
-  // sessions.permissionMode.get / sessions.contextUsage.get (SDK 1.6.1), same
+  // sessions.permissionMode.get / sessions.contextUsage.get (platform 1.6.1), same
   // 'sessions'-prefixed convention as sessionDetail/sessionMessages above, so
   // useRealtimeInvalidation's broad `queryKeys.sessions` invalidation (fired on every
   // 'permissions' domain frame, PERMISSION_MODE_CHANGED rides it) also revalidates
@@ -59,7 +59,7 @@ export const queryKeys = {
   // which session that is at the point the frame arrives.
   sessionPermissionMode: (sessionId: string) => ['sessions', sessionId, 'permission-mode'] as const,
   sessionContextUsage: (sessionId: string) => ['sessions', sessionId, 'context-usage'] as const,
-  // sessions.changes.get (SDK 1.6.1), same 'sessions'-prefixed convention as
+  // sessions.changes.get (platform 1.6.1), same 'sessions'-prefixed convention as
   // sessionPermissionMode/sessionContextUsage above. No wire event exists for this verb
   // yet (same standing gap fleet.*/checkpoints.* document elsewhere in this file), so
   // SessionChanges.tsx refetches manually rather than riding useRealtimeInvalidation;
@@ -75,7 +75,7 @@ export const queryKeys = {
   // once (non-exact invalidateQueries match), the same "prefix sweeps every variant"
   // convention queryKeys.sessions already documents for sessionDetail/sessionMessages.
   hostedSessionsAll: ['hosted-sessions'] as const,
-  // cost.attribution.get (SDK 1.6.1), keyed by window+dimension so switching either
+  // cost.attribution.get (platform 1.6.1), keyed by window+dimension so switching either
   // refetches honestly rather than serving a stale slice from cache.
   costAttribution: (window: string, dimension: string) => ['cost', 'attribution', window, dimension] as const,
   knowledgeStatus: ['knowledge', 'status'] as const,
@@ -92,7 +92,7 @@ export const queryKeys = {
   // never-called-before surface (like knowledgeJobs above) this brief adopts.
   knowledgeCandidates: ['knowledge', 'candidates'] as const,
   localAuth: ['local-auth'] as const,
-  // Memory (memory.records.* / memory.review-queue, SDK 1.1.0). No wire event exists
+  // Memory (memory.records.* / memory.review-queue, platform 1.1.0). No wire event exists
   // for this domain yet, so MemoryView polls/refetches manually rather than riding
   // useRealtimeInvalidation (same standing gap fleet.*/checkpoints.* document above).
   memoryList: ['memory', 'list'] as const,
@@ -113,57 +113,57 @@ export const queryKeys = {
   // Keyed per IMAP UID: the peek body for one message is its own cache entry, so
   // reopening a message already read is instant and closing does not evict the list.
   emailMessage: (uid: number) => ['email', 'message', uid] as const,
-  // ci.* (SDK 1.6.1's initiative family). No wire event exists for this domain yet, so
+  // ci.* (platform 1.6.1's initiative family). No wire event exists for this domain yet, so
   // CiWatchesView polls/refetches manually rather than riding useRealtimeInvalidation,
   // same standing gap fleet.*/checkpoints.*/memory.* document above.
   ciWatches: ['ci', 'watches'] as const,
-  // checkin.* (SDK 1.6.1's initiative family). Same manual-refresh story as ci.* above.
+  // checkin.* (platform 1.6.1's initiative family). Same manual-refresh story as ci.* above.
   checkinConfig: ['checkin', 'config'] as const,
   checkinReceipts: ['checkin', 'receipts'] as const,
-  // principals.* / channels.profiles.* (SDK 1.6.1's initiative family). Same
+  // principals.* / channels.profiles.* (platform 1.6.1's initiative family). Same
   // manual-refresh story as ci.*/checkin.* above.
   principals: ['principals'] as const,
   channelProfiles: ['channels', 'profiles'] as const,
-  // pairing.tokens.* (SDK 1.8.0), per-device revocable pairing tokens. No wire event
+  // pairing.tokens.* (platform 1.8.0), per-device revocable pairing tokens. No wire event
   // exists for this domain yet, so PairingTokensSettings polls/refetches manually,
   // same standing gap fleet.*/checkpoints.*/memory.*/ci.* document above.
   pairingTokens: ['pairing', 'tokens'] as const,
-  // pairing.posture.get (SDK 1.8.0's LAN-http posture work), the honest TLS/capability
+  // pairing.posture.get (platform 1.8.0's LAN-http posture work), the honest TLS/capability
   // posture of THIS surface's own origin. An origin's posture never changes within a
   // session (see useOriginPosture), so this is fetched once and never invalidated.
   originPosture: ['pairing', 'posture'] as const,
-  // power.status.get / power.keepAwake.set (SDK 1.8.0's host sleep-ownership work).
+  // power.status.get / power.keepAwake.set (platform 1.8.0's host sleep-ownership work).
   // OPS_POWER_STATE_CHANGED rides the 'ops' runtime domain, useRealtimeInvalidation
   // invalidates this key on that frame, so the always-visible "sleep disabled" chip and
   // the admin Power panel both refetch on the real event, not only on the next poll.
   power: ['power', 'status'] as const,
-  // ops.memory.get (SDK 1.9.0-dev's memory-relay-voice-hardening work), the
+  // ops.memory.get (platform 1.9.0-dev's memory-relay-voice-hardening work), the
   // MemoryGovernor's own observability snapshot. OPS_MEMORY_PRESSURE rides the same
   // 'ops' runtime domain OPS_POWER_STATE_CHANGED does, useRealtimeInvalidation
   // invalidates this key on that frame, so the panel refetches on the real tier
   // change/tripwire event, not only on the next poll.
   opsMemory: ['ops', 'memory'] as const,
-  // voice.local.status (SDK 1.9.0-dev), the managed local-voice runtime's own
+  // voice.local.status (platform 1.9.0-dev), the managed local-voice runtime's own
   // provisioning state (piper TTS + whisper.cpp STT binaries/models on disk), distinct
   // from voice.status's provider-availability posture. No wire event exists for this
   // verb yet, so VoiceSettings refetches manually/on install-mutation success, same
   // standing gap fleet.*/checkpoints.*/memory.* document elsewhere in this file.
   voiceLocalStatus: ['voice', 'local', 'status'] as const,
-  // sessions.queuedMessages.list (SDK 1.8.0's interaction-wins round). No wire event
+  // sessions.queuedMessages.list (platform 1.8.0's interaction-wins round). No wire event
   // exists for this verb yet, so the Composer's queued-messages panel refetches
   // manually/on mutation success, same standing gap fleet.*/checkpoints.*/memory.*
   // document elsewhere in this file.
   sessionQueuedMessages: (sessionId: string) => ['sessions', sessionId, 'queued-messages'] as const,
-  // fleet.graph.get (SDK 1.8.0's fix-phase workstream rework). No wire event exists for
+  // fleet.graph.get (platform 1.8.0's fix-phase workstream rework). No wire event exists for
   // this verb yet either, same standing gap. Keyed by workstreamId so switching the
   // selected workstream refetches honestly rather than serving a stale graph.
   fleetGraph: (workstreamId: string) => ['fleet', 'graph', workstreamId] as const,
-  // tailscale.get (SDK 1.8.0's LAN-http posture work), the read-only environment
+  // tailscale.get (platform 1.8.0's LAN-http posture work), the read-only environment
   // probe behind the one-action "Serve over tailscale" affordance. No wire event
   // exists for this verb yet, so TailscaleSettings polls/refetches manually, same
   // standing gap pairingTokens/fleetGraph document above.
   tailscale: ['tailscale', 'get'] as const,
-  // memory.consolidation.receipts (SDK 1.8.0), retained consolidation run receipts
+  // memory.consolidation.receipts (platform 1.8.0), retained consolidation run receipts
   // + pending judgment proposals. No wire event exists for this verb yet either,
   // same standing gap; the panel refetches manually/on demand.
   memoryConsolidationReceipts: ['memory', 'consolidation', 'receipts'] as const,
@@ -196,14 +196,14 @@ export const queryKeys = {
 export async function loadBootSnapshot() {
   const entries = await Promise.allSettled([
     getCurrentAuth(),
-    sdk.operator.control.status(),
-    sdk.operator.control.snapshot(),
-    sdk.operator.accounts.snapshot(),
-    sdk.operator.providers.list(),
-    sdk.operator.tasks.list(),
-    sdk.operator.approvals.list(),
-    sdk.operator.sessions.list(),
-    sdk.knowledge.status(),
+    platformClient.operator.control.status(),
+    platformClient.operator.control.snapshot(),
+    platformClient.operator.accounts.snapshot(),
+    platformClient.operator.providers.list(),
+    platformClient.operator.tasks.list(),
+    platformClient.operator.approvals.list(),
+    platformClient.operator.sessions.list(),
+    platformClient.knowledge.status(),
     invokeMethod('knowledge.sources.list', { limit: 100 }),
     invokeMethod('knowledge.nodes.list', { limit: 100 }),
     invokeMethod('knowledge.issues.list', { limit: 100 }),

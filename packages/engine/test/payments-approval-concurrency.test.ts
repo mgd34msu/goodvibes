@@ -1,8 +1,8 @@
 import * as fs from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, expect, spyOn, test } from 'bun:test';
-import { DaemonApprovalStore, PaymentApprovalStoreError } from '../sdk/src/platform/payments/host/approval-store.js';
-import { tryAcquireCrossProcessLock } from '../sdk/src/platform/workspace/checkpoint/cross-process-lock.js';
+import { DaemonApprovalStore, PaymentApprovalStoreError } from '../platform/src/platform/payments/host/approval-store.js';
+import { tryAcquireCrossProcessLock } from '../platform/src/platform/workspace/checkpoint/cross-process-lock.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const ACTION = 'payments.checkout.begin';
@@ -84,7 +84,7 @@ test('a failed directory confirmation never restores a spent approval from memor
 test('actual concurrent processes have exactly one successful spend of the original grant', async () => {
   new DaemonApprovalStore(filePath).grant({ action: ACTION, content: CONTENT });
   const childPath = join(makeProjectTempDir('approval-processes'), 'spend.ts');
-  const module = new URL('../sdk/src/platform/payments/host/approval-store.ts', import.meta.url).href;
+  const module = new URL('../platform/src/platform/payments/host/approval-store.ts', import.meta.url).href;
   fs.writeFileSync(childPath, `import { DaemonApprovalStore, PaymentApprovalStoreError } from ${JSON.stringify(module)};
 const store = new DaemonApprovalStore(process.argv[2]!);
 const input = JSON.parse(process.argv[3]!);

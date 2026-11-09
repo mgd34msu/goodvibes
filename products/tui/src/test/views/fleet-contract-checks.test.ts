@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { ProcessCheckSummary, ProcessNode } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
+import type { ProcessCheckSummary, ProcessNode } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import { renderCheckLines, renderFleetDetailLines } from '../../views/fleet-format.ts';
 import { contractFixture } from '../helpers/contract-work-tree-fixtures.ts';
 import { lineToString } from '../setup.ts';

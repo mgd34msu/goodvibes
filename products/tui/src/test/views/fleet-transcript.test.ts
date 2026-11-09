@@ -12,7 +12,7 @@ import { contractFixture } from '../helpers/contract-work-tree-fixtures.ts';
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ProcessNode } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
+import type { ProcessNode } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import {
   parseAgentLedger,
   renderFleetAgentTranscript,
@@ -286,8 +286,8 @@ describe('renderFleetLedgerFallback', () => {
 });
 
 // ---------------------------------------------------------------------------
-//, a real fixture matching the SDK writer's exact message vocabulary
-// (goodvibes-sdk packages/sdk/src/platform/agents/session.ts's `meta` message
+//, a real fixture matching the platform writer's exact message vocabulary
+// (goodvibes-platform packages/engine/platform/src/platform/agents/session.ts's `meta` message
 // and orchestrator-runner.ts's session_config/llm_request/llm_response/
 // tool_execution/session_end messages, see this test's fixture file for the
 // exact field names each type carries). Exercises parseAgentLedger +

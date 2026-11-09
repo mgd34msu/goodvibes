@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync, symlinkSync, unlinkSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NativeWorkSubmissionPreflight } from '../../runtime/native-work-submission-preflight.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createNativeWorkLedgerHost } from '../../runtime/native-work-ledger-host.ts';
 
 import { pairNativeTestHost, replaceNativeTestCredential } from '../helpers/native-host-pairing.ts';

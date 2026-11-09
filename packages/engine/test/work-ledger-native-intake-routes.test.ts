@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test';
-import { GatewayMethodCatalog, type GatewayMethodInvocation } from '../sdk/src/platform/control-plane/method-catalog.js';
-import { registerNativeConversationIntakeGatewayMethods } from '../sdk/src/platform/control-plane/routes/native-intake.js';
-import { NativeConversationIntakeError, type NativeConversationIntakeHost } from '../sdk/src/platform/workflow/work-ledger/native-intake.js';
-import type { NativeConversationIntakeResult } from '../sdk/src/platform/workflow/work-ledger/native-intake-wire.js';
-import type { NativePairedSnapshot } from '../sdk/src/platform/security/http-auth.js';
+import { GatewayMethodCatalog, type GatewayMethodInvocation } from '../platform/src/platform/control-plane/method-catalog.js';
+import { registerNativeConversationIntakeGatewayMethods } from '../platform/src/platform/control-plane/routes/native-intake.js';
+import { NativeConversationIntakeError, type NativeConversationIntakeHost } from '../platform/src/platform/workflow/work-ledger/native-intake.js';
+import type { NativeConversationIntakeResult } from '../platform/src/platform/workflow/work-ledger/native-intake-wire.js';
+import type { NativePairedSnapshot } from '../platform/src/platform/security/http-auth.js';
 const scopes = ['read:work-ledger', 'write:work-ledger'];
 const sourceRef = { version: 1 as const, inputId: 'input-1', sourceId: 'source-1', sourceRevision: 'revision-1', sessionId: 'session-1' };
 const captured = (): NativeConversationIntakeResult => ({ kind: 'captured', projectId: 'project-1', requestId: 'request-1', sourceRef: { ...sourceRef } });

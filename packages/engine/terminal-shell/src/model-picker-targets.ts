@@ -1,5 +1,5 @@
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { ModelPickerTargetInfo } from './model-picker-types.js';
 export function buildConversationModelPickerTargets(
   configManager: Pick<ConfigManager, 'get'>,

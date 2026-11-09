@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { basename, join } from 'node:path';
 import { makeProjectTempDir } from './_helpers/project-temp.js';
-import { AtomicWriteDurabilityError, STALE_TEMP_FILE_MIN_AGE_MS, writeFileAtomic, writeJsonFileAtomic } from '../sdk/src/platform/utils/atomic-json-store.js';
+import { AtomicWriteDurabilityError, STALE_TEMP_FILE_MIN_AGE_MS, writeFileAtomic, writeJsonFileAtomic } from '../platform/src/platform/utils/atomic-json-store.js';
 const restore: Array<() => void> = [];
 afterEach(() => { for (const close of restore.splice(0).reverse()) close(); });
 function fixture() { const root = makeProjectTempDir('atomic-owned-file'); return { root, file: join(root, 'state.json') }; }

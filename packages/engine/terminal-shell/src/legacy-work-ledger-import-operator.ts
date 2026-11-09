@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { drainOwned, parseJevDecision } from '@goodvibes-jev/judgment/decisions';
-import { createOperatorSdk } from '@goodvibes-jev/engine/operator-sdk';
+import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
 import { array, boolean, enum as enumSchema, literal, object, record, strictObject, string, union, unknown } from 'zod/v4';
-import { validateLegacyWorkLedgerManifest, type LegacyMigrationPreparation } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger';
+import { validateLegacyWorkLedgerManifest, type LegacyMigrationPreparation } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 import { bindingKey, LegacyImportJournal, type LegacyImportBinding, type LegacyImportEntry, type LegacyImportCommand, type LegacyImportJournalOptions, legacyImportResultSchema } from './legacy-work-ledger-import-journal.js';
 
 export interface LegacyImportHost { readonly baseUrl: string; readonly token: string; readonly workspace: string; readonly selectionIdentity?: string }
@@ -20,7 +20,7 @@ const preparationSchema = union([
   strictObject({ kind: literal('blocked'), code: enumSchema(['cancelled', 'pending-local-changes', 'invalid-source', 'limit', 'identity-conflict', 'target-conflict', 'stale-preparation']), reason: string() }),
 ]);
 function clientFor(host: LegacyImportHost, current: () => void): LegacyImportOperatorClient {
-  const client = createOperatorSdk({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: async (input, init) => {
+  const client = createOperatorApiClient({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: async (input, init) => {
     current(); const response = await fetch(input, { ...init, redirect: 'error' }); current(); return response;
   } });
   return { currentAuth: signal => client.control.auth.current({}, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000) }),

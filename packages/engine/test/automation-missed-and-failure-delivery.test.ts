@@ -13,17 +13,17 @@ import { describe, expect, test } from 'bun:test';
 import {
   maybeDeliverAutomationFailureNotice,
   resolveAutomationFailureNoticeTargets,
-} from '../sdk/src/platform/automation/manager-runtime-delivery.ts';
+} from '../platform/src/platform/automation/manager-runtime-delivery.ts';
 import {
   describeMissedRunReason,
   recordAutomationMissedRun,
-} from '../sdk/src/platform/automation/manager-runtime-missed.ts';
-import { scheduleAutomationJob } from '../sdk/src/platform/automation/manager-runtime-scheduling.ts';
-import { createDaemonRuntimeAutomationRouteHandlers } from '../daemon-sdk/src/runtime-automation-routes.ts';
-import type { AutomationDeliveryManager } from '../sdk/src/platform/automation/delivery-manager.ts';
-import type { AutomationDeliveryTarget } from '../sdk/src/platform/automation/delivery.ts';
-import type { AutomationJob } from '../sdk/src/platform/automation/jobs.ts';
-import type { AutomationRun } from '../sdk/src/platform/automation/runs.ts';
+} from '../platform/src/platform/automation/manager-runtime-missed.ts';
+import { scheduleAutomationJob } from '../platform/src/platform/automation/manager-runtime-scheduling.ts';
+import { createDaemonRuntimeAutomationRouteHandlers } from '../daemon-api/src/runtime-automation-routes.ts';
+import type { AutomationDeliveryManager } from '../platform/src/platform/automation/delivery-manager.ts';
+import type { AutomationDeliveryTarget } from '../platform/src/platform/automation/delivery.ts';
+import type { AutomationJob } from '../platform/src/platform/automation/jobs.ts';
+import type { AutomationRun } from '../platform/src/platform/automation/runs.ts';
 
 function makeJob(overrides: Partial<AutomationJob> = {}): AutomationJob {
   const now = Date.now();

@@ -1,5 +1,5 @@
 import { resolveConnectedHostBaseUrl } from '../config/connected-host-dial.ts';
-import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { resolveRuntimeEndpointBinding } from '../cli/endpoints.ts';
 import { inspectCliExternalRuntime, type CliExternalRuntimeSnapshot } from '../cli/external-runtime.ts';
 import type { CommandContext } from '../input/command-registry.ts';

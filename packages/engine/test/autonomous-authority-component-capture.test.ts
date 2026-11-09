@@ -6,13 +6,13 @@ import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibe
 import { captureJevDecisionContext, JEV_DECISION_BINDING_KEYS } from '@goodvibes-jev/judgment/decisions';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { captureAutonomousCatalogContext, inspectDecisionProtocolReferences } from '../sdk/src/platform/gate/autonomous-decision.ts';
-import { autonomousSourceEvidence, captureAutonomousChoices, captureAutonomousSource, captureAutonomousSourceFrame } from '../sdk/src/platform/permissions/autonomous.ts';
-import { createPermissionConfigReader, PermissionManager } from '../sdk/src/platform/permissions/manager.ts';
-import { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.ts';
-import { assertCurrentToolEffect, ToolRegistry } from '../sdk/src/platform/tools/registry.ts';
-import type { NativeSelectedDiffContext } from '../sdk/src/platform/workflow/work-ledger/native-diff-context.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { captureAutonomousCatalogContext, inspectDecisionProtocolReferences } from '../platform/src/platform/gate/autonomous-decision.ts';
+import { autonomousSourceEvidence, captureAutonomousChoices, captureAutonomousSource, captureAutonomousSourceFrame } from '../platform/src/platform/permissions/autonomous.ts';
+import { createPermissionConfigReader, PermissionManager } from '../platform/src/platform/permissions/manager.ts';
+import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
+import { assertCurrentToolEffect, ToolRegistry } from '../platform/src/platform/tools/registry.ts';
+import type { NativeSelectedDiffContext } from '../platform/src/platform/workflow/work-ledger/native-diff-context.ts';
 import { forgetGateReadings, gateReadingsPort, READ_ONLY } from './_helpers/gate-readings.ts';
 
 const NAME = 'component_capture_effect';

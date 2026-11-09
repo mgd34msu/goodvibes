@@ -24,7 +24,7 @@ import {
   resolveDefaultModelReadiness,
   type ModelProviderSource,
   type OnboardingModelCopy,
-} from '@goodvibes-jev/engine/sdk/platform/providers';
+} from '@goodvibes-jev/engine/platform/platform/providers';
 import type { CommandContext } from '../../input/command-registry.ts';
 import type { SelectionItem } from '../../input/selection-modal.ts';
 import { writeOnboardingCheckMarker } from './markers.ts';

@@ -143,7 +143,7 @@ describe('TUI-owned explicit host pairing', () => {
       expect(f.migrations).toBe(0); expect(readTuiHostPairing(f.home, f.host).status).toBe('missing');
     } finally { f.close(); }
   });
-  test('selection change during SDK preparation prevents bootstrap dispatch', async () => {
+  test('selection change during platform preparation prevents bootstrap dispatch', async () => {
     const f = fixture(); try {
       const pending = previewTuiHostPairing(f.options);
       f.configManager.set('controlPlane.port', 1);

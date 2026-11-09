@@ -2,7 +2,7 @@
  * git-structured-diff.test.ts, /git diff routes to real diff machinery.
  *
  * Defect class: the consumer's /git diff sliced raw text at 4,000 chars and
- * printed the stub. The SDK now serves the diff STRUCTURALLY (per-file,
+ * printed the stub. The platform now serves the diff STRUCTURALLY (per-file,
  * per-hunk, per-line, no size cap anywhere), so surfaces render it with their
  * diff-view machinery and the truncation branch is deleted. The completeness
  * proof: a diff far larger than 4,000 chars parses and reconstructs
@@ -13,8 +13,8 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { GitService } from '../sdk/src/platform/git/service.ts';
-import { parseUnifiedDiff, reconstructUnifiedDiff } from '../sdk/src/platform/git/structured-diff.ts';
+import { GitService } from '../platform/src/platform/git/service.ts';
+import { parseUnifiedDiff, reconstructUnifiedDiff } from '../platform/src/platform/git/structured-diff.ts';
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf-8' });

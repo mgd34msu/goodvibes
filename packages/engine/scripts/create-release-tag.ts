@@ -1,7 +1,7 @@
 /**
  * create-release-tag.ts
  *
- * Creates an annotated git tag for the current SDK version.
+ * Creates an annotated git tag for the current engine version.
  * Usage: bun scripts/create-release-tag.ts [--push]
  *
  * See docs/release-and-publishing.md for the full release workflow.
@@ -13,14 +13,14 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SDK_ROOT = resolve(__dirname, '..');
-const sdkPkg = JSON.parse(readFileSync(resolve(SDK_ROOT, 'package.json'), 'utf8'));
-const version: string = sdkPkg.version;
+const ENGINE_ROOT = resolve(__dirname, '..');
+const enginePkg = JSON.parse(readFileSync(resolve(ENGINE_ROOT, 'package.json'), 'utf8'));
+const version: string = enginePkg.version;
 const tag = `v${version}`;
 const PUSH = process.argv.includes('--push');
 
 function run(cmd: string, args: string[]): string {
-  return execFileSync(cmd, args, { cwd: SDK_ROOT, encoding: 'utf8', stdio: ['pipe', 'pipe', 'inherit'] });
+  return execFileSync(cmd, args, { cwd: ENGINE_ROOT, encoding: 'utf8', stdio: ['pipe', 'pipe', 'inherit'] });
 }
 
 // Verify working tree is clean

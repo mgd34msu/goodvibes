@@ -1,4 +1,4 @@
-import { registerWorkLedgerGatewayMethods } from '../../sdk/src/platform/control-plane/routes/work-ledger.js';
+import { registerWorkLedgerGatewayMethods } from '../../platform/src/platform/control-plane/routes/work-ledger.js';
 /**
  * _helpers/gateway-verb-required-probe.ts
  *
@@ -38,57 +38,57 @@ import { registerWorkLedgerGatewayMethods } from '../../sdk/src/platform/control
  * `GatewayVerbError.field`, which the handlers set explicitly, see that
  * class's doc comment for why prose parsing was rejected.
  */
-import { GatewayMethodCatalog } from '../../sdk/src/platform/control-plane/method-catalog.js';
+import { GatewayMethodCatalog } from '../../platform/src/platform/control-plane/method-catalog.js';
 import {
   GatewayVerbError,
   isGatewayVerbError,
-} from '../../sdk/src/platform/control-plane/routes/gateway-verb-error.js';
+} from '../../platform/src/platform/control-plane/routes/gateway-verb-error.js';
 import type {
   GatewayMethodDescriptor,
   GatewayMethodInvocationContext,
-} from '../../sdk/src/platform/control-plane/method-catalog-shared.js';
+} from '../../platform/src/platform/control-plane/method-catalog-shared.js';
 
-import { registerAcpGatewayMethods } from '../../sdk/src/platform/control-plane/routes/acp.js';
-import { registerApprovalRaiseGatewayMethods } from '../../sdk/src/platform/control-plane/routes/approvals-raise.js';
-import { registerCredentialWriteGatewayMethods } from '../../sdk/src/platform/control-plane/routes/credentials-write.js';
-import { registerBrowserGatewayMethods } from '../../sdk/src/platform/control-plane/routes/browser.js';
-import { registerCalendarGatewayMethods } from '../../sdk/src/platform/control-plane/routes/calendar.js';
-import { registerChannelProfilesGatewayMethods } from '../../sdk/src/platform/control-plane/routes/channel-profiles.js';
-import { registerChannelSyncGatewayMethods } from '../../sdk/src/platform/control-plane/routes/channel-sync.js';
-import { registerChannelTestGatewayMethods } from '../../sdk/src/platform/control-plane/routes/channel-test.js';
-import { registerRelayGatewayMethods } from '../../sdk/src/platform/control-plane/routes/relay.js';
-import { registerUpdateGatewayMethods } from '../../sdk/src/platform/control-plane/routes/update.js';
-import { registerCheckinGatewayMethods } from '../../sdk/src/platform/control-plane/routes/checkin.js';
-import { registerCiGatewayMethods } from '../../sdk/src/platform/control-plane/routes/ci.js';
-import { registerCostGatewayMethods } from '../../sdk/src/platform/control-plane/routes/cost.js';
-import { registerDevicesGatewayMethods } from '../../sdk/src/platform/control-plane/routes/devices.js';
-import { registerDaemonEmailVerbs } from '../../sdk/src/platform/control-plane/routes/email-composition.js';
-import { registerEmailGatewayMethods } from '../../sdk/src/platform/control-plane/routes/email.js';
-import { registerEmailExpectationGatewayMethods } from '../../sdk/src/platform/control-plane/routes/email-expectations.ts';
-import { registerOccasionsGatewayMethods } from '../../sdk/src/platform/control-plane/routes/occasions.ts';
-import { registerOwnerProfileGatewayMethods } from '../../sdk/src/platform/control-plane/routes/owner-profile.ts';
-import { registerPaymentsGatewayMethods } from '../../sdk/src/platform/control-plane/routes/payments.ts';
-import { registerFlagsGraduationGatewayMethods } from '../../sdk/src/platform/control-plane/routes/flags-graduation.js';
-import { registerFleetCheckpointsSearchGatewayMethods } from '../../sdk/src/platform/control-plane/routes/register-fleet-checkpoints-search.js';
-import { registerMemoryGatewayMethods } from '../../sdk/src/platform/control-plane/routes/memory.js';
-import { registerMemoryProjectionsGatewayMethods } from '../../sdk/src/platform/control-plane/routes/memory-projections.js';
-import { registerPairingGatewayMethods } from '../../sdk/src/platform/control-plane/routes/pairing.js';
-import { registerPairingHandoffGatewayMethods } from '../../sdk/src/platform/control-plane/routes/pairing-handoff.js';
-import { registerPermissionRulesGatewayMethods } from '../../sdk/src/platform/control-plane/routes/permission-rules.js';
-import { registerPowerGatewayMethods } from '../../sdk/src/platform/control-plane/routes/power.js';
-import { registerPrincipalsGatewayMethods } from '../../sdk/src/platform/control-plane/routes/principals.js';
-import { registerPushGatewayMethods } from '../../sdk/src/platform/control-plane/routes/push.js';
-import { registerRewindGatewayMethods } from '../../sdk/src/platform/control-plane/routes/rewind.js';
-import { createConversationRewindHostBroker, registerRewindConversationHostGatewayMethods } from '../../sdk/src/platform/control-plane/routes/rewind-conversation-hosts.js';
-import { registerRuntimeMetricsGatewayMethods } from '../../sdk/src/platform/control-plane/routes/runtime-metrics.js';
-import { registerSessionRuntimeGatewayMethods } from '../../sdk/src/platform/control-plane/routes/session-runtime.js';
-import { registerHostedSessionGatewayMethods } from '../../sdk/src/platform/control-plane/routes/hosted-sessions.js';
-import { registerSkillsGatewayMethods } from '../../sdk/src/platform/control-plane/routes/skills.js';
-import { registerStepUpGatewayMethods } from '../../sdk/src/platform/control-plane/routes/stepup.js';
-import { registerTailscaleGatewayMethods } from '../../sdk/src/platform/control-plane/routes/tailscale.js';
-import { registerVoiceSetupGatewayMethods } from '../../sdk/src/platform/control-plane/routes/voice-setup.js';
-import { registerWorkspacesGatewayMethods } from '../../sdk/src/platform/control-plane/routes/workspaces.js';
-import { registerWorktreeSetupGatewayMethods } from '../../sdk/src/platform/control-plane/routes/worktree-setup.js';
+import { registerAcpGatewayMethods } from '../../platform/src/platform/control-plane/routes/acp.js';
+import { registerApprovalRaiseGatewayMethods } from '../../platform/src/platform/control-plane/routes/approvals-raise.js';
+import { registerCredentialWriteGatewayMethods } from '../../platform/src/platform/control-plane/routes/credentials-write.js';
+import { registerBrowserGatewayMethods } from '../../platform/src/platform/control-plane/routes/browser.js';
+import { registerCalendarGatewayMethods } from '../../platform/src/platform/control-plane/routes/calendar.js';
+import { registerChannelProfilesGatewayMethods } from '../../platform/src/platform/control-plane/routes/channel-profiles.js';
+import { registerChannelSyncGatewayMethods } from '../../platform/src/platform/control-plane/routes/channel-sync.js';
+import { registerChannelTestGatewayMethods } from '../../platform/src/platform/control-plane/routes/channel-test.js';
+import { registerRelayGatewayMethods } from '../../platform/src/platform/control-plane/routes/relay.js';
+import { registerUpdateGatewayMethods } from '../../platform/src/platform/control-plane/routes/update.js';
+import { registerCheckinGatewayMethods } from '../../platform/src/platform/control-plane/routes/checkin.js';
+import { registerCiGatewayMethods } from '../../platform/src/platform/control-plane/routes/ci.js';
+import { registerCostGatewayMethods } from '../../platform/src/platform/control-plane/routes/cost.js';
+import { registerDevicesGatewayMethods } from '../../platform/src/platform/control-plane/routes/devices.js';
+import { registerDaemonEmailVerbs } from '../../platform/src/platform/control-plane/routes/email-composition.js';
+import { registerEmailGatewayMethods } from '../../platform/src/platform/control-plane/routes/email.js';
+import { registerEmailExpectationGatewayMethods } from '../../platform/src/platform/control-plane/routes/email-expectations.ts';
+import { registerOccasionsGatewayMethods } from '../../platform/src/platform/control-plane/routes/occasions.ts';
+import { registerOwnerProfileGatewayMethods } from '../../platform/src/platform/control-plane/routes/owner-profile.ts';
+import { registerPaymentsGatewayMethods } from '../../platform/src/platform/control-plane/routes/payments.ts';
+import { registerFlagsGraduationGatewayMethods } from '../../platform/src/platform/control-plane/routes/flags-graduation.js';
+import { registerFleetCheckpointsSearchGatewayMethods } from '../../platform/src/platform/control-plane/routes/register-fleet-checkpoints-search.js';
+import { registerMemoryGatewayMethods } from '../../platform/src/platform/control-plane/routes/memory.js';
+import { registerMemoryProjectionsGatewayMethods } from '../../platform/src/platform/control-plane/routes/memory-projections.js';
+import { registerPairingGatewayMethods } from '../../platform/src/platform/control-plane/routes/pairing.js';
+import { registerPairingHandoffGatewayMethods } from '../../platform/src/platform/control-plane/routes/pairing-handoff.js';
+import { registerPermissionRulesGatewayMethods } from '../../platform/src/platform/control-plane/routes/permission-rules.js';
+import { registerPowerGatewayMethods } from '../../platform/src/platform/control-plane/routes/power.js';
+import { registerPrincipalsGatewayMethods } from '../../platform/src/platform/control-plane/routes/principals.js';
+import { registerPushGatewayMethods } from '../../platform/src/platform/control-plane/routes/push.js';
+import { registerRewindGatewayMethods } from '../../platform/src/platform/control-plane/routes/rewind.js';
+import { createConversationRewindHostBroker, registerRewindConversationHostGatewayMethods } from '../../platform/src/platform/control-plane/routes/rewind-conversation-hosts.js';
+import { registerRuntimeMetricsGatewayMethods } from '../../platform/src/platform/control-plane/routes/runtime-metrics.js';
+import { registerSessionRuntimeGatewayMethods } from '../../platform/src/platform/control-plane/routes/session-runtime.js';
+import { registerHostedSessionGatewayMethods } from '../../platform/src/platform/control-plane/routes/hosted-sessions.js';
+import { registerSkillsGatewayMethods } from '../../platform/src/platform/control-plane/routes/skills.js';
+import { registerStepUpGatewayMethods } from '../../platform/src/platform/control-plane/routes/stepup.js';
+import { registerTailscaleGatewayMethods } from '../../platform/src/platform/control-plane/routes/tailscale.js';
+import { registerVoiceSetupGatewayMethods } from '../../platform/src/platform/control-plane/routes/voice-setup.js';
+import { registerWorkspacesGatewayMethods } from '../../platform/src/platform/control-plane/routes/workspaces.js';
+import { registerWorktreeSetupGatewayMethods } from '../../platform/src/platform/control-plane/routes/worktree-setup.js';
 
 /**
  * A stand-in for whatever service/deps a route group is handed.

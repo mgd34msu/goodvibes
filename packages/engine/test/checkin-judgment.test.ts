@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { DecisionModelsDisabledError, decisionModelPolicyState, installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
 import { createSystemOnePort, JudgmentError, SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { createProviderBackedCheckinJudge } from '../sdk/src/platform/checkin/judge.js';
-import { CheckinService } from '../sdk/src/platform/checkin/service.js';
-import { CheckinReceiptStore } from '../sdk/src/platform/checkin/receipts.js';
-import type { CheckinStateSnapshot } from '../sdk/src/platform/checkin/types.js';
-import type { ProviderRegistry } from '../sdk/src/platform/providers/registry.js';
+import { createProviderBackedCheckinJudge } from '../platform/src/platform/checkin/judge.js';
+import { CheckinService } from '../platform/src/platform/checkin/service.js';
+import { CheckinReceiptStore } from '../platform/src/platform/checkin/receipts.js';
+import type { CheckinStateSnapshot } from '../platform/src/platform/checkin/types.js';
+import type { ProviderRegistry } from '../platform/src/platform/providers/registry.js';
 
 let previous: JudgmentPort | undefined;
 let log: SqliteDecisionLog;

@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
-import { executeFetchInput } from '../sdk/src/platform/tools/fetch/runtime.js';
-import { withExternalOperationSource } from '../sdk/src/platform/permissions/external-operation-scope.js';
+import { executeFetchInput } from '../platform/src/platform/tools/fetch/runtime.js';
+import { withExternalOperationSource } from '../platform/src/platform/permissions/external-operation-scope.js';
 
 const originalFetch = globalThis.fetch;
 const source = { sourceOf: () => ({ goal: 'Read the local preview', criteria: ['Only this request'] }), assertCurrent() {} };
@@ -24,11 +24,11 @@ import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibe
 import { fakePort, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { gateReadingsPort, forgetGateReadings } from './_helpers/gate-readings.js';
-import { PermissionManager, type PermissionConfigReader } from '../sdk/src/platform/permissions/manager.js';
-import { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.js';
-import { buildLocalhostFetchApproval, type LocalhostFetchApprovalInput, type LocalhostFetchPermit } from '../sdk/src/platform/runtime/permissions/localhost-fetch-approval.js';
-import { admitLocalhostFetch } from '../sdk/src/platform/runtime/permissions/autonomous-localhost-fetch.js';
-import type { AutonomousToolPromptHost } from '../sdk/src/platform/runtime/permissions/autonomous-tool-prompts.js';
+import { PermissionManager, type PermissionConfigReader } from '../platform/src/platform/permissions/manager.js';
+import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.js';
+import { buildLocalhostFetchApproval, type LocalhostFetchApprovalInput, type LocalhostFetchPermit } from '../platform/src/platform/runtime/permissions/localhost-fetch-approval.js';
+import { admitLocalhostFetch } from '../platform/src/platform/runtime/permissions/autonomous-localhost-fetch.js';
+import type { AutonomousToolPromptHost } from '../platform/src/platform/runtime/permissions/autonomous-tool-prompts.js';
 
 let log: SqliteDecisionLog;
 let restore: ReturnType<typeof installJudgmentPort>;

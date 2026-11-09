@@ -16,9 +16,9 @@ import { mkdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { runAppendOnlyRetentionSweep } from '../sdk/src/platform/runtime/retention/append-only-registry.ts';
-import { resolveScopedDirectory } from '../sdk/src/platform/runtime/surface-root.ts';
-import { SessionManager } from '../sdk/src/platform/sessions/manager.ts';
+import { runAppendOnlyRetentionSweep } from '../platform/src/platform/runtime/retention/append-only-registry.ts';
+import { resolveScopedDirectory } from '../platform/src/platform/runtime/surface-root.ts';
+import { SessionManager } from '../platform/src/platform/sessions/manager.ts';
 
 const dirs: string[] = [];
 function tempDir(): string {

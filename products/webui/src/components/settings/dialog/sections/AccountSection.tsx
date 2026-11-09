@@ -131,7 +131,7 @@ export function AccountSection() {
 
       <SettingsBlock
         title="Operator token"
-        description={<>Paste a token deliberately. It is checked with <code>sdk.auth.current()</code>; an invalid token is cleared at once.</>}
+        description={<>Paste a token deliberately. It is checked with <code>platform.auth.current()</code>; an invalid token is cleared at once.</>}
       >
         <form className="settings-form" onSubmit={submitToken}>
           <Field label="Operator token">

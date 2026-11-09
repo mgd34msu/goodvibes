@@ -4,14 +4,14 @@ import * as fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { TriggerManager, TriggerSnapshotStore, TriggerStoreVersionError, checksumOf, getTriggerReapReportPath, loadTriggerSnapshot, saveTriggerSnapshot, validateSnapshot, writeReapReport, type TriggerRecoveryReport } from '../sdk/src/platform/triggers/index.ts';
+import { TriggerManager, TriggerSnapshotStore, TriggerStoreVersionError, checksumOf, getTriggerReapReportPath, loadTriggerSnapshot, saveTriggerSnapshot, validateSnapshot, writeReapReport, type TriggerRecoveryReport, type TriggerRecord } from '../platform/src/platform/triggers/index.ts';
 const roots: string[] = [];
 function fixture() { const root = fs.mkdtempSync(join(tmpdir(), 'trigger-snapshot-v2-')); roots.push(root); return { root, path: join(root, 'triggers.json') }; }
 afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
 const input = { daemonBootId: 'fixture-boot', triggers: [], grants: [], eventLog: [], now: 1000 } as const;
 const report: TriggerRecoveryReport = { at: 1000, reason: 'startup', triggersLoaded: 1, triggersReaped: 1, reapedIds: ['retired'], runsReaped: 0, observationsReaped: 0, eventsReaped: 0, orphanedProcesses: [] };
-function publishedV1() {
-  const body = { version: 1, daemonBootId: 'released-boot', savedAt: 1000, triggers: [], grants: [], eventLog: [] };
+function publishedV1(triggers: readonly unknown[] = []) {
+  const body = { version: 1, daemonBootId: 'released-boot', savedAt: 1000, triggers, grants: [], eventLog: [] };
   // Independent reproduction of the deployed v1 fixture representation only.
   return `${JSON.stringify({ ...body, checksum: createHash('sha256').update(JSON.stringify(body)).digest('hex') })}\n`;
 }
@@ -76,4 +76,68 @@ test('v2 fully validates grants/events/runtime records, beyond only a definition
   const base = { version: 2, daemonBootId: 'fixture', savedAt: 1, triggers: [], grants: [], eventLog: [] };
   expect('invalid' in validateSnapshot({ ...base, grants: [{ id: 'forged' }] })).toBe(true);
   expect('invalid' in validateSnapshot({ ...base, eventLog: [{ at: 1, triggerId: 'x', kind: 'condition', event: 'execute-arbitrary', fingerprint: '' }] })).toBe(true);
+});
+
+
+function platformToolRecord(state: 'idle' | 'cancelled' = 'idle'): TriggerRecord {
+  return {
+    definition: { id: 'bounded-inspection', label: 'Bounded inspection', createdAt: 1000,
+      spec: { kind: 'condition', probe: { kind: 'platform-tool', tool: 'status.inspect', input: { detail: 'summary' } }, extract: { kind: 'raw' }, rule: { kind: 'change' } },
+      action: { kind: 'agent-turn', prompt: 'Review the bounded inspection result.' } },
+    state, observations: [], runs: [], ruleState: {}, strikes: 0, backoffRung: 0, firedCount: 0, droppedLines: 0, updatedAt: 1000,
+  };
+}
+/** The deployed old probe spelling appears only in actual saved-input fixtures. */
+function savedEarlierToolRecord(state: 'idle' | 'cancelled' = 'idle') {
+  const record = platformToolRecord(state), spec = record.definition.spec;
+  if (spec.kind !== 'condition') throw Error('Expected condition fixture');
+  return { ...record, definition: { ...record.definition, spec: { ...spec, probe: { ...spec.probe, kind: 'sdk-tool' } } } };
+}
+
+for (const version of [1, 2]) test(`actual saved v${version} earlier tool probes normalize on read and publish only canonical data`, () => {
+  const { root, path: previousPath } = fixture(), path = join(root, 'triggers-v2.json');
+  const previous = version === 1 ? publishedV1([savedEarlierToolRecord('cancelled')]) : undefined;
+  const earlier = version === 2 ? `${JSON.stringify({ version: 2, daemonBootId: 'earlier', savedAt: 1000, triggers: [savedEarlierToolRecord()], grants: [], eventLog: [] })}\n` : undefined;
+  if (previous !== undefined) fs.writeFileSync(previousPath, previous, { mode: 0o600 });
+  if (earlier !== undefined) fs.writeFileSync(path, earlier, { mode: 0o600 });
+  const formats: string[] = [];
+  const store = new TriggerSnapshotStore(path, () => { formats.push('trigger-snapshots-v2'); }, version === 1 ? previousPath : undefined,
+    () => { formats.push('trigger-platform-tool-kind-v1'); });
+  const loaded = store.load(true).snapshot;
+  expect(loaded).not.toBeNull();
+  const probe = loaded!.triggers[0]?.definition.spec;
+  expect(probe?.kind === 'condition' && probe.probe.kind).toBe('platform-tool');
+  expect(formats).toEqual([]);
+  if (earlier !== undefined) expect(fs.readFileSync(path, 'utf8')).toBe(earlier);
+  if (previous !== undefined) expect(fs.readFileSync(previousPath, 'utf8')).toBe(previous);
+  store.save({ ...input, triggers: loaded!.triggers });
+  const published = fs.readFileSync(path, 'utf8');
+  expect(published).toContain('platform-tool'); expect(published).not.toContain('sdk-tool');
+  expect(formats).toContain('trigger-platform-tool-kind-v1');
+  if (previous !== undefined) expect(fs.readFileSync(previousPath, 'utf8')).toBe(previous);
+  expect('invalid' in validateSnapshot({ version: 2, daemonBootId: 'caller', savedAt: 1000, triggers: [savedEarlierToolRecord()], grants: [], eventLog: [] })).toBe(true);
+});
+
+test('actual manager refuses an incompatible platform-tool reader before changing saved trigger bytes or admitting effects', async () => {
+  const { path } = fixture();
+  const bytes = JSON.stringify({ version: 2, daemonBootId: 'earlier', savedAt: 1000, triggers: [savedEarlierToolRecord()], grants: [], eventLog: [] });
+  fs.writeFileSync(path, bytes, { mode: 0o600 });
+  let effects = 0; const formats: string[] = [];
+  const manager = new TriggerManager({ storePath: path, config: { enabled: true }, now: () => 1000,
+    nativeDataWriter: { declare(format) { formats.push(format); if (format === 'trigger-platform-tool-kind-v1') throw Error('reader cohort incompatible'); } },
+    actions: { async runAgentTurn() { effects++; return ''; }, async runGrant() { effects++; return ''; } } });
+  try {
+    expect(() => manager.load()).toThrow('reader cohort incompatible');
+    expect(formats).toContain('trigger-snapshots-v2'); expect(formats).toContain('trigger-platform-tool-kind-v1');
+    expect(fs.readFileSync(path, 'utf8')).toBe(bytes); expect(effects).toBe(0);
+    expect(fs.existsSync(`${path}.cutover.json`)).toBe(false);
+  } finally { manager.shutdown(); await manager.join(); }
+});
+
+test('an asynchronous platform-tool write restriction is drained and refuses before original snapshot mutation', () => {
+  const { path } = fixture(), bytes = JSON.stringify({ version: 2, daemonBootId: 'earlier', savedAt: 1000, triggers: [], grants: [], eventLog: [] });
+  fs.writeFileSync(path, bytes, { mode: 0o600 });
+  const store = new TriggerSnapshotStore(path, undefined, undefined, async () => { throw Error('retired reader'); });
+  store.load(); expect(() => store.save({ ...input, triggers: [platformToolRecord()] })).toThrow();
+  expect(fs.readFileSync(path, 'utf8')).toBe(bytes); expect(fs.existsSync(`${path}.cutover.json`)).toBe(false);
 });

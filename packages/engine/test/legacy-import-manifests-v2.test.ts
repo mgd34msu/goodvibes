@@ -4,9 +4,9 @@ import * as crypto from 'node:crypto';
 import {
   assertLegacyWorkLedgerSourcesCurrent, matchLegacyWorkLedgerManifest, prepareLegacyWorkLedgerMigration,
   replayLegacyWorkLedgerPreparation, validateLegacyWorkLedgerManifest, type LegacyMigrationInput, type LegacyMigrationManifest,
-} from '../sdk/src/platform/workflow/work-ledger/legacy-import.js';
-import { workLedgerCommandSchema } from '../sdk/src/platform/workflow/work-ledger/types.js';
-import { createEmptyWorkLedgerState, createWorkLedger, readWorkLedgerState } from '../sdk/src/platform/workflow/work-ledger/service.js';
+} from '../platform/src/platform/workflow/work-ledger/legacy-import.js';
+import { workLedgerCommandSchema } from '../platform/src/platform/workflow/work-ledger/types.js';
+import { createEmptyWorkLedgerState, createWorkLedger, readWorkLedgerState } from '../platform/src/platform/workflow/work-ledger/service.js';
 
 function input(): LegacyMigrationInput {
   const decision = { id: 'decision', title: 'Preserve the decision', text: 'Exact historical text', status: 'accepted' };

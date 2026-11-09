@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test';
 import { decisionModelPolicyState, installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { withDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { withDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { fakePort, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { externalMemoryLiveProviderRecords, externalMemoryReceiptEvidence, setupStatusFromLiveRecord } from '../../tools/agent-harness-memory-external-providers.js';

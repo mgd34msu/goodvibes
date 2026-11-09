@@ -43,13 +43,13 @@ import {
   PersistedExpectationStore,
   type InboundMailSourceFactory,
   type InboundMailSupervisorDeps,
-} from '../sdk/src/platform/email/inbound/index.ts';
-import type { DedupingInboundMailSink } from '../sdk/src/platform/email/inbound/sink.ts';
-import type { InboundMailSource } from '../sdk/src/platform/email/inbound/source.ts';
+} from '../platform/src/platform/email/inbound/index.ts';
+import type { DedupingInboundMailSink } from '../platform/src/platform/email/inbound/sink.ts';
+import type { InboundMailSource } from '../platform/src/platform/email/inbound/source.ts';
 import type {
   ImapInboundMessage,
   InboundCapabilityVerdict,
-} from '../sdk/src/platform/email/inbound/ports.ts';
+} from '../platform/src/platform/email/inbound/ports.ts';
 
 const NOW = new Date('2026-07-28T09:00:00.000Z');
 const ACCOUNT = 'primary';

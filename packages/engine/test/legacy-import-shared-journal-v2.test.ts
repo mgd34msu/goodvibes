@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { LegacyImportJournal, type LegacyImportBinding } from '../terminal-shell/src/legacy-work-ledger-import-journal.js';
 import { openLegacyImportOperator, type LegacyImportOperatorOptions } from '../terminal-shell/src/legacy-work-ledger-import-operator.js';
 import { resolveLegacyImportJournalLocation, retainLegacyImportJournalOwner } from '../terminal-shell/src/legacy-work-ledger-import-path.js';
-import { prepareLegacyWorkLedgerMigration } from '../sdk/src/platform/workflow/work-ledger/legacy-import.js';
+import { prepareLegacyWorkLedgerMigration } from '../platform/src/platform/workflow/work-ledger/legacy-import.js';
 import fixture from '../../../products/agent/src/test/fixtures/legacy-ledger/preparation.json' with { type: 'json' };
 
 const roots: string[] = [];

@@ -3,7 +3,7 @@
  * are reachable and readable in the settings workspace.
  *
  * Triggers are configured entirely through config keys, so a key that exists in
- * the SDK schema but never surfaces in this app is a capability the owner cannot
+ * the platform schema but never surfaces in this app is a capability the owner cannot
  * actually tune. This is the same reachability pin the paired-phone and
  * wake-word families carry (device-settings-reachable.test.ts,
  * settings-wake-word-group.test.ts): every key routes into a group, the group

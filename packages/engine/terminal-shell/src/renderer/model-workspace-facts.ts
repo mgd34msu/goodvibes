@@ -1,4 +1,4 @@
-import type { ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { KitRow } from './surface-kit-list.js';
 import { activeTokens } from './theme.js';
 export function modelWorkspaceKey(model: ModelDefinition): string {

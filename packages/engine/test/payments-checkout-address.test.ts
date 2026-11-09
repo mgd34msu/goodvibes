@@ -18,11 +18,11 @@ import {
   type AddressFieldTarget,
   type AddressKind,
   type AddressStore,
-} from '../sdk/src/platform/payments/address.js';
-import { renderVetoMessage } from '../sdk/src/platform/payments/message.js';
-import { BudgetLedger } from '../sdk/src/platform/payments/budget.js';
-import { unsafeOwnerSuppliedTextForTests, type PostalAddress } from '../sdk/src/platform/payments/types.js';
-import type { CurrencyCode } from '../sdk/src/platform/payments/types.js';
+} from '../platform/src/platform/payments/address.js';
+import { renderVetoMessage } from '../platform/src/platform/payments/message.js';
+import { BudgetLedger } from '../platform/src/platform/payments/budget.js';
+import { unsafeOwnerSuppliedTextForTests, type PostalAddress } from '../platform/src/platform/payments/types.js';
+import type { CurrencyCode } from '../platform/src/platform/payments/types.js';
 
 const USD = 'USD' as CurrencyCode;
 

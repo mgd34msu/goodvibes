@@ -3,8 +3,8 @@ import { captureCatalogReadRequest, selectHarnessCatalog } from './agent-harness
 import { captureStatefulCatalogRequest, rankStatefulCatalog } from './agent-harness-stateful-catalog-source.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import { buildMcpAttackPathReview, captureUiSecurityReadSource } from '@/runtime/index.ts';
-import { capturePolicyRuntimeReadSource } from '@goodvibes-jev/engine/sdk/platform/runtime/security';
-import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/sdk/platform/config';
+import { capturePolicyRuntimeReadSource } from '@goodvibes-jev/engine/platform/platform/runtime/security';
+import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/platform/platform/config';
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 

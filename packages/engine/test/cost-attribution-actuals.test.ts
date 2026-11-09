@@ -7,16 +7,16 @@
  * to the session total.
  */
 import { describe, expect, test } from 'bun:test';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
-import { withCostOriginAsync } from '../sdk/src/platform/runtime/cost/cost-origin.ts';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
+import { withCostOriginAsync } from '../platform/src/platform/runtime/cost/cost-origin.ts';
 import {
   CostAttributionService,
   type ResolvePricing,
-} from '../sdk/src/platform/runtime/cost/attribution.ts';
-import { emitLlmResponseReceived } from '../sdk/src/platform/runtime/emitters/turn.ts';
-import { ToolLLM } from '../sdk/src/platform/config/tool-llm.ts';
-import { HelperModel } from '../sdk/src/platform/config/helper-model.ts';
-import type { LLMProvider, ChatResponse } from '../sdk/src/platform/providers/interface.ts';
+} from '../platform/src/platform/runtime/cost/attribution.ts';
+import { emitLlmResponseReceived } from '../platform/src/platform/runtime/emitters/turn.ts';
+import { ToolLLM } from '../platform/src/platform/config/tool-llm.ts';
+import { HelperModel } from '../platform/src/platform/config/helper-model.ts';
+import type { LLMProvider, ChatResponse } from '../platform/src/platform/providers/interface.ts';
 
 const pricing: ResolvePricing = () => ({ input: 3, output: 15 });
 

@@ -362,7 +362,7 @@ export function setupHandoffsForItem(item: SetupPlanItem): readonly SetupHandoff
           effect: 'read-only',
           userRoute: item.userRoute,
           modelRoute: 'setup action:"item" setupItemId:"sudo-execution-posture"',
-          nextStep: 'Review foreground-only escalation posture, SUDO_PASSWORD presence, blocked background routes, and missing SDK/daemon contracts.',
+          nextStep: 'Review foreground-only escalation posture, SUDO_PASSWORD presence, blocked background routes, and missing platform/daemon contracts.',
           safety: 'Read-only setup posture; raw sudo password values are never read, stored, or returned.',
         }),
         setupHandoff({

@@ -1,8 +1,8 @@
 /** Real git, runner, paired host and authenticated wire behind the production modal. */
 import { expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
-import { createOperatorSdk } from '@goodvibes-jev/engine/operator-sdk';
-import { createOperatorNativeWorkExecutionClient } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
+import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
+import { createOperatorNativeWorkExecutionClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
 import { operatorWorkLedgerSelection } from '../../../runtime/native-work-ledger.ts';
 import { createNativeWorkLedgerModalSurface } from '../../../views/modals/native-work-ledger-modal.ts';
 import { ConfigModal } from '../../../input/config-modal.ts';
@@ -25,8 +25,8 @@ test('actual native conflict and autonomous fix-passed reach the TUI as separate
   let client: ReturnType<typeof createOperatorNativeWorkExecutionClient> | undefined;
   try {
     const ready = await host.ready();
-    const sdk = createOperatorSdk({ baseUrl: ready.baseUrl, authToken: ready.token, retry: { maxAttempts: 1 } });
-    client = createOperatorNativeWorkExecutionClient(sdk, 'project');
+    const platformClient = createOperatorApiClient({ baseUrl: ready.baseUrl, authToken: ready.token, retry: { maxAttempts: 1 } });
+    client = createOperatorNativeWorkExecutionClient(platformClient, 'project');
     const before = await client.status(ready.identity, { signal: AbortSignal.timeout(10_000) });
     if (before.kind !== 'execution' || before.integration?.state !== 'live') throw new Error('Expected live native conflict');
     expect(before.receipt?.contractId).toBe(ready.contractId);
@@ -35,7 +35,7 @@ test('actual native conflict and autonomous fix-passed reach the TUI as separate
     if (!conflicted || conflicted.item.state !== 'recorded') throw new Error('Expected the actual conflicted item');
     const item = conflicted.item;
     expect(existsSync(item.worktreePath!)).toBe(true);
-    const surface = createNativeWorkLedgerModalSurface(() => operatorWorkLedgerSelection('paired-native-host', before.projectId, sdk));
+    const surface = createNativeWorkLedgerModalSurface(() => operatorWorkLedgerSelection('paired-native-host', before.projectId, platformClient));
     const route = { configModal: modal, requestRender() {}, handleEscape: () => modal.close() };
     const key = (logicalName: string) => handleConfigModalToken(route, { type: 'key', logicalName } as never);
     const tab = (id: string) => {
@@ -84,13 +84,13 @@ for (const afterRepair of [false, true]) test(`an actual legacy runner keeps nat
   let primaryError: unknown;
   try {
     const ready = await host.ready(); const paths: string[] = [];
-    const sdk = createOperatorSdk({ baseUrl: ready.baseUrl, authToken: ready.token, retry: { maxAttempts: 1 },
+    const platformClient = createOperatorApiClient({ baseUrl: ready.baseUrl, authToken: ready.token, retry: { maxAttempts: 1 },
       fetchImpl: (input, init) => {
         paths.push(new URL(input instanceof Request ? input.url : String(input)).pathname);
         return fetch(input, init); // Observe real HTTP requests; no replacement responses.
       },
     });
-    client = createOperatorNativeWorkExecutionClient(sdk, 'project');
+    client = createOperatorNativeWorkExecutionClient(platformClient, 'project');
     const before = await client.status(ready.identity, { signal: AbortSignal.timeout(10_000) });
     if (before.kind !== 'execution' || !before.progress) throw new Error('Legacy native runner must preserve real execution progress');
     expect(before.receipt?.contractId).toBe(ready.contractId);
@@ -98,7 +98,7 @@ for (const afterRepair of [false, true]) test(`an actual legacy runner keeps nat
       expectedRevision: ready.identity.expectedRevision, integration: { state: 'unavailable', reason: 'unsupported-runner' },
       progress: { semanticState: 'deciding', stage: 'fix-plan' } });
     expect(Object.keys(before.integration!).sort()).toEqual(['reason', 'state']);
-    const surface = createNativeWorkLedgerModalSurface(() => operatorWorkLedgerSelection('paired-legacy-runner', before.projectId, sdk));
+    const surface = createNativeWorkLedgerModalSurface(() => operatorWorkLedgerSelection('paired-legacy-runner', before.projectId, platformClient));
     const route = { configModal: modal, requestRender() {}, handleEscape: () => modal.close() };
     const key = (logicalName: string) => handleConfigModalToken(route, { type: 'key', logicalName } as never);
     const tab = (id: string) => {
@@ -166,7 +166,7 @@ test('held native HTTP status ordinals preserve captured response order across a
   const inFlight: Promise<unknown>[] = [];
   try {
     const ready = await host.ready();
-    client = createOperatorNativeWorkExecutionClient(createOperatorSdk({ baseUrl: ready.baseUrl, authToken: ready.token, retry: { maxAttempts: 1 } }), 'project');
+    client = createOperatorNativeWorkExecutionClient(createOperatorApiClient({ baseUrl: ready.baseUrl, authToken: ready.token, retry: { maxAttempts: 1 } }), 'project');
     await host.holdStatus();
     let settled = false;
     const pending = client.status(ready.identity, { signal: AbortSignal.timeout(20_000) }).then(snapshot => { settled = true; return snapshot; });

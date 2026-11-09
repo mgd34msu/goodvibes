@@ -10,7 +10,7 @@ No external provider or production account is contacted.
 Every recorded native response `body` is the original `Response.text()` and is
 replayed unchanged. All native source, project, session, broker, and correlation
 identities originated in that test run. The fixture loader checks request inputs
-and response outputs against both the generated operator contract and SDK schemas.
+and response outputs against both the generated operator contract and platform schemas.
 
 The second model request evidence contains the original user/assistant message
 objects selected from the actual provider request. Unrelated system/tool definitions

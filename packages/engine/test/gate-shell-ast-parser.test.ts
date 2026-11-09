@@ -22,7 +22,7 @@ import {
   type PipeNode,
   type SequenceNode,
   type SubshellNode,
-} from '../sdk/src/platform/runtime/permissions/normalization/index.ts';
+} from '../platform/src/platform/runtime/permissions/normalization/index.ts';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -273,7 +273,7 @@ describe('parseAST: from token list', () => {
         },
         enumerable: true,
       },
-    ) as unknown as import('../sdk/src/platform/runtime/permissions/normalization/index.ts').CommandToken;
+    ) as unknown as import('../platform/src/platform/runtime/permissions/normalization/index.ts').CommandToken;
 
     const result = parseAST([poisonToken]);
     expect(result.kind).toBe('command');

@@ -110,7 +110,7 @@ If messages only appear after the next send:
 - confirm the served app is on the latest cache-bust version
 - clear Vite optimized deps and restart the dev server
 - check browser console errors
-- verify `sdk.chat.messages.create` returns successfully
+- verify `platform.chat.messages.create` returns successfully
 - verify companion chat events are connected for the active session
 
 ## `SESSION_NOT_FOUND`
@@ -132,9 +132,9 @@ Then refresh the page.
 
 Plain WebUI chat must use companion chat:
 
-- `sdk.chat.sessions.create`
-- `sdk.chat.messages.create`
-- `sdk.chat.events.stream`
+- `platform.chat.sessions.create`
+- `platform.chat.messages.create`
+- `platform.chat.events.stream`
 
 Do not send plain chat through:
 
@@ -169,8 +169,8 @@ Use authenticated access where required. Runtime provider ids such as
 
 Attachment send flow:
 
-1. `sdk.artifacts.create`
-2. `sdk.chat.messages.create(sessionId, { body, attachments })`
+1. `platform.artifacts.create`
+2. `platform.chat.messages.create(sessionId, { body, attachments })`
 
 Common causes:
 
@@ -191,7 +191,7 @@ If Home Graph records appear in regular Knowledge by default:
 
 1. Keep WebUI payloads unchanged.
 2. Record the endpoint, payload, and returned ids/titles.
-3. Report it as an SDK/daemon scoping issue.
+3. Report it as an platform/daemon scoping issue.
 
 Do not "fix" this by filtering text, tags, or ids in WebUI.
 
@@ -210,8 +210,8 @@ Verify the served app version (match the version in `package.json`):
 curl -sS --max-time 3 http://127.0.0.1:3423/ | rg "$(node -p "require('./package.json').version")"
 ```
 
-Verify installed SDK:
+Verify installed platform:
 
 ```bash
-node -p "require('./node_modules/@goodvibes-jev/engine/sdk/package.json').version"
+node -p "require('./node_modules/@goodvibes-jev/engine/platform/package.json').version"
 ```

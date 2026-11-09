@@ -1,4 +1,4 @@
-import type { MemoryApi } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { AgentNoteRegistry } from '../agent/note-registry.ts';
 import { AgentPersonaRegistry } from '../agent/persona-registry.ts';

@@ -20,10 +20,10 @@
  */
 
 import { describe, expect, test, beforeEach, afterEach, spyOn, type Mock } from 'bun:test';
-import { notifyCompletion, isNotifySuppressed } from '../sdk/src/platform/utils/notify.ts';
+import { notifyCompletion, isNotifySuppressed } from '../platform/src/platform/utils/notify.ts';
 
 test('completion notification leaves piped JSON parseable after a long successful turn', async () => {
-  const modulePath = new URL('../sdk/src/platform/utils/notify.ts', import.meta.url).pathname;
+  const modulePath = new URL('../platform/src/platform/utils/notify.ts', import.meta.url).pathname;
   const script = `import { notifyCompletion } from ${JSON.stringify(modulePath)};
     notifyCompletion('GoodVibes', 'Response complete', 6000);
     process.stdout.write(JSON.stringify({ok:true,response:'Completed the requested project.'})+'\\n');`;

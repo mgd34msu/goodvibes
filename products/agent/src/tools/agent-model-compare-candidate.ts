@@ -1,6 +1,6 @@
-import { assertCurrentToolEffect, type ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { ToolExecuteOptions } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { assertCurrentToolEffect, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import type { ToolExecuteOptions } from '@goodvibes-jev/engine/platform/platform/tools';
 import { runCandidate, listSelectableModels, parseArtifactCandidate } from './agent-model-compare-run.ts';
 import { type AgentModelCompareToolDeps, type CompareCandidateResult, type ResolvedCompareModel } from './agent-model-compare-types.ts';
 import { assertComparisonCandidateSource, createComparisonCandidateProjector } from './agent-model-compare-candidate-input.ts';

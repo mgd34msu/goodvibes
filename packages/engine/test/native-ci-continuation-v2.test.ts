@@ -6,11 +6,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { captureNativeCiIssue, nativeCiIssueCommitment, captureNativeCiWatch, nativeCiWatchCommitment, captureNativeCiFailure, nativeCiFailureCommitment,
-  nativeCiConsumption, nativeCiSuccessorId, nativeCiSourceBinding, parseNativeCiContinuation, parseNativeCiContinuationJson } from '../sdk/src/platform/workflow/work-ledger/native-ci-continuation-types.js';
-import { bindNativeCiSourceIssuer, bindNativeCiWatchOwner, captureNativeCiWatchOwner, nativeCiWatchOwner, type NativeCiWatchOwner } from '../sdk/src/platform/ci-watch/native-owner.js';
-import type { ExternalOperationSource } from '../sdk/src/platform/permissions/external-request.js';
-import { captureAutonomousSource } from '../sdk/src/platform/permissions/autonomous.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
+  nativeCiConsumption, nativeCiSuccessorId, nativeCiSourceBinding, parseNativeCiContinuation, parseNativeCiContinuationJson } from '../platform/src/platform/workflow/work-ledger/native-ci-continuation-types.js';
+import { bindNativeCiSourceIssuer, bindNativeCiWatchOwner, captureNativeCiWatchOwner, nativeCiWatchOwner, type NativeCiWatchOwner } from '../platform/src/platform/ci-watch/native-owner.js';
+import type { ExternalOperationSource } from '../platform/src/platform/permissions/external-request.js';
+import { captureAutonomousSource } from '../platform/src/platform/permissions/autonomous.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 
 const roots: string[] = [], stores: KnowledgeStore[] = [];
 afterEach(async () => { for (const store of stores.splice(0)) await store.close(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

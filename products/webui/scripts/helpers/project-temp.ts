@@ -11,7 +11,7 @@
  * prefixes. This repo's contribution to that was small, 3 call sites when
  * this was written, but the same failure mode applies here.
  *
- * This module gives the scripts' tests (sdk-dev, pack-bundle, check-workflows,
+ * This module gives the scripts' tests (engine-dev, pack-bundle, check-workflows,
  * the generators) one place to create and clean up scratch directories:
  *
  *   - `makeProjectTempDir` roots scratch dirs under an in-repo `.test-tmp/`
@@ -63,7 +63,7 @@ export const PROJECT_TEMP_ROOT = join(REPO_ROOT, '.test-tmp');
  * - 'webui-gen-ownership-', 'webui-gen-presentation-'
  *                          scripts/generate-*.test.ts
  * - 'webui-check-workflows-' scripts/check-workflows.test.ts
- * - 'webui-sdk-dev-'       scripts/sdk-dev.test.ts
+ * - 'webui-engine-dev-'       scripts/engine-dev.test.ts
  * - 'webui-terminal-theme-' e2e/support/terminal-theme-host.ts
  * - 'temp-root-proof-'     scripts/test-temp-root.test.ts, only reaches the real
  *                          tmpdir if the preload redirect it tests has broken
@@ -83,7 +83,7 @@ export const KNOWN_TEMP_PREFIXES = [
   'webui-gen-ownership-',
   'webui-gen-presentation-',
   'webui-check-workflows-',
-  'webui-sdk-dev-',
+  'webui-engine-dev-',
   'webui-types-hook-',
   'webui-terminal-theme-',
   'temp-root-proof-',

@@ -12,7 +12,7 @@
  *
  * This repo's runner (`scripts/run-tests.ts`) gives every test file its own
  * process, so a poller left behind cannot reach an unrelated later file the way
- * it does in the single-process SDK suite. What it does instead is burn the
+ * it does in the single-process platform suite. What it does instead is burn the
  * rest of the file's runtime on work nobody is waiting for, hold the temp dirs
  * and SQLite handles those pollers write through, and make the file slower and
  * noisier than the behaviour it is testing. `scripts/leak-scan.ts` collapses
@@ -37,7 +37,7 @@
  * evaluation registers the hook in that file's scope, which is the only
  * reliable way to do this under a shared module cache.
  *
- * Kept deliberately identical to the SDK's `test/_helpers/disposables.ts`, so
+ * Kept deliberately identical to the platform's `test/_helpers/disposables.ts`, so
  * the two suites cannot drift into different ideas of what tracked teardown
  * means.
  */

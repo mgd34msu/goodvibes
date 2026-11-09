@@ -15,10 +15,10 @@ const root = process.cwd();
 // Reader evidence must come from the exact selected release source, not that
 // coordinator's former relative directory or a nearby installed engine.
 const { inspectTerminalReaderArtifact, retainTerminalReaderCohort } = await import(pathToFileURL(join(root, 'packages/engine/toolchain/src/lib/client-reader-artifact.ts')).href);
-const { clientReaderPayloadPaths, clientReaderMemberAsset } = await import(pathToFileURL(join(root, 'packages/engine/sdk/src/platform/runtime/client-reader-artifact.ts')).href);
-const { resolveDaemonNativePayloads, retainDaemonNativeFiles, parseDaemonCiArtifact, assertDaemonNativePayloadPins } = await import(pathToFileURL(join(root, 'packages/engine/sdk/src/platform/runtime/daemon-native-cohort.ts')).href);
-const { realUpdateFileIo } = await import(pathToFileURL(join(root, 'packages/engine/sdk/src/platform/runtime/update-file-io.ts')).href);
-const { parseNativeReaderCapabilities } = await import(pathToFileURL(join(root, 'packages/engine/sdk/src/platform/runtime/native-reader-compatibility.ts')).href);
+const { clientReaderPayloadPaths, clientReaderMemberAsset } = await import(pathToFileURL(join(root, 'packages/engine/platform/src/platform/runtime/client-reader-artifact.ts')).href);
+const { resolveDaemonNativePayloads, retainDaemonNativeFiles, parseDaemonCiArtifact, assertDaemonNativePayloadPins } = await import(pathToFileURL(join(root, 'packages/engine/platform/src/platform/runtime/daemon-native-cohort.ts')).href);
+const { realUpdateFileIo } = await import(pathToFileURL(join(root, 'packages/engine/platform/src/platform/runtime/update-file-io.ts')).href);
+const { parseNativeReaderCapabilities } = await import(pathToFileURL(join(root, 'packages/engine/platform/src/platform/runtime/native-reader-compatibility.ts')).href);
 const run = (command, args, cwd = root) => execFileSync(command, args, { cwd, stdio: ['ignore', 'pipe', 'inherit'], timeout: 300_000 }).toString().trim();
 const source = run('git', ['rev-parse', 'HEAD']);
 const sourceTree = run('git', ['rev-parse', 'HEAD^{tree}']);

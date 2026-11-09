@@ -5,7 +5,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, expect, test } from 'bun:test';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { buildShellFooter, type ShellFooterBuildOptions } from '../../renderer/shell-surface.ts';
 import { renderThrobberLine, resolveThrobberActivity, type ThrobberActivity, type ThrobberActivityInput, type ThrobberState } from '../../renderer/throbber.ts';
 import { renderToasts } from '../../renderer/surface-kit-parts.ts';

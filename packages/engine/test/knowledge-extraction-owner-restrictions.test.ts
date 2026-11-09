@@ -2,8 +2,8 @@
 import { afterEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { createKnowledgeExtractionOwner } from '../sdk/src/platform/knowledge/extraction-ownership.js';
-import { KnowledgeExtractionJudgmentHoldError, readKnowledgeExtractionTextUsability } from '../sdk/src/platform/knowledge/extraction-policy.js';
+import { createKnowledgeExtractionOwner } from '../platform/src/platform/knowledge/extraction-ownership.js';
+import { KnowledgeExtractionJudgmentHoldError, readKnowledgeExtractionTextUsability } from '../platform/src/platform/knowledge/extraction-policy.js';
 
 const previous = installJudgmentPort(undefined);
 afterEach(() => { installJudgmentPort(previous); });

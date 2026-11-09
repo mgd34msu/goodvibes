@@ -1,10 +1,10 @@
 import { screeningAnswers } from './_helpers/screening-answers.js';
 import { afterEach, expect, spyOn, test } from 'bun:test';
-import { createEmailInboxOwner, type EmailInboxOwnerOptions } from '../sdk/src/platform/intake/providers/email-owner.js';
-import type { ImapUidCheckpoint } from '../sdk/src/platform/intake/provider-adapter.js';
+import { createEmailInboxOwner, type EmailInboxOwnerOptions } from '../platform/src/platform/intake/providers/email-owner.js';
+import type { ImapUidCheckpoint } from '../platform/src/platform/intake/provider-adapter.js';
 import { SnapshotSocket, snapshotFixture } from './_helpers/mail-inbox-snapshot.js';
 import { deferred, tick } from './_helpers/mail-subject-source.js';
-import { acquireAccountInboxIdentity } from '../sdk/src/platform/intake/providers/account-identity.js';
+import { acquireAccountInboxIdentity } from '../platform/src/platform/intake/providers/account-identity.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const cleanups: Array<() => void | Promise<void>> = [];

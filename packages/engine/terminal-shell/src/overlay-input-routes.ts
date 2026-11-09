@@ -1,4 +1,4 @@
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { SearchManager, SearchConversation, SearchHistory as InfiniteBuffer } from './transcript-search.js';
 import type { OverlayFilter, OverlayFilters } from './overlay-filter.js';
 import { isTextBackspace } from './delete-key-policy.js';

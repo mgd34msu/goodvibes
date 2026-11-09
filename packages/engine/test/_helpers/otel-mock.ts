@@ -6,7 +6,7 @@ import type {
   OtelTracer,
   OtelMeter,
   OtelSpan,
-} from '../../sdk/src/observer/index.js';
+} from '../../platform/src/observer/index.js';
 
 export interface MockOtelResult {
   tracer: OtelTracer;

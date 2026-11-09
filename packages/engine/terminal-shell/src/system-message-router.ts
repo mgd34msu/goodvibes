@@ -1,5 +1,5 @@
-import type { RuntimeEventProvenance } from '@goodvibes-jev/engine/sdk/platform/runtime/bootstrap';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { RuntimeEventProvenance } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import {
   classifySystemMessageKind,
   classifySystemMessagePriority,
@@ -7,9 +7,9 @@ import {
   resolveSystemMessageDelivery,
   type SystemMessageKind,
   type SystemMessageTarget,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
+} from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { classifyNoise, foldProviderReplayLines, providerNameFromReplay, type NoiseGateDeps } from './system-message-noise.js';
-export type { SystemMessageKind, SystemMessageTarget } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
+export type { SystemMessageKind, SystemMessageTarget } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 export type SystemMessagePriority = 'high' | 'low';
 export interface SystemMessageActivityFeed {
   push(message: string, priority: SystemMessagePriority): unknown;
@@ -66,7 +66,7 @@ export class TerminalSystemMessageRouter<Feed extends SystemMessageActivityFeed 
   }
   /**
    * Buffer a provider "from last session" replay line and schedule a microtask
-   * flush. The SDK emits the whole persisted-provider burst synchronously, so a
+   * flush. The platform emits the whole persisted-provider burst synchronously, so a
    * single microtask captures the full burst and folds it to one quiet line.
    */
   private bufferProviderReplay(message: string): void {

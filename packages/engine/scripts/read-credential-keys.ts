@@ -12,7 +12,7 @@ import { judgmentProcessSignal } from '../../judgment/scripts/process-owner.ts';
 
 import { parseArgs } from 'node:util';
 import { createSystemOnePort, judgmentConfigFromEnv } from '@goodvibes-jev/judgment';
-import { credentialKey } from '../sdk/src/platform/config/batteries/credential-key.ts';
+import { credentialKey } from '../platform/src/platform/config/batteries/credential-key.ts';
 import {
   loadCredentialKeyReadings,
   saveCredentialKeyReadings,

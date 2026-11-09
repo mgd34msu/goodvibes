@@ -1,15 +1,15 @@
 import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
-import { FEATURE_SETTINGS } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
+import { FEATURE_SETTINGS } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';
 
 /**
  * `goodvibes-agent relay status|pair`, the outbound zero-knowledge relay
- * (SDK 1.6.1, platform/relay) that lets a daemon register with a
+ * (platform 1.6.1, platform/relay) that lets a daemon register with a
  * self-hostable rendezvous relay so surfaces can reach it from outside the
  * LAN. Relay reachability (RelayReachability, the live registration
  * lifecycle, and the relay identity keypair a pairing payload is minted
- * from) is owned entirely by the SDK's DaemonServer facade
+ * from) is owned entirely by the platform's DaemonServer facade
  * (buildDaemonRelayReachability, started at boot in facade.ts), the daemon
  * process holding the relay identity's private key material.
  *
@@ -23,7 +23,7 @@ import type { CliCommandRuntime } from './management.ts';
  * relay.* configuration and the relay-connect feature flag's static
  * definition, and refuses to fabricate a live registration status or a
  * pairing payload neither of which this process can observe or mint. The
- * SDK's operator wire ships no remote relay-status/pairing route yet (relay
+ * platform's operator wire ships no remote relay-status/pairing route yet (relay
  * reuses the existing REST surface for tunneled traffic, not a status
  * query), so there is no live check to perform even for a genuinely
  * connected host.
@@ -55,7 +55,7 @@ function handleRelayStatus(runtime: CliCommandRuntime): CliCommandOutput {
     liveVerified: false,
     config: { enabled, url, rendezvousId, label, requireStepUpForMutations },
     flag,
-    note: "This reflects goodvibes-agent's own imported copy of relay.* settings, not a live check of the connected GoodVibes daemon's actual relay registration, Agent hosts no daemon and the SDK has no remote relay-status route yet.",
+    note: "This reflects goodvibes-agent's own imported copy of relay.* settings, not a live check of the connected GoodVibes daemon's actual relay registration, Agent hosts no daemon and the platform has no remote relay-status route yet.",
   };
 
   const lines = [

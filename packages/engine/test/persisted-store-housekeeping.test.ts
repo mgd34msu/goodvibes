@@ -42,18 +42,18 @@ import {
   APPEND_ONLY_SWEEP_INTERVAL_MS,
   runAppendOnlyRetentionSweep,
   type AppendOnlyRetentionRoots,
-} from '../sdk/src/platform/runtime/retention/append-only-registry.ts';
-import { resolveScopedDirectory } from '../sdk/src/platform/runtime/surface-root.ts';
-import { acquireCrossProcessLock } from '../sdk/src/platform/workspace/checkpoint/cross-process-lock.ts';
-import { DaemonReceiptStore, type ReceiptStoreIo } from '../sdk/src/platform/daemon/receipts.ts';
+} from '../platform/src/platform/runtime/retention/append-only-registry.ts';
+import { resolveScopedDirectory } from '../platform/src/platform/runtime/surface-root.ts';
+import { acquireCrossProcessLock } from '../platform/src/platform/workspace/checkpoint/cross-process-lock.ts';
+import { DaemonReceiptStore, type ReceiptStoreIo } from '../platform/src/platform/daemon/receipts.ts';
 import {
   loadLastConversation,
   readLastSessionPointer,
   writeLastSessionPointer,
-} from '../sdk/src/platform/runtime/session-persistence.ts';
-import { createSessionSurface, type SessionSurface } from '../sdk/src/platform/runtime/session-surface.ts';
-import { SessionManager } from '../sdk/src/platform/sessions/manager.ts';
-import { logger } from '../sdk/src/platform/utils/logger.ts';
+} from '../platform/src/platform/runtime/session-persistence.ts';
+import { createSessionSurface, type SessionSurface } from '../platform/src/platform/runtime/session-surface.ts';
+import { SessionManager } from '../platform/src/platform/sessions/manager.ts';
+import { logger } from '../platform/src/platform/utils/logger.ts';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const roots: string[] = [];

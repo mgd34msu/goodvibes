@@ -1,5 +1,5 @@
 import { types as nodeTypes } from 'node:util';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogMethods, captureCatalogSnapshot, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureCatalogPath, rankResearchRecords } from './agent-harness-research-catalog-source.ts';
 import { modelReadingServicePath, withModelReadingSource } from './agent-harness-model-reading-source.ts';
@@ -35,7 +35,7 @@ export interface ResearchBrowserRunnerRecord {
   readonly controlRoutes: Readonly<Record<string, string>>;
   readonly modelRoute: string;
   readonly sourcePath: string;
-  readonly source: 'daemon-read-model' | 'sdk-read-model';
+  readonly source: 'daemon-read-model' | 'platform-read-model';
   readonly certification: ResearchLiveRecordCertification;
 }
 
@@ -50,7 +50,7 @@ export interface ResearchVisualReportRecord {
   readonly citationCoverage: string | null;
   readonly modelRoute: string;
   readonly sourcePath: string;
-  readonly source: 'daemon-read-model' | 'sdk-read-model';
+  readonly source: 'daemon-read-model' | 'platform-read-model';
   readonly certification: ResearchLiveRecordCertification;
 }
 
@@ -63,12 +63,12 @@ export interface ResearchLiveReadModelSnapshot {
 interface SourceCandidate {
   readonly path: string;
   readonly source: unknown;
-  readonly kind: 'daemon-read-model' | 'sdk-read-model';
+  readonly kind: 'daemon-read-model' | 'platform-read-model';
 }
 
 interface CollectedRecord {
   readonly path: string;
-  readonly kind: 'daemon-read-model' | 'sdk-read-model';
+  readonly kind: 'daemon-read-model' | 'platform-read-model';
   readonly record: Record<string, unknown>;
 }
 
@@ -254,7 +254,7 @@ function certification(input: {
     ...(receiptId ? { receiptId: safePreview(receiptId, 96) } : {}),
     ...(cursor ? { cursor: safePreview(cursor, 96) } : {}),
     missingSignals,
-    policy: 'Research live read models certify release readiness only when the SDK or daemon publishes schema, durable ids, publication guarantee, publisher/provenance, freshness cursor, exact inspect route, redacted source/render evidence, and user-visible controls without exposing page secrets.',
+    policy: 'Research live read models certify release readiness only when the platform or daemon publishes schema, durable ids, publication guarantee, publisher/provenance, freshness cursor, exact inspect route, redacted source/render evidence, and user-visible controls without exposing page secrets.',
   };
 }
 
@@ -476,9 +476,9 @@ function runnerSources(context: object, guards: (() => void)[]): readonly Source
     { path: 'context.platform.readModels.research.runs', keys: ["platform", "readModels", "research", "runs"], kind: 'daemon-read-model' },
     { path: 'context.platform.readModels.deepResearch.browserRuns', keys: ["platform", "readModels", "deepResearch", "browserRuns"], kind: 'daemon-read-model' },
     { path: 'context.platform.readModels.researchBrowserRuns', keys: ["platform", "readModels", "researchBrowserRuns"], kind: 'daemon-read-model' },
-    { path: 'context.ops.research.browserRuns', keys: ["ops", "research", "browserRuns"], kind: 'sdk-read-model' },
-    { path: 'context.clients.operator.research.browserRuns', keys: ["clients", "operator", "research", "browserRuns"], kind: 'sdk-read-model' },
-    { path: 'context.clients.operatorSdk.research.browserRuns', keys: ["clients", "operatorSdk", "research", "browserRuns"], kind: 'sdk-read-model' },
+    { path: 'context.ops.research.browserRuns', keys: ["ops", "research", "browserRuns"], kind: 'platform-read-model' },
+    { path: 'context.clients.operator.research.browserRuns', keys: ["clients", "operator", "research", "browserRuns"], kind: 'platform-read-model' },
+    { path: 'context.clients.operatorApiClient.research.browserRuns', keys: ["clients", "operatorApiClient", "research", "browserRuns"], kind: 'platform-read-model' },
   ] satisfies readonly { path: string; keys: readonly string[]; kind: SourceCandidate['kind'] }[];
   return definitions.map(definition => {
     const captured = captureCatalogPath(context, definition.keys); guards.push(captured.assertCurrent);
@@ -492,9 +492,9 @@ function visualSources(context: object, guards: (() => void)[]): readonly Source
     { path: 'context.platform.readModels.research.reportSurfaces', keys: ["platform", "readModels", "research", "reportSurfaces"], kind: 'daemon-read-model' },
     { path: 'context.platform.readModels.deepResearch.visualReports', keys: ["platform", "readModels", "deepResearch", "visualReports"], kind: 'daemon-read-model' },
     { path: 'context.platform.readModels.researchVisualReports', keys: ["platform", "readModels", "researchVisualReports"], kind: 'daemon-read-model' },
-    { path: 'context.ops.research.visualReports', keys: ["ops", "research", "visualReports"], kind: 'sdk-read-model' },
-    { path: 'context.clients.operator.research.visualReports', keys: ["clients", "operator", "research", "visualReports"], kind: 'sdk-read-model' },
-    { path: 'context.clients.operatorSdk.research.visualReports', keys: ["clients", "operatorSdk", "research", "visualReports"], kind: 'sdk-read-model' },
+    { path: 'context.ops.research.visualReports', keys: ["ops", "research", "visualReports"], kind: 'platform-read-model' },
+    { path: 'context.clients.operator.research.visualReports', keys: ["clients", "operator", "research", "visualReports"], kind: 'platform-read-model' },
+    { path: 'context.clients.operatorApiClient.research.visualReports', keys: ["clients", "operatorApiClient", "research", "visualReports"], kind: 'platform-read-model' },
   ] satisfies readonly { path: string; keys: readonly string[]; kind: SourceCandidate['kind'] }[];
   return definitions.map(definition => {
     const captured = captureCatalogPath(context, definition.keys); guards.push(captured.assertCurrent);

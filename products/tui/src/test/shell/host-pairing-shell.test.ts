@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { InfiniteBuffer, SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import { ConversationManager } from '../../core/conversation.ts';
 import { InputHandler } from '../../input/handler.ts';
 import { getActiveModalName } from '../../input/handler-ui-state.ts';

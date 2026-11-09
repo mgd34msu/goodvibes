@@ -2,10 +2,10 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { WorkspaceCheckpointManager } from '../sdk/src/platform/workspace/checkpoint/manager.js';
-import { CheckpointDiffObservations } from '../sdk/src/platform/workspace/checkpoint/diff-observations.js';
-import { CHECKPOINT_DIFF_REVISION_PATTERN, CHECKPOINT_DIFF_SOURCE_MAX_BYTES } from '../sdk/src/platform/workspace/checkpoint/diff-observation-contract.js';
-import type { CheckpointDiff } from '../sdk/src/platform/workspace/checkpoint/types.js';
+import { WorkspaceCheckpointManager } from '../platform/src/platform/workspace/checkpoint/manager.js';
+import { CheckpointDiffObservations } from '../platform/src/platform/workspace/checkpoint/diff-observations.js';
+import { CHECKPOINT_DIFF_REVISION_PATTERN, CHECKPOINT_DIFF_SOURCE_MAX_BYTES } from '../platform/src/platform/workspace/checkpoint/diff-observation-contract.js';
+import type { CheckpointDiff } from '../platform/src/platform/workspace/checkpoint/types.js';
 
 test('actual checkpoint reads keep exact view ownership across refresh and refuse another manager or restored changed view', async () => {
   const root = mkdtempSync(join(tmpdir(), 'checkpoint-diff-owner-'));
@@ -20,7 +20,7 @@ test('actual checkpoint reads keep exact view ownership across refresh and refus
     const selected = await manager.diff(baseline.id);
     expect(selected.nativeRevision).toMatch(new RegExp(CHECKPOINT_DIFF_REVISION_PATTERN));
     expect((await manager.diff(baseline.id)).nativeRevision).toBe(selected.nativeRevision);
-    // A direct SDK caller cannot mutate the retained evidence through the response.
+    // A direct platform caller cannot mutate the retained evidence through the response.
     selected.files.push('fabricated.txt');
     expect((await manager.diff(baseline.id)).nativeRevision).toBe(selected.nativeRevision);
     const foreign = await replacement.diff(baseline.id);

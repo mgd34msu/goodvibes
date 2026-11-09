@@ -14,10 +14,10 @@ import {
   runVoiceSetupWithProgress,
   VOICE_SETUP_ANNOUNCEMENT,
 } from '../../core/voice-provision-gateway.ts';
-import { resolveWakeRuntimeSettings } from '@goodvibes-jev/engine/sdk/platform/voice/wake/runtime';
+import { resolveWakeRuntimeSettings } from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
 import { terminalWakeCapabilities } from '../../core/wake-provision-status.ts';
 import { printWakeStatus, runWakeProvision } from '../../core/wake-provision-runner.ts';
-import { wakeProvisionStatus } from '@goodvibes-jev/engine/sdk/platform/voice';
+import { wakeProvisionStatus } from '@goodvibes-jev/engine/platform/platform/voice';
 
 export function registerExperienceRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
@@ -204,7 +204,7 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
   reportFailure: false,
   paths: requireShellPaths,
   async wake(args, ctx, shellPaths, _yes) {
-    // The wake models are provisioned locally by the SDK (checksum-pinned
+    // The wake models are provisioned locally by the platform (checksum-pinned
     // download), not through a daemon verb, so this path needs no gateway.
     // Installation already provisions them and a daemon retries at boot;
     // `setup` here is the recovery act, and nothing downloads unless the user

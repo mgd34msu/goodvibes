@@ -8,8 +8,8 @@
  * expanded unless a test passes `false` explicitly, matching the old full card.
  */
 
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { PermissionPromptRequest } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
+import type { PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { PermissionPromptUI, type PromptViewState } from '../../permissions/prompt.ts';
 import type { HunkSelectionState } from '../../permissions/hunk-selection.ts';
 import { frameFromLayer } from './surface-frame.ts';

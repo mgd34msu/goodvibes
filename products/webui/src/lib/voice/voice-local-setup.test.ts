@@ -90,7 +90,7 @@ describe('readVoiceLocalStatus: defensive wire parse', () => {
   });
 });
 
-describe('readVoiceLocalStatus: the optional installInProgress section (SDK 5357f09e)', () => {
+describe('readVoiceLocalStatus: the optional installInProgress section (platform 5357f09e)', () => {
   const IN_PROGRESS = {
     startedAt: 1_752_600_000_000,
     components: [

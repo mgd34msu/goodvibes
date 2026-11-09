@@ -79,7 +79,7 @@ describe('mirroring a hosted conversation into the session store', () => {
       { role: 'user', content: 'what time should i leave for my trip on the 6th?' },
       { role: 'assistant', content: 'Leave by 5:15 AM.' },
     ]);
-    // persistConversation is the SDK call that ALSO moves last-session.json;
+    // persistConversation is the platform call that ALSO moves last-session.json;
     // using it is what stops a resume opening the older local session.
     expect(persisted[0]!.title).toBe('Trip timing');
   });

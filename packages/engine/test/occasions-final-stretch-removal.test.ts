@@ -25,15 +25,15 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { ingestSettingsFile } from '../sdk/src/platform/config/settings-ingestion.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { ingestSettingsFile } from '../platform/src/platform/config/settings-ingestion.ts';
 import {
   migrateOccasionsFinalStretchRemoval,
   RETIRED_OCCASIONS_FINAL_STRETCH_KEY,
-} from '../sdk/src/platform/config/migrations.ts';
-import { applyOccasionsFinalStretchMigrationPass } from '../sdk/src/platform/config/manager-migration-passes.ts';
-import { occasionsConfigSettings } from '../sdk/src/platform/config/schema-domain-occasions.ts';
-import { OCCASIONS_DEFAULTS } from '../sdk/src/platform/occasions/policy.ts';
+} from '../platform/src/platform/config/migrations.ts';
+import { applyOccasionsFinalStretchMigrationPass } from '../platform/src/platform/config/manager-migration-passes.ts';
+import { occasionsConfigSettings } from '../platform/src/platform/config/schema-domain-occasions.ts';
+import { OCCASIONS_DEFAULTS } from '../platform/src/platform/occasions/policy.ts';
 
 /** A daemon store carrying the retired key, plus the surface dirs a manager needs. */
 function makeHomeWithRetiredKey(label: string, surface: string, extra: Record<string, unknown> = {}): {

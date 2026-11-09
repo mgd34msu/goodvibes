@@ -1,13 +1,13 @@
 /**
  * Session maintenance types.
  *
- * The canonical evaluator is the SDK version exported from @/runtime/index.ts
+ * The canonical evaluator is the platform version exported from @/runtime/index.ts
  * (via operations.evaluateSessionMaintenance), which reads from configManager.
  * Import the evaluator from there, this module provides only the shared
  * View* type surface used across TUI views and tests; it intentionally does
  * not re-implement the evaluator.
  */
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 
 export type ViewGuidanceMode = 'off' | 'minimal' | 'guided';
 export type ViewSessionMaintenanceLevel = 'stable' | 'watch' | 'suggest-compact' | 'compacting' | 'needs-repair' | 'unknown';
@@ -43,12 +43,12 @@ export interface ViewSessionMaintenanceStatus {
   readonly remainingTokens: number | null;
   /**
    * Compact threshold as a percent integer.
-   * SDK schema range is [10, 100]; default is 80.
+   * platform schema range is [10, 100]; default is 80.
    */
   readonly thresholdPct: number;
   /**
    * True when autoCompactThreshold is in its valid range (>0).
-   * With SDK default (80), auto-compact is active unless explicitly lowered below 10.
+   * With platform default (80), auto-compact is active unless explicitly lowered below 10.
    */
   readonly autoCompactEnabled: boolean;
   readonly sessionMemoryCount: number;

@@ -2,8 +2,8 @@ import { expect, test } from 'bun:test';
 import type { EntryType, JsonValue } from '@goodvibes-jev/judgment';
 import {
   captureJsonEntry, captureJsonValue, captureOwnedJson, JudgmentInputError, retainOwnedJson, snapshotJudgmentEntry, snapshotJudgmentJson,
-} from '../sdk/src/platform/gate/judgment-input.js';
-import { captureAutonomousChoices, captureAutonomousSource } from '../sdk/src/platform/permissions/autonomous.js';
+} from '../platform/src/platform/gate/judgment-input.js';
+import { captureAutonomousChoices, captureAutonomousSource } from '../platform/src/platform/permissions/autonomous.js';
 
 test('typed judgment state preserves JSON wire shape and detaches the complete nested input', () => {
   const rows = ['original', undefined, 'tail'];

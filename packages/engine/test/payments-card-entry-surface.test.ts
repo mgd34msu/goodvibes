@@ -36,8 +36,8 @@ import {
   scanForCardDetails,
   describeCardEntryRefusal,
   WEBUI_CARD_ENTRY_CONDITIONS,
-} from '../sdk/src/platform/payments/entry-surface.js';
-import { parseCommandAuthorityChannel } from '../sdk/src/platform/payments/types.js';
+} from '../platform/src/platform/payments/entry-surface.js';
+import { parseCommandAuthorityChannel } from '../platform/src/platform/payments/types.js';
 import { usePaymentsReadings, withPaymentsReadings } from './helpers/payments-readings.ts';
 
 const readings = usePaymentsReadings();

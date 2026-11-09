@@ -30,9 +30,9 @@
  * turn, as often as the model likes.
  */
 
-import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import { readEmailConfig, validateEmailConfig } from '@goodvibes-jev/engine/sdk/platform/email';
+import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { readEmailConfig, validateEmailConfig } from '@goodvibes-jev/engine/platform/platform/email';
 import { buildProbeContext } from '../capabilities/capability-boot-check.ts';
 import { resolveCapabilityIndex } from '../capabilities/capability-index.ts';
 import { configValueIsPresent, safeMcpServerPosture, servedOperatorMethodIds } from '../capabilities/capability-sources.ts';

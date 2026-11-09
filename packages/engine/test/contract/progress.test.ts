@@ -12,8 +12,8 @@ import {
   regressionCounts,
   standingOf,
   type CheckStanding,
-} from '../../sdk/src/platform/contract/progress.js';
-import type { ContractUnit, CriterionVerdict, Nudge, UnitCheck } from '../../sdk/src/platform/contract/types.js';
+} from '../../platform/src/platform/contract/progress.js';
+import type { ContractUnit, CriterionVerdict, Nudge, UnitCheck } from '../../platform/src/platform/contract/types.js';
 import { makeCriterion, makeUnit } from './fixtures.js';
 
 const LIMITS = { stallLimit: 3, maxNudgesPerUnit: 12 };

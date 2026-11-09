@@ -1,4 +1,4 @@
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { OnboardingCheckMarkerState } from './onboarding-state-types.js';
 import { resolveRuntimeEndpointBinding } from './cli-endpoints.js';
 export function secretPolicyLabel(policy: unknown): string {

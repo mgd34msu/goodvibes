@@ -25,29 +25,29 @@ let previousImapPort: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previousImapPort = installJudgmentPort(imapFixturePort().port); });
 afterEach(() => { installJudgmentPort(previousImapPort); });
 import { createServer, connect, type Server, type Socket } from 'node:net';
-import { ImapClient } from '../sdk/src/platform/email/imap-client.ts';
+import { ImapClient } from '../platform/src/platform/email/imap-client.ts';
 import {
   parseBodyStructure,
   attachmentsFromParts,
   decodeTextPart,
   selectBodyPart,
-} from '../sdk/src/platform/email/imap-bodystructure.ts';
+} from '../platform/src/platform/email/imap-bodystructure.ts';
 import {
   buildDraftMessage,
   encodeHeaderValue,
   formatRfc5322Date,
   parseAppendUid,
   selectDraftsMailbox,
-} from '../sdk/src/platform/email/imap-draft.ts';
-import { takeUtf8Bytes } from '../sdk/src/platform/email/imap-session.ts';
+} from '../platform/src/platform/email/imap-draft.ts';
+import { takeUtf8Bytes } from '../platform/src/platform/email/imap-session.ts';
 import {
   IMAP_BODY_PROBE_BYTES,
   ImapBodyCapabilityError,
   assessFetchedBody,
   declaredTextOctets,
   probeMailboxBody,
-} from '../sdk/src/platform/email/imap-body-probe.ts';
-import { describeEmailCapabilityFailure } from '../sdk/src/platform/email/imap-open.ts';
+} from '../platform/src/platform/email/imap-body-probe.ts';
+import { describeEmailCapabilityFailure } from '../platform/src/platform/email/imap-open.ts';
 
 // ---------------------------------------------------------------------------
 // Fake server

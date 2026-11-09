@@ -19,7 +19,7 @@ import {
   STALE_TEMP_FILE_MIN_AGE_MS,
   writeFileAtomic,
   writeJsonFileAtomic,
-} from '../sdk/src/platform/utils/atomic-json-store.ts';
+} from '../platform/src/platform/utils/atomic-json-store.ts';
 
 interface Shape {
   readonly version: 1;

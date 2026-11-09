@@ -5,20 +5,20 @@ import { decisionModelPolicyState, installJudgmentPort } from '@goodvibes-jev/en
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort } from '@goodvibes-jev/judgment/testing';
 import { noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
 import { readServiceLogPosture } from '../terminal-shell/src/service-posture.js';
-import { readEditorMessage } from '../sdk/src/platform/presentation/editor-message.js';
+import { readEditorMessage } from '../platform/src/platform/presentation/editor-message.js';
 import { makeProjectTempDir } from './_helpers/project-temp.js';
-import { classifyFailure } from '../sdk/src/platform/runtime/forensics/classifier.js';
-import { ForensicsCollector } from '../sdk/src/platform/runtime/forensics/collector.js';
-import { ForensicsRegistry } from '../sdk/src/platform/runtime/forensics/registry.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { emitTurnSubmitted, emitTurnError } from '../sdk/src/platform/runtime/emitters/turn.js';
-import { readSystemMessagePriority } from '../sdk/src/platform/runtime/batteries/system-message-priority.js';
-import { replyInstructsTyping } from '../sdk/src/platform/runtime/batteries/setup-reply-command.js';
-import { readSlowPhases } from '../sdk/src/platform/runtime/forensics/slow-phases.js';
-import { readUserErrorClass, describeUserError } from '../sdk/src/platform/routing/user-error.js';
-import { lintPolicyConfig } from '../sdk/src/platform/runtime/permissions/lint.js';
+import { classifyFailure } from '../platform/src/platform/runtime/forensics/classifier.js';
+import { ForensicsCollector } from '../platform/src/platform/runtime/forensics/collector.js';
+import { ForensicsRegistry } from '../platform/src/platform/runtime/forensics/registry.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { emitTurnSubmitted, emitTurnError } from '../platform/src/platform/runtime/emitters/turn.js';
+import { readSystemMessagePriority } from '../platform/src/platform/runtime/batteries/system-message-priority.js';
+import { replyInstructsTyping } from '../platform/src/platform/runtime/batteries/setup-reply-command.js';
+import { readSlowPhases } from '../platform/src/platform/runtime/forensics/slow-phases.js';
+import { readUserErrorClass, describeUserError } from '../platform/src/platform/routing/user-error.js';
+import { lintPolicyConfig } from '../platform/src/platform/runtime/permissions/lint.js';
 
 function install(port: JudgmentPort) {
   const previous = installJudgmentPort(port); restore = () => { installJudgmentPort(previous); };

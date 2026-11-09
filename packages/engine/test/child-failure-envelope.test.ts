@@ -4,10 +4,10 @@ import {
   classifyChildFailureReason,
   describeChildPhase,
   isChildFailureTerminal,
-} from '../sdk/src/platform/tools/agent/child-failure-envelope.js';
-import type { AgentRecord } from '../sdk/src/platform/tools/agent/manager.js';
+} from '../platform/src/platform/tools/agent/child-failure-envelope.js';
+import type { AgentRecord } from '../platform/src/platform/tools/agent/manager.js';
 import { useToolReadings } from './_helpers/tool-readings.ts';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
 
 // Free-text errors are read by engine.tools.child-failure-reason; these fakes
 // stand in for Jev. Wording no entry names reads as `error`.

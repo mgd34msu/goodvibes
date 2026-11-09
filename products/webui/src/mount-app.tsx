@@ -3,7 +3,7 @@
  *
  * Split out of main.tsx so it is imported DYNAMICALLY, only after the entry guard
  * (src/lib/insecure-origin.ts) has cleared the origin. App's import graph pulls in
- * src/lib/goodvibes.ts, which constructs the SDK transport and THROWS at module
+ * src/lib/goodvibes.ts, which constructs the platform transport and THROWS at module
  * evaluation on an insecure non-local origin, importing it eagerly is exactly what made
  * that failure a silent white screen. Keeping this behind a dynamic import means the
  * throwing graph is never evaluated on the origins where the guard shows its message.

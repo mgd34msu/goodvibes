@@ -5,9 +5,9 @@ import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import {
   loadWatcherSnapshotFromPath,
   saveWatcherSnapshotToPath,
-} from '../sdk/src/platform/watchers/store.ts';
-import { STALE_TEMP_FILE_MIN_AGE_MS } from '../sdk/src/platform/utils/atomic-json-store.ts';
-import type { WatcherRecord } from '../sdk/src/platform/runtime/store/domains/watchers.ts';
+} from '../platform/src/platform/watchers/store.ts';
+import { STALE_TEMP_FILE_MIN_AGE_MS } from '../platform/src/platform/utils/atomic-json-store.ts';
+import type { WatcherRecord } from '../platform/src/platform/runtime/store/domains/watchers.ts';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 

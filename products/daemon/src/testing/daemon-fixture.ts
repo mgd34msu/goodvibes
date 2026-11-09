@@ -13,10 +13,10 @@
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { DaemonServer } from '@goodvibes-jev/engine/sdk/platform/daemon';
-import { createRuntimeStore } from '@goodvibes-jev/engine/sdk/platform/runtime/store';
-import { UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { DaemonServer } from '@goodvibes-jev/engine/platform/platform/daemon';
+import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
+import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
 import { createFeatureFlagManager, deriveFeatureStates, RuntimeEventBus } from '../runtime/index.js';
 import { createRuntimeServices, type RuntimeServices, type RuntimeServicesOptions } from '../runtime/services.js';
 import { createHostedSessionOptions } from '../runtime/hosted-session-composition.js';

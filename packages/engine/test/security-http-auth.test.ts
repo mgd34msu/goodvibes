@@ -7,10 +7,10 @@ import {
   extractOperatorAuthToken,
   isOperatorAdmin,
   OPERATOR_SESSION_COOKIE_NAME,
-} from '@goodvibes-jev/engine/sdk/platform/security';
-import { UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
+} from '@goodvibes-jev/engine/platform/platform/security';
+import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { matchesSharedToken } from '../sdk/src/platform/security/http-auth.js';
+import { matchesSharedToken } from '../platform/src/platform/security/http-auth.js';
 
 test.each([
   ['same-token', 'same-token', true],

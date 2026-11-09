@@ -12,7 +12,7 @@ import {
   handleResetConfirmKey,
 } from '../../input/settings-modal-reset.ts';
 import type { SettingEntry } from '../../input/settings-modal-types.ts';
-import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 
 // ---------------------------------------------------------------------------
 // Helpers

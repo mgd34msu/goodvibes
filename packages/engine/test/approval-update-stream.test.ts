@@ -16,10 +16,10 @@ import {
   APPROVAL_UPDATE_DOMAIN,
   approvalUpdateStreamUrl,
   readApprovalUpdateNotice,
-} from '../sdk/src/platform/runtime/client/approval-updates.ts';
-import { createClientApprovalRaiser } from '../sdk/src/platform/runtime/client/approval-raiser.ts';
-import type { ApprovalUpdateNotice, ApprovalUpdateSubscription } from '../sdk/src/platform/runtime/client/approval-updates.ts';
-import type { PermissionPromptRequest } from '../sdk/src/platform/permissions/prompt.ts';
+} from '../platform/src/platform/runtime/client/approval-updates.ts';
+import { createClientApprovalRaiser } from '../platform/src/platform/runtime/client/approval-raiser.ts';
+import type { ApprovalUpdateNotice, ApprovalUpdateSubscription } from '../platform/src/platform/runtime/client/approval-updates.ts';
+import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.ts';
 
 const REQUEST: PermissionPromptRequest = {
   callId: 'call-1',

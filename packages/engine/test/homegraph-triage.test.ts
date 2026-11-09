@@ -5,15 +5,15 @@ import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/test
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { ArtifactStore } from '../sdk/src/platform/artifacts/index.js';
+import { ArtifactStore } from '../platform/src/platform/artifacts/index.js';
 import {
   HomeGraphService,
   KnowledgeSemanticService,
   homeAssistantKnowledgeSpaceId,
-} from '../sdk/src/platform/knowledge/index.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { HomeGraphRoutes } from '../sdk/src/platform/daemon/http/home-graph-routes.js';
-import type { KnowledgeSemanticLlm } from '../sdk/src/platform/knowledge/semantic/index.js';
+} from '../platform/src/platform/knowledge/index.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { HomeGraphRoutes } from '../platform/src/platform/daemon/http/home-graph-routes.js';
+import type { KnowledgeSemanticLlm } from '../platform/src/platform/knowledge/semantic/index.js';
 import { trackDisposables } from './_helpers/disposables.ts';
 
 /**
@@ -75,7 +75,7 @@ const TRIAGE_SNAPSHOT = {
     { id: 'hallway-motion', name: 'Hallway Motion', areaId: 'entry' },
     { id: 'living-room-tv', name: 'Living Room TV', manufacturer: 'Sony', model: 'Bravia', areaId: 'living-room' },
   ],
-  // HomeGraphObjectInput (packages/sdk/src/platform/knowledge/home-graph/types.ts)
+  // HomeGraphObjectInput (packages/platform/src/platform/knowledge/home-graph/types.ts)
   // declares camelCase fields (entityId/deviceId/areaId); normalizeHomeGraphObjectInput
   // also accepts raw Home-Assistant snake_case (entity_id/device_id/area_id/attributes)
   // at runtime, but that is a wider Record<string, unknown> fallback the *element*

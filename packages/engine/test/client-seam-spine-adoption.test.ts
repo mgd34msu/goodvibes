@@ -14,8 +14,8 @@
  * flickering out of the cross-surface list and inbound steers landing twice.
  */
 import { describe, expect, test } from 'bun:test';
-import { createSpineAdoptionSync } from '../sdk/src/platform/runtime/client/spine-adoption.ts';
-import type { SpineWireBundle } from '../sdk/src/platform/runtime/client/spine-adoption.ts';
+import { createSpineAdoptionSync } from '../platform/src/platform/runtime/client/spine-adoption.ts';
+import type { SpineWireBundle } from '../platform/src/platform/runtime/client/spine-adoption.ts';
 
 function harness(options: { activation?: 'adopt-on-status' | 'live-immediately' } = {}) {
   const events: string[] = [];

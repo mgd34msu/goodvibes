@@ -29,7 +29,7 @@ import { settleSyntaxHighlighting } from '../../renderer/code-block.ts';
 import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Cell, Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Cell, Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { activeTokens, setActiveThemeMode, setActiveThemeName } from '../../renderer/theme.ts';
 import { auditFrame } from '../helpers/frame-audit.ts';
 import { frameFixtures } from '../helpers/agent-frame-fixtures.ts';

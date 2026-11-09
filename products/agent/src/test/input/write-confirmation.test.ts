@@ -2,7 +2,7 @@ import { describe, expect, mock, test } from 'bun:test';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { registerOperatorRuntimeCommands } from '../../input/commands/operator-runtime.ts';
 import { registerSessionContentCommands } from '../../input/commands/session-content.ts';
 import { sessionCommand } from '../../input/commands/session.ts';

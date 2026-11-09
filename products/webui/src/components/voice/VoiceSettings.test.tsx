@@ -1,6 +1,6 @@
 /**
  * VoiceSettings, covers the shared voice popover's local-voice setup section
- * (voice.local.status / voice.local.install, SDK 1.9.0-dev's memory-relay-voice-
+ * (voice.local.status / voice.local.install, platform 1.9.0-dev's memory-relay-voice-
  * hardening work): checking/unavailable/error/provisioned/unsupported-platform/
  * not-provisioned (setup action, size-labeled)/install-progress/install-receipt
  * (with and without a retriable failure) states.
@@ -27,7 +27,7 @@ mock.module('../../lib/voice/useVoice', () => ({
 
 mock.module('../../lib/goodvibes', () => ({
   invokeMethod: () => Promise.resolve({}),
-  sdk: {
+  client: {
     operator: {
       voice: {
         voices: () => Promise.resolve({ voices: [] }),

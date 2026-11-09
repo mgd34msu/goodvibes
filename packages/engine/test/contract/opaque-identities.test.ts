@@ -1,16 +1,16 @@
 import * as fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import * as atomic from '../../sdk/src/platform/utils/atomic-json-store.js';
+import * as atomic from '../../platform/src/platform/utils/atomic-json-store.js';
 /** Regression source authored during coding; execution is deferred. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
-import * as types from '../../sdk/src/platform/contract/types.js';
-import * as placement from '../../sdk/src/platform/contract/git-placement.js';
-import { ContractStore, contractPath, contractCheckpointsDir, serializeContract } from '../../sdk/src/platform/contract/store.js';
-import { DurableContractAdmissions, type DurableContractRequest } from '../../sdk/src/platform/contract/durable-admission.js';
-import { captureNativeSettlementPublication } from '../../sdk/src/platform/workflow/work-ledger/native-settlement-types.js';
+import * as types from '../../platform/src/platform/contract/types.js';
+import * as placement from '../../platform/src/platform/contract/git-placement.js';
+import { ContractStore, contractPath, contractCheckpointsDir, serializeContract } from '../../platform/src/platform/contract/store.js';
+import { DurableContractAdmissions, type DurableContractRequest } from '../../platform/src/platform/contract/durable-admission.js';
+import { captureNativeSettlementPublication } from '../../platform/src/platform/workflow/work-ledger/native-settlement-types.js';
 import { makeHarness, makeRepo, oneUnitPlan, waitFor, type Harness } from './runner-support.js';
 import { makeContract as fixtureContract } from './fixtures.js';
 const roots: string[] = [], harnesses: Harness[] = [], stores: ContractStore[] = [];
@@ -188,7 +188,7 @@ test('an actively publishing checkpoint is not adopted by a second reader', () =
 });
 
 test('a real dead creator claim is reclaimed when its complete checkpoint is read after restart', () => {
-  const path = root(), module = new URL('../../sdk/src/platform/contract/store.ts', import.meta.url).href;
+  const path = root(), module = new URL('../../platform/src/platform/contract/store.ts', import.meta.url).href;
   const text = serializeContract(fixtureContract({ id, projectRoot: path, status: 'queued' }), Date.now())!;
   const script = `const {ContractStore}=await import(${JSON.stringify(module)});const data=JSON.parse(process.argv[1]);const store=new ContractStore({projectRoot:data.projectRoot});const claim=store.reserveCreation(data.id);store.publishCreation(claim,data);process.exit(0);`;
   const child = spawnSync(process.execPath, ['--eval', script, JSON.stringify(JSON.parse(text).contract)], { encoding: 'utf8' });

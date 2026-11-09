@@ -20,7 +20,7 @@
  * ── The rule ────────────────────────────────────────────────────────────
  *
  * Card details may be TYPED only on `tui`, `agent-terminal` or `webui`, an
- * SDK allowlist (platform/payments/entry-surface.ts), never a list restated
+ * platform allowlist (platform/payments/entry-surface.ts), never a list restated
  * here. Anything else is refused. A card number sent to a hosted chat is
  * stored on that provider's servers in history nobody here can erase, and it
  * travelled through their infrastructure on the way; encrypting our copy
@@ -29,11 +29,11 @@
  * This says nothing about APPROVING a purchase. Every command-authority
  * channel, Telegram included, may still approve or veto. Answering a
  * question about money and entering the instrument are different axes and are
- * never merged into one check. See the SDK module's header.
+ * never merged into one check. See the platform module's header.
  *
  * ── The refusal never quotes what it refused ────────────────────────────
  *
- * The refusal text comes from the SDK's describeCardEntryRefusal and is built
+ * The refusal text comes from the platform's describeCardEntryRefusal and is built
  * from the SURFACE NAME and the matched SHAPES only. It never contains, masks,
  * partially masks or summarizes the value. A masked echo is still an echo, and
  * a refusal that quoted the number would put it in the very place, the error
@@ -45,9 +45,9 @@ import {
   evaluateCardEntry,
   isRemoteMessageSurface,
   mayEnterCardDetails,
-} from '@goodvibes-jev/engine/sdk/platform/payments';
+} from '@goodvibes-jev/engine/platform/platform/payments';
 
-/** The shapes the SDK scanner reports. Never accompanied by the matching text. */
+/** The shapes the platform scanner reports. Never accompanied by the matching text. */
 export type CardDetailShape = 'card-number' | 'expiry' | 'cvv';
 
 export interface CardMaterialRefusal {
@@ -55,12 +55,12 @@ export interface CardMaterialRefusal {
   readonly surface: string;
   /** Which shapes matched. Kinds only, never the values. */
   readonly matched: readonly CardDetailShape[];
-  /** The SDK's refusal wording. Contains no part of the refused text. */
+  /** The platform's refusal wording. Contains no part of the refused text. */
   readonly reason: string;
 }
 
 /**
- * Thrown instead of delivering. Its `message` is the SDK refusal text, so
+ * Thrown instead of delivering. Its `message` is the platform refusal text, so
  * every layer that surfaces an error, the transcript, a log line, a tool
  * result handed back to a model, gets wording that is already safe to print.
  */
@@ -160,5 +160,5 @@ export function mayOfferCardEntryOnDelivery(target: {
   return mayEnterCardDetails(resolveDeliverySurfaceName(target));
 }
 
-/** Re-exported so callers name remote surfaces through the SDK, not a local list. */
+/** Re-exported so callers name remote surfaces through the platform, not a local list. */
 export { isRemoteMessageSurface };

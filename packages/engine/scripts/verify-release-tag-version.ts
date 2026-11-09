@@ -1,4 +1,4 @@
-import sdkPackage from '../package.json' with { type: 'json' };
+import enginePackage from '../package.json' with { type: 'json' };
 
 const tagName = process.env.GITHUB_REF_NAME;
 if (!tagName) {
@@ -6,9 +6,9 @@ if (!tagName) {
   process.exit(1);
 }
 
-const expectedTag = `v${sdkPackage.version}`;
+const expectedTag = `v${enginePackage.version}`;
 if (tagName !== expectedTag) {
-  console.error(`ERROR: Git tag '${tagName}' does not match package.json version '${sdkPackage.version}' (expected tag: '${expectedTag}').`);
+  console.error(`ERROR: Git tag '${tagName}' does not match package.json version '${enginePackage.version}' (expected tag: '${expectedTag}').`);
   process.exit(1);
 }
 

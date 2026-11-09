@@ -1,9 +1,9 @@
 # Media, multimodal, and web search
 
 GoodVibes exposes media, voice, multimodal analysis, artifact, and web-search
-features through the daemon control plane and SDK platform modules.
+features through the daemon control plane and platform modules.
 
-Daemon embedders use the dedicated `@goodvibes-jev/engine/sdk/platform/multimodal`
+Daemon embedders use the dedicated `@goodvibes-jev/engine/platform/platform/multimodal`
 subpath and explicit daemon/runtime wiring. Consumer apps interact through
 operator methods documented below.
 
@@ -24,8 +24,8 @@ metadata reads to raw content retrieval.
 
 Artifacts are used by knowledge extraction, multimodal writeback, media
 providers, session export, and channel delivery.
-The scoped browser knowledge SDK also exposes `sdk.artifacts.create(...)`,
-`sdk.artifacts.get(...)`, and `sdk.artifacts.list()` so browser WebUI clients
+The scoped browser knowledge platform also exposes `platformClient.artifacts.create(...)`,
+`platformClient.artifacts.get(...)`, and `platformClient.artifacts.list()` so browser WebUI clients
 can attach uploaded artifacts to companion-chat messages without importing the
 full operator contract.
 

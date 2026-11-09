@@ -1,5 +1,5 @@
-import { OwnedSelectionObservation } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
-import { createOperatorSdk } from '@goodvibes-jev/engine/operator-sdk';
+import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
 import { createNativeHostFetch } from '../../runtime/client/native-host-fetch.ts';
 import { realpathSync } from 'node:fs';
 import { openLegacyImportOperator, registerLegacyImportCommands, resolveLegacyImportJournalLocation, retainLegacyImportJournalOwner, type LegacyImportOperatorSession } from '@goodvibes-jev/engine/terminal-shell/legacy-work-ledger-import';
@@ -20,7 +20,7 @@ export function registerTuiLegacyImportCommands(registry: CommandRegistry, _daem
   return openLegacyImportOperator({ projectId, journalPath: location.journalPath, journalOptions: retainLegacyImportJournalOwner(location, configOwner, stateDirectory, () => ({ config: context.platform.configManager, stateDirectory: requireShellPaths(context).resolveUserPath() })),
     createClient(host) {
       let disposed = false;
-      const client = createOperatorSdk({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: createNativeHostFetch({ current: () => {
+      const client = createOperatorApiClient({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: createNativeHostFetch({ current: () => {
         if (disposed) return false;
         const paths = requireShellPaths(context);
         const credential = resolveNativeHostCredential({ configManager: context.platform.configManager, homeDirectory: paths.homeDirectory, observation: credentialObservation });

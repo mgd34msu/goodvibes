@@ -5,7 +5,7 @@ import {
   redactIssuerCredentials,
   registerAccountIdentityRedaction,
   registerProfileRedactionValues,
-} from '@goodvibes-jev/engine/sdk/platform/utils';
+} from '@goodvibes-jev/engine/platform/platform/utils';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 
 // Synthetic issuer-shaped fixtures; never real account material.

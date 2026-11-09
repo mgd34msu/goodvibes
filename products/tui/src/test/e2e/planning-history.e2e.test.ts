@@ -2,7 +2,7 @@
 import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { KnowledgeStore, ProjectPlanningService, prepareConfiguredProjectContext, createConfiguredPlanningStore } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import { KnowledgeStore, ProjectPlanningService, prepareConfiguredProjectContext, createConfiguredPlanningStore } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { TuiConfigManager } from '../../config/host-settings.ts';
 import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
 import { readPlanningSourceSnapshots } from '../helpers/planning-source-snapshot.ts';

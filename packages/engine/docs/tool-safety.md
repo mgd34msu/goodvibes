@@ -31,7 +31,7 @@ contents were inspected.
 
 ## Tool-call lifecycle
 
-When a provider streams a response that includes a tool call, the SDK processes it in three stages:
+When a provider streams a response that includes a tool call, the platform processes it in three stages:
 
 ### 1. Delta accumulation
 
@@ -62,7 +62,7 @@ export function parseToolCallArguments(
 }
 ```
 
-**Key behavior:** an empty accumulated argument string is treated as `{}` for no-argument tools. If the accumulated string is truncated or syntactically invalid JSON, the SDK emits a `warn`-level log and drops that malformed tool call. The tool handler is not called with manufactured empty arguments.
+**Key behavior:** an empty accumulated argument string is treated as `{}` for no-argument tools. If the accumulated string is truncated or syntactically invalid JSON, the platform emits a `warn`-level log and drops that malformed tool call. The tool handler is not called with manufactured empty arguments.
 
 **Text-token tool calls:** Some models (for example `kimi-k2-thinking` via `ollama-cloud`) emit tool calls as text tokens inside the content stream, using `<|tool_call_begin|>`-style delimiters, rather than as structured streaming deltas. `extractTextToolCalls()` in `tool-formats.ts` parses those delimited spans once the text content is assembled and routes each argument span through the same `parseToolCallArguments` boundary. A span whose JSON fails to parse is dropped exactly like a malformed structured call: the extractor skips it instead of emitting a tool call with manufactured arguments.
 
@@ -94,7 +94,7 @@ Most tool argument failures fall into two categories:
 | Network error mid-stream truncates the argument buffer | Malformed tool call is dropped before handler dispatch |
 | LLM produces valid JSON with extra or missing fields | Handler receives the object as-is |
 
-The SDK rejects malformed JSON before tool dispatch, but it does not schema-validate third-party arguments. It cannot know whether a valid JSON object is correct for your tool. **Validation is the tool author's responsibility.**
+The platform rejects malformed JSON before tool dispatch, but it does not schema-validate third-party arguments. It cannot know whether a valid JSON object is correct for your tool. **Validation is the tool author's responsibility.**
 
 ---
 
@@ -163,7 +163,7 @@ Avoiding `throw` in handler code is reasonable (prevents unhandled promise rejec
 
 ## Detecting dropped parse failures
 
-When the SDK drops a malformed tool call due to a parse error, a log entry is emitted at `warn` level. To catch this in production:
+When the platform drops a malformed tool call due to a parse error, a log entry is emitted at `warn` level. To catch this in production:
 
 - Configure your observability stack to alert on `tool-formats: failed to parse JSON tool arguments; dropping malformed tool call`
 - Review malformed-stop-reason reconciliation events when a provider reported tool use but no parseable tool calls remained

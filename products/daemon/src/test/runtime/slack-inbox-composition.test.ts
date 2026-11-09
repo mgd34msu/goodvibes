@@ -4,15 +4,15 @@ import { Database } from 'bun:sqlite';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Client } from 'undici/index.js';
-import { ConfigManager, createDaemonCredentialStore } from '@goodvibes-jev/engine/sdk/platform/config';
-import { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import { ConfigManager, createDaemonCredentialStore } from '@goodvibes-jev/engine/platform/platform/config';
+import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import {
   createSlackInboxOwner, digestSender, registerInboxSurface,
   type InboxListOutput, type InboxPollingControl, type SlackInboxAccount, type SlackInboxOwner,
-} from '@goodvibes-jev/engine/sdk/platform/intake';
-import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { createRuntimeStore } from '@goodvibes-jev/engine/sdk/platform/runtime/store';
-import { UserAuthManager, type ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/sdk/platform/security';
+} from '@goodvibes-jev/engine/platform/platform/intake';
+import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
+import { UserAuthManager, type ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/platform/platform/security';
 import type { HandlerContext } from '../../daemon/handlers/context.js';
 import type { DaemonInboxFactory } from '../../runtime/daemon-handler-composition.js';
 import { createDaemonHost, type DaemonHost } from '../../runtime/daemon-host.js';
@@ -21,7 +21,7 @@ import { createRuntimeServices } from '../../runtime/services.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 
 // The normal daemon test command builds this entry first. Keep the fixture's
-// SDK collaborators public while exercising the factory consumers actually load.
+// platform collaborators public while exercising the factory consumers actually load.
 const { createSlackDaemonInboxFactory } = await import(new URL('../../../dist/cli/index.js', import.meta.url).href) as typeof import('../../cli/index.js');
 
 let hosts: DaemonHost[];

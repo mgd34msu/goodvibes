@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import type { GoodVibesConfig } from '../sdk/src/platform/config/schema-types.ts';
-import { runPolicyCommand, type PolicyFrontDoorContext } from '../sdk/src/platform/gate/policy/policy-command.ts';
-import { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.ts';
-import { createUnsignedBundle } from '../sdk/src/platform/runtime/permissions/policy-loader.ts';
-import { createPermissionSimulator } from '../sdk/src/platform/runtime/permissions/index.ts';
-import { DivergenceDashboard } from '../sdk/src/platform/runtime/permissions/divergence-dashboard.ts';
+import type { GoodVibesConfig } from '../platform/src/platform/config/schema-types.ts';
+import { runPolicyCommand, type PolicyFrontDoorContext } from '../platform/src/platform/gate/policy/policy-command.ts';
+import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
+import { createUnsignedBundle } from '../platform/src/platform/runtime/permissions/policy-loader.ts';
+import { createPermissionSimulator } from '../platform/src/platform/runtime/permissions/index.ts';
+import { DivergenceDashboard } from '../platform/src/platform/runtime/permissions/divergence-dashboard.ts';
 
 function fixture() {
   const state = new PolicyRuntimeState();

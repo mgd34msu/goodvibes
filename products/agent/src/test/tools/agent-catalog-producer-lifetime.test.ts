@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import * as nativeOs from 'node:os';
 import { ConfigManager, type ConfigKey } from '../../config/index.ts';
-import { captureConfigSelectedScalars } from '@goodvibes-jev/engine/sdk/platform/config';
+import { captureConfigSelectedScalars } from '@goodvibes-jev/engine/platform/platform/config';
 import * as artifactEffects from '../../tools/agent-artifact-effect.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 import { capturePairingAdvertisement } from '../../tools/agent-harness-pairing-posture.ts';
 import { mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { MediaProviderRegistry, type MediaProvider } from '@goodvibes-jev/engine/sdk/platform/media';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { MediaProviderRegistry, type MediaProvider } from '@goodvibes-jev/engine/platform/platform/media';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { createDomainDispatch, createRuntimeStore } from '../../runtime/store/index.ts';
 import type { RuntimeTask } from '@/runtime/index.ts';

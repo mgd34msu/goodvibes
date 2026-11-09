@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { ConversationManager, type ConversationMessageSnapshot } from '../sdk/src/platform/core/conversation.ts';
-import { messagesToInternal, restoreKeptMessages } from '../sdk/src/platform/core/conversation-utils.ts';
-import { compactSmallWindow } from '../sdk/src/platform/core/context-compaction.ts';
-import type { ProviderMessage } from '../sdk/src/platform/providers/interface.ts';
+import { ConversationManager, type ConversationMessageSnapshot } from '../platform/src/platform/core/conversation.ts';
+import { messagesToInternal, restoreKeptMessages } from '../platform/src/platform/core/conversation-utils.ts';
+import { compactSmallWindow } from '../platform/src/platform/core/context-compaction.ts';
+import type { ProviderMessage } from '../platform/src/platform/providers/interface.ts';
 
 // The defect this pins: replaceMessagesForLLM rebuilt the kept messages from
 // provider messages with role and text only, so a compaction stripped every

@@ -1,4 +1,4 @@
-import type { ConfigSetting } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ModelPickerTarget as PlatformModelTarget } from './model-picker-types.js';
 export type ModelPickerTarget = Exclude<PlatformModelTarget, 'embeddings'>;
 export type ModelPickerLaunch =
@@ -36,17 +36,17 @@ export function getNumericAdjustmentMeta(setting: AdjustableSetting): {
 } {
   if (setting.key === 'tts.speed') {
     // Speed multiplier, 0.1 increments across the schema's own supported range
-    // (see the key's numRange in the SDK config schema).
+    // (see the key's numRange in the platform config schema).
     return { step: 0.1, min: 0.25, max: 4, precision: 1 };
   }
   return { step: 1, precision: 0 };
 }
 /**
- * Parse a committed number-setting edit buffer, money field or not: SDK
+ * Parse a committed number-setting edit buffer, money field or not: platform
  * 2.0.5 removed the major/minor conversion these keys used to need, so a
  * money setting's stored value is now the plain number a person typed, same
  * as any other number setting. Returns null for anything unparseable; the
- * SDK's own config-set codec (`coerceSchemaValue`) tolerates a leading
+ * platform's own config-set codec (`coerceSchemaValue`) tolerates a leading
  * currency symbol or thousands grouping on the write path itself.
  */
 export function parseNumberEditBuffer(buffer: string): number | null {

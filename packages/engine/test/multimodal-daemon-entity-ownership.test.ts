@@ -1,11 +1,11 @@
-/** Offline routes use the real SDK service adapter, canonical rerank and owned result retention. */
+/** Offline routes use the real platform service adapter, canonical rerank and owned result retention. */
 import { afterEach, expect, test } from 'bun:test';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '../errors/src/index.js';
 import { JudgmentError } from '@goodvibes-jev/judgment';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
-import { buildMediaRouteContext } from '../sdk/src/platform/daemon/http/router-route-contexts.js';
-import { createDaemonMediaRouteHandlers } from '../daemon-sdk/src/media-routes.js';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
+import { buildMediaRouteContext } from '../platform/src/platform/daemon/http/router-route-contexts.js';
+import { createDaemonMediaRouteHandlers } from '../daemon-api/src/media-routes.js';
 import { multimodalFixture } from './_helpers/multimodal-entities.js';
 
 let previous: ReturnType<typeof installJudgmentPort>;

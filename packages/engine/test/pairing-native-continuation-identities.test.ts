@@ -2,8 +2,8 @@ import { expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
 import { lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { PairingTokenManager, type NativeContinuationAuthority, type NativeContinuationGrant } from '../sdk/src/platform/pairing/pairing-token-store.js';
-import * as atomic from '../sdk/src/platform/utils/atomic-json-store.js';
+import { PairingTokenManager, type NativeContinuationAuthority, type NativeContinuationGrant } from '../platform/src/platform/pairing/pairing-token-store.js';
+import * as atomic from '../platform/src/platform/utils/atomic-json-store.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const binding = '11'.repeat(32), successor = '22'.repeat(32), childBinding = '33'.repeat(32), noop = () => {};

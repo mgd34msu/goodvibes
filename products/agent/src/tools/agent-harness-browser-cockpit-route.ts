@@ -1,4 +1,4 @@
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureSetupReadSource } from './agent-harness-setup-read-source.ts';
 import { captureCatalogNativeFacts, captureCatalogProducerSources, withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
@@ -184,7 +184,7 @@ function browserCockpitWorkspaceCoverage(
       sourceCounts: browserPwa.sourceCounts,
     } : {}),
     policy: nativeCategoryRoutesPublished
-      ? 'Workspace coverage is counted ready only from certified SDK/daemon browser-native category route records with exact routes, mobile/touch evidence, publication, provenance, and freshness cursor metadata.'
+      ? 'Workspace coverage is counted ready only from certified platform/daemon browser-native category route records with exact routes, mobile/touch evidence, publication, provenance, and freshness cursor metadata.'
       : 'Workspace coverage is a route contract map, not a claim that the connected-host browser already renders these Agent category controls.',
   };
 }

@@ -1,7 +1,7 @@
 /**
  * bundle-budget.ts
  *
- * Reports gzipped entry-file sizes for @goodvibes-jev/engine/sdk.
+ * Reports gzipped entry-file sizes for @goodvibes-jev/engine/platform.
  * Imported dependencies are not included, so these are not consumer bundle sizes.
  *
  * Usage:
@@ -9,7 +9,7 @@
  *   bun scripts/bundle-budget.ts
  *
  * Behaviour:
- *   1. Builds the SDK if dist/ is missing. Warns (but does NOT rebuild) if dist/
+ *   1. Builds the engine if dist/ is missing. Warns (but does NOT rebuild) if dist/
  *      exists but appears stale, the build step is left to the caller in CI so
  *      that a concurrent build failure does not obscure artifact diagnostics.
  *      Pass --build to force a rebuild when dist/ is stale.
@@ -29,10 +29,10 @@ import { subpackageExports } from './export-conditions.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
-const SDK_PKG = resolve(REPO_ROOT, 'sdk');
-const DIST_DIR = resolve(SDK_PKG, 'dist');
-// The sdk's exports are the engine package's ./sdk/* exports.
-const SDK_PKG_JSON_PATH = resolve(REPO_ROOT, 'package.json');
+const ENGINE_PKG = resolve(REPO_ROOT, 'platform');
+const DIST_DIR = resolve(ENGINE_PKG, 'dist');
+// The engine's exports are the engine package's ./platform/* exports.
+const ENGINE_PKG_JSON_PATH = resolve(REPO_ROOT, 'package.json');
 const BUDGETS_PATH = resolve(REPO_ROOT, 'bundle-budgets.json');
 
 const FORCE_BUILD = process.argv.includes('--build');
@@ -75,7 +75,7 @@ function distExists(): boolean {
 function isStale(): boolean {
   const distMtime = newestMtime(DIST_DIR);
   if (distMtime === 0) return true;
-  const srcDir = resolve(SDK_PKG, 'src');
+  const srcDir = resolve(ENGINE_PKG, 'src');
   return newestMtime(srcDir) > distMtime;
 }
 
@@ -162,13 +162,13 @@ function isBudgetEntry(value: unknown): value is BudgetEntry {
 }
 
 /**
- * The sdk's export map, read from the engine package's ./sdk/* exports as the
- * old sdk package's map: the report measures each entry's `import` target
- * under sdk/dist, as before.
+ * The engine's export map, read from the engine package's ./platform/* exports as the
+ * old engine package's map: the report measures each entry's `import` target
+ * under engine/dist, as before.
  */
 function loadExports(): Record<string, ExportValue> {
-  const pkg = JSON.parse(readFileSync(SDK_PKG_JSON_PATH, 'utf8')) as PkgJson;
-  return subpackageExports(pkg.exports ?? {}, 'sdk') as Record<string, ExportValue>;
+  const pkg = JSON.parse(readFileSync(ENGINE_PKG_JSON_PATH, 'utf8')) as PkgJson;
+  return subpackageExports(pkg.exports ?? {}, 'platform') as Record<string, ExportValue>;
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -223,7 +223,7 @@ const measuredEntries = new Set(entries.map((entry) => entry.entry));
 const staleBudgetEntries = Object.keys(budgets).filter((entry) => !measuredEntries.has(entry));
 
 for (const { entry, distRel } of entries) {
-  const filePath = resolve(SDK_PKG, distRel);
+  const filePath = resolve(ENGINE_PKG, distRel);
   if (!existsSync(filePath)) {
     if (isStale()) {
       // File is absent because dist/ is stale, the entry exists in package.json
@@ -269,7 +269,7 @@ const domains = eventsBudget?.domains;
 if (domains !== undefined && (!Array.isArray(domains) || !domains.every((value) => typeof value === 'string'))) {
   console.warn('ADVISORY: optional event-domain references are malformed; ignoring that reference list.');
 } else if (domains) {
-  const distEventsDir = resolve(SDK_PKG, 'dist', 'events');
+  const distEventsDir = resolve(ENGINE_PKG, 'dist', 'events');
   if (existsSync(distEventsDir)) {
     const declared = new Set<string>(domains);
     const SKIP_NON_DOMAIN_FILES = new Set(['index']);

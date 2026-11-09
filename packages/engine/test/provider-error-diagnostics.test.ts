@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, it, expect } from 'bun:test';
-import { ProviderError } from '@goodvibes-jev/engine/sdk/platform/types';
+import { ProviderError } from '@goodvibes-jev/engine/platform/platform/types';
 import {
   buildErrorResponseBody,
   formatError,
@@ -8,7 +8,7 @@ import {
   readNormalizedError,
   summarizeError,
   toProviderError,
-} from '@goodvibes-jev/engine/sdk/platform/utils';
+} from '@goodvibes-jev/engine/platform/platform/utils';
 import { forgetFailureReadings, installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { authoredErrorReadingsPort, errorText } from './_helpers/authored-error-readings.ts';
 

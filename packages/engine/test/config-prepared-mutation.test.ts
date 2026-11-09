@@ -2,9 +2,9 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { ConfigManager, type PreparedConfigMutation, type PreparedConfigMutationTransition } from '../sdk/src/platform/config/manager.js';
-import { CONFIG_SCHEMA, type ConfigKey } from '../sdk/src/platform/config/schema.js';
-import * as atomic from '../sdk/src/platform/utils/atomic-json-store.js';
+import { ConfigManager, type PreparedConfigMutation, type PreparedConfigMutationTransition } from '../platform/src/platform/config/manager.js';
+import { CONFIG_SCHEMA, type ConfigKey } from '../platform/src/platform/config/schema.js';
+import * as atomic from '../platform/src/platform/utils/atomic-json-store.js';
 
 const roots: string[] = [];
 const restorers: Array<() => void> = [];

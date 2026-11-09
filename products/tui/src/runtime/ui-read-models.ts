@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/sdk/platform/runtime/ui';
+export * from '@goodvibes-jev/engine/platform/platform/runtime/ui';

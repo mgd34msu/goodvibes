@@ -1,5 +1,5 @@
 import type { CommandRegistry } from '../command-registry.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 /**
  * registerImageRuntimeCommands - `/imagine <prompt>`.
@@ -10,7 +10,7 @@ import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
  * before wiring this in: the brief that scoped this command was written
  * before checking for the collision.
  *
- * First production caller of MediaProviderRegistry.generate(), the SDK
+ * First production caller of MediaProviderRegistry.generate(), the platform
  * plumbing existed with zero non-test call sites before this command.
  * findProvider('generate') returns whichever generation-capable provider is
  * configured; when none are, the command prints the registry's own

@@ -79,7 +79,7 @@ describe('readUserFacingError', () => {
 
   test('a dead subscription session is named as such, never as an API key problem', async () => {
     reading('auth', true);
-    // The exact failure that shipped: the SDK's subscription provider says
+    // The exact failure that shipped: the platform's subscription provider says
     // "subscription session has ended", and the fixed API-key wording told a
     // logged-in subscriber their subscription was not there.
     const result = await readUserFacingError(new Error(

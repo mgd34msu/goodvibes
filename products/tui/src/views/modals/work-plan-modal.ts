@@ -4,8 +4,8 @@ import type {
   ConfigModalSurface,
   ConfigModalView,
 } from '../../input/config-modal-types.ts';
-import type { WorkPlan, WorkPlanItem, WorkPlanItemStatus, WorkPlanLinkTargets } from '@goodvibes-jev/engine/sdk/platform/workflow';
-import { contractNodeId } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
+import type { WorkPlan, WorkPlanItem, WorkPlanItemStatus, WorkPlanLinkTargets } from '@goodvibes-jev/engine/platform/platform/workflow';
+import { contractNodeId } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 
 // ---------------------------------------------------------------------------
 // Work Plan → config-modal surface (group-B port). Lists the active
@@ -137,7 +137,7 @@ class WorkPlanModalSurface implements ConfigModalSurface {
     if (id === 'jumpAgent') {
       const agentId = item.linked?.agentId;
       if (!agentId) return;
-      // 'agent' matches the SDK's ProcessKind for a live agent node, which
+      // 'agent' matches the platform's ProcessKind for a live agent node, which
       // AgentsModal.reveal matches on id and kind.
       void ctx.executeCommand?.('agents', ['--target', `${agentId}:agent`]);
       ctx.setStatus(`Opened Agents on agent ${agentId}.`);

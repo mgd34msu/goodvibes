@@ -2,9 +2,9 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createOperatorSdk } from '../operator-sdk/src/client.js';
+import { createOperatorApiClient } from '../operator-client/src/client.js';
 import { openLegacyImportOperator } from '../terminal-shell/src/legacy-work-ledger-import-operator.js';
-import { prepareLegacyWorkLedgerMigration } from '../sdk/src/platform/workflow/work-ledger/legacy-import.js';
+import { prepareLegacyWorkLedgerMigration } from '../platform/src/platform/workflow/work-ledger/legacy-import.js';
 import fixture from '../../../products/agent/src/test/fixtures/legacy-ledger/preparation.json' with { type: 'json' };
 
 const roots: string[] = [];
@@ -46,8 +46,8 @@ function host() {
   };
 }
 
-test('real operator SDK validates both legacy and paginated source responses before complete import preparation', async () => {
-  const f = host(); const client = createOperatorSdk({ baseUrl: f.baseUrl, authToken: 'synthetic-read-token' });
+test('real operator platform validates both legacy and paginated source responses before complete import preparation', async () => {
+  const f = host(); const client = createOperatorApiClient({ baseUrl: f.baseUrl, authToken: 'synthetic-read-token' });
   try {
     const legacy: unknown = await client.invoke('knowledge.sources.list');
     expect(legacy).toEqual({ sources: f.sources });
@@ -61,7 +61,7 @@ test('real operator SDK validates both legacy and paginated source responses bef
   } finally { client.dispose(); f.close(); }
 });
 
-test('real operator SDK retains response validation and post-page revocation fencing', async () => {
+test('real operator platform retains response validation and post-page revocation fencing', async () => {
   const f = host();
   try {
     f.revokeDuringDiscovery(); const session = await f.open();

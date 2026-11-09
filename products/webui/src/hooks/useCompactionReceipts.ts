@@ -23,7 +23,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { sdk, DEFAULT_SSE_RECONNECT } from '../lib/goodvibes';
+import { client as platformClient, DEFAULT_SSE_RECONNECT } from '../lib/goodvibes';
 import { parseCompactionCheck, parseCompactionReceipt, type CompactionCheck, type CompactionReceipt } from '../lib/compaction';
 
 const COMPACTION_EVENTS_PATH = '/api/control-plane/events?domains=compaction';
@@ -59,7 +59,7 @@ export function useCompactionReceipts(sessionId: string, enabled: boolean): Comp
     let disposed = false;
     let close: (() => void) | null = null;
 
-    sdk.streams
+    platformClient.streams
       .open(
         COMPACTION_EVENTS_PATH,
         {

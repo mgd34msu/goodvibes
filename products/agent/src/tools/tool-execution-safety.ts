@@ -1,6 +1,6 @@
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 const TOOL_SAFETY_MARKER = Symbol.for('goodvibes-agent.tool-execution-safety-wrapped');
 const REGISTRY_SAFETY_MARKER = Symbol.for('goodvibes-agent.tool-registry-safety-installed');

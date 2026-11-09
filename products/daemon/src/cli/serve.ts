@@ -4,12 +4,12 @@ import {
   applyRuntimeConfigOverrides, applyRuntimeConfigValue, applyRuntimeEndpointFlagOverrides,
   applyRuntimeFeatureFlagOverrides, resolveRuntimeEndpointBinding,
 } from '@goodvibes-jev/engine/terminal-shell';
-import { describeDerivedBindMismatch, readControlPlaneBinding } from '@goodvibes-jev/engine/sdk/platform/config';
-import { resolveHostBinding } from '@goodvibes-jev/engine/sdk/platform/daemon';
-import { getModelIdFromProviderModel, getProviderIdFromModel } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { createRuntimeStore } from '@goodvibes-jev/engine/sdk/platform/runtime/store';
-import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/sdk/platform/pairing';
-import { RuntimeEventBus, runtimeEventBusOptionsFrom } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
+import { describeDerivedBindMismatch, readControlPlaneBinding } from '@goodvibes-jev/engine/platform/platform/config';
+import { resolveHostBinding } from '@goodvibes-jev/engine/platform/platform/daemon';
+import { getModelIdFromProviderModel, getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
+import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
+import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { RuntimeEventBus, runtimeEventBusOptionsFrom } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { isKnownConfigKey } from '../config/config-key-guard.js';
 import { getPackageVersion, renderDaemonBoundEndpoint, renderDaemonStartupBanner } from './help.js';
 import { createDaemonHost } from '../runtime/daemon-host.js';

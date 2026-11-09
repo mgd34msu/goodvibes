@@ -16,17 +16,17 @@
  * covered separately in feature-flag-config-bridge-services.test.ts.
  */
 import { describe, expect, test } from 'bun:test';
-import { createFeatureFlagManager } from '../sdk/src/platform/runtime/feature-flags/manager.js';
+import { createFeatureFlagManager } from '../platform/src/platform/runtime/feature-flags/manager.js';
 import {
   FEATURE_SETTINGS_BINDINGS,
   bindFeatureSettingsBridge,
   deriveFeatureState,
   deriveFeatureStates,
   getFeatureSettingsBinding,
-} from '../sdk/src/platform/runtime/feature-flags/feature-settings.js';
-import { FEATURE_FLAG_MAP } from '../sdk/src/platform/runtime/feature-flags/flags.js';
-import type { FlagState } from '../sdk/src/platform/runtime/feature-flags/types.js';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.js';
+} from '../platform/src/platform/runtime/feature-flags/feature-settings.js';
+import { FEATURE_FLAG_MAP } from '../platform/src/platform/runtime/feature-flags/flags.js';
+import type { FlagState } from '../platform/src/platform/runtime/feature-flags/types.js';
+import type { ConfigManager } from '../platform/src/platform/config/manager.js';
 
 // A runtime-toggleable capability defaulting OFF and a startup-gated
 // (runtimeToggleable: false) one defaulting OFF, picked from the real
@@ -166,8 +166,8 @@ describe('feature-settings bindings: derivation', () => {
   test('deriveFeatureStates on registry defaults reproduces every defaultState', () => {
     // A fake config manager returning each binding key's schema default is the
     // stock-config boot; deriving from it must be a no-op against the registry.
-    const { DEFAULT_CONFIG } = require('../sdk/src/platform/config/schema.js') as
-      typeof import('../sdk/src/platform/config/schema.js');
+    const { DEFAULT_CONFIG } = require('../platform/src/platform/config/schema.js') as
+      typeof import('../platform/src/platform/config/schema.js');
     const fake = {
       get: (key: string) => key.split('.').reduce<unknown>(
         (cursor, segment) => (cursor as Record<string, unknown>)?.[segment],

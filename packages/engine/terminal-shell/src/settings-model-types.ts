@@ -1,4 +1,4 @@
-import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 export type CommonSettingsCategory =
   | 'display'
   | 'ui'

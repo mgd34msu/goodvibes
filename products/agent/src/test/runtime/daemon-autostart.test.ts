@@ -7,9 +7,9 @@
  * and a running daemon left untouched.
  */
 import { describe, expect, test } from 'bun:test';
-import type { HookDispatcher } from '@goodvibes-jev/engine/sdk/platform/hooks';
+import type { HookDispatcher } from '@goodvibes-jev/engine/platform/platform/hooks';
 import type { RuntimeEventBus, DeferredStartupCoordinator, ExternalServicesHandle, HostServiceStatus } from '@/runtime/index.ts';
-import type { DaemonServiceControl, DaemonServiceSnapshot } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+import type { DaemonServiceControl, DaemonServiceSnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { wireAgentExternalServices } from '../../runtime/bootstrap-external-services.ts';
 import { AgentDaemonReceiptFeed } from '../../runtime/daemon-receipts.ts';
 import type { SystemMessageRouter } from '../../core/system-message-router.ts';

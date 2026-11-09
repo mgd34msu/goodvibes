@@ -112,7 +112,7 @@
         "refreshLeewayMs",
         "tokenStore"
       ],
-      "text": "export interface AutoRefreshCoordinatorOptions { readonly tokenStore: GoodVibesTokenStore; readonly autoRefresh: boolean; readonly refreshLeewayMs: number; readonly now?: (() => number) | undefined; readonly refresh?: (() => Promise<{ token: string; expiresAt?: number | undefined; }>) | undefined; readonly observer?: SDKObserver | undefined; } ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+      "text": "export interface AutoRefreshCoordinatorOptions { readonly tokenStore: GoodVibesTokenStore; readonly autoRefresh: boolean; readonly refreshLeewayMs: number; readonly now?: (() => number) | undefined; readonly refresh?: (() => Promise<{ token: string; expiresAt?: number | undefined; }>) | undefined; readonly observer?: PlatformObserver | undefined; } ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
     },
     {
       "name": "AutoRefreshOptions",
@@ -161,9 +161,9 @@
       "text": "export interface BackpressureInfo { readonly droppedCount: number; readonly queueLength: number; readonly queueBytes: number; readonly reason: 'message_too_large' | 'queue_full'; }"
     },
     {
-      "name": "BrowserGoodVibesSdkOptions",
+      "name": "BrowserGoodVibesPlatformOptions",
       "kind": "interface",
-      "text": "export interface BrowserGoodVibesSdkOptions extends Omit<GoodVibesSdkOptions, 'baseUrl' | 'fetch' | 'WebSocketImpl'> { readonly baseUrl?: string | undefined; readonly fetch?: FetchLike | undefined; readonly WebSocketImpl?: typeof WebSocket | undefined; }"
+      "text": "export interface BrowserGoodVibesPlatformOptions extends Omit<GoodVibesPlatformOptions, 'baseUrl' | 'fetch' | 'WebSocketImpl'> { readonly baseUrl?: string | undefined; readonly fetch?: FetchLike | undefined; readonly WebSocketImpl?: typeof WebSocket | undefined; }"
     },
     {
       "name": "BrowserTokenStoreOptions",
@@ -374,7 +374,7 @@
         "[Symbol.hasInstance]",
         "constructor"
       ],
-      "text": "export declare class ConfigurationError extends GoodVibesSdkError { static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options?: GoodVibesSdkErrorOptions); }"
+      "text": "export declare class ConfigurationError extends GoodVibesError { static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options?: GoodVibesErrorOptions); }"
     },
     {
       "name": "ConfiguredVia",
@@ -454,7 +454,7 @@
         "[Symbol.hasInstance]",
         "constructor"
       ],
-      "text": "export declare class ContractError extends GoodVibesSdkError { static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options?: GoodVibesSdkErrorOptions); }"
+      "text": "export declare class ContractError extends GoodVibesError { static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options?: GoodVibesErrorOptions); }"
     },
     {
       "name": "ContractEvent",
@@ -936,9 +936,9 @@
       "text": "export type ExecutionStrategy = 'auto' | 'single' | 'cohort' | 'background' | 'remote';"
     },
     {
-      "name": "ExpoGoodVibesSdkOptions",
+      "name": "ExpoGoodVibesPlatformOptions",
       "kind": "type",
-      "text": "export type ExpoGoodVibesSdkOptions = ReactNativeGoodVibesSdkOptions;"
+      "text": "export type ExpoGoodVibesPlatformOptions = ReactNativeGoodVibesPlatformOptions;"
     },
     {
       "name": "FOUNDATION_METADATA",
@@ -1206,7 +1206,7 @@
       "text": "export interface GoodVibesRealtimeOptions { readonly sseReconnect?: StreamReconnectPolicy | undefined; readonly webSocketReconnect?: StreamReconnectPolicy | undefined; readonly onError?: ((error: unknown) => void) | undefined; }"
     },
     {
-      "name": "GoodVibesSdk",
+      "name": "GoodVibesPlatform",
       "kind": "interface",
       "required": [
         "auth",
@@ -1215,10 +1215,10 @@
         "realtime",
         "use"
       ],
-      "text": "export interface GoodVibesSdk { readonly operator: OperatorSdk; readonly peer: PeerSdk; readonly auth: GoodVibesAuthClient; readonly realtime: GoodVibesRealtime; use(middleware: TransportMiddleware): void; }"
+      "text": "export interface GoodVibesPlatform { readonly operator: OperatorApiClient; readonly peer: PeerApiClient; readonly auth: GoodVibesAuthClient; readonly realtime: GoodVibesRealtime; use(middleware: TransportMiddleware): void; }"
     },
     {
-      "name": "GoodVibesSdkError",
+      "name": "GoodVibesError",
       "kind": "class",
       "publicMembers": [
         "[Symbol.hasInstance]",
@@ -1243,20 +1243,20 @@
         "toJSON",
         "url"
       ],
-      "text": "export declare class GoodVibesSdkError extends Error { readonly kind: SDKErrorKind; readonly code: SDKErrorCode | (string & {}); readonly category: ErrorCategory; readonly source: ErrorSource; readonly recoverable: boolean; readonly status?: number | undefined; readonly url?: string | undefined; readonly method?: string | undefined; readonly body?: unknown | undefined; readonly hint?: string | undefined; readonly provider?: string | undefined; readonly operation?: string | undefined; readonly phase?: string | undefined; readonly requestId?: string | undefined; readonly providerCode?: string | undefined; readonly providerType?: string | undefined; readonly retryAfterMs?: number | undefined; readonly cause?: unknown | undefined; static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options?: GoodVibesSdkErrorOptions); toJSON(): Record<string, unknown>; } ;; via Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
+      "text": "export declare class GoodVibesError extends Error { readonly kind: EngineErrorKind; readonly code: EngineErrorCode | (string & {}); readonly category: ErrorCategory; readonly source: ErrorSource; readonly recoverable: boolean; readonly status?: number | undefined; readonly url?: string | undefined; readonly method?: string | undefined; readonly body?: unknown | undefined; readonly hint?: string | undefined; readonly provider?: string | undefined; readonly operation?: string | undefined; readonly phase?: string | undefined; readonly requestId?: string | undefined; readonly providerCode?: string | undefined; readonly providerType?: string | undefined; readonly retryAfterMs?: number | undefined; readonly cause?: unknown | undefined; static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options?: GoodVibesErrorOptions); toJSON(): Record<string, unknown>; } ;; via Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
     },
     {
-      "name": "GoodVibesSdkErrorOptions",
+      "name": "GoodVibesErrorOptions",
       "kind": "interface",
-      "text": "export interface GoodVibesSdkErrorOptions { readonly code?: SDKErrorCode | (string & {}) | undefined; readonly category?: ErrorCategory | undefined; readonly source?: ErrorSource | undefined; readonly recoverable?: boolean | undefined; readonly status?: number | undefined; readonly url?: string | undefined; readonly method?: string | undefined; readonly body?: unknown | undefined; readonly hint?: string | undefined; readonly provider?: string | undefined; readonly operation?: string | undefined; readonly phase?: string | undefined; readonly requestId?: string | undefined; readonly providerCode?: string | undefined; readonly providerType?: string | undefined; readonly retryAfterMs?: number | undefined; readonly cause?: unknown | undefined; }"
+      "text": "export interface GoodVibesErrorOptions { readonly code?: EngineErrorCode | (string & {}) | undefined; readonly category?: ErrorCategory | undefined; readonly source?: ErrorSource | undefined; readonly recoverable?: boolean | undefined; readonly status?: number | undefined; readonly url?: string | undefined; readonly method?: string | undefined; readonly body?: unknown | undefined; readonly hint?: string | undefined; readonly provider?: string | undefined; readonly operation?: string | undefined; readonly phase?: string | undefined; readonly requestId?: string | undefined; readonly providerCode?: string | undefined; readonly providerType?: string | undefined; readonly retryAfterMs?: number | undefined; readonly cause?: unknown | undefined; }"
     },
     {
-      "name": "GoodVibesSdkOptions",
+      "name": "GoodVibesPlatformOptions",
       "kind": "interface",
       "required": [
         "baseUrl"
       ],
-      "text": "export interface GoodVibesSdkOptions { readonly baseUrl: string; readonly authToken?: string | null | undefined; readonly getAuthToken?: AuthTokenResolver | undefined; readonly tokenStore?: GoodVibesTokenStore | undefined; readonly fetch?: FetchLike | undefined; readonly headers?: HeadersInit | undefined; readonly getHeaders?: HeaderResolver | undefined; readonly retry?: HttpRetryPolicy | undefined; readonly WebSocketImpl?: typeof WebSocket | undefined; readonly realtime?: GoodVibesRealtimeOptions | undefined; readonly observer?: SDKObserver | undefined; readonly middleware?: TransportMiddleware[] | undefined; readonly autoRefresh?: AutoRefreshOptions | undefined; } ;; via HeadersInit = type HeadersInit = [string, string][] | Record<string, string> | Headers;"
+      "text": "export interface GoodVibesPlatformOptions { readonly baseUrl: string; readonly authToken?: string | null | undefined; readonly getAuthToken?: AuthTokenResolver | undefined; readonly tokenStore?: GoodVibesTokenStore | undefined; readonly fetch?: FetchLike | undefined; readonly headers?: HeadersInit | undefined; readonly getHeaders?: HeaderResolver | undefined; readonly retry?: HttpRetryPolicy | undefined; readonly WebSocketImpl?: typeof WebSocket | undefined; readonly realtime?: GoodVibesRealtimeOptions | undefined; readonly observer?: PlatformObserver | undefined; readonly middleware?: TransportMiddleware[] | undefined; readonly autoRefresh?: AutoRefreshOptions | undefined; } ;; via HeadersInit = type HeadersInit = [string, string][] | Record<string, string> | Headers;"
     },
     {
       "name": "GoodVibesTokenStore",
@@ -1328,7 +1328,7 @@
         "[Symbol.hasInstance]",
         "constructor"
       ],
-      "text": "export declare class HttpStatusError extends GoodVibesSdkError { static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options?: GoodVibesSdkErrorOptions); }"
+      "text": "export declare class HttpStatusError extends GoodVibesError { static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options?: GoodVibesErrorOptions); }"
     },
     {
       "name": "HttpTransport",
@@ -1741,14 +1741,14 @@
       "text": "export interface OperatorSchemaCoverageContract { readonly methods: number; readonly typedInputs: number; readonly genericInputs: number; readonly typedOutputs: number; readonly genericOutputs: number; }"
     },
     {
-      "name": "OperatorSdk",
+      "name": "OperatorApiClient",
       "kind": "type",
-      "text": "export type OperatorSdk = Omit<OperatorRemoteClient, 'getOperation'> & { readonly transport: HttpTransport; getOperation(methodId: OperatorMethodId): OperatorMethodContract; dispose(): void; asyncDispose(): Promise<void>; [Symbol.dispose](): void; [Symbol.asyncDispose](): Promise<void>; }; ;; via Omit = type Omit<T, K extends keyof any> = Pick<T, Exclude<keyof T, K>>; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+      "text": "export type OperatorApiClient = Omit<OperatorRemoteClient, 'getOperation'> & { readonly transport: HttpTransport; getOperation(methodId: OperatorMethodId): OperatorMethodContract; dispose(): void; asyncDispose(): Promise<void>; [Symbol.dispose](): void; [Symbol.asyncDispose](): Promise<void>; }; ;; via Omit = type Omit<T, K extends keyof any> = Pick<T, Exclude<keyof T, K>>; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
     },
     {
-      "name": "OperatorSdkOptions",
+      "name": "OperatorApiClientOptions",
       "kind": "interface",
-      "text": "export interface OperatorSdkOptions extends HttpTransportOptions, Pick<OperatorRemoteClientOptions, 'regexReading' | 'getRegexReading'> { readonly validateResponses?: boolean | undefined; }"
+      "text": "export interface OperatorApiClientOptions extends HttpTransportOptions, Pick<OperatorRemoteClientOptions, 'regexReading' | 'getRegexReading'> { readonly validateResponses?: boolean | undefined; }"
     },
     {
       "name": "OperatorStreamMethodId",
@@ -1986,19 +1986,19 @@
       "text": "export interface PeerRemoteClientOptions { readonly validateResponses?: boolean | undefined; readonly regexReading?: RegexReadingCapability | undefined; readonly getRegexReading?: ContractRegexReadingFactory | undefined; }"
     },
     {
-      "name": "PeerSdk",
+      "name": "PeerApiClient",
       "kind": "type",
-      "text": "export type PeerSdk = Omit<PeerRemoteClient, 'getOperation'> & { readonly transport: HttpTransport; getOperation(endpointId: PeerEndpointId): PeerEndpointContract; dispose(): void; asyncDispose(): Promise<void>; [Symbol.dispose](): void; [Symbol.asyncDispose](): Promise<void>; }; ;; via Omit = type Omit<T, K extends keyof any> = Pick<T, Exclude<keyof T, K>>; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+      "text": "export type PeerApiClient = Omit<PeerRemoteClient, 'getOperation'> & { readonly transport: HttpTransport; getOperation(endpointId: PeerEndpointId): PeerEndpointContract; dispose(): void; asyncDispose(): Promise<void>; [Symbol.dispose](): void; [Symbol.asyncDispose](): Promise<void>; }; ;; via Omit = type Omit<T, K extends keyof any> = Pick<T, Exclude<keyof T, K>>; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
     },
     {
-      "name": "PeerSdkBehaviorOptions",
+      "name": "PeerApiClientBehaviorOptions",
       "kind": "interface",
-      "text": "export interface PeerSdkBehaviorOptions extends Pick<PeerRemoteClientOptions, 'regexReading' | 'getRegexReading'> { readonly validateResponses?: boolean | undefined; }"
+      "text": "export interface PeerApiClientBehaviorOptions extends Pick<PeerRemoteClientOptions, 'regexReading' | 'getRegexReading'> { readonly validateResponses?: boolean | undefined; }"
     },
     {
-      "name": "PeerSdkOptions",
+      "name": "PeerApiClientOptions",
       "kind": "type",
-      "text": "export type PeerSdkOptions = HttpTransportOptions & PeerSdkBehaviorOptions;"
+      "text": "export type PeerApiClientOptions = HttpTransportOptions & PeerApiClientBehaviorOptions;"
     },
     {
       "name": "PeerTypedEndpointId",
@@ -2172,14 +2172,14 @@
       "text": "export interface ReactNativeGoodVibesRealtime { runtime(): RemoteRuntimeEvents<RuntimeEventRecord>; viaWebSocket(webSocketImpl?: typeof WebSocket): RemoteRuntimeEvents<RuntimeEventRecord>; }"
     },
     {
-      "name": "ReactNativeGoodVibesSdk",
+      "name": "ReactNativeGoodVibesPlatform",
       "kind": "type",
-      "text": "export type ReactNativeGoodVibesSdk = Omit<GoodVibesSdk, 'realtime'> & { readonly realtime: ReactNativeGoodVibesRealtime; }; ;; via Omit = type Omit<T, K extends keyof any> = Pick<T, Exclude<keyof T, K>>;"
+      "text": "export type ReactNativeGoodVibesPlatform = Omit<GoodVibesPlatform, 'realtime'> & { readonly realtime: ReactNativeGoodVibesRealtime; }; ;; via Omit = type Omit<T, K extends keyof any> = Pick<T, Exclude<keyof T, K>>;"
     },
     {
-      "name": "ReactNativeGoodVibesSdkOptions",
+      "name": "ReactNativeGoodVibesPlatformOptions",
       "kind": "interface",
-      "text": "export interface ReactNativeGoodVibesSdkOptions extends GoodVibesSdkOptions { readonly WebSocketImpl?: typeof WebSocket | undefined; }"
+      "text": "export interface ReactNativeGoodVibesPlatformOptions extends GoodVibesPlatformOptions { readonly WebSocketImpl?: typeof WebSocket | undefined; }"
     },
     {
       "name": "ReconnectAttemptInfo",
@@ -2407,24 +2407,24 @@
       "text": "export type RuntimeEventTypedDomain = keyof RuntimeDomainEventPayloadMap & string;"
     },
     {
-      "name": "SDKErrorCode",
+      "name": "EngineErrorCode",
       "kind": "type",
-      "text": "export type SDKErrorCode = 'AUTH_REQUIRED' | 'TOKEN_EXPIRED' | 'PERMISSION_DENIED' | 'PAYMENT_REQUIRED' | 'RATE_LIMITED' | 'NETWORK_UNREACHABLE' | 'TIMEOUT' | 'CANCELLED' | 'NOT_FOUND' | 'CONFLICT' | 'SESSION_CLOSED' | 'NOT_INVOKABLE' | 'METHOD_NOT_FOUND' | 'VALIDATION_FAILED' | 'AGENT_TIMEOUT' | 'AGENT_FAILED' | 'TOOL_EXEC_FAILED' | 'SERVICE_UNAVAILABLE' | 'CONTRACT_MISMATCH' | 'PROTOCOL_ERROR' | 'INTERNAL_ERROR' | 'SDK_CONFIGURATION_ERROR' | 'SDK_CONTRACT_ERROR' | 'SDK_HTTP_STATUS_ERROR' | 'UNKNOWN';"
+      "text": "export type EngineErrorCode = 'AUTH_REQUIRED' | 'TOKEN_EXPIRED' | 'PERMISSION_DENIED' | 'PAYMENT_REQUIRED' | 'RATE_LIMITED' | 'NETWORK_UNREACHABLE' | 'TIMEOUT' | 'CANCELLED' | 'NOT_FOUND' | 'CONFLICT' | 'SESSION_CLOSED' | 'NOT_INVOKABLE' | 'METHOD_NOT_FOUND' | 'VALIDATION_FAILED' | 'AGENT_TIMEOUT' | 'AGENT_FAILED' | 'TOOL_EXEC_FAILED' | 'SERVICE_UNAVAILABLE' | 'CONTRACT_MISMATCH' | 'PROTOCOL_ERROR' | 'INTERNAL_ERROR' | 'ENGINE_CONFIGURATION_ERROR' | 'ENGINE_CONTRACT_ERROR' | 'ENGINE_HTTP_STATUS_ERROR' | 'UNKNOWN';"
     },
     {
-      "name": "SDKErrorCodes",
+      "name": "EngineErrorCodes",
       "kind": "const",
-      "text": "SDKErrorCodes: { readonly AUTH_REQUIRED: \"AUTH_REQUIRED\"; readonly TOKEN_EXPIRED: \"TOKEN_EXPIRED\"; readonly PERMISSION_DENIED: \"PERMISSION_DENIED\"; readonly PAYMENT_REQUIRED: \"PAYMENT_REQUIRED\"; readonly RATE_LIMITED: \"RATE_LIMITED\"; readonly NETWORK_UNREACHABLE: \"NETWORK_UNREACHABLE\"; readonly TIMEOUT: \"TIMEOUT\"; readonly CANCELLED: \"CANCELLED\"; readonly NOT_FOUND: \"NOT_FOUND\"; readonly CONFLICT: \"CONFLICT\"; readonly SESSION_CLOSED: \"SESSION_CLOSED\"; readonly NOT_INVOKABLE: \"NOT_INVOKABLE\"; readonly METHOD_NOT_FOUND: \"METHOD_NOT_FOUND\"; readonly VALIDATION_FAILED: \"VALIDATION_FAILED\"; readonly AGENT_TIMEOUT: \"AGENT_TIMEOUT\"; readonly AGENT_FAILED: \"AGENT_FAILED\"; readonly TOOL_EXEC_FAILED: \"TOOL_EXEC_FAILED\"; readonly SERVICE_UNAVAILABLE: \"SERVICE_UNAVAILABLE\"; readonly CONTRACT_MISMATCH: \"CONTRACT_MISMATCH\"; readonly PROTOCOL_ERROR: \"PROTOCOL_ERROR\"; readonly INTERNAL_ERROR: \"INTERNAL_ERROR\"; readonly SDK_CONFIGURATION_ERROR: \"SDK_CONFIGURATION_ERROR\"; readonly SDK_CONTRACT_ERROR: \"SDK_CONTRACT_ERROR\"; readonly SDK_HTTP_STATUS_ERROR: \"SDK_HTTP_STATUS_ERROR\"; readonly UNKNOWN: \"UNKNOWN\"; }"
+      "text": "EngineErrorCodes: { readonly AUTH_REQUIRED: \"AUTH_REQUIRED\"; readonly TOKEN_EXPIRED: \"TOKEN_EXPIRED\"; readonly PERMISSION_DENIED: \"PERMISSION_DENIED\"; readonly PAYMENT_REQUIRED: \"PAYMENT_REQUIRED\"; readonly RATE_LIMITED: \"RATE_LIMITED\"; readonly NETWORK_UNREACHABLE: \"NETWORK_UNREACHABLE\"; readonly TIMEOUT: \"TIMEOUT\"; readonly CANCELLED: \"CANCELLED\"; readonly NOT_FOUND: \"NOT_FOUND\"; readonly CONFLICT: \"CONFLICT\"; readonly SESSION_CLOSED: \"SESSION_CLOSED\"; readonly NOT_INVOKABLE: \"NOT_INVOKABLE\"; readonly METHOD_NOT_FOUND: \"METHOD_NOT_FOUND\"; readonly VALIDATION_FAILED: \"VALIDATION_FAILED\"; readonly AGENT_TIMEOUT: \"AGENT_TIMEOUT\"; readonly AGENT_FAILED: \"AGENT_FAILED\"; readonly TOOL_EXEC_FAILED: \"TOOL_EXEC_FAILED\"; readonly SERVICE_UNAVAILABLE: \"SERVICE_UNAVAILABLE\"; readonly CONTRACT_MISMATCH: \"CONTRACT_MISMATCH\"; readonly PROTOCOL_ERROR: \"PROTOCOL_ERROR\"; readonly INTERNAL_ERROR: \"INTERNAL_ERROR\"; readonly ENGINE_CONFIGURATION_ERROR: \"ENGINE_CONFIGURATION_ERROR\"; readonly ENGINE_CONTRACT_ERROR: \"ENGINE_CONTRACT_ERROR\"; readonly ENGINE_HTTP_STATUS_ERROR: \"ENGINE_HTTP_STATUS_ERROR\"; readonly UNKNOWN: \"UNKNOWN\"; }"
     },
     {
-      "name": "SDKErrorKind",
+      "name": "EngineErrorKind",
       "kind": "type",
-      "text": "export type SDKErrorKind = 'auth' | 'config' | 'contract' | 'network' | 'not-found' | 'protocol' | 'rate-limit' | 'service' | 'internal' | 'tool' | 'validation' | 'unknown';"
+      "text": "export type EngineErrorKind = 'auth' | 'config' | 'contract' | 'network' | 'not-found' | 'protocol' | 'rate-limit' | 'service' | 'internal' | 'tool' | 'validation' | 'unknown';"
     },
     {
-      "name": "SDKObserver",
+      "name": "PlatformObserver",
       "kind": "interface",
-      "text": "export interface SDKObserver extends TransportObserver { onEvent?(event: AnyRuntimeEvent): void; onError?(err: GoodVibesSdkError): void; onTransportActivity?(activity: TransportActivityInfo): void; onAuthTransition?(transition: AuthTransitionInfo): void; }"
+      "text": "export interface PlatformObserver extends TransportObserver { onEvent?(event: AnyRuntimeEvent): void; onError?(err: GoodVibesError): void; onTransportActivity?(activity: TransportActivityInfo): void; onAuthTransition?(transition: AuthTransitionInfo): void; }"
     },
     {
       "name": "SPAN_STATUS_ERROR",
@@ -2513,7 +2513,7 @@
         "tokenStore",
         "writable"
       ],
-      "text": "export declare class SessionManager { constructor(operator: OperatorSdk, tokenStore: TokenStore | null, observer?: SDKObserver); current(): Promise<GoodVibesCurrentAuth>; login(input: GoodVibesLoginInput, options?: GoodVibesAuthLoginOptions): Promise<GoodVibesLoginOutput>; get writable(): boolean; get tokenStore(): TokenStore | null; } ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+      "text": "export declare class SessionManager { constructor(operator: OperatorApiClient, tokenStore: TokenStore | null, observer?: PlatformObserver); current(): Promise<GoodVibesCurrentAuth>; login(input: GoodVibesLoginInput, options?: GoodVibesAuthLoginOptions): Promise<GoodVibesLoginOutput>; get writable(): boolean; get tokenStore(): TokenStore | null; } ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
     },
     {
       "name": "SharedSessionConversationRouteOutput",
@@ -2837,9 +2837,9 @@
       "text": "export type WatcherSourceKind = (typeof WATCHER_SOURCE_KINDS)[number];"
     },
     {
-      "name": "WebGoodVibesSdkOptions",
+      "name": "WebGoodVibesPlatformOptions",
       "kind": "type",
-      "text": "export type WebGoodVibesSdkOptions = BrowserGoodVibesSdkOptions;"
+      "text": "export type WebGoodVibesPlatformOptions = BrowserGoodVibesPlatformOptions;"
     },
     {
       "name": "WebSocketMessageAssembler",
@@ -2857,7 +2857,7 @@
         "[Symbol.hasInstance]",
         "constructor"
       ],
-      "text": "export declare class WebSocketTransportError extends GoodVibesSdkError { static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options: { readonly cause?: unknown; readonly hint?: string; readonly code: string; readonly category?: import('@goodvibes-jev/engine/errors').ErrorCategory | undefined; readonly recoverable?: boolean | undefined; readonly status?: number | undefined; readonly requestId?: string | undefined; readonly provider?: string | undefined; readonly operation?: string | undefined; readonly phase?: string | undefined; }); }"
+      "text": "export declare class WebSocketTransportError extends GoodVibesError { static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options: { readonly cause?: unknown; readonly hint?: string; readonly code: string; readonly category?: import('@goodvibes-jev/engine/errors').ErrorCategory | undefined; readonly recoverable?: boolean | undefined; readonly status?: number | undefined; readonly requestId?: string | undefined; readonly provider?: string | undefined; readonly operation?: string | undefined; readonly phase?: string | undefined; }); }"
     },
     {
       "name": "WithoutKeys",
@@ -3009,9 +3009,9 @@
       "text": "export declare function connectionSummary(connection: ConnectionFailure | undefined, provider?: string): string | undefined;"
     },
     {
-      "name": "createBrowserGoodVibesSdk",
+      "name": "createBrowserGoodVibesPlatform",
       "kind": "function",
-      "text": "export declare function createBrowserGoodVibesSdk(options?: BrowserGoodVibesSdkOptions): GoodVibesSdk;"
+      "text": "export declare function createBrowserGoodVibesPlatform(options?: BrowserGoodVibesPlatformOptions): GoodVibesPlatform;"
     },
     {
       "name": "createBrowserTokenStore",
@@ -3026,7 +3026,7 @@
     {
       "name": "createConsoleObserver",
       "kind": "function",
-      "text": "export declare function createConsoleObserver(options?: ConsoleObserverOptions): SDKObserver;"
+      "text": "export declare function createConsoleObserver(options?: ConsoleObserverOptions): PlatformObserver;"
     },
     {
       "name": "createDirectClientTransport",
@@ -3044,9 +3044,9 @@
       "text": "export declare function createEventSourceConnector<TEvent extends RuntimeEventRecord = RuntimeEventRecord>(baseUrl: string, token: AuthTokenSource, fetchImpl: FetchLike, options?: RuntimeEventConnectorOptions): DomainEventConnector<RuntimeEventDomain, TEvent>;"
     },
     {
-      "name": "createExpoGoodVibesSdk",
+      "name": "createExpoGoodVibesPlatform",
       "kind": "function",
-      "text": "export declare function createExpoGoodVibesSdk(options: ExpoGoodVibesSdkOptions): ReactNativeGoodVibesSdk;"
+      "text": "export declare function createExpoGoodVibesPlatform(options: ExpoGoodVibesPlatformOptions): ReactNativeGoodVibesPlatform;"
     },
     {
       "name": "createFetch",
@@ -3056,7 +3056,7 @@
     {
       "name": "createGoodVibesAuthClient",
       "kind": "function",
-      "text": "export declare function createGoodVibesAuthClient(operator: OperatorSdk, tokenStore: GoodVibesTokenStore | null, getAuthToken?: AuthTokenResolver, observer?: SDKObserver | undefined, autoRefreshOptions?: AutoRefreshOptions, existingCoordinator?: AutoRefreshCoordinator | null): GoodVibesAuthClient;"
+      "text": "export declare function createGoodVibesAuthClient(operator: OperatorApiClient, tokenStore: GoodVibesTokenStore | null, getAuthToken?: AuthTokenResolver, observer?: PlatformObserver | undefined, autoRefreshOptions?: AutoRefreshOptions, existingCoordinator?: AutoRefreshCoordinator | null): GoodVibesAuthClient;"
     },
     {
       "name": "createGoodVibesCloudflareWorker",
@@ -3064,9 +3064,9 @@
       "text": "export declare function createGoodVibesCloudflareWorker(options?: GoodVibesCloudflareWorkerOptions): GoodVibesCloudflareWorker;"
     },
     {
-      "name": "createGoodVibesSdk",
+      "name": "createGoodVibesPlatform",
       "kind": "function",
-      "text": "export declare function createGoodVibesSdk(options: GoodVibesSdkOptions): GoodVibesSdk;"
+      "text": "export declare function createGoodVibesPlatform(options: GoodVibesPlatformOptions): GoodVibesPlatform;"
     },
     {
       "name": "createHttpStatusError",
@@ -3096,7 +3096,7 @@
     {
       "name": "createOpenTelemetryObserver",
       "kind": "function",
-      "text": "export declare function createOpenTelemetryObserver(tracer: OtelTracer, meter: OtelMeter): SDKObserver;"
+      "text": "export declare function createOpenTelemetryObserver(tracer: OtelTracer, meter: OtelMeter): PlatformObserver;"
     },
     {
       "name": "createOperatorContractWorkAdapter",
@@ -3109,9 +3109,9 @@
       "text": "export declare function createOperatorRemoteClient(transport: HttpTransport, contract: OperatorContractManifest, clientOptions?: OperatorRemoteClientOptions): OperatorRemoteClient;"
     },
     {
-      "name": "createOperatorSdk",
+      "name": "createOperatorApiClient",
       "kind": "function",
-      "text": "export declare function createOperatorSdk(options: OperatorSdkOptions): OperatorSdk;"
+      "text": "export declare function createOperatorApiClient(options: OperatorApiClientOptions): OperatorApiClient;"
     },
     {
       "name": "createPeerRemoteClient",
@@ -3119,14 +3119,14 @@
       "text": "export declare function createPeerRemoteClient(transport: HttpTransport, contract: PeerContractManifest, clientOptions?: PeerRemoteClientOptions): PeerRemoteClient;"
     },
     {
-      "name": "createPeerSdk",
+      "name": "createPeerApiClient",
       "kind": "function",
-      "text": "export declare function createPeerSdk(options: PeerSdkOptions): PeerSdk;"
+      "text": "export declare function createPeerApiClient(options: PeerApiClientOptions): PeerApiClient;"
     },
     {
-      "name": "createReactNativeGoodVibesSdk",
+      "name": "createReactNativeGoodVibesPlatform",
       "kind": "function",
-      "text": "export declare function createReactNativeGoodVibesSdk(options: ReactNativeGoodVibesSdkOptions): ReactNativeGoodVibesSdk;"
+      "text": "export declare function createReactNativeGoodVibesPlatform(options: ReactNativeGoodVibesPlatformOptions): ReactNativeGoodVibesPlatform;"
     },
     {
       "name": "createRelayClient",
@@ -3169,9 +3169,9 @@
       "text": "export declare function createUuidV4(): string;"
     },
     {
-      "name": "createWebGoodVibesSdk",
+      "name": "createWebGoodVibesPlatform",
       "kind": "function",
-      "text": "export declare function createWebGoodVibesSdk(options?: WebGoodVibesSdkOptions): GoodVibesSdk;"
+      "text": "export declare function createWebGoodVibesPlatform(options?: WebGoodVibesPlatformOptions): GoodVibesPlatform;"
     },
     {
       "name": "createWebSocketConnector",
@@ -3316,12 +3316,12 @@
     {
       "name": "isErrorCode",
       "kind": "function",
-      "text": "export declare function isErrorCode<C extends SDKErrorCode>(err: { readonly code?: SDKErrorCode | (string & {}) | undefined; }, code: C): err is { readonly code: C; };"
+      "text": "export declare function isErrorCode<C extends EngineErrorCode>(err: { readonly code?: EngineErrorCode | (string & {}) | undefined; }, code: C): err is { readonly code: C; };"
     },
     {
       "name": "isKnownErrorCode",
       "kind": "function",
-      "text": "export declare function isKnownErrorCode(value: string): value is SDKErrorCode;"
+      "text": "export declare function isKnownErrorCode(value: string): value is EngineErrorCode;"
     },
     {
       "name": "isKnownEventType",
@@ -3578,7 +3578,7 @@
         "refreshLeewayMs",
         "tokenStore"
       ],
-      "text": "export interface AutoRefreshCoordinatorOptions { readonly tokenStore: GoodVibesTokenStore; readonly autoRefresh: boolean; readonly refreshLeewayMs: number; readonly now?: (() => number) | undefined; readonly refresh?: (() => Promise<{ token: string; expiresAt?: number | undefined; }>) | undefined; readonly observer?: SDKObserver | undefined; } ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; SDKObserver = export interface SDKObserver extends TransportObserver { onEvent?(event: AnyRuntimeEvent): void; onError?(err: GoodVibesSdkError): void; onTransportActivity?(activity: TransportActivityInfo): void; onAuthTransition?(transition: AuthTransitionInfo): void; }"
+      "text": "export interface AutoRefreshCoordinatorOptions { readonly tokenStore: GoodVibesTokenStore; readonly autoRefresh: boolean; readonly refreshLeewayMs: number; readonly now?: (() => number) | undefined; readonly refresh?: (() => Promise<{ token: string; expiresAt?: number | undefined; }>) | undefined; readonly observer?: PlatformObserver | undefined; } ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; PlatformObserver = export interface PlatformObserver extends TransportObserver { onEvent?(event: AnyRuntimeEvent): void; onError?(err: GoodVibesError): void; onTransportActivity?(activity: TransportActivityInfo): void; onAuthTransition?(transition: AuthTransitionInfo): void; }"
     },
     {
       "name": "AutoRefreshOptions",
@@ -3716,7 +3716,7 @@
         "tokenStore",
         "writable"
       ],
-      "text": "export declare class SessionManager { constructor(operator: OperatorSdk, tokenStore: TokenStore | null, observer?: SDKObserver); current(): Promise<GoodVibesCurrentAuth>; login(input: GoodVibesLoginInput, options?: GoodVibesAuthLoginOptions): Promise<GoodVibesLoginOutput>; get writable(): boolean; get tokenStore(): TokenStore | null; } ;; via OperatorSdk = export type OperatorSdk = Omit<OperatorRemoteClient, 'getOperation'> & { readonly transport: HttpTransport; getOperation(methodId: OperatorMethodId): OperatorMethodContract; dispose(): void; asyncDispose(): Promise<void>; [Symbol.dispose](): void; [Symbol.asyncDispose](): Promise<void>; }; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; SDKObserver = export interface SDKObserver extends TransportObserver { onEvent?(event: AnyRuntimeEvent): void; onError?(err: GoodVibesSdkError): void; onTransportActivity?(activity: TransportActivityInfo): void; onAuthTransition?(transition: AuthTransitionInfo): void; }"
+      "text": "export declare class SessionManager { constructor(operator: OperatorApiClient, tokenStore: TokenStore | null, observer?: PlatformObserver); current(): Promise<GoodVibesCurrentAuth>; login(input: GoodVibesLoginInput, options?: GoodVibesAuthLoginOptions): Promise<GoodVibesLoginOutput>; get writable(): boolean; get tokenStore(): TokenStore | null; } ;; via OperatorApiClient = export type OperatorApiClient = Omit<OperatorRemoteClient, 'getOperation'> & { readonly transport: HttpTransport; getOperation(methodId: OperatorMethodId): OperatorMethodContract; dispose(): void; asyncDispose(): Promise<void>; [Symbol.dispose](): void; [Symbol.asyncDispose](): Promise<void>; }; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; PlatformObserver = export interface PlatformObserver extends TransportObserver { onEvent?(event: AnyRuntimeEvent): void; onError?(err: GoodVibesError): void; onTransportActivity?(activity: TransportActivityInfo): void; onAuthTransition?(transition: AuthTransitionInfo): void; }"
     },
     {
       "name": "TokenStore",
@@ -3741,7 +3741,7 @@
     {
       "name": "createGoodVibesAuthClient",
       "kind": "function",
-      "text": "export declare function createGoodVibesAuthClient(operator: OperatorSdk, tokenStore: GoodVibesTokenStore | null, getAuthToken?: AuthTokenResolver, observer?: SDKObserver | undefined, autoRefreshOptions?: AutoRefreshOptions, existingCoordinator?: AutoRefreshCoordinator | null): GoodVibesAuthClient; ;; via AuthTokenResolver = export type AuthTokenResolver = () => MaybePromise<string | null | undefined>; ;; OperatorSdk = export type OperatorSdk = Omit<OperatorRemoteClient, 'getOperation'> & { readonly transport: HttpTransport; getOperation(methodId: OperatorMethodId): OperatorMethodContract; dispose(): void; asyncDispose(): Promise<void>; [Symbol.dispose](): void; [Symbol.asyncDispose](): Promise<void>; }; ;; SDKObserver = export interface SDKObserver extends TransportObserver { onEvent?(event: AnyRuntimeEvent): void; onError?(err: GoodVibesSdkError): void; onTransportActivity?(activity: TransportActivityInfo): void; onAuthTransition?(transition: AuthTransitionInfo): void; }"
+      "text": "export declare function createGoodVibesAuthClient(operator: OperatorApiClient, tokenStore: GoodVibesTokenStore | null, getAuthToken?: AuthTokenResolver, observer?: PlatformObserver | undefined, autoRefreshOptions?: AutoRefreshOptions, existingCoordinator?: AutoRefreshCoordinator | null): GoodVibesAuthClient; ;; via AuthTokenResolver = export type AuthTokenResolver = () => MaybePromise<string | null | undefined>; ;; OperatorApiClient = export type OperatorApiClient = Omit<OperatorRemoteClient, 'getOperation'> & { readonly transport: HttpTransport; getOperation(methodId: OperatorMethodId): OperatorMethodContract; dispose(): void; asyncDispose(): Promise<void>; [Symbol.dispose](): void; [Symbol.asyncDispose](): Promise<void>; }; ;; PlatformObserver = export interface PlatformObserver extends TransportObserver { onEvent?(event: AnyRuntimeEvent): void; onError?(err: GoodVibesError): void; onTransportActivity?(activity: TransportActivityInfo): void; onAuthTransition?(transition: AuthTransitionInfo): void; }"
     },
     {
       "name": "createMemoryTokenStore",
@@ -3751,14 +3751,14 @@
   ],
   "./browser": [
     {
-      "name": "BrowserGoodVibesSdkOptions",
+      "name": "BrowserGoodVibesPlatformOptions",
       "kind": "interface",
-      "text": "export interface BrowserGoodVibesSdkOptions extends Omit<GoodVibesSdkOptions, 'baseUrl' | 'fetch' | 'WebSocketImpl'> { readonly baseUrl?: string | undefined; readonly fetch?: FetchLike | undefined; readonly WebSocketImpl?: typeof WebSocket | undefined; } ;; via FetchLike = export type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>; ;; GoodVibesSdkOptions = export interface GoodVibesSdkOptions { readonly baseUrl: string; readonly authToken?: string | null | undefined; readonly getAuthToken?: AuthTokenResolver | undefined; readonly tokenStore?: GoodVibesTokenStore | undefined; readonly fetch?: FetchLike | undefined; readonly headers?: HeadersInit | undefined; readonly getHeaders?: HeaderResolver | undefined; readonly retry?: HttpRetryPolicy | undefined; readonly WebSocketImpl?: typeof WebSocket | undefined; readonly realtime?: GoodVibesRealtimeOptions | undefined; readonly observer?: SDKObserver | undefined; readonly middleware?: TransportMiddleware[] | undefined; readonly autoRefresh?: AutoRefreshOptions | undefined; }"
+      "text": "export interface BrowserGoodVibesPlatformOptions extends Omit<GoodVibesPlatformOptions, 'baseUrl' | 'fetch' | 'WebSocketImpl'> { readonly baseUrl?: string | undefined; readonly fetch?: FetchLike | undefined; readonly WebSocketImpl?: typeof WebSocket | undefined; } ;; via FetchLike = export type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>; ;; GoodVibesPlatformOptions = export interface GoodVibesPlatformOptions { readonly baseUrl: string; readonly authToken?: string | null | undefined; readonly getAuthToken?: AuthTokenResolver | undefined; readonly tokenStore?: GoodVibesTokenStore | undefined; readonly fetch?: FetchLike | undefined; readonly headers?: HeadersInit | undefined; readonly getHeaders?: HeaderResolver | undefined; readonly retry?: HttpRetryPolicy | undefined; readonly WebSocketImpl?: typeof WebSocket | undefined; readonly realtime?: GoodVibesRealtimeOptions | undefined; readonly observer?: PlatformObserver | undefined; readonly middleware?: TransportMiddleware[] | undefined; readonly autoRefresh?: AutoRefreshOptions | undefined; }"
     },
     {
-      "name": "createBrowserGoodVibesSdk",
+      "name": "createBrowserGoodVibesPlatform",
       "kind": "function",
-      "text": "export declare function createBrowserGoodVibesSdk(options?: BrowserGoodVibesSdkOptions): GoodVibesSdk; ;; via GoodVibesSdk = export interface GoodVibesSdk { readonly operator: OperatorSdk; readonly peer: PeerSdk; readonly auth: GoodVibesAuthClient; readonly realtime: GoodVibesRealtime; use(middleware: TransportMiddleware): void; }"
+      "text": "export declare function createBrowserGoodVibesPlatform(options?: BrowserGoodVibesPlatformOptions): GoodVibesPlatform; ;; via GoodVibesPlatform = export interface GoodVibesPlatform { readonly operator: OperatorApiClient; readonly peer: PeerApiClient; readonly auth: GoodVibesAuthClient; readonly realtime: GoodVibesRealtime; use(middleware: TransportMiddleware): void; }"
     },
     {
       "name": "forSession",
@@ -3768,14 +3768,14 @@
   ],
   "./browser/agent": [
     {
-      "name": "BrowserAgentSdk",
+      "name": "BrowserAgentPlatform",
       "kind": "type",
-      "text": "export type BrowserAgentSdk = BrowserKnowledgeSdk; ;; via BrowserKnowledgeSdk = export interface BrowserKnowledgeSdk extends ScopedBrowserSdk<BrowserKnowledgeMethodId, BrowserKnowledgeDomain> { readonly knowledge: { ask(input: OperatorMethodInput<'knowledge.ask'>): Promise<OperatorMethodOutput<'knowledge.ask'>>; search(input: OperatorMethodInput<'knowledge.search'>): Promise<OperatorMethodOutput<'knowledge.search'>>; status(input?: OperatorMethodInput<'knowledge.status'>): Promise<OperatorMethodOutput<'knowledge.status'>>; map(input?: OperatorMethodInput<'knowledge.map'>): Promise<OperatorMethodOutput<'knowledge.map'>>; }; readonly chat: { readonly sessions: { create(input?: OperatorMethodInput<'companion.chat.sessions.create'>): Promise<OperatorMethodOutput<'companion.chat.sessions.create'>>; get(sessionId: string): Promise<OperatorMethodOutput<'companion.chat.sessions.get'>>; list(input?: OperatorMethodInput<'companion.chat.sessions.list'>): Promise<OperatorMethodOutput<'companion.chat.sessions.list'>>; update(sessionId: string, input: OperatorInputWithout<'companion.chat.sessions.update', 'sessionId'>): Promise<OperatorMethodOutput<'companion.chat.sessions.update'>>; }; readonly messages: { create(sessionId: string, input: OperatorInputWithout<'companion.chat.messages.create', 'sessionId'>): Promise<OperatorMethodOutput<'companion.chat.messages.create'>>; list(sessionId: string): Promise<OperatorMethodOutput<'companion.chat.messages.list'>>; steer(sessionId: string, input: OperatorInputWithout<'companion.chat.messages.steer', 'sessionId'>): Promise<OperatorMethodOutput<'companion.chat.messages.steer'>>; }; readonly turns: { cancel(sessionId: string, input?: OperatorInputWithout<'companion.chat.turns.cancel', 'sessionId'>): Promise<OperatorMethodOutput<'companion.chat.turns.cancel'>>; }; readonly events: { stream(sessionId: string, handlers: ServerSentEventHandlers, options?: ScopedEventStreamOptions): Promise<() => void>; }; }; readonly artifacts: { create(input: OperatorMethodInput<'artifacts.create'>): Promise<OperatorMethodOutput<'artifacts.create'>>; get(artifactId: string): Promise<OperatorMethodOutput<'artifacts.get'>>; list(): Promise<OperatorMethodOutput<'artifacts.list'>>; }; readonly workPlan: { snapshot(input?: OperatorMethodInput<'projectPlanning.workPlan.snapshot'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.snapshot'>>; readonly tasks: { list(input?: OperatorMethodInput<'projectPlanning.workPlan.tasks.list'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.tasks.list'>>; get(taskId: string, input?: OperatorInputWithout<'projectPlanning.workPlan.task.get', 'taskId'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.task.get'>>; create(input: OperatorMethodInput<'projectPlanning.workPlan.task.create'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.task.create'>>; update(taskId: string, input: OperatorInputWithout<'projectPlanning.workPlan.task.update', 'taskId'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.task.update'>>; status(taskId: string, input: OperatorInputWithout<'projectPlanning.workPlan.task.status', 'taskId'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.task.status'>>; reorder(input: OperatorMethodInput<'projectPlanning.workPlan.tasks.reorder'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.tasks.reorder'>>; delete(taskId: string, input?: OperatorInputWithout<'projectPlanning.workPlan.task.delete', 'taskId'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.task.delete'>>; clearCompleted(input?: OperatorMethodInput<'projectPlanning.workPlan.clearCompleted'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.clearCompleted'>>; }; }; }"
+      "text": "export type BrowserAgentPlatform = BrowserKnowledgePlatform; ;; via BrowserKnowledgePlatform = export interface BrowserKnowledgePlatform extends ScopedBrowserPlatform<BrowserKnowledgeMethodId, BrowserKnowledgeDomain> { readonly knowledge: { ask(input: OperatorMethodInput<'knowledge.ask'>): Promise<OperatorMethodOutput<'knowledge.ask'>>; search(input: OperatorMethodInput<'knowledge.search'>): Promise<OperatorMethodOutput<'knowledge.search'>>; status(input?: OperatorMethodInput<'knowledge.status'>): Promise<OperatorMethodOutput<'knowledge.status'>>; map(input?: OperatorMethodInput<'knowledge.map'>): Promise<OperatorMethodOutput<'knowledge.map'>>; }; readonly chat: { readonly sessions: { create(input?: OperatorMethodInput<'companion.chat.sessions.create'>): Promise<OperatorMethodOutput<'companion.chat.sessions.create'>>; get(sessionId: string): Promise<OperatorMethodOutput<'companion.chat.sessions.get'>>; list(input?: OperatorMethodInput<'companion.chat.sessions.list'>): Promise<OperatorMethodOutput<'companion.chat.sessions.list'>>; update(sessionId: string, input: OperatorInputWithout<'companion.chat.sessions.update', 'sessionId'>): Promise<OperatorMethodOutput<'companion.chat.sessions.update'>>; }; readonly messages: { create(sessionId: string, input: OperatorInputWithout<'companion.chat.messages.create', 'sessionId'>): Promise<OperatorMethodOutput<'companion.chat.messages.create'>>; list(sessionId: string): Promise<OperatorMethodOutput<'companion.chat.messages.list'>>; steer(sessionId: string, input: OperatorInputWithout<'companion.chat.messages.steer', 'sessionId'>): Promise<OperatorMethodOutput<'companion.chat.messages.steer'>>; }; readonly turns: { cancel(sessionId: string, input?: OperatorInputWithout<'companion.chat.turns.cancel', 'sessionId'>): Promise<OperatorMethodOutput<'companion.chat.turns.cancel'>>; }; readonly events: { stream(sessionId: string, handlers: ServerSentEventHandlers, options?: ScopedEventStreamOptions): Promise<() => void>; }; }; readonly artifacts: { create(input: OperatorMethodInput<'artifacts.create'>): Promise<OperatorMethodOutput<'artifacts.create'>>; get(artifactId: string): Promise<OperatorMethodOutput<'artifacts.get'>>; list(): Promise<OperatorMethodOutput<'artifacts.list'>>; }; readonly workPlan: { snapshot(input?: OperatorMethodInput<'projectPlanning.workPlan.snapshot'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.snapshot'>>; readonly tasks: { list(input?: OperatorMethodInput<'projectPlanning.workPlan.tasks.list'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.tasks.list'>>; get(taskId: string, input?: OperatorInputWithout<'projectPlanning.workPlan.task.get', 'taskId'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.task.get'>>; create(input: OperatorMethodInput<'projectPlanning.workPlan.task.create'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.task.create'>>; update(taskId: string, input: OperatorInputWithout<'projectPlanning.workPlan.task.update', 'taskId'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.task.update'>>; status(taskId: string, input: OperatorInputWithout<'projectPlanning.workPlan.task.status', 'taskId'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.task.status'>>; reorder(input: OperatorMethodInput<'projectPlanning.workPlan.tasks.reorder'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.tasks.reorder'>>; delete(taskId: string, input?: OperatorInputWithout<'projectPlanning.workPlan.task.delete', 'taskId'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.task.delete'>>; clearCompleted(input?: OperatorMethodInput<'projectPlanning.workPlan.clearCompleted'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.clearCompleted'>>; }; }; }"
     },
     {
-      "name": "createBrowserAgentSdk",
+      "name": "createBrowserAgentPlatform",
       "kind": "function",
-      "text": "export declare function createBrowserAgentSdk(options?: ScopedBrowserSdkOptions): BrowserAgentSdk; ;; via ScopedBrowserSdkOptions = export interface ScopedBrowserSdkOptions { readonly baseUrl?: string | undefined; readonly authToken?: string | null | undefined; readonly getAuthToken?: AuthTokenResolver | undefined; readonly tokenStore?: GoodVibesTokenStore | undefined; readonly fetch?: FetchLike | undefined; readonly WebSocketImpl?: typeof WebSocket | undefined; readonly headers?: HeadersInit | undefined; readonly getHeaders?: (() => HeadersInit | undefined | Promise<HeadersInit | undefined>) | undefined; readonly retry?: HttpRetryPolicy | undefined; readonly middleware?: readonly TransportMiddleware[] | undefined; readonly realtime?: { readonly sseReconnect?: StreamReconnectPolicy | undefined; readonly onError?: ((error: unknown) => void) | undefined; } | undefined; readonly observer?: SDKObserver | undefined; }"
+      "text": "export declare function createBrowserAgentPlatform(options?: ScopedBrowserPlatformOptions): BrowserAgentPlatform; ;; via ScopedBrowserPlatformOptions = export interface ScopedBrowserPlatformOptions { readonly baseUrl?: string | undefined; readonly authToken?: string | null | undefined; readonly getAuthToken?: AuthTokenResolver | undefined; readonly tokenStore?: GoodVibesTokenStore | undefined; readonly fetch?: FetchLike | undefined; readonly WebSocketImpl?: typeof WebSocket | undefined; readonly headers?: HeadersInit | undefined; readonly getHeaders?: (() => HeadersInit | undefined | Promise<HeadersInit | undefined>) | undefined; readonly retry?: HttpRetryPolicy | undefined; readonly middleware?: readonly TransportMiddleware[] | undefined; readonly realtime?: { readonly sseReconnect?: StreamReconnectPolicy | undefined; readonly onError?: ((error: unknown) => void) | undefined; } | undefined; readonly observer?: PlatformObserver | undefined; }"
     },
     {
       "name": "forSession",
@@ -3896,17 +3896,17 @@
       "text": "export type BrowserHomeAssistantMethodId = SharedBrowserMethodId | Extract<keyof typeof HOME_ASSISTANT_BROWSER_ROUTES, OperatorTypedMethodId>; ;; via Extract = type Extract<T, U> = T extends U ? T : never; ;; OperatorTypedMethodId = export type OperatorTypedMethodId = OperatorMethodId; ;; SharedBrowserMethodId = export type SharedBrowserMethodId = Extract<keyof typeof SHARED_BROWSER_ROUTES, OperatorTypedMethodId>;"
     },
     {
-      "name": "BrowserHomeAssistantSdk",
+      "name": "BrowserHomeAssistantPlatform",
       "kind": "interface",
       "required": [
         "homeGraph"
       ],
-      "text": "export interface BrowserHomeAssistantSdk extends ScopedBrowserSdk<BrowserHomeAssistantMethodId, BrowserHomeAssistantDomain> { readonly homeGraph: { status(input?: OperatorMethodInput<'homeassistant.homeGraph.status'>): Promise<OperatorMethodOutput<'homeassistant.homeGraph.status'>>; ask(input: OperatorMethodInput<'homeassistant.homeGraph.askHomeGraph'>): Promise<OperatorMethodOutput<'homeassistant.homeGraph.askHomeGraph'>>; map(input?: OperatorMethodInput<'homeassistant.homeGraph.map'>): Promise<OperatorMethodOutput<'homeassistant.homeGraph.map'>>; pages(input?: OperatorMethodInput<'homeassistant.homeGraph.pages.list'>): Promise<OperatorMethodOutput<'homeassistant.homeGraph.pages.list'>>; }; } ;; via OperatorMethodInput = export type OperatorMethodInput<TMethodId extends OperatorTypedMethodId> = OperatorMethodInputMap[TMethodId]; ;; OperatorMethodOutput = export type OperatorMethodOutput<TMethodId extends OperatorTypedMethodId> = OperatorMethodOutputMap[TMethodId]; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+      "text": "export interface BrowserHomeAssistantPlatform extends ScopedBrowserPlatform<BrowserHomeAssistantMethodId, BrowserHomeAssistantDomain> { readonly homeGraph: { status(input?: OperatorMethodInput<'homeassistant.homeGraph.status'>): Promise<OperatorMethodOutput<'homeassistant.homeGraph.status'>>; ask(input: OperatorMethodInput<'homeassistant.homeGraph.askHomeGraph'>): Promise<OperatorMethodOutput<'homeassistant.homeGraph.askHomeGraph'>>; map(input?: OperatorMethodInput<'homeassistant.homeGraph.map'>): Promise<OperatorMethodOutput<'homeassistant.homeGraph.map'>>; pages(input?: OperatorMethodInput<'homeassistant.homeGraph.pages.list'>): Promise<OperatorMethodOutput<'homeassistant.homeGraph.pages.list'>>; }; } ;; via OperatorMethodInput = export type OperatorMethodInput<TMethodId extends OperatorTypedMethodId> = OperatorMethodInputMap[TMethodId]; ;; OperatorMethodOutput = export type OperatorMethodOutput<TMethodId extends OperatorTypedMethodId> = OperatorMethodOutputMap[TMethodId]; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
     },
     {
-      "name": "createBrowserHomeAssistantSdk",
+      "name": "createBrowserHomeAssistantPlatform",
       "kind": "function",
-      "text": "export declare function createBrowserHomeAssistantSdk(options?: ScopedBrowserSdkOptions): BrowserHomeAssistantSdk; ;; via ScopedBrowserSdkOptions = export interface ScopedBrowserSdkOptions { readonly baseUrl?: string | undefined; readonly authToken?: string | null | undefined; readonly getAuthToken?: AuthTokenResolver | undefined; readonly tokenStore?: GoodVibesTokenStore | undefined; readonly fetch?: FetchLike | undefined; readonly WebSocketImpl?: typeof WebSocket | undefined; readonly headers?: HeadersInit | undefined; readonly getHeaders?: (() => HeadersInit | undefined | Promise<HeadersInit | undefined>) | undefined; readonly retry?: HttpRetryPolicy | undefined; readonly middleware?: readonly TransportMiddleware[] | undefined; readonly realtime?: { readonly sseReconnect?: StreamReconnectPolicy | undefined; readonly onError?: ((error: unknown) => void) | undefined; } | undefined; readonly observer?: SDKObserver | undefined; }"
+      "text": "export declare function createBrowserHomeAssistantPlatform(options?: ScopedBrowserPlatformOptions): BrowserHomeAssistantPlatform; ;; via ScopedBrowserPlatformOptions = export interface ScopedBrowserPlatformOptions { readonly baseUrl?: string | undefined; readonly authToken?: string | null | undefined; readonly getAuthToken?: AuthTokenResolver | undefined; readonly tokenStore?: GoodVibesTokenStore | undefined; readonly fetch?: FetchLike | undefined; readonly WebSocketImpl?: typeof WebSocket | undefined; readonly headers?: HeadersInit | undefined; readonly getHeaders?: (() => HeadersInit | undefined | Promise<HeadersInit | undefined>) | undefined; readonly retry?: HttpRetryPolicy | undefined; readonly middleware?: readonly TransportMiddleware[] | undefined; readonly realtime?: { readonly sseReconnect?: StreamReconnectPolicy | undefined; readonly onError?: ((error: unknown) => void) | undefined; } | undefined; readonly observer?: PlatformObserver | undefined; }"
     },
     {
       "name": "forSession",
@@ -3926,7 +3926,7 @@
       "text": "export type BrowserKnowledgeMethodId = SharedBrowserMethodId | Extract<keyof typeof KNOWLEDGE_BROWSER_ROUTES, OperatorTypedMethodId>; ;; via Extract = type Extract<T, U> = T extends U ? T : never; ;; OperatorTypedMethodId = export type OperatorTypedMethodId = OperatorMethodId; ;; SharedBrowserMethodId = export type SharedBrowserMethodId = Extract<keyof typeof SHARED_BROWSER_ROUTES, OperatorTypedMethodId>;"
     },
     {
-      "name": "BrowserKnowledgeSdk",
+      "name": "BrowserKnowledgePlatform",
       "kind": "interface",
       "required": [
         "artifacts",
@@ -3934,7 +3934,7 @@
         "knowledge",
         "workPlan"
       ],
-      "text": "export interface BrowserKnowledgeSdk extends ScopedBrowserSdk<BrowserKnowledgeMethodId, BrowserKnowledgeDomain> { readonly knowledge: { ask(input: OperatorMethodInput<'knowledge.ask'>): Promise<OperatorMethodOutput<'knowledge.ask'>>; search(input: OperatorMethodInput<'knowledge.search'>): Promise<OperatorMethodOutput<'knowledge.search'>>; status(input?: OperatorMethodInput<'knowledge.status'>): Promise<OperatorMethodOutput<'knowledge.status'>>; map(input?: OperatorMethodInput<'knowledge.map'>): Promise<OperatorMethodOutput<'knowledge.map'>>; }; readonly chat: { readonly sessions: { create(input?: OperatorMethodInput<'companion.chat.sessions.create'>): Promise<OperatorMethodOutput<'companion.chat.sessions.create'>>; get(sessionId: string): Promise<OperatorMethodOutput<'companion.chat.sessions.get'>>; list(input?: OperatorMethodInput<'companion.chat.sessions.list'>): Promise<OperatorMethodOutput<'companion.chat.sessions.list'>>; update(sessionId: string, input: OperatorInputWithout<'companion.chat.sessions.update', 'sessionId'>): Promise<OperatorMethodOutput<'companion.chat.sessions.update'>>; }; readonly messages: { create(sessionId: string, input: OperatorInputWithout<'companion.chat.messages.create', 'sessionId'>): Promise<OperatorMethodOutput<'companion.chat.messages.create'>>; list(sessionId: string): Promise<OperatorMethodOutput<'companion.chat.messages.list'>>; steer(sessionId: string, input: OperatorInputWithout<'companion.chat.messages.steer', 'sessionId'>): Promise<OperatorMethodOutput<'companion.chat.messages.steer'>>; }; readonly turns: { cancel(sessionId: string, input?: OperatorInputWithout<'companion.chat.turns.cancel', 'sessionId'>): Promise<OperatorMethodOutput<'companion.chat.turns.cancel'>>; }; readonly events: { stream(sessionId: string, handlers: ServerSentEventHandlers, options?: ScopedEventStreamOptions): Promise<() => void>; }; }; readonly artifacts: { create(input: OperatorMethodInput<'artifacts.create'>): Promise<OperatorMethodOutput<'artifacts.create'>>; get(artifactId: string): Promise<OperatorMethodOutput<'artifacts.get'>>; list(): Promise<OperatorMethodOutput<'artifacts.list'>>; }; readonly workPlan: { snapshot(input?: OperatorMethodInput<'projectPlanning.workPlan.snapshot'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.snapshot'>>; readonly tasks: { list(input?: OperatorMethodInput<'projectPlanning.workPlan.tasks.list'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.tasks.list'>>; get(taskId: string, input?: OperatorInputWithout<'projectPlanning.workPlan.task.get', 'taskId'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.task.get'>>; create(input: OperatorMethodInput<'projectPlanning.workPlan.task.create'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.task.create'>>; update(taskId: string, input: OperatorInputWithout<'projectPlanning.workPlan.task.update', 'taskId'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.task.update'>>; status(taskId: string, input: OperatorInputWithout<'projectPlanning.workPlan.task.status', 'taskId'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.task.status'>>; reorder(input: OperatorMethodInput<'projectPlanning.workPlan.tasks.reorder'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.tasks.reorder'>>; delete(taskId: string, input?: OperatorInputWithout<'projectPlanning.workPlan.task.delete', 'taskId'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.task.delete'>>; clearCompleted(input?: OperatorMethodInput<'projectPlanning.workPlan.clearCompleted'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.clearCompleted'>>; }; }; } ;; via OperatorInputWithout = type OperatorInputWithout<TMethodId extends OperatorTypedMethodId, TKey extends string> = OmitNamed<OperatorMethodInput<TMethodId>, TKey>; ;; OperatorMethodInput = export type OperatorMethodInput<TMethodId extends OperatorTypedMethodId> = OperatorMethodInputMap[TMethodId]; ;; OperatorMethodOutput = export type OperatorMethodOutput<TMethodId extends OperatorTypedMethodId> = OperatorMethodOutputMap[TMethodId]; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; ScopedEventStreamOptions = export interface ScopedEventStreamOptions { readonly signal?: AbortSignal | undefined; readonly headers?: HeadersInit | undefined; readonly reconnect?: StreamReconnectPolicy | undefined; } ;; ServerSentEventHandlers = export interface ServerSentEventHandlers { readonly onEvent?: ((eventName: string, payload: unknown) => void) | undefined; readonly onReady?: ((payload: unknown) => void) | undefined; readonly onError?: ((error: unknown) => void) | undefined; readonly onReconnect?: (input: { readonly attempt: number; readonly delayMs: number; }) => void; readonly onClose?: (() => void) | undefined; readonly onTerminate?: (input: { readonly error: unknown; readonly reconnectAttempts: number; }) => void; readonly onEventId?: ((id: string) => void) | undefined; }"
+      "text": "export interface BrowserKnowledgePlatform extends ScopedBrowserPlatform<BrowserKnowledgeMethodId, BrowserKnowledgeDomain> { readonly knowledge: { ask(input: OperatorMethodInput<'knowledge.ask'>): Promise<OperatorMethodOutput<'knowledge.ask'>>; search(input: OperatorMethodInput<'knowledge.search'>): Promise<OperatorMethodOutput<'knowledge.search'>>; status(input?: OperatorMethodInput<'knowledge.status'>): Promise<OperatorMethodOutput<'knowledge.status'>>; map(input?: OperatorMethodInput<'knowledge.map'>): Promise<OperatorMethodOutput<'knowledge.map'>>; }; readonly chat: { readonly sessions: { create(input?: OperatorMethodInput<'companion.chat.sessions.create'>): Promise<OperatorMethodOutput<'companion.chat.sessions.create'>>; get(sessionId: string): Promise<OperatorMethodOutput<'companion.chat.sessions.get'>>; list(input?: OperatorMethodInput<'companion.chat.sessions.list'>): Promise<OperatorMethodOutput<'companion.chat.sessions.list'>>; update(sessionId: string, input: OperatorInputWithout<'companion.chat.sessions.update', 'sessionId'>): Promise<OperatorMethodOutput<'companion.chat.sessions.update'>>; }; readonly messages: { create(sessionId: string, input: OperatorInputWithout<'companion.chat.messages.create', 'sessionId'>): Promise<OperatorMethodOutput<'companion.chat.messages.create'>>; list(sessionId: string): Promise<OperatorMethodOutput<'companion.chat.messages.list'>>; steer(sessionId: string, input: OperatorInputWithout<'companion.chat.messages.steer', 'sessionId'>): Promise<OperatorMethodOutput<'companion.chat.messages.steer'>>; }; readonly turns: { cancel(sessionId: string, input?: OperatorInputWithout<'companion.chat.turns.cancel', 'sessionId'>): Promise<OperatorMethodOutput<'companion.chat.turns.cancel'>>; }; readonly events: { stream(sessionId: string, handlers: ServerSentEventHandlers, options?: ScopedEventStreamOptions): Promise<() => void>; }; }; readonly artifacts: { create(input: OperatorMethodInput<'artifacts.create'>): Promise<OperatorMethodOutput<'artifacts.create'>>; get(artifactId: string): Promise<OperatorMethodOutput<'artifacts.get'>>; list(): Promise<OperatorMethodOutput<'artifacts.list'>>; }; readonly workPlan: { snapshot(input?: OperatorMethodInput<'projectPlanning.workPlan.snapshot'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.snapshot'>>; readonly tasks: { list(input?: OperatorMethodInput<'projectPlanning.workPlan.tasks.list'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.tasks.list'>>; get(taskId: string, input?: OperatorInputWithout<'projectPlanning.workPlan.task.get', 'taskId'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.task.get'>>; create(input: OperatorMethodInput<'projectPlanning.workPlan.task.create'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.task.create'>>; update(taskId: string, input: OperatorInputWithout<'projectPlanning.workPlan.task.update', 'taskId'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.task.update'>>; status(taskId: string, input: OperatorInputWithout<'projectPlanning.workPlan.task.status', 'taskId'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.task.status'>>; reorder(input: OperatorMethodInput<'projectPlanning.workPlan.tasks.reorder'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.tasks.reorder'>>; delete(taskId: string, input?: OperatorInputWithout<'projectPlanning.workPlan.task.delete', 'taskId'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.task.delete'>>; clearCompleted(input?: OperatorMethodInput<'projectPlanning.workPlan.clearCompleted'>): Promise<OperatorMethodOutput<'projectPlanning.workPlan.clearCompleted'>>; }; }; } ;; via OperatorInputWithout = type OperatorInputWithout<TMethodId extends OperatorTypedMethodId, TKey extends string> = OmitNamed<OperatorMethodInput<TMethodId>, TKey>; ;; OperatorMethodInput = export type OperatorMethodInput<TMethodId extends OperatorTypedMethodId> = OperatorMethodInputMap[TMethodId]; ;; OperatorMethodOutput = export type OperatorMethodOutput<TMethodId extends OperatorTypedMethodId> = OperatorMethodOutputMap[TMethodId]; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; ScopedEventStreamOptions = export interface ScopedEventStreamOptions { readonly signal?: AbortSignal | undefined; readonly headers?: HeadersInit | undefined; readonly reconnect?: StreamReconnectPolicy | undefined; } ;; ServerSentEventHandlers = export interface ServerSentEventHandlers { readonly onEvent?: ((eventName: string, payload: unknown) => void) | undefined; readonly onReady?: ((payload: unknown) => void) | undefined; readonly onError?: ((error: unknown) => void) | undefined; readonly onReconnect?: (input: { readonly attempt: number; readonly delayMs: number; }) => void; readonly onClose?: (() => void) | undefined; readonly onTerminate?: (input: { readonly error: unknown; readonly reconnectAttempts: number; }) => void; readonly onEventId?: ((id: string) => void) | undefined; }"
     },
     {
       "name": "KNOWLEDGE_BROWSER_DOMAINS",
@@ -3947,14 +3947,14 @@
       "text": "KNOWLEDGE_BROWSER_ROUTES: { readonly 'knowledge.ask': { readonly method: \"POST\"; readonly path: \"/api/knowledge/ask\"; }; readonly 'knowledge.candidate.decide': { readonly method: \"POST\"; readonly path: \"/api/knowledge/candidates/{id}/decide\"; }; readonly 'knowledge.candidate.get': { readonly method: \"GET\"; readonly path: \"/api/knowledge/candidates/{id}\"; }; readonly 'knowledge.candidates.list': { readonly method: \"GET\"; readonly path: \"/api/knowledge/candidates\"; }; readonly 'knowledge.connector.doctor': { readonly method: \"GET\"; readonly path: \"/api/knowledge/connectors/{id}/doctor\"; }; readonly 'knowledge.connector.get': { readonly method: \"GET\"; readonly path: \"/api/knowledge/connectors/{id}\"; }; readonly 'knowledge.connectors.list': { readonly method: \"GET\"; readonly path: \"/api/knowledge/connectors\"; }; readonly 'knowledge.extraction.get': { readonly method: \"GET\"; readonly path: \"/api/knowledge/extractions/{id}\"; }; readonly 'knowledge.extractions.list': { readonly method: \"GET\"; readonly path: \"/api/knowledge/extractions\"; }; readonly 'knowledge.graphql.execute': { readonly method: \"POST\"; readonly path: \"/api/knowledge/graphql\"; }; readonly 'knowledge.graphql.schema': { readonly method: \"GET\"; readonly path: \"/api/knowledge/graphql/schema\"; }; readonly 'knowledge.ingest.artifact': { readonly method: \"POST\"; readonly path: \"/api/knowledge/ingest/artifact\"; }; readonly 'knowledge.ingest.bookmarks': { readonly method: \"POST\"; readonly path: \"/api/knowledge/ingest/bookmarks\"; }; readonly 'knowledge.ingest.browserHistory': { readonly method: \"POST\"; readonly path: \"/api/knowledge/ingest/browser-history\"; }; readonly 'knowledge.ingest.connector': { readonly method: \"POST\"; readonly path: \"/api/knowledge/ingest/connector\"; }; readonly 'knowledge.ingest.url': { readonly method: \"POST\"; readonly path: \"/api/knowledge/ingest/url\"; }; readonly 'knowledge.ingest.urls': { readonly method: \"POST\"; readonly path: \"/api/knowledge/ingest/urls\"; }; readonly 'knowledge.issue.review': { readonly method: \"POST\"; readonly path: \"/api/knowledge/issues/{id}/review\"; }; readonly 'knowledge.issues.list': { readonly method: \"GET\"; readonly path: \"/api/knowledge/issues\"; }; readonly 'knowledge.item.get': { readonly method: \"GET\"; readonly path: \"/api/knowledge/items/{id}\"; }; readonly 'knowledge.job-runs.list': { readonly method: \"GET\"; readonly path: \"/api/knowledge/job-runs\"; }; readonly 'knowledge.job.get': { readonly method: \"GET\"; readonly path: \"/api/knowledge/jobs/{jobId}\"; }; readonly 'knowledge.job.run': { readonly method: \"POST\"; readonly path: \"/api/knowledge/jobs/{jobId}/run\"; }; readonly 'knowledge.jobs.list': { readonly method: \"GET\"; readonly path: \"/api/knowledge/jobs\"; }; readonly 'knowledge.lint': { readonly method: \"POST\"; readonly path: \"/api/knowledge/lint\"; }; readonly 'knowledge.map': { readonly method: \"GET\"; readonly path: \"/api/knowledge/map\"; }; readonly 'knowledge.nodes.list': { readonly method: \"GET\"; readonly path: \"/api/knowledge/nodes\"; }; readonly 'knowledge.packet': { readonly method: \"POST\"; readonly path: \"/api/knowledge/packet\"; }; readonly 'knowledge.projection.materialize': { readonly method: \"POST\"; readonly path: \"/api/knowledge/projections/materialize\"; }; readonly 'knowledge.projection.render': { readonly method: \"POST\"; readonly path: \"/api/knowledge/projections/render\"; }; readonly 'knowledge.projections.list': { readonly method: \"GET\"; readonly path: \"/api/knowledge/projections\"; }; readonly 'knowledge.refinement.run': { readonly method: \"POST\"; readonly path: \"/api/knowledge/refinement/run\"; }; readonly 'knowledge.refinement.task.cancel': { readonly method: \"POST\"; readonly path: \"/api/knowledge/refinement/tasks/{id}/cancel\"; }; readonly 'knowledge.refinement.task.get': { readonly method: \"GET\"; readonly path: \"/api/knowledge/refinement/tasks/{id}\"; }; readonly 'knowledge.refinement.tasks.list': { readonly method: \"GET\"; readonly path: \"/api/knowledge/refinement/tasks\"; }; readonly 'knowledge.reindex': { readonly method: \"POST\"; readonly path: \"/api/knowledge/reindex\"; }; readonly 'knowledge.report.get': { readonly method: \"GET\"; readonly path: \"/api/knowledge/reports/{id}\"; }; readonly 'knowledge.reports.list': { readonly method: \"GET\"; readonly path: \"/api/knowledge/reports\"; }; readonly 'knowledge.schedule.delete': { readonly method: \"DELETE\"; readonly path: \"/api/knowledge/schedules/{id}\"; }; readonly 'knowledge.schedule.enable': { readonly method: \"POST\"; readonly path: \"/api/knowledge/schedules/{id}/enabled\"; }; readonly 'knowledge.schedule.get': { readonly method: \"GET\"; readonly path: \"/api/knowledge/schedules/{id}\"; }; readonly 'knowledge.schedule.save': { readonly method: \"POST\"; readonly path: \"/api/knowledge/schedules\"; }; readonly 'knowledge.schedules.list': { readonly method: \"GET\"; readonly path: \"/api/knowledge/schedules\"; }; readonly 'knowledge.search': { readonly method: \"POST\"; readonly path: \"/api/knowledge/search\"; }; readonly 'knowledge.source.extraction.get': { readonly method: \"GET\"; readonly path: \"/api/knowledge/sources/{id}/extraction\"; }; readonly 'knowledge.sources.list': { readonly method: \"GET\"; readonly path: \"/api/knowledge/sources\"; }; readonly 'knowledge.status': { readonly method: \"GET\"; readonly path: \"/api/knowledge/status\"; }; readonly 'knowledge.usage.list': { readonly method: \"GET\"; readonly path: \"/api/knowledge/usage\"; }; readonly 'projectPlanning.workPlan.clearCompleted': { readonly method: \"POST\"; readonly path: \"/api/projects/planning/work-plan/clear-completed\"; }; readonly 'projectPlanning.workPlan.snapshot': { readonly method: \"GET\"; readonly path: \"/api/projects/planning/work-plan\"; }; readonly 'projectPlanning.workPlan.task.create': { readonly method: \"POST\"; readonly path: \"/api/projects/planning/work-plan/tasks\"; }; readonly 'projectPlanning.workPlan.task.delete': { readonly method: \"DELETE\"; readonly path: \"/api/projects/planning/work-plan/tasks/{taskId}\"; }; readonly 'projectPlanning.workPlan.task.get': { readonly method: \"GET\"; readonly path: \"/api/projects/planning/work-plan/tasks/{taskId}\"; }; readonly 'projectPlanning.workPlan.task.status': { readonly method: \"POST\"; readonly path: \"/api/projects/planning/work-plan/tasks/{taskId}/status\"; }; readonly 'projectPlanning.workPlan.task.update': { readonly method: \"PATCH\"; readonly path: \"/api/projects/planning/work-plan/tasks/{taskId}\"; }; readonly 'projectPlanning.workPlan.tasks.list': { readonly method: \"GET\"; readonly path: \"/api/projects/planning/work-plan/tasks\"; }; readonly 'projectPlanning.workPlan.tasks.reorder': { readonly method: \"POST\"; readonly path: \"/api/projects/planning/work-plan/tasks/reorder\"; }; readonly 'artifacts.create': { readonly method: \"POST\"; readonly path: \"/api/artifacts\"; }; readonly 'artifacts.get': { readonly method: \"GET\"; readonly path: \"/api/artifacts/{artifactId}\"; }; readonly 'artifacts.list': { readonly method: \"GET\"; readonly path: \"/api/artifacts\"; }; readonly 'companion.chat.messages.create': { readonly method: \"POST\"; readonly path: \"/api/companion/chat/sessions/{sessionId}/messages\"; }; readonly 'companion.chat.messages.list': { readonly method: \"GET\"; readonly path: \"/api/companion/chat/sessions/{sessionId}/messages\"; }; readonly 'companion.chat.sessions.create': { readonly method: \"POST\"; readonly path: \"/api/companion/chat/sessions\"; }; readonly 'companion.chat.sessions.get': { readonly method: \"GET\"; readonly path: \"/api/companion/chat/sessions/{sessionId}\"; }; readonly 'companion.chat.sessions.list': { readonly method: \"GET\"; readonly path: \"/api/companion/chat/sessions\"; }; readonly 'companion.chat.sessions.update': { readonly method: \"PATCH\"; readonly path: \"/api/companion/chat/sessions/{sessionId}\"; }; readonly 'companion.chat.messages.steer': { readonly method: \"POST\"; readonly path: \"/api/companion/chat/sessions/{sessionId}/messages/steer\"; }; readonly 'companion.chat.turns.cancel': { readonly method: \"POST\"; readonly path: \"/api/companion/chat/sessions/{sessionId}/turns/cancel\"; }; }"
     },
     {
-      "name": "createBrowserKnowledgeSdk",
+      "name": "createBrowserKnowledgePlatform",
       "kind": "function",
-      "text": "export declare function createBrowserKnowledgeSdk(options?: ScopedBrowserSdkOptions): BrowserKnowledgeSdk; ;; via ScopedBrowserSdkOptions = export interface ScopedBrowserSdkOptions { readonly baseUrl?: string | undefined; readonly authToken?: string | null | undefined; readonly getAuthToken?: AuthTokenResolver | undefined; readonly tokenStore?: GoodVibesTokenStore | undefined; readonly fetch?: FetchLike | undefined; readonly WebSocketImpl?: typeof WebSocket | undefined; readonly headers?: HeadersInit | undefined; readonly getHeaders?: (() => HeadersInit | undefined | Promise<HeadersInit | undefined>) | undefined; readonly retry?: HttpRetryPolicy | undefined; readonly middleware?: readonly TransportMiddleware[] | undefined; readonly realtime?: { readonly sseReconnect?: StreamReconnectPolicy | undefined; readonly onError?: ((error: unknown) => void) | undefined; } | undefined; readonly observer?: SDKObserver | undefined; }"
+      "text": "export declare function createBrowserKnowledgePlatform(options?: ScopedBrowserPlatformOptions): BrowserKnowledgePlatform; ;; via ScopedBrowserPlatformOptions = export interface ScopedBrowserPlatformOptions { readonly baseUrl?: string | undefined; readonly authToken?: string | null | undefined; readonly getAuthToken?: AuthTokenResolver | undefined; readonly tokenStore?: GoodVibesTokenStore | undefined; readonly fetch?: FetchLike | undefined; readonly WebSocketImpl?: typeof WebSocket | undefined; readonly headers?: HeadersInit | undefined; readonly getHeaders?: (() => HeadersInit | undefined | Promise<HeadersInit | undefined>) | undefined; readonly retry?: HttpRetryPolicy | undefined; readonly middleware?: readonly TransportMiddleware[] | undefined; readonly realtime?: { readonly sseReconnect?: StreamReconnectPolicy | undefined; readonly onError?: ((error: unknown) => void) | undefined; } | undefined; readonly observer?: PlatformObserver | undefined; }"
     },
     {
-      "name": "createBrowserKnowledgeSdkFromRoutes",
+      "name": "createBrowserKnowledgePlatformFromRoutes",
       "kind": "function",
-      "text": "export declare function createBrowserKnowledgeSdkFromRoutes(knowledgeRoutes: Partial<Record<BrowserKnowledgeMethodId, BrowserScopedRouteDefinition>>, options?: ScopedBrowserSdkOptions): BrowserKnowledgeSdk; ;; via BrowserScopedRouteDefinition = export type BrowserScopedRouteDefinition = { readonly method: string; readonly path: string; }; ;; Partial = type Partial<T> = { [P in keyof T]?: T[P]; }; ;; Record = type Record<K extends keyof any, T> = { [P in K]: T; }; ;; ScopedBrowserSdkOptions = export interface ScopedBrowserSdkOptions { readonly baseUrl?: string | undefined; readonly authToken?: string | null | undefined; readonly getAuthToken?: AuthTokenResolver | undefined; readonly tokenStore?: GoodVibesTokenStore | undefined; readonly fetch?: FetchLike | undefined; readonly WebSocketImpl?: typeof WebSocket | undefined; readonly headers?: HeadersInit | undefined; readonly getHeaders?: (() => HeadersInit | undefined | Promise<HeadersInit | undefined>) | undefined; readonly retry?: HttpRetryPolicy | undefined; readonly middleware?: readonly TransportMiddleware[] | undefined; readonly realtime?: { readonly sseReconnect?: StreamReconnectPolicy | undefined; readonly onError?: ((error: unknown) => void) | undefined; } | undefined; readonly observer?: SDKObserver | undefined; }"
+      "text": "export declare function createBrowserKnowledgePlatformFromRoutes(knowledgeRoutes: Partial<Record<BrowserKnowledgeMethodId, BrowserScopedRouteDefinition>>, options?: ScopedBrowserPlatformOptions): BrowserKnowledgePlatform; ;; via BrowserScopedRouteDefinition = export type BrowserScopedRouteDefinition = { readonly method: string; readonly path: string; }; ;; Partial = type Partial<T> = { [P in keyof T]?: T[P]; }; ;; Record = type Record<K extends keyof any, T> = { [P in K]: T; }; ;; ScopedBrowserPlatformOptions = export interface ScopedBrowserPlatformOptions { readonly baseUrl?: string | undefined; readonly authToken?: string | null | undefined; readonly getAuthToken?: AuthTokenResolver | undefined; readonly tokenStore?: GoodVibesTokenStore | undefined; readonly fetch?: FetchLike | undefined; readonly WebSocketImpl?: typeof WebSocket | undefined; readonly headers?: HeadersInit | undefined; readonly getHeaders?: (() => HeadersInit | undefined | Promise<HeadersInit | undefined>) | undefined; readonly retry?: HttpRetryPolicy | undefined; readonly middleware?: readonly TransportMiddleware[] | undefined; readonly realtime?: { readonly sseReconnect?: StreamReconnectPolicy | undefined; readonly onError?: ((error: unknown) => void) | undefined; } | undefined; readonly observer?: PlatformObserver | undefined; }"
     },
     {
       "name": "forSession",
@@ -3982,7 +3982,7 @@
         "refreshLeewayMs",
         "tokenStore"
       ],
-      "text": "export interface AutoRefreshCoordinatorOptions { readonly tokenStore: GoodVibesTokenStore; readonly autoRefresh: boolean; readonly refreshLeewayMs: number; readonly now?: (() => number) | undefined; readonly refresh?: (() => Promise<{ token: string; expiresAt?: number | undefined; }>) | undefined; readonly observer?: SDKObserver | undefined; } ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; SDKObserver = export interface SDKObserver extends TransportObserver { onEvent?(event: AnyRuntimeEvent): void; onError?(err: GoodVibesSdkError): void; onTransportActivity?(activity: TransportActivityInfo): void; onAuthTransition?(transition: AuthTransitionInfo): void; }"
+      "text": "export interface AutoRefreshCoordinatorOptions { readonly tokenStore: GoodVibesTokenStore; readonly autoRefresh: boolean; readonly refreshLeewayMs: number; readonly now?: (() => number) | undefined; readonly refresh?: (() => Promise<{ token: string; expiresAt?: number | undefined; }>) | undefined; readonly observer?: PlatformObserver | undefined; } ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; PlatformObserver = export interface PlatformObserver extends TransportObserver { onEvent?(event: AnyRuntimeEvent): void; onError?(err: GoodVibesError): void; onTransportActivity?(activity: TransportActivityInfo): void; onAuthTransition?(transition: AuthTransitionInfo): void; }"
     },
     {
       "name": "AutoRefreshOptions",
@@ -4090,7 +4090,7 @@
         "tokenStore",
         "writable"
       ],
-      "text": "export declare class SessionManager { constructor(operator: OperatorSdk, tokenStore: TokenStore | null, observer?: SDKObserver); current(): Promise<GoodVibesCurrentAuth>; login(input: GoodVibesLoginInput, options?: GoodVibesAuthLoginOptions): Promise<GoodVibesLoginOutput>; get writable(): boolean; get tokenStore(): TokenStore | null; } ;; via OperatorSdk = export type OperatorSdk = Omit<OperatorRemoteClient, 'getOperation'> & { readonly transport: HttpTransport; getOperation(methodId: OperatorMethodId): OperatorMethodContract; dispose(): void; asyncDispose(): Promise<void>; [Symbol.dispose](): void; [Symbol.asyncDispose](): Promise<void>; }; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; SDKObserver = export interface SDKObserver extends TransportObserver { onEvent?(event: AnyRuntimeEvent): void; onError?(err: GoodVibesSdkError): void; onTransportActivity?(activity: TransportActivityInfo): void; onAuthTransition?(transition: AuthTransitionInfo): void; }"
+      "text": "export declare class SessionManager { constructor(operator: OperatorApiClient, tokenStore: TokenStore | null, observer?: PlatformObserver); current(): Promise<GoodVibesCurrentAuth>; login(input: GoodVibesLoginInput, options?: GoodVibesAuthLoginOptions): Promise<GoodVibesLoginOutput>; get writable(): boolean; get tokenStore(): TokenStore | null; } ;; via OperatorApiClient = export type OperatorApiClient = Omit<OperatorRemoteClient, 'getOperation'> & { readonly transport: HttpTransport; getOperation(methodId: OperatorMethodId): OperatorMethodContract; dispose(): void; asyncDispose(): Promise<void>; [Symbol.dispose](): void; [Symbol.asyncDispose](): Promise<void>; }; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; PlatformObserver = export interface PlatformObserver extends TransportObserver { onEvent?(event: AnyRuntimeEvent): void; onError?(err: GoodVibesError): void; onTransportActivity?(activity: TransportActivityInfo): void; onAuthTransition?(transition: AuthTransitionInfo): void; }"
     },
     {
       "name": "TokenStore",
@@ -7314,7 +7314,7 @@
         "[Symbol.hasInstance]",
         "constructor"
       ],
-      "text": "export declare class ConfigurationError extends GoodVibesSdkError { static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options?: GoodVibesSdkErrorOptions); }"
+      "text": "export declare class ConfigurationError extends GoodVibesError { static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options?: GoodVibesErrorOptions); }"
     },
     {
       "name": "ConnectionFailure",
@@ -7328,7 +7328,7 @@
         "[Symbol.hasInstance]",
         "constructor"
       ],
-      "text": "export declare class ContractError extends GoodVibesSdkError { static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options?: GoodVibesSdkErrorOptions); }"
+      "text": "export declare class ContractError extends GoodVibesError { static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options?: GoodVibesErrorOptions); }"
     },
     {
       "name": "ContractRegexReadingContext",
@@ -7459,7 +7459,7 @@
       "text": "export interface FailureTransience { readonly failureClass: FailureClass; readonly basis: TransienceBasis; readonly detail: string; }"
     },
     {
-      "name": "GoodVibesSdkError",
+      "name": "GoodVibesError",
       "kind": "class",
       "publicMembers": [
         "[Symbol.hasInstance]",
@@ -7484,12 +7484,12 @@
         "toJSON",
         "url"
       ],
-      "text": "export declare class GoodVibesSdkError extends Error { readonly kind: SDKErrorKind; readonly code: SDKErrorCode | (string & {}); readonly category: ErrorCategory; readonly source: ErrorSource; readonly recoverable: boolean; readonly status?: number | undefined; readonly url?: string | undefined; readonly method?: string | undefined; readonly body?: unknown | undefined; readonly hint?: string | undefined; readonly provider?: string | undefined; readonly operation?: string | undefined; readonly phase?: string | undefined; readonly requestId?: string | undefined; readonly providerCode?: string | undefined; readonly providerType?: string | undefined; readonly retryAfterMs?: number | undefined; readonly cause?: unknown | undefined; static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options?: GoodVibesSdkErrorOptions); toJSON(): Record<string, unknown>; } ;; via Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
+      "text": "export declare class GoodVibesError extends Error { readonly kind: EngineErrorKind; readonly code: EngineErrorCode | (string & {}); readonly category: ErrorCategory; readonly source: ErrorSource; readonly recoverable: boolean; readonly status?: number | undefined; readonly url?: string | undefined; readonly method?: string | undefined; readonly body?: unknown | undefined; readonly hint?: string | undefined; readonly provider?: string | undefined; readonly operation?: string | undefined; readonly phase?: string | undefined; readonly requestId?: string | undefined; readonly providerCode?: string | undefined; readonly providerType?: string | undefined; readonly retryAfterMs?: number | undefined; readonly cause?: unknown | undefined; static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options?: GoodVibesErrorOptions); toJSON(): Record<string, unknown>; } ;; via Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
     },
     {
-      "name": "GoodVibesSdkErrorOptions",
+      "name": "GoodVibesErrorOptions",
       "kind": "interface",
-      "text": "export interface GoodVibesSdkErrorOptions { readonly code?: SDKErrorCode | (string & {}) | undefined; readonly category?: ErrorCategory | undefined; readonly source?: ErrorSource | undefined; readonly recoverable?: boolean | undefined; readonly status?: number | undefined; readonly url?: string | undefined; readonly method?: string | undefined; readonly body?: unknown | undefined; readonly hint?: string | undefined; readonly provider?: string | undefined; readonly operation?: string | undefined; readonly phase?: string | undefined; readonly requestId?: string | undefined; readonly providerCode?: string | undefined; readonly providerType?: string | undefined; readonly retryAfterMs?: number | undefined; readonly cause?: unknown | undefined; }"
+      "text": "export interface GoodVibesErrorOptions { readonly code?: EngineErrorCode | (string & {}) | undefined; readonly category?: ErrorCategory | undefined; readonly source?: ErrorSource | undefined; readonly recoverable?: boolean | undefined; readonly status?: number | undefined; readonly url?: string | undefined; readonly method?: string | undefined; readonly body?: unknown | undefined; readonly hint?: string | undefined; readonly provider?: string | undefined; readonly operation?: string | undefined; readonly phase?: string | undefined; readonly requestId?: string | undefined; readonly providerCode?: string | undefined; readonly providerType?: string | undefined; readonly retryAfterMs?: number | undefined; readonly cause?: unknown | undefined; }"
     },
     {
       "name": "HttpStatusError",
@@ -7498,7 +7498,7 @@
         "[Symbol.hasInstance]",
         "constructor"
       ],
-      "text": "export declare class HttpStatusError extends GoodVibesSdkError { static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options?: GoodVibesSdkErrorOptions); }"
+      "text": "export declare class HttpStatusError extends GoodVibesError { static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options?: GoodVibesErrorOptions); }"
     },
     {
       "name": "JudgmentAuthorityFrame",
@@ -7597,19 +7597,19 @@
       "text": "export interface RegexReadingCapability { readonly signal: AbortSignal; readonly assertCurrent: () => void; readonly read: (source: string, flags: string, maxInputChars: number, signal: AbortSignal) => Promise<YesNoReading>; } ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; YesNoReading = export interface YesNoReading { readonly kind: 'yes-no'; readonly probability: number; readonly verdict: 'yes' | 'no' | 'uncertain'; readonly outcome: Outcome; }"
     },
     {
-      "name": "SDKErrorCode",
+      "name": "EngineErrorCode",
       "kind": "type",
-      "text": "export type SDKErrorCode = 'AUTH_REQUIRED' | 'TOKEN_EXPIRED' | 'PERMISSION_DENIED' | 'PAYMENT_REQUIRED' | 'RATE_LIMITED' | 'NETWORK_UNREACHABLE' | 'TIMEOUT' | 'CANCELLED' | 'NOT_FOUND' | 'CONFLICT' | 'SESSION_CLOSED' | 'NOT_INVOKABLE' | 'METHOD_NOT_FOUND' | 'VALIDATION_FAILED' | 'AGENT_TIMEOUT' | 'AGENT_FAILED' | 'TOOL_EXEC_FAILED' | 'SERVICE_UNAVAILABLE' | 'CONTRACT_MISMATCH' | 'PROTOCOL_ERROR' | 'INTERNAL_ERROR' | 'SDK_CONFIGURATION_ERROR' | 'SDK_CONTRACT_ERROR' | 'SDK_HTTP_STATUS_ERROR' | 'UNKNOWN';"
+      "text": "export type EngineErrorCode = 'AUTH_REQUIRED' | 'TOKEN_EXPIRED' | 'PERMISSION_DENIED' | 'PAYMENT_REQUIRED' | 'RATE_LIMITED' | 'NETWORK_UNREACHABLE' | 'TIMEOUT' | 'CANCELLED' | 'NOT_FOUND' | 'CONFLICT' | 'SESSION_CLOSED' | 'NOT_INVOKABLE' | 'METHOD_NOT_FOUND' | 'VALIDATION_FAILED' | 'AGENT_TIMEOUT' | 'AGENT_FAILED' | 'TOOL_EXEC_FAILED' | 'SERVICE_UNAVAILABLE' | 'CONTRACT_MISMATCH' | 'PROTOCOL_ERROR' | 'INTERNAL_ERROR' | 'ENGINE_CONFIGURATION_ERROR' | 'ENGINE_CONTRACT_ERROR' | 'ENGINE_HTTP_STATUS_ERROR' | 'UNKNOWN';"
     },
     {
-      "name": "SDKErrorCodes",
+      "name": "EngineErrorCodes",
       "kind": "const",
-      "text": "SDKErrorCodes: { readonly AUTH_REQUIRED: \"AUTH_REQUIRED\"; readonly TOKEN_EXPIRED: \"TOKEN_EXPIRED\"; readonly PERMISSION_DENIED: \"PERMISSION_DENIED\"; readonly PAYMENT_REQUIRED: \"PAYMENT_REQUIRED\"; readonly RATE_LIMITED: \"RATE_LIMITED\"; readonly NETWORK_UNREACHABLE: \"NETWORK_UNREACHABLE\"; readonly TIMEOUT: \"TIMEOUT\"; readonly CANCELLED: \"CANCELLED\"; readonly NOT_FOUND: \"NOT_FOUND\"; readonly CONFLICT: \"CONFLICT\"; readonly SESSION_CLOSED: \"SESSION_CLOSED\"; readonly NOT_INVOKABLE: \"NOT_INVOKABLE\"; readonly METHOD_NOT_FOUND: \"METHOD_NOT_FOUND\"; readonly VALIDATION_FAILED: \"VALIDATION_FAILED\"; readonly AGENT_TIMEOUT: \"AGENT_TIMEOUT\"; readonly AGENT_FAILED: \"AGENT_FAILED\"; readonly TOOL_EXEC_FAILED: \"TOOL_EXEC_FAILED\"; readonly SERVICE_UNAVAILABLE: \"SERVICE_UNAVAILABLE\"; readonly CONTRACT_MISMATCH: \"CONTRACT_MISMATCH\"; readonly PROTOCOL_ERROR: \"PROTOCOL_ERROR\"; readonly INTERNAL_ERROR: \"INTERNAL_ERROR\"; readonly SDK_CONFIGURATION_ERROR: \"SDK_CONFIGURATION_ERROR\"; readonly SDK_CONTRACT_ERROR: \"SDK_CONTRACT_ERROR\"; readonly SDK_HTTP_STATUS_ERROR: \"SDK_HTTP_STATUS_ERROR\"; readonly UNKNOWN: \"UNKNOWN\"; }"
+      "text": "EngineErrorCodes: { readonly AUTH_REQUIRED: \"AUTH_REQUIRED\"; readonly TOKEN_EXPIRED: \"TOKEN_EXPIRED\"; readonly PERMISSION_DENIED: \"PERMISSION_DENIED\"; readonly PAYMENT_REQUIRED: \"PAYMENT_REQUIRED\"; readonly RATE_LIMITED: \"RATE_LIMITED\"; readonly NETWORK_UNREACHABLE: \"NETWORK_UNREACHABLE\"; readonly TIMEOUT: \"TIMEOUT\"; readonly CANCELLED: \"CANCELLED\"; readonly NOT_FOUND: \"NOT_FOUND\"; readonly CONFLICT: \"CONFLICT\"; readonly SESSION_CLOSED: \"SESSION_CLOSED\"; readonly NOT_INVOKABLE: \"NOT_INVOKABLE\"; readonly METHOD_NOT_FOUND: \"METHOD_NOT_FOUND\"; readonly VALIDATION_FAILED: \"VALIDATION_FAILED\"; readonly AGENT_TIMEOUT: \"AGENT_TIMEOUT\"; readonly AGENT_FAILED: \"AGENT_FAILED\"; readonly TOOL_EXEC_FAILED: \"TOOL_EXEC_FAILED\"; readonly SERVICE_UNAVAILABLE: \"SERVICE_UNAVAILABLE\"; readonly CONTRACT_MISMATCH: \"CONTRACT_MISMATCH\"; readonly PROTOCOL_ERROR: \"PROTOCOL_ERROR\"; readonly INTERNAL_ERROR: \"INTERNAL_ERROR\"; readonly ENGINE_CONFIGURATION_ERROR: \"ENGINE_CONFIGURATION_ERROR\"; readonly ENGINE_CONTRACT_ERROR: \"ENGINE_CONTRACT_ERROR\"; readonly ENGINE_HTTP_STATUS_ERROR: \"ENGINE_HTTP_STATUS_ERROR\"; readonly UNKNOWN: \"UNKNOWN\"; }"
     },
     {
-      "name": "SDKErrorKind",
+      "name": "EngineErrorKind",
       "kind": "type",
-      "text": "export type SDKErrorKind = 'auth' | 'config' | 'contract' | 'network' | 'not-found' | 'protocol' | 'rate-limit' | 'service' | 'internal' | 'tool' | 'validation' | 'unknown';"
+      "text": "export type EngineErrorKind = 'auth' | 'config' | 'contract' | 'network' | 'not-found' | 'protocol' | 'rate-limit' | 'service' | 'internal' | 'tool' | 'validation' | 'unknown';"
     },
     {
       "name": "StructuredDaemonErrorBody",
@@ -7722,12 +7722,12 @@
     {
       "name": "isErrorCode",
       "kind": "function",
-      "text": "export declare function isErrorCode<C extends SDKErrorCode>(err: { readonly code?: SDKErrorCode | (string & {}) | undefined; }, code: C): err is { readonly code: C; };"
+      "text": "export declare function isErrorCode<C extends EngineErrorCode>(err: { readonly code?: EngineErrorCode | (string & {}) | undefined; }, code: C): err is { readonly code: C; };"
     },
     {
       "name": "isKnownErrorCode",
       "kind": "function",
-      "text": "export declare function isKnownErrorCode(value: string): value is SDKErrorCode;"
+      "text": "export declare function isKnownErrorCode(value: string): value is EngineErrorCode;"
     },
     {
       "name": "isStructuredDaemonErrorBody",
@@ -9427,9 +9427,9 @@
   ],
   "./expo": [
     {
-      "name": "ExpoGoodVibesSdkOptions",
+      "name": "ExpoGoodVibesPlatformOptions",
       "kind": "type",
-      "text": "export type ExpoGoodVibesSdkOptions = ReactNativeGoodVibesSdkOptions; ;; via ReactNativeGoodVibesSdkOptions = export interface ReactNativeGoodVibesSdkOptions extends GoodVibesSdkOptions { readonly WebSocketImpl?: typeof WebSocket | undefined; }"
+      "text": "export type ExpoGoodVibesPlatformOptions = ReactNativeGoodVibesPlatformOptions; ;; via ReactNativeGoodVibesPlatformOptions = export interface ReactNativeGoodVibesPlatformOptions extends GoodVibesPlatformOptions { readonly WebSocketImpl?: typeof WebSocket | undefined; }"
     },
     {
       "name": "ExpoSecureStoreAccessible",
@@ -9451,9 +9451,9 @@
       "text": "export interface ExpoSecureTokenStoreOptions { readonly key?: string | undefined; readonly keychainService?: string | undefined; readonly accessible?: ExpoSecureStoreAccessible | undefined; }"
     },
     {
-      "name": "createExpoGoodVibesSdk",
+      "name": "createExpoGoodVibesPlatform",
       "kind": "function",
-      "text": "export declare function createExpoGoodVibesSdk(options: ExpoGoodVibesSdkOptions): ReactNativeGoodVibesSdk; ;; via ReactNativeGoodVibesSdk = export type ReactNativeGoodVibesSdk = Omit<GoodVibesSdk, 'realtime'> & { readonly realtime: ReactNativeGoodVibesRealtime; };"
+      "text": "export declare function createExpoGoodVibesPlatform(options: ExpoGoodVibesPlatformOptions): ReactNativeGoodVibesPlatform; ;; via ReactNativeGoodVibesPlatform = export type ReactNativeGoodVibesPlatform = Omit<GoodVibesPlatform, 'realtime'> & { readonly realtime: ReactNativeGoodVibesRealtime; };"
     },
     {
       "name": "createExpoSecureTokenStore",
@@ -9553,9 +9553,9 @@
       "text": "export interface OtelTracer { startActiveSpan<F extends (span: OtelSpan) => unknown>(name: string, fn: F): ReturnType<F>; startSpan(name: string, options?: unknown): OtelSpan; } ;; via ReturnType = type ReturnType<T extends (...args: any) => any> = T extends (...args: any) => infer R ? R : any;"
     },
     {
-      "name": "SDKObserver",
+      "name": "PlatformObserver",
       "kind": "interface",
-      "text": "export interface SDKObserver extends TransportObserver { onEvent?(event: AnyRuntimeEvent): void; onError?(err: GoodVibesSdkError): void; onTransportActivity?(activity: TransportActivityInfo): void; onAuthTransition?(transition: AuthTransitionInfo): void; }"
+      "text": "export interface PlatformObserver extends TransportObserver { onEvent?(event: AnyRuntimeEvent): void; onError?(err: GoodVibesError): void; onTransportActivity?(activity: TransportActivityInfo): void; onAuthTransition?(transition: AuthTransitionInfo): void; }"
     },
     {
       "name": "SPAN_STATUS_ERROR",
@@ -9574,12 +9574,12 @@
     {
       "name": "createConsoleObserver",
       "kind": "function",
-      "text": "export declare function createConsoleObserver(options?: ConsoleObserverOptions): SDKObserver;"
+      "text": "export declare function createConsoleObserver(options?: ConsoleObserverOptions): PlatformObserver;"
     },
     {
       "name": "createOpenTelemetryObserver",
       "kind": "function",
-      "text": "export declare function createOpenTelemetryObserver(tracer: OtelTracer, meter: OtelMeter): SDKObserver;"
+      "text": "export declare function createOpenTelemetryObserver(tracer: OtelTracer, meter: OtelMeter): PlatformObserver;"
     },
     {
       "name": "invokeObserver",
@@ -9650,14 +9650,14 @@
       "text": "export interface OperatorRemoteClientStreamOptions extends ContractStreamOptions { }"
     },
     {
-      "name": "OperatorSdk",
+      "name": "OperatorApiClient",
       "kind": "type",
-      "text": "export type OperatorSdk = Omit<OperatorRemoteClient, 'getOperation'> & { readonly transport: HttpTransport; getOperation(methodId: OperatorMethodId): OperatorMethodContract; dispose(): void; asyncDispose(): Promise<void>; [Symbol.dispose](): void; [Symbol.asyncDispose](): Promise<void>; }; ;; via HttpTransport = export type HttpTransport = HttpJsonTransport; ;; Omit = type Omit<T, K extends keyof any> = Pick<T, Exclude<keyof T, K>>; ;; OperatorMethodContract = export interface OperatorMethodContract { readonly id: string; readonly title: string; readonly description: string; readonly category: string; readonly source: GatewayMethodSource; readonly access: GatewayMethodAccess; readonly transport: readonly GatewayMethodTransport[]; readonly scopes: readonly string[]; readonly http?: ContractHttpDefinition | undefined; readonly events?: readonly string[] | undefined; readonly inputSchema?: JsonSchema | undefined; readonly outputSchema?: JsonSchema | undefined; readonly pluginId?: string | undefined; readonly dangerous?: boolean | undefined; readonly invokable?: boolean | undefined; readonly idempotent?: boolean | undefined; readonly metadata?: Record<string, unknown> | undefined; } ;; OperatorMethodId = export type OperatorMethodId = typeof OPERATOR_METHOD_IDS[number]; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+      "text": "export type OperatorApiClient = Omit<OperatorRemoteClient, 'getOperation'> & { readonly transport: HttpTransport; getOperation(methodId: OperatorMethodId): OperatorMethodContract; dispose(): void; asyncDispose(): Promise<void>; [Symbol.dispose](): void; [Symbol.asyncDispose](): Promise<void>; }; ;; via HttpTransport = export type HttpTransport = HttpJsonTransport; ;; Omit = type Omit<T, K extends keyof any> = Pick<T, Exclude<keyof T, K>>; ;; OperatorMethodContract = export interface OperatorMethodContract { readonly id: string; readonly title: string; readonly description: string; readonly category: string; readonly source: GatewayMethodSource; readonly access: GatewayMethodAccess; readonly transport: readonly GatewayMethodTransport[]; readonly scopes: readonly string[]; readonly http?: ContractHttpDefinition | undefined; readonly events?: readonly string[] | undefined; readonly inputSchema?: JsonSchema | undefined; readonly outputSchema?: JsonSchema | undefined; readonly pluginId?: string | undefined; readonly dangerous?: boolean | undefined; readonly invokable?: boolean | undefined; readonly idempotent?: boolean | undefined; readonly metadata?: Record<string, unknown> | undefined; } ;; OperatorMethodId = export type OperatorMethodId = typeof OPERATOR_METHOD_IDS[number]; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
     },
     {
-      "name": "OperatorSdkOptions",
+      "name": "OperatorApiClientOptions",
       "kind": "interface",
-      "text": "export interface OperatorSdkOptions extends HttpTransportOptions, Pick<OperatorRemoteClientOptions, 'regexReading' | 'getRegexReading'> { readonly validateResponses?: boolean | undefined; }"
+      "text": "export interface OperatorApiClientOptions extends HttpTransportOptions, Pick<OperatorRemoteClientOptions, 'regexReading' | 'getRegexReading'> { readonly validateResponses?: boolean | undefined; }"
     },
     {
       "name": "OperatorStreamOptions",
@@ -9675,9 +9675,9 @@
       "text": "export declare function createOperatorRemoteClient(transport: HttpTransport, contract: OperatorContractManifest, clientOptions?: OperatorRemoteClientOptions): OperatorRemoteClient; ;; via HttpTransport = export type HttpTransport = HttpJsonTransport; ;; OperatorContractManifest = export interface OperatorContractManifest { readonly version: number; readonly product: { readonly id: string; readonly surface: string; readonly version: string; }; readonly auth: { readonly modes: readonly string[]; readonly login: { readonly method: string; readonly path: string; readonly requestSchema: JsonSchema; readonly responseSchema: JsonSchema; }; readonly current: { readonly method: string; readonly path: string; readonly aliasPaths?: readonly string[] | undefined; readonly responseSchema: JsonSchema; }; readonly sessionCookie: { readonly name: string; readonly httpOnly: boolean; readonly sameSite: string; readonly path: string; }; readonly bearer: { readonly header: string; readonly queryParameters: readonly string[]; }; }; readonly transports: { readonly http: { readonly statusPath: string; readonly methodsPath: string; readonly eventsCatalogPath: string; }; readonly sse: { readonly path: string; readonly query: { readonly domains: string; }; }; readonly websocket: { readonly path: string; readonly clientFrames: readonly { readonly type: string; readonly fields?: readonly string[] | undefined; }[]; readonly serverFrames: readonly { readonly type: string; readonly fields?: readonly string[] | undefined; }[]; }; }; readonly operator: { readonly methods: readonly OperatorMethodContract[]; readonly events: readonly OperatorEventContract[]; readonly schemaCoverage: OperatorSchemaCoverageContract; readonly eventCoverage: OperatorEventCoverageContract; readonly validationCoverage?: OperatorValidationCoverageContract | undefined; }; readonly peer: { readonly contractPath: string; readonly relationship: string; }; }"
     },
     {
-      "name": "createOperatorSdk",
+      "name": "createOperatorApiClient",
       "kind": "function",
-      "text": "export declare function createOperatorSdk(options: OperatorSdkOptions): OperatorSdk;"
+      "text": "export declare function createOperatorApiClient(options: OperatorApiClientOptions): OperatorApiClient;"
     }
   ],
   "./peer": [
@@ -9723,19 +9723,19 @@
       "text": "export interface PeerRemoteClientOptions { readonly validateResponses?: boolean | undefined; readonly regexReading?: RegexReadingCapability | undefined; readonly getRegexReading?: ContractRegexReadingFactory | undefined; } ;; via ContractRegexReadingFactory = export type ContractRegexReadingFactory = (context: ContractRegexReadingContext) => RegexReadingCapability; ;; RegexReadingCapability = export interface RegexReadingCapability { readonly signal: AbortSignal; readonly assertCurrent: () => void; readonly read: (source: string, flags: string, maxInputChars: number, signal: AbortSignal) => Promise<YesNoReading>; }"
     },
     {
-      "name": "PeerSdk",
+      "name": "PeerApiClient",
       "kind": "type",
-      "text": "export type PeerSdk = Omit<PeerRemoteClient, 'getOperation'> & { readonly transport: HttpTransport; getOperation(endpointId: PeerEndpointId): PeerEndpointContract; dispose(): void; asyncDispose(): Promise<void>; [Symbol.dispose](): void; [Symbol.asyncDispose](): Promise<void>; }; ;; via HttpTransport = export type HttpTransport = HttpJsonTransport; ;; Omit = type Omit<T, K extends keyof any> = Pick<T, Exclude<keyof T, K>>; ;; PeerEndpointContract = export interface PeerEndpointContract { readonly id: string; readonly method: 'GET' | 'POST'; readonly path: string; readonly auth: 'none' | 'bearer-peer-token' | 'bearer-operator-token'; readonly requiredScope?: string | undefined; readonly description: string; readonly inputSchema?: JsonSchema | undefined; readonly outputSchema?: JsonSchema | undefined; readonly idempotent?: boolean | undefined; } ;; PeerEndpointId = export type PeerEndpointId = typeof PEER_ENDPOINT_IDS[number]; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+      "text": "export type PeerApiClient = Omit<PeerRemoteClient, 'getOperation'> & { readonly transport: HttpTransport; getOperation(endpointId: PeerEndpointId): PeerEndpointContract; dispose(): void; asyncDispose(): Promise<void>; [Symbol.dispose](): void; [Symbol.asyncDispose](): Promise<void>; }; ;; via HttpTransport = export type HttpTransport = HttpJsonTransport; ;; Omit = type Omit<T, K extends keyof any> = Pick<T, Exclude<keyof T, K>>; ;; PeerEndpointContract = export interface PeerEndpointContract { readonly id: string; readonly method: 'GET' | 'POST'; readonly path: string; readonly auth: 'none' | 'bearer-peer-token' | 'bearer-operator-token'; readonly requiredScope?: string | undefined; readonly description: string; readonly inputSchema?: JsonSchema | undefined; readonly outputSchema?: JsonSchema | undefined; readonly idempotent?: boolean | undefined; } ;; PeerEndpointId = export type PeerEndpointId = typeof PEER_ENDPOINT_IDS[number]; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
     },
     {
-      "name": "PeerSdkBehaviorOptions",
+      "name": "PeerApiClientBehaviorOptions",
       "kind": "interface",
-      "text": "export interface PeerSdkBehaviorOptions extends Pick<PeerRemoteClientOptions, 'regexReading' | 'getRegexReading'> { readonly validateResponses?: boolean | undefined; }"
+      "text": "export interface PeerApiClientBehaviorOptions extends Pick<PeerRemoteClientOptions, 'regexReading' | 'getRegexReading'> { readonly validateResponses?: boolean | undefined; }"
     },
     {
-      "name": "PeerSdkOptions",
+      "name": "PeerApiClientOptions",
       "kind": "type",
-      "text": "export type PeerSdkOptions = HttpTransportOptions & PeerSdkBehaviorOptions; ;; via HttpTransportOptions = export type HttpTransportOptions = HttpJsonTransportOptions;"
+      "text": "export type PeerApiClientOptions = HttpTransportOptions & PeerApiClientBehaviorOptions; ;; via HttpTransportOptions = export type HttpTransportOptions = HttpJsonTransportOptions;"
     },
     {
       "name": "createPeerRemoteClient",
@@ -9743,9 +9743,9 @@
       "text": "export declare function createPeerRemoteClient(transport: HttpTransport, contract: PeerContractManifest, clientOptions?: PeerRemoteClientOptions): PeerRemoteClient; ;; via HttpTransport = export type HttpTransport = HttpJsonTransport; ;; PeerContractManifest = export interface PeerContractManifest { readonly schemaVersion: 1; readonly transport: 'http-json'; readonly basePath: '/api/remote'; readonly peerKinds: readonly DistributedPeerKind[]; readonly workTypes: readonly DistributedWorkType[]; readonly scopes: readonly string[]; readonly recommendedHeartbeatMs: number; readonly recommendedWorkPullMs: number; readonly endpoints: readonly PeerEndpointContract[]; readonly workCompletionStatuses: readonly DistributedWorkStatus[]; readonly metadata: Record<string, unknown>; }"
     },
     {
-      "name": "createPeerSdk",
+      "name": "createPeerApiClient",
       "kind": "function",
-      "text": "export declare function createPeerSdk(options: PeerSdkOptions): PeerSdk;"
+      "text": "export declare function createPeerApiClient(options: PeerApiClientOptions): PeerApiClient;"
     }
   ],
   "./platform/acp": [
@@ -15034,7 +15034,7 @@
         "ok",
         "permissions"
       ],
-      "text": "export interface CloudflareTokenRequirementsResult { readonly ok: true; readonly components: Readonly<Record<CloudflareComponent, boolean>>; readonly permissions: readonly CloudflareTokenPermissionRequirement[]; readonly bootstrapToken: { readonly requiredForSdkCreation: boolean; readonly storeInGoodVibes: false; readonly instructions: readonly string[]; }; } ;; via Readonly = type Readonly<T> = { readonly [P in keyof T]: T[P]; }; ;; Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
+      "text": "export interface CloudflareTokenRequirementsResult { readonly ok: true; readonly components: Readonly<Record<CloudflareComponent, boolean>>; readonly permissions: readonly CloudflareTokenPermissionRequirement[]; readonly bootstrapToken: { readonly requiredForPlatformCreation: boolean; readonly storeInGoodVibes: false; readonly instructions: readonly string[]; }; } ;; via Readonly = type Readonly<T> = { readonly [P in keyof T]: T[P]; }; ;; Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
     },
     {
       "name": "CloudflareValidateInput",
@@ -35209,7 +35209,7 @@
         "failureClass",
         "statusCode"
       ],
-      "text": "export declare class DeliveryError extends GoodVibesSdkError { readonly failureClass: DeliveryFailureClass; readonly statusCode?: number | undefined; readonly code: 'DELIVERY_ERROR'; constructor(message: string, failureClass: DeliveryFailureClass, statusCode?: number | undefined); }"
+      "text": "export declare class DeliveryError extends GoodVibesError { readonly failureClass: DeliveryFailureClass; readonly statusCode?: number | undefined; readonly code: 'DELIVERY_ERROR'; constructor(message: string, failureClass: DeliveryFailureClass, statusCode?: number | undefined); }"
     },
     {
       "name": "DeliveryFailureClass",
@@ -35404,7 +35404,7 @@
     {
       "name": "GOODVIBES_NTFY_ORIGIN",
       "kind": "const",
-      "text": "GOODVIBES_NTFY_ORIGIN = \"goodvibes-sdk\""
+      "text": "GOODVIBES_NTFY_ORIGIN = \"goodvibes-platform\""
     },
     {
       "name": "GOODVIBES_NTFY_ORIGIN_HEADER",
@@ -35414,7 +35414,7 @@
     {
       "name": "GOODVIBES_NTFY_OUTBOUND_TAG",
       "kind": "const",
-      "text": "GOODVIBES_NTFY_OUTBOUND_TAG = \"goodvibes-sdk-outbound\""
+      "text": "GOODVIBES_NTFY_OUTBOUND_TAG = \"goodvibes-platform-outbound\""
     },
     {
       "name": "GOODVIBES_NTFY_REMOTE_TOPIC",
@@ -38292,7 +38292,7 @@
     {
       "name": "MemoryConsolidationConnection",
       "kind": "type",
-      "text": "export type MemoryConsolidationConnection = { readonly available: true; readonly sdk: Pick<GoodVibesSdk, 'operator'>; } | { readonly available: false; readonly reason: string; }; ;; via GoodVibesSdk = export interface GoodVibesSdk { readonly operator: OperatorSdk; readonly peer: PeerSdk; readonly auth: GoodVibesAuthClient; readonly realtime: GoodVibesRealtime; use(middleware: TransportMiddleware): void; } ;; Pick = type Pick<T, K extends keyof T> = { [P in K]: T[P]; };"
+      "text": "export type MemoryConsolidationConnection = { readonly available: true; readonly sdk: Pick<GoodVibesPlatform, 'operator'>; } | { readonly available: false; readonly reason: string; }; ;; via GoodVibesPlatform = export interface GoodVibesPlatform { readonly operator: OperatorApiClient; readonly peer: PeerApiClient; readonly auth: GoodVibesAuthClient; readonly realtime: GoodVibesRealtime; use(middleware: TransportMiddleware): void; } ;; Pick = type Pick<T, K extends keyof T> = { [P in K]: T[P]; };"
     },
     {
       "name": "MemoryConsolidationFetchFailure",
@@ -40432,12 +40432,12 @@
     {
       "name": "GOODVIBES_CLIENT_SAFE_ENTRYPOINTS",
       "kind": "const",
-      "text": "GOODVIBES_CLIENT_SAFE_ENTRYPOINTS: readonly [\"@goodvibes-jev/engine/sdk\", \"@goodvibes-jev/engine/sdk/auth\", \"@goodvibes-jev/engine/sdk/browser\", \"@goodvibes-jev/engine/sdk/browser/homeassistant\", \"@goodvibes-jev/engine/sdk/browser/knowledge\", \"@goodvibes-jev/engine/sdk/client-auth\", \"@goodvibes-jev/engine/sdk/contracts\", \"@goodvibes-jev/engine/sdk/errors\", \"@goodvibes-jev/engine/sdk/events\", \"@goodvibes-jev/engine/sdk/expo\", \"@goodvibes-jev/engine/sdk/observer\", \"@goodvibes-jev/engine/sdk/operator\", \"@goodvibes-jev/engine/sdk/peer\", \"@goodvibes-jev/engine/sdk/react-native\", \"@goodvibes-jev/engine/sdk/transport-core\", \"@goodvibes-jev/engine/sdk/transport-direct\", \"@goodvibes-jev/engine/sdk/transport-http\", \"@goodvibes-jev/engine/sdk/transport-realtime\", \"@goodvibes-jev/engine/sdk/web\", \"@goodvibes-jev/engine/sdk/workers\"]"
+      "text": "GOODVIBES_CLIENT_SAFE_ENTRYPOINTS: readonly [\"@goodvibes-jev/engine/platform\", \"@goodvibes-jev/engine/platform/auth\", \"@goodvibes-jev/engine/platform/browser\", \"@goodvibes-jev/engine/platform/browser/homeassistant\", \"@goodvibes-jev/engine/platform/browser/knowledge\", \"@goodvibes-jev/engine/platform/client-auth\", \"@goodvibes-jev/engine/platform/contracts\", \"@goodvibes-jev/engine/platform/errors\", \"@goodvibes-jev/engine/platform/events\", \"@goodvibes-jev/engine/platform/expo\", \"@goodvibes-jev/engine/platform/observer\", \"@goodvibes-jev/engine/platform/operator\", \"@goodvibes-jev/engine/platform/peer\", \"@goodvibes-jev/engine/platform/react-native\", \"@goodvibes-jev/engine/platform/transport-core\", \"@goodvibes-jev/engine/platform/transport-direct\", \"@goodvibes-jev/engine/platform/transport-http\", \"@goodvibes-jev/engine/platform/transport-realtime\", \"@goodvibes-jev/engine/platform/web\", \"@goodvibes-jev/engine/platform/workers\"]"
     },
     {
       "name": "GOODVIBES_NODE_RUNTIME_ENTRYPOINTS",
       "kind": "const",
-      "text": "GOODVIBES_NODE_RUNTIME_ENTRYPOINTS: readonly [\"@goodvibes-jev/engine/sdk/platform/node\", \"@goodvibes-jev/engine/sdk/platform/node/runtime-boundary\", \"@goodvibes-jev/engine/sdk/platform/config\", \"@goodvibes-jev/engine/sdk/platform/core\", \"@goodvibes-jev/engine/sdk/platform/daemon\", \"@goodvibes-jev/engine/sdk/platform/git\", \"@goodvibes-jev/engine/sdk/platform/intelligence\", \"@goodvibes-jev/engine/sdk/platform/integrations\", \"@goodvibes-jev/engine/sdk/platform/knowledge\", \"@goodvibes-jev/engine/sdk/platform/knowledge/extensions\", \"@goodvibes-jev/engine/sdk/platform/knowledge/home-graph\", \"@goodvibes-jev/engine/sdk/platform/multimodal\", \"@goodvibes-jev/engine/sdk/platform/pairing\", \"@goodvibes-jev/engine/sdk/platform/providers\", \"@goodvibes-jev/engine/sdk/platform/runtime\", \"@goodvibes-jev/engine/sdk/platform/runtime/observability\", \"@goodvibes-jev/engine/sdk/platform/runtime/sandbox\", \"@goodvibes-jev/engine/sdk/platform/runtime/settings\", \"@goodvibes-jev/engine/sdk/platform/runtime/state\", \"@goodvibes-jev/engine/sdk/platform/runtime/store\", \"@goodvibes-jev/engine/sdk/platform/runtime/ui\", \"@goodvibes-jev/engine/sdk/contracts/node\", \"@goodvibes-jev/engine/sdk/platform/tools\", \"@goodvibes-jev/engine/sdk/platform/utils\", \"@goodvibes-jev/engine/sdk/platform/voice\"]"
+      "text": "GOODVIBES_NODE_RUNTIME_ENTRYPOINTS: readonly [\"@goodvibes-jev/engine/platform/platform/node\", \"@goodvibes-jev/engine/platform/platform/node/runtime-boundary\", \"@goodvibes-jev/engine/platform/platform/config\", \"@goodvibes-jev/engine/platform/platform/core\", \"@goodvibes-jev/engine/platform/platform/daemon\", \"@goodvibes-jev/engine/platform/platform/git\", \"@goodvibes-jev/engine/platform/platform/intelligence\", \"@goodvibes-jev/engine/platform/platform/integrations\", \"@goodvibes-jev/engine/platform/platform/knowledge\", \"@goodvibes-jev/engine/platform/platform/knowledge/extensions\", \"@goodvibes-jev/engine/platform/platform/knowledge/home-graph\", \"@goodvibes-jev/engine/platform/platform/multimodal\", \"@goodvibes-jev/engine/platform/platform/pairing\", \"@goodvibes-jev/engine/platform/platform/providers\", \"@goodvibes-jev/engine/platform/platform/runtime\", \"@goodvibes-jev/engine/platform/platform/runtime/observability\", \"@goodvibes-jev/engine/platform/platform/runtime/sandbox\", \"@goodvibes-jev/engine/platform/platform/runtime/settings\", \"@goodvibes-jev/engine/platform/platform/runtime/state\", \"@goodvibes-jev/engine/platform/platform/runtime/store\", \"@goodvibes-jev/engine/platform/platform/runtime/ui\", \"@goodvibes-jev/engine/platform/contracts/node\", \"@goodvibes-jev/engine/platform/platform/tools\", \"@goodvibes-jev/engine/platform/platform/utils\", \"@goodvibes-jev/engine/platform/platform/voice\"]"
     },
     {
       "name": "GOODVIBES_RUNTIME_CAPABILITIES",
@@ -49182,7 +49182,7 @@
         "constructor",
         "providerId"
       ],
-      "text": "export declare class ProviderNotFoundError extends GoodVibesSdkError { readonly code: 'PROVIDER_NOT_FOUND'; readonly providerId: string; readonly availableIds: readonly string[]; constructor(providerId: string, available: readonly string[]); }"
+      "text": "export declare class ProviderNotFoundError extends GoodVibesError { readonly code: 'PROVIDER_NOT_FOUND'; readonly providerId: string; readonly availableIds: readonly string[]; constructor(providerId: string, available: readonly string[]); }"
     },
     {
       "name": "ProviderOptimizer",
@@ -60600,7 +60600,7 @@
         "currentState",
         "targetId"
       ],
-      "text": "export declare class OpsIllegalActionError extends GoodVibesSdkError { readonly code: 'OPS_ILLEGAL_ACTION'; readonly targetId: string; readonly action: string; readonly currentState: string; constructor(targetId: string, action: string, currentState: string); }"
+      "text": "export declare class OpsIllegalActionError extends GoodVibesError { readonly code: 'OPS_ILLEGAL_ACTION'; readonly targetId: string; readonly action: string; readonly currentState: string; constructor(targetId: string, action: string, currentState: string); }"
     },
     {
       "name": "OpsTargetNotFoundError",
@@ -60611,7 +60611,7 @@
         "targetId",
         "targetKind"
       ],
-      "text": "export declare class OpsTargetNotFoundError extends GoodVibesSdkError { readonly code: 'OPS_TARGET_NOT_FOUND'; readonly targetId: string; readonly targetKind: 'task' | 'agent'; constructor(targetId: string, targetKind: 'task' | 'agent'); }"
+      "text": "export declare class OpsTargetNotFoundError extends GoodVibesError { readonly code: 'OPS_TARGET_NOT_FOUND'; readonly targetId: string; readonly targetKind: 'task' | 'agent'; constructor(targetId: string, targetKind: 'task' | 'agent'); }"
     },
     {
       "name": "PLUGIN_CAPABILITIES",
@@ -61877,7 +61877,7 @@
         "constructor",
         "taskId"
       ],
-      "text": "export declare class TaskNotCancellableError extends GoodVibesSdkError { readonly code: 'TASK_NOT_CANCELLABLE'; readonly taskId: string; constructor(taskId: string); }"
+      "text": "export declare class TaskNotCancellableError extends GoodVibesError { readonly code: 'TASK_NOT_CANCELLABLE'; readonly taskId: string; constructor(taskId: string); }"
     },
     {
       "name": "TaskNotFoundError",
@@ -61887,7 +61887,7 @@
         "constructor",
         "taskId"
       ],
-      "text": "export declare class TaskNotFoundError extends GoodVibesSdkError { readonly code: 'TASK_NOT_FOUND'; readonly taskId: string; constructor(taskId: string); }"
+      "text": "export declare class TaskNotFoundError extends GoodVibesError { readonly code: 'TASK_NOT_FOUND'; readonly taskId: string; constructor(taskId: string); }"
     },
     {
       "name": "TaskRegistry",
@@ -61915,7 +61915,7 @@
         "taskId",
         "to"
       ],
-      "text": "export declare class TaskTransitionError extends GoodVibesSdkError { readonly code: 'TASK_TRANSITION_ERROR'; readonly taskId: string; readonly from: TaskLifecycleState; readonly to: TaskLifecycleState; constructor(taskId: string, from: TaskLifecycleState, to: TaskLifecycleState); } ;; via TaskLifecycleState = export type TaskLifecycleState = 'queued' | 'running' | 'blocked' | 'completed' | 'failed' | 'cancelled';"
+      "text": "export declare class TaskTransitionError extends GoodVibesError { readonly code: 'TASK_TRANSITION_ERROR'; readonly taskId: string; readonly from: TaskLifecycleState; readonly to: TaskLifecycleState; constructor(taskId: string, from: TaskLifecycleState, to: TaskLifecycleState); } ;; via TaskLifecycleState = export type TaskLifecycleState = 'queued' | 'running' | 'blocked' | 'completed' | 'failed' | 'cancelled';"
     },
     {
       "name": "TaskUpdateParams",
@@ -62094,7 +62094,7 @@
         "offeredVersion",
         "peerVersion"
       ],
-      "text": "export declare class VersionMismatchError extends GoodVibesSdkError { readonly code: 'major_version_mismatch' | 'peer_version_too_old' | 'peer_version_unsupported'; readonly mismatchCode: 'major_version_mismatch' | 'peer_version_too_old' | 'peer_version_unsupported'; readonly offeredVersion: Readonly<ProtocolVersion>; readonly peerVersion: Readonly<ProtocolVersion>; constructor(mismatchCode: 'major_version_mismatch' | 'peer_version_too_old' | 'peer_version_unsupported', offeredVersion: Readonly<ProtocolVersion>, peerVersion: Readonly<ProtocolVersion>, message: string); } ;; via Readonly = type Readonly<T> = { readonly [P in keyof T]: T[P]; };"
+      "text": "export declare class VersionMismatchError extends GoodVibesError { readonly code: 'major_version_mismatch' | 'peer_version_too_old' | 'peer_version_unsupported'; readonly mismatchCode: 'major_version_mismatch' | 'peer_version_too_old' | 'peer_version_unsupported'; readonly offeredVersion: Readonly<ProtocolVersion>; readonly peerVersion: Readonly<ProtocolVersion>; constructor(mismatchCode: 'major_version_mismatch' | 'peer_version_too_old' | 'peer_version_unsupported', offeredVersion: Readonly<ProtocolVersion>, peerVersion: Readonly<ProtocolVersion>, message: string); } ;; via Readonly = type Readonly<T> = { readonly [P in keyof T]: T[P]; };"
     },
     {
       "name": "VersionNegotiationResult",
@@ -63988,7 +63988,7 @@
         "constructor",
         "gate"
       ],
-      "text": "export declare class DivergenceGateError extends GoodVibesSdkError { readonly code: 'DIVERGENCE_GATE_BLOCKED'; readonly gate: EnforceGateResult; constructor(message: string, gate: EnforceGateResult); }"
+      "text": "export declare class DivergenceGateError extends GoodVibesError { readonly code: 'DIVERGENCE_GATE_BLOCKED'; readonly gate: EnforceGateResult; constructor(message: string, gate: EnforceGateResult); }"
     },
     {
       "name": "DivergenceReport",
@@ -64204,7 +64204,7 @@
         "constructor",
         "signatureStatus"
       ],
-      "text": "export declare class PolicySignatureError extends GoodVibesSdkError { readonly bundleId: PolicyBundleId; readonly signatureStatus: SignatureStatus; readonly code: 'POLICY_SIGNATURE_INVALID'; constructor(bundleId: PolicyBundleId, signatureStatus: SignatureStatus, message: string); } ;; via PolicyBundleId = export type PolicyBundleId = string; ;; SignatureStatus = export type SignatureStatus = 'valid' | 'invalid' | 'missing' | 'unsigned' | 'skipped';"
+      "text": "export declare class PolicySignatureError extends GoodVibesError { readonly bundleId: PolicyBundleId; readonly signatureStatus: SignatureStatus; readonly code: 'POLICY_SIGNATURE_INVALID'; constructor(bundleId: PolicyBundleId, signatureStatus: SignatureStatus, message: string); } ;; via PolicyBundleId = export type PolicyBundleId = string; ;; SignatureStatus = export type SignatureStatus = 'valid' | 'invalid' | 'missing' | 'unsigned' | 'skipped';"
     },
     {
       "name": "PolicySimulationSummary",
@@ -76967,13 +76967,13 @@
       "text": "export interface RuleEvaluationContext { readonly observations: readonly TriggerObservation[]; readonly ruleState: TriggerRuleState; readonly now: number; readonly eventLog: readonly TriggerEventLogEntry[]; readonly selfTriggerId: string; }"
     },
     {
-      "name": "SdkToolProbe",
+      "name": "PlatformToolProbe",
       "kind": "interface",
       "required": [
         "kind",
         "tool"
       ],
-      "text": "export interface SdkToolProbe { readonly kind: 'sdk-tool'; readonly tool: string; readonly input?: Readonly<Record<string, TriggerValue>> | undefined; readonly timeoutMs?: number | undefined; } ;; via Readonly = type Readonly<T> = { readonly [P in keyof T]: T[P]; }; ;; Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
+      "text": "export interface PlatformToolProbe { readonly kind: 'sdk-tool'; readonly tool: string; readonly input?: Readonly<Record<string, TriggerValue>> | undefined; readonly timeoutMs?: number | undefined; } ;; via Readonly = type Readonly<T> = { readonly [P in keyof T]: T[P]; }; ;; Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
     },
     {
       "name": "StreamBatch",
@@ -77395,7 +77395,7 @@
     {
       "name": "TriggerProbe",
       "kind": "type",
-      "text": "export type TriggerProbe = HttpProbe | FileProbe | CommandProbe | SdkToolProbe;"
+      "text": "export type TriggerProbe = HttpProbe | FileProbe | CommandProbe | PlatformToolProbe;"
     },
     {
       "name": "TriggerProcessHost",
@@ -77970,7 +77970,7 @@
         "recoverable",
         "statusCode"
       ],
-      "text": "export declare class AppError extends GoodVibesSdkError { readonly code: string; readonly recoverable: boolean; readonly statusCode?: number | undefined; readonly guidance?: string | undefined; readonly detail?: string | undefined; readonly rawMessage?: string | undefined; constructor(message: string, code: string, recoverable: boolean, options?: AppErrorOptions); }"
+      "text": "export declare class AppError extends GoodVibesError { readonly code: string; readonly recoverable: boolean; readonly statusCode?: number | undefined; readonly guidance?: string | undefined; readonly detail?: string | undefined; readonly rawMessage?: string | undefined; constructor(message: string, code: string, recoverable: boolean, options?: AppErrorOptions); }"
     },
     {
       "name": "AppErrorOptions",
@@ -84583,14 +84583,14 @@
       "text": "export interface ReactNativeGoodVibesRealtime { runtime(): RemoteRuntimeEvents<RuntimeEventRecord>; viaWebSocket(webSocketImpl?: typeof WebSocket): RemoteRuntimeEvents<RuntimeEventRecord>; } ;; via RemoteRuntimeEvents = export type RemoteRuntimeEvents<TEvent extends RuntimeEventRecord = RuntimeEventRecord> = DomainEvents<RuntimeEventDomain, TEvent>; ;; RuntimeEventRecord = export type RuntimeEventRecord = { readonly type: string; };"
     },
     {
-      "name": "ReactNativeGoodVibesSdk",
+      "name": "ReactNativeGoodVibesPlatform",
       "kind": "type",
-      "text": "export type ReactNativeGoodVibesSdk = Omit<GoodVibesSdk, 'realtime'> & { readonly realtime: ReactNativeGoodVibesRealtime; }; ;; via GoodVibesSdk = export interface GoodVibesSdk { readonly operator: OperatorSdk; readonly peer: PeerSdk; readonly auth: GoodVibesAuthClient; readonly realtime: GoodVibesRealtime; use(middleware: TransportMiddleware): void; } ;; Omit = type Omit<T, K extends keyof any> = Pick<T, Exclude<keyof T, K>>;"
+      "text": "export type ReactNativeGoodVibesPlatform = Omit<GoodVibesPlatform, 'realtime'> & { readonly realtime: ReactNativeGoodVibesRealtime; }; ;; via GoodVibesPlatform = export interface GoodVibesPlatform { readonly operator: OperatorApiClient; readonly peer: PeerApiClient; readonly auth: GoodVibesAuthClient; readonly realtime: GoodVibesRealtime; use(middleware: TransportMiddleware): void; } ;; Omit = type Omit<T, K extends keyof any> = Pick<T, Exclude<keyof T, K>>;"
     },
     {
-      "name": "ReactNativeGoodVibesSdkOptions",
+      "name": "ReactNativeGoodVibesPlatformOptions",
       "kind": "interface",
-      "text": "export interface ReactNativeGoodVibesSdkOptions extends GoodVibesSdkOptions { readonly WebSocketImpl?: typeof WebSocket | undefined; }"
+      "text": "export interface ReactNativeGoodVibesPlatformOptions extends GoodVibesPlatformOptions { readonly WebSocketImpl?: typeof WebSocket | undefined; }"
     },
     {
       "name": "createAndroidKeystoreTokenStore",
@@ -84603,9 +84603,9 @@
       "text": "export declare function createIOSKeychainTokenStore(options?: IOSKeychainTokenStoreOptions, __loadModule?: () => Promise<unknown>): IOSKeychainTokenStore; ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
     },
     {
-      "name": "createReactNativeGoodVibesSdk",
+      "name": "createReactNativeGoodVibesPlatform",
       "kind": "function",
-      "text": "export declare function createReactNativeGoodVibesSdk(options: ReactNativeGoodVibesSdkOptions): ReactNativeGoodVibesSdk;"
+      "text": "export declare function createReactNativeGoodVibesPlatform(options: ReactNativeGoodVibesPlatformOptions): ReactNativeGoodVibesPlatform;"
     },
     {
       "name": "forSession",
@@ -85459,7 +85459,7 @@
         "[Symbol.hasInstance]",
         "constructor"
       ],
-      "text": "export declare class WebSocketTransportError extends GoodVibesSdkError { static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options: { readonly cause?: unknown; readonly hint?: string; readonly code: string; readonly category?: import('@goodvibes-jev/engine/errors').ErrorCategory | undefined; readonly recoverable?: boolean | undefined; readonly status?: number | undefined; readonly requestId?: string | undefined; readonly provider?: string | undefined; readonly operation?: string | undefined; readonly phase?: string | undefined; }); }"
+      "text": "export declare class WebSocketTransportError extends GoodVibesError { static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options: { readonly cause?: unknown; readonly hint?: string; readonly code: string; readonly category?: import('@goodvibes-jev/engine/errors').ErrorCategory | undefined; readonly recoverable?: boolean | undefined; readonly status?: number | undefined; readonly requestId?: string | undefined; readonly provider?: string | undefined; readonly operation?: string | undefined; readonly phase?: string | undefined; }); }"
     },
     {
       "name": "buildEventSourceUrl",
@@ -85524,14 +85524,14 @@
   ],
   "./web": [
     {
-      "name": "WebGoodVibesSdkOptions",
+      "name": "WebGoodVibesPlatformOptions",
       "kind": "type",
-      "text": "export type WebGoodVibesSdkOptions = BrowserGoodVibesSdkOptions; ;; via BrowserGoodVibesSdkOptions = export interface BrowserGoodVibesSdkOptions extends Omit<GoodVibesSdkOptions, 'baseUrl' | 'fetch' | 'WebSocketImpl'> { readonly baseUrl?: string | undefined; readonly fetch?: FetchLike | undefined; readonly WebSocketImpl?: typeof WebSocket | undefined; }"
+      "text": "export type WebGoodVibesPlatformOptions = BrowserGoodVibesPlatformOptions; ;; via BrowserGoodVibesPlatformOptions = export interface BrowserGoodVibesPlatformOptions extends Omit<GoodVibesPlatformOptions, 'baseUrl' | 'fetch' | 'WebSocketImpl'> { readonly baseUrl?: string | undefined; readonly fetch?: FetchLike | undefined; readonly WebSocketImpl?: typeof WebSocket | undefined; }"
     },
     {
-      "name": "createWebGoodVibesSdk",
+      "name": "createWebGoodVibesPlatform",
       "kind": "function",
-      "text": "export declare function createWebGoodVibesSdk(options?: WebGoodVibesSdkOptions): GoodVibesSdk; ;; via GoodVibesSdk = export interface GoodVibesSdk { readonly operator: OperatorSdk; readonly peer: PeerSdk; readonly auth: GoodVibesAuthClient; readonly realtime: GoodVibesRealtime; use(middleware: TransportMiddleware): void; }"
+      "text": "export declare function createWebGoodVibesPlatform(options?: WebGoodVibesPlatformOptions): GoodVibesPlatform; ;; via GoodVibesPlatform = export interface GoodVibesPlatform { readonly operator: OperatorApiClient; readonly peer: PeerApiClient; readonly auth: GoodVibesAuthClient; readonly realtime: GoodVibesRealtime; use(middleware: TransportMiddleware): void; }"
     },
     {
       "name": "forSession",

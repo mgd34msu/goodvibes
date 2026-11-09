@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { captureOwnedJson, retainOwnedJson, judgmentInputProblem, JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.js';
-import { knowledgeRecordVersion } from '../sdk/src/platform/knowledge/store-record-representation.js';
+import { captureOwnedJson, retainOwnedJson, judgmentInputProblem, JudgmentInputError } from '../platform/src/platform/gate/judgment-input.js';
+import { knowledgeRecordVersion } from '../platform/src/platform/knowledge/store-record-representation.js';
 
 test('only native immutable snapshots can be reused without recapture', () => {
   const source = Object.freeze({ nested: { value: 'before' } });

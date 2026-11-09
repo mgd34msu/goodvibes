@@ -5,9 +5,9 @@
  */
 import type { Question } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import type { DecompositionRunner, DecompositionRunnerRequest, DecompositionRunResult } from '../../sdk/src/platform/core/plan-decomposition.js';
-import type { ContractPlan } from '../../sdk/src/platform/contract/plan-schema.js';
-import type { ContractConfigReader, RequestShape, ShapeReading, UnitRoute } from '../../sdk/src/platform/contract/index.js';
+import type { DecompositionRunner, DecompositionRunnerRequest, DecompositionRunResult } from '../../platform/src/platform/core/plan-decomposition.js';
+import type { ContractPlan } from '../../platform/src/platform/contract/plan-schema.js';
+import type { ContractConfigReader, RequestShape, ShapeReading, UnitRoute } from '../../platform/src/platform/contract/index.js';
 
 export const ASK = 'Add a CSV parser and a JSON formatter, each with unit tests, and wire both into the convert command.';
 

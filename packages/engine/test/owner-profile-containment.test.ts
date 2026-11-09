@@ -22,20 +22,20 @@ import {
   redactSensitiveDataAsync as redactSensitiveData,
   redactStructuredDataAsync as redactStructuredData,
   registerProfileRedactionValues,
-} from '../sdk/src/platform/utils/redaction.ts';
-import { redactedErrorMessage } from '../sdk/src/platform/utils/error-display.ts';
-import { redactAtRestLine } from '../sdk/src/platform/runtime/at-rest-persistence.ts';
-import { exportToJSON, exportToMarkdownExtended } from '../sdk/src/platform/export/session-export.ts';
-import { OwnerProfileStore } from '../sdk/src/platform/owner-profile/index.ts';
-import { installOwnerProfileConsumers } from '../sdk/src/platform/owner-profile/consumers.ts';
+} from '../platform/src/platform/utils/redaction.ts';
+import { redactedErrorMessage } from '../platform/src/platform/utils/error-display.ts';
+import { redactAtRestLine } from '../platform/src/platform/runtime/at-rest-persistence.ts';
+import { exportToJSON, exportToMarkdownExtended } from '../platform/src/platform/export/session-export.ts';
+import { OwnerProfileStore } from '../platform/src/platform/owner-profile/index.ts';
+import { installOwnerProfileConsumers } from '../platform/src/platform/owner-profile/consumers.ts';
 import {
   openTierContextBlock,
   registerOpenTierContextBlock,
   renderOpenTierBlock,
-} from '../sdk/src/platform/owner-profile/context-block.ts';
-import { withOpenTierProfileBlock } from '../sdk/src/platform/agents/orchestrator-prompts.ts';
-import { registerSignupBaseAddressFallback } from '../sdk/src/platform/google/account-registry.ts';
-import { resetProcessUntrustedContentLedgerForTests } from '../sdk/src/platform/security/untrusted-content.ts';
+} from '../platform/src/platform/owner-profile/context-block.ts';
+import { withOpenTierProfileBlock } from '../platform/src/platform/agents/orchestrator-prompts.ts';
+import { registerSignupBaseAddressFallback } from '../platform/src/platform/google/account-registry.ts';
+import { resetProcessUntrustedContentLedgerForTests } from '../platform/src/platform/security/untrusted-content.ts';
 
 useSecurityReadings();
 

@@ -6,14 +6,14 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { DEFAULT_CONFIG } from '../sdk/src/platform/config/schema.ts';
+import { DEFAULT_CONFIG } from '../platform/src/platform/config/schema.ts';
 import {
   formatProviderModel,
   getModelIdFromProviderModel,
   getProviderIdFromModel,
-} from '../sdk/src/platform/providers/provider-model.ts';
-import { splitModelRegistryKey } from '../sdk/src/platform/providers/registry-helpers.ts';
-import { getConfiguredProviderId } from '../sdk/src/platform/config/index.ts';
+} from '../platform/src/platform/providers/provider-model.ts';
+import { splitModelRegistryKey } from '../platform/src/platform/providers/registry-helpers.ts';
+import { getConfiguredProviderId } from '../platform/src/platform/config/index.ts';
 
 const defaultProvider = getProviderIdFromModel(DEFAULT_CONFIG.provider.model);
 const defaultModel = String(DEFAULT_CONFIG.provider.model);

@@ -1,8 +1,8 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { requireYesFlag } from './command-confirmation.js';
-import { buildAuthInspectionSnapshot, inspectProviderAuth } from '@goodvibes-jev/engine/sdk/platform/runtime/security';
-import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/sdk/platform/config';
+import { buildAuthInspectionSnapshot, inspectProviderAuth } from '@goodvibes-jev/engine/platform/platform/runtime/security';
+import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/platform/platform/config';
 interface AuthReviewContext {
   print(message: string): void;
 }

@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test';
-import { GoodVibesSdkError } from '@goodvibes-jev/engine/sdk';
-import type { HonestMemorySearchResult, MemoryRecord } from '@goodvibes-jev/engine/sdk/platform/state';
+import { GoodVibesError } from '@goodvibes-jev/engine/platform';
+import type { HonestMemorySearchResult, MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
 import { createMemoryModalSurface, type MemoryModalDeps } from '../../../views/modals/memory-modal.ts';
 import type { MemoryConsolidationGatewayResolution, MemoryConsolidationProposal } from '../../../views/memory-consolidation-gateway.ts';
 import { actionCtx, captureCommands, findAction, open, tabText } from './modal-surface-test-helpers.ts';
@@ -291,7 +291,7 @@ describe('memory modal: Proposals tab', () => {
   test('a 501 from the daemon (no consolidation scheduler on this runtime) renders "unavailable", not a generic error', async () => {
     const surface = createMemoryModalSurface({
       ...fixedDeps(),
-      resolveConsolidationGateway: failingGateway(new GoodVibesSdkError('no scheduler', { status: 501 })),
+      resolveConsolidationGateway: failingGateway(new GoodVibesError('no scheduler', { status: 501 })),
     });
     const view = await openAsync(surface);
     expect(proposalsTab(view).emptyText).toContain('Pending proposals unavailable');
@@ -300,7 +300,7 @@ describe('memory modal: Proposals tab', () => {
   test('a 404 from an older daemon (route not wired yet) also renders "unavailable"; the same bucket as 501', async () => {
     const surface = createMemoryModalSurface({
       ...fixedDeps(),
-      resolveConsolidationGateway: failingGateway(new GoodVibesSdkError('not found', { status: 404 })),
+      resolveConsolidationGateway: failingGateway(new GoodVibesError('not found', { status: 404 })),
     });
     const view = await openAsync(surface);
     expect(proposalsTab(view).emptyText).toContain('Pending proposals unavailable');

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { sdk, GOODVIBES_BASE_URL, WEBUI_VERSION, getCurrentAuth } from '../lib/goodvibes';
+import { client as platformClient, GOODVIBES_BASE_URL, WEBUI_VERSION, getCurrentAuth } from '../lib/goodvibes';
 import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime } from '../lib/client-lifetime';
 import {
   evaluateClientCompatibility,
@@ -80,13 +80,13 @@ async function probeCall(fn: () => Promise<unknown>): Promise<{ ok: boolean; sta
  *
  * - Probes the daemon every 15 s via a lightweight fetch (no throw on failure).
  * - Reuses the existing queryClient pattern for tasks + model (separate queries).
- * - Subscribes to `sdk.realtime.viaSse()` for SSE state tracking.
+ * - Subscribes to `platform.realtime.viaSse()` for SSE state tracking.
  */
 export function useDaemonHealth(): DaemonHealth {
   // -- Route state ------------------------------------------------------------
   // Reactive view of the module-level active-route store (lib/relay-connection.ts),
   // the SAME store routedFetch reads for every actual request, so this never drifts
-  // from what the SDK client is genuinely dispatching over. The store only ever holds
+  // from what the platform client is genuinely dispatching over. The store only ever holds
   // 'direct' or 'relay' (never a 'down'/null verdict); the connection probe below is
   // what flips it, and the health.route field returned at the bottom maps it to null
   // whenever the daemon is unreachable by either path.
@@ -115,9 +115,9 @@ export function useDaemonHealth(): DaemonHealth {
   const [sseState, setSseState] = useState<SseState>('connecting');
 
   useEffect(() => {
-    // The SDK opens SSE through routedFetch on both direct and relay routes.
+    // The platform opens SSE through routedFetch on both direct and relay routes.
     // A route change retires this subscription before opening a fresh one, with
-    // reconnect and authentication still owned by the existing SDK transport.
+    // reconnect and authentication still owned by the existing platform transport.
     setSseState('connecting');
     let mounted = true;
     const controller = new AbortController();
@@ -128,7 +128,7 @@ export function useDaemonHealth(): DaemonHealth {
     };
 
     try {
-      const events = sdk.realtime.viaSse({ signal: controller.signal, onError });
+      const events = platformClient.realtime.viaSse({ signal: controller.signal, onError });
 
       // Subscribe to a lightweight domain to confirm the SSE pipe is alive.
       // The 'turn' domain fires on any agent turn event.
@@ -275,7 +275,7 @@ export function useDaemonHealth(): DaemonHealth {
   // -- Tasks ----------------------------------------------------------------
   const tasksQuery = useQuery({
     queryKey: ['tasks'] as const,
-    queryFn: () => sdk.operator.tasks.list(),
+    queryFn: () => platformClient.operator.tasks.list(),
     refetchInterval: HEALTH_PROBE_INTERVAL_MS,
     refetchIntervalInBackground: true,
     retry: 0,
@@ -297,7 +297,7 @@ export function useDaemonHealth(): DaemonHealth {
   // so the strip shows reachable+signed-in but NOT working rather than a false "live".
   const workingProbe = useQuery({
     queryKey: ['daemon-health', 'working'] as const,
-    queryFn: () => probeCall(() => sdk.operator.sessions.list()),
+    queryFn: () => probeCall(() => platformClient.operator.sessions.list()),
     refetchInterval: HEALTH_PROBE_INTERVAL_MS,
     refetchIntervalInBackground: true,
     retry: 0,
@@ -310,7 +310,7 @@ export function useDaemonHealth(): DaemonHealth {
   // -- Current model --------------------------------------------------------
   const modelQuery = useQuery({
     queryKey: ['daemon-health', 'model'] as const,
-    queryFn: () => sdk.operator.models.current.get(),
+    queryFn: () => platformClient.operator.models.current.get(),
     // Models change rarely, refresh every 60 s
     refetchInterval: 60_000,
     refetchIntervalInBackground: false,

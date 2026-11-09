@@ -20,11 +20,11 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { DaemonHttpRouter } from '../sdk/src/platform/daemon/http/router.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { createRuntimeStore } from '../sdk/src/platform/runtime/store/index.js';
-import type { ProviderRegistry } from '../sdk/src/platform/providers/registry.js';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.js';
+import { DaemonHttpRouter } from '../platform/src/platform/daemon/http/router.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.js';
+import type { ProviderRegistry } from '../platform/src/platform/providers/registry.js';
+import type { ConfigManager } from '../platform/src/platform/config/manager.js';
 
 // ---------------------------------------------------------------------------
 // Stubs, identical pattern to model-routes-secrets-skipped.test.ts

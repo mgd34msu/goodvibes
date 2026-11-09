@@ -9,12 +9,12 @@
  * The host itself (lib/voice/wake-host.ts) holds no React and no daemon client; this
  * file is where the two are joined, which is why the daemon-facing dependencies are
  * INSTALLED here rather than imported there, a component that only wants the
- * indicator must not pull the whole SDK client surface in behind it.
+ * indicator must not pull the whole platform client surface in behind it.
  */
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { WakeRuntimeSettings } from '@goodvibes-jev/engine/sdk/platform/voice/wake/runtime';
-import { sdk } from '../goodvibes';
+import type { WakeRuntimeSettings } from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
+import { client as platformClient } from '../goodvibes';
 import type { OperatorMethodOutput } from '../goodvibes';
 import {
   createBrowserModelSetLoader,
@@ -46,13 +46,13 @@ export function useWakeProvisioning(enabled = true) {
   const queryClient = useQueryClient();
   const status = useQuery({
     queryKey: WAKE_STATUS_QUERY_KEY,
-    queryFn: () => sdk.operator.voice.wake.status(),
+    queryFn: () => platformClient.operator.voice.wake.status(),
     enabled,
     staleTime: 30_000,
     retry: false,
   });
   const provision = useMutation({
-    mutationFn: () => sdk.operator.voice.wake.provision(),
+    mutationFn: () => platformClient.operator.voice.wake.provision(),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: WAKE_STATUS_QUERY_KEY });
     },
@@ -84,10 +84,10 @@ function ensureDaemonDeps(): void {
   installWakeHostDaemonDeps({
     loadModelSet: createBrowserModelSetLoader({
       readChunk: async (input: { component: WakeModelComponent; offset: number }): Promise<WakeModelChunk> =>
-        await sdk.operator.voice.wake.model.get({ component: input.component, offset: input.offset }),
+        await platformClient.operator.voice.wake.model.get({ component: input.component, offset: input.offset }),
       modelVersion: async () => {
         try {
-          return (await sdk.operator.voice.wake.status()).modelVersion;
+          return (await platformClient.operator.voice.wake.status()).modelVersion;
         } catch {
           // A status read that fails is not a reason to refuse the download; it
           // only costs the cache its version segment.
@@ -97,7 +97,7 @@ function ensureDaemonDeps(): void {
       warn: wakeHostWarn,
     }),
     transcribe: async (artifact) => {
-      const result = await sdk.operator.voice.stt({
+      const result = await platformClient.operator.voice.stt({
         audio: {
           mimeType: artifact.mimeType,
           format: artifact.format,

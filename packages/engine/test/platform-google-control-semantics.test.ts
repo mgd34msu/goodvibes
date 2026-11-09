@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
-import { findElement, requireElement, looksLikeGoogleSignIn, consumeGoogleElement } from '../sdk/src/platform/google/browser-elements.ts';
-import { createAppPassword } from '../sdk/src/platform/google/app-password-flow.ts';
-import { ownGoogleBrowser } from '../sdk/src/platform/google/browser-readings.ts';
-import type { GoogleBrowserElement, GoogleBrowserPort } from '../sdk/src/platform/google/types.ts';
+import { findElement, requireElement, looksLikeGoogleSignIn, consumeGoogleElement } from '../platform/src/platform/google/browser-elements.ts';
+import { createAppPassword } from '../platform/src/platform/google/app-password-flow.ts';
+import { ownGoogleBrowser } from '../platform/src/platform/google/browser-readings.ts';
+import type { GoogleBrowserElement, GoogleBrowserPort } from '../platform/src/platform/google/types.ts';
 
 let previous: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previous = installJudgmentPort(undefined); });

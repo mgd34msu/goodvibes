@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { getConfiguredProviderIds } from '../sdk/src/platform/providers/credentials.js';
-import { computeConfiguredProviderIds } from '../sdk/src/platform/providers/registry-configured-ids.js';
-import type { LLMProvider } from '../sdk/src/platform/providers/interface.js';
-import type { CatalogModel } from '../sdk/src/platform/providers/model-catalog.js';
+import { getConfiguredProviderIds } from '../platform/src/platform/providers/credentials.js';
+import { computeConfiguredProviderIds } from '../platform/src/platform/providers/registry-configured-ids.js';
+import type { LLMProvider } from '../platform/src/platform/providers/interface.js';
+import type { CatalogModel } from '../platform/src/platform/providers/model-catalog.js';
 
 const TEST_ENV_VAR = 'GOODVIBES_TEST_PROVIDER_CONFIGURED_IDS_API_KEY';
 

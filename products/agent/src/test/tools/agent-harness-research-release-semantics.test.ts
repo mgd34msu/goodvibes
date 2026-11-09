@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { installJudgmentPort, judgmentPort } from '@goodvibes-jev/engine/errors';
 import { choice, noul, SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { withNativeCatalog, rankResearchRecords } from '../../tools/agent-harness-research-catalog-source.ts';
 import { selectHarnessCatalog } from '../../tools/agent-harness-catalog-selection.ts';
 import { researchLiveReadModelSnapshot, type ResearchLiveRecordCertification } from '../../tools/agent-harness-research-live-read-models.ts';

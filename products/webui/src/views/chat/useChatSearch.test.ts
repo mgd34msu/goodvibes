@@ -24,7 +24,7 @@
  *
  * Module mocks must be declared before any dynamic import of the module
  * under test, because bun:test module mocking is synchronous and import-
- * scoped. All SDK interactions are stubbed via mock.module.
+ * scoped. All platform interactions are stubbed via mock.module.
  */
 import { afterEach, beforeEach, describe, expect, jest, mock, test } from 'bun:test';
 import React from 'react';
@@ -41,7 +41,7 @@ import { flushSync } from 'react-dom';
  */
 interface FakeSession { id: string; sessionId: string; title: string }
 
-/** Control surface for the SDK list stub. */
+/** Control surface for the platform list stub. */
 interface ListStub {
   /** Messages returned per sessionId, keyed by id. */
   responses: Map<string, Record<string, unknown>[]>;
@@ -85,9 +85,9 @@ const sessionSearchStub: SessionSearchStub = {
   loadMoreDelayMs: 0,
 };
 
-// Mock the SDK before any import of useChatSearch.
+// Mock the platform before any import of useChatSearch.
 mock.module('../../lib/goodvibes', () => ({
-  sdk: {
+  client: {
     operator: {
       sessions: {
         messages: {

@@ -6,9 +6,9 @@
  * gateways report "not connected".
  */
 
-import type { ProcessNode } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
-import type { UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ProcessNode } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+import type { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { ModalSurfaceRegistry } from '../../views/modal-surface-registry.ts';
 import { UsageTracker } from '../../runtime/usage-tracker.ts';
 import { buildFleetSnapshot, createStaticFleetReadModel } from '../../views/fleet-read-model.ts';

@@ -4,13 +4,13 @@
  * listArchived(), and running work can never be archived.
  */
 import { describe, expect, test, spyOn } from 'bun:test';
-import { withFleetArchive } from '../sdk/src/platform/runtime/fleet/archive.js';
+import { withFleetArchive } from '../platform/src/platform/runtime/fleet/archive.js';
 import type {
   FleetSnapshot,
   ProcessNode,
   ProcessRegistry,
   ProcessState,
-} from '../sdk/src/platform/runtime/fleet/types.js';
+} from '../platform/src/platform/runtime/fleet/types.js';
 
 function makeNode(id: string, state: ProcessState, parentId?: string): ProcessNode {
   return {

@@ -29,9 +29,9 @@ import { join } from 'node:path';
 import * as ort from 'onnxruntime-web/wasm';
 import glueAssetPath from 'onnxruntime-web/ort-wasm-simd-threaded.mjs' with { type: 'file' };
 import wasmAssetPath from 'onnxruntime-web/ort-wasm-simd-threaded.wasm' with { type: 'file' };
-import type { WakeInferenceSession, WakeModelHandle, WakeRuntimeSettings, WakeTensor, WakeVadGate, } from '@goodvibes-jev/engine/sdk/platform/voice';
-import { WakeWordEngine } from '@goodvibes-jev/engine/sdk/platform/voice';
-import { atomicWriteFileSync } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { WakeInferenceSession, WakeModelHandle, WakeRuntimeSettings, WakeTensor, WakeVadGate, } from '@goodvibes-jev/engine/platform/platform/voice';
+import { WakeWordEngine } from '@goodvibes-jev/engine/platform/platform/voice';
+import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/config';
 /**
  * The runtime asks for its glue and its wasm by these exact names, relative to
  * `ort.env.wasm.wasmPaths`, so the extracted copies must keep them.
@@ -64,7 +64,7 @@ export function extractOnnxRuntimeAssets(directory: string): string {
             continue;
         // The directory is shared by every TUI process for this user; a plain
         // write can leave a torn file for a concurrent process's WASM loader.
-        // The SDK's atomicWriteFileSync now accepts raw bytes directly (sdk
+        // The platform's atomicWriteFileSync now accepts raw bytes directly (platform
         // 2.0.18), so it does the temp-then-rename instead of this file inlining it.
         atomicWriteFileSync(target, bytes, { mkdirp: true });
     }
@@ -87,7 +87,7 @@ export function configureOnnxRuntime(assetDirectory: string): void {
     configuredAssetDirectory = assetDirectory;
 }
 /**
- * Adapt an onnxruntime session to the SDK's session shape.
+ * Adapt an onnxruntime session to the platform's session shape.
  *
  * The engine reads `inputNames[0]` / `outputNames[0]` rather than hard-coded
  * names, so the pinned classifier (`onnx::Flatten_0` -> `output`) and the
@@ -152,7 +152,7 @@ export interface WakeEngineFactoryOptions {
     readonly loadSession?: ((modelPath: string) => Promise<WakeInferenceSession>) | undefined;
 }
 /**
- * Build the `createEngine` callback the SDK listener drives.
+ * Build the `createEngine` callback the platform listener drives.
  *
  * The listener calls it on EVERY start including a restart, because a restart
  * exists to recover from a runtime that died, so the sessions are created here

@@ -1,38 +1,38 @@
-import { registerTriggerSupervisorGatewayMethods } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import { registerTriggerSupervisorGatewayMethods } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { registerTerminalKnowledgeCleanup } from '@goodvibes-jev/engine/terminal-shell/bootstrap-lifecycle';
 import { createTerminalMemoryAdmission } from '@goodvibes-jev/engine/terminal-shell/bootstrap-lifecycle';
 import { join } from 'node:path';
-import { StepUpService } from '@goodvibes-jev/engine/sdk/daemon';
-import { PairingTokenManager } from '@goodvibes-jev/engine/sdk/platform/pairing';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { shell as runtimeShell, operations as runtimeOperations } from '@goodvibes-jev/engine/sdk/platform/runtime';
-// The graph's shutdown seam. Shared with the SDK composition root rather than
+import { StepUpService } from '@goodvibes-jev/engine/platform/daemon';
+import { PairingTokenManager } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { shell as runtimeShell, operations as runtimeOperations } from '@goodvibes-jev/engine/platform/platform/runtime';
+// The graph's shutdown seam. Shared with the platform composition root rather than
 // reimplemented here, so "which pollers exist" has exactly one answer across
 // both compositions: RuntimePollerOwners is all-required, and a poller added to
 // this fork's graph later cannot compile without being named for teardown.
-import { createAsyncDisposalScope, registerRuntimePollers } from '@goodvibes-jev/engine/sdk/platform/runtime/disposal';
-import type { shell as RuntimeShell, bootstrap as RuntimeBootstrap } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { createAsyncDisposalScope, registerRuntimePollers } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
+import type { shell as RuntimeShell, bootstrap as RuntimeBootstrap } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { applyRawSecretLiteralHandling, type SecretsManager } from '../config/secrets.ts';
 import { readCheckpointGuardSettings, readCheckpointRegistrationSetting } from '../config/checkpoint-settings.ts';
 import { createAgentResearchSourceOwner } from './research-source-screening.ts';
-import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/sdk/platform/security';
+import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
 import {
   backfillCheckpointEligibilityIfNeeded,
   createWorkspaceRegistrationLiveChecker,
   migrateLegacyWorkspaceRegistryIfNeeded,
 } from '../config/workspace-registration.ts';
 import { FocusTracker } from '@/runtime/index.ts';
-import { ServiceRegistry } from '@goodvibes-jev/engine/sdk/platform/config';
-import { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { AutomationDeliveryManager, AutomationManager, AutomationRouteStore } from '@goodvibes-jev/engine/sdk/platform/automation';
+import { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
+import { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { AutomationDeliveryManager, AutomationManager, AutomationRouteStore } from '@goodvibes-jev/engine/platform/platform/automation';
 import {
   ChannelPluginRegistry,
   ChannelPolicyManager,
   RouteBindingManager,
   SurfaceRegistry,
-} from '@goodvibes-jev/engine/sdk/platform/channels';
-import { ChannelDeliveryRouter } from '@goodvibes-jev/engine/sdk/platform/channels';
-import { ApprovalBroker, GatewayMethodCatalog, SharedSessionBroker } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+} from '@goodvibes-jev/engine/platform/platform/channels';
+import { ChannelDeliveryRouter } from '@goodvibes-jev/engine/platform/platform/channels';
+import { ApprovalBroker, GatewayMethodCatalog, SharedSessionBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { createArchivableFleetRegistry } from '@goodvibes-jev/engine/terminal-shell';
 import { createSessionConversationRewindPort } from './conversation-rewind-port.ts';
 // ── The client seams ───────────────────────────────────────────────────────
@@ -51,8 +51,8 @@ import {
   createWireSessionDispatch,
   readSurfaceAgentOutcome,
   watchApprovalUpdates,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/client';
-import type { AgentCompletionRecordView } from '@goodvibes-jev/engine/sdk/platform/agents';
+} from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import type { AgentCompletionRecordView } from '@goodvibes-jev/engine/platform/platform/agents';
 import type {
   ConversationRewindHostClient,
   DaemonConfigClient,
@@ -60,13 +60,13 @@ import type {
   DaemonVerbCaller,
   DevicesClient,
   WireSessionDispatch,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/client';
-import { createClientRuntimeServices } from '@goodvibes-jev/engine/sdk/platform/runtime/client-services';
+} from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import { createClientRuntimeServices } from '@goodvibes-jev/engine/platform/platform/runtime/client-services';
 import type {
   ApprovalRaiser,
   ProviderRegistryConstructionOptions,
   UserPermissionRuleAccess,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/client-services';
+} from '@goodvibes-jev/engine/platform/platform/runtime/client-services';
 import { createAgentDaemonVerbCaller, resolveConnectedHostConnection } from './client/daemon-verbs.ts';
 import { createApprovalsView, type ApprovalsView } from './client/approvals-view.ts';
 import { createAgentFleetUnion, type AgentFleetUnion } from './client/fleet-union.ts';
@@ -75,48 +75,48 @@ import { createHostedSessionRegistry, type HostedSessionRegistry } from './clien
 import { createHostedConversationHandoff, type HostedConversationHandoff } from './client/hosted-handoff.ts';
 import { installAgentDaemonCredentialsClient } from '../config/daemon-credential-routing.ts';
 import { installAgentDaemonConfigClient } from '../config/daemon-config-routing.ts';
-import type { LocalPermissionPrompt } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+import type { LocalPermissionPrompt } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 // Not re-exported by @goodvibes-jev/engine/terminal-shell (only the gateway-verb
-// composition and the registry factory are), reached directly per the SDK
+// composition and the registry factory are), reached directly per the platform
 // adoption convention of going straight to the platform package for whatever
 // terminal-shell does not already wrap, rather than hand-rolling the bridge.
-import { attachFleetEmitBridge } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
+import { attachFleetEmitBridge } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import {
   computeUsageCostUsd,
   createLaunchTolerantProviderRegistry,
   ensureConfiguredModelIsRoutable,
-} from '@goodvibes-jev/engine/sdk/platform/providers';
-import { buildSharedSessionAgentSpawnRoutingInput } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
-// SDK-owned memory governance (public since sdk 4d5e247b published the
+} from '@goodvibes-jev/engine/platform/platform/providers';
+import { buildSharedSessionAgentSpawnRoutingInput } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+// platform-owned memory governance (public since platform 4d5e247b published the
 // composition surface): the same CacheRegistry/PauseController/MemoryGovernor
-// wiring the SDK's own daemon composition constructs and starts.
+// wiring the platform's own daemon composition constructs and starts.
 import {
   CacheRegistry,
   PauseController,
   wireDaemonMemoryGovernance,
   type MemoryGovernor,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/memory';
+} from '@goodvibes-jev/engine/platform/platform/runtime/memory';
 // The shared free function both compositions build the local remembered-approval
 // store through (platform/runtime/permissions/permission-composition.ts, public
 // via the runtime bootstrap namespace). Same path, same background init, one
 // implementation, see the userPermissionRuleStore construction below for why a
 // surface keeping its own remembered approvals is the client-shaped thing to do.
-import { bootstrap as runtimeComposition } from '@goodvibes-jev/engine/sdk/platform/runtime';
-import type { PermissionManager } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import { bootstrap as runtimeComposition } from '@goodvibes-jev/engine/platform/platform/runtime';
+import type { PermissionManager } from '@goodvibes-jev/engine/platform/platform/permissions';
 import {
   AGENT_SPINE_PARTICIPANT,
   SessionSpineClient,
   createSessionSpineRestProbe,
   createSessionSpineRestTransport,
   createSessionSpineReceiptConsumer,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/session-spine';
+} from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
 import { createSpineConnectionResolver } from './session-spine-rest-transport.ts';
-import { MemorySpineClient, createLocalMemoryAccess } from '@goodvibes-jev/engine/sdk/platform/runtime/memory-spine';
-import type { MemoryTransport } from '@goodvibes-jev/engine/sdk/platform/runtime/memory-spine';
+import { MemorySpineClient, createLocalMemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
+import type { MemoryTransport } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import { createMemorySpineRestTransport } from './memory-spine-rest-transport.ts';
-import { WatcherRegistry } from '@goodvibes-jev/engine/sdk/platform/watchers';
-import { ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
+import { WatcherRegistry } from '@goodvibes-jev/engine/platform/platform/watchers';
+import { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import {
   GOODVIBES_AGENT_KNOWLEDGE_DB_FILE,
   HOME_GRAPH_KNOWLEDGE_DB_FILE,
@@ -130,88 +130,88 @@ import {
   configureKnowledgeArtifactReferences,
   createProviderBackedKnowledgeSemanticLlm,
   createWebKnowledgeGapRepairer,
-} from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import { MediaProviderRegistry, ensureBuiltinMediaProviders } from '@goodvibes-jev/engine/sdk/platform/media';
-import { MultimodalService } from '@goodvibes-jev/engine/sdk/platform/multimodal';
-import { AgentManager, cancelAllAgentRuns } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { AgentMessageBus } from '@goodvibes-jev/engine/sdk/platform/agents';
-import { createContractOperatorService, createContractIntake, type ContractIntake } from '@goodvibes-jev/engine/sdk/platform/contract';
-import { createApprovalDerivedHandlers, type ApprovalDerivedHandlers } from '@goodvibes-jev/engine/sdk/platform/runtime/bootstrap';
-import { continuationContractOptions } from '@goodvibes-jev/engine/sdk/platform/agents';
-import { AgentOrchestrator } from '@goodvibes-jev/engine/sdk/platform/agents';
-import { ArchetypeLoader } from '@goodvibes-jev/engine/sdk/platform/agents';
-import { CodeIndexStore, resolveMemoryVectorDbPath } from '@goodvibes-jev/engine/sdk/platform/state';
-import { CodeIndexReindexScheduler } from '@goodvibes-jev/engine/sdk/platform/state';
+} from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { MediaProviderRegistry, ensureBuiltinMediaProviders } from '@goodvibes-jev/engine/platform/platform/media';
+import { MultimodalService } from '@goodvibes-jev/engine/platform/platform/multimodal';
+import { AgentManager, cancelAllAgentRuns } from '@goodvibes-jev/engine/platform/platform/tools';
+import { AgentMessageBus } from '@goodvibes-jev/engine/platform/platform/agents';
+import { createContractOperatorService, createContractIntake, type ContractIntake } from '@goodvibes-jev/engine/platform/platform/contract';
+import { createApprovalDerivedHandlers, type ApprovalDerivedHandlers } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+import { continuationContractOptions } from '@goodvibes-jev/engine/platform/platform/agents';
+import { AgentOrchestrator } from '@goodvibes-jev/engine/platform/platform/agents';
+import { ArchetypeLoader } from '@goodvibes-jev/engine/platform/platform/agents';
+import { CodeIndexStore, resolveMemoryVectorDbPath } from '@goodvibes-jev/engine/platform/platform/state';
+import { CodeIndexReindexScheduler } from '@goodvibes-jev/engine/platform/platform/state';
 // Daemon-side idle+schedule memory consolidation driver, the SAME class the
-// SDK's own RuntimeServices composition constructs (it superseded this repo's
+// platform's own RuntimeServices composition constructs (it superseded this repo's
 // retired turn-settled local wiring), consumed from the public platform/state
-// barrel (re-exported there since sdk a03bf218).
-import { MemoryConsolidationScheduler } from '@goodvibes-jev/engine/sdk/platform/state';
-import type { MemoryConsolidationRunReceipt } from '@goodvibes-jev/engine/sdk/platform/state';
+// barrel (re-exported there since platform a03bf218).
+import { MemoryConsolidationScheduler } from '@goodvibes-jev/engine/platform/platform/state';
+import type { MemoryConsolidationRunReceipt } from '@goodvibes-jev/engine/platform/platform/state';
 
-// Sleep ownership (SDK round: power/*): work inhibition, sleep-edge honesty,
-// the keep-awake toggle. Constructed exactly as the SDK composition root does
+// Sleep ownership (platform round: power/*): work inhibition, sleep-edge honesty,
+// the keep-awake toggle. Constructed exactly as the platform composition root does
 // (wireRuntimePower binds runtimeBus work signals and starts the manager).
-import { createUnavailablePowerSeam, wireRuntimePower } from '@goodvibes-jev/engine/sdk/platform/power';
-import { forwardKeepAwakeToAdoptedDaemon } from '@goodvibes-jev/engine/sdk/platform/power';
-import { StoreSnapshotScheduler } from '@goodvibes-jev/engine/sdk/platform/state/store-snapshots';
+import { createUnavailablePowerSeam, wireRuntimePower } from '@goodvibes-jev/engine/platform/platform/power';
+import { forwardKeepAwakeToAdoptedDaemon } from '@goodvibes-jev/engine/platform/platform/power';
+import { StoreSnapshotScheduler } from '@goodvibes-jev/engine/platform/platform/state/store-snapshots';
 import { AgentDaemonReceiptFeed } from './daemon-receipts.ts';
-import { WorkspaceCheckpointManager, type CheckpointSessionResolver } from '@goodvibes-jev/engine/sdk/platform/workspace';
-import { ProcessManager } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { TriggerManager } from '@goodvibes-jev/engine/sdk/platform/triggers';
+import { WorkspaceCheckpointManager, type CheckpointSessionResolver } from '@goodvibes-jev/engine/platform/platform/workspace';
+import { ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
+import { TriggerManager } from '@goodvibes-jev/engine/platform/platform/triggers';
 import {
   createBunStreamHost,
   createProcessManagerTriggerHost,
   createTriggerActionExecutor,
-} from '@goodvibes-jev/engine/sdk/platform/triggers';
-import { ModeManager } from '@goodvibes-jev/engine/sdk/platform/state';
-import { FileUndoManager } from '@goodvibes-jev/engine/sdk/platform/state';
-import { MemoryRegistry } from '@goodvibes-jev/engine/sdk/platform/state';
-import { MemoryStore } from '@goodvibes-jev/engine/sdk/platform/state';
+} from '@goodvibes-jev/engine/platform/platform/triggers';
+import { ModeManager } from '@goodvibes-jev/engine/platform/platform/state';
+import { FileUndoManager } from '@goodvibes-jev/engine/platform/platform/state';
+import { MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
+import { MemoryStore } from '@goodvibes-jev/engine/platform/platform/state';
 // One canonical cross-surface memory store + no-loss legacy fold.
-import { resolveCanonicalMemoryDbPath, foldMemoryStores } from '@goodvibes-jev/engine/sdk/platform/state';
-import type { LegacyMemorySource, MemoryFoldReport } from '@goodvibes-jev/engine/sdk/platform/state';
+import { resolveCanonicalMemoryDbPath, foldMemoryStores } from '@goodvibes-jev/engine/platform/platform/state';
+import type { LegacyMemorySource, MemoryFoldReport } from '@goodvibes-jev/engine/platform/platform/state';
 import type { RuntimeEventBus } from '@/runtime/index.ts';
 import type { DomainDispatch, RuntimeStore } from './store/index.ts';
 import { DistributedRuntimeManager } from '@/runtime/index.ts';
 import { RemoteRunnerRegistry, RemoteSupervisor } from '@/runtime/index.ts';
 import { IntegrationHelperService } from '@/runtime/index.ts';
-import { VoiceProviderRegistry, VoiceService, ensureBuiltinVoiceProviders } from '@goodvibes-jev/engine/sdk/platform/voice';
-import { createVoiceSetupService, type VoiceSetupService } from '@goodvibes-jev/engine/sdk/platform/runtime/voice-setup';
-import { WebSearchProviderRegistry, WebSearchService } from '@goodvibes-jev/engine/sdk/platform/web-search';
-import { MemoryEmbeddingProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/state';
-import { HookActivityTracker } from '@goodvibes-jev/engine/sdk/platform/hooks';
-import { HookDispatcher, type HookWorkbench } from '@goodvibes-jev/engine/sdk/platform/hooks';
-import { PluginManager } from '@goodvibes-jev/engine/sdk/platform/plugins';
-import { BookmarkManager } from '@goodvibes-jev/engine/sdk/platform/bookmarks';
-import { ProfileManager } from '@goodvibes-jev/engine/sdk/platform/profiles';
-import { SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
-import { CrossSessionTaskRegistry } from '@goodvibes-jev/engine/sdk/platform/sessions';
-import { ApiTokenAuditor } from '@goodvibes-jev/engine/sdk/platform/security';
-import { UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
-import { WebhookNotifier } from '@goodvibes-jev/engine/sdk/platform/integrations';
-import { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
-import { DeterministicReplayEngine } from '@goodvibes-jev/engine/sdk/platform/core';
-import { ProviderOptimizer } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { VoiceProviderRegistry, VoiceService, ensureBuiltinVoiceProviders } from '@goodvibes-jev/engine/platform/platform/voice';
+import { createVoiceSetupService, type VoiceSetupService } from '@goodvibes-jev/engine/platform/platform/runtime/voice-setup';
+import { WebSearchProviderRegistry, WebSearchService } from '@goodvibes-jev/engine/platform/platform/web-search';
+import { MemoryEmbeddingProviderRegistry } from '@goodvibes-jev/engine/platform/platform/state';
+import { HookActivityTracker } from '@goodvibes-jev/engine/platform/platform/hooks';
+import { HookDispatcher, type HookWorkbench } from '@goodvibes-jev/engine/platform/platform/hooks';
+import { PluginManager } from '@goodvibes-jev/engine/platform/platform/plugins';
+import { BookmarkManager } from '@goodvibes-jev/engine/platform/platform/bookmarks';
+import { ProfileManager } from '@goodvibes-jev/engine/platform/platform/profiles';
+import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
+import { CrossSessionTaskRegistry } from '@goodvibes-jev/engine/platform/platform/sessions';
+import { ApiTokenAuditor } from '@goodvibes-jev/engine/platform/platform/security';
+import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
+import { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
+import { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
+import { DeterministicReplayEngine } from '@goodvibes-jev/engine/platform/platform/core';
+import { ProviderOptimizer } from '@goodvibes-jev/engine/platform/platform/providers';
+import { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 
-import { ProviderCapabilityRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { CacheHitTracker } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { FavoritesStore } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { BenchmarkStore } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { ModelLimitsService } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { ProviderCapabilityRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { CacheHitTracker } from '@goodvibes-jev/engine/platform/platform/providers';
+import { FavoritesStore } from '@goodvibes-jev/engine/platform/platform/providers';
+import { BenchmarkStore } from '@goodvibes-jev/engine/platform/platform/providers';
+import { ModelLimitsService } from '@goodvibes-jev/engine/platform/platform/providers';
 import { KeybindingsManager } from '../input/keybindings.ts';
-import { SessionMemoryStore } from '@goodvibes-jev/engine/sdk/platform/core';
-import { SessionLineageTracker } from '@goodvibes-jev/engine/sdk/platform/core';
-import { SessionChangeTracker } from '@goodvibes-jev/engine/sdk/platform/sessions';
-import { ExecutionPlanManager } from '@goodvibes-jev/engine/sdk/platform/core';
-import { AdaptivePlanner } from '@goodvibes-jev/engine/sdk/platform/core';
-import { FileStateCache } from '@goodvibes-jev/engine/sdk/platform/state';
-import { ProjectIndex } from '@goodvibes-jev/engine/sdk/platform/state';
+import { SessionMemoryStore } from '@goodvibes-jev/engine/platform/platform/core';
+import { SessionLineageTracker } from '@goodvibes-jev/engine/platform/platform/core';
+import { SessionChangeTracker } from '@goodvibes-jev/engine/platform/platform/sessions';
+import { ExecutionPlanManager } from '@goodvibes-jev/engine/platform/platform/core';
+import { AdaptivePlanner } from '@goodvibes-jev/engine/platform/platform/core';
+import { FileStateCache } from '@goodvibes-jev/engine/platform/platform/state';
+import { ProjectIndex } from '@goodvibes-jev/engine/platform/platform/state';
 import { IdempotencyStore } from '@/runtime/index.ts';
-import { OverflowHandler } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { OverflowHandler } from '@goodvibes-jev/engine/platform/platform/tools';
 
-import { ToolLLM } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ToolLLM } from '@goodvibes-jev/engine/platform/platform/config';
 import { ComponentHealthMonitor } from '@/runtime/index.ts';
 import { SandboxSessionRegistry } from '@/runtime/index.ts';
 import type { ShellPathService } from '@/runtime/index.ts';
@@ -220,24 +220,24 @@ import { createLazyMcpRegistry } from './mcp-lazy-start.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
 import { createFeatureFlagManager, deriveFeatureStates, bindFeatureSettingsBridge } from '@/runtime/index.ts';
-import { FeatureAnnouncementStore, featureAnnouncementsPath } from '@goodvibes-jev/engine/sdk/platform/runtime/feature-announcements';
-import { type LocalhostFetchApproval } from '@goodvibes-jev/engine/sdk/platform/runtime/permissions/localhost-fetch-approval';
+import { FeatureAnnouncementStore, featureAnnouncementsPath } from '@goodvibes-jev/engine/platform/platform/runtime/feature-announcements';
+import { type LocalhostFetchApproval } from '@goodvibes-jev/engine/platform/platform/runtime/permissions/localhost-fetch-approval';
 import { PolicyRuntimeState } from '@/runtime/index.ts';
-import type { WorkflowServices } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { WorkPlanStore } from '@goodvibes-jev/engine/sdk/platform/workflow';
-import { AgentExecutionLedger } from '@goodvibes-jev/engine/sdk/platform/gate/policy';
+import type { WorkflowServices } from '@goodvibes-jev/engine/platform/platform/tools';
+import { WorkPlanStore } from '@goodvibes-jev/engine/platform/platform/workflow';
+import { AgentExecutionLedger } from '@goodvibes-jev/engine/platform/platform/gate/policy';
 import { attachAgentSessionWriteLedger, clearAgentSessionWrites } from '../tools/agent-session-write-ledger.ts';
 import { VERSION } from '../version.ts';
 import { ClientBuildGuard } from './client-build-compatibility.ts';
 import { AGENT_DAEMON_BUILD_FLOOR, DaemonBuildGuard, readDaemonStatusPayload } from './daemon-build-compatibility.ts';
 
 type WorktreeRegistry = RuntimeShell.WorktreeRegistry;
-// The SDK's FULL runtime-services shape. This graph deliberately is not that
+// The platform's FULL runtime-services shape. This graph deliberately is not that
 // shape: three members are narrowed or withheld (see the Omit on RuntimeServices
 // below), because a surface that runs a loop and reaches a daemon for everything
 // else does not own a persisting session register, does not serve the canonical
 // permission-rule store, and mints no pairing tokens.
-type SdkRuntimeServices = RuntimeBootstrap.RuntimeServices;
+type PlatformRuntimeServices = RuntimeBootstrap.RuntimeServices;
 type AssertTrue<T extends true> = T;
 // Compile-pin: this graph must satisfy the CLIENT composition shape. That is the
 // contract a surface product owes now, `ClientRuntimeServices` is what a turn
@@ -248,10 +248,10 @@ type AssertTrue<T extends true> = T;
 // surfaceRoot, permissionManager, requestApproval, the two spine clients, and
 // the file-tool caches.
 type _ClientRuntimeServicesPin = AssertTrue<RuntimeServices extends RuntimeBootstrap.ClientRuntimeServices ? true : false>;
-type SdkCompanionGraphService = NonNullable<SdkRuntimeServices>['homeGraphService'];
+type PlatformCompanionGraphService = NonNullable<PlatformRuntimeServices>['homeGraphService'];
 // Compile-pin: the real HomeGraphService constructed below must remain
-// assignable to the SDK's own RuntimeServices#homeGraphService slot.
-type _HomeGraphServicePin = AssertTrue<HomeGraphService extends SdkCompanionGraphService ? true : false>;
+// assignable to the platform's own RuntimeServices#homeGraphService slot.
+type _HomeGraphServicePin = AssertTrue<HomeGraphService extends PlatformCompanionGraphService ? true : false>;
 
 class DisabledAgentWorktreeRegistry extends runtimeShell.WorktreeRegistry {
   public override async list(): Promise<Awaited<ReturnType<WorktreeRegistry['list']>>> {
@@ -282,8 +282,8 @@ function createDisabledAgentWorktreeRegistry(workingDirectory: string): Worktree
  * slash commands (/voice status, /voice setup, /voice wake status, /voice wake
  * setup) and to the voice.local.* and voice.wake.* gateway verbs.
  *
- * An alias for the SDK's own service type rather than a locally-declared shape.
- * It was declared locally while the SDK's composition was internal; now that
+ * An alias for the platform's own service type rather than a locally-declared shape.
+ * It was declared locally while the platform's composition was internal; now that
  * createVoiceSetupService is exported, a separate declaration could only drift
  * from what is actually constructed, and the wake trio it grew (wakeStatus,
  * wakeProvision, wakeModelChunk) is exactly the kind of addition a hand-written
@@ -292,7 +292,7 @@ function createDisabledAgentWorktreeRegistry(workingDirectory: string): Worktree
 export type AgentVoiceSetupService = VoiceSetupService;
 
 /**
- * The narrow live-snapshot slice /health memory reads. A Pick over the SDK's
+ * The narrow live-snapshot slice /health memory reads. A Pick over the platform's
  * real MemoryGovernor so the command surface can be handed the composed
  * governor without gaining pause/exit authority.
  */
@@ -332,7 +332,7 @@ export function shouldRefreshModels(mode: ModelDiscoveryMode | undefined): boole
  *    credential refresh reads the store inside the synchronous prefix of
  *    `refreshProviderCredentials()`, which runs immediately AFTER this
  *    callback returns. See applyRawSecretLiteralHandling for what the pair
- *    does and the SDK option that would retire this.
+ *    does and the platform option that would retire this.
  */
 function buildAgentProviderRegistry(options: ProviderRegistryConstructionOptions): ProviderRegistry {
   // The registry's own option bag narrows the credential store to the two
@@ -365,7 +365,7 @@ export interface RuntimeServicesOptions {
   readonly homeDirectory: string;
   /**
    * Host power seam opt-in. Left ABSENT, createRuntimeServices defaults to the
-   * SDK's non-spawning "unavailable" seam so a test-constructed runtime never
+   * platform's non-spawning "unavailable" seam so a test-constructed runtime never
    * spawns systemd-inhibit inhibitors or a dbus-monitor sleep-edge watcher.
    * Only the real long-lived composition that owns the sleep edge (the embedded
    * interactive runtime, see bootstrap-core.ts) passes createHostPowerSeam()
@@ -398,7 +398,7 @@ export interface RuntimeServicesOptions {
 /**
  * This product's runtime graph.
  *
- * Two members are OMITTED from the SDK's daemon-grade shape and re-declared to
+ * Two members are OMITTED from the platform's daemon-grade shape and re-declared to
  * the client contract, because this process is a client:
  *
  * - `sessionBroker` is the inbound-DISPATCH seam, not a persisting register.
@@ -415,7 +415,7 @@ export interface RuntimeServicesOptions {
  * Everything else the daemon-grade shape declares is built here, because this
  * product legitimately carries more than the client floor.
  */
-export interface RuntimeServices extends Omit<SdkRuntimeServices, 'sessionBroker' | 'userPermissionRuleStore' | 'pairingTokens'> {
+export interface RuntimeServices extends Omit<PlatformRuntimeServices, 'sessionBroker' | 'userPermissionRuleStore' | 'pairingTokens'> {
   readonly workingDirectory: string;
   readonly homeDirectory: string;
   /** This product's storage root, every per-product path derives from it. */
@@ -444,7 +444,7 @@ export interface RuntimeServices extends Omit<SdkRuntimeServices, 'sessionBroker
    * Trigger family supervisor (stream watchers, model-free condition checks,
    * on-exit process triggers). Constructed unconditionally so
    * `watchers.triggers.enabled` is a real runtime toggle; it does no work
-   * while that flag is false. The SDK daemon facade start()/shutdown()s it.
+   * while that flag is false. The platform daemon facade start()/shutdown()s it.
    */
   readonly triggerManager: TriggerManager;
   readonly approvalBroker: ApprovalBroker;
@@ -497,7 +497,7 @@ export interface RuntimeServices extends Omit<SdkRuntimeServices, 'sessionBroker
    */
   readonly userPermissionRuleStore: UserPermissionRuleAccess;
   /**
-   * This graph as the SDK's DAEMON-GRADE shape, for the three SDK entry points
+   * This graph as the platform's DAEMON-GRADE shape, for the three platform entry points
    * that still take it whole: `startHostServices` (adopt-only discovery),
    * `createRuntimeFoundationClients`, and the observability read models.
    *
@@ -512,9 +512,9 @@ export interface RuntimeServices extends Omit<SdkRuntimeServices, 'sessionBroker
    * way this product calls them (`startHostServices` reads `localUserAuthManager`
    * and `configManager` only, and never constructs a DaemonServer with
    * `adoptOnly: true`), but each is a real instance regardless, so nothing here
-   * hands an SDK entry point a stub.
+   * hands a platform entry point a stub.
    */
-  readonly asDaemonGradeView: () => SdkRuntimeServices;
+  readonly asDaemonGradeView: () => PlatformRuntimeServices;
   /**
    * How a permission ask leaves this process: raised on the daemon
    * (`approvals.raise`) AND prompted locally, first real answer wins.
@@ -628,14 +628,14 @@ export interface RuntimeServices extends Omit<SdkRuntimeServices, 'sessionBroker
   /** Compatibility alias that intentionally points at the isolated Agent Knowledge service, not default knowledge. */
   readonly knowledgeService: KnowledgeService;
   readonly agentKnowledgeService: KnowledgeService;
-  readonly homeGraphService: SdkCompanionGraphService;
+  readonly homeGraphService: PlatformCompanionGraphService;
   readonly projectPlanningService: ProjectPlanningService;
   readonly projectPlanningProjectId: string;
   readonly workPlanStore: WorkPlanStore;
   readonly memoryStore: MemoryStore;
   readonly memoryRegistry: MemoryRegistry;
   /**
-   * The consumer half of the daemon-served memory spine (SDK 1.1.0). Constructed
+   * The consumer half of the daemon-served memory spine (platform 1.1.0). Constructed
    * in LOCAL mode always (wrapping `memoryRegistry` directly); a deferred boot task
    * (see bootstrap.ts, mirroring the session-spine reachability probe) activates it
    * with the REST wire transport when the agent confirms an adopted daemon, and
@@ -667,11 +667,11 @@ export interface RuntimeServices extends Omit<SdkRuntimeServices, 'sessionBroker
   readonly voiceService: VoiceService;
   /**
    * Managed local-voice provisioning: status read + one-act install, mirroring
-   * the SDK's own daemon composition (platform/runtime/services.ts).
+   * the platform's own daemon composition (platform/runtime/services.ts).
    */
   readonly voiceSetup: AgentVoiceSetupService;
   /**
-   * SDK-owned memory governance, composed here exactly as the SDK's own
+   * platform-owned memory governance, composed here exactly as the platform's own
    * daemon composition does (constructed and STARTED by default, it is a
    * safety feature): samples RSS/heap, sheds registered caches by tier,
    * pauses deferrable background jobs, and trips on a genuine leak before
@@ -694,7 +694,7 @@ export interface RuntimeServices extends Omit<SdkRuntimeServices, 'sessionBroker
   readonly worktreeRegistry: WorktreeRegistry;
   readonly sandboxSessionRegistry: SandboxSessionRegistry;
   readonly webhookNotifier: WebhookNotifier;
-  /** OS-level terminal focus tracker (SDK platform/runtime). */
+  /** OS-level terminal focus tracker (platform platform/runtime). */
   readonly focusTracker: FocusTracker;
   readonly replayEngine: DeterministicReplayEngine;
   readonly providerOptimizer: ProviderOptimizer;
@@ -735,7 +735,7 @@ export interface RuntimeServices extends Omit<SdkRuntimeServices, 'sessionBroker
    * sweep, both knowledge schedulers, the snapshot/retention/consolidation
    * schedulers, the spine keepalive) and release their handles.
    *
-   * Restated from the SDK interface because ownership differs here: this fork
+   * Restated from the platform interface because ownership differs here: this fork
    * composes no DaemonServer of its own, so nothing else will ever call this.
    * Every path that builds a graph owns taking it back down. Best-effort, total
    * and idempotent, an owner that throws is logged and the rest still come down.
@@ -1015,7 +1015,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   const keybindingsManager = new KeybindingsManager({
     configPath: shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'keybindings.json'),
   });
-  // featureFlags is REQUIRED here in practice, even though the SDK types it
+  // featureFlags is REQUIRED here in practice, even though the platform types it
   // optional. `isFeatureGateEnabled(null, ...)` is permissive by design, a
   // narrow embed with no manager wired gets the capability rather than a silent
   // off, so omitting it did not disable route binding. It did something worse:
@@ -1027,7 +1027,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // fork's composition root did not.
   //
   // Threading it preserves current effective behaviour rather than changing it:
-  // the config default is true (the SDK's schema-domain-features.ts), the flag's
+  // the config default is true (the platform's schema-domain-features.ts), the flag's
   // own defaultState is 'enabled', and the flag declares no notOperable record,
   // so with nothing configured the gate reads exactly as it did before, and the
   // difference is only that turning it OFF now turns it off.
@@ -1048,7 +1048,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     });
   const profileManager = new ProfileManager(shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'profiles'));
   const bookmarkManager = new BookmarkManager(shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'bookmarks'));
-  // featureFlags is REQUIRED here in practice, even though the SDK types it
+  // featureFlags is REQUIRED here in practice, even though the platform types it
   // optional. isFeatureGateEnabled(null, ...) is permissive by design, a
   // narrow embed with no manager wired gets the capability rather than a
   // silent off, so omitting it did not disable the watcher framework when
@@ -1131,10 +1131,10 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // through `devicesClient` below, over the daemon's verbs, never through a
   // token this process holds.
   //
-  // The SDK's DAEMON-GRADE shape still names the member, because a daemon has
+  // The platform's DAEMON-GRADE shape still names the member, because a daemon has
   // one, so `asDaemonGradeView()` supplies it, scoped to THIS surface's own
   // control-plane directory so it can never read or write the daemon's file,
-  // and built lazily so nothing exists unless one of those three SDK entry
+  // and built lazily so nothing exists unless one of those three platform entry
   // points someday asks. None of them dereferences it today.
   let surfaceScopedPairingTokens: PairingTokenManager | null = null;
   const pairingTokensForDaemonGradeView = (): PairingTokenManager =>
@@ -1167,9 +1167,9 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     // and starts work whatever conversationGate.mode/gatedSurfaces say.
     conversationGateConfig: configManager,
   });
-  // The SDK's extracted session-spine core, consumed via this surface's
+  // The platform's extracted session-spine core, consumed via this surface's
   // own REST transport adapter (session-spine-rest-transport.ts), version-
-  // tolerant, since the agent may compile against a pinned SDK predating the
+  // tolerant, since the agent may compile against a pinned platform predating the
   // typed sessions.register client. Live-immediately mode: passing `transport`
   // at construction starts the keepalive now, for the whole process lifetime
   // (no separate activate() step, the agent has none). Client-only; never
@@ -1244,7 +1244,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   const sessionSpineClient = new SessionSpineClient({
     participant: AGENT_SPINE_PARTICIPANT,
     // Explicit, despite AGENT_SPINE_PARTICIPANT's own doc comment suggesting
-    // recordKind can be left unset: verified against the live daemon-sdk route
+    // recordKind can be left unset: verified against the live daemon-api route
     // (runtime-session-register.js) that no server-side stamping of kind:'agent'
     // for a surfaceKind:'service' participant actually exists, an absent kind
     // falls through SharedSessionBroker's own default (`input.kind ?? 'tui'`),
@@ -1309,7 +1309,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
       // follow-up typed on a local surface. Both `conversationGate.mode` and
       // the `gatedSurfaces` list now read the live config: the 1.21.0 re-pin
       // carries the `conversationGate` schema domain, so `getCategory` reads
-      // the configured surface list instead of falling back to the SDK's
+      // the configured surface list instead of falling back to the platform's
       // shipped defaults.
       ...continuationContractOptions(input, {
         configReader: {
@@ -1317,7 +1317,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
           getCategory: (name: string) => configManager.getCategory(name as never),
         },
       }),
-      // Spawn routing resolves through the SDK's shared model-reference
+      // Spawn routing resolves through the platform's shared model-reference
       // resolver contract (unique-across-registry auto-qualifies; ambiguous
       // and unknown ids throw errors naming real candidates), the live
       // registry's models are the candidate list.
@@ -1336,7 +1336,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     embeddingRegistry: memoryEmbeddingRegistry,
   });
   const memoryRegistry = new MemoryRegistry(memoryStore);
-  // Consumer half of the memory spine (SDK 1.1.0). Always constructed in LOCAL mode
+  // Consumer half of the memory spine (platform 1.1.0). Always constructed in LOCAL mode
   // (embedded/offline is a hard requirement, the agent must work with no daemon
   // running). `spineResolveConnection` above is the SAME connected-host connection
   // (host/port/token) already built for the session spine; one daemon, one resolver.
@@ -1350,7 +1350,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     log: logger,
   });
   const memorySpineTransport = createMemorySpineRestTransport({ resolveConnection: spineResolveConnection });
-  // featureFlags is REQUIRED here in practice, even though the SDK types it
+  // featureFlags is REQUIRED here in practice, even though the platform types it
   // optional. isFeatureGateEnabled(null, ...) is permissive by design, so
   // omitting it did not disable delivery tracking when
   // integrations.deliveryTracking is turned off, deliverText/deliverJobRun
@@ -1364,7 +1364,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     // Required: the router this builds resolves goodvibes://secrets/...
     // surface credentials through it. Omitting it produced a delivery path
     // that accepted replies and dropped them at send time, see the same fix
-    // in goodvibes-tui and the SDK's now-mandatory parameter.
+    // in goodvibes-tui and the platform's now-mandatory parameter.
     secretsManager,
     serviceRegistry,
     runtimeBus: options.runtimeBus,
@@ -1418,7 +1418,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     dbFileName: HOME_GRAPH_KNOWLEDGE_DB_FILE,
   });
   configureKnowledgeArtifactReferences({ artifactStore, controlPlaneDirectory: configManager.getControlPlaneConfigDir(), stores: [agentKnowledgeStore, homeGraphKnowledgeStore] });
-  // Memory-governance seams, built EARLY exactly as the SDK's own daemon
+  // Memory-governance seams, built EARLY exactly as the platform's own daemon
   // composition builds them (platform/runtime/services.ts): the knowledge
   // background job and the consolidation scheduler consult the pause
   // controller and the late-bound admission gate below before the
@@ -1531,7 +1531,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   });
   const remoteRunnerRegistry = new RemoteRunnerRegistry(agentManager);
   const remoteSupervisor = new RemoteSupervisor(remoteRunnerRegistry);
-  // featureFlags is REQUIRED here in practice, even though the SDK types it
+  // featureFlags is REQUIRED here in practice, even though the platform types it
   // optional. isFeatureGateEnabled(null, ...) is permissive by design, so
   // omitting it did not disable managed blocking when
   // security.tokenAudit.enabled is turned off. Threading it preserves current
@@ -1569,7 +1569,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // read guard can tell a file the agent just authored from someone else's
   // hidden file (see tools/agent-read-policy.ts).
   const detachSessionWriteLedger = attachAgentSessionWriteLedger(options.runtimeBus);
-  // The SDK's foundation/integration contracts still expect a panel manager;
+  // The platform's foundation/integration contracts still expect a panel manager;
   // the Agent shell has no panel UI (modals replaced it), so we
   // satisfy those contracts with a no-op implementation.
   const NOOP_PANEL_MANAGER = (() => {
@@ -1585,7 +1585,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   const panelManager = NOOP_PANEL_MANAGER;
   // Surface-scoped, not the loose workingDirectory/homeDirectory pair. This
   // product declares its own `.goodvibes/<surface>/` root and writes everything
-  // through it, and the SDK's two construction scopes are a mutually exclusive
+  // through it, and the platform's two construction scopes are a mutually exclusive
   // union precisely so the choice is deliberate: constructed with the legacy
   // fields, this service's continuity reads, the recovery-file check among them
   //, resolve to the UNSCOPED directories, i.e. to paths nothing in this product
@@ -1615,7 +1615,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // An exec command blocked on a terminal prompt (host-key confirmation,
   // credential ask) rides the same broker: the pending prompt surfaces through
   // every surface's approval machinery and the typed answer feeds the same
-  // continuing run. The SDK's own wiring (public since this SDK round): the
+  // continuing run. The platform's own wiring (public since this platform round): the
   // former agent-local mirror existed only because the builder had no public
   // export path.
   //
@@ -1699,7 +1699,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // (manual -> registration -> provider-served -> catalog -> unknown; any
   // resolvable model). Unknown/subscription yields null (costState
   // 'unpriced'), never $0. SHARED by fleet + orchestration so totals never
-  // double-count, mirrors the SDK composition root.
+  // double-count, mirrors the platform composition root.
   const priceUsage = (model: string | undefined, usage: { inputTokens: number; outputTokens: number }): number | null =>
     model ? computeUsageCostUsd(providerRegistry.resolveModelPricing(model), usage) : null;
 
@@ -1709,8 +1709,8 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     memoryEmbeddingRegistry,
   );
   // Data safety with no discipline: a daily snapshot of every SQLite store
-  // this runtime writes, bounded retention, unref'd timers, the SDK's own
-  // StoreSnapshotScheduler (public since this SDK round; the former agent-local
+  // this runtime writes, bounded retention, unref'd timers, the platform's own
+  // StoreSnapshotScheduler (public since this platform round; the former agent-local
   // mirror and its local pruning engine existed only because the class and
   // RetentionPolicy/SnapshotPruner had no public export path). The canonical
   // memory db is shared with the daemon/TUI; the shared snapshot layout means
@@ -1726,16 +1726,16 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   });
   storeSnapshotScheduler.start();
   // Start-time janitor: one retention pass over every registered append-only
-  // store (best-effort, mirrors the SDK's own composition root at
+  // store (best-effort, mirrors the platform's own composition root at
   // platform/runtime/services.ts). Every root this composition knows is
   // passed, logDir/telemetryDir resolve to THIS repo's actual on-disk
   // locations (join(workingDirectory, '.goodvibes', 'logs'|'telemetry'), the
   // same root entrypoint.ts's configureActivityLogger already writes
   // activity.md into, NOT the home-scoped shellPaths.resolveUserPath('logs')
-  // the SDK's own default composition uses, which would silently sweep a
+  // the platform's own default composition uses, which would silently sweep a
   // directory nothing here ever writes to). Omitting logDir/telemetryDir
   // would leave the registered activity-log and telemetry-ledger entries
-  // skipped on every sweep, same defect class the SDK round fixed at its own
+  // skipped on every sweep, same defect class the platform round fixed at its own
   // call site.
   // MCP servers start when a tool needs one, never at boot. See
   // runtime/mcp-lazy-start.ts: launching the agent used to spawn every server
@@ -1783,11 +1783,11 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     isEnabled: () => false,
   });
   // Archive-aware: finished agent/swarm subtrees can be moved out of the
-  // live fleet view into a session-scoped archive (SDK fleet/archive.ts).
+  // live fleet view into a session-scoped archive (platform fleet/archive.ts).
   // createArchivableFleetRegistry is the shared terminal-shell wrapper over the
-  // SDK's withFleetArchive(createProcessRegistry(...)), one named seam both
+  // platform's withFleetArchive(createProcessRegistry(...)), one named seam both
   // daemon front-ends build the registry through so it cannot drift.
-  // Trigger family. Mirrors the SDK factory's own composition: config is a
+  // Trigger family. Mirrors the platform factory's own composition: config is a
   // CLOSURE over configManager (so the flag toggles at runtime rather than only
   // at restart) and the process host is ProcessManager-backed, so a supervised
   // on-exit child inherits the same credential-env scrub, live output
@@ -1847,7 +1847,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // registry above answers for work this process spawned; the daemon runs its
   // own, scheduled jobs, channel-driven runs, work other surfaces submitted,
   // and the union is what the Activity modal reads (client/fleet-union.ts,
-  // over the SDK's poll + local-wins merge policy).
+  // over the platform's poll + local-wins merge policy).
   const fleetUnion = createAgentFleetUnion({
     local: { nodes: () => processRegistry.query().nodes },
     verbs: daemonVerbs,
@@ -1855,27 +1855,27 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   disposalScope.registry.add('fleet union poller', () => fleetUnion.stop());
   // Root/retention guard options come from the user's `checkpoints.*` settings
   // (see config/checkpoint-settings.ts); any key the user did not set is omitted
-  // so the SDK manager applies its own default. These guards are defense in
+  // so the platform manager applies its own default. These guards are defense in
   // depth UNDER the registered-workspaces-only rule below, not replaced by it:
   // even a registered root can still be refused as too broad or too large.
   //
   // Registered-workspaces-only (owner ruling, 2026-07-10; live-gating extended
   // 2026-07-11 so registering mid-launch takes effect without a restart, the
   // same stale-until-restart defect class fixed for permission-mode metadata).
-  // The SDK's WorkspaceCheckpointManager only takes automatic turn/agent-
-  // lifecycle snapshots when constructed WITH a runtimeBus (see the SDK's own
+  // The platform's WorkspaceCheckpointManager only takes automatic turn/agent-
+  // lifecycle snapshots when constructed WITH a runtimeBus (see the platform's own
   // platform/runtime/services.ts, which always passes one). This composition
   // root ALWAYS passes runtimeBus now (so the automatic-snapshot subscription
   // is live from process start regardless of boot-time registration state),
   // and instead gates each individual automatic snapshot attempt through a
   // LIVE re-check via `checkpointsCurrentlyAllowed` below, patched onto this
-  // one manager instance's own `create` method, since the SDK has no built-in
+  // one manager instance's own `create` method, since the platform has no built-in
   // predicate hook for this. `checkpointsCurrentlyAllowed` is cheap to call on
   // every event: `createWorkspaceRegistrationLiveChecker` probes the git
   // worktree link ONCE (a `git` subprocess spawn) and every call after that
   // only re-reads the shared registration JSON file. "Allowed" means
   // `workingDirectory` resolves as COVERED by the shared registration store
-  // (SDK 1.6.1 platform/workspace/registration, via
+  // (platform 1.6.1 platform/workspace/registration, via
   // config/workspace-registration.ts, the successor to this fork's local
   // per-user registry, migrated in once below), or the owner has explicitly
   // opted an unregistered workspace back in via
@@ -1914,8 +1914,8 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     // and Agent would otherwise SHARE when run against the same working
     // directory. Fixed to the surface's own workingDirectory regardless of
     // preferGitRoot; readCheckpointGuardSettings may still override via an
-    // explicit checkpointDir, which the SDK's own resolution order respects
-    // over this surface default. The SDK migrates the legacy checkpoint dir
+    // explicit checkpointDir, which the platform's own resolution order respects
+    // over this surface default. The platform migrates the legacy checkpoint dir
     // into this scoped location automatically on first surface use.
     surface,
     runtimeBus: options.runtimeBus,
@@ -1947,7 +1947,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     return originalCreateCheckpoint(opts);
   }) as typeof workspaceCheckpointManager.create;
   // Eagerly initialize so the automatic snapshot subscription is wired up
-  // immediately (mirrors the SDK's own default runtime services) rather than
+  // immediately (mirrors the platform's own default runtime services) rather than
   // only on first explicit checkpoints.* call, otherwise the very first
   // TURN_COMPLETED could arrive before anything has touched the manager. Now
   // unconditional (previously skipped for an unregistered-at-boot workspace):
@@ -2006,7 +2006,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   };
 
   // Idle-time + slow-schedule memory consolidation, constructed the way the
-  // SDK's own RuntimeServices composition root constructs it (platform/
+  // platform's own RuntimeServices composition root constructs it (platform/
   // runtime/services.ts: `new MemoryConsolidationScheduler({ memoryRegistry,
   // configSource: configManager, isIdle: ... })`), replacing this repo's
   // retired local scheduler/wiring/receipt-store trio. Every run's receipt
@@ -2018,7 +2018,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     memoryRegistry,
     configSource: configManager,
     // Idle AND not paused by the governor AND admitted at the current memory
-    // tier, memory pressure defers consolidation (mirrors the SDK's own
+    // tier, memory pressure defers consolidation (mirrors the platform's own
     // daemon composition of this same scheduler).
     isIdle: () =>
       hostedSessions.countBusySessions() === 0 &&
@@ -2031,14 +2031,14 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   });
   memoryConsolidationScheduler.start();
 
-  // Sleep ownership (SDK round: power/*). Constructed exactly as the SDK
+  // Sleep ownership (platform round: power/*). Constructed exactly as the platform
   // composition root does: readConfig/writeConfig over the live ConfigManager,
   // runtimeBus bound so real work (a running turn, an active agent, a
   // due schedule) automatically holds the inhibitor, sleep-edge hooks that
   // checkpoint the store snapshots on sleep and catch consolidation + store
   // snapshots + heartbeat back up on wake.
   const powerManager = wireRuntimePower({
-    // Non-spawning default: without an explicit opt-in the seam is the SDK's
+    // Non-spawning default: without an explicit opt-in the seam is the platform's
     // honest "unavailable" seam, NOT the spawning host seam that
     // wireRuntimePower would otherwise pick for an undefined seam. This keeps
     // every test-constructed runtime (and one-shot CLI subcommands) from
@@ -2051,8 +2051,8 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     seam: options.powerSeam ?? createUnavailablePowerSeam('runtime services constructed without a host power seam'),
     readConfig: (key) => configManager.get(key as never),
     writeConfig: (key, value) => configManager.setDynamic(key as never, value),
-    // Live-apply straight from the SDK's own PowerManager (SDK round: the
-    // config live-apply is SDK-side now, see manager.ts's
+    // Live-apply straight from the platform's own PowerManager (platform round: the
+    // config live-apply is platform-side now, see manager.ts's
     // unsubscribeKeepAwakeConfig). A power.keepAwake change from ANY origin
     // (settings modal, CLI flag, or an external settings.json edit reaching
     // configManager via watchConfigFiles()) flips this process's real
@@ -2092,7 +2092,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   });
 
   // Memory governance: construct + START the MemoryGovernor (default ON, it
-  // is a safety feature) with REAL cache adapters, exactly as the SDK's own
+  // is a safety feature) with REAL cache adapters, exactly as the platform's own
   // daemon composition does (platform/runtime/services.ts, via the same
   // public wireDaemonMemoryGovernance). Registered caches: this fork's two
   // knowledge stores (job-run history pruning is the real reclaim) and the
@@ -2124,7 +2124,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     // registered for the look of it.
     sessionBroker: automationSessionRegister,
     // Graceful tripwire shutdown flushes in-flight state via ASYNC store
-    // snapshots, same as the SDK composition: sync copies on a stalled disk
+    // snapshots, same as the platform composition: sync copies on a stalled disk
     // would block the event loop and defeat the governor's 10s shutdown
     // ceiling.
     onTripwireShutdown: async () => {
@@ -2160,7 +2160,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   });
   // Turn the fleet registry's coalesced snapshot tick into poll-free
   // spawn/progress/attention/completion events on the runtime event bus's
-  // 'fleet' domain (SDK 1.6.1, runtime/fleet/emit-bridge.ts), the SDK's own
+  // 'fleet' domain (platform 1.6.1, runtime/fleet/emit-bridge.ts), the platform's own
   // doc note on this bridge: "The control-plane gateway already fans every
   // runtime-bus domain out to subscribed SSE/WebSocket clients, so no
   // gateway/channel change is needed once the fleet domain exists." Without
@@ -2170,17 +2170,17 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // them only on manual refresh, never their attention state flipping to
   // needs-input in real time. No unsubscribe is kept: the bridge is meant to
   // live for the registry's lifetime (same non-disposed pattern as the
-  // fleet/push verb registrations just above; see the SDK's own doc comment
+  // fleet/push verb registrations just above; see the platform's own doc comment
   // on attachFleetEmitBridge).
   attachFleetEmitBridge({ registry: processRegistry, bus: options.runtimeBus });
 
-  // The relay step-up ceremony service the SDK's RuntimeServices requires (and
-  // the daemon facade dereferences at start). Constructed exactly as the SDK
-  // composition root does, from the public @goodvibes-jev/engine/sdk/daemon export.
+  // The relay step-up ceremony service the platform's RuntimeServices requires (and
+  // the daemon facade dereferences at start). Constructed exactly as the platform
+  // composition root does, from the public @goodvibes-jev/engine/platform/daemon export.
   const stepUpService = new StepUpService({ secrets: secretsManager });
 
   // Teardown for every poller started above. This fork composes no DaemonServer
-  //, it hands its graph to one, and the SDK's ownership rule leaves a
+  //, it hands its graph to one, and the platform's ownership rule leaves a
   // caller-supplied graph alone, so dispose() below is the ONLY thing that
   // stops these, and the shutdown paths (runtime/bootstrap-shutdown.ts,
   // cli/management.ts, cli/bundle-command.ts) are the ones that must call it.
@@ -2225,7 +2225,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     // in-flight provider call instead of letting it sleep out a retry backoff.
     cancelHostedAgentRuns: () => cancelAllAgentRuns(agentManager),
   });
-  // Owners this product has that the SDK's composition does not. The
+  // Owners this product has that the platform's composition does not. The
   // session-spine client's keepalive is graph-owned even though the interactive
   // shutdown path also closes it by session id first, dispose() is idempotent,
   // and registering here is what covers the CLI paths that have no such path.
@@ -2248,7 +2248,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   });
 
   const graph: RuntimeServices = {
-    asDaemonGradeView: (): SdkRuntimeServices => ({
+    asDaemonGradeView: (): PlatformRuntimeServices => ({
       ...graph,
       sessionBroker: automationSessionRegister,
       // The client floor builds this through `createUserPermissionRuleStore`,
@@ -2263,8 +2263,8 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
         return pairingTokensForDaemonGradeView();
       },
     }),
-    // The REAL SDK memory-governance instances composed above (governor
-    // constructed + started by wireDaemonMemoryGovernance). The SDK's
+    // The REAL platform memory-governance instances composed above (governor
+    // constructed + started by wireDaemonMemoryGovernance). The platform's
     // DaemonServer facade (facade-composition.ts) genuinely consumes these
     // when this repo hands its RuntimeServices to it, e.g. it registers the
     // control-plane event-replay ring onto cacheRegistry.

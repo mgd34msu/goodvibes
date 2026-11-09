@@ -1,5 +1,5 @@
 import { dirname, join } from 'node:path';
-import { resolveDaemonNativePayloads, sha256, type DaemonCiArtifact, type NativeReaderCapabilities, type UpdateFileIo } from '../../sdk/src/platform/runtime/self-update.ts';
+import { resolveDaemonNativePayloads, sha256, type DaemonCiArtifact, type NativeReaderCapabilities, type UpdateFileIo } from '../../platform/src/platform/runtime/self-update.ts';
 
 export function nativeCohortFixture(options: {
   readonly version: string;

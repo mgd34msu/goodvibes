@@ -13,7 +13,7 @@
  * no usable direction it mixes the fill toward the diff's sign color instead.
  */
 
-import { mixHex } from '@goodvibes-jev/engine/sdk/platform/presentation';
+import { mixHex } from '@goodvibes-jev/engine/platform/platform/presentation';
 import { activeDiffTones, activeTokens } from './theme.js';
 
 /**

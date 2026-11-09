@@ -7,7 +7,7 @@
  * offset loop still visits every record (so behavior is unchanged).
  */
 import { describe, expect, test } from 'bun:test';
-import { getKnowledgeSpaceId } from '../sdk/src/platform/knowledge/spaces.js';
+import { getKnowledgeSpaceId } from '../platform/src/platform/knowledge/spaces.js';
 import { createStores } from './_helpers/knowledge-semantic-fixtures.js';
 
 describe('knowledge store bounded paging', () => {

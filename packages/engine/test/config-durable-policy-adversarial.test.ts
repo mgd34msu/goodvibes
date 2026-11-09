@@ -2,11 +2,11 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { cpSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { DurablePolicyEpochOwner } from '../sdk/src/platform/config/durable-policy-epoch.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import * as atomic from '../sdk/src/platform/utils/atomic-json-store.js';
-import { migrateDaemonOwnedConfig } from '../sdk/src/platform/config/daemon-config-migration.js';
-import { daemonConfigMovedPath } from '../sdk/src/platform/config/daemon-config-migration-io.js';
+import { DurablePolicyEpochOwner } from '../platform/src/platform/config/durable-policy-epoch.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import * as atomic from '../platform/src/platform/utils/atomic-json-store.js';
+import { migrateDaemonOwnedConfig } from '../platform/src/platform/config/daemon-config-migration.js';
+import { daemonConfigMovedPath } from '../platform/src/platform/config/daemon-config-migration-io.js';
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });

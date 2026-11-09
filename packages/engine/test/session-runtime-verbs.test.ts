@@ -8,15 +8,15 @@
  * `estimated`).
  */
 import { describe, expect, test } from 'bun:test';
-import { GATE_PRESETS, SESSION_GATE_PRESET_NAMES, isGatePresetName, isSettableGatePresetName, gatePresetLabel } from '@goodvibes-jev/engine/sdk/platform/gate/presets';
-import { ModelLimitsService } from '../sdk/src/platform/providers/model-limits.js';
-import type { ModelDefinition } from '../sdk/src/platform/providers/registry-types.js';
-import { deriveContextUsage } from '../sdk/src/platform/runtime/context-usage.js';
+import { GATE_PRESETS, SESSION_GATE_PRESET_NAMES, isGatePresetName, isSettableGatePresetName, gatePresetLabel } from '@goodvibes-jev/engine/platform/platform/gate/presets';
+import { ModelLimitsService } from '../platform/src/platform/providers/model-limits.js';
+import type { ModelDefinition } from '../platform/src/platform/providers/registry-types.js';
+import { deriveContextUsage } from '../platform/src/platform/runtime/context-usage.js';
 import { firstJsonSchemaFailure } from '../transport-http/src/client-plumbing.js';
-import type { GatewayMethodInvocation } from '../sdk/src/platform/control-plane/method-catalog-shared.js';
-import type { PermissionMode } from '../sdk/src/platform/config/schema-types.js';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.js';
-import { GatewayVerbError } from '../sdk/src/platform/control-plane/routes/gateway-verb-error.js';
+import type { GatewayMethodInvocation } from '../platform/src/platform/control-plane/method-catalog-shared.js';
+import type { PermissionMode } from '../platform/src/platform/config/schema-types.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
+import { GatewayVerbError } from '../platform/src/platform/control-plane/routes/gateway-verb-error.js';
 import {
   createSessionRuntimeControls,
   SessionLiveTurnControlsHolder,
@@ -28,7 +28,7 @@ import {
   toConfigPermissionMode,
   type PermissionModeConfig,
   type SessionRuntimeStateReader,
-} from '../sdk/src/platform/control-plane/routes/session-runtime.js';
+} from '../platform/src/platform/control-plane/routes/session-runtime.js';
 
 function invoke(body: Record<string, unknown>): GatewayMethodInvocation {
   return { body, context: {} };

@@ -5,8 +5,8 @@ import {
   startHostServices,
   type DaemonIdentityProbeResult,
   type HostServicesConfig,
-} from '../sdk/src/platform/runtime/bootstrap.ts';
-import { isDaemonVersionCompatible } from '../sdk/src/platform/runtime/daemon-version-compat.ts';
+} from '../platform/src/platform/runtime/bootstrap.ts';
+import { isDaemonVersionCompatible } from '../platform/src/platform/runtime/daemon-version-compat.ts';
 
 /**
  * The shared adopt-or-spawn decision policy. Asserts the pure ruling and the two
@@ -32,7 +32,7 @@ describe('classifyDaemonProbe', () => {
   });
   test('the platform build wins over the artifact version: daemon 1.28.x carrying sdk 2.x adopts on a 2.x surface', () => {
     // The shipped defect: the daemon's own release number (1.28.x) was
-    // band-checked against a surface's SDK version (2.x), so every surface
+    // band-checked against a surface's platform version (2.x), so every surface
     // refused the daemon it was released alongside and silently ran
     // local-only for three weeks.
     const identity = { kind: 'goodvibes' as const, status: 'running', version: '1.28.23', platformVersion: '2.0.21' };

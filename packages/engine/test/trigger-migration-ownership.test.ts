@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TriggerManager, TriggerMigrationRequiredError, TriggerSnapshotStore, TriggerStoreOwnershipError,
-  loadTriggerSnapshot, type TriggerManagerOptions, type TriggerRecord } from '../sdk/src/platform/triggers/index.ts';
+  loadTriggerSnapshot, type TriggerManagerOptions, type TriggerRecord } from '../platform/src/platform/triggers/index.ts';
 const roots: string[] = [], managers: TriggerManager[] = [];
 afterEach(async () => { for (const manager of managers.splice(0)) { manager.shutdown(); await manager.join(); } for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 const emptyActions = { async runAgentTurn() { return ''; }, async runGrant() { return ''; } };

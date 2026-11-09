@@ -6,8 +6,8 @@ import * as crypto from 'node:crypto';
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { DurablePolicyEpochOwner } from '../sdk/src/platform/config/durable-policy-epoch.ts';
-import * as atomic from '../sdk/src/platform/utils/atomic-json-store.ts';
+import { DurablePolicyEpochOwner } from '../platform/src/platform/config/durable-policy-epoch.ts';
+import * as atomic from '../platform/src/platform/utils/atomic-json-store.ts';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

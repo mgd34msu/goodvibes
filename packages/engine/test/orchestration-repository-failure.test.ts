@@ -1,5 +1,5 @@
-import { ContractRun } from '../sdk/src/platform/contract/run-context.js';
-import { createGroupRunner } from '../sdk/src/platform/contract/group-runner.js';
+import { ContractRun } from '../platform/src/platform/contract/run-context.js';
+import { createGroupRunner } from '../platform/src/platform/contract/group-runner.js';
 import { makeContract, makeGroup, makeUnit } from './contract/fixtures.js';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -8,13 +8,13 @@ import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
-import { classifyBookkeepingFailure, repositoryFailureReading } from '../sdk/src/platform/orchestration/bookkeeping.js';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
-import { registry } from '../sdk/src/platform/orchestration/judgment-registry.js';
-import { createOrchestrationEngine } from '../sdk/src/platform/orchestration/engine.js';
-import { runPhase } from '../sdk/src/platform/orchestration/phase-runner.js';
-import { createCancellationRegistry } from '../sdk/src/platform/orchestration/cancellation.js';
-import type { PhaseSpec } from '../sdk/src/platform/orchestration/types.js';
+import { classifyBookkeepingFailure, repositoryFailureReading } from '../platform/src/platform/orchestration/bookkeeping.js';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
+import { registry } from '../platform/src/platform/orchestration/judgment-registry.js';
+import { createOrchestrationEngine } from '../platform/src/platform/orchestration/engine.js';
+import { runPhase } from '../platform/src/platform/orchestration/phase-runner.js';
+import { createCancellationRegistry } from '../platform/src/platform/orchestration/cancellation.js';
+import type { PhaseSpec } from '../platform/src/platform/orchestration/types.js';
 import { createOrchestrationHarness, makeFakeConfigManager, engineerReportOutput, flushMicrotasks } from './_helpers/orchestration-harness.js';
 
 const roots: string[] = [];

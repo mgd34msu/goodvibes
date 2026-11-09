@@ -14,7 +14,7 @@
  *     and must be the same account the agent and the terminal see. That means it has
  *     to live in daemon-owned config and the daemon secret tier, never in browser
  *     state. Every write this repo makes to such a key goes through
- *     `sdk.operator.config.set`, and `surfaces.*` is already covered by
+ *     `platform.operator.config.set`, and `surfaces.*` is already covered by
  *     DAEMON_OWNED_CONFIG_PREFIXES in config-ownership.ts, so SettingsModal's
  *     schema-driven editor writes those keys through the daemon and badges them
  *     "Daemon-owned" with no bespoke form needed here.
@@ -36,7 +36,7 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import { CalendarDays, Mail } from 'lucide-react';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { formatError } from '../../lib/errors';
 import {
@@ -156,12 +156,12 @@ export function MailAccountSettings() {
   // change mailbox or calendar state.
   const mailProbe = useQuery({
     queryKey: queryKeys.emailInbox(1, false, ''),
-    queryFn: () => sdk.operator.email.inbox.list({ limit: 1 }),
+    queryFn: () => platformClient.operator.email.inbox.list({ limit: 1 }),
     retry: false,
   });
   const calendarProbe = useQuery({
     queryKey: ['calendar', 'surface-probe'],
-    queryFn: () => sdk.operator.calendar.events.list({ limit: 1 }),
+    queryFn: () => platformClient.operator.calendar.events.list({ limit: 1 }),
     retry: false,
   });
 

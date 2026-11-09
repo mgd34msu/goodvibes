@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { selectSourceCitationEvidence } from '../../sdk/src/platform/contract/source-citation-selection.js';
-import type { UnitEvidence } from '../../sdk/src/platform/contract/evidence.js';
+import { selectSourceCitationEvidence } from '../../platform/src/platform/contract/source-citation-selection.js';
+import type { UnitEvidence } from '../../platform/src/platform/contract/evidence.js';
 
 function largeEvidence(output: string): UnitEvidence {
   return { output, changedPaths: [], diff: '', omitted: [], commands: [], sourceReads: [

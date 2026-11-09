@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
-import { HookActivityTracker, HookDispatcher } from '@goodvibes-jev/engine/sdk/platform/hooks';
-import type { HookDefinition, HookEvent, HookResult } from '@goodvibes-jev/engine/sdk/platform/hooks';
+import { HookActivityTracker, HookDispatcher } from '@goodvibes-jev/engine/platform/platform/hooks';
+import type { HookDefinition, HookEvent, HookResult } from '@goodvibes-jev/engine/platform/platform/hooks';
 
 import { waitFor, withTestTimeout } from './_helpers/test-timeout.js';
 

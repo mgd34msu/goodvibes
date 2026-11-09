@@ -3,16 +3,16 @@ import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { SessionLiveTurnControlsHolder } from '../sdk/src/platform/control-plane/routes/session-runtime.js';
-import { HostedSessionManager, type HostedSessionSpine } from '../sdk/src/platform/hosted-sessions/manager.js';
-import type { HostedSessionSpineIntake } from '../sdk/src/platform/hosted-sessions/spine-intake.js';
-import type { HostedWorkspaceFloor } from '../sdk/src/platform/hosted-sessions/workspace-floor.js';
-import { HostedSessionStore } from '../sdk/src/platform/hosted-sessions/store.js';
-import type { HostedDetachPolicy, HostedSessionUpdatePayload } from '../sdk/src/platform/hosted-sessions/types.js';
-import { createClientRuntimeServices } from '../sdk/src/platform/runtime/client-services.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { createRuntimeStore } from '../sdk/src/platform/runtime/store/index.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { SessionLiveTurnControlsHolder } from '../platform/src/platform/control-plane/routes/session-runtime.js';
+import { HostedSessionManager, type HostedSessionSpine } from '../platform/src/platform/hosted-sessions/manager.js';
+import type { HostedSessionSpineIntake } from '../platform/src/platform/hosted-sessions/spine-intake.js';
+import type { HostedWorkspaceFloor } from '../platform/src/platform/hosted-sessions/workspace-floor.js';
+import { HostedSessionStore } from '../platform/src/platform/hosted-sessions/store.js';
+import type { HostedDetachPolicy, HostedSessionUpdatePayload } from '../platform/src/platform/hosted-sessions/types.js';
+import { createClientRuntimeServices } from '../platform/src/platform/runtime/client-services.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.js';
 
 let root: string;
 let workspace: string;

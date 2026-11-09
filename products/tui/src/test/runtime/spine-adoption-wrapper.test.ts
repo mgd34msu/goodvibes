@@ -4,16 +4,16 @@
  * ── What this covers, and what deliberately lives elsewhere ───────────────
  *
  * The adoption POLICY, idempotent per base URL, tear down before re-wiring,
- * fold the legacy store once, and the two activation timings, is the SDK's now
- * and is pinned there (test/client-seam-spine-adoption.test.ts in the SDK
+ * fold the legacy store once, and the two activation timings, is the platform's now
+ * and is pinned there (test/client-seam-spine-adoption.test.ts in the platform
  * repository). Re-asserting it here would pin the same behaviour twice and let
  * the two copies disagree about which is authoritative.
  *
  * What is only true HERE, and so is only checkable here, is the wrapper: that
  * this terminal gates on its boot discovery probe's verdict rather than wiring
  * the moment it is handed a base URL, that a `HostServiceStatus` is adapted
- * into the narrower signal the SDK takes, and that the wire it injects actually
- * carries all four members the SDK expects to find in the bundle. A bundle
+ * into the narrower signal the platform takes, and that the wire it injects actually
+ * carries all four members the platform expects to find in the bundle. A bundle
  * missing one of those is a mirror that comes up and silently does not deliver
  *, the failure this module exists to prevent.
  *

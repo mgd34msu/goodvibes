@@ -4,24 +4,24 @@ import { afterEach, describe, expect, test, beforeEach } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { OwnerProfileStore } from '../sdk/src/platform/owner-profile/store.ts';
-import { OccasionStateStore } from '../sdk/src/platform/occasions/state-store.ts';
+import { OwnerProfileStore } from '../platform/src/platform/owner-profile/store.ts';
+import { OccasionStateStore } from '../platform/src/platform/occasions/state-store.ts';
 import {
   OccasionsService,
   type OccasionNudgeDeliverer,
-} from '../sdk/src/platform/occasions/service.ts';
-import { nudgeDeliveryText } from '../sdk/src/platform/occasions/destinations.ts';
-import { AGENT_NOTICE_HEADING } from '../sdk/src/platform/occasions/nudge.ts';
-import { reconcileRaiseLedger } from '../sdk/src/platform/occasions/cadence.ts';
+} from '../platform/src/platform/occasions/service.ts';
+import { nudgeDeliveryText } from '../platform/src/platform/occasions/destinations.ts';
+import { AGENT_NOTICE_HEADING } from '../platform/src/platform/occasions/nudge.ts';
+import { reconcileRaiseLedger } from '../platform/src/platform/occasions/cadence.ts';
 import {
   pushableSubject,
   resolveOccasionSubject,
-} from '../sdk/src/platform/occasions/subject.ts';
-import { parseOccasionLine } from '../sdk/src/platform/occasions/grammar.ts';
-import { OCCASIONS_DEFAULTS } from '../sdk/src/platform/occasions/policy.ts';
-import { PROFILE_TOOL_SCHEMA } from '../sdk/src/platform/tools/profile/schema.ts';
-import type { OccasionNudge, OpenItem } from '../sdk/src/platform/occasions/types.ts';
-import { resetProcessUntrustedContentLedgerForTests } from '../sdk/src/platform/security/untrusted-content.ts';
+} from '../platform/src/platform/occasions/subject.ts';
+import { parseOccasionLine } from '../platform/src/platform/occasions/grammar.ts';
+import { OCCASIONS_DEFAULTS } from '../platform/src/platform/occasions/policy.ts';
+import { PROFILE_TOOL_SCHEMA } from '../platform/src/platform/tools/profile/schema.ts';
+import type { OccasionNudge, OpenItem } from '../platform/src/platform/occasions/types.ts';
+import { resetProcessUntrustedContentLedgerForTests } from '../platform/src/platform/security/untrusted-content.ts';
 
 // Profile writes ask the content-derivation reading whenever the process
 // ledger holds untrusted text; another test file's reads must not reach these.

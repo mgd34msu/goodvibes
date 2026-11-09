@@ -5,12 +5,12 @@ import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { upsertObservedKnowledgeNode } from '../sdk/src/platform/knowledge/store-node-observation.js';
-import { assertAnswerEvidenceCurrent, collectAnswerEvidence, includeOfficialLinkedEvidence } from '../sdk/src/platform/knowledge/semantic/answer-evidence.js';
-import { bindAnswerCandidateWindow } from '../sdk/src/platform/knowledge/semantic/answer-candidate-window.js';
-import { readPublicKnowledgeSelection } from '../sdk/src/platform/knowledge/public-retrieval.js';
-import type { KnowledgeNodeUpsertInput, KnowledgeSourceUpsertInput } from '../sdk/src/platform/knowledge/types.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { upsertObservedKnowledgeNode } from '../platform/src/platform/knowledge/store-node-observation.js';
+import { assertAnswerEvidenceCurrent, collectAnswerEvidence, includeOfficialLinkedEvidence } from '../platform/src/platform/knowledge/semantic/answer-evidence.js';
+import { bindAnswerCandidateWindow } from '../platform/src/platform/knowledge/semantic/answer-candidate-window.js';
+import { readPublicKnowledgeSelection } from '../platform/src/platform/knowledge/public-retrieval.js';
+import type { KnowledgeNodeUpsertInput, KnowledgeSourceUpsertInput } from '../platform/src/platform/knowledge/types.js';
 
 const roots: string[] = [];
 let previous: JudgmentPort | undefined;

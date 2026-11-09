@@ -12,7 +12,7 @@
  * defect as the Telegram one, the Agent wrote its own settings file, the daemon
  * read a different one, and the setting did nothing.
  *
- * That rationale expired. Those keys are daemon-owned (the SDK's
+ * That rationale expired. Those keys are daemon-owned (the platform's
  * config-ownership.ts) and writes route to the runtime that acts on them
  * (src/config/daemon-config-routing.ts), so a write reaches the daemon and takes
  * effect. The lock outlived its reason by months and, by the end, its only

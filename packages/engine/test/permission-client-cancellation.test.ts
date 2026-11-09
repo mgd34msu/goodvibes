@@ -1,8 +1,8 @@
 import { expect, mock, spyOn, test } from 'bun:test';
-import { createClientApprovalRaiser, type ClientApprovalRaiserOptions } from '../sdk/src/platform/runtime/client/approval-raiser.ts';
-import { trustGatedApprovalRaiser } from '../sdk/src/platform/runtime/workspace-trust-approval.ts';
-import type { PermissionPromptDecision, PermissionPromptRequest } from '../sdk/src/platform/permissions/prompt.ts';
-import type { ApprovalUpdateNotice, ApprovalUpdateSubscription } from '../sdk/src/platform/runtime/client/approval-updates.ts';
+import { createClientApprovalRaiser, type ClientApprovalRaiserOptions } from '../platform/src/platform/runtime/client/approval-raiser.ts';
+import { trustGatedApprovalRaiser } from '../platform/src/platform/runtime/workspace-trust-approval.ts';
+import type { PermissionPromptDecision, PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.ts';
+import type { ApprovalUpdateNotice, ApprovalUpdateSubscription } from '../platform/src/platform/runtime/client/approval-updates.ts';
 
 const request: PermissionPromptRequest = { callId: 'synthetic', tool: 'write', args: { path: 'synthetic.txt' }, category: 'write', analysis: { classification: 'write', riskLevel: 'medium', summary: 'Synthetic write', reasons: [] } };
 const PRIVATE_REASON = 'synthetic private client context';
@@ -130,7 +130,7 @@ test('cancellation during trust loading starts neither the trust ask nor the too
 });
 
 for (const late of [false, true]) for (const asynchronous of [false, true]) test(`a ${asynchronous ? 'rejecting' : 'throwing'} ${late ? 'late-acquired' : 'acquired'} subscription close is contained once`, async () => {
-  const { logger } = await import('../sdk/src/platform/utils/logger.ts');
+  const { logger } = await import('../platform/src/platform/utils/logger.ts');
   const warning = spyOn(logger, 'warn').mockImplementation(() => {});
   const wire = verbs(); const opening = deferred<ApprovalUpdateSubscription | null>(); const prompt = deferred<PermissionPromptDecision>();
   const controller = new AbortController(); let started = false;

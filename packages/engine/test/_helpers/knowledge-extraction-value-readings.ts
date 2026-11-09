@@ -1,12 +1,12 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { Question } from '@goodvibes-jev/judgment';
-import { captureStrictJudgmentJson } from '../../sdk/src/platform/gate/judgment-result.js';
-import { sourceRankingContent } from '../../sdk/src/platform/knowledge/semantic/answer-source-ranking.js';
-import { knowledgeExtractionValue } from '../../sdk/src/platform/knowledge/semantic/extraction-value/battery.js';
-import type { KnowledgeExtractionValueInput } from '../../sdk/src/platform/knowledge/semantic/extraction-value/types.js';
-import { sourceSemanticText } from '../../sdk/src/platform/knowledge/semantic/utils.js';
-import { knowledgeSourceJudgmentUris } from '../../sdk/src/platform/knowledge/source-structural-references.js';
-import type { KnowledgeSourceRecord, KnowledgeExtractionRecord } from '../../sdk/src/platform/knowledge/types.js';
+import { captureStrictJudgmentJson } from '../../platform/src/platform/gate/judgment-result.js';
+import { sourceRankingContent } from '../../platform/src/platform/knowledge/semantic/answer-source-ranking.js';
+import { knowledgeExtractionValue } from '../../platform/src/platform/knowledge/semantic/extraction-value/battery.js';
+import type { KnowledgeExtractionValueInput } from '../../platform/src/platform/knowledge/semantic/extraction-value/types.js';
+import { sourceSemanticText } from '../../platform/src/platform/knowledge/semantic/utils.js';
+import { knowledgeSourceJudgmentUris } from '../../platform/src/platform/knowledge/source-structural-references.js';
+import type { KnowledgeSourceRecord, KnowledgeExtractionRecord } from '../../platform/src/platform/knowledge/types.js';
 
 export type ExtractionValueFixtures = ReadonlyArray<readonly [input: KnowledgeExtractionValueInput, probability: number]>;
 const canonicalQuestion = captureStrictJudgmentJson(knowledgeExtractionValue.items.extractionValue.question);

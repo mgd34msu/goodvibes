@@ -9,14 +9,14 @@
  * never claim readiness backed only by methods a caller cannot invoke.
  *
  * These tests run against the REAL operator contract (the vendored
- * @goodvibes-jev/engine/sdk contract, which carries
+ * @goodvibes-jev/engine/platform contract, which carries
  * email.*: invokable:false), plus pure-function checks that hold no matter
  * which method families are marked unavailable later (calendar.* is being
  * marked by a parallel fix, the generic invokable filter must degrade it
  * automatically with no further agent change).
  */
 import { describe, expect, test } from 'bun:test';
-import { getOperatorContract } from '@goodvibes-jev/engine/sdk/contracts';
+import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
 import {
   calendarWorkflows,
   inboxWorkflows,
@@ -83,7 +83,7 @@ describe('native invokable metadata excludes advertised-but-undispatchable metho
 
   test('calendar tokens: any method marked invokable:false is excluded from readiness automatically', () => {
     // calendar.* may still be invokable:true in this contract snapshot (the
-    // parallel fixer is marking them SDK-side). This asserts the INVARIANT
+    // parallel fixer is marking them platform-side). This asserts the INVARIANT
     // either way: readiness ids and unavailable ids are disjoint, and every
     // unavailable id really carries invokable:false.
     const readinessIds = new Set(calendarContract().available);

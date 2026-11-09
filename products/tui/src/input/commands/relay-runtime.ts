@@ -1,11 +1,11 @@
 import type { CommandContext } from '../command-registry.ts';
 import type { CommandRegistry } from '../command-registry.ts';
-import { generateQrMatrix, renderQrToString } from '@goodvibes-jev/engine/sdk/platform/pairing';
+import { generateQrMatrix, renderQrToString } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { RELAY_STATE_NOT_READABLE_HERE } from '../../runtime/relay-reachability-bridge.ts';
 
 /**
  * Register the /relay command, the relay's configuration, its reachability
- * state, and a QR-encodable pairing payload for the SDK's outbound
+ * state, and a QR-encodable pairing payload for the platform's outbound
  * zero-knowledge relay (relay.* settings, gated by the `relay-connect` feature
  * flag).
  *

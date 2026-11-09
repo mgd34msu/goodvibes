@@ -5,8 +5,8 @@ import type { ConfigModalSurface, ConfigModalView } from '../input/config-modal-
 import { createProviderRuntimeInspectionQuery } from '@/runtime/index.ts';
 import { createRuntimeProviderApi } from '@/runtime/index.ts';
 import { copyToClipboard } from '../utils/clipboard.ts';
-import { ensurePublicBaseUrl } from '@goodvibes-jev/engine/sdk/platform/pairing';
-import { availablePairingOffers, mintPairingHandoff, defaultPairingTokenName } from '@goodvibes-jev/engine/sdk/platform/pairing';
+import { ensurePublicBaseUrl } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { availablePairingOffers, mintPairingHandoff, defaultPairingTokenName } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { probePairingTailscale, runPairingTailscaleServe } from '../core/pairing-tailscale-gateway.ts';
 // ── Providers & Connectivity + Security subset ────────────────────────────────
 import { createServicesModalSurface } from './modals/services-modal.ts';

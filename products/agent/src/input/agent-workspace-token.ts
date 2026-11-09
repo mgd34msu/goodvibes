@@ -1,4 +1,4 @@
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { AgentWorkspace } from './agent-workspace.ts';
 
 /** Lines per PageUp/PageDown in the action-result block. */

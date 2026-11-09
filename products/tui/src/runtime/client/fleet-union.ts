@@ -2,9 +2,9 @@
  * fleet-union.ts, the Agents modal shows everything running, not just what this
  * terminal started.
  *
- * ── What moved to the SDK, and what stays here ────────────────────────────
+ * ── What moved to the platform, and what stays here ────────────────────────────
  *
- * The SDK's `@goodvibes-jev/engine/sdk/platform/runtime/client` now owns the
+ * The platform's `@goodvibes-jev/engine/platform/platform/runtime/client` now owns the
  * policy every surface needs for this: `createDaemonFleetRowsPoller` (the poll
  * cadence and last-known-rows retention when a poll fails), `mergeFleetNodes`
  * (the local-wins dedupe by node id) and `daemonOnlyFleetActRefusal` (the
@@ -47,11 +47,11 @@ import {
   type DaemonFleetRowsPoller,
   type DaemonFleetRowsPollerOptions,
   type DaemonVerbCaller,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/client';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+} from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { buildFleetSnapshot, type FleetReadModel, type FleetSnapshot } from '../../views/fleet-read-model.ts';
 
-/** Re-exported so an importer that only needs the SDK's policy has one import site. */
+/** Re-exported so an importer that only needs the platform's policy has one import site. */
 export { DEFAULT_FLEET_REFRESH_MS, daemonOnlyFleetActRefusal, mergeFleetNodes, readDaemonFleetRows };
 export type { DaemonFleetRows, DaemonFleetRowsPoller, DaemonFleetRowsPollerOptions };
 
@@ -75,7 +75,7 @@ const SURFACE_LABEL = 'this terminal';
 
 /**
  * Wrap a local fleet read model so its snapshot also carries the adopted
- * daemon's rows, over the SDK's poll/merge/refusal policy.
+ * daemon's rows, over the platform's poll/merge/refusal policy.
  *
  * Inert until the first poll lands: before then, and whenever the daemon
  * cannot answer, the snapshot is exactly the local one, which is the honest

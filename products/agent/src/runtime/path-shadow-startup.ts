@@ -3,7 +3,7 @@ import { IS_WORKSPACE_DISTRIBUTION } from './workspace-update-policy.ts';
  * path-shadow-startup.ts, the Agent's launch-time answer to "is this the
  * build you are actually reaching, and is it the current one".
  *
- * The check itself is the SDK's (platform/runtime reachability-check): it
+ * The check itself is the platform's (platform/runtime reachability-check): it
  * scans PATH for an older copy shadowing this one, decides whether this
  * install is even reachable by name, compares against the newest release, and
  * turns all of that into lines. What lives here is the part only this product

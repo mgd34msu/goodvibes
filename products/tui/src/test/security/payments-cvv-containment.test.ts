@@ -27,15 +27,15 @@ import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { mkdirSync, rmSync, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { CVV_PROMPT_TRADEOFF_WARNING as SDK_CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/sdk/platform/payments';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { CVV_PROMPT_TRADEOFF_WARNING as ENGINE_CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/platform/platform/payments';
 import { SecretsManager } from '../../config/secrets.ts';
-import { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { ServiceRegistry } from '@goodvibes-jev/engine/sdk/platform/config';
+import { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
-import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
+import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
 import { SettingsModal } from '../../input/settings-modal.ts';
 import { renderSettingsModal } from '../../renderer/settings-modal.ts';
 import { lineToString, linesToText } from '../setup.ts';
@@ -44,7 +44,7 @@ import type { SecretScope } from '../../config/secrets.ts';
 import { setSecretBackedSettingValue } from '../../input/settings-modal-secrets.ts';
 import { PAYMENTS_CARD_CVV_CONFIG_KEY, PAYMENTS_CVV_HANDLING_CONFIG_KEY } from '../../input/payments-config.ts';
 import { runPaymentsCommand, startCardEntryFlow, CARD_ENTRY_SURFACE, CARD_SECRET_FIELDS } from '../../input/commands/payment-card-intake.ts';
-import { mayEnterCardDetails, mayOfferCardEntryFlow, describeCardEntryRefusal } from '@goodvibes-jev/engine/sdk/platform/payments';
+import { mayEnterCardDetails, mayOfferCardEntryFlow, describeCardEntryRefusal } from '@goodvibes-jev/engine/platform/platform/payments';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { handlePromptKeyToken, type KeyRouteState } from '../../input/handler-feed-routes.ts';
 import { InputHistory } from '../../input/input-history.ts';
@@ -304,7 +304,7 @@ describe('payments CVV containment', () => {
       expect(texts).not.toContain(FAKE_CVV);
     });
 
-    test('selecting cvvHandling = prompt states the unattended-purchasing tradeoff at the moment of selection, using the SDK\'s own wording', () => {
+    test('selecting cvvHandling = prompt states the unattended-purchasing tradeoff at the moment of selection, using the platform\'s own wording', () => {
       while (modal.currentCategory !== 'payments') modal.nextCategory();
       modal.focusRegion = 'settings';
       modal.selectedIndex = modal.currentItems.findIndex((entry) => entry.setting.key === PAYMENTS_CVV_HANDLING_CONFIG_KEY);
@@ -312,10 +312,10 @@ describe('payments CVV containment', () => {
       modal.adjustSelected('right'); // stored -> prompt (the only two values)
       expect(modal.getSelected()?.currentValue).toBe('prompt');
       expect(modal.lastSettingEffectMessage ?? '').toContain('disables unattended purchasing');
-      // The exact SDK string, not a locally-authored copy: this is the
+      // The exact platform string, not a locally-authored copy: this is the
       // shared-string fix (Step 4), a local fork of this text is the drift
       // class that caused the platform's Telegram outage.
-      expect(modal.lastSettingEffectMessage).toBe(SDK_CVV_PROMPT_TRADEOFF_WARNING);
+      expect(modal.lastSettingEffectMessage).toBe(ENGINE_CVV_PROMPT_TRADEOFF_WARNING);
       // And it is NOT the old TUI-local literal this session deleted.
       expect(modal.lastSettingEffectMessage).not.toContain('the daemon stops and waits for you to type it before any purchase can complete');
       const lines = frameFromLayer(renderSettingsModal(modal, W), W, 24);
@@ -422,17 +422,17 @@ describe('payments CVV containment', () => {
 
   // -------------------------------------------------------------------------
   // 4b. Card details are entered only at a local terminal or the webui,
-  //     the entry-surface boundary is decided by the SDK's own allowlist,
+  //     the entry-surface boundary is decided by the platform's own allowlist,
   //     never a local literal in this command.
   // -------------------------------------------------------------------------
-  describe('card entry is gated on the SDK entry-surface allowlist', () => {
-    test("this command's own surface (CARD_ENTRY_SURFACE) is a real entry surface, per the SDK", () => {
+  describe('card entry is gated on the platform entry-surface allowlist', () => {
+    test("this command's own surface (CARD_ENTRY_SURFACE) is a real entry surface, per the platform", () => {
       expect(CARD_ENTRY_SURFACE).toBe('tui');
       expect(mayEnterCardDetails(CARD_ENTRY_SURFACE)).toBe(true);
       expect(mayOfferCardEntryFlow(CARD_ENTRY_SURFACE)).toBe(true);
     });
 
-    test('startCardEntryFlow refuses to begin when driven with a non-entry surface, printing the SDK\'s own refusal text', () => {
+    test('startCardEntryFlow refuses to begin when driven with a non-entry surface, printing the platform\'s own refusal text', () => {
       const { ctx, printed } = makeCommandCtx();
       let concealedInputOffered = false;
       const ctxNoConceal = {
@@ -594,7 +594,7 @@ describe('payments CVV containment', () => {
           cardExpiry: FAKE_EXPIRY,
           cardCvv: FAKE_CVV,
           cardholderName: FAKE_CARDHOLDER,
-          // Real shape now: billingAddress is a structured SDK config object
+          // Real shape now: billingAddress is a structured platform config object
           // (payments.billingAddress.line1, etc.), not a card-material field.
           billingAddress: { line1: '123 Fake St' },
         },

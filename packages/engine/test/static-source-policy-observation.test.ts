@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import * as crypto from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
-import * as atomic from '../sdk/src/platform/utils/atomic-json-store.ts';
+import * as atomic from '../platform/src/platform/utils/atomic-json-store.ts';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { captureStaticInputs, staticInputKey, readStaticInput, staticDecisionSourceHash, staticDecisionSourceManifest,

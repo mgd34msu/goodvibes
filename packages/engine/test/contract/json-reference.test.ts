@@ -2,10 +2,10 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { currentFileObservations } from '../../sdk/src/platform/contract/current-file-observations.js';
-import { compactJsonReference } from '../../sdk/src/platform/contract/json-reference.js';
-import type { SourceReadEvidence } from '../../sdk/src/platform/contract/evidence.js';
-import { compareJsonReadReferences } from '../../sdk/src/platform/contract/read-reference-comparison.js';
+import { currentFileObservations } from '../../platform/src/platform/contract/current-file-observations.js';
+import { compactJsonReference } from '../../platform/src/platform/contract/json-reference.js';
+import type { SourceReadEvidence } from '../../platform/src/platform/contract/evidence.js';
+import { compareJsonReadReferences } from '../../platform/src/platform/contract/read-reference-comparison.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

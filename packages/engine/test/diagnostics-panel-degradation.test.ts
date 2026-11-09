@@ -1,15 +1,15 @@
 import { describe, expect, spyOn, test, type Mock } from 'bun:test';
-import { StateInspectorPanel } from '../sdk/src/platform/runtime/diagnostics/panels/state-inspector.js';
-import { PanelResourcesPanel } from '../sdk/src/platform/runtime/diagnostics/panels/panel-resources.js';
-import { HealthPanel } from '../sdk/src/platform/runtime/diagnostics/panels/health.js';
-import { RuntimeHealthAggregator } from '../sdk/src/platform/runtime/health/aggregator.js';
-import { safeCheck } from '../sdk/src/platform/runtime/ops/safe-check.js';
-import { ForensicsRegistry } from '../sdk/src/platform/runtime/forensics/registry.js';
-import { logger } from '../sdk/src/platform/utils/logger.js';
-import type { ComponentHealthMonitor } from '../sdk/src/platform/runtime/perf/component-health-monitor.js';
-import type { SloCollector } from '../sdk/src/platform/runtime/perf/slo-collector.js';
-import type { CascadeTimer } from '../sdk/src/platform/runtime/health/cascade-timing.js';
-import type { FailureReport } from '../sdk/src/platform/runtime/forensics/types.js';
+import { StateInspectorPanel } from '../platform/src/platform/runtime/diagnostics/panels/state-inspector.js';
+import { PanelResourcesPanel } from '../platform/src/platform/runtime/diagnostics/panels/panel-resources.js';
+import { HealthPanel } from '../platform/src/platform/runtime/diagnostics/panels/health.js';
+import { RuntimeHealthAggregator } from '../platform/src/platform/runtime/health/aggregator.js';
+import { safeCheck } from '../platform/src/platform/runtime/ops/safe-check.js';
+import { ForensicsRegistry } from '../platform/src/platform/runtime/forensics/registry.js';
+import { logger } from '../platform/src/platform/utils/logger.js';
+import type { ComponentHealthMonitor } from '../platform/src/platform/runtime/perf/component-health-monitor.js';
+import type { SloCollector } from '../platform/src/platform/runtime/perf/slo-collector.js';
+import type { CascadeTimer } from '../platform/src/platform/runtime/health/cascade-timing.js';
+import type { FailureReport } from '../platform/src/platform/runtime/forensics/types.js';
 
 function warningMessages(warnSpy: Mock<typeof logger.warn>): string[] {
   return warnSpy.mock.calls.map((call) => String(call[0]));

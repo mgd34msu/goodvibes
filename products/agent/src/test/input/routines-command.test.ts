@@ -9,7 +9,7 @@ import { registerRoutinesRuntimeCommands } from '../../input/commands/routines-r
 import { registerScheduleRuntimeCommands } from '../../input/commands/schedule-runtime.ts';
 import { createShellPathService } from '@/runtime/index.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/sdk/contracts';
+import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
 
 function commandHarness(): {
   readonly registry: CommandRegistry;

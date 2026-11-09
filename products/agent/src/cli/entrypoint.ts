@@ -22,7 +22,7 @@ import { formatProviderModel, getModelIdFromProviderModel, getProviderIdFromMode
 import { readOnboardingCheckMarkers } from '../runtime/onboarding/index.ts';
 import { GlobalNetworkTransportInstaller } from '@/runtime/index.ts';
 import { createShellPathService } from '@/runtime/index.ts';
-import { configureActivityLogger, logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { configureActivityLogger, logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import {
   applyRuntimeCommandEndpointFlagOverrides,
   applyRuntimeConfigOverrides,

@@ -2,9 +2,9 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import type { ConfigKey } from '../sdk/src/platform/config/schema.ts';
-import { setManagedSettingLock } from '../sdk/src/platform/runtime/settings/control-plane.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
+import { setManagedSettingLock } from '../platform/src/platform/runtime/settings/control-plane.ts';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

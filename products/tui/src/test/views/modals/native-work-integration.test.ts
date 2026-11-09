@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { createOperatorNativeWorkExecutionClient, type NativeWorkExecutionIdentity, type NativeWorkExecutionSnapshot } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
-import type { WorkLedgerReadClient, WorkLedgerReadSnapshot } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger';
+import { createOperatorNativeWorkExecutionClient, type NativeWorkExecutionIdentity, type NativeWorkExecutionSnapshot } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
+import type { WorkLedgerReadClient, WorkLedgerReadSnapshot } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 import { nativeWorkIntegrationView } from '../../../runtime/native-work-integration.ts';
 import type { NativeWorkLedgerSelection } from '../../../runtime/native-work-ledger.ts';
 import { createNativeWorkLedgerModalSurface } from '../../../views/modals/native-work-ledger-modal.ts';

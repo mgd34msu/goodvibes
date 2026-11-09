@@ -3,17 +3,17 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import {
   PlatformServiceManager,
   type ManagedServiceActionResult,
   type ManagedServiceDefinition,
-} from '../sdk/src/platform/daemon/service-manager.js';
+} from '../platform/src/platform/daemon/service-manager.js';
 
 /**
  * Coverage for the WIRED launchd path in service-manager.ts (reached by the
  * daemon's HTTP system routes via facade-composition.ts -> facade.ts ->
- * @goodvibes-jev/engine/daemon-sdk system-routes.ts POST /api/service/install et al).
+ * @goodvibes-jev/engine/daemon-api system-routes.ts POST /api/service/install et al).
  *
  * This host is Linux, so every test here fakes the darwin/launchd platform via
  * `configManager.set('service.platform', 'launchd')` (an explicit config override

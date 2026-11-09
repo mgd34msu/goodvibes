@@ -10,14 +10,14 @@ import {
   type PinnedMarketplaceIndexEntry,
   type CapabilityBundleManifest,
   type BundleActivationPlan,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/ecosystem';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+} from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { CliCommandOutput, CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';
 
 // ---------------------------------------------------------------------------
 // `goodvibes plugin bundles browse|install|list`, the capability-bundle
 // marketplace surface. Extends the existing plugin-command.ts family with the
-// SDK's SHA-256-pinned bundle distribution (platform/runtime/ecosystem):
+// platform's SHA-256-pinned bundle distribution (platform/runtime/ecosystem):
 // parseMarketplaceIndex, fetchAndVerifyBundle, planBundleActivation. There is
 // deliberately NO flag that bypasses a pin mismatch, `install` either
 // verifies or refuses; `--yes` only confirms an ALREADY-verified activation

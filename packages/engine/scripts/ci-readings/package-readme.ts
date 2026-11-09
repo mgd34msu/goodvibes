@@ -4,7 +4,7 @@
  * It replaces two checks of scripts/package-metadata-check.ts: the 200
  * character floor that stood in for "is this documentation" (a long README of
  * boilerplate passed it) and the three stale phrases ("Internal workspace
- * package backing", "umbrella package", "umbrella SDK") that any rewording
+ * package backing", "umbrella package", "umbrella engine") that any rewording
  * slipped past.
  *
  * Read by `bun run package-readmes:read` for every package directory the
@@ -91,7 +91,7 @@ export const packageReadme = defineBattery({
     },
     {
       name: 'umbrella wording',
-      state: { name: '@acme/sdk', description: 'Acme SDK', readme: '# @acme/sdk\n\nThe umbrella SDK: it re-exports @acme/core, @acme/http and @acme/realtime so you can install one thing.\n\n`npm install @acme/sdk`\n\n```ts\nimport { http } from \'@acme/sdk\';\n```' },
+      state: { name: '@acme/engine', description: 'Acme engine', readme: '# @acme/engine\n\nThe umbrella engine: it re-exports @acme/core, @acme/http and @acme/realtime so you can install one thing.\n\n`npm install @acme/engine`\n\n```ts\nimport { http } from \'@acme/engine\';\n```' },
       expect: { stale: 'yes' },
     },
     {

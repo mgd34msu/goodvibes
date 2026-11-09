@@ -1,7 +1,7 @@
 /**
  * QueuedMessagesPanel, messages posted while another turn is still running sit
  * queued (not yet delivered to the model) until that turn ends
- * (sessions.queuedMessages.list/edit/delete, SDK 1.8.0's interaction-wins
+ * (sessions.queuedMessages.list/edit/delete, platform 1.8.0's interaction-wins
  * round). This panel lets the operator review, edit, or drop a queued message
  * before it is ever sent, renders nothing when there is nothing queued (the
  * common case), never a dead empty section.
@@ -17,7 +17,7 @@ import { Clock, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { IconButton } from '../../components/ui/IconButton';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { formatError } from '../../lib/errors';
 import '../../styles/components/queued-messages.css';
@@ -38,7 +38,7 @@ export function QueuedMessagesPanel({ sessionId, active }: QueuedMessagesPanelPr
 
   const list = useQuery({
     queryKey: queryKeys.sessionQueuedMessages(sessionId),
-    queryFn: () => sdk.operator.sessions.queuedMessages.list(sessionId),
+    queryFn: () => platformClient.operator.sessions.queuedMessages.list(sessionId),
     enabled: Boolean(sessionId),
     refetchInterval: active ? POLL_INTERVAL_MS : false,
   });
@@ -48,7 +48,7 @@ export function QueuedMessagesPanel({ sessionId, active }: QueuedMessagesPanelPr
   }
 
   const editMutation = useMutation({
-    mutationFn: ({ id, text }: { id: string; text: string }) => sdk.operator.sessions.queuedMessages.edit(sessionId, id, text),
+    mutationFn: ({ id, text }: { id: string; text: string }) => platformClient.operator.sessions.queuedMessages.edit(sessionId, id, text),
     onSuccess: async () => {
       setEditingId('');
       setDraftText('');
@@ -57,7 +57,7 @@ export function QueuedMessagesPanel({ sessionId, active }: QueuedMessagesPanelPr
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => sdk.operator.sessions.queuedMessages.delete(sessionId, id),
+    mutationFn: (id: string) => platformClient.operator.sessions.queuedMessages.delete(sessionId, id),
     onSuccess: invalidate,
   });
 

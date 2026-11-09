@@ -3,7 +3,7 @@ import fixture from '../fixtures/legacy-ledger/preparation.json';
 import { prepareLegacyWorkLedgerMigration, projectLegacyImportWorks } from '../../runtime/legacy-work-ledger-migration.ts';
 import { nativeWorkLedgerLines } from '../../renderer/native-work-ledger.ts';
 import { NativeWorkLedgerModel } from '../../runtime/native-work-ledger.ts';
-import type { WorkLedgerEvent, WorkLedgerReadEvent, WorkLedgerReadSnapshot } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger';
+import type { WorkLedgerEvent, WorkLedgerReadEvent, WorkLedgerReadSnapshot } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 
 test('actual Agent history renders one atomic import without treating it as evidence or an ordinary create', async () => {
   const prepared = prepareLegacyWorkLedgerMigration(fixture); if (prepared.kind !== 'prepared') throw new Error(prepared.reason);

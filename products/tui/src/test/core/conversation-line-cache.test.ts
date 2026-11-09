@@ -19,8 +19,8 @@
 import { describe, test, expect } from 'bun:test';
 import { ConversationManager } from '../../core/conversation.ts';
 import { transcriptUnits } from '../../core/work-tree-model.ts';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
+import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
 
 // --- serialisation ---------------------------------------------------------
 

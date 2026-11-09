@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import { directOwnerRemoteInput, type CommandRegistry, type CommandContext } from '../command-registry.ts';
-import { AGENT_TEMPLATES } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { AGENT_TEMPLATES } from '@goodvibes-jev/engine/platform/platform/tools';
 import { handleRemoteSetupCommand } from './remote-runtime-setup.ts';
 import { handleRemotePoolCommand } from './remote-runtime-pool.ts';
 import { requireAgentManager, requireAcpManager, requirePeerClient, requireShellPaths } from './runtime-services.ts';

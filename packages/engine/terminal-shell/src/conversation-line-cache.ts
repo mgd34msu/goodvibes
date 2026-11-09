@@ -35,9 +35,9 @@
  */
 
 import { BeadContentCache } from './bead-content-cache.js';
-import { createEmptyLine, type Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import { createEmptyLine, type Line } from '@goodvibes-jev/engine/platform/platform/types';
 import type { BlockMeta } from './work-tree-types.js';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { TurnModel } from './work-tree-model.js';
 import type { TurnRender } from './work-tree-render.js';
 import type { TreeGlyphSetName } from './renderer/lane-graph-glyphs.js';
@@ -46,7 +46,7 @@ import { semanticSummaryGeneration } from './semantic-diff-memo.js';
 import { syntaxHighlightGeneration, syntaxHighlightMisses } from './renderer/code-block.js';
 import type { GutterRow } from './renderer/lane-graph-layout.js';
 import { transcriptUnits, turnHasOpenDiff, turnSignature, type TranscriptUnit } from './work-tree-model.js';
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
 
 type Message = ConversationMessageSnapshot;
 type Part = string | number | boolean | undefined | null | object;

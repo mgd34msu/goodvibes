@@ -19,8 +19,8 @@ import {
   interviewResumeDate,
   laterReturnDate,
   reconcileRaiseLedger,
-} from '../sdk/src/platform/occasions/cadence.ts';
-import { parseOccasionLine, parsePlanLine } from '../sdk/src/platform/occasions/grammar.ts';
+} from '../platform/src/platform/occasions/cadence.ts';
+import { parseOccasionLine, parsePlanLine } from '../platform/src/platform/occasions/grammar.ts';
 import {
   composeConflictMessage,
   composeNudge,
@@ -28,20 +28,20 @@ import {
   nameOf,
   proximityOf,
   subjectFor,
-} from '../sdk/src/platform/occasions/nudge.ts';
+} from '../platform/src/platform/occasions/nudge.ts';
 import {
   decideSweep,
   effectiveLead,
   isWithinActiveHours,
   type OccasionsPolicy,
   type SweepContext,
-} from '../sdk/src/platform/occasions/sweep.ts';
+} from '../platform/src/platform/occasions/sweep.ts';
 import type {
   Occasion,
   OccasionAcknowledgement,
   OpenItem,
   Plan,
-} from '../sdk/src/platform/occasions/types.ts';
+} from '../platform/src/platform/occasions/types.ts';
 
 const POLICY: OccasionsPolicy = {
   enabled: true,

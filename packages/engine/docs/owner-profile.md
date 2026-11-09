@@ -64,7 +64,7 @@ write-temp-then-rename.**
 
 ### 2.1 Rejected: build on `platform/knowledge/`
 
-The knowledge subsystem (`packages/engine/sdk/src/platform/knowledge/`, 52 modules) has
+The knowledge subsystem (`packages/engine/platform/src/platform/knowledge/`, 52 modules) has
 provenance, node revision history, spaces, consolidation, refinement, lint and
 scheduling over a SQLite store. Reusing it would avoid writing provenance and
 history machinery twice, and duplicated machinery is a drift class that has cost
@@ -552,7 +552,7 @@ Each surface answers honestly rather than uniformly:
 |---|---|---|
 | TUI | hardcoded `owner-direct` | the only input reaching these calls is the owner typing on their own machine |
 | Web UI | hardcoded `owner-direct` | the same, the owner's own typing in their own settings page |
-| Agent | the model states it per write | the agent genuinely can be handed a purported fact by an email, a page, a channel message or a document, and the SDK must be told which so it can refuse |
+| Agent | the model states it per write | the agent genuinely can be handed a purported fact by an email, a page, a channel message or a document, and the platform must be told which so it can refuse |
 
 The contract has to declare it required too. A schema listing `authority` as
 optional while the handler throws without it publishes a lie, and a generated
@@ -752,7 +752,7 @@ When it records something autonomously it says so in the reply, in one line:
 owner asked. Several facts in one turn collapse into one line. It is a receipt,
 not a confirmation prompt: confirmation prompts were declined by the learning
 ruling.
-`describeProfileWrite(changes)` in the SDK produces the string so all three
+`describeProfileWrite(changes)` in the platform produces the string so all three
 surfaces say the same thing.
 
 ### 8.3 The three questions, on every surface
@@ -983,7 +983,7 @@ clean. That is worth writing down here because the profile verbs are where it wa
 found, but the cause is platform-wide and the fix is not this round's to make
 unilaterally.
 
-The SDK's *typed* overload is correct:
+The platform's *typed* overload is correct:
 
 ```ts
 invoke<TMethodId extends OperatorTypedMethodId>(
@@ -1026,7 +1026,7 @@ repo's TypeScript 5.9.3 with a `profile.forget`-shaped input, seeding a retired
 | stale field carried in **by the spread source's type** | **slips through** | **slips through** | **slips through** | rejected |
 
 **The middle column is the one that matters, and it is all four rows.** Measured
-against a faithful model of `operator-sdk/client-core.ts`, the variadic
+against a faithful model of `operator-client/client-core.ts`, the variadic
 `...args: KnownMethodArgs<T>` typed overload with the loose
 `invoke<T = unknown>(id: string, input?: Record<string, unknown>, options?)`
 beneath it. A body the typed overload rejects does not error; it **falls through
@@ -1072,7 +1072,7 @@ re-measure against the **real call shape** rather than against a model of it.
 **Proposed platform change, for the owner to rule on, not adopted here:** make
 `invoke` typed-only and move dynamic invocation to a separately named method, so
 a known id can never fall through to the loose overload. That is a breaking
-change to a published SDK surface affecting every operator method, and it should
+change to a published platform surface affecting every operator method, and it should
 be decided across the platform rather than by whichever feature happened to trip
 over it.
 
@@ -1210,7 +1210,7 @@ So the registration is mandatory, not cosmetic:
 |---|---|
 | TUI | add `'profile'` to `SettingsCategory` and to a `SETTINGS_CATEGORY_GROUPS` group in `src/input/settings-modal-types.ts` |
 | Agent | the same two edits in its own `src/input/settings-modal-types.ts` |
-| Webui | regenerate `src/lib/generated/config-schema.ts` from the SDK; add `CATEGORY_LABELS['profile']` in `src/lib/config-redaction.ts` for the display name |
+| Webui | regenerate `src/lib/generated/config-schema.ts` from the platform; add `CATEGORY_LABELS['profile']` in `src/lib/config-redaction.ts` for the display name |
 
 The webui derives its groups with no hand-maintained category list, so it cannot
 drop the domain, but without the label entry the group renders as a Title-Cased

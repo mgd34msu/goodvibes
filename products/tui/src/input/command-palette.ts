@@ -17,9 +17,9 @@
  * for any command) fills the composer instead so the arguments can be typed.
  */
 
-import { readCommandDiscovery, type CommandDiscoveryReading } from '@goodvibes-jev/engine/sdk/platform/routing';
-import { retainStrictJudgmentJson, assertJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import { readCommandDiscovery, type CommandDiscoveryReading } from '@goodvibes-jev/engine/platform/platform/routing';
+import { retainStrictJudgmentJson, assertJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { SlashCommand } from './command-registry.ts';
 import type { SurfaceModal, SurfaceModalHost } from './surface-modal-host.ts';
 import type { SurfaceLayer } from '../renderer/surface-kit.ts';

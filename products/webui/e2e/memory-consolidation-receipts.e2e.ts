@@ -1,5 +1,5 @@
 /**
- * Memory consolidation on the Library's Review tab (memory.consolidation.receipts, SDK
+ * Memory consolidation on the Library's Review tab (memory.consolidation.receipts, platform
  * 1.8.0's consolidation-reaches-the-review-queue work). Proves: pending proposals render
  * with what kind, how many records and why; "Resolve" opens the proposal and highlights
  * exactly the referenced queue rows (never filtering the rest away); the genuinely-empty and

@@ -1,5 +1,5 @@
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
-import { calcSessionCost, isModelPriced } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
+import { calcSessionCost, isModelPriced } from '@goodvibes-jev/engine/platform/platform/providers';
 import { voiceCaptureRowVisible, type VoiceCaptureIndicatorState } from '../voice-capture-status.js';
 import type { ShellFooterView } from '../shell-footer-view.js';
 import { activeTokens } from './theme.js';

@@ -40,15 +40,15 @@ import {
   type InboundMailSupervisorDeps,
   type InboundNoticeHealth,
   type NoticeRouteResolution,
-} from '../sdk/src/platform/email/inbound/index.ts';
-import { composeInboundMail } from '../sdk/src/platform/daemon/facade-inbound-mail.ts';
-import { createEmailInboundStatusHandler } from '../sdk/src/platform/control-plane/routes/email-inbound-status.ts';
-import type { InboundMailSource } from '../sdk/src/platform/email/inbound/source.ts';
+} from '../platform/src/platform/email/inbound/index.ts';
+import { composeInboundMail } from '../platform/src/platform/daemon/facade-inbound-mail.ts';
+import { createEmailInboundStatusHandler } from '../platform/src/platform/control-plane/routes/email-inbound-status.ts';
+import type { InboundMailSource } from '../platform/src/platform/email/inbound/source.ts';
 import type {
   ImapInboundMessage,
   InboundCapabilityVerdict,
-} from '../sdk/src/platform/email/inbound/ports.ts';
-import type { SurfaceNoticeDelivery } from '../sdk/src/platform/daemon/types.ts';
+} from '../platform/src/platform/email/inbound/ports.ts';
+import type { SurfaceNoticeDelivery } from '../platform/src/platform/daemon/types.ts';
 
 const NOW = new Date('2026-07-28T09:00:00.000Z');
 const ACCOUNT = 'primary';

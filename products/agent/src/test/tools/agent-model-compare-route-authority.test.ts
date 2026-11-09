@@ -1,10 +1,10 @@
 import { afterAll, afterEach, expect, test } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { createPermissionConfigReader } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import type { ArtifactRecord } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import { FavoritesStore } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { createPermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
+import type { ArtifactRecord } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import { FavoritesStore } from '@goodvibes-jev/engine/platform/platform/providers';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { bindAgentResearchSourceOwner } from '../../agent/protected-research-report.ts';
 import { createAgentSettingsTool } from '../../tools/agent-settings-tool.ts';

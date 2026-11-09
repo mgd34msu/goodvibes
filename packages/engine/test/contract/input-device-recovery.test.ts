@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { uptime } from 'node:os';
-import { captureContractInput, contractInputPath, materializeContractInput, restoreContractInputDevice, type ContractInputSnapshot } from '../../sdk/src/platform/contract/input-snapshot.js';
+import { captureContractInput, contractInputPath, materializeContractInput, restoreContractInputDevice, type ContractInputSnapshot } from '../../platform/src/platform/contract/input-snapshot.js';
 import { makeRepo } from './runner-support.js';
 import { git } from './steps-support.js';
 

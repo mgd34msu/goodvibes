@@ -22,16 +22,16 @@ import { realpathSync } from 'node:fs';
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
-import { PlatformServiceManager } from '@goodvibes-jev/engine/sdk/platform/daemon';
-import type { ManagedServiceStatus } from '@goodvibes-jev/engine/sdk/platform/daemon';
-import { resolveDaemonEnabled } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { PlatformServiceManager } from '@goodvibes-jev/engine/platform/platform/daemon';
+import type { ManagedServiceStatus } from '@goodvibes-jev/engine/platform/platform/daemon';
+import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { formatRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
 import type { RuntimeEndpointId } from '@goodvibes-jev/engine/terminal-shell';
 import './network-posture.ts';
 import { redactText } from '@goodvibes-jev/engine/terminal-shell';
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
 
 export interface CliServicePosture {
   readonly config: {

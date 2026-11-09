@@ -1,0 +1,90 @@
+import { BatteryRegistry } from '@goodvibes-jev/judgment';
+import { modelFamily } from '../providers/batteries/model-family.js';
+
+/**
+ * Every named decision the routing subsystem makes, for calibration:
+ *
+ *   bun run --cwd packages/judgment calibrate --registry ../engine/platform/src/platform/routing/judgment-registry.ts
+ */
+export const registry = new BatteryRegistry();
+registry.register(modelFamily);
+
+// Requests: what a piece of work needs, read before tokens are spent.
+import { requestDifficulty, requestDomain, requestIntent, requestLanguage, requestRisk, requestTier } from './batteries/request.js';
+registry.register(requestTier);
+registry.register(requestIntent);
+registry.register(requestDifficulty);
+registry.register(requestRisk);
+registry.register(requestDomain);
+registry.register(requestLanguage);
+
+// Models: capability tiers and task-specific selection.
+import { modelChoice, modelTier } from './batteries/model.js';
+registry.register(modelTier);
+registry.register(modelChoice);
+import { sameFamily } from './route-scope.js';
+registry.register(sameFamily);
+
+// Catalog: how a provider's models are paid for.
+import { catalogProviderAccess } from './batteries/catalog.js';
+registry.register(catalogProviderAccess);
+
+// Providers: local servers, alternate APIs, reasoning settings, stream labels, stop reasons.
+import { alternateApi, contentPartKind, localServerIdentity, reasoningFamily, reasoningRejection, stopReason } from './batteries/provider.js';
+registry.register(localServerIdentity);
+registry.register(alternateApi);
+registry.register(reasoningRejection);
+registry.register(contentPartKind);
+registry.register(stopReason);
+registry.register(reasoningFamily);
+
+// The user error line, hoisted from the TUI.
+import { userErrorReading } from './user-error.js';
+registry.register(userErrorReading);
+
+// Task routes: the agent route planner and route tool, hoisted into the engine.
+import { registry as taskRouteRegistry } from './task-routes/judgment-registry.js';
+for (const decision of taskRouteRegistry.list()) registry.register(decision);
+
+// Providers: model limits and listings.
+import { anthropicOutputCap } from './batteries/model-limits.js';
+registry.register(anthropicOutputCap);
+
+// Providers: transports and prompt caching.
+import { cacheMinimum, copilotClaudeModel } from './batteries/provider-cache.js';
+registry.register(copilotClaudeModel);
+registry.register(cacheMinimum);
+
+// Provider setup presentation is separate from routing/catalog access semantics.
+import { providerSetupReading } from '../providers/setup-reading.js';
+registry.register(providerSetupReading);
+
+// Agent model readiness and local hardware/recipe fit share one canonical definition.
+import { localRecipeFit, routeReadiness } from './batteries/model-readiness.js';
+registry.register(routeReadiness);
+registry.register(localRecipeFit);
+import { modelReasonTheme } from './batteries/model-reason-theme.js';
+registry.register(modelReasonTheme);
+
+import { localServingStatus, localResourcePressure, localServingSchemaStatus } from './batteries/local-model-diagnostics.js';
+registry.register(localServingStatus);
+registry.register(localResourcePressure);
+registry.register(localServingSchemaStatus);
+
+import { atRestCredential, memoryRouteRole, memoryCredentialState, memoryLiveStatus, memoryReceiptMember, memorySchemaCertified, memoryProviderSelect } from './batteries/memory-provider.js';
+registry.register(memoryRouteRole);
+registry.register(memoryCredentialState);
+registry.register(memoryLiveStatus);
+registry.register(memoryReceiptMember);
+registry.register(memorySchemaCertified);
+registry.register(memoryProviderSelect);
+registry.register(atRestCredential);
+
+import { localBenchmarkPrompt } from './batteries/local-benchmark-prompt.js';
+registry.register(localBenchmarkPrompt);
+
+import { commandDiscovery } from './command-discovery.js';
+registry.register(commandDiscovery);
+
+import { decisionRouterCategory } from './batteries/decision-router.js';
+registry.register(decisionRouterCategory);

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { runLiveModelRefresh } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { runLiveModelRefresh } from '@goodvibes-jev/engine/platform/platform/providers';
 import { makeProjectTempDir } from './project-temp.ts';
 import { seedProviderModelListCacheFixture } from './provider-metadata-cache-fixture.ts';
 

@@ -1,7 +1,7 @@
 /** The old exact descriptor protocol must survive adding candidate capabilities. */
 import { expect, test } from 'bun:test';
 import { daemonReleaseArtifactDescriptors } from '../../../.github/scripts/stage-native-release-assets.mjs';
-import { nativeReaderCapabilities, parseDaemonCiArtifact } from '../sdk/src/platform/runtime/self-update.js';
+import { nativeReaderCapabilities, parseDaemonCiArtifact } from '../platform/src/platform/runtime/self-update.js';
 import { nativeCohortFixture } from './_helpers/daemon-native-cohort.js';
 
 test('public native descriptors preserve the released six-key v1 protocol and the exact richer CI evidence', () => {

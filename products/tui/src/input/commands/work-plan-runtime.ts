@@ -1,8 +1,8 @@
 import type { CommandRegistry } from '../command-registry.ts';
-import type { WorkPlanItemStatus, WorkPlanStore } from '@goodvibes-jev/engine/sdk/platform/workflow';
-import { WORK_PLAN_STATUSES } from '@goodvibes-jev/engine/sdk/platform/workflow';
+import type { WorkPlanItemStatus, WorkPlanStore } from '@goodvibes-jev/engine/platform/platform/workflow';
+import { WORK_PLAN_STATUSES } from '@goodvibes-jev/engine/platform/platform/workflow';
 import { openModalCommand } from './runtime-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 const STATUS_COMMANDS: Record<string, WorkPlanItemStatus> = {
   pending: 'pending',

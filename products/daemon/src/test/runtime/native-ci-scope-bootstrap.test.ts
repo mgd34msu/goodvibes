@@ -1,8 +1,8 @@
 import { expect, spyOn, test } from 'bun:test';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { GatewayMethodCatalog, prepareGatewayScopePolicyOwner, completeGatewayScopePolicyBootstrap } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { registerInboxSurface } from '@goodvibes-jev/engine/sdk/platform/intake';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { GatewayMethodCatalog, prepareGatewayScopePolicyOwner, completeGatewayScopePolicyBootstrap } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { registerInboxSurface } from '@goodvibes-jev/engine/platform/platform/intake';
 import * as activation from '../../runtime/native-work-execution-activation.js';
 import { startDaemonFixture, type DaemonFixture } from '../../testing/daemon-fixture.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';

@@ -26,7 +26,7 @@ import type { CommandContext } from '../command-registry.ts';
 import { requireShellPaths } from './runtime-services.ts';
 
 /**
- * Resolve (or honestly refuse to resolve) an operator SDK client wired to this
+ * Resolve (or honestly refuse to resolve) an operator platform client wired to this
  * workspace's control-plane daemon. Reasons for refusal are surfaced verbatim
  * to the caller so commands print them directly rather than inventing their own
  * wording.

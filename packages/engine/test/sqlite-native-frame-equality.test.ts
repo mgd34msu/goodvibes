@@ -2,16 +2,16 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { SqlDatabase, SQLiteStore as SQLiteStoreType } from '../sdk/src/platform/state/sqlite-store.js';
+import type { SqlDatabase, SQLiteStore as SQLiteStoreType } from '../platform/src/platform/state/sqlite-store.js';
 
 // These adversarial cases own the native engine's birth. A different suite may
 // legitimately retire the process-shared optimized path and retain the complete
 // fallback before this fixture starts; that is a different path to exercise.
-const nativeSuiteModule = '../sdk/src/platform/state/sqlite-store.js?native-frame-equality-suite';
-const { loadSqlJsEngine, SQLiteObservationRetiredError, SQLiteStore }: typeof import('../sdk/src/platform/state/sqlite-store.js') = await import(nativeSuiteModule);
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { createSemanticWriteGuard } from '../sdk/src/platform/knowledge/semantic/primary-source-plan.js';
-import { KnowledgeSourceQualityHeldError } from '../sdk/src/platform/knowledge/source-quality.js';
+const nativeSuiteModule = '../platform/src/platform/state/sqlite-store.js?native-frame-equality-suite';
+const { loadSqlJsEngine, SQLiteObservationRetiredError, SQLiteStore }: typeof import('../platform/src/platform/state/sqlite-store.js') = await import(nativeSuiteModule);
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { createSemanticWriteGuard } from '../platform/src/platform/knowledge/semantic/primary-source-plan.js';
+import { KnowledgeSourceQualityHeldError } from '../platform/src/platform/knowledge/source-quality.js';
 
 type NativeDatabase = InstanceType<Awaited<ReturnType<typeof loadSqlJsEngine>>['Database']>;
 const roots: string[] = [], databases: SQLiteStoreType[] = [], knowledgeStores: KnowledgeStore[] = [];
@@ -27,7 +27,7 @@ function path() {
   roots.push(root); return join(root, 'knowledge.sqlite');
 }
 async function fixture(projection: boolean, primedReaderAtBirth = false,
-  native: Pick<typeof import('../sdk/src/platform/state/sqlite-store.js'), 'SQLiteStore' | 'loadSqlJsEngine'> = { SQLiteStore, loadSqlJsEngine }) {
+  native: Pick<typeof import('../platform/src/platform/state/sqlite-store.js'), 'SQLiteStore' | 'loadSqlJsEngine'> = { SQLiteStore, loadSqlJsEngine }) {
   const filename = path(), sqlite = new native.SQLiteStore(filename, { coordinated: true });
   databases.push(sqlite);
   let facade: SqlDatabase | undefined;
@@ -605,8 +605,8 @@ test.each(['proxy', 'accessor'] as const)('an observable global receiver %s cann
 test('a late global capture setter cannot omit complete private native facts', async () => {
   // A separate actual source module keeps this acquisition control from
   // changing the engine provenance used by every other whole-file control.
-  const modulePath = '../sdk/src/platform/state/sqlite-store.js?native-global-facts-own-append';
-  const isolated: typeof import('../sdk/src/platform/state/sqlite-store.js') = await import(modulePath);
+  const modulePath = '../platform/src/platform/state/sqlite-store.js?native-global-facts-own-append';
+  const isolated: typeof import('../platform/src/platform/state/sqlite-store.js') = await import(modulePath);
   if (isolated.loadSqlJsEngine === loadSqlJsEngine) throw new Error('The acquisition control requires a distinct actual source loader');
   const own = Object.getOwnPropertyDescriptor;
   const parent = Object.getPrototypeOf, define = Object.defineProperty, remove = Reflect.deleteProperty, apply = Reflect.apply;
@@ -686,8 +686,8 @@ test('a late global capture setter cannot omit complete private native facts', a
 });
 
 async function nativePrefixFixture() {
-  const modulePath = '../sdk/src/platform/state/sqlite-store.js?native-adjacent-facts-prefix-guard';
-  const native: typeof import('../sdk/src/platform/state/sqlite-store.js') = await import(modulePath);
+  const modulePath = '../platform/src/platform/state/sqlite-store.js?native-adjacent-facts-prefix-guard';
+  const native: typeof import('../platform/src/platform/state/sqlite-store.js') = await import(modulePath);
   if (native.loadSqlJsEngine === loadSqlJsEngine) throw new Error('The prefix control requires a distinct actual source loader');
   return { ...await fixture(true, false, native), heldError: native.SQLiteObservationRetiredError };
 }
@@ -765,8 +765,8 @@ test('a call-through descriptor callback cannot restore shared statement facts b
 test('a late statement capture setter cannot omit complete private native facts', async () => {
   // A separate actual source module keeps this acquisition control from
   // changing the engine provenance used by every other whole-file control.
-  const modulePath = '../sdk/src/platform/state/sqlite-store.js?native-adjacent-facts-acquisition';
-  const isolated: typeof import('../sdk/src/platform/state/sqlite-store.js') = await import(modulePath);
+  const modulePath = '../platform/src/platform/state/sqlite-store.js?native-adjacent-facts-acquisition';
+  const isolated: typeof import('../platform/src/platform/state/sqlite-store.js') = await import(modulePath);
   if (isolated.loadSqlJsEngine === loadSqlJsEngine) throw new Error('The acquisition control requires a distinct actual source loader');
   const own = Object.getOwnPropertyDescriptor, descriptors = Object.getOwnPropertyDescriptors;
   const parent = Object.getPrototypeOf, define = Object.defineProperty, remove = Reflect.deleteProperty;
@@ -949,8 +949,8 @@ async function aliasNativeFixture(hooks: Partial<Record<AliasNativeExport, Alias
       } });
       installed.add(key);
     }
-    const modulePath = `../sdk/src/platform/state/sqlite-store.js?native-alias-opposition-${++aliasFixtureSequence}`;
-    const native: typeof import('../sdk/src/platform/state/sqlite-store.js') = await import(modulePath);
+    const modulePath = `../platform/src/platform/state/sqlite-store.js?native-alias-opposition-${++aliasFixtureSequence}`;
+    const native: typeof import('../platform/src/platform/state/sqlite-store.js') = await import(modulePath);
     if (native.loadSqlJsEngine === loadSqlJsEngine) throw new Error('Native acquisition control requires a distinct source owner');
     await native.loadSqlJsEngine();
     expect(installed.size).toBe(Object.keys(hooks).length);
@@ -1307,8 +1307,8 @@ test('an acquired private lookup cannot substitute a facts checker and suppress 
     }
     return apply(get, this, [key]);
   };
-  const modulePath = '../sdk/src/platform/state/sqlite-store.js?native-source-predicate-private-lookup';
-  let native: typeof import('../sdk/src/platform/state/sqlite-store.js');
+  const modulePath = '../platform/src/platform/state/sqlite-store.js?native-source-predicate-private-lookup';
+  let native: typeof import('../platform/src/platform/state/sqlite-store.js');
   try {
     define(WeakMap.prototype, 'get', { ...descriptor, value: borrowing });
     native = await import(modulePath);
@@ -1402,8 +1402,8 @@ test('the original expected-side inherited descriptor read retains its mutation-
     }
     return freeze(value);
   };
-  const modulePath = '../sdk/src/platform/state/sqlite-store.js?native-source-predicate-expected-read-order';
-  let native: typeof import('../sdk/src/platform/state/sqlite-store.js');
+  const modulePath = '../platform/src/platform/state/sqlite-store.js?native-source-predicate-expected-read-order';
+  let native: typeof import('../platform/src/platform/state/sqlite-store.js');
   try {
     define(Object, 'freeze', { ...freezeSlot, value: observingFreeze });
     native = await import(modulePath);

@@ -6,8 +6,8 @@ import type {
   ConfigModalTab,
   ConfigModalView,
 } from '../../input/config-modal-types.ts';
-import { memoryRecordTemporalStatus, type MemoryRecord } from '@goodvibes-jev/engine/sdk/platform/state';
-import type { MemoryAccess } from '@goodvibes-jev/engine/sdk/platform/runtime/memory-spine';
+import { memoryRecordTemporalStatus, type MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
+import type { MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import type { MemoryConsolidationGatewayResolution, MemoryConsolidationProposal } from '../memory-consolidation-gateway.ts';
 import { classifyConsolidationFetchError } from '../memory-consolidation-gateway.ts';
 

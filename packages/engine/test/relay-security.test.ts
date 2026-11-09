@@ -10,12 +10,12 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { isRelayTunneledRequest, RELAY_VIA_HEADER } from '../daemon-sdk/src/relay-registration.js';
+import { isRelayTunneledRequest, RELAY_VIA_HEADER } from '../daemon-api/src/relay-registration.js';
 import {
   evaluateStepUp,
   isMutatingMethod,
-} from '../sdk/src/platform/relay/step-up-policy.js';
-import * as relaySurface from '../sdk/src/platform/relay/index.js';
+} from '../platform/src/platform/relay/step-up-policy.js';
+import * as relaySurface from '../platform/src/platform/relay/index.js';
 
 describe('step-up policy decision', () => {
   test('only bites on mutating relay calls when required', () => {
@@ -55,7 +55,7 @@ describe('certificate-minting prohibition (the daemon never mints certificates)'
   });
 
   test('no certificate-minting module exists in the relay source tree', () => {
-    const relayDir = join(import.meta.dir, '..', 'sdk', 'src', 'platform', 'relay');
+    const relayDir = join(import.meta.dir, '..', 'platform', 'src', 'platform', 'relay');
     const files = readdirSync(relayDir);
     expect(files.some((file) => /cert/i.test(file))).toBe(false);
     // No relay source invokes openssl or self-signs anything.
@@ -68,7 +68,7 @@ describe('certificate-minting prohibition (the daemon never mints certificates)'
   });
 
   test('the daemon entry source exports no cert-minting name', () => {
-    const daemonEntry = readFileSync(join(import.meta.dir, '..', 'sdk', 'src', 'daemon.ts'), 'utf8');
+    const daemonEntry = readFileSync(join(import.meta.dir, '..', 'platform', 'src', 'daemon.ts'), 'utf8');
     expect(/mint[A-Za-z]*Certificate|LanCert/i.test(daemonEntry)).toBe(false);
   });
 });

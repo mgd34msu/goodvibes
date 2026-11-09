@@ -2,7 +2,7 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs';
 import { join } from 'node:path';
-import { AgentWorktree } from '../sdk/src/platform/agents/worktree.js';
+import { AgentWorktree } from '../platform/src/platform/agents/worktree.js';
 import { makeProjectTempDir } from './_helpers/project-temp.js';
 
 const roots: string[] = [];

@@ -1,11 +1,11 @@
 /**
  * `PROFILE_AUTHORITIES` / `ProfileAuthority`, and why this file keeps a local
- * array instead of importing one from the SDK.
+ * array instead of importing one from the platform.
  *
- * `ProfileAuthority` already IS the SDK's own type (`AuthoritySurface`,
+ * `ProfileAuthority` already IS the platform's own type (`AuthoritySurface`,
  * reached through `trust/untrusted-content.ts`'s re-export), there is no
  * mirrored TYPE to drift. `PROFILE_AUTHORITIES` is different: it is a runtime
- * array of that type's members, and the SDK
+ * array of that type's members, and the platform
  * (`platform/security/untrusted-content.ts`) exports `AuthoritySurface` as a
  * type only, confirmed by reading the built `.d.ts`/`.js`: the module hands
  * back functions of an already-known surface (`surfaceTrustTier`,
@@ -16,7 +16,7 @@
  *
  * What stands in for that: `exhaustiveProfileAuthorityCheck` is a switch over
  * every literal of `ProfileAuthority`, with an `assertNever` default, it
- * fails to COMPILE if the SDK's `AuthoritySurface` ever gains or loses a
+ * fails to COMPILE if the platform's `AuthoritySurface` ever gains or loses a
  * member, which is the earliest possible signal for the drift class behind
  * three defects this session. This suite exercises it at runtime too, and
  * pins that `PROFILE_AUTHORITIES` and the switch's cases name the same set,
@@ -47,7 +47,7 @@ const SWITCH_CASES: readonly ProfileAuthority[] = [
   'calendar-event',
 ];
 
-describe('agent-profile-types: PROFILE_AUTHORITIES has no SDK runtime value to import', () => {
+describe('agent-profile-types: PROFILE_AUTHORITIES has no platform runtime value to import', () => {
   test('every entry in PROFILE_AUTHORITIES passes the exhaustive switch without throwing', () => {
     for (const authority of PROFILE_AUTHORITIES) {
       expect(exhaustiveProfileAuthorityCheck(authority)).toBe(true);

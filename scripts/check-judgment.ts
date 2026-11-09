@@ -1,9 +1,9 @@
 /** Verify the installed account's Jev connection before declaring setup complete. */
 import { resolve } from 'node:path';
-import { ConfigManager } from '../packages/engine/sdk/dist/platform/config/manager.js';
-import { createRuntimeSecretsManager } from '../packages/engine/sdk/dist/platform/runtime/secrets-composition.js';
-import { createSettingsJudgmentPort } from '../packages/engine/sdk/dist/platform/runtime/judgment-services.js';
-import { decisionOrClassic, withDecisionModelPolicy } from '../packages/engine/sdk/dist/platform/runtime/decision-policy.js';
+import { ConfigManager } from '../packages/engine/platform/dist/platform/config/manager.js';
+import { createRuntimeSecretsManager } from '../packages/engine/platform/dist/platform/runtime/secrets-composition.js';
+import { createSettingsJudgmentPort } from '../packages/engine/platform/dist/platform/runtime/judgment-services.js';
+import { decisionOrClassic, withDecisionModelPolicy } from '../packages/engine/platform/dist/platform/runtime/decision-policy.js';
 
 try {
   const homeDirectory = resolve(process.argv[2]!);
@@ -18,7 +18,7 @@ try {
   console.log('Decision-model connection verified.');
   }, () => { console.log('Classic operation selected; no decision-model connection is required or certified.'); }));
 } catch (error) {
-  // The installed SDK and source script may load separate copies of the
+  // The installed engine and source script may load separate copies of the
   // judgment module, so use its public status field rather than class identity.
   const next = error !== null && typeof error === 'object' && 'status' in error && error.status === 402
     ? 'Add credits or update billing for the TypeSafe account at https://console.typesafe.ai/settings/billing.'

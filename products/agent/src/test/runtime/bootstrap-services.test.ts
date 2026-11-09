@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { RuntimeEventBus, startExternalServices } from '@/runtime/index.ts';
-import { HookDispatcher } from '@goodvibes-jev/engine/sdk/platform/hooks';
+import { HookDispatcher } from '@goodvibes-jev/engine/platform/platform/hooks';
 import { getTestRuntimeServices } from '../helpers/runtime-services.ts';
 
 function createConfig(overrides: {
@@ -113,7 +113,7 @@ describe('startExternalServices (Agent: adopt-only)', () => {
   });
 
   test('refuses to adopt a daemon reporting an incompatible wire version', async () => {
-    // Deliberately unrelated fixture strings (not the live SDK VERSION) so
+    // Deliberately unrelated fixture strings (not the live platform VERSION) so
     // this assertion never drifts with a real version bump, the injected
     // isDaemonVersionCompatible predicate is the sole source of truth here.
     const probeDaemonIdentity = mock(async () => ({

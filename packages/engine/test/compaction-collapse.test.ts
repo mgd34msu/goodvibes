@@ -12,11 +12,11 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { validateContextBudget, type EntryType, type Questions } from '@goodvibes-jev/judgment';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { runCollapse } from '../sdk/src/platform/runtime/compaction/strategies/collapse.ts';
-import { packKeepRequests } from '../sdk/src/platform/runtime/compaction/batteries/collapse-keep.ts';
-import { MAX_COMPRESSION_RATIO } from '../sdk/src/platform/runtime/compaction/quality-score.ts';
-import type { StrategyInput } from '../sdk/src/platform/runtime/compaction/types.ts';
-import type { ProviderMessage } from '../sdk/src/platform/providers/interface.ts';
+import { runCollapse } from '../platform/src/platform/runtime/compaction/strategies/collapse.ts';
+import { packKeepRequests } from '../platform/src/platform/runtime/compaction/batteries/collapse-keep.ts';
+import { MAX_COMPRESSION_RATIO } from '../platform/src/platform/runtime/compaction/quality-score.ts';
+import type { StrategyInput } from '../platform/src/platform/runtime/compaction/types.ts';
+import type { ProviderMessage } from '../platform/src/platform/providers/interface.ts';
 import { compactionQualityPort } from './_helpers/compaction-quality.ts';
 
 const CONVERSATION: ProviderMessage[] = [

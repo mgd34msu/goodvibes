@@ -1,36 +1,36 @@
 import {
-  createGoodVibesSdk,
+  createGoodVibesPlatform,
   createMemoryTokenStore,
   type GoodVibesCurrentAuth,
   type GoodVibesLoginOutput,
-} from '@goodvibes-jev/engine/sdk';
+} from '@goodvibes-jev/engine/platform';
 import type {
   OperatorMethodInput,
   OperatorMethodOutput,
   OperatorTypedMethodId,
-} from '@goodvibes-jev/engine/sdk/contracts';
-import { createOperatorSdk } from '@goodvibes-jev/engine/sdk/operator';
-import { createPeerSdk } from '@goodvibes-jev/engine/sdk/peer';
+} from '@goodvibes-jev/engine/platform/contracts';
+import { createOperatorApiClient } from '@goodvibes-jev/engine/platform/operator';
+import { createPeerApiClient } from '@goodvibes-jev/engine/platform/peer';
 
-async function verifyTypedSdkSurface(): Promise<void> {
-  const sdk = createGoodVibesSdk({
+async function verifyTypedPlatformSurface(): Promise<void> {
+  const platformClient = createGoodVibesPlatform({
     baseUrl: 'http://127.0.0.1:3210',
     tokenStore: createMemoryTokenStore(),
   });
 
-  const login: GoodVibesLoginOutput = await sdk.auth.login({
+  const login: GoodVibesLoginOutput = await platformClient.auth.login({
     username: 'alice',
     password: 'secret',
   });
   const token: string = login.token;
 
-  const current: GoodVibesCurrentAuth = await sdk.auth.current();
+  const current: GoodVibesCurrentAuth = await platformClient.auth.current();
   const authenticated: boolean = current.authenticated;
 
-  const currentViaOperator = await sdk.operator.control.auth.current();
+  const currentViaOperator = await platformClient.operator.control.auth.current();
   const currentPrincipalId: string | null = currentViaOperator.principalId;
 
-  const typedInvokeLogin = await sdk.operator.invoke('control.auth.login', {
+  const typedInvokeLogin = await platformClient.operator.invoke('control.auth.login', {
     username: 'alice',
     password: 'secret',
   });
@@ -43,12 +43,12 @@ async function verifyTypedSdkSurface(): Promise<void> {
     includeSources: true,
     includeLinkedObjects: true,
   };
-  const knowledgeAskOutput = await sdk.operator.invoke(knowledgeAskMethodId, knowledgeAskInput);
+  const knowledgeAskOutput = await platformClient.operator.invoke(knowledgeAskMethodId, knowledgeAskInput);
   const typedKnowledgeAskOutput: OperatorMethodOutput<'knowledge.ask'> = knowledgeAskOutput;
-  const refinementTasksOutput = await sdk.operator.invoke(refinementTasksMethodId);
+  const refinementTasksOutput = await platformClient.operator.invoke(refinementTasksMethodId);
   const typedRefinementTasksOutput: OperatorMethodOutput<'knowledge.refinement.tasks.list'> = refinementTasksOutput;
 
-  const pairRequest = await sdk.peer.invoke('pair.request', {
+  const pairRequest = await platformClient.peer.invoke('pair.request', {
     peerKind: 'node',
     label: 'Pixel companion',
     requestedId: 'device-1',
@@ -64,12 +64,12 @@ async function verifyTypedSdkSurface(): Promise<void> {
   void challenge;
 }
 
-void verifyTypedSdkSurface;
+void verifyTypedPlatformSurface;
 
 // Verify well-known disposal symbols (using declarations, ES2025 / TC39 explicit resource management)
 {
-  using operatorSdk = createOperatorSdk({ baseUrl: 'http://127.0.0.1:3210' });
-  using peerSdk = createPeerSdk({ baseUrl: 'http://127.0.0.1:3210' });
-  void operatorSdk;
-  void peerSdk;
+  using operatorApiClient = createOperatorApiClient({ baseUrl: 'http://127.0.0.1:3210' });
+  using peerApiClient = createPeerApiClient({ baseUrl: 'http://127.0.0.1:3210' });
+  void operatorApiClient;
+  void peerApiClient;
 }

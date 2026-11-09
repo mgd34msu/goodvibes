@@ -2,18 +2,18 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { copyFileSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadSqlJsEngine, SQLiteObservationRetiredError, SQLiteStore, type SqlDatabase } from '../sdk/src/platform/state/sqlite-store.js';
-import { SQLiteStorePersistence } from '../sdk/src/platform/state/sqlite-store-persistence.js';
-import * as fileObservations from '../sdk/src/platform/utils/file-observation.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { assertKnowledgeRecordAdmissions, KnowledgeRecordAdmissionHeldError, prepareKnowledgeRecordAdmission } from '../sdk/src/platform/knowledge/store-record-snapshot.js';
-import { createSemanticWriteGuard } from '../sdk/src/platform/knowledge/semantic/primary-source-plan.js';
-import { KnowledgeSourceQualityHeldError } from '../sdk/src/platform/knowledge/source-quality.js';
-import { JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.js';
+import { loadSqlJsEngine, SQLiteObservationRetiredError, SQLiteStore, type SqlDatabase } from '../platform/src/platform/state/sqlite-store.js';
+import { SQLiteStorePersistence } from '../platform/src/platform/state/sqlite-store-persistence.js';
+import * as fileObservations from '../platform/src/platform/utils/file-observation.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { assertKnowledgeRecordAdmissions, KnowledgeRecordAdmissionHeldError, prepareKnowledgeRecordAdmission } from '../platform/src/platform/knowledge/store-record-snapshot.js';
+import { createSemanticWriteGuard } from '../platform/src/platform/knowledge/semantic/primary-source-plan.js';
+import { KnowledgeSourceQualityHeldError } from '../platform/src/platform/knowledge/source-quality.js';
+import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input.js';
 import { bindJudgmentPortAuthority, installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { prepareKnowledgeScopeSelection, KnowledgeScopeSelectionHeldError } from '../sdk/src/platform/knowledge/scope-selection.js';
-import { knowledgeNodeContentRevisionTriggers } from '../sdk/src/platform/knowledge/store-node-content-revisions.js';
+import { prepareKnowledgeScopeSelection, KnowledgeScopeSelectionHeldError } from '../platform/src/platform/knowledge/scope-selection.js';
+import { knowledgeNodeContentRevisionTriggers } from '../platform/src/platform/knowledge/store-node-content-revisions.js';
 
 const roots: string[] = [], stores: KnowledgeStore[] = [], databases: SQLiteStore[] = [];
 afterEach(async () => {

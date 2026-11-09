@@ -1,4 +1,4 @@
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import {
   channelTargetNamedIds,
   modelProviderNamedIds,
@@ -8,7 +8,7 @@ import {
   type TaskRouteCatalogRanking,
   type TaskRouteDraft,
   type TaskRoutePlan,
-} from '@goodvibes-jev/engine/sdk/platform/routing';
+} from '@goodvibes-jev/engine/platform/platform/routing';
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import type { CommandContext } from '../input/command-registry.ts';
 import { AGENT_WORKSPACE_CATEGORIES } from '../input/agent-workspace-categories.ts';

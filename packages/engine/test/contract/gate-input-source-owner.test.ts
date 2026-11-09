@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { captureGateInput } from '../../sdk/src/platform/contract/gate-input.js';
+import { captureGateInput } from '../../platform/src/platform/contract/gate-input.js';
 
 let directory: string;
 beforeEach(() => { directory = fs.mkdtempSync(join(tmpdir(), 'gate-source-owner-')); });

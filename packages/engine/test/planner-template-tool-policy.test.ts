@@ -6,11 +6,11 @@
  * the planner tool set refusing 'write'.
  */
 import { describe, expect, test } from 'bun:test';
-import { AgentManager, AGENT_TEMPLATES } from '../sdk/src/platform/tools/agent/manager.js';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.js';
-import type { Tool } from '../sdk/src/platform/types/tools.js';
-import { PLANNER_DECOMPOSITION_TOOLS } from '../sdk/src/platform/agents/planner-decomposition-runner.js';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.js';
+import { AgentManager, AGENT_TEMPLATES } from '../platform/src/platform/tools/agent/manager.js';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.js';
+import type { Tool } from '../platform/src/platform/types/tools.js';
+import { PLANNER_DECOMPOSITION_TOOLS } from '../platform/src/platform/agents/planner-decomposition-runner.js';
+import type { ConfigManager } from '../platform/src/platform/config/manager.js';
 
 const FORBIDDEN = ['write', 'edit', 'exec', 'delegate', 'agent'];
 

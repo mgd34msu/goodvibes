@@ -2,8 +2,8 @@ import { expect, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs';
 import { chmodSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ProtectedPaymentRequests, ProtectedPaymentRequestError } from '../sdk/src/platform/payments/host/protected-requests.js';
-import { encryptStore } from '../sdk/src/platform/config/secrets-keyfile.js';
+import { ProtectedPaymentRequests, ProtectedPaymentRequestError } from '../platform/src/platform/payments/host/protected-requests.js';
+import { encryptStore } from '../platform/src/platform/config/secrets-keyfile.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { protectedPaymentRequest } from './helpers/protected-payment-request.ts';
 

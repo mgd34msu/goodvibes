@@ -18,14 +18,14 @@
  * below is what stops the early `return` coming back.
  */
 import { describe, expect, test } from 'bun:test';
-import { registerDaemonClusterSurfaces } from '../sdk/src/platform/daemon/facade-cluster.ts';
-import { inboxSurface, surfaceIdFor } from '../sdk/src/platform/cluster/surface-id.ts';
-import type { ClusterConsumerGate } from '../sdk/src/platform/cluster/types.ts';
-import type { ClusterCoordinator } from '../sdk/src/platform/cluster/index.ts';
+import { registerDaemonClusterSurfaces } from '../platform/src/platform/daemon/facade-cluster.ts';
+import { inboxSurface, surfaceIdFor } from '../platform/src/platform/cluster/surface-id.ts';
+import type { ClusterConsumerGate } from '../platform/src/platform/cluster/types.ts';
+import type { ClusterCoordinator } from '../platform/src/platform/cluster/index.ts';
 import type {
   DaemonFacadeCollaborators,
   ResolvedDaemonFacadeRuntime,
-} from '../sdk/src/platform/daemon/facade-types.ts';
+} from '../platform/src/platform/daemon/facade-types.ts';
 import { addNode, advance, createWorld, startNode } from './cluster-harness.ts';
 
 // ---------------------------------------------------------------------------

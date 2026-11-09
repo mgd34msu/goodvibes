@@ -10,7 +10,7 @@
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort, type JudgmentRequest, type Questions } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { forgetCredentialEnvReadings } from '../../sdk/src/platform/tools/exec/credential-env.ts';
+import { forgetCredentialEnvReadings } from '../../platform/src/platform/tools/exec/credential-env.ts';
 import { forgetGateReadings, type GateReadingTable } from './gate-readings.ts';
 import { compactionQualityPort } from './compaction-quality.ts';
 import { coreReadingsPort } from './core-readings.ts';

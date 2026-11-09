@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { captureStructuredCredentialReferenceConfigValue, readCredentialKey } from '@goodvibes-jev/engine/sdk/platform/config';
+import { captureStructuredCredentialReferenceConfigValue, readCredentialKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { collectSensitiveConfigValues, isSensitiveConfigPath, prepareConfigRedaction, redactConfig, redactSerializedSecrets, REDACTED_VALUE } from '@goodvibes-jev/engine/terminal-shell';
 
 let previous: ReturnType<typeof installJudgmentPort>;

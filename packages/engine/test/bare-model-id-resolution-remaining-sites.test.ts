@@ -10,14 +10,14 @@
  *   - tools/agent/manager.ts AgentManager.spawn() (registry threaded)
  */
 import { describe, expect, test } from 'bun:test';
-import type { ModelDefinition } from '../sdk/src/platform/providers/registry-types.js';
-import type { LLMProvider } from '../sdk/src/platform/providers/interface.js';
-import { createBuiltinImageUnderstandingProvider } from '../sdk/src/platform/media/builtin-image-understanding.js';
-import { createProviderApi, type ProviderApiDependencies } from '../sdk/src/platform/providers/provider-api.js';
-import { buildDefaultExecution } from '../sdk/src/platform/automation/manager-runtime-helpers.js';
-import { buildSharedSessionAgentSpawnRoutingInput } from '../sdk/src/platform/control-plane/session-intents.js';
-import { AgentManager } from '../sdk/src/platform/tools/agent/manager.js';
-import type { ConfigManager } from '../sdk/src/platform/config/index.js';
+import type { ModelDefinition } from '../platform/src/platform/providers/registry-types.js';
+import type { LLMProvider } from '../platform/src/platform/providers/interface.js';
+import { createBuiltinImageUnderstandingProvider } from '../platform/src/platform/media/builtin-image-understanding.js';
+import { createProviderApi, type ProviderApiDependencies } from '../platform/src/platform/providers/provider-api.js';
+import { buildDefaultExecution } from '../platform/src/platform/automation/manager-runtime-helpers.js';
+import { buildSharedSessionAgentSpawnRoutingInput } from '../platform/src/platform/control-plane/session-intents.js';
+import { AgentManager } from '../platform/src/platform/tools/agent/manager.js';
+import type { ConfigManager } from '../platform/src/platform/config/index.js';
 
 function makeModel(provider: string, id: string, overrides: Partial<ModelDefinition> = {}): ModelDefinition {
   return {

@@ -136,7 +136,7 @@ export function isMethodUnavailableError(error: unknown): boolean {
 
 /**
  * True when a thrown request error never reached the daemon, a network/connection
- * failure rather than an HTTP rejection. The SDK transport tags these with
+ * failure rather than an HTTP rejection. The platform transport tags these with
  * `category: 'network'` and `transport.status: 0` (createNetworkTransportError), and the
  * webui's own requestJson leaves `status` unset when fetch throws. This is what lets the
  * auth gate tell "daemon unreachable" (keep the token, reconnect) apart from a genuine
@@ -199,7 +199,7 @@ export function isCalendarAuthFailedError(error: unknown): boolean {
  * about but has no live handler wired for on this build. Distinct from
  * `isMethodUnavailableError` (404, the daemon has never heard of the id at
  * all): 501 means the id IS in the catalog, just not wired to a handler yet.
- * Calendar is the first surface where this matters, the SDK ships the
+ * Calendar is the first surface where this matters, the platform ships the
  * `calendar.*` contract with `invokable: false` by default; a daemon build
  * that has not registered a real CalDAV handler answers this way.
  */
@@ -216,11 +216,11 @@ export function isMethodNotInvokableError(error: unknown): boolean {
  * address / app password in daemon config and the daemon secret tier).
  *
  * GROUNDING NOTE, deliberately explicit because it differs from most helpers here:
- * the installed SDK defines no EMAIL_, IMAP_ or SMTP_ prefixed error-code literals at
- * all (verified by sweeping @goodvibes-jev/engine/sdk/dist, only the three
+ * the installed platform defines no EMAIL_, IMAP_ or SMTP_ prefixed error-code literals at
+ * all (verified by sweeping @goodvibes-jev/engine/platform/dist, only the three
  * EMAIL_..._SCHEMA shape names appear). The named codes below are ANTICIPATED, as
  * `isCalendarUnconfiguredError`'s CALENDAR_NOT_CONFIGURED is anticipated, that
- * literal is likewise absent from the SDK. So correctness here does not rest on
+ * literal is likewise absent from the platform. So correctness here does not rest on
  * guessing a string right: the structural backstop is HTTP 412, which is what a
  * precondition refusal ("configure the surface first") is by definition. Any 412 on
  * an email call reads as not-configured whether or not its code matches, so a daemon
@@ -259,7 +259,7 @@ export function isEmailAuthFailedError(error: unknown): boolean {
 
 /**
  * True for the daemon's step-up refusal on a mutating call that arrived over the relay
- * (evaluateStepUp in @goodvibes-jev/engine/sdk's relay step-up policy, a fail-closed hook:
+ * (evaluateStepUp in @goodvibes-jev/engine/platform's relay step-up policy, a fail-closed hook:
  * consumers wire a real WebAuthn verifier, and until one is wired every mutating relay
  * call is refused rather than silently allowed through). Two distinct codes, both a
  * genuine policy refusal rather than a fault:

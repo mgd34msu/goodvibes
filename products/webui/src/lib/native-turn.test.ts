@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { NativeConversationIntakeLookupResult } from "@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client";
+import type { NativeConversationIntakeLookupResult } from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client";
 import { createNativeIntakeTurn } from "./native-turn";
 import type { NativeIntakeBrowserRecord } from "./native-intake-journal";
 

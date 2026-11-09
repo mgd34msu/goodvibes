@@ -22,7 +22,7 @@ import {
   type CardCreateInput,
   type CvvHandling,
   type PaymentsSecretStore,
-} from '../sdk/src/platform/payments/host/card-store.js';
+} from '../platform/src/platform/payments/host/card-store.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 /** A number nothing could mistake for anything else, so a leak is unambiguous. */

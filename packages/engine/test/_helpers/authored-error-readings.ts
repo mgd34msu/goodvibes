@@ -1,9 +1,9 @@
 import type { EntryType, Question } from '@goodvibes-jev/judgment/decisions';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { failureState } from '@goodvibes-jev/engine/errors';
-import type { RedactionPart } from '../../sdk/src/platform/utils/batteries/redaction.ts';
+import type { RedactionPart } from '../../platform/src/platform/utils/batteries/redaction.ts';
 import type { FailureWordingReading } from './failure-readings.ts';
-import { MAX_RETRY_WAIT_MESSAGE_CHARS, numberSpans } from '../../sdk/src/platform/types/batteries/retry-wait.ts';
+import { MAX_RETRY_WAIT_MESSAGE_CHARS, numberSpans } from '../../platform/src/platform/types/batteries/retry-wait.ts';
 
 export const errorText = (text: string): RedactionPart => ({ kind: 'text', text });
 export const errorSpan = (field: string, number = 1): RedactionPart =>

@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { ContractError, installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort } from '@goodvibes-jev/judgment/testing';
-import { createOperatorRemoteClient, type OperatorRemoteClientOptions } from '../operator-sdk/src/client-core.ts';
+import { createOperatorRemoteClient, type OperatorRemoteClientOptions } from '../operator-client/src/client-core.ts';
 import { createHttpTransport } from '../transport-http/src/http.ts';
 import { firstJsonSchemaFailureAsync } from '../transport-http/src/client-plumbing.ts';
 import { retainJsonSchemaSource } from '../transport-http/src/retained-schema-source.ts';
-import { buildOperatorContract } from '../sdk/src/platform/control-plane/operator-contract.ts';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
+import { buildOperatorContract } from '../platform/src/platform/control-plane/operator-contract.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
 
 let previous: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previous = installJudgmentPort(undefined); });

@@ -29,11 +29,11 @@
  */
 
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
-import { channelDraftWireReference, createChannelDraftWireReference, historicalChannelDraftWireReference, isNativeDraftWireReference, matchesHistoricalDraftWireReference } from '@goodvibes-jev/engine/sdk/platform/channels';
+import { channelDraftWireReference, createChannelDraftWireReference, historicalChannelDraftWireReference, isNativeDraftWireReference, matchesHistoricalDraftWireReference } from '@goodvibes-jev/engine/platform/platform/channels';
 import { existsSync, readFileSync } from 'node:fs';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { writeStoreFile } from '@/utils/store-file.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { retainChannelStoreSource, type ChannelStoreEffectOptions } from './channel-store-lifetime.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { AgentChannelDeliveryInput } from './channel-delivery.ts';
@@ -547,7 +547,7 @@ export async function syncChannelDrafts(
  * calling `deliverAgentChannelMessage` and then `markDraftSent` or
  * `markDraftFailed` to record the outcome.
  *
- * This routes through the EXISTING confirmed send path, no new SDK contract.
+ * This routes through the EXISTING confirmed send path, no new platform contract.
  */
 export async function queueDraftToSend(
   shellPaths: ShellPaths,

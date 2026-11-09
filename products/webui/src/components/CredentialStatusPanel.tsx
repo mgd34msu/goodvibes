@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { readCredentialProvider, type CredentialProviderResult } from '../lib/credential-provider-judgment';
 import { subscribeClientLifetime } from '../lib/client-lifetime';
-import { readDeclaredProviderCredential } from '@goodvibes-jev/engine/sdk/platform/judgment-browser/catalogs';
+import { readDeclaredProviderCredential } from '@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs';
 /**
  * CredentialStatusPanel, the display-site adoption of the cross-surface
  * credential-status facade (src/lib/provider-status.ts: deriveCredentialAvailability
- * over `sdk.operator.credentials.get`). The facade shipped in 1.0.1 with zero
+ * over `platform.operator.credentials.get`). The facade shipped in 1.0.1 with zero
  * consumers; this is the reference implementation the audit calls for, so the
  * pattern here is what the TUI/agent can later mirror.
  *
@@ -28,7 +28,7 @@ import { readDeclaredProviderCredential } from '@goodvibes-jev/engine/sdk/platfo
 import { useQuery } from '@tanstack/react-query';
 import { KeyRound } from 'lucide-react';
 import type { StatusTone } from './ui/StatusDot';
-import { sdk } from '../lib/goodvibes';
+import { client as platformClient } from '../lib/goodvibes';
 import { deriveCredentialAvailability, type CredentialStatusEntry } from '../lib/provider-status';
 import { errorCode, serializeError } from '../lib/errors';
 import { EmptyState } from './feedback/EmptyState';
@@ -82,7 +82,7 @@ export interface CredentialStatusPanelProps {
 export function CredentialStatusPanel({ selectedProviderId }: CredentialStatusPanelProps) {
   const query = useQuery({
     queryKey: ['credentials'],
-    queryFn: () => sdk.operator.credentials.get(),
+    queryFn: () => platformClient.operator.credentials.get(),
     retry: false,
   });
 

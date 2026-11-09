@@ -6,7 +6,7 @@
  * visible whatever else happens.
  */
 import { describe, test, expect } from 'bun:test';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { buildShellFooter, estimateShellFooterHeight, type ShellFooterBuildOptions } from '../../renderer/shell-surface.ts';
 import type { VoiceCaptureIndicatorState } from '../../core/voice-capture-status.ts';
 import { activeTokens } from '../../renderer/theme.ts';

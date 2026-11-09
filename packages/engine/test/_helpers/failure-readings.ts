@@ -17,7 +17,7 @@ import { afterEach, beforeEach } from 'bun:test';
 import type { Question } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { forgetFailureReadings, installJudgmentPort, type ConnectionFailure, type FailureCategory } from '@goodvibes-jev/engine/errors';
-import { forgetRetryWaitReadings } from '../../sdk/src/platform/types/batteries/retry-wait.ts';
+import { forgetRetryWaitReadings } from '../../platform/src/platform/types/batteries/retry-wait.ts';
 
 export interface FailureWordingReading {
   readonly category?: FailureCategory;

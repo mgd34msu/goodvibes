@@ -7,10 +7,10 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createDaemonSystemRouteHandlers } from '../daemon-sdk/src/system-routes.js';
-import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../sdk/src/platform/daemon/control-plane.js';
-import { PairingTokenManager } from '../sdk/src/platform/pairing/pairing-token-store.js';
-import { UserAuthManager } from '../sdk/src/platform/security/user-auth.js';
+import { createDaemonSystemRouteHandlers } from '../daemon-api/src/system-routes.js';
+import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../platform/src/platform/daemon/control-plane.js';
+import { PairingTokenManager } from '../platform/src/platform/pairing/pairing-token-store.js';
+import { UserAuthManager } from '../platform/src/platform/security/user-auth.js';
 
 const roots: string[] = [];
 const restores: (() => void)[] = [];

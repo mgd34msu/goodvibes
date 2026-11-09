@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, spyOn, test } from 'bun:test';
-import { BROWSER_JUDGMENT_PATH, createBunRelayServer, createRelayDaemonRegistration, type RelayDaemonRegistrationOptions, type RelayClientWebSocket } from '../daemon-sdk/src/index.js';
+import { BROWSER_JUDGMENT_PATH, createBunRelayServer, createRelayDaemonRegistration, type RelayDaemonRegistrationOptions, type RelayClientWebSocket } from '../daemon-api/src/index.js';
 import { createRelayClient } from '../transport-realtime/src/relay-transport.js';
 import { decodeTunnelFrame, encodeTunnelFrame, generateRelayIdentity, RelaySecureChannel } from '../transport-core/src/relay/index.js';
 

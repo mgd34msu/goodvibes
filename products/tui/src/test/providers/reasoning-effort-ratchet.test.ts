@@ -24,7 +24,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, expect, test } from 'bun:test';
-import type { ReasoningEffortSpec } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ReasoningEffortSpec } from '@goodvibes-jev/engine/platform/platform/providers';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerShellCoreCommands } from '../../input/commands/shell-core.ts';
 import { createBootstrapCommandActions } from '../../runtime/bootstrap-command-parts.ts';
@@ -36,7 +36,7 @@ import {
   type EffortModelLike,
 } from '../../providers/reasoning-effort-surface.ts';
 
-// Ids deliberately outside the SDK's curated family table, so the spec attached
+// Ids deliberately outside the platform's curated family table, so the spec attached
 // below is the one under test rather than one the family table supplies.
 const CAPABLE_ID = 'test-only-capable-reasoner';
 const CAPPED_ID = 'test-only-capped-reasoner';

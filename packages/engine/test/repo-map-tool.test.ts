@@ -11,9 +11,9 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createRepoMapTool, extractTopLevelExports } from '../sdk/src/platform/tools/repo-map/index.ts';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.ts';
-import { estimateTokens } from '../sdk/src/platform/core/compaction-types.ts';
+import { createRepoMapTool, extractTopLevelExports } from '../platform/src/platform/tools/repo-map/index.ts';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
+import { estimateTokens } from '../platform/src/platform/core/compaction-types.ts';
 
 /** A small repo where core.ts is imported by two files (highest centrality). */
 function makeRepo(): string {

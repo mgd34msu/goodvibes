@@ -31,10 +31,10 @@ import {
   InboundNoticeTransportError,
   PersistedExpectationStore,
   type InboundNoticeMode,
-} from '../sdk/src/platform/email/inbound/index.ts';
-import type { GmailInboundMessage, ImapInboundMessage } from '../sdk/src/platform/email/inbound/ports.ts';
-import type { SurfaceNoticeDelivery } from '../sdk/src/platform/daemon/types.ts';
-import type { StructuredNotice } from '../sdk/src/platform/email/inbound-notice.ts';
+} from '../platform/src/platform/email/inbound/index.ts';
+import type { GmailInboundMessage, ImapInboundMessage } from '../platform/src/platform/email/inbound/ports.ts';
+import type { SurfaceNoticeDelivery } from '../platform/src/platform/daemon/types.ts';
+import type { StructuredNotice } from '../platform/src/platform/email/inbound-notice.ts';
 
 const NOW = new Date('2026-07-27T12:00:00.000Z');
 

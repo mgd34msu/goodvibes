@@ -2,7 +2,7 @@
  * useRealtimeInvalidation, refetch React Query caches off the control-plane event feed.
  *
  * CONNECTION BUDGET (the W-2 fix): the browser caps concurrent connections per origin
- * (~6 on HTTP/1.1). The previous implementation used `sdk.realtime.viaSse()` and
+ * (~6 on HTTP/1.1). The previous implementation used `platform.realtime.viaSse()` and
  * subscribed to five domains (tasks, gate, providers, knowledge, control-plane),
  * and viaSse opens ONE SSE connection PER domain. Together with useSessionRealtime's
  * own session stream that reached six long-lived streams, saturating the pool so the
@@ -22,7 +22,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 import { getClientLifetime, subscribeClientLifetime } from '../lib/client-lifetime';
 import { useQueryClient } from '@tanstack/react-query';
 import type { RuntimeEventDomain } from '@goodvibes-jev/engine/contracts';
-import { sdk, DEFAULT_SSE_RECONNECT } from '../lib/goodvibes';
+import { client as platformClient, DEFAULT_SSE_RECONNECT } from '../lib/goodvibes';
 import { queryKeys } from '../lib/queries';
 import { RELAY_OVERFLOW_EVENT, noteRelayOverflow, readDroppedCount } from '../lib/relay-stream-overflow';
 
@@ -36,7 +36,7 @@ import { RELAY_OVERFLOW_EVENT, noteRelayOverflow, readDroppedCount } from '../li
 const DOMAIN_INVALIDATIONS: Record<string, readonly (readonly unknown[])[]> = {
   tasks: [queryKeys.tasks],
   contracts: [queryKeys.contracts],
-  // gate: approvals AND queryKeys.sessions, the SDK's PERMISSION_MODE_CHANGED
+  // gate: approvals AND queryKeys.sessions, the platform's PERMISSION_MODE_CHANGED
   // event (events/gate.ts) rides this same domain (no dedicated wire event of
   // its own) and carries no sessionId, so we can't target the one session-scoped
   // permission-mode query that changed. Invalidating the broad `queryKeys.sessions`
@@ -53,7 +53,7 @@ const DOMAIN_INVALIDATIONS: Record<string, readonly (readonly unknown[])[]> = {
   providers: [queryKeys.providers, queryKeys.sessions],
   knowledge: [['knowledge']],
   'control-plane': [queryKeys.control],
-  // fleet: the SDK now emits per-node lifecycle deltas (FLEET_NODE_STARTED /
+  // fleet: the platform now emits per-node lifecycle deltas (FLEET_NODE_STARTED /
   // _STATE_CHANGED / _FINISHED / _BLOCKED_ON_USER / _UNBLOCKED) on the runtime
   // event bus `fleet` domain, which the daemon fans out over this SAME multiplexed
   // stream (no new connection). We follow this hook's established idiom, INVALIDATE
@@ -64,11 +64,11 @@ const DOMAIN_INVALIDATIONS: Record<string, readonly (readonly unknown[])[]> = {
   // not reconstruct a client-side tree from the deltas. The poll remains as the honest
   // fallback while this stream is down (see FleetView's subscriptionActive gate).
   fleet: [queryKeys.fleet, queryKeys.fleetArchived],
-  // ops: the runtime.ops domain, OPS_POWER_STATE_CHANGED rides it (SDK 1.8.0's host
+  // ops: the runtime.ops domain, OPS_POWER_STATE_CHANGED rides it (platform 1.8.0's host
   // sleep-ownership work). Invalidating queryKeys.power revalidates the always-visible
   // "sleep disabled" chip (StatusStrip) and the admin Power panel the instant the owner
   // keep-awake toggle or the automatic work inhibitor changes on ANY attached surface,
-  // not only on this one's own mutation success. OPS_MEMORY_PRESSURE (SDK 1.9.0-dev's
+  // not only on this one's own mutation success. OPS_MEMORY_PRESSURE (platform 1.9.0-dev's
   // memory-relay-voice-hardening work) rides the SAME 'ops' domain, invalidating
   // queryKeys.opsMemory here is the whole surfacing story for that event: the admin
   // Memory panel refetches its tier chip on the real pressure change, exactly the way
@@ -129,7 +129,7 @@ export function useRealtimeInvalidation(enabled: boolean) {
       });
     };
 
-    sdk.streams
+    platformClient.streams
       .open(
         INVALIDATION_EVENTS_PATH,
         {

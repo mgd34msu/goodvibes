@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { SqliteDecisionLog, withDecisionLog, noul, readYesNo, STAKES_BANDS, readingsOf, type JudgmentPort, type YesNoReading } from '@goodvibes-jev/judgment';
-import { BROWSER_JUDGMENT_PATH, createBrowserJudgmentHttpHandler, type AuthenticatedPrincipal } from '../daemon-sdk/src/index.ts';
-import { BrowserJudgmentRegistry, BrowserJudgmentReferences, BrowserJudgmentService, type BrowserJudgmentProjection } from '../sdk/src/platform/judgment-browser/index.ts';
-import { validateBrowserJudgmentProjection } from '../sdk/src/platform/judgment-browser/projection.ts';
+import { BROWSER_JUDGMENT_PATH, createBrowserJudgmentHttpHandler, type AuthenticatedPrincipal } from '../daemon-api/src/index.ts';
+import { BrowserJudgmentRegistry, BrowserJudgmentReferences, BrowserJudgmentService, type BrowserJudgmentProjection } from '../platform/src/platform/judgment-browser/index.ts';
+import { validateBrowserJudgmentProjection } from '../platform/src/platform/judgment-browser/projection.ts';
 
 const ID = 'webui.errors.daemon-refusal' as const;
 const names = ['session_not_found', 'session_closed', 'session_active', 'session_not_local', 'method_unknown'] as const;

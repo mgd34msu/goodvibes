@@ -3,11 +3,11 @@ import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibe
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { join } from 'node:path';
-import { ConfigManager, DEFAULT_CONFIG } from '../sdk/src/platform/config/index.js';
-import { PermissionManager, type PermissionConfigReader } from '../sdk/src/platform/permissions/manager.js';
-import { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.js';
-import { createAgentTool, type AgentRecord } from '../sdk/src/platform/tools/agent/index.js';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.js';
+import { ConfigManager, DEFAULT_CONFIG } from '../platform/src/platform/config/index.js';
+import { PermissionManager, type PermissionConfigReader } from '../platform/src/platform/permissions/manager.js';
+import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.js';
+import { createAgentTool, type AgentRecord } from '../platform/src/platform/tools/agent/index.js';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.js';
 import { forgetGateReadings, gateReadingsPort } from './_helpers/gate-readings.js';
 import { makeHarness } from './contract/runner-support.js';
 

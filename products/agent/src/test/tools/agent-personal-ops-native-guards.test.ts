@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import * as contracts from '@goodvibes-jev/engine/sdk/contracts';
+import * as contracts from '@goodvibes-jev/engine/platform/contracts';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { captureCatalogData, captureCatalogMethods, captureCatalogSnapshotGuard } from '../../tools/agent-harness-catalog-ranking.ts';
 import { captureModelReadingInput } from '../../tools/agent-harness-model-reading-source.ts';

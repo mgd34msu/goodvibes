@@ -27,12 +27,12 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { SharedSessionBroker } from '../sdk/src/platform/control-plane/session-broker.ts';
-import { PersistentStore } from '../sdk/src/platform/state/persistent-store.ts';
-import { RouteBindingManager } from '../sdk/src/platform/channels/route-manager.ts';
-import { AutomationRouteStore } from '../sdk/src/platform/automation/store/routes.ts';
-import type { AutomationRouteBinding } from '../sdk/src/platform/automation/routes.ts';
-import type { AutomationSessionPolicy } from '../sdk/src/platform/automation/types.ts';
+import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.ts';
+import { PersistentStore } from '../platform/src/platform/state/persistent-store.ts';
+import { RouteBindingManager } from '../platform/src/platform/channels/route-manager.ts';
+import { AutomationRouteStore } from '../platform/src/platform/automation/store/routes.ts';
+import type { AutomationRouteBinding } from '../platform/src/platform/automation/routes.ts';
+import type { AutomationSessionPolicy } from '../platform/src/platform/automation/types.ts';
 import { trackDisposables } from './_helpers/disposables.ts';
 
 const disposables = trackDisposables();

@@ -36,7 +36,7 @@
  * way the audit script treated drawings on top of a fill.
  */
 
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import type { PaletteTokens } from '../../renderer/theme.ts';
 import { getDisplayWidth } from '../../utils/terminal-width.ts';
 import { SPINNER_FRAMES } from '../../renderer/ui-primitives.ts';

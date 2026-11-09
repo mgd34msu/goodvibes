@@ -1,5 +1,5 @@
-import { AgentManager } from '../sdk/src/platform/tools/agent/manager.js';
-import { bindContractPlanConsumer, hasContractPlanConsumer } from '../sdk/src/platform/tools/agent/contract-binding.js';
+import { AgentManager } from '../platform/src/platform/tools/agent/manager.js';
+import { bindContractPlanConsumer, hasContractPlanConsumer } from '../platform/src/platform/tools/agent/contract-binding.js';
 /**
  * Production DecompositionRunner backed by AgentManager
  * (agents/planner-decomposition-runner.ts).
@@ -11,8 +11,8 @@ import { bindContractPlanConsumer, hasContractPlanConsumer } from '../sdk/src/pl
  * injected and a virtual clock advances on each poll.
  */
 import { describe, expect, test } from 'bun:test';
-import { createAgentManagerDecompositionRunner } from '../sdk/src/platform/agents/planner-decomposition-runner.js';
-import type { AgentRecord } from '../sdk/src/platform/tools/agent/manager.js';
+import { createAgentManagerDecompositionRunner } from '../platform/src/platform/agents/planner-decomposition-runner.js';
+import type { AgentRecord } from '../platform/src/platform/tools/agent/manager.js';
 
 type Poll = (i: number) => { status: AgentRecord['status']; usage?: AgentRecord['usage']; fullOutput?: string; error?: string };
 
@@ -145,9 +145,9 @@ describe('AgentManager decomposition runner', () => {
 
 test('planner receives the requested frozen working directory and pre-aborted requests spawn nothing', async () => {
   const fake = makeFake({ poll: () => ({ status: 'completed', fullOutput: 'planned' }) });
-  const inputs: import('../sdk/src/platform/tools/agent/schema.js').AgentInput[] = [];
+  const inputs: import('../platform/src/platform/tools/agent/schema.js').AgentInput[] = [];
   const original = fake.agentManager.spawn;
-  const agentManager = { ...fake.agentManager, spawn(input: import('../sdk/src/platform/tools/agent/schema.js').AgentInput) { inputs.push(input); return original(); } };
+  const agentManager = { ...fake.agentManager, spawn(input: import('../platform/src/platform/tools/agent/schema.js').AgentInput) { inputs.push(input); return original(); } };
   const runner = createAgentManagerDecompositionRunner({ agentManager, now: fake.now, sleep: fake.sleep });
   await runner.run({ ...REQ, workingDir: '/recorded/input/generation-one' });
   expect(inputs.map((input) => input.workingDirectory)).toEqual(['/recorded/input/generation-one']);

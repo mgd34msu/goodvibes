@@ -12,7 +12,7 @@
  */
 import type { CommandRegistry } from '../command-registry.ts';
 import { describeOperatorRpcError, getOperatorRpc } from './operator-rpc.ts';
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/sdk';
+import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
 
 type CheckinConfig = OperatorMethodOutput<'checkin.config.get'>['config'];
 type CheckinReceipt = OperatorMethodOutput<'checkin.receipts.list'>['receipts'][number];
@@ -52,7 +52,7 @@ export function registerCheckinRuntimeCommands(registry: CommandRegistry): void 
 
       if (args[0] === 'run') {
         try {
-          const result = await rpc.sdk.operator.invoke('checkin.run', {});
+          const result = await rpc.platformClient.operator.invoke('checkin.run', {});
           const lines = [`[checkin run] outcome: ${result.outcome}`, `  ${result.summary}`];
           if (result.deliveryId) lines.push(`  delivery id: ${result.deliveryId}`);
           ctx.print(lines.join('\n'));
@@ -69,8 +69,8 @@ export function registerCheckinRuntimeCommands(registry: CommandRegistry): void 
 
       try {
         const [{ config }, { receipts }] = await Promise.all([
-          rpc.sdk.operator.invoke('checkin.config.get', {}),
-          rpc.sdk.operator.invoke('checkin.receipts.list', { limit: 10 }),
+          rpc.platformClient.operator.invoke('checkin.config.get', {}),
+          rpc.platformClient.operator.invoke('checkin.receipts.list', { limit: 10 }),
         ]);
         const lines = [renderConfig(config), ''];
         if (receipts.length === 0) {

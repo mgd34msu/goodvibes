@@ -1,4 +1,4 @@
-import type { ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { EmbeddingProviderPickerEntry } from './model-picker-types.js';
 export type ConfiguredVia = Map<string, 'env' | 'secrets' | 'subscription' | 'anonymous'>;
 export interface ModelPickerCatalogFill<Info> {

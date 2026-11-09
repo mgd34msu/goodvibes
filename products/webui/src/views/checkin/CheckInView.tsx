@@ -19,7 +19,7 @@
 import { useState, type SyntheticEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { BellRing, RefreshCw } from 'lucide-react';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import type { OperatorMethodOutput } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { DetailSection, EmptyState, Facts, SkeletonRows } from '../../components/data-view/DataView';
@@ -85,7 +85,7 @@ function ConfigEditForm({
   const [quietHours, setQuietHours] = useState(config.quietHours);
 
   const save = useMutation({
-    mutationFn: () => sdk.operator.checkin.config.set({ enabled, cadence, deliveryChannel, quietHours }),
+    mutationFn: () => platformClient.operator.checkin.config.set({ enabled, cadence, deliveryChannel, quietHours }),
     onSuccess: () => {
       onSaved();
       toast({ title: 'Check-in configuration saved', tone: 'success' });
@@ -173,15 +173,15 @@ export function CheckInSettings() {
 
   const config = useQuery({
     queryKey: queryKeys.checkinConfig,
-    queryFn: () => sdk.operator.checkin.config.get(),
+    queryFn: () => platformClient.operator.checkin.config.get(),
   });
   const receipts = useQuery({
     queryKey: queryKeys.checkinReceipts,
-    queryFn: () => sdk.operator.checkin.receipts.list(),
+    queryFn: () => platformClient.operator.checkin.receipts.list(),
   });
 
   const run = useMutation({
-    mutationFn: () => sdk.operator.checkin.run(),
+    mutationFn: () => platformClient.operator.checkin.run(),
     onSuccess: async (result) => {
       setRunResult(result);
       await queryClient.invalidateQueries({ queryKey: queryKeys.checkinReceipts });

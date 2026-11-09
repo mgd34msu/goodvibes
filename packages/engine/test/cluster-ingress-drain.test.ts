@@ -1,10 +1,10 @@
 /** UNRUN: real signed group flood against an actual held credential read. */
 import { expect, test } from 'bun:test';
-import { createGroup, joinGroup } from '../sdk/src/platform/cluster/group-operations.ts';
-import { CONFIG_MESSAGE_TYPES } from '../sdk/src/platform/cluster/config-replication.ts';
-import { MAX_ACTIVE_GROUP_MESSAGES } from '../sdk/src/platform/cluster/ingress-work.ts';
-import { encodeEnvelope } from '../sdk/src/platform/cluster/protocol-envelope.ts';
-import { replicatedSecretKeyFor } from '../sdk/src/platform/cluster/config-replication-policy.ts';
+import { createGroup, joinGroup } from '../platform/src/platform/cluster/group-operations.ts';
+import { CONFIG_MESSAGE_TYPES } from '../platform/src/platform/cluster/config-replication.ts';
+import { MAX_ACTIVE_GROUP_MESSAGES } from '../platform/src/platform/cluster/ingress-work.ts';
+import { encodeEnvelope } from '../platform/src/platform/cluster/protocol-envelope.ts';
+import { replicatedSecretKeyFor } from '../platform/src/platform/cluster/config-replication-policy.ts';
 import { addGroupNode, createGroupWorld, destroyGroupWorld, MemorySecretStore, settle, stopGroupWorld } from './cluster-group-harness.ts';
 test('excess authenticated requests never become deferred handlers; stop drains admitted reads without sending late secrets', async () => {
   const release = Promise.withResolvers<void>(), entered = Promise.withResolvers<void>(), world = createGroupWorld();

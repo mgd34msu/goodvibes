@@ -4,7 +4,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { GlobalNetworkTransportInstaller } from '@goodvibes-jev/engine/sdk/platform/runtime/transport';
+import { GlobalNetworkTransportInstaller } from '@goodvibes-jev/engine/platform/platform/runtime/transport';
 import { createDaemonCliConfiguration } from '../../cli/configuration.js';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../../config/surface.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';

@@ -16,13 +16,13 @@ import { describe, expect, test } from 'bun:test';
 import { chmodSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
-import { createLocalVoiceProvider } from '../sdk/src/platform/voice/providers/local.ts';
-import { VoiceProviderRegistry } from '../sdk/src/platform/voice/provider-registry.ts';
-import { VoiceService } from '../sdk/src/platform/voice/service.ts';
-import { SpokenTurnController } from '../sdk/src/platform/voice/spoken-turn/controller.ts';
-import type { AudioSink } from '../sdk/src/platform/voice/spoken-turn/audio-sink.ts';
-import { CostAttributionService } from '../sdk/src/platform/runtime/cost/attribution.ts';
-import type { VoiceProvider } from '../sdk/src/platform/voice/types.ts';
+import { createLocalVoiceProvider } from '../platform/src/platform/voice/providers/local.ts';
+import { VoiceProviderRegistry } from '../platform/src/platform/voice/provider-registry.ts';
+import { VoiceService } from '../platform/src/platform/voice/service.ts';
+import { SpokenTurnController } from '../platform/src/platform/voice/spoken-turn/controller.ts';
+import type { AudioSink } from '../platform/src/platform/voice/spoken-turn/audio-sink.ts';
+import { CostAttributionService } from '../platform/src/platform/runtime/cost/attribution.ts';
+import type { VoiceProvider } from '../platform/src/platform/voice/types.ts';
 
 function configReader(values: Record<string, string>) {
   return (key: string) => values[key] ?? '';

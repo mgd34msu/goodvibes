@@ -5,7 +5,7 @@ domain. There is no separate enablement namespace: turning a feature on, off, or
 into one of its modes is done through the same settings keys that tune it
 (`behavior.compactionStrategy`, `sandbox.enabled`, `notifications.adaptiveSuppression`,
 `web.enabled`, ...). Surfaces render the per-feature metadata exported as
-`FEATURE_SETTINGS` from `@goodvibes-jev/engine/sdk/platform/runtime/feature-flags`:
+`FEATURE_SETTINGS` from `@goodvibes-jev/engine/platform/platform/runtime/feature-flags`:
 each feature's domain, enablement shape (boolean or enum with its active
 values), associated tuning keys, real behavior description, restart
 requirement, and stock default.
@@ -15,7 +15,7 @@ configurable capability, never unreachable machinery.
 
 ## How enablement works
 
-- The SDK derives each internal capability gate from its bound settings key at
+- The platform derives each internal capability gate from its bound settings key at
   startup and keeps it live through config subscriptions. Setting
   `behavior.compactionStrategy` to `off` turns session compaction off;
   setting `sandbox.judgment` to `auto-approve` opts into judgment auto-approval.
@@ -35,7 +35,7 @@ configurable capability, never unreachable machinery.
 ## Migration from the legacy featureFlags config
 
 Configs written before the dissolution carried a `featureFlags` record. On
-first load the SDK migrates each entry onto its domain settings key (explicit
+first load the platform migrates each entry onto its domain settings key (explicit
 choices preserved: a legacy `disabled` maps to the feature's off value, a
 legacy `enabled` defers to an existing domain switch it used to AND with),
 removes the legacy record, persists the rewritten file, and logs a one-line
@@ -63,7 +63,7 @@ same way. No user action is needed.
 | Overflow spill backend | `tools.overflowSpillBackend` | `ledger`/`diagnostics` | `file` | no | The backend selection is always honored; `file` is the stock behavior. |
 | Tool contract verification | `tools.contractVerification` | `true` | on | no | Registration-time contract checks; invalid tools fail closed. |
 | Output schema fingerprints | `tools.outputSchemaFingerprints` | `true` | off | no | `_meta` fingerprints on find/analyze/inspect results. |
-| OpenTelemetry foundation | `telemetry.otelMode` | `in-process`/`remote-export` | `off` | yes (from off) | SDK init, span creation, in-process export. |
+| OpenTelemetry foundation | `telemetry.otelMode` | `in-process`/`remote-export` | `off` | yes (from off) | platform init, span creation, in-process export. |
 | OTel remote export | `telemetry.otelMode` | `remote-export` | off | no | OTLP export; decision-log export tunes via `telemetry.decisionOtlp*`. |
 | Local provider context ingestion | `provider.localContextIngestion` | `true` | on | no | Provider-reported context windows for local models. |
 | Provider optimizer | `provider.optimizerMode` | `manual`/`auto`/`pinned` | `off` | no | Capability-contract routing; pin via `provider.optimizerPinnedModel`. |

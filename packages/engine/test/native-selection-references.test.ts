@@ -3,15 +3,15 @@ import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'nod
 import { dirname, join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { ownedAutomationJob, AutomationJobMutationStaleError } from '../sdk/src/platform/automation/job-mutations.ts';
-import { AutomationManager, assertRetainedAutomationTargetCurrent, projectRetainedAutomationRequest } from '../sdk/src/platform/automation/manager-runtime.ts';
-import { AutomationJobStore } from '../sdk/src/platform/automation/store/jobs.ts';
-import { snapshotJudgmentInput } from '../sdk/src/platform/gate/judgment-input.ts';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.ts';
-import { SQLiteStore } from '../sdk/src/platform/state/sqlite-store.ts';
-import { KNOWLEDGE_SCHEMA_VERSION } from '../sdk/src/platform/knowledge/store-schema-version.ts';
-import { ProjectPlanningService } from '../sdk/src/platform/knowledge/project-planning/service.ts';
-import { findCardNumberShapes } from '../sdk/src/platform/security/card-shapes.ts';
+import { ownedAutomationJob, AutomationJobMutationStaleError } from '../platform/src/platform/automation/job-mutations.ts';
+import { AutomationManager, assertRetainedAutomationTargetCurrent, projectRetainedAutomationRequest } from '../platform/src/platform/automation/manager-runtime.ts';
+import { AutomationJobStore } from '../platform/src/platform/automation/store/jobs.ts';
+import { snapshotJudgmentInput } from '../platform/src/platform/gate/judgment-input.ts';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.ts';
+import { SQLiteStore } from '../platform/src/platform/state/sqlite-store.ts';
+import { KNOWLEDGE_SCHEMA_VERSION } from '../platform/src/platform/knowledge/store-schema-version.ts';
+import { ProjectPlanningService } from '../platform/src/platform/knowledge/project-planning/service.ts';
+import { findCardNumberShapes } from '../platform/src/platform/security/card-shapes.ts';
 import { automationMutationFixture } from './_helpers/automation-mutation-fixture.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 

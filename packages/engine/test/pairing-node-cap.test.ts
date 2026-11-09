@@ -20,7 +20,7 @@ import { join } from 'node:path';
 import {
   PairingLimitReachedError,
   PairingTokenManager,
-} from '../sdk/src/platform/pairing/pairing-token-store.ts';
+} from '../platform/src/platform/pairing/pairing-token-store.ts';
 
 function tempFile(): string {
   return join(mkdtempSync(join(tmpdir(), 'gv-pairing-cap-')), 'pairing-tokens.json');

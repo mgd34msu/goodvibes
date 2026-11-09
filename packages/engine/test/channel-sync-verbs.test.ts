@@ -12,29 +12,29 @@
  * `channels.inbox.list` was the eighth, and it is served now too, by the host
  * that holds the provider credentials, from its synced mirror. What is asserted
  * here is the split: the flag is gone and the advertised path is routed, while
- * registering THESE handlers still attaches nothing for it, because an SDK-only
+ * registering THESE handlers still attaches nothing for it, because an platform-only
  * build has no mailbox to answer from.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { GATEWAY_REST_ROUTES } from '../daemon-sdk/src/gateway-rest-routes.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { GATEWAY_REST_ROUTES } from '../daemon-api/src/gateway-rest-routes.ts';
 import {
-  createDaemonSdkRouteProbe,
+  createDaemonApiRouteProbe,
   reconcileHttpDescriptor,
-} from '../sdk/src/platform/control-plane/method-catalog-route-reconcile.ts';
+} from '../platform/src/platform/control-plane/method-catalog-route-reconcile.ts';
 import {
   CHANNEL_SYNC_METHOD_IDS,
   registerChannelSyncGatewayMethods,
-} from '../sdk/src/platform/control-plane/routes/channel-sync.ts';
+} from '../platform/src/platform/control-plane/routes/channel-sync.ts';
 import {
   ChannelSyncRegistry,
   ChannelSyncStore,
-} from '../sdk/src/platform/channel-sync/index.ts';
-import { readGatewayVerbRefusal } from '../sdk/src/platform/control-plane/routes/gateway-verb-error.ts';
-import type { GatewayMethodInvocation } from '../sdk/src/platform/control-plane/method-catalog-shared.ts';
+} from '../platform/src/platform/channel-sync/index.ts';
+import { readGatewayVerbRefusal } from '../platform/src/platform/control-plane/routes/gateway-verb-error.ts';
+import type { GatewayMethodInvocation } from '../platform/src/platform/control-plane/method-catalog-shared.ts';
 
 let root: string;
 let registry: ChannelSyncRegistry;
@@ -164,7 +164,7 @@ describe('the verbs are callable, and say so', () => {
   });
 
   test('each advertised REST path is in the gateway REST table and resolves', async () => {
-    const probe = createDaemonSdkRouteProbe();
+    const probe = createDaemonApiRouteProbe();
     const catalog = catalogWithHandlers();
     const tableIds = new Set(GATEWAY_REST_ROUTES.map((entry) => entry.methodId));
     for (const id of CHANNEL_SYNC_METHOD_IDS) {
@@ -210,7 +210,7 @@ describe('the verbs are callable, and say so', () => {
   // The eighth verb, and the last of this debt. It is served now, by the host
   // that holds the provider credentials, not by this module, so the flag is
   // gone and the path is in the table. What stays true is that registering the
-  // routing/drafts handlers attaches no handler for it: an SDK-only build has
+  // routing/drafts handlers attaches no handler for it: an platform-only build has
   // no mailbox, and the 501 it answers names the composition step that is
   // missing rather than pretending the verb does not exist.
   test('channels.inbox.list no longer claims to be uncallable, and its path is routed', () => {

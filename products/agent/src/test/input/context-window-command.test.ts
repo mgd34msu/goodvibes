@@ -9,7 +9,7 @@ import {
   handleContextWindowSubcommand,
 } from '../../input/commands/context-window.ts';
 import type { CommandContext } from '../../input/command-registry.ts';
-import type { ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
 
 // ---------------------------------------------------------------------------
 // parseContextWindowSize

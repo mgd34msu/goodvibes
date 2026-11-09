@@ -1,6 +1,6 @@
-import { buildMcpAttackPathReview } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import type { ApiTokenAuditor } from '@goodvibes-jev/engine/sdk/platform/security';
-import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/sdk/platform/config';
+import { buildMcpAttackPathReview } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import type { ApiTokenAuditor } from '@goodvibes-jev/engine/platform/platform/security';
+import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/platform/platform/config';
 import type { TerminalSlashCommand } from './command-registry.js';
 type AttackPathInput = Parameters<typeof buildMcpAttackPathReview>[0];
 /** Security reads and presentation share a flow; each shell supplies its available views and sources. */

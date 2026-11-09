@@ -12,7 +12,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
 import { ConversationManager } from '../../core/conversation.ts';
 import { buildTurnModel, transcriptUnits, type TurnModel } from '../../core/work-tree-model.ts';
 import { userMessageFingerprint, WorkTreeTimingStore, type TurnTiming, type WorkTreeSources } from '../../core/work-tree-sources.ts';

@@ -1,8 +1,8 @@
 import { renderThrobberLine } from './throbber.ts';
 import { createShellFooter, statusCostText as priceUsage } from '@goodvibes-jev/engine/terminal-shell/shell-footer';
-import { presetForMode, type GatePresetName } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { type Line, createEmptyLine } from '@goodvibes-jev/engine/sdk/platform/types';
-import '@goodvibes-jev/engine/sdk/platform/providers';
+import { presetForMode, type GatePresetName } from '@goodvibes-jev/engine/platform/platform/gate';
+import { type Line, createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types';
+import '@goodvibes-jev/engine/platform/platform/providers';
 import { type VoiceCaptureIndicatorState } from '../core/voice-capture-status.ts';
 import { activeTokens, activeUiTones } from './theme.ts';
 import './composer.ts';

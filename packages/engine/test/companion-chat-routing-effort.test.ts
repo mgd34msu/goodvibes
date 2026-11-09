@@ -1,13 +1,13 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { CompanionChatManager } from '../sdk/src/platform/companion/companion-chat-manager.js';
-import type { CompanionChatManagerConfig, CompanionLLMProvider } from '../sdk/src/platform/companion/companion-chat-manager.js';
-import type { PersistedChatSession } from '../sdk/src/platform/companion/companion-chat-persistence.js';
-import { CompanionChatPersistence } from '../sdk/src/platform/companion/companion-chat-persistence.js';
-import { dispatchCompanionChatRoutes } from '../sdk/src/platform/companion/companion-chat-routes.js';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.js';
-import { AtomicWriteDurabilityError } from '../sdk/src/platform/utils/atomic-json-store.js';
+import { CompanionChatManager } from '../platform/src/platform/companion/companion-chat-manager.js';
+import type { CompanionChatManagerConfig, CompanionLLMProvider } from '../platform/src/platform/companion/companion-chat-manager.js';
+import type { PersistedChatSession } from '../platform/src/platform/companion/companion-chat-persistence.js';
+import { CompanionChatPersistence } from '../platform/src/platform/companion/companion-chat-persistence.js';
+import { dispatchCompanionChatRoutes } from '../platform/src/platform/companion/companion-chat-routes.js';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.js';
+import { AtomicWriteDurabilityError } from '../platform/src/platform/utils/atomic-json-store.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const managers: CompanionChatManager[] = [], roots: string[] = [], expectedCloseFailure = new Set<CompanionChatManager>();

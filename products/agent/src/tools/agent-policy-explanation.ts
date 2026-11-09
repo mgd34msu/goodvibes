@@ -1,10 +1,10 @@
-import type { PermissionCategory } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import { analyzePermissionRequest } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import type { ToolDefinition } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { PermissionCategory } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { analyzePermissionRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
+import type { ToolDefinition } from '@goodvibes-jev/engine/platform/platform/types';
+import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext } from '../input/command-registry.ts';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { readPermissionCategory } from '@goodvibes-jev/engine/sdk/platform/gate/policy';
+import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
+import { readPermissionCategory } from '@goodvibes-jev/engine/platform/platform/gate/policy';
 import { HARNESS_MODE_DESCRIPTORS } from './agent-harness-mode-catalog.ts';
 import { explainAgentToolPolicyInvocation } from './agent-tool-policy-guard.ts';
 import { computeApprovalPosture, readApprovalPostureFromConfig, type ApprovalPosture } from '../permissions/approval-posture.ts';

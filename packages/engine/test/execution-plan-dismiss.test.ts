@@ -17,7 +17,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'bun:test';
-import { ExecutionPlanManager, type PlanItem } from '../sdk/src/platform/core/execution-plan.ts';
+import { ExecutionPlanManager, type PlanItem } from '../platform/src/platform/core/execution-plan.ts';
 
 const roots: string[] = [];
 function createTmpRoot(prefix: string): string {

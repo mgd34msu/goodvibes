@@ -1,8 +1,8 @@
 import { expect, spyOn, test } from 'bun:test';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.js';
-import { InboxCursorStore } from '../sdk/src/platform/intake/cursor-store.js';
-import { registerInboxSurface, INBOX_LIST_METHOD_ID, type InboxPollingControl, type InboxSurfaceContext } from '../sdk/src/platform/intake/registration.js';
-import type { InboundProviderAdapter } from '../sdk/src/platform/intake/provider-adapter.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
+import { InboxCursorStore } from '../platform/src/platform/intake/cursor-store.js';
+import { registerInboxSurface, INBOX_LIST_METHOD_ID, type InboxPollingControl, type InboxSurfaceContext } from '../platform/src/platform/intake/registration.js';
+import type { InboundProviderAdapter } from '../platform/src/platform/intake/provider-adapter.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 function deferred() { let resolve!: () => void; const promise = new Promise<void>((done) => { resolve = done; }); return { resolve, promise }; }

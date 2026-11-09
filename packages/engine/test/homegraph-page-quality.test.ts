@@ -7,8 +7,8 @@ import {
   homeGraphPageSourceWeight,
   isUsefulHomeGraphPageSource,
   isUsefulHomeGraphPageSourceCandidate,
-} from '../sdk/src/platform/knowledge/home-graph/page-quality.js';
-import type { KnowledgeSourceRecord } from '../sdk/src/platform/knowledge/types.js';
+} from '../platform/src/platform/knowledge/home-graph/page-quality.js';
+import type { KnowledgeSourceRecord } from '../platform/src/platform/knowledge/types.js';
 
 const FIXED_TEST_EPOCH_MS = Date.UTC(2026, 0, 1);
 

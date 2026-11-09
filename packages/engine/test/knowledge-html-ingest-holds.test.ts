@@ -5,12 +5,12 @@ import { tmpdir } from 'node:os';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { ArtifactStore } from '../sdk/src/platform/artifacts/store.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { HomeGraphService } from '../sdk/src/platform/knowledge/home-graph/service.js';
-import { KnowledgeConnectorRegistry } from '../sdk/src/platform/knowledge/connectors.js';
-import { ingestKnowledgeArtifact } from '../sdk/src/platform/knowledge/ingest-inputs.js';
-import { KnowledgeExtractionJudgmentHoldError } from '../sdk/src/platform/knowledge/extraction-policy.js';
+import { ArtifactStore } from '../platform/src/platform/artifacts/store.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { HomeGraphService } from '../platform/src/platform/knowledge/home-graph/service.js';
+import { KnowledgeConnectorRegistry } from '../platform/src/platform/knowledge/connectors.js';
+import { ingestKnowledgeArtifact } from '../platform/src/platform/knowledge/ingest-inputs.js';
+import { KnowledgeExtractionJudgmentHoldError } from '../platform/src/platform/knowledge/extraction-policy.js';
 import { htmlExtractionPort } from './_helpers/html-extraction-readings.js';
 
 let root: string;

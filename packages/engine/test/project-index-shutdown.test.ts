@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ProjectIndex } from '../sdk/src/platform/state/project-index.js';
+import { ProjectIndex } from '../platform/src/platform/state/project-index.js';
 
 test('index disposal flushes accepted changes once and makes later writes terminal', async () => {
   const root = mkdtempSync(join(tmpdir(), 'index-shutdown-')); const index = new ProjectIndex(root);

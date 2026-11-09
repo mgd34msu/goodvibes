@@ -1,7 +1,7 @@
-import { isYoloExecution } from '@goodvibes-jev/engine/sdk/platform/gate';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import { assertCurrentToolExecution } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { isYoloExecution } from '@goodvibes-jev/engine/platform/platform/gate';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { assertCurrentToolExecution } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import {
   wrapAnalyzeToolForAgentPolicy,
   wrapRegistryToolForAgentPolicy,
@@ -17,7 +17,7 @@ import {
   type SettingsToolArgs,
 } from './agent-settings-write-policy.ts';
 import { wrapSettingsToolForAdmittedAgentPolicy as wrapSettingsToolForAgentPolicy,
-  validateAgentSettingsMechanics } from '@goodvibes-jev/engine/sdk/platform/gate/policy';
+  validateAgentSettingsMechanics } from '@goodvibes-jev/engine/platform/platform/gate/policy';
 import { wrapWebSearchToolForAgentPolicy } from './agent-web-search-policy.ts';
 import type {
   AgentToolArgs,

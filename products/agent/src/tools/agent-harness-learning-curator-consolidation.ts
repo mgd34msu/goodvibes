@@ -1,11 +1,11 @@
-import { requireDecisionFeature } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { requireDecisionFeature } from '@goodvibes-jev/engine/platform/platform/runtime';
 import type { AgentWorkspaceLocalLibraryItem } from '../input/agent-workspace-types.ts';
 import type { LearningCandidateDraft, LearningConsolidationDiff, LearningConsolidationFields, LearningConsolidationPlan, LocalLearningCandidateDomain } from './agent-harness-learning-curator-types.ts';
 import { localRegistryRoute, routeList, routeValue } from './agent-harness-learning-curator-common.ts';
 import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import type { LearningRecord } from './agent-harness-learning-curator-source.ts';
 import { readLearningDuplicatePair, readLearningSurvivor } from './agent-harness-learning-curator-readings.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 const CONSOLIDATION_DOMAINS: readonly LocalLearningCandidateDomain[] = ['memory', 'persona', 'skill', 'routine'];
 
 function uniqueText(values: readonly string[]): readonly string[] {

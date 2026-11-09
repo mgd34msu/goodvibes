@@ -2,9 +2,9 @@
 import { homedir } from 'node:os';
 import { writeSync } from 'node:fs';
 import { runClusterCommand, resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
-import { readOperatorTokenFile } from '@goodvibes-jev/engine/sdk/platform/workspace';
-import { isDeclaredSecretBearingConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
-import { createNetworkFetch } from '@goodvibes-jev/engine/sdk/platform/runtime/transport';
+import { readOperatorTokenFile } from '@goodvibes-jev/engine/platform/platform/workspace';
+import { isDeclaredSecretBearingConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import { createNetworkFetch } from '@goodvibes-jev/engine/platform/platform/runtime/transport';
 import { runConfigCommand } from '../daemon/config-command.js';
 import { runPairCommand } from '../daemon/pair-command.js';
 import { createDaemonCommandSocketFactory } from '../daemon/remote-transport.js';

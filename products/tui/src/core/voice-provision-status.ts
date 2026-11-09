@@ -2,7 +2,7 @@
 // voice-provision-status.ts, the surface-facing projection of the managed
 // local-voice runtime (voice.local.status / voice.local.install).
 //
-// The SDK owns the provisioning policy: a one-act install that fetches the
+// The platform owns the provisioning policy: a one-act install that fetches the
 // piper TTS engine + a default voice (fully hosted) and, where a pinned bundle
 // is hosted for the platform, the whisper STT engine + model, atomic,
 // checksum-verified, resumable, and honest about every terminal state. This
@@ -16,7 +16,7 @@
 // hands them here, so these builders are unit-testable against fixture shapes.
 // ---------------------------------------------------------------------------
 
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/sdk';
+import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
 
 /** voice.local.status output, the no-network installed/available snapshot. */
 export type VoiceRuntimeStatusResult = OperatorMethodOutput<'voice.local.status'>;
@@ -44,7 +44,7 @@ export function formatVoiceBytes(bytes: number | null | undefined): string {
 /**
  * True when a whisper STT bundle is PINNED for this platform (bytes + checksum
  * fixed) but not yet hosted/sideloaded, the "supported but not yet published"
- * state. The SDK signals it as supported === true with an unprovisioned state
+ * state. The platform signals it as supported === true with an unprovisioned state
  * and an honest reason string; contrast an unsupported platform (supported ===
  * false), which has no pin at all.
  */

@@ -1,5 +1,5 @@
 /**
- * fleet-graph.ts, display helpers for fleet.graph.get (SDK 1.8.0's fix-phase
+ * fleet-graph.ts, display helpers for fleet.graph.get (platform 1.8.0's fix-phase
  * workstream rework): the dependency-graph view of one workstream (nodes,
  * edges, elastic-pool state).
  *
@@ -9,7 +9,7 @@
  * 'awaiting-capacity' / 'in-phase' / 'passed' / 'failed' / 'blocked-budget' /
  * 'blocked-dependency' / 'blocked-bookkeeping' / 'held-merge'), read as an open string for the same
  * reason lib/fleet.ts reads ProcessState as one: this client is hand-mirrored
- * from the SDK source (contract-bridge-types.ts's generic bridge for
+ * from the platform source (contract-bridge-types.ts's generic bridge for
  * fleet.graph.get) rather than generated, so a daemon newer than this client
  * may report a state it has never seen, render it verbatim, never drop it.
  */

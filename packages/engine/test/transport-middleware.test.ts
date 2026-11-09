@@ -4,10 +4,10 @@
  * Covers:
  * 1. Middleware execution order (outer-first, onion model)
  * 2. Context mutation propagated through chain
- * 3. Error propagation, middleware error surfaces as SDKError{kind:'unknown'}
+ * 3. Error propagation, middleware error surfaces as GoodVibesError{kind:'unknown'}
  * 4. Signal propagation, signal available in ctx
  * 5. ctx.response / ctx.durationMs / ctx.error set correctly
- * 6. sdk.use() appends to chain, stateless rebuild each call
+ * 6. platform.use() appends to chain, stateless rebuild each call
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -232,7 +232,7 @@ describe('composeMiddleware: signal propagation', () => {
 });
 
 // ---------------------------------------------------------------------------
-// sdk.use() facade integration
+// platform.use() facade integration
 // ---------------------------------------------------------------------------
 
 describe('transport.use(): appends to chain', () => {
@@ -291,55 +291,55 @@ describe('transport.use(): appends to chain', () => {
 });
 
 // ---------------------------------------------------------------------------
-// sdk.use() facade on the full SDK instance
+// platform.use() facade on the full platform instance
 // ---------------------------------------------------------------------------
 
-describe('sdk.use(): full SDK facade integration', () => {
-  test('sdk.use() appends middleware that runs on operator transport requests', async () => {
-    const { createGoodVibesSdk } = await import('../sdk/src/client.js');
+describe('platform.use(): full platform facade integration', () => {
+  test('platform.use() appends middleware that runs on operator transport requests', async () => {
+    const { createGoodVibesPlatform } = await import('../platform/src/client.js');
     const intercepted: string[] = [];
     const fetchStub = stubFetch(async () => {
       return new Response(JSON.stringify({ ok: true }), { status: 200 });
     });
-    const sdk = createGoodVibesSdk({
+    const platformClient = createGoodVibesPlatform({
       baseUrl: 'https://api.example.com',
       fetch: fetchStub,
     });
-    sdk.use(async (ctx, next) => {
+    platformClient.use(async (ctx, next) => {
       intercepted.push(ctx.url);
       await next();
     });
     // Trigger a request via the operator transport directly to verify middleware ran.
     // We invoke requestJson on the underlying transport (accessible via operator.transport).
-    await sdk.operator.transport.requestJson('/v1/test');
+    await platformClient.operator.transport.requestJson('/v1/test');
     expect(intercepted.length).toBeGreaterThanOrEqual(1);
     expect(intercepted[0]).toContain('/v1/test');
   });
 
-  test('multiple sdk.use() calls compose in order', async () => {
-    const { createGoodVibesSdk } = await import('../sdk/src/client.js');
+  test('multiple platform.use() calls compose in order', async () => {
+    const { createGoodVibesPlatform } = await import('../platform/src/client.js');
     const order: string[] = [];
     const fetchStub = stubFetch(async () => {
       return new Response('{}', { status: 200 });
     });
-    const sdk = createGoodVibesSdk({
+    const platformClient = createGoodVibesPlatform({
       baseUrl: 'https://api.example.com',
       fetch: fetchStub,
     });
-    sdk.use(async (_ctx, next) => { order.push('first'); await next(); });
-    sdk.use(async (_ctx, next) => { order.push('second'); await next(); });
-    await sdk.operator.transport.requestJson('/v1/test');
+    platformClient.use(async (_ctx, next) => { order.push('first'); await next(); });
+    platformClient.use(async (_ctx, next) => { order.push('second'); await next(); });
+    await platformClient.operator.transport.requestJson('/v1/test');
     expect(order[0]).toBe('first');
     expect(order[1]).toBe('second');
   });
 
-  test('middleware option in createGoodVibesSdk is applied on first request', async () => {
-    const { createGoodVibesSdk } = await import('../sdk/src/client.js');
+  test('middleware option in createGoodVibesPlatform is applied on first request', async () => {
+    const { createGoodVibesPlatform } = await import('../platform/src/client.js');
     let middlewareRan = false;
     const fetchStub = stubFetch(async () => {
       return new Response('{}', { status: 200 });
     });
-    const sdk = createGoodVibesSdk({
+    const platformClient = createGoodVibesPlatform({
       baseUrl: 'https://api.example.com',
       fetch: fetchStub,
       middleware: [
@@ -349,19 +349,19 @@ describe('sdk.use(): full SDK facade integration', () => {
         },
       ],
     });
-    await sdk.operator.transport.requestJson('/v1/test');
+    await platformClient.operator.transport.requestJson('/v1/test');
     expect(middlewareRan).toBe(true);
   });
 });
 
 // ---------------------------------------------------------------------------
-// HttpStatusError thrown from middleware is wrapped as SDKError{kind:'unknown'}
+// HttpStatusError thrown from middleware is wrapped as GoodVibesError{kind:'unknown'}
 // ---------------------------------------------------------------------------
 
 describe('middleware error wrap: HttpStatusError from middleware', () => {
-  test('HttpStatusError thrown by middleware surfaces as SDKError with middleware identity in cause', async () => {
+  test('HttpStatusError thrown by middleware surfaces as GoodVibesError with middleware identity in cause', async () => {
     const { createHttpJsonTransport } = await import('../transport-http/src/http-core.js');
-    const { HttpStatusError, GoodVibesSdkError } = await import('./_helpers/dist-errors.js');
+    const { HttpStatusError, GoodVibesError } = await import('./_helpers/dist-errors.js');
 
     const fetchStub = stubFetch(async () => {
       return new Response(JSON.stringify({ ok: true }), { status: 200 });
@@ -382,8 +382,8 @@ describe('middleware error wrap: HttpStatusError from middleware', () => {
 
     const caught = await transport.requestJson('/v1/test').catch((e: unknown) => e);
 
-    expect(caught instanceof GoodVibesSdkError).toBe(true);
-    const err = caught as InstanceType<typeof GoodVibesSdkError>;
+    expect(caught instanceof GoodVibesError).toBe(true);
+    const err = caught as InstanceType<typeof GoodVibesError>;
     expect(err.category).toBe('unknown');
     // cause should include middleware identity
     const cause = (err as { cause?: unknown }).cause as { middleware?: string } | undefined;
@@ -392,7 +392,7 @@ describe('middleware error wrap: HttpStatusError from middleware', () => {
 
   test('non-HttpStatusError thrown by middleware is also wrapped with middleware identity', async () => {
     const { createHttpJsonTransport } = await import('../transport-http/src/http-core.js');
-    const { GoodVibesSdkError } = await import('./_helpers/dist-errors.js');
+    const { GoodVibesError } = await import('./_helpers/dist-errors.js');
 
     const fetchStub = stubFetch(async () => {
       return new Response('{}', { status: 200 });
@@ -409,8 +409,8 @@ describe('middleware error wrap: HttpStatusError from middleware', () => {
 
     const caught = await transport.requestJson('/v1/test').catch((e: unknown) => e);
 
-    expect(caught instanceof GoodVibesSdkError).toBe(true);
-    const err = caught as InstanceType<typeof GoodVibesSdkError>;
+    expect(caught instanceof GoodVibesError).toBe(true);
+    const err = caught as InstanceType<typeof GoodVibesError>;
     expect(err.category).toBe('unknown');
     const cause = (err as { cause?: unknown }).cause as { middleware?: string } | undefined;
     expect(cause?.middleware).toBe('loggerMw');

@@ -11,16 +11,16 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CompanionChatManager } from '../sdk/src/platform/companion/companion-chat-manager.ts';
-import { defaultSessionsDir } from '../sdk/src/platform/companion/companion-chat-persistence.ts';
+import { CompanionChatManager } from '../platform/src/platform/companion/companion-chat-manager.ts';
+import { defaultSessionsDir } from '../platform/src/platform/companion/companion-chat-persistence.ts';
 import type {
   CompanionLLMProvider,
   CompanionProviderChunk,
-} from '../sdk/src/platform/companion/companion-chat-manager.ts';
-import { dispatchCompanionChatRoutes } from '../sdk/src/platform/companion/companion-chat-routes.ts';
-import type { CompanionChatRouteContext } from '../sdk/src/platform/companion/companion-chat-route-types.ts';
-import { SharedSessionBroker } from '../sdk/src/platform/control-plane/session-broker.ts';
-import { RouteBindingManager } from '../sdk/src/platform/channels/index.ts';
+} from '../platform/src/platform/companion/companion-chat-manager.ts';
+import { dispatchCompanionChatRoutes } from '../platform/src/platform/companion/companion-chat-routes.ts';
+import type { CompanionChatRouteContext } from '../platform/src/platform/companion/companion-chat-route-types.ts';
+import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.ts';
+import { RouteBindingManager } from '../platform/src/platform/channels/index.ts';
 import { trackDisposables } from './_helpers/disposables.ts';
 
 const disposables = trackDisposables();

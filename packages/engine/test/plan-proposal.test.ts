@@ -3,13 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, test } from 'bun:test';
-import { ExecutionPlanManager } from '../sdk/src/platform/core/execution-plan.js';
+import { ExecutionPlanManager } from '../platform/src/platform/core/execution-plan.js';
 import {
   assemblePlanProposal,
   planProposalToPlanningState,
   singleItemProposal,
   type RawDecomposition,
-} from '../sdk/src/platform/core/plan-proposal.js';
+} from '../platform/src/platform/core/plan-proposal.js';
 
 const tmpRoots: string[] = [];
 

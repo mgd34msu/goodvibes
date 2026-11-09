@@ -9,7 +9,7 @@
  */
 
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { ConversationManager } from '../../core/conversation.ts';
 import { activeTheme, registerThemeRefresh, setActiveThemeMode, setActiveThemeName } from '../../renderer/theme.ts';
 

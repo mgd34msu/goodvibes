@@ -1,11 +1,11 @@
 import { admittedToolWorkspace, executeAdmitted } from '../helpers/admitted-tool.ts';
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
+import { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import { createShellPathService } from '@/runtime/index.ts';
 import { AgentDocumentRegistry } from '../../agent/document-registry.ts';
 import { createAgentDocumentsTool, registerAgentDocumentsTool } from '../../tools/agent-documents-tool.ts';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 function fixture() {

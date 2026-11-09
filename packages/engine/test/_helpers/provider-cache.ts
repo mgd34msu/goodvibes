@@ -2,8 +2,8 @@ import { makeProjectTempDir } from './project-temp.ts';
 import { createTempDirRegistry } from './temp-registry.ts';
 import { lstatSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { CatalogModel, loadCatalogCache } from '../../sdk/src/platform/providers/model-catalog.ts';
-import type { BenchmarkEntry } from '../../sdk/src/platform/providers/model-benchmarks.ts';
+import type { CatalogModel, loadCatalogCache } from '../../platform/src/platform/providers/model-catalog.ts';
+import type { BenchmarkEntry } from '../../platform/src/platform/providers/model-benchmarks.ts';
 
 export interface ProviderCacheFixture {
   readonly cacheDir: string;

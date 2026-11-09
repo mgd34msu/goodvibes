@@ -26,7 +26,7 @@ function workspaceDiagnostic(message: string) {
  */
 describe('workspace swap failed', () => {
   test('normalizeError handles workspace errors without throwing', async () => {
-    const { normalizeError, readNormalizedError } = await import('../sdk/src/platform/utils/error-display.js');
+    const { normalizeError, readNormalizedError } = await import('../platform/src/platform/utils/error-display.js');
     const err = new Error('Workspace swap failed: target directory not found');
     expect(normalizeError(err).message).toBe(err.message);
     const fixture = workspaceDiagnostic(err.message);
@@ -39,14 +39,14 @@ describe('workspace swap failed', () => {
   });
 
   test('normalizeError infers recoverable=false for unknown errors', async () => {
-    const { normalizeError } = await import('../sdk/src/platform/utils/error-display.js');
+    const { normalizeError } = await import('../platform/src/platform/utils/error-display.js');
     const err = new Error('Unexpected swap state');
     const result = normalizeError(err);
     expect(result.recoverable).toBe(false);
   });
 
   test('summarizeError returns a non-empty string', async () => {
-    const { readNormalizedError, summarizeError } = await import('../sdk/src/platform/utils/error-display.js');
+    const { readNormalizedError, summarizeError } = await import('../platform/src/platform/utils/error-display.js');
     const err = new Error('workspace gone');
     expect(summarizeError(err)).toBe(err.message);
     const fixture = workspaceDiagnostic(err.message);

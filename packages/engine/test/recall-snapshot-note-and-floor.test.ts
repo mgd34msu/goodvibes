@@ -11,13 +11,13 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { buildRecallSnapshot } from '../sdk/src/platform/runtime/memory-spine/recall-snapshot.js';
+import { buildRecallSnapshot } from '../platform/src/platform/runtime/memory-spine/recall-snapshot.js';
 import {
   runHonestMemorySearch,
   MIN_PROMPT_MEMORY_CONFIDENCE,
   type HonestMemorySearchResult,
-} from '../sdk/src/platform/state/memory-recall-contract.js';
-import type { MemoryRecord } from '../sdk/src/platform/state/memory-store.js';
+} from '../platform/src/platform/state/memory-recall-contract.js';
+import type { MemoryRecord } from '../platform/src/platform/state/memory-store.js';
 
 function record(id: string, confidence: number, reviewState: MemoryRecord['reviewState'] = 'fresh'): MemoryRecord {
   return {
@@ -93,7 +93,7 @@ describe('honest search result carries the recall floor', () => {
 
   test('the memory-search wire schema exposes recallFloor', async () => {
     const { MEMORY_RECORD_SEARCH_OUTPUT_SCHEMA } = await import(
-      '../sdk/src/platform/control-plane/operator-contract-schemas-runtime.js'
+      '../platform/src/platform/control-plane/operator-contract-schemas-runtime.js'
     );
     const schema = MEMORY_RECORD_SEARCH_OUTPUT_SCHEMA as { properties?: Record<string, unknown>; required?: string[] };
     expect('recallFloor' in (schema.properties ?? {})).toBe(true);

@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
-import { HookDispatcher } from '../sdk/src/platform/hooks/dispatcher.ts';
-import { TurnHookOwner } from '../sdk/src/platform/hooks/turn-ownership.ts';
-import type { HookCategory, HookEvent, HookPhase } from '../sdk/src/platform/hooks/types.ts';
+import { HookDispatcher } from '../platform/src/platform/hooks/dispatcher.ts';
+import { TurnHookOwner } from '../platform/src/platform/hooks/turn-ownership.ts';
+import type { HookCategory, HookEvent, HookPhase } from '../platform/src/platform/hooks/types.ts';
 
 function event(phase: HookPhase, category: HookCategory, specific = 'dynamic-extension'): HookEvent {
   return { path: `${phase}:${category}:${specific}`, phase, category, specific, sessionId: 'session', timestamp: 0, payload: {} };

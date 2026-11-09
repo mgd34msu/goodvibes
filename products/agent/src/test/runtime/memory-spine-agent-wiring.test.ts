@@ -1,7 +1,7 @@
 /**
  * The agent's own memory-spine wiring (services.ts's memorySpineClient +
  * memorySpineTransport, and the reconcileMemorySpineAdoption policy bootstrap.ts
- * runs against a real reachability probe). Complements the SDK's generic
+ * runs against a real reachability probe). Complements the platform's generic
  * memory-spine-client tests and this repo's memory-spine-rest-transport tests with
  * proof that THIS agent's construction behaves correctly end to end:
  *
@@ -20,16 +20,16 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { DaemonServer } from '@goodvibes-jev/engine/sdk/platform/daemon';
-import { UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { DaemonServer } from '@goodvibes-jev/engine/platform/platform/daemon';
+import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
 import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { reconcileMemorySpineAdoption } from '../../runtime/memory-spine-adoption.ts';
 import { createSpineConnectionResolver } from '../../runtime/session-spine-rest-transport.ts';
-import { createSessionSpineRestProbe as createSpineRestProbe } from '@goodvibes-jev/engine/sdk/platform/runtime/session-spine';
+import { createSessionSpineRestProbe as createSpineRestProbe } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 const TEST_TOKEN = 'memory-spine-agent-wiring-token-456';

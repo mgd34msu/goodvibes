@@ -8,9 +8,9 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { CONFIG_SCHEMA } from '../sdk/src/platform/config/schema.ts';
-import { isDeclaredSecretBearingConfigKey } from '../sdk/src/platform/config/secret-bearing-config-keys.ts';
-import { isStructuredCredentialReferenceConfigKey, isScalarCredentialReferenceConfigKey } from '../sdk/src/platform/config/structured-credential-config.ts';
+import { CONFIG_SCHEMA } from '../platform/src/platform/config/schema.ts';
+import { isDeclaredSecretBearingConfigKey } from '../platform/src/platform/config/secret-bearing-config-keys.ts';
+import { isStructuredCredentialReferenceConfigKey, isScalarCredentialReferenceConfigKey } from '../platform/src/platform/config/structured-credential-config.ts';
 
 export const READINGS_PATH = resolve(import.meta.dir, '..', 'etc', 'credential-key-readings.json');
 

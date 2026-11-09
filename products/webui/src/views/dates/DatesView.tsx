@@ -34,7 +34,7 @@
 import { useState, type ReactNode, type SyntheticEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, Cake, Plane, Plus, RefreshCw, Trash2 } from 'lucide-react';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import type { OperatorMethodInput, OperatorMethodOutput } from '../../lib/goodvibes';
 import { readProfileWriteOutcome, WEBUI_PROFILE_AUTHORITY, WEBUI_PROFILE_SURFACE } from '../../lib/owner-profile';
 import { queryKeys } from '../../lib/queries';
@@ -259,10 +259,10 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
   const [interviewDrafts, setInterviewDrafts] = useState<Record<string, Record<string, string>>>({});
   const [landedOnDrafts, setLandedOnDrafts] = useState<Record<string, string>>({});
 
-  const list = useQuery({ queryKey: queryKeys.occasionsList, queryFn: () => sdk.operator.occasions.list() });
-  const plans = useQuery({ queryKey: queryKeys.occasionsPlansList, queryFn: () => sdk.operator.occasions.plans.list() });
-  const pending = useQuery({ queryKey: queryKeys.occasionsPending, queryFn: () => sdk.operator.occasions.pending() });
-  const state = useQuery({ queryKey: queryKeys.occasionsState, queryFn: () => sdk.operator.occasions.state() });
+  const list = useQuery({ queryKey: queryKeys.occasionsList, queryFn: () => platformClient.operator.occasions.list() });
+  const plans = useQuery({ queryKey: queryKeys.occasionsPlansList, queryFn: () => platformClient.operator.occasions.plans.list() });
+  const pending = useQuery({ queryKey: queryKeys.occasionsPending, queryFn: () => platformClient.operator.occasions.pending() });
+  const state = useQuery({ queryKey: queryKeys.occasionsState, queryFn: () => platformClient.operator.occasions.state() });
 
   function invalidateAll(): Promise<void> {
     return Promise.all([
@@ -274,7 +274,7 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
   }
 
   const answerOccasion = useMutation({
-    mutationFn: (input: OperatorMethodInput<'occasions.answer'>) => sdk.operator.occasions.answer(input),
+    mutationFn: (input: OperatorMethodInput<'occasions.answer'>) => platformClient.operator.occasions.answer(input),
     onSuccess: async (result) => {
       await invalidateAll();
       if (!result.ok) {
@@ -292,7 +292,7 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
 
   const removeOccasion = useMutation({
     mutationFn: (occasionId: string) =>
-      sdk.operator.occasions.remove({ occasionId, confirmed: true, authority: WEBUI_PROFILE_AUTHORITY }),
+      platformClient.operator.occasions.remove({ occasionId, confirmed: true, authority: WEBUI_PROFILE_AUTHORITY }),
     onSuccess: async (result) => {
       await invalidateAll();
       if (result.ok) setSelection(null);
@@ -307,7 +307,7 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
 
   const removePlan = useMutation({
     mutationFn: (text: string) =>
-      sdk.operator.profile.forget({ section: 'Plans', text, authority: WEBUI_PROFILE_AUTHORITY }),
+      platformClient.operator.profile.forget({ section: 'Plans', text, authority: WEBUI_PROFILE_AUTHORITY }),
     onSuccess: async (result) => {
       const outcome = readProfileWriteOutcome(result);
       await invalidateAll();
@@ -324,7 +324,7 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
   });
 
   const resolveConflict = useMutation({
-    mutationFn: (occasionId: string) => sdk.operator.occasions.conflict.resolve(occasionId),
+    mutationFn: (occasionId: string) => platformClient.operator.occasions.conflict.resolve(occasionId),
     onSuccess: async () => {
       await invalidateAll();
       toast({ title: 'Conflict resolved', tone: 'success' });
@@ -333,7 +333,7 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
   });
 
   const answerInterview = useMutation({
-    mutationFn: (input: OperatorMethodInput<'occasions.interview.answer'>) => sdk.operator.occasions.interview.answer(input),
+    mutationFn: (input: OperatorMethodInput<'occasions.interview.answer'>) => platformClient.operator.occasions.interview.answer(input),
     onSuccess: async (result, input) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.occasionsPending });
       if (!result.present || result.interview === null) {
@@ -351,7 +351,7 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
   });
 
   const recordInterview = useMutation({
-    mutationFn: (input: OperatorMethodInput<'occasions.interview.record'>) => sdk.operator.occasions.interview.record(input),
+    mutationFn: (input: OperatorMethodInput<'occasions.interview.record'>) => platformClient.operator.occasions.interview.record(input),
     onSuccess: async (result, input) => {
       await invalidateAll();
       if (!result.present || result.interview === null) {
@@ -373,7 +373,7 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
   });
 
   const runSweep = useMutation({
-    mutationFn: () => sdk.operator.occasions.sweep(),
+    mutationFn: () => platformClient.operator.occasions.sweep(),
     onSuccess: async (result) => {
       setSweepResult(result);
       await invalidateAll();
@@ -383,7 +383,7 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
 
   const proposeOccasion = useMutation({
     mutationFn: () =>
-      sdk.operator.occasions.propose({
+      platformClient.operator.occasions.propose({
         title: occasion.title.trim(),
         date: occasion.date,
         ...(occasion.kind ? { kind: occasion.kind } : {}),
@@ -397,7 +397,7 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
 
   const confirmOccasion = useMutation({
     mutationFn: () =>
-      sdk.operator.occasions.confirm({
+      platformClient.operator.occasions.confirm({
         title: occasion.title.trim(),
         date: occasion.date,
         kind: occasion.kind as OccasionKind,
@@ -424,7 +424,7 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
 
   const proposePlan = useMutation({
     mutationFn: () =>
-      sdk.operator.occasions.plans.propose({
+      platformClient.operator.occasions.plans.propose({
         title: plan.title.trim(),
         from: plan.from,
         to: plan.to,
@@ -437,7 +437,7 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
 
   const confirmPlan = useMutation({
     mutationFn: () =>
-      sdk.operator.occasions.plans.confirm({
+      platformClient.operator.occasions.plans.confirm({
         title: plan.title.trim(),
         from: plan.from,
         to: plan.to,

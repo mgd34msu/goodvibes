@@ -5,7 +5,7 @@ import * as nodeCrypto from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 
 test('separate sources, extractions, edges and job runs retain their full generated identities after reopen', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'knowledge-full-identities-')), dbPath = join(directory, 'knowledge.sqlite');

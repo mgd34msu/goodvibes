@@ -1,5 +1,5 @@
 /**
- * generate-presentation-tokens.test.ts: a change in the SDK presentation
+ * generate-presentation-tokens.test.ts: a change in the engine presentation
  * contract (a glyph, a tone color) reaches both emitted artifacts, the TS artifact
  * is a valid module whose exports are the snapshot (proven by importing what was
  * rendered), and the artifacts are written only when their content changes. The

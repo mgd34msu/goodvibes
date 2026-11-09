@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { readEmailConfig } from '../sdk/src/platform/email/email-config.js';
-import type { EmailReplySubjectSource } from '../sdk/src/platform/email/reply-subject-source.js';
+import { readEmailConfig } from '../platform/src/platform/email/email-config.js';
+import type { EmailReplySubjectSource } from '../platform/src/platform/email/reply-subject-source.js';
 import { snapshotFixture } from './_helpers/mail-inbox-snapshot.js';
 
 function fixture() {

@@ -1,8 +1,8 @@
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogMethods, captureCatalogSnapshot, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureCatalogReadRequest, selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
-import type { McpApi } from '@goodvibes-jev/engine/sdk/platform/mcp';
+import type { McpApi } from '@goodvibes-jev/engine/platform/platform/mcp';
 
 type McpCatalogContext = {
   readonly clients?: { readonly mcpApi?: Pick<McpApi, 'listServerSecurity' | 'listAllTools' | 'captureToolCatalog'> };

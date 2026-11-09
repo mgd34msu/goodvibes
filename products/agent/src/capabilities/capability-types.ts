@@ -59,7 +59,7 @@ export type CapabilityProbe =
   /** A daemon operator method is served, not merely cataloged. */
   | { readonly kind: 'operator-method-served'; readonly methodId: string }
   /**
-   * An installed package can be resolved (a driver or SDK the capability needs).
+   * An installed package can be resolved (a driver or platform the capability needs).
    *
    * `searchDirectories` exists because a `bun build --compile` executable has no
    * node_modules: module resolution alone can never succeed inside one, so a

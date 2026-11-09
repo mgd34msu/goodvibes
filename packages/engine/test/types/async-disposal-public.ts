@@ -1,4 +1,4 @@
-import { createAsyncDisposalScope, createDisposalScope, type AsyncDisposalScope, type DisposalRegistry } from '@goodvibes-jev/engine/sdk/platform/runtime/disposal';
+import { createAsyncDisposalScope, createDisposalScope, type AsyncDisposalScope, type DisposalRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
 
 const scope: AsyncDisposalScope = createAsyncDisposalScope('consumer fixture');
 const compatibleRegistry: DisposalRegistry = scope.registry;

@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { nativeConversationIntakeLookupResultSchema } from "@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client";
-import { nativeHostedTurnLookupSchema } from "@goodvibes-jev/engine/sdk/platform/hosted-sessions/native-turn-client";
-import { nativeWorkExecutionSnapshotSchema } from "@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client";
+import { nativeConversationIntakeLookupResultSchema } from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client";
+import { nativeHostedTurnLookupSchema } from "@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client";
+import { nativeWorkExecutionSnapshotSchema } from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client";
 import {
   loadSelectedDiffCapture,
   recordedUnifiedDiff,
@@ -12,7 +12,7 @@ import {
 } from "./native-selected-diff-fixture";
 
 describe("genuine native selected-hunk HTTP recordings", () => {
-  test("all native requests, checkpoint reads and unchanged response bodies validate current generated contracts and SDK schemas", () => {
+  test("all native requests, checkpoint reads and unchanged response bodies validate current generated contracts and platform schemas", () => {
     const capture = loadSelectedDiffCapture();
     expect(capture.source.toLowerCase()).toContain("real");
     expect(capture.sessionRow).toMatchObject({ id: capture.sessionId, kind: "hosted" });

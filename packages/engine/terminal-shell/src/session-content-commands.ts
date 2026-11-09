@@ -1,8 +1,8 @@
 import { mkdirSync, existsSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { exportToMarkdown, type ExportMessage } from '@goodvibes-jev/engine/sdk/platform/export';
-import type { ShellPathService } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
+import { exportToMarkdown, type ExportMessage } from '@goodvibes-jev/engine/platform/platform/export';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import type { TerminalSlashCommand } from './command-registry.js';
 import { requireYesFlag, stripYesFlag } from './command-confirmation.js';
 interface ContentContext {
@@ -121,12 +121,12 @@ export function createSessionContentCommands<Context extends ContentContext, Mes
 
 /** Explicit user saves remain exempt from automatic transcript retention. */
 export function createSessionSaveCommand<Context extends ContentContext>(policy: {
-  readonly manager: (context: Context) => import('@goodvibes-jev/engine/sdk/platform/sessions').SessionManager;
+  readonly manager: (context: Context) => import('@goodvibes-jev/engine/platform/platform/sessions').SessionManager;
   readonly messages: (context: Context) => object[];
-  readonly extraMeta: (context: Context) => Partial<import('@goodvibes-jev/engine/sdk/platform/sessions').SessionMeta>;
+  readonly extraMeta: (context: Context) => Partial<import('@goodvibes-jev/engine/platform/platform/sessions').SessionMeta>;
   readonly records: (
     context: Context,
-  ) => Parameters<import('@goodvibes-jev/engine/sdk/platform/sessions').SessionManager['save']>[3] | null;
+  ) => Parameters<import('@goodvibes-jev/engine/platform/platform/sessions').SessionManager['save']>[3] | null;
   readonly description: string;
   readonly saved: (rawName: string, result: { readonly filePath: string; readonly sanitizedName: string }, records: number) => string;
   readonly failed: (error: unknown) => string;
@@ -182,18 +182,18 @@ export function createSessionListCommand<
     readonly openSelection?: import('./selection-modal.js').OpenSelection | undefined;
   },
 >(policy: {
-  readonly manager: (context: Context) => import('@goodvibes-jev/engine/sdk/platform/sessions').SessionManager;
+  readonly manager: (context: Context) => import('@goodvibes-jev/engine/platform/platform/sessions').SessionManager;
   readonly forward: (args: string[], context: Context) => void | Promise<void>;
   readonly filter: (
-    sessions: ReturnType<import('@goodvibes-jev/engine/sdk/platform/sessions').SessionManager['list']>,
-  ) => ReturnType<import('@goodvibes-jev/engine/sdk/platform/sessions').SessionManager['list']>;
+    sessions: ReturnType<import('@goodvibes-jev/engine/platform/platform/sessions').SessionManager['list']>,
+  ) => ReturnType<import('@goodvibes-jev/engine/platform/platform/sessions').SessionManager['list']>;
   readonly emptyDetail: string;
   readonly actions: string;
   readonly options: Parameters<import('./selection-modal.js').OpenSelection>[2];
   readonly selected: (
     context: Context,
-    manager: import('@goodvibes-jev/engine/sdk/platform/sessions').SessionManager,
-    sessions: ReturnType<import('@goodvibes-jev/engine/sdk/platform/sessions').SessionManager['list']>,
+    manager: import('@goodvibes-jev/engine/platform/platform/sessions').SessionManager,
+    sessions: ReturnType<import('@goodvibes-jev/engine/platform/platform/sessions').SessionManager['list']>,
     result: import('./selection-modal.js').SelectionResult,
   ) => void;
   readonly heading: string;

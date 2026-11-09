@@ -22,7 +22,7 @@ import {
 } from '../../runtime/session-resume-liveness-confirm.ts';
 import { createResumeSessionHandler } from '../../runtime/bootstrap-hook-bridge.ts';
 import { ConversationManager } from '../../core/conversation.ts';
-import { writeLivenessMarker, LIVENESS_STALE_AFTER_MS } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { writeLivenessMarker, LIVENESS_STALE_AFTER_MS } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { makeTestSurface } from '../helpers/session-surface.ts';
 

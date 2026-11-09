@@ -3,7 +3,7 @@
  * transcript event" into a history-buffer line number.
  *
  * Extracted from ConversationManager (core/conversation.ts), which is at its
- * line-count gate, and kept structural (no SDK imports beyond the event kind)
+ * line-count gate, and kept structural (no platform imports beyond the event kind)
  * so the ordering rule can be tested without building a conversation.
  *
  * The rule both directions share: take the events of the requested kind, map
@@ -13,7 +13,7 @@
  * backward falls back to the last. -1 means there is nowhere to go.
  */
 
-import type { TranscriptEventKind } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { TranscriptEventKind } from '@goodvibes-jev/engine/platform/platform/core';
 
 /** The subset of a transcript-event-index entry this module reads. */
 export interface TranscriptEventLike {

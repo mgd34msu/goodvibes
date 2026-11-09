@@ -2,9 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { mkdirSync } from 'node:fs';
-import { createStateTool } from '../sdk/src/platform/tools/state/index.ts';
-import { KVState } from '../sdk/src/platform/state/kv-state.ts';
-import { ProjectIndex } from '../sdk/src/platform/state/project-index.ts';
+import { createStateTool } from '../platform/src/platform/tools/state/index.ts';
+import { KVState } from '../platform/src/platform/state/kv-state.ts';
+import { ProjectIndex } from '../platform/src/platform/state/project-index.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

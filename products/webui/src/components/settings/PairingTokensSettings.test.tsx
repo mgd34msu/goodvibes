@@ -34,7 +34,7 @@ mock.module('../../lib/goodvibes', () => ({
     setExplicitAuthTokenCalls.push(token);
     return Promise.resolve({ authenticated: true });
   },
-  sdk: {
+  client: {
     operator: {
       pairing: {
         tokens: {
@@ -189,7 +189,7 @@ describe('PairingTokensSettings revoke: confirm gate', () => {
     expect(el.querySelector('.gv-confirm')?.textContent).toContain('Phone');
     click(el.querySelector('.gv-confirm__cancel'));
     // The sheet closes as ask() resolves false. The handler resumes after that
-    // await on a microtask, and a revoke mutation would reach the SDK on further
+    // await on a microtask, and a revoke mutation would reach the platform on further
     // microtasks, so one real event-loop turn after the close lets all of it run.
     await waitFor(() => !el.querySelector('.gv-confirm'));
     await new Promise<void>((resolve) => setImmediate(resolve));

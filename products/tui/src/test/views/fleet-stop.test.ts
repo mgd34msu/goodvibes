@@ -5,7 +5,7 @@ import { contractFixture } from '../helpers/contract-work-tree-fixtures.ts';
  * src/input/agents-modal.ts. Pure/isolated, so unit-tested here directly.
  */
 import { describe, expect, test } from 'bun:test';
-import type { ProcessCapabilities, ProcessNode, ProcessState } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
+import type { ProcessCapabilities, ProcessNode, ProcessState } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import {
   FleetStopTracker,
   STOP_SETTLE_MS,

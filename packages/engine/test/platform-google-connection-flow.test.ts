@@ -14,30 +14,30 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { planGoogleConnection } from '../sdk/src/platform/google/discovery.ts';
+import { planGoogleConnection } from '../platform/src/platform/google/discovery.ts';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { diagnoseInvalidGrant } from '../sdk/src/platform/google/grant-diagnosis.ts';
+import { diagnoseInvalidGrant } from '../platform/src/platform/google/grant-diagnosis.ts';
 import { commandRoots, namedCommandsAndKeys } from './_helpers/setup-vocabulary.ts';
-import { removeGoogleCredentials } from '../sdk/src/platform/google/credential-removal.ts';
-import { adoptExistingGoogleCredentials } from '../sdk/src/platform/google/setup-actions.ts';
-import { buildAuthorizationUrl } from '../sdk/src/platform/google/oauth-loopback.ts';
-import { GoogleTokenManager } from '../sdk/src/platform/google/token-manager.ts';
-import { proveGoogleConnection } from '../sdk/src/platform/google/connection-proof.ts';
+import { removeGoogleCredentials } from '../platform/src/platform/google/credential-removal.ts';
+import { adoptExistingGoogleCredentials } from '../platform/src/platform/google/setup-actions.ts';
+import { buildAuthorizationUrl } from '../platform/src/platform/google/oauth-loopback.ts';
+import { GoogleTokenManager } from '../platform/src/platform/google/token-manager.ts';
+import { proveGoogleConnection } from '../platform/src/platform/google/connection-proof.ts';
 import {
   GOOGLE_CONFIG_KEYS,
   GOOGLE_REFERENCED_COMMANDS,
   GOOGLE_SETUP_STEPS,
   GOOGLE_SECRET_KEYS,
   OAUTH_SCOPES,
-} from '../sdk/src/platform/google/setup-plan.ts';
+} from '../platform/src/platform/google/setup-plan.ts';
 import type {
   GoogleCommandPort,
   GoogleCommandResult,
   GoogleConfigPort,
   GoogleSecretPort,
-} from '../sdk/src/platform/google/types.ts';
-import type { GoogleOAuthCredentials } from '../sdk/src/platform/google/credential-adoption.ts';
+} from '../platform/src/platform/google/types.ts';
+import type { GoogleOAuthCredentials } from '../platform/src/platform/google/credential-adoption.ts';
 
 let previousGrantPort: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previousGrantPort = installJudgmentPort(fakePort((name, _question, state) => {
@@ -305,13 +305,13 @@ describe('zero friction is the bar, not an aspiration', () => {
   test('the consent step is the only human-assisted step on the existing-client path', async () => {
     // Three logins and ten dialogs is what a path full of browser-driven steps
     // produces. This path has one thing a person touches.
-    const { stepsForPath } = await import('../sdk/src/platform/google/setup-plan.ts');
+    const { stepsForPath } = await import('../platform/src/platform/google/setup-plan.ts');
     const humanSteps = stepsForPath('existing-client').filter((step) => step.actor !== 'automated');
     expect(humanSteps.map((step) => step.id)).toEqual(['oauth-authorize']);
   });
 
   test('the run ends by reading mail AND calendar, so the reply is not "try it and see"', async () => {
-    const { stepsForPath } = await import('../sdk/src/platform/google/setup-plan.ts');
+    const { stepsForPath } = await import('../platform/src/platform/google/setup-plan.ts');
     const last = stepsForPath('existing-client').at(-1);
     expect(last?.id).toBe('oauth-verify');
     expect(last?.purpose).toMatch(/reads the mailbox and reads the calendar/i);
@@ -795,7 +795,7 @@ describe('no setup string tells the user to type anything', () => {
 
   test('a scope refusal offers to re-authorize rather than naming a command', async () => {
     const { proveGoogleConnection: prove } = await import(
-      '../sdk/src/platform/google/connection-proof.ts'
+      '../platform/src/platform/google/connection-proof.ts'
     );
     const proof = await prove({
       getProfile: async () => ({ ok: true, value: { emailAddress: 'a@b.c', messagesTotal: 1, threadsTotal: 1, historyId: '1' } }),

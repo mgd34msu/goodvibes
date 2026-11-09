@@ -37,7 +37,7 @@ let restoreImpl: (input: unknown) => Promise<unknown> = () => Promise.resolve({
 mock.module('../../lib/goodvibes', () => ({
   getCurrentAuth: () => Promise.resolve({}),
   invokeMethod: () => Promise.resolve({}),
-  sdk: {
+  client: {
     operator: {
       checkpoints: {
         list: () => Promise.resolve(FIXTURE_LIST),
@@ -233,7 +233,7 @@ describe('CheckpointsPanel restore: destructive confirm gate', () => {
     await waitFor(() => Boolean(el.querySelector('.gv-confirm')));
     click([...el.querySelectorAll('.gv-confirm__cancel')][0]);
     // The sheet closes as ask() resolves false. The handler resumes after that
-    // await on a microtask, and a restore mutation would reach the SDK on further
+    // await on a microtask, and a restore mutation would reach the platform on further
     // microtasks, so one real event-loop turn after the close lets all of it run.
     await waitFor(() => !el.querySelector('.gv-confirm'));
     await new Promise<void>((resolve) => setImmediate(resolve));

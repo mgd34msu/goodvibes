@@ -52,12 +52,12 @@
  * hiding them would trade one dishonesty for another. What the caller must show
  * alongside them is {@link describeApprovalsUnavailable}.
  */
-import type { SharedApprovalRecord } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import type { SharedApprovalRecord } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type {
   ApprovalUpdateNotice,
   ApprovalUpdateSubscription,
   DaemonVerbCaller,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+} from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { describeConnectedHostVerbError } from './daemon-verbs.ts';
 
 /** The `approvals.list` reply shape this reads; the verb returns more. */

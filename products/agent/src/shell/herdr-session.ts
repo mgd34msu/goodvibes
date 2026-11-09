@@ -1,9 +1,9 @@
 import { join } from 'node:path';
 import type { HerdrSessionUpdate } from '@goodvibes-jev/engine/terminal-shell';
-import { sanitizeSessionName } from '@goodvibes-jev/engine/sdk/platform/sessions';
-import type { HookDispatcher } from '@goodvibes-jev/engine/sdk/platform/hooks';
-import type { ProcessNode } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
-import type { ContractView } from '@goodvibes-jev/engine/sdk/platform/contract';
+import { sanitizeSessionName } from '@goodvibes-jev/engine/platform/platform/sessions';
+import type { HookDispatcher } from '@goodvibes-jev/engine/platform/platform/hooks';
+import type { ProcessNode } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+import type { ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
 import type { SetupPairingController } from './setup-pairing-controller.ts';
 import type { InputHandler } from '../input/handler.ts';
 import type { PendingPermissionState } from './blocking-input.ts';

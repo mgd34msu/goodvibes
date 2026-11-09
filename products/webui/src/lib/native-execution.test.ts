@@ -2,8 +2,8 @@ import { expect, test } from "bun:test";
 import {
   createOperatorNativeWorkExecutionClient,
   type NativeWorkExecutionSnapshot,
-} from "@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client";
-import type { NativeConversationIntakeLookupResult } from "@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client";
+} from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client";
+import type { NativeConversationIntakeLookupResult } from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client";
 import { createNativeIntakeExecution, nativeExecutionCanResume } from "./native-execution";
 import type { NativeExecutionBrowserRecord } from "./native-execution-journal";
 import type { NativeIntakeBrowserRecord } from "./native-intake-journal";

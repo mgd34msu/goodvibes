@@ -1,6 +1,6 @@
 # Voice and streaming TTS
 
-The SDK owns voice provider registration, provider and voice discovery, durable
+The platform owns voice provider registration, provider and voice discovery, durable
 TTS defaults, and daemon HTTP routes. UI clients own command syntax, transcript
 rendering, local playback, and playback controls.
 
@@ -16,7 +16,7 @@ Voice providers advertise capabilities through the voice registry:
 | `realtime` | Realtime voice session setup. |
 | `voice-list` | Voice discovery for provider-backed voice selection. |
 
-The SDK registers six built-in voice providers. Each advertises only the
+The platform registers six built-in voice providers. Each advertises only the
 capabilities it implements:
 
 | Provider | `tts` | `tts-stream` | `stt` | `realtime` | `voice-list` |
@@ -43,7 +43,7 @@ Spoken-output clients use these config keys:
 | `tts.voice` | empty | Default voice id when a request omits `voiceId`; providers may still apply their own fallback. |
 | `tts.llmProvider` | empty | Optional future override for spoken-output generation; empty means use the active chat provider. |
 | `tts.llmModel` | empty | Optional future override for spoken-output generation; empty means use the active chat model. |
-| `tts.speed` | `1.0` | Default speed multiplier used by the SDK's spoken-turn (live `/tts`) controller when a turn omits speed. |
+| `tts.speed` | `1.0` | Default speed multiplier used by the platform's spoken-turn (live `/tts`) controller when a turn omits speed. |
 
 The config keys are defaults, not locks. Clients can pass `providerId`,
 `voiceId`, `modelId`, `format`, and `speed` on individual requests. `tts.speed`
@@ -84,7 +84,7 @@ Successful streaming responses include:
 | `Content-Type` | Audio MIME type selected by the provider. |
 | `Cache-Control: no-store` | Audio streams should not be cached. |
 | `X-GoodVibes-Voice-Provider` | Provider id that produced the audio. |
-| `X-GoodVibes-Audio-Format` | SDK-normalized audio format, such as `mp3`. |
+| `X-GoodVibes-Audio-Format` | platform-normalized audio format, such as `mp3`. |
 
 The streaming route passes the daemon request `AbortSignal` into the provider
 request and cancels the upstream audio reader when the client cancels the

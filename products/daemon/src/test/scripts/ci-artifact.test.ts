@@ -4,7 +4,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, w
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
-import { nativeReaderCapabilities } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { nativeReaderCapabilities } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { recordDaemonCiArtifact, readVerifiedDaemonCiArtifact, verifyDaemonCiArtifact, type DaemonArtifactSource } from '../../../scripts/ci-artifact.ts';
 import { nativeReaderProbeScript, nativeRuntimeProvenance, writeV1NativeArtifactFixture } from '../helpers/native-runtime-provenance.ts';
 

@@ -21,11 +21,11 @@
  *    process boundary is exactly how that happens.
  */
 import { describe, expect, test } from 'bun:test';
-import { createClientApprovalRaiser } from '../sdk/src/platform/runtime/client/approval-raiser.ts';
-import { createDaemonConfigClient } from '../sdk/src/platform/runtime/client/config-client.ts';
-import { createDaemonCredentialsClient } from '../sdk/src/platform/runtime/client/credentials-client.ts';
-import type { DaemonVerbCaller } from '../sdk/src/platform/runtime/client/daemon-verbs.ts';
-import type { PermissionPromptRequest } from '../sdk/src/platform/permissions/prompt.ts';
+import { createClientApprovalRaiser } from '../platform/src/platform/runtime/client/approval-raiser.ts';
+import { createDaemonConfigClient } from '../platform/src/platform/runtime/client/config-client.ts';
+import { createDaemonCredentialsClient } from '../platform/src/platform/runtime/client/credentials-client.ts';
+import type { DaemonVerbCaller } from '../platform/src/platform/runtime/client/daemon-verbs.ts';
+import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.ts';
 
 interface Recorder {
   readonly calls: Array<[string, unknown]>;

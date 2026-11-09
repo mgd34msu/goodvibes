@@ -1,7 +1,7 @@
 /** UI observation owned by the current conversation/session, never execution permission. */
 import { JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
-import { TranscriptSourceChangedError, TranscriptReadingLifetime } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { ConversationManager } from '@goodvibes-jev/engine/sdk/platform/core';
+import { TranscriptSourceChangedError, TranscriptReadingLifetime } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ConversationManager } from '@goodvibes-jev/engine/platform/platform/core';
 export type TranscriptConversation = Pick<ConversationManager, 'getMessageSnapshot' | 'getTranscriptEventIndex'>;
 export interface TranscriptCommandContext<Conversation extends TranscriptConversation = TranscriptConversation> {
     readonly session: {

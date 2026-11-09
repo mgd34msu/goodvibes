@@ -1,9 +1,9 @@
-import { createPeerRemoteClient } from '../peer-sdk/src/client-core.ts';
+import { createPeerRemoteClient } from '../peer-client/src/client-core.ts';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { getOperatorContract, getPeerContract } from '@goodvibes-jev/engine/contracts';
 import { installJudgmentPort, type ContractRegexReadingFactory } from '@goodvibes-jev/engine/errors';
 import { readYesNo, STAKES_BANDS } from '@goodvibes-jev/judgment/decisions';
-import { createOperatorRemoteClient } from '../operator-sdk/src/client-core.ts';
+import { createOperatorRemoteClient } from '../operator-client/src/client-core.ts';
 import { createHttpTransport } from '../transport-http/src/http.ts';
 
 let previous: ReturnType<typeof installJudgmentPort>;

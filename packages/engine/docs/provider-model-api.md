@@ -278,7 +278,7 @@ The `previous` field is omitted when there is no meaningful prior selection (e.g
 
 ## Zod contract schemas
 
-Importable from `@goodvibes-jev/engine/sdk/contracts`:
+Importable from `@goodvibes-jev/engine/platform/contracts`:
 
 ```ts
 import {
@@ -288,7 +288,7 @@ import {
   PatchCurrentModelErrorSchema,
   PatchCurrentModelResponseSchema,
   ModelChangedEventSchema,
-} from '@goodvibes-jev/engine/sdk/contracts';
+} from '@goodvibes-jev/engine/platform/contracts';
 
 // Validate a response body at runtime:
 const result = ListProviderModelsResponseSchema.safeParse(responseBody);

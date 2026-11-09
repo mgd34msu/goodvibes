@@ -1,4 +1,4 @@
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.ts';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
@@ -8,14 +8,14 @@ import {
   type DecisionNote, type JudgmentPort, type NewDecisionEntry,
 } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.ts';
+import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input.ts';
 import {
   buildProjectPlanningAnswerActions as build,
   readProjectPlanningAnswerActions as read,
-} from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import type { ProjectPlanningQuestion } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import { planningAnswerTopic, planningRecommendationSpecific } from '../sdk/src/platform/knowledge/project-planning/batteries/answer-actions.ts';
-import { registry } from '../sdk/src/platform/knowledge/judgment-registry.ts';
+} from '@goodvibes-jev/engine/platform/platform/knowledge';
+import type { ProjectPlanningQuestion } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { planningAnswerTopic, planningRecommendationSpecific } from '../platform/src/platform/knowledge/project-planning/batteries/answer-actions.ts';
+import { registry } from '../platform/src/platform/knowledge/judgment-registry.ts';
 
 let previous: JudgmentPort | undefined;
 beforeEach(() => { previous = installJudgmentPort(undefined); });

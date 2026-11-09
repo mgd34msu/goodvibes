@@ -19,16 +19,16 @@ import {
   parsePactlSources,
   resolveAudioInputBinding,
   type AudioInputDevice,
-} from '../sdk/src/platform/voice/capture/device-binding.ts';
-import { WakeListener } from '../sdk/src/platform/voice/wake/listener.ts';
-import { describeWakeListening } from '../sdk/src/platform/voice/wake/listening-claim.ts';
+} from '../platform/src/platform/voice/capture/device-binding.ts';
+import { WakeListener } from '../platform/src/platform/voice/wake/listener.ts';
+import { describeWakeListening } from '../platform/src/platform/voice/wake/listening-claim.ts';
 import {
   resolveRecorderCandidates,
   resolveRecorderCommand,
-} from '../sdk/src/platform/voice/capture/recorder-command.ts';
-import { createRecorderCaptureOpener } from '../sdk/src/platform/voice/capture/recorder-source.ts';
-import type { AudioCaptureHandlers, AudioCaptureRequest } from '../sdk/src/platform/voice/capture/types.ts';
-import { resolveWakeRuntimeSettings } from '../sdk/src/platform/voice/wake/settings.ts';
+} from '../platform/src/platform/voice/capture/recorder-command.ts';
+import { createRecorderCaptureOpener } from '../platform/src/platform/voice/capture/recorder-source.ts';
+import type { AudioCaptureHandlers, AudioCaptureRequest } from '../platform/src/platform/voice/capture/types.ts';
+import { resolveWakeRuntimeSettings } from '../platform/src/platform/voice/wake/settings.ts';
 
 const HEADSET = 'bluez_input.AC:BF:71:00:00:01.headset-head-unit';
 

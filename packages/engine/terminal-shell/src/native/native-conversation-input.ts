@@ -1,5 +1,5 @@
-import type { ContentPart } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { NativeConversationIntakeUnsupportedSource } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
+import type { ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { NativeConversationIntakeUnsupportedSource } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 
 /** Source text is captured before trim, expansion, model directives or shell context. */
 export interface NativeConversationInput {

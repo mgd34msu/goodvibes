@@ -5,7 +5,7 @@ import { loadToolchainConfig } from '../lib/load-config.js';
 import { realFsReader, consoleLogger } from '../lib/effects.js';
 import { resolveTargets, runBuildBinaries } from '../lib/build-binaries.js';
 import { readDependencyManifest, type DependencyManifest } from '../lib/optional-externals.js';
-import { DEFAULT_SDK_PACKAGE, type BuildConfig } from '../config.js';
+import { DEFAULT_ENGINE_PACKAGE, type BuildConfig } from '../config.js';
 
 import { provideNativeAddon, resolveOwnedPackageManifest } from '../lib/binary-dependency-resolution.js';
 
@@ -21,7 +21,7 @@ const nativeKey = `${process.platform === 'darwin' ? 'darwin' : process.platform
 
 /**
  * The manifests whose optionalDependencies may be externalised: this repo's
- * own, plus the SDK it bundles. The SDK's are the ones that matter, it is
+ * own, plus the engine it bundles. The engine's are the ones that matter, it is
  * where the thirty optional packages are declared and where the dynamic
  * imports that make them genuinely optional live.
  */
@@ -30,10 +30,10 @@ function dependencyManifests(): DependencyManifest[] {
   const found: DependencyManifest[] = [];
   const own = readDependencyManifest(fs, 'package.json', 'this package');
   if (own) found.push(own);
-  const sdkPackage = config.sdkPin?.sdkPackage ?? DEFAULT_SDK_PACKAGE;
-  const sdkPath = resolveOwnedPackageManifest(join(root, 'package.json'), sdkPackage);
-  const sdk = sdkPath === null ? null : readDependencyManifest(fs, sdkPath, sdkPackage);
-  if (sdk) found.push(sdk);
+  const enginePackage = config.enginePin?.enginePackage ?? DEFAULT_ENGINE_PACKAGE;
+  const enginePath = resolveOwnedPackageManifest(join(root, 'package.json'), enginePackage);
+  const engine = enginePath === null ? null : readDependencyManifest(fs, enginePath, enginePackage);
+  if (engine) found.push(engine);
   return found;
 }
 
@@ -57,7 +57,7 @@ function isPackageInstalled(packageName: string): boolean {
 try {
   const selection = resolveTargets(process.argv.slice(2), build, nativeKey);
   const outcomes = runBuildBinaries({
-    cwd: root, config: build, selection, nativeKey, provideAddon: (target, sameHost) => provideNativeAddon({ root, sdkPackage: config.sdkPin?.sdkPackage ?? DEFAULT_SDK_PACKAGE, addonOutDir: build.addonOutDir, target, sameHost }), logger: consoleLogger,
+    cwd: root, config: build, selection, nativeKey, provideAddon: (target, sameHost) => provideNativeAddon({ root, enginePackage: config.enginePin?.enginePackage ?? DEFAULT_ENGINE_PACKAGE, addonOutDir: build.addonOutDir, target, sameHost }), logger: consoleLogger,
     dependencyManifests: manifests,
     isPackageInstalled,
   });

@@ -2,7 +2,7 @@ import { Dispatch, SetStateAction, useCallback, useEffect, useRef } from 'react'
 import { getClientLifetime, isClientLifetimeCurrent, type ClientLifetime } from '../../lib/client-lifetime';
 import type { ChatSelection, ChatSelectionTracker } from '../../lib/chat-selection';
 import { useMutation } from '@tanstack/react-query';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import { bestId } from '../../lib/object';
 import {
   companionSessionFromDetail,
@@ -174,7 +174,7 @@ export function useChatSend({
       if (!sessionId) {
         const createdAt = Date.now();
         const title = body.slice(0, 72) || files[0]?.name?.slice(0, 72) || 'Attachment chat';
-        const created = await sdk.chat.sessions.create({ title });
+        const created = await platformClient.chat.sessions.create({ title });
         if (!isCurrent(lease)) return;
         sessionId = extractSessionId(created);
         const createdSession = companionSessionFromDetail(created);
@@ -226,7 +226,7 @@ export function useChatSend({
         attachments = await Promise.all(files.map(async (file) => {
           const dataBase64 = await fileToBase64(file);
           if (!isCurrent(lease)) return undefined;
-          const uploaded = await sdk.artifacts.create({
+          const uploaded = await platformClient.artifacts.create({
             filename: file.name,
             mimeType: file.type || 'application/octet-stream',
             dataBase64,
@@ -264,18 +264,18 @@ export function useChatSend({
           // doesn't exist, fall back to an ordinary send and SAY so, never
           // silently pretend the interruption happened.
           try {
-            result = await sdk.chat.messages.steer(sessionId, payload);
+            result = await platformClient.chat.messages.steer(sessionId, payload);
           } catch (steerError) {
             if (!isCurrent(lease) || !isMethodUnavailableError(steerError)) throw steerError;
-            result = await sdk.chat.messages.create(sessionId, payload);
+            result = await platformClient.chat.messages.create(sessionId, payload);
             if (!isCurrent(lease)) return;
             setTurnError(
               'Sent as a normal message: this daemon does not support steering '
-              + '(needs SDK 1.4+), so the current reply was not interrupted.',
+              + '(update the connected daemon), so the current reply was not interrupted.',
             );
           }
         } else {
-          result = await sdk.chat.messages.create(sessionId, payload);
+          result = await platformClient.chat.messages.create(sessionId, payload);
         }
       } catch (error) {
         if (!isCurrent(lease)) throw error;
@@ -404,7 +404,7 @@ export function useChatSend({
     mutationFn: async (vars) => {
       if (!isCurrent(vars.lease)) return vars;
       beginLineageTurn();
-      await sdk.chat.messages.retry(
+      await platformClient.chat.messages.retry(
         vars.sessionId,
         vars.messageId ? { messageId: vars.messageId } : undefined,
       );
@@ -419,7 +419,7 @@ export function useChatSend({
     mutationFn: async (vars) => {
       if (!isCurrent(vars.lease)) return vars;
       beginLineageTurn();
-      await sdk.chat.messages.edit(vars.sessionId, vars.messageId, { content: vars.content });
+      await platformClient.chat.messages.edit(vars.sessionId, vars.messageId, { content: vars.content });
       if (isCurrent(vars.lease)) await invalidateChatState(vars.sessionId);
       return vars;
     },

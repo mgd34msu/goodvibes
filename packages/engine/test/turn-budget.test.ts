@@ -13,9 +13,9 @@ import {
   resolveTurnBudget,
   formatTurnLimitError,
   TURN_BUDGET_EXHAUSTED,
-} from '../sdk/src/platform/agents/turn-budget.ts';
-import { emitContractEvent } from '../sdk/src/platform/contract/events.ts';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
+} from '../platform/src/platform/agents/turn-budget.ts';
+import { emitContractEvent } from '../platform/src/platform/contract/events.ts';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
 
 describe('resolveTurnBudget', () => {
   test('no override uses the config default, source "default"', () => {

@@ -13,12 +13,12 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { rmSync, existsSync } from 'node:fs';
 import { SessionPickerModal, type SessionPickerHostedRoster } from '../../input/session-picker-modal.ts';
 import { renderSessionPickerModal } from '../../renderer/session-picker-modal.ts';
-import { SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
+import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { makeTestSurface } from '../helpers/session-surface.ts';
 import type { HostedRosterSnapshot } from '../../runtime/client/hosted-roster.ts';
-import type { HostedSessionRecord } from '@goodvibes-jev/engine/sdk/platform/hosted-sessions';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { HostedSessionRecord } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 
 function frameText(lines: Line[]): string {
   return lines.map((line) => line.map((cell) => cell?.char ?? ' ').join('')).join('\n');

@@ -1,10 +1,10 @@
 import { rmSync } from 'node:fs';
-import { GatewayMethodCatalog } from '../../sdk/src/platform/control-plane/index.js';
-import type { RoutingHostContext as HandlerContext } from '../../sdk/src/platform/channels/host-routing/registration-types.js';
+import { GatewayMethodCatalog } from '../../platform/src/platform/control-plane/index.js';
+import type { RoutingHostContext as HandlerContext } from '../../platform/src/platform/channels/host-routing/registration-types.js';
 type HandlerLogger = HandlerContext['logger'];
 import type {
   GatewayMethodInvocation,
-} from '../../sdk/src/platform/control-plane/index.js';
+} from '../../platform/src/platform/control-plane/index.js';
 import { makeProjectTempDir } from './project-temp.ts';
 
 /** A throwaway working directory rooted in the OS temp dir for SQLite files. */

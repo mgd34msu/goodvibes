@@ -14,14 +14,14 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, unlinkSync, u
 import { join } from 'node:path';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { TEST_SURFACE_ROOT, makeTestSurface } from './_helpers/session-surface.ts';
-import type { SessionSurface } from '../sdk/src/platform/runtime/session-surface.ts';
+import type { SessionSurface } from '../platform/src/platform/runtime/session-surface.ts';
 import {
   JOURNAL_ORPHAN_MAX_AGE_MS,
   journalPathFor,
   openTranscriptJournal,
   reapOrphanedJournals,
   replayJournal,
-} from '../sdk/src/platform/runtime/transcript-journal.ts';
+} from '../platform/src/platform/runtime/transcript-journal.ts';
 
 let tmpHome: string;
 let surface: SessionSurface;

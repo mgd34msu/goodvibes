@@ -12,7 +12,7 @@
 
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 
-import { cancelActiveTurn, type ActiveCompanionTurn } from '../sdk/src/platform/companion/companion-chat-turn-control.ts';
+import { cancelActiveTurn, type ActiveCompanionTurn } from '../platform/src/platform/companion/companion-chat-turn-control.ts';
 
 /** The delay the subject uses, so an assertion names the timer it means. */
 const CANCEL_SETTLE_TIMEOUT_MS = 3_000;

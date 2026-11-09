@@ -1,8 +1,8 @@
 /**
- * Approval card UX (SDK remember tiers, colored diff, full wrapped command,
+ * Approval card UX (platform remember tiers, colored diff, full wrapped command,
  * deny-with-reason typing, exec-prompt answering, honest queue count):
  *
- *  - the SDK's rememberOptions tiers render as numbered choices in the
+ *  - the platform's rememberOptions tiers render as numbered choices in the
  *    "Allow for session ▸" submenu and the matching key resolves with that tier;
  *  - write/edit asks show a real colored diff through the diff-view
  *    machinery; execute asks render the FULL command wrapped, never
@@ -16,7 +16,7 @@
  */
 import { promptCardLines } from '../helpers/permission-card.ts';
 import { describe, expect, test } from 'bun:test';
-import type { PermissionPromptRequest } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import type { PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { PermissionPromptUI, type PromptViewState } from '../../permissions/prompt.ts';
 import { buildPendingPermissionExtras } from '../../permissions/hunk-selection.ts';
 import { handleBlockingShellInput, type PendingPermissionState } from '../../shell/blocking-input.ts';

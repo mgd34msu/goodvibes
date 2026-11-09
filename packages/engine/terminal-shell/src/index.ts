@@ -21,9 +21,9 @@
  * feature-flag overrides). A different vocabulary is a different catalog
  * against the same engine, not a forked parser.
  *
- * The startup reachability notice lives in the SDK core instead
- * (`@goodvibes-jev/engine/sdk/platform/runtime`, the `operations` namespace):
- * SDK-side code needs it too, and the SDK cannot import this package.
+ * The startup reachability notice lives in the platform core instead
+ * (`@goodvibes-jev/engine/platform/platform/runtime`, the `operations` namespace):
+ * platform-side code needs it too, and the platform cannot import this package.
  *
  * Alongside the wiring sits the terminal IDIOM: the arithmetic and policy a
  * character-cell surface needs before it can draw anything, capability
@@ -32,7 +32,7 @@
  * key-semantics and list-filter conventions two terminal front-ends must
  * answer identically or feel like different products. None of it is
  * front-end-specific; all of it is meaningless outside a terminal, which is
- * why it lives here rather than in the SDK core.
+ * why it lives here rather than in the platform core.
  *
  * See ./conformance for the descriptor/handler gate, ./terminal-output-guard
  * for guard installation, and ./terminal-write and ./ansi-sanitize for the

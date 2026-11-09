@@ -24,15 +24,15 @@ import {
   daemonOnlyFleetActRefusal,
   mergeFleetNodes,
   readDaemonFleetRows,
-} from '../sdk/src/platform/runtime/client/fleet-union.ts';
+} from '../platform/src/platform/runtime/client/fleet-union.ts';
 import {
   autostartInstalledDaemon,
   describeDaemonAutostart,
   type DaemonServiceControl,
   type DaemonServiceSnapshot,
-} from '../sdk/src/platform/runtime/client/daemon-autostart.ts';
-import type { DaemonVerbCaller } from '../sdk/src/platform/runtime/client/daemon-verbs.ts';
-import type { ProcessNode } from '../sdk/src/platform/runtime/fleet/index.ts';
+} from '../platform/src/platform/runtime/client/daemon-autostart.ts';
+import type { DaemonVerbCaller } from '../platform/src/platform/runtime/client/daemon-verbs.ts';
+import type { ProcessNode } from '../platform/src/platform/runtime/fleet/index.ts';
 
 function node(id: string, label: string): ProcessNode {
   return {

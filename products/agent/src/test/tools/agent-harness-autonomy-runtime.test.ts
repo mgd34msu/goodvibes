@@ -6,8 +6,8 @@ import { resetAgentMcpCallRouteForTests } from '../../tools/agent-mcp-call-route
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { registerAgentBrowserTool } from '../../tools/agent-browser-tool.ts';
 import { AgentResearchRunRegistry } from '../../agent/research-run-registry.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
@@ -749,7 +749,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(trigger.triggerWorkflowSummary.watcherEvidenceMissing).toContain('durable-run-history-records');
       expect(trigger.triggerWorkflowSummary.watcherEvidenceMissing).toContain('provider-source-records');
       expect(trigger.watcherEvidenceContract.status).toBe('contract-needed');
-      expect(trigger.watcherEvidenceContract.owner).toBe('goodvibes-sdk-or-daemon');
+      expect(trigger.watcherEvidenceContract.owner).toBe('goodvibes-platform-or-daemon');
       const watcher = trigger.triggerWorkflows.find((workflow) => workflow.id === 'incoming-webhook-or-watcher');
       expect(watcher?.status).toBe('ready');
       expect(watcher?.evidence.watcherCreatePublished).toBe(true);
@@ -760,7 +760,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(watcher?.outcome?.verificationRoute).toContain('watchers.list');
       const watcherContract = watcher?.evidenceContract;
       expect(watcherContract?.status).toBe('contract-needed');
-      expect(watcherContract?.owner).toBe('goodvibes-sdk-or-daemon');
+      expect(watcherContract?.owner).toBe('goodvibes-platform-or-daemon');
       expect(watcherContract?.contractChecklist.find((check) => check.id === 'watcher-list-route')?.status).toBe('published-route');
       expect(watcherContract?.contractChecklist.find((check) => check.id === 'durable-run-history-records')?.status).toBe('missing');
       expect(watcherContract?.contractChecklist.find((check) => check.id === 'provider-source-records')?.status).toBe('missing');
@@ -1236,7 +1236,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(posture.summary.browserControlSetup.certifiedRuntimeRecords[0]?.certification.publicationGuarantee).toContain('token=<redacted>');
         expect(posture.summary.browserControlSetup.certifiedRuntimeRecords[0]?.certification.missingSignals).toEqual([]);
         expect(posture.routes.find((route) => route.executionRouteId === 'browser-or-desktop-control')?.availability).toBe('ready');
-        expect(posture.decisionRules.join('\n')).toContain('certified SDK/daemon runtime records');
+        expect(posture.decisionRules.join('\n')).toContain('certified platform/daemon runtime records');
         expect(JSON.stringify(posture)).not.toContain('host-secret');
         expect(JSON.stringify(posture)).not.toContain('chunk-secret');
         expect(JSON.stringify(posture)).not.toContain('sudo-secret');

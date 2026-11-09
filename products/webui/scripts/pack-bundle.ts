@@ -41,7 +41,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createReleaseStage, planReleaseDirectory } from '@goodvibes-jev/engine/toolchain/release-publication';
 import type { PublishedReleaseFile } from '@goodvibes-jev/engine/toolchain/release-publication';
-import { readFileObservation } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { readFileObservation } from '@goodvibes-jev/engine/platform/platform/utils';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 

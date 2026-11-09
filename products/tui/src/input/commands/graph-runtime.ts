@@ -35,7 +35,7 @@ export function registerGraphRuntimeCommands(registry: CommandRegistry): void {
         return;
       }
       try {
-        const snapshot = await rpc.sdk.operator.invoke('fleet.graph.get', { workstreamId });
+        const snapshot = await rpc.platformClient.operator.invoke('fleet.graph.get', { workstreamId });
         ctx.print(renderWorkstreamGraphLines(snapshot, renderWidth()).join('\n'));
       } catch (error) {
         ctx.print(`[graph] ${describeOperatorRpcError(error)}`);

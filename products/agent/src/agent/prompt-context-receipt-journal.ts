@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { PromptContextReceipt, PromptContextTurnOutcome } from './prompt-context-receipts.ts';
 
 /**

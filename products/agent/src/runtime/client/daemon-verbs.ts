@@ -1,16 +1,16 @@
 /**
- * daemon-verbs.ts, this product's plug into the SDK's client seams.
+ * daemon-verbs.ts, this product's plug into the platform's client seams.
  *
  * ── What is here and what deliberately is not ─────────────────────────────
  *
  * The POLICY for every seam this agent crosses, raising an approval, writing a
  * daemon-owned setting, storing a credential, receiving inbound session work,
  * answering a conversation-rewind question, reaching a paired phone, lives in
- * `@goodvibes-jev/engine/sdk/platform/runtime/client`. Each of those modules takes
+ * `@goodvibes-jev/engine/platform/platform/runtime/client`. Each of those modules takes
  * one thing: a `DaemonVerbCaller`, two methods.
  *
  * This file is that one thing, for this product. Resolving WHICH host this
- * agent talks to is a consumer trust-boundary concern the SDK core deliberately
+ * agent talks to is a consumer trust-boundary concern the platform core deliberately
  * never reaches into (the carve-out recorded beside the spine transports), and
  * this agent already had the resolution, `createSpineConnectionResolver` plus
  * the connected-host operator token. So the resolution stays here and the seams
@@ -38,14 +38,14 @@
  * and must never be laundered into an empty result.
  */
 import { statSync } from 'node:fs';
-import { OwnedSelectionObservation, captureRemoteSettingsPrecondition } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
-import { assertProjectionCurrent } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { OwnedSelectionObservation, captureRemoteSettingsPrecondition } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import { assertProjectionCurrent } from '@goodvibes-jev/engine/platform/platform/tools';
 import { agentHostPairingStorePath } from '../connected-host-pairing-store.ts';
 import { connectedHostOperatorTokenPath } from '../connected-host-auth.ts';
 import { resolveConnectedHostDialEnabled, captureRemoteSettingsImportPrecondition, observeImportFile,
-  assertImportFileCurrent } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { DaemonReachability, DaemonVerbCaller } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+  assertImportFileCurrent } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { DaemonReachability, DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { readConnectedHostOperatorToken, connectedHostTokenRequiredMessage } from '../connected-host-auth.ts';
 import { connectedHostBaseUrl } from '../../config/connected-host-dial.ts';
 

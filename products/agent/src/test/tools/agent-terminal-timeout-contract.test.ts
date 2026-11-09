@@ -15,10 +15,10 @@
  */
 import { afterAll, afterEach, beforeEach, describe, test, expect } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { gateJudgmentRegistry } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { gateJudgmentRegistry } from '@goodvibes-jev/engine/platform/platform/gate';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import type { Battery, YesNoItem } from '@goodvibes-jev/judgment';
-import type { BackgroundProcess } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { BackgroundProcess } from '@goodvibes-jev/engine/platform/platform/tools';
 import { ordinaryResearchOwner, cleanupResearchScreeningFixtures } from '../helpers/research-screening.ts';
 import {
   resolveBackgroundProcessClass,

@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { getLanguageConfig, loadLanguageConfigs } from '../sdk/src/platform/intelligence/config.js';
-import { logger } from '../sdk/src/platform/utils/logger.js';
+import { getLanguageConfig, loadLanguageConfigs } from '../platform/src/platform/intelligence/config.js';
+import { logger } from '../platform/src/platform/utils/logger.js';
 
 let home: string;
 let project: string;

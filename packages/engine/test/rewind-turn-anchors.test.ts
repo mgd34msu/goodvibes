@@ -10,7 +10,7 @@ import {
   resolveTurnAnchor,
   restoreTurnAnchors,
   type TurnAnchor,
-} from '../sdk/src/platform/rewind/turn-anchors.ts';
+} from '../platform/src/platform/rewind/turn-anchors.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const tempDirs: string[] = [];

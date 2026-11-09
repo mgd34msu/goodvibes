@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { chmodSync, copyFileSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveDaemonCliOwnership } from '../../cli/configuration.js';
-import { applyVerifiedUpdate, createNativeDataWriteOwner, inspectDaemonNativeInstallation, nativeReaderCapabilities, realUpdateFileIo, rollbackKeptPrevious, sha256 } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { applyVerifiedUpdate, createNativeDataWriteOwner, inspectDaemonNativeInstallation, nativeReaderCapabilities, realUpdateFileIo, rollbackKeptPrevious, sha256 } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { rollbackDaemonNative } from '../../../scripts/install-native.ts';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 import { writeNativeInstallationFixture } from '../helpers/native-runtime-provenance.js';
@@ -87,7 +87,7 @@ test('isolated import and resolution do not construct runtime owners or use the 
     import { mock } from 'bun:test';
     let activations = 0;
     function unexpected() { activations++; throw new Error('Unexpected runtime activation'); }
-    const daemonEntry = import.meta.resolve('@goodvibes-jev/engine/sdk/platform/daemon');
+    const daemonEntry = import.meta.resolve('@goodvibes-jev/engine/platform/platform/daemon');
     for (const [file, name] of [
       ['server.js', 'DaemonServer'],
       ['http-listener.js', 'HttpListener'],

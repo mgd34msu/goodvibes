@@ -9,7 +9,7 @@
  * account.
  *
  * Both halves are pinned here: the capture contract the turn is given, and the
- * boundary it is held to. Modelled on the SDK's
+ * boundary it is held to. Modelled on the platform's
  * test/personal-information-capture.test.ts, same fake-port shape, same
  * insistence that each reason the capture could not have happened gets its own
  * test so none of them come back quietly.
@@ -21,9 +21,9 @@ import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import type { OccasionsGatewayInvoke } from '../../agent/occasions-gateway.ts';
 import { executeNativeMemoryWork, nativeMemoryWorkAdmission, nativeMemoryWorkRegistry } from '../helpers/native-memory-work-readings.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import { CONVERSATIONAL_TURN_TOOLS } from '@goodvibes-jev/engine/sdk/platform/personal-capture';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { CONVERSATIONAL_TURN_TOOLS } from '@goodvibes-jev/engine/platform/platform/personal-capture';
 import {
   AGENT_CONVERSATIONAL_CAPTURE_POLICY,
   AGENT_CONVERSATIONAL_CAPTURE_TOOLS,
@@ -68,10 +68,10 @@ function stubTool(name: string): Tool & { calls: unknown[] } {
 
 // Authored semantic answers; the live battery owns language qualification.
 const requestedSourceMessages = new Set([
-  'read /home/x/Projects/goodvibes-sdk/packages/sdk/src/a.ts', 'show me the goodvibes sdk source',
+  'read /home/x/Projects/goodvibes/packages/engine/platform/src/a.ts', 'show me the goodvibes platform source',
   'go fix the daemon', 'look at the tui repo', 'read src/main.ts in goodvibes-agent',
-  'show me how the sdk does this', 'fix the goodvibes tui source',
-  String.raw`C:\project\node_modules\@goodvibes-jev\engine\sdk\index.js`,
+  'show me how the platform does this', 'fix the goodvibes tui source',
+  String.raw`C:\project\node_modules\@goodvibes-jev\engine\platform\index.js`,
   String.raw`C:\project\node_modules\@goodvibes-jev\engine\src\index.ts`,
 ]);
 let originalPort: ReturnType<typeof installJudgmentPort>;
@@ -87,13 +87,13 @@ afterEach(() => { installJudgmentPort(originalPort); });
 // ── 1. The capture tools a conversational turn actually has ─────────────────
 
 describe('a conversational turn can reach the capture tools', () => {
-  test('the capture floor names the profile tool, from the SDK contract', async () => {
+  test('the capture floor names the profile tool, from the platform contract', async () => {
     expect(CONVERSATIONAL_TURN_TOOLS).toContain('profile');
     expect(AGENT_CONVERSATIONAL_CAPTURE_TOOLS).toContain('profile');
   });
 
-  test('it composes with the SDK list rather than replacing it', async () => {
-    // Every tool the SDK contract names is still required here. The Agent adds
+  test('it composes with the platform list rather than replacing it', async () => {
+    // Every tool the platform contract names is still required here. The Agent adds
     // `occasions`, its half of the capture surface, and takes nothing away.
     for (const name of CONVERSATIONAL_TURN_TOOLS) {
       expect(AGENT_CONVERSATIONAL_CAPTURE_TOOLS).toContain(name);
@@ -229,20 +229,20 @@ describe('the capture contract the operator policy carries', () => {
 
 describe('platform source path detection', () => {
   test('the platform repositories are recognised', async () => {
-    expect(isGoodVibesPlatformSourcePath('/home/x/Projects/goodvibes-sdk/packages/sdk/src/a.ts')).toBe(true);
+    expect(isGoodVibesPlatformSourcePath('/home/x/Projects/goodvibes/packages/engine/platform/src/a.ts')).toBe(true);
     expect(isGoodVibesPlatformSourcePath('/home/x/Projects/goodvibes-agent/src/main.ts')).toBe(true);
     expect(isGoodVibesPlatformSourcePath('/home/x/Projects/goodvibes-daemon/src/b.ts')).toBe(true);
     // A worktree of one is still one.
     expect(isGoodVibesPlatformSourcePath('/home/x/Projects/goodvibes-agent-wt-capture/src/main.ts')).toBe(true);
     // And the published packages, wherever they are installed.
-    expect(isGoodVibesPlatformSourcePath('node_modules/@goodvibes-jev/engine/sdk/dist/index.js')).toBe(true);
+    expect(isGoodVibesPlatformSourcePath('node_modules/@goodvibes-jev/engine/platform/dist/index.js')).toBe(true);
   });
 
   test('canonical installed workspace packages are platform source, without matching lookalikes', async () => {
     for (const name of ['engine', 'judgment', 'daemon', 'agent', 'tui', 'webui']) {
       expect(isGoodVibesPlatformSourcePath(`node_modules/@goodvibes-jev/${name}/src/index.ts`)).toBe(true);
     }
-    expect(isGoodVibesPlatformSourcePath('C:\\project\\node_modules\\@goodvibes-jev\\engine\\sdk\\index.js')).toBe(true);
+    expect(isGoodVibesPlatformSourcePath('C:\\project\\node_modules\\@goodvibes-jev\\engine\\platform\\index.js')).toBe(true);
     for (const path of [
       'node_modules/@goodvibes-jev/engine-helper/index.js',
       'node_modules/@someone/engine/index.js',
@@ -270,14 +270,14 @@ describe('did he ask about the platform source this turn', () => {
   });
 
   test('naming the path, the source, or the repair all count as asking', async () => {
-    expect(await ownerAskedAboutPlatformSource('read /home/x/Projects/goodvibes-sdk/packages/sdk/src/a.ts')).toBe(true);
-    expect(await ownerAskedAboutPlatformSource('show me the goodvibes sdk source')).toBe(true);
+    expect(await ownerAskedAboutPlatformSource('read /home/x/Projects/goodvibes/packages/engine/platform/src/a.ts')).toBe(true);
+    expect(await ownerAskedAboutPlatformSource('show me the goodvibes platform source')).toBe(true);
     expect(await ownerAskedAboutPlatformSource('go fix the daemon')).toBe(true);
     expect(await ownerAskedAboutPlatformSource('look at the tui repo')).toBe(true);
     // Pointing you at it counts, not only asking for a repair. Refusing these
     // would be the opposite mistake to the one being corrected.
     expect(await ownerAskedAboutPlatformSource('read src/main.ts in goodvibes-agent')).toBe(true);
-    expect(await ownerAskedAboutPlatformSource('show me how the sdk does this')).toBe(true);
+    expect(await ownerAskedAboutPlatformSource('show me how the platform does this')).toBe(true);
   });
 
   test('naming the platform without pointing at its innards is not asking', async () => {
@@ -292,8 +292,8 @@ describe('did he ask about the platform source this turn', () => {
 
 describe('source paths do not add implicit approval gates', () => {
   test.each([
-    '/home/x/Projects/goodvibes-sdk/packages/sdk/src/platform/google/oauth-wizard.ts',
-    'node_modules/@goodvibes-jev/engine/sdk/index.ts',
+    '/home/x/Projects/goodvibes/packages/engine/platform/src/platform/google/oauth-wizard.ts',
+    'node_modules/@goodvibes-jev/engine/platform/index.ts',
     'C:\\project\\node_modules\\@goodvibes-jev\\engine\\src\\index.ts',
     '/home/x/Documents/notes.md',
   ])('the compatibility guard preserves calls for %s', async path => {
@@ -316,7 +316,7 @@ describe('source paths do not add implicit approval gates', () => {
 // ── 4. The found-itinerary flow, end to end through the tool ────────────────
 
 describe('a found itinerary is recorded as a plan', () => {
-  /** The daemon's occasions verbs, faked. Same shape as the SDK test's port. */
+  /** The daemon's occasions verbs, faked. Same shape as the platform test's port. */
   function fakeOccasionsGateway() {
     const confirmed: Record<string, unknown>[] = [];
     const invoke: OccasionsGatewayInvoke = async (methodId, body) => {

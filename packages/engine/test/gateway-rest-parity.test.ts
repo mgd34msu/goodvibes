@@ -10,8 +10,8 @@
  * with the path parameters folded into both the query and the body.
  */
 import { describe, expect, test } from 'bun:test';
-import { dispatchDaemonApiRoutes } from '../daemon-sdk/src/api-router.js';
-import { createDaemonControlRouteHandlers } from '../daemon-sdk/src/control-routes.js';
+import { dispatchDaemonApiRoutes } from '../daemon-api/src/api-router.js';
+import { createDaemonControlRouteHandlers } from '../daemon-api/src/control-routes.js';
 import { makeDefaultDaemonHandlerStub } from './_helpers/daemon-stub-handlers.js';
 import { makeRequest } from './_helpers/router-requests.js';
 

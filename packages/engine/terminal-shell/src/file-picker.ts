@@ -1,4 +1,4 @@
-import { readWalkDirectories } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { readWalkDirectories } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { Dirent } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join, relative } from 'node:path';

@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { PaymentReplyInbox, PaymentReplyInboxClosedError } from '../sdk/src/platform/payments/reply-inbox.js';
-import { createChannelPaymentNotifier } from '../sdk/src/platform/payments/notice-delivery.js';
+import { PaymentReplyInbox, PaymentReplyInboxClosedError } from '../platform/src/platform/payments/reply-inbox.js';
+import { createChannelPaymentNotifier } from '../platform/src/platform/payments/notice-delivery.js';
 import { paymentsPort } from './helpers/payments-readings.ts';
 
 const input = { purchaseId: 'fixture-veto', kind: 'veto' as const, channels: ['telegram' as const], notice: 'Fixture purchase notice', deadlineMs: Date.now() + 60_000 };

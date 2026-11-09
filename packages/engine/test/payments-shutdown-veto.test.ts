@@ -1,14 +1,14 @@
 import { expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError } from '@goodvibes-jev/judgment';
-import { PaymentReplyInbox, PaymentReplyInboxClosedError } from '../sdk/src/platform/payments/reply-inbox.js';
-import { createChannelPaymentNotifier } from '../sdk/src/platform/payments/notice-delivery.js';
-import { runCheckout, type CheckoutFlowDeps } from '../sdk/src/platform/payments/checkout-flow.js';
-import { CheckoutRegistry, MemoryCheckoutJournal, type CheckoutJournal } from '../sdk/src/platform/payments/checkout-registry.js';
-import { BudgetLedger } from '../sdk/src/platform/payments/budget.js';
-import { CardMaterialRedactor } from '../sdk/src/platform/payments/card-redaction.js';
-import { parseCurrencyCode, unsafeOwnerSuppliedTextForTests } from '../sdk/src/platform/payments/types.js';
-import { UntrustedContentLedger } from '../sdk/src/platform/security/untrusted-content.js';
+import { PaymentReplyInbox, PaymentReplyInboxClosedError } from '../platform/src/platform/payments/reply-inbox.js';
+import { createChannelPaymentNotifier } from '../platform/src/platform/payments/notice-delivery.js';
+import { runCheckout, type CheckoutFlowDeps } from '../platform/src/platform/payments/checkout-flow.js';
+import { CheckoutRegistry, MemoryCheckoutJournal, type CheckoutJournal } from '../platform/src/platform/payments/checkout-registry.js';
+import { BudgetLedger } from '../platform/src/platform/payments/budget.js';
+import { CardMaterialRedactor } from '../platform/src/platform/payments/card-redaction.js';
+import { parseCurrencyCode, unsafeOwnerSuppliedTextForTests } from '../platform/src/platform/payments/types.js';
+import { UntrustedContentLedger } from '../platform/src/platform/security/untrusted-content.js';
 import { usePaymentsReadings } from './helpers/payments-readings.ts';
 
 usePaymentsReadings();

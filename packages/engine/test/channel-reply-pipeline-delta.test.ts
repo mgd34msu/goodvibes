@@ -16,10 +16,10 @@ import type { JudgmentPort } from '@goodvibes-jev/judgment';
  *    `{"version":1,"archetype":"engineer",...}` on a lock screen.
  */
 import { describe, expect, test } from 'bun:test';
-import { ChannelReplyPipeline } from '../sdk/src/platform/channels/reply-pipeline.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { emitAgentCompleted, emitAgentProgress } from '../sdk/src/platform/runtime/emitters/agents.js';
-import { emitContractPassed } from '../sdk/src/platform/runtime/emitters/contract.js';
+import { ChannelReplyPipeline } from '../platform/src/platform/channels/reply-pipeline.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { emitAgentCompleted, emitAgentProgress } from '../platform/src/platform/runtime/emitters/agents.js';
+import { emitContractPassed } from '../platform/src/platform/runtime/emitters/contract.js';
 import { waitFor } from './_helpers/test-timeout.js';
 
 interface Published {

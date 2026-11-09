@@ -8,7 +8,7 @@
  * partially-loaded tab into a detector with every threshold at 0.
  */
 import { describe, expect, test } from 'bun:test';
-import { WAKE_SETTING_KEYS } from '@goodvibes-jev/engine/sdk/platform/voice/wake/runtime';
+import { WAKE_SETTING_KEYS } from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
 import { configPathReader, resolveWebuiWakeSettings } from './wake-config';
 
 describe('configPathReader', () => {
@@ -86,9 +86,9 @@ describe('the surface this tab resolves as', () => {
 });
 
 describe('what a browser tab cannot do, said out loud', () => {
-  // The speex stage is a WebAssembly module the SDK carries, so a tab runs it: the
+  // The speex stage is a WebAssembly module the platform carries, so a tab runs it: the
   // row is honoured rather than refused, and this asserts the capability is asked
-  // of the SDK instead of being declared false here.
+  // of the platform instead of being declared false here.
   test('speex noise suppression is HONOURED: a tab has WebAssembly, so the filter runs', () => {
     const settings = resolveWebuiWakeSettings({
       voice: { wake: { enabled: true, surfaces: { webui: true }, noiseSuppression: 'speex' } },

@@ -573,7 +573,7 @@ configuration are intentionally excluded from the Bun script-package tarball.
 
 `scripts/check-version.ts` validates private product identity, exact compiled
 fallback and agreement with the `goodvibes-jev` root version. Root `sync:version`
-owns the SDK fallback, daemon manifest and daemon fallback; root `version:check`
+owns the platform fallback, daemon manifest and daemon fallback; root `version:check`
 checks the engine, judgment and daemon workspace versions. Native prebuild remains read-only.
 
 `build:binary` compiles the host target. `smoke:binary --binary <path>` uses the
@@ -672,7 +672,7 @@ bun run native:package --artifact-root /absolute/producer/products/daemon \
 ```
 
 This is distinct from a script-package npm tarball. It does not establish npm
-SDK-pin/lock agreement, registry authentication, a release feed or publication.
+platform-pin/lock agreement, registry authentication, a release feed or publication.
 
 ## Explicit release preparation
 

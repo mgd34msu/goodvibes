@@ -30,12 +30,12 @@
  * ── Where these rules live ────────────────────────────────────────────────
  *
  * Both comparisons, the header name, the verdict shapes, the version ordering
- *, are owned by the SDK (platform/control-plane/client-compatibility.ts and
+ *, are owned by the platform (platform/control-plane/client-compatibility.ts and
  * daemon-compatibility.ts) and imported below rather than duplicated. What
  * stays here is this process's own state: the forward latch, the reverse
  * announce-once, and the daemon floor this product declares. The agent holds
  * the same forward latch shape for its own process lifetime, which is why the
- * latch is not a value the SDK ships.
+ * latch is not a value the platform ships.
  */
 
 import {
@@ -43,7 +43,7 @@ import {
   evaluateDaemonStatusCompatibility,
   type ClientCompatibilityVerdict,
   type DaemonCompatibilityVerdict,
-} from '@goodvibes-jev/engine/sdk/platform/control-plane';
+} from '@goodvibes-jev/engine/platform/platform/control-plane';
 
 /**
  * The oldest daemon build this terminal will adopt.

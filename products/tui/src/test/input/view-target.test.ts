@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { ProcessKind } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
+import type { ProcessKind } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import { parseViewTarget, takeTargetFlag } from '../../input/views.ts';
 
 describe('view target grammar', () => {

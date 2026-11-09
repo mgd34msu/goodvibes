@@ -139,11 +139,11 @@ test('payload inspection accepts a directory-linked package within the extractio
 });
 
 
-test('an SDK export subpath resolves the enclosing engine package manifest', () => {
+test('an platform export subpath resolves the enclosing engine package manifest', () => {
   const f = fixture();
   const engine = pkg(join(f.root, 'engine'), '@fixture/engine');
   mkdirSync(join(f.product, 'node_modules', '@fixture'), { recursive: true });
-  mkdirSync(join(engine, 'sdk'), { recursive: true });
+  mkdirSync(join(engine, 'platform'), { recursive: true });
   symlinkSync(engine, join(f.product, 'node_modules', '@fixture', 'engine'), 'dir');
   expect(resolveOwnedPackageManifest(join(f.product, 'package.json'), '@fixture/engine/sdk')).toBe(join(engine, 'package.json'));
 });
@@ -157,7 +157,7 @@ function engineOwnedFixture(declareEngine = true, declareSqlite = true, optional
   symlinkSync(engine, join(f.product, 'node_modules', '@fixture', 'engine'), 'dir');
   mkdirSync(join(engine, 'node_modules'), { recursive: true });
   symlinkSync(f.owner, join(engine, 'node_modules', 'sqlite-vec'), 'dir');
-  const stage = () => provideNativeAddon({ root: f.product, sdkPackage: '@fixture/engine/sdk', addonOutDir: 'dist/lib', target, sameHost: true, exec: () => { throw new Error('host build must not fetch'); } });
+  const stage = () => provideNativeAddon({ root: f.product, enginePackage: '@fixture/engine/sdk', addonOutDir: 'dist/lib', target, sameHost: true, exec: () => { throw new Error('host build must not fetch'); } });
   return { ...f, stage };
 }
 

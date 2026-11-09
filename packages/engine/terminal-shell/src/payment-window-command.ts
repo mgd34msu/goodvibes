@@ -1,7 +1,7 @@
 import { readPaymentWindowStatus, readPaymentWindowAnswer, readPaymentOperation, readPaymentOperationCancellation, paymentOperationDescription, isLivePaymentOperation, canReconcilePaymentOperation,
-  type PaymentWindowView, type PaymentOperationView } from '@goodvibes-jev/engine/sdk/platform/payments/browser';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { OwnedSelectionObservation } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+  type PaymentWindowView, type PaymentOperationView } from '@goodvibes-jev/engine/platform/platform/payments/browser';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { RetainedOperatorConnection, type RetainedOperatorConnectionPolicy, type SelectedOperatorConnection } from './retained-operator-connection.js';
 import type { OpenSelection, SelectionItem, SelectionResult } from './selection-modal.js';
 import { stripDangerousAnsi } from './ansi-sanitize.js';

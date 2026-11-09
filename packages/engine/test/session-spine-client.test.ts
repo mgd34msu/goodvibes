@@ -1,7 +1,7 @@
 /**
  * session-spine-client.test.ts
  *
- * Unit evidence for the extracted SDK session-spine core. Proves the ONE
+ * Unit evidence for the extracted platform session-spine core. Proves the ONE
  * core drives identically through BOTH real transport shapes:
  *  - a TYPED adapter (TUI-style: wraps a typed sessions client, resolve->ok /
  *    throw->offline), and
@@ -22,7 +22,7 @@ import type {
   RegisterSharedSessionInput,
   SharedSessionRecord,
   SharedSessionRegisterResult,
-} from '../sdk/src/platform/control-plane/index.ts';
+} from '../platform/src/platform/control-plane/index.ts';
 import {
   AGENT_SPINE_PARTICIPANT,
   foldLegacySpineStore,
@@ -30,7 +30,7 @@ import {
   TUI_SPINE_PARTICIPANT,
   type SpineResult,
   type SpineTransport,
-} from '../sdk/src/platform/runtime/session-spine/index.ts';
+} from '../platform/src/platform/runtime/session-spine/index.ts';
 
 const silent = { debug: () => {}, info: () => {} };
 
@@ -520,7 +520,7 @@ describe('SessionSpineClient: mirroredSessionIds (the true shared identity for a
 
 describe('foldLegacySpineStore', () => {
   let root: string;
-  beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'goodvibes-sdk-spine-fold-')); });
+  beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'goodvibes-platform-spine-fold-')); });
   afterEach(() => { /* best-effort */ });
 
   test('reads the store, folds records, and writes a migration marker', () => {

@@ -1,5 +1,5 @@
 /**
- * LAN-http posture, at a REAL private-network origin (SDK 1.8.0).
+ * LAN-http posture, at a REAL private-network origin (platform 1.8.0).
  *
  * Runs on the "lan-origin" Playwright project only (playwright.config.ts), which serves
  * THIS app from the host's own real private-network interface address (10/8, 172.16/12,

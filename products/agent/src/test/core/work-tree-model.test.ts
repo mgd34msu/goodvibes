@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { ToolCall } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
 import { buildTurnModel, MAX_NEST_DEPTH, transcriptUnits, turnSignature, type TurnModel, type TurnRow } from '../../core/work-tree-model.ts';
 import type { AgentLaneInfo, WorkTreeSources } from '../../core/work-tree-sources.ts';
 import { WorkTreeTimingStore } from '../../core/work-tree-sources.ts';

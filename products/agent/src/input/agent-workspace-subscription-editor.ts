@@ -1,6 +1,6 @@
-import { beginOpenAICodexLogin, exchangeOpenAICodexCode, getSubscriptionProviderConfig } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { OAuthProviderConfig, ProviderSubscription } from '@goodvibes-jev/engine/sdk/platform/config';
-import { openExternalUrl } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { beginOpenAICodexLogin, exchangeOpenAICodexCode, getSubscriptionProviderConfig } from '@goodvibes-jev/engine/platform/platform/config';
+import type { OAuthProviderConfig, ProviderSubscription } from '@goodvibes-jev/engine/platform/platform/config';
+import { openExternalUrl } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { CommandContext } from './command-registry.ts';
 import { isAffirmative } from './agent-workspace-editors.ts';
 import { buildAgentWorkspaceRuntimeSnapshot } from './agent-workspace-snapshot.ts';

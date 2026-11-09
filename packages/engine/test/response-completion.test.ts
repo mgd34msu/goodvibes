@@ -1,19 +1,19 @@
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ChatRequest, ChatResponse } from '../sdk/src/platform/providers/interface.js';
-import type { AgentRecord } from '../sdk/src/platform/tools/agent/record.js';
+import type { ChatRequest, ChatResponse } from '../platform/src/platform/providers/interface.js';
+import type { AgentRecord } from '../platform/src/platform/tools/agent/record.js';
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort as baseFakePort, noulAnswer, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { JudgmentError } from '@goodvibes-jev/judgment';
-import { ConversationManager } from '../sdk/src/platform/core/conversation.js';
-import { ResponseCompletionAccessError, ResponseCompletionGuard, waitForResponseDelegates } from '../sdk/src/platform/core/response-completion.js';
-import { registry } from '../sdk/src/platform/core/judgment-registry.js';
-import { executeOrchestratorTurnLoop, type OrchestratorTurnLoopContext } from '../sdk/src/platform/core/orchestrator-turn-loop.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.js';
-import { UNKNOWN_MODEL_PRICING } from '../sdk/src/platform/providers/model-pricing.js';
+import { ConversationManager } from '../platform/src/platform/core/conversation.js';
+import { ResponseCompletionAccessError, ResponseCompletionGuard, waitForResponseDelegates } from '../platform/src/platform/core/response-completion.js';
+import { registry } from '../platform/src/platform/core/judgment-registry.js';
+import { executeOrchestratorTurnLoop, type OrchestratorTurnLoopContext } from '../platform/src/platform/core/orchestrator-turn-loop.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.js';
+import { UNKNOWN_MODEL_PRICING } from '../platform/src/platform/providers/model-pricing.js';
 import { verificationWriter } from './_helpers/verification.js';
 
 // These fixtures exercise work acceptance. Applicability is tested separately

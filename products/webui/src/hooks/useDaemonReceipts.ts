@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { sdk, type DaemonReceipt } from '../lib/goodvibes';
+import { client as platformClient, type DaemonReceipt } from '../lib/goodvibes';
 import { takeRelayPairingCorruptionNotice } from '../lib/relay-pairing';
 
 /**
@@ -70,7 +70,7 @@ export function useDaemonReceipts(connected: boolean, signedIn: boolean): Daemon
     // setState on an unmounted component is a no-op in React 18+.
     void (async () => {
       try {
-        const result = await sdk.operator.control.status({ receipts: 'consume' });
+        const result = await platformClient.operator.control.status({ receipts: 'consume' });
         const raw = (result as { receipts?: unknown }).receipts;
         const incoming = Array.isArray(raw) ? raw.filter(isDaemonReceipt) : [];
         const fresh = incoming.filter((receipt) => !seenIdsRef.current.has(receipt.id));

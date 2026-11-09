@@ -19,7 +19,7 @@ let stagedReceipts: { id: string; text: string; at: number }[] = [];
 mock.module('../../lib/goodvibes', () => ({
   getCurrentAuth: () => null,
   invokeMethod: () => Promise.resolve({}),
-  sdk: {
+  client: {
     operator: {
       control: {
         status: (input?: { receipts?: 'consume' }) => {

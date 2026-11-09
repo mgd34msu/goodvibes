@@ -17,20 +17,20 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ProviderRegistry } from '../sdk/src/platform/providers/registry.js';
-import { getContextWindowOverridesPath } from '../sdk/src/platform/providers/context-window-overrides.js';
-import type { DiscoveredServer } from '../sdk/src/platform/discovery/scanner.js';
+import { ProviderRegistry } from '../platform/src/platform/providers/registry.js';
+import { getContextWindowOverridesPath } from '../platform/src/platform/providers/context-window-overrides.js';
+import type { DiscoveredServer } from '../platform/src/platform/discovery/scanner.js';
 import {
   checkContextWindowPreflight,
   handlePostTurnContextMaintenance,
   type PreflightDeps,
   type PostTurnContextDeps,
   type ModelContextWarning,
-} from '../sdk/src/platform/core/orchestrator-context-runtime.js';
-import type { ModelDefinition } from '../sdk/src/platform/providers/registry-types.js';
-import type { ConversationManager } from '../sdk/src/platform/core/conversation.js';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import type { CompactionContext } from '../sdk/src/platform/core/compaction-types.js';
+} from '../platform/src/platform/core/orchestrator-context-runtime.js';
+import type { ModelDefinition } from '../platform/src/platform/providers/registry-types.js';
+import type { ConversationManager } from '../platform/src/platform/core/conversation.js';
+import type { ConfigManager } from '../platform/src/platform/config/manager.js';
+import type { CompactionContext } from '../platform/src/platform/core/compaction-types.js';
 import { makeContract } from './contract/fixtures.js';
 
 // ---------------------------------------------------------------------------
@@ -415,9 +415,9 @@ describe('model-issued compaction warning: post-turn maintenance', () => {
 // ---------------------------------------------------------------------------
 
 import { writeFileSync } from 'node:fs';
-import { isContextSizeExceededError } from '../sdk/src/platform/types/errors.js';
+import { isContextSizeExceededError } from '../platform/src/platform/types/errors.js';
 import { useFailureReadings } from './_helpers/failure-readings.ts';
-import { loadContextWindowOverrides } from '../sdk/src/platform/providers/context-window-overrides.js';
+import { loadContextWindowOverrides } from '../platform/src/platform/providers/context-window-overrides.js';
 
 describe('isContextSizeExceededError: real provider messages', () => {
   // The wording is read by the failure-reading battery; this is the reading it carries.

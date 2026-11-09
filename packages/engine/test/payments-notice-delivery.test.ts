@@ -27,7 +27,7 @@ import {
   readPaymentReply,
   type PaymentNoticeTarget,
   type PaymentReplySource,
-} from '../sdk/src/platform/payments/notice-delivery.js';
+} from '../platform/src/platform/payments/notice-delivery.js';
 import { usePaymentsReadings } from './helpers/payments-readings.ts';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
@@ -37,9 +37,9 @@ import {
   type ApprovalState,
   type ChannelDelivery,
   type VetoState,
-} from '../sdk/src/platform/payments/windows.js';
-import { sanitizeNoticeField } from '../sdk/src/platform/security/notice-text.js';
-import type { CommandAuthorityChannel } from '../sdk/src/platform/payments/types.js';
+} from '../platform/src/platform/payments/windows.js';
+import { sanitizeNoticeField } from '../platform/src/platform/security/notice-text.js';
+import type { CommandAuthorityChannel } from '../platform/src/platform/payments/types.js';
 
 /** A channel that records what it was handed, or refuses to take it. */
 function fakeChannel(options: { readonly failing?: boolean } = {}) {

@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { resolveWorkspaceRegisterReadPath } from '@goodvibes-jev/engine/sdk/platform/workspace';
+import { resolveWorkspaceRegisterReadPath } from '@goodvibes-jev/engine/platform/platform/workspace';
 import type { ShellPathService } from '../index.js';
 import {
   normalizeWorkspaceRoot,
@@ -10,7 +10,7 @@ import {
   type WorkspaceCoverageStatus,
   type WorkspaceGitMetadata,
   type WorkspaceResolution,
-} from '@goodvibes-jev/engine/sdk/platform/workspace';
+} from '@goodvibes-jev/engine/platform/platform/workspace';
 
 /**
  * Checkpoint eligibility, read live off the shared workspace-registration store.
@@ -25,19 +25,19 @@ import {
  * inside a subscription callback that cannot await, and it has to reflect the
  * store as it is on disk RIGHT NOW, registering a workspace while the daemon is
  * running has to take effect on the next eligible event, not on the next
- * restart. The SDK's resolver is pure, so the only I/O is one small JSON read
+ * restart. The platform's resolver is pure, so the only I/O is one small JSON read
  * plus a single git worktree probe amortized at construction.
  */
 
 export type StoreShellPaths = Pick<ShellPathService, 'resolveUserPath' | 'homeDirectory'>;
 
 /**
- * Path of the shared store's JSON document, the same path the SDK's gateway
+ * Path of the shared store's JSON document, the same path the platform's gateway
  * verb group constructs its own store over.
  *
  * "The same path" is the whole contract, and it is why this goes through the
- * SDK's resolver rather than spelling any location out. goodvibes-agent reads
- * and writes this same file directly and the SDK's gateway writes it, so the
+ * platform's resolver rather than spelling any location out. goodvibes-agent reads
+ * and writes this same file directly and the platform's gateway writes it, so the
  * register is cross-product state rather than the daemon's own, it lives in
  * the shared tier (~/.goodvibes/shared/), which takes no surface root, so all
  * three resolve one identical path. Until the boot fold has moved it, the

@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
-import { parseModelCatalogRepository } from '../sdk/src/platform/providers/model-catalog-repository.js';
-import { transformModelsDevResponse, saveCatalogCache, loadCatalogCache } from '../sdk/src/platform/providers/model-catalog-cache.js';
-import { installCatalogModelFacts, knownCatalogChatCapability } from '../sdk/src/platform/providers/model-catalog-facts.js';
+import { parseModelCatalogRepository } from '../platform/src/platform/providers/model-catalog-repository.js';
+import { transformModelsDevResponse, saveCatalogCache, loadCatalogCache } from '../platform/src/platform/providers/model-catalog-cache.js';
+import { installCatalogModelFacts, knownCatalogChatCapability } from '../platform/src/platform/providers/model-catalog-facts.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -39,7 +39,7 @@ test('a broken base-model reference refuses the new snapshot', async () => {
 });
 
 test('repository types decide untyped live-listing entries without judgment calls', async () => {
-  const { fetchModelIdsFromListing } = await import('../sdk/src/platform/providers/live-model-discovery.js');
+  const { fetchModelIdsFromListing } = await import('../platform/src/platform/providers/live-model-discovery.js');
   const { installJudgmentPort } = await import('@goodvibes-jev/engine/errors');
   const models = transformModelsDevResponse({ a: { id: 'a', name: 'A', models: {
     alias: { id: 'alias', type: 'chat' }, vector: { id: 'vector', type: 'embedding' },
@@ -59,7 +59,7 @@ test('repository types decide untyped live-listing entries without judgment call
 test('downloads a repository archive, supports long model IDs and rejects a failed refresh', async () => {
   const { c } = await import('tar');
   const { mkdirSync, writeFileSync } = await import('node:fs');
-  const { fetchModelCatalogRepository, MODEL_CATALOG_REPOSITORY_URL } = await import('../sdk/src/platform/providers/model-catalog-repository.js');
+  const { fetchModelCatalogRepository, MODEL_CATALOG_REPOSITORY_URL } = await import('../platform/src/platform/providers/model-catalog-repository.js');
   const root = mkdtempSync(join(tmpdir(), 'catalog-archive-'));
   const originalFetch = globalThis.fetch;
   try {
@@ -80,7 +80,7 @@ test('downloads a repository archive, supports long model IDs and rejects a fail
 
 test.each([5, 6])('a version-%i cached catalog remains available while a repository refresh fails', async version => {
   const { writeFileSync, readFileSync } = await import('node:fs');
-  const { refreshProviderCatalog } = await import('../sdk/src/platform/providers/registry-catalog-lifecycle.js');
+  const { refreshProviderCatalog } = await import('../platform/src/platform/providers/registry-catalog-lifecycle.js');
   const root = mkdtempSync(join(tmpdir(), 'catalog-offline-'));
   const cachePath = join(root, 'models.json'), tmpPath = join(root, 'models.tmp');
   const models = [{ id: 'known', name: 'Known', provider: 'A', providerId: 'a', providerEnvVars: [], pricing: null, tier: 'paid' as const, contextWindow: 16000 }];
@@ -102,8 +102,8 @@ test.each([5, 6])('a version-%i cached catalog remains available while a reposit
 
 test('published reasoning controls resolve per endpoint and skip family judgments', async () => {
   const { installJudgmentPort } = await import('@goodvibes-jev/engine/errors');
-  const { prepareReasoningEffort, resolveReasoningEffortSpec } = await import('../sdk/src/platform/providers/reasoning-effort-families.js');
-  const { knownCatalogMaxOutput } = await import('../sdk/src/platform/providers/model-catalog-facts.js');
+  const { prepareReasoningEffort, resolveReasoningEffortSpec } = await import('../platform/src/platform/providers/reasoning-effort-families.js');
+  const { knownCatalogMaxOutput } = await import('../platform/src/platform/providers/model-catalog-facts.js');
   const common = { id: 'alias', canonicalModelId: 'lab/model', name: 'Opaque model', providerEnvVars: [], pricing: null, tier: 'paid' as const };
   installCatalogModelFacts([
     { ...common, provider: 'A', providerId: 'a', maxOutputTokens: 16000, reasoningOptions: [{ type: 'effort', values: ['low', 'high'] }] },
@@ -128,7 +128,7 @@ test('published reasoning controls resolve per endpoint and skip family judgment
 });
 
 test('Anthropic requests use repository output and reasoning facts while live endpoint limits take precedence', async () => {
-  const { AnthropicProvider, documentedMaxOutput } = await import('../sdk/src/platform/providers/anthropic.js');
+  const { AnthropicProvider, documentedMaxOutput } = await import('../platform/src/platform/providers/anthropic.js');
   const { installJudgmentPort } = await import('@goodvibes-jev/engine/errors');
   installCatalogModelFacts([{ id: 'opaque-model', name: 'Opaque', provider: 'Anthropic', providerId: 'anthropic',
     providerEnvVars: [], pricing: null, tier: 'paid', maxOutputTokens: 16000,
@@ -157,8 +157,8 @@ test('Anthropic requests use repository output and reasoning facts while live en
 
 
 test('repository schema 2 retains GPT-6.1 Sol effort choices, capability flags and base prices', async () => {
-  const { getCatalogModelDefinitionsFrom } = await import('../sdk/src/platform/providers/model-catalog.js');
-  const { effortLevelsForModel } = await import('../sdk/src/platform/providers/reasoning-effort-surface.js');
+  const { getCatalogModelDefinitionsFrom } = await import('../platform/src/platform/providers/model-catalog.js');
+  const { effortLevelsForModel } = await import('../platform/src/platform/providers/reasoning-effort-surface.js');
   const files = new Map([
     ['providers/openai/provider.toml', 'name="OpenAI"\nenv=["OPENAI_API_KEY"]'],
     ['models/openai/gpt-6.1-sol.toml', 'schema=2\nname="GPT-6.1 Sol"\n[capabilities]\nreasoning={supported=true}\ntools={supported=true}\n[limit]\ncontext=1050000\noutput=128000'],

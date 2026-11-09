@@ -8,8 +8,8 @@
  */
 
 import { afterEach, describe, expect, test } from 'bun:test';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { getBundledTheme, resolveTheme } from '@goodvibes-jev/engine/sdk/platform/presentation';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { getBundledTheme, resolveTheme } from '@goodvibes-jev/engine/platform/platform/presentation';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { SelectionModal, type SelectionItem, type SelectionResult } from '../../input/selection-modal.ts';

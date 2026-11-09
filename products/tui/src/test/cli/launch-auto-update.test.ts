@@ -7,7 +7,7 @@ import {
 } from '@/cli/launch-auto-update.ts';
 import type { ApplyUpdateOptions } from '@/input/commands/update-runtime.ts';
 import type { UpdateFetchLike } from '@/runtime/update-check.ts';
-import { SuiteUpdateRecoveryError } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { SuiteUpdateRecoveryError } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 
 // Decision-logic coverage for the launch-time self-update, with every seam
 // stubbed: fetch (never the real network), apply (never a real swap), spawn

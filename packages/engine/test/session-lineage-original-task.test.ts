@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { SessionLineageTracker } from '../sdk/src/platform/core/session-lineage.ts';
+import { SessionLineageTracker } from '../platform/src/platform/core/session-lineage.ts';
 
 describe('SessionLineageTracker.getOriginalTask', () => {
   test('returns null before any task is set', () => {

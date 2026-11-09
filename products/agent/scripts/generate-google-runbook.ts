@@ -8,7 +8,7 @@
  */
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { renderGoogleSetupRunbook, RUNBOOK_RELATIVE_PATH } from '@goodvibes-jev/engine/sdk/platform/google';
+import { renderGoogleSetupRunbook, RUNBOOK_RELATIVE_PATH } from '@goodvibes-jev/engine/platform/platform/google';
 
 const repoRoot = join(import.meta.dir, '..');
 const target = join(repoRoot, RUNBOOK_RELATIVE_PATH);

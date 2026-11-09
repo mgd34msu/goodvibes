@@ -1,9 +1,9 @@
-import { requireDefined } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { type Line, type Cell, createStyledCell } from '@goodvibes-jev/engine/sdk/platform/types';
+import { requireDefined } from '@goodvibes-jev/engine/platform/platform/utils';
+import { type Line, type Cell, createStyledCell } from '@goodvibes-jev/engine/platform/platform/types';
 import { safeTerminalLink } from '../ansi-sanitize.js';
 import { stringToLine } from './string-to-line.js';
 import { renderCodeBlock } from './code-block.js';
-import { getDisplayWidth } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils';
 import { activeTheme, activeTokens } from './theme.js';
 import { renderInlineMarkdown, type InlineToken } from './markdown-inline.js';
 import { isLikelyTableHeaderRow, isLikelyTableSeparatorRow, renderTable } from './markdown-table.js';

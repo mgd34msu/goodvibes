@@ -6,17 +6,17 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { READ_ONLY, useGateReadings } from './_helpers/gate-readings.ts';
-import { PermissionManager, type PermissionConfigReader } from '../sdk/src/platform/permissions/manager.js';
-import type { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.js';
-import type { PermissionMode } from '../sdk/src/platform/config/schema.js';
-import type { PermissionPromptRequest } from '../sdk/src/platform/permissions/prompt.js';
-import { UntrustedContentLedger } from '../sdk/src/platform/security/untrusted-content.js';
-import { runBoundary, stringFieldsOf } from '../sdk/src/platform/gate/boundary.js';
-import { stakesFromFacts, readingArguments, type GateReading } from '../sdk/src/platform/gate/reading.js';
-import { decideByPreset, GATE_PRESETS, presetForMode } from '../sdk/src/platform/gate/presets.js';
-import { McpPermissionManager } from '../sdk/src/platform/runtime/mcp/permissions.js';
-import { permissionPhase } from '../sdk/src/platform/runtime/tools/phases/permission.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
+import { PermissionManager, type PermissionConfigReader } from '../platform/src/platform/permissions/manager.js';
+import type { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.js';
+import type { PermissionMode } from '../platform/src/platform/config/schema.js';
+import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.js';
+import { UntrustedContentLedger } from '../platform/src/platform/security/untrusted-content.js';
+import { runBoundary, stringFieldsOf } from '../platform/src/platform/gate/boundary.js';
+import { stakesFromFacts, readingArguments, type GateReading } from '../platform/src/platform/gate/reading.js';
+import { decideByPreset, GATE_PRESETS, presetForMode } from '../platform/src/platform/gate/presets.js';
+import { McpPermissionManager } from '../platform/src/platform/runtime/mcp/permissions.js';
+import { permissionPhase } from '../platform/src/platform/runtime/tools/phases/permission.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
 
 function reader(mode: PermissionMode): PermissionConfigReader {
   return {

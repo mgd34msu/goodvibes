@@ -1,18 +1,18 @@
-import { postalConfigKey, readConfigSettingForDisplay } from '@goodvibes-jev/engine/sdk/platform/config';
+import { postalConfigKey, readConfigSettingForDisplay } from '@goodvibes-jev/engine/platform/platform/config';
 /**
  * settings-modal-mutations, pure mutation helpers for SettingsModal.
  *
  * These functions encapsulate the side-effectful write operations. Every
  * write, feature-unit headers included, is a plain domain-settings config
- * write; the SDK's settings bridge keeps the runtime gate manager in sync
+ * write; the platform's settings bridge keeps the runtime gate manager in sync
  * (flipping runtime-toggleable gates live and recording honest
  * pending-restart markers for startup-gated ones). Each function takes its
  * dependencies as explicit arguments rather than accessing class-level state.
  */
 
-import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
 import type { FlagEntry, SettingEntry } from './settings-modal-types.ts';
 import { deepEqual, refreshHostSettingEntry, refreshSettingsPolicyAvailability } from './settings-modal-data.ts';
@@ -84,7 +84,7 @@ export function applySettingValue({
   }
   // Defensive: a handful of TUI-local synthetic keys (see worktree-setup-config.ts)
   // live under a config section CONFIG_SCHEMA/DEFAULT_CONFIG has never populated
-  // (e.g. 'worktree' as of the SDK 1.6.1 repack), so configManager.get can throw
+  // (e.g. 'worktree' as of the platform 1.6.1 repack), so configManager.get can throw
   // "Invalid config path" here even though the write attempt below is already
   // guarded. Without this, that read, which runs unconditionally, before the
   // write's own try/catch, would crash the whole settings modal on save instead
@@ -95,8 +95,8 @@ export function applySettingValue({
   } catch (e) {
     logger.error('SettingsModal: failed to read previous config value', { key, error: summarizeError(e) });
   }
-  // REQUIRES_RESTART: SDK's ConfigSetting has no requiresRestart field yet (see
-  // goodvibes-sdk HANDOFF-FROM-TUI-SESSION-20260611.md §Item 8). Until it does,
+  // REQUIRES_RESTART: platform's ConfigSetting has no requiresRestart field yet (see
+  // goodvibes-platform HANDOFF-FROM-TUI-SESSION-20260611.md §Item 8). Until it does,
   // we detect restart-triggering keys by sub-key name heuristic below.
   const isRestartKey = ['host', 'port', 'hostMode', 'enabled'].includes(key.split('.')[1] ?? '');
 

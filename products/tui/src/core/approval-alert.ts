@@ -2,7 +2,7 @@
  * approval-alert, fires an unfocused-user alert the moment a tool call
  * becomes a real, user-blocking permission prompt.
  *
- * Anchor: `PERMISSION_REQUESTED` (SDK events/permissions.ts) is the wrong
+ * Anchor: `PERMISSION_REQUESTED` (platform events/permissions.ts) is the wrong
  * signal, it fires for every policy-evaluation step, including ones
  * auto-resolved by allow-lists/yolo-mode in milliseconds. The only place a
  * request becomes an actual user-facing prompt is where main.ts assigns
@@ -14,18 +14,18 @@
  * wrapped promise settles) so it reflects "a prompt just appeared", not
  * "a prompt was just resolved".
  *
- * Text (owner ruling 2026-09-29, SDK runtime/turn-notification.ts): the
+ * Text (owner ruling 2026-09-29, platform runtime/turn-notification.ts): the
  * notice names what is waiting, the command for exec, the file for write and
  * edit, the URL for fetch, and the turn that asked for it. When
  * behavior.notificationsMetadataOnly is not explicitly false every channel here
  * (OSC 9, desktop, webhook) sends the tool name and permission category only,
  * never a command, a path or the turn's name.
  */
-import { notifyCompletion } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
-import type { WebhookNotifier } from '@goodvibes-jev/engine/sdk/platform/integrations';
-import type { PermissionRequestHandler, PermissionPromptRequest } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import type { FocusTracker } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { notifyCompletion } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
+import type { PermissionRequestHandler, PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
+import type { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import {
   shouldFireAlert,
   FORCE_NOTIFY_DURATION_MS,
@@ -37,7 +37,7 @@ import {
   resolveTurnName,
   type ConfigGet,
   type ApprovalNotificationFacts,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+} from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { TerminalNotifier } from './terminal-notifier.ts';
 
 export interface ApprovalAlertDeps {
@@ -57,7 +57,7 @@ export interface ApprovalAlertDeps {
    * user message while a turn runs). Absent means the notice names no turn.
    */
   readonly conversation?: ApprovalTurnSource | null;
-  /** Desktop delivery; defaults to the SDK notifyCompletion. Tests pass a spy to read the text. */
+  /** Desktop delivery; defaults to the platform notifyCompletion. Tests pass a spy to read the text. */
   readonly notifyDesktop?: typeof notifyCompletion;
 }
 
@@ -87,7 +87,7 @@ export function wrapRequestPermissionWithAlert(
 
 function fireApprovalAlert(request: PermissionPromptRequest, deps: ApprovalAlertDeps): void {
   const metadataOnly = readNotificationsMetadataOnly(deps.configGet);
-  // Private fields stay lazy until the local builder or SDK delivery owner
+  // Private fields stay lazy until the local builder or platform delivery owner
   // admits content. Restricted admission never inspects args or conversation.
   const facts: ApprovalNotificationFacts = {
     tool: request.tool,

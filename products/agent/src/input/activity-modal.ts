@@ -10,7 +10,7 @@
  * closes the modal and never stops any work.
  */
 
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { SurfaceModal, SurfaceModalHost } from './surface-modal-host.ts';
 import type { SurfaceLayer } from '../renderer/surface-kit.ts';
 import { activityItems, renderActivityModal, type ActivityModalView, type ActivityView } from '../renderer/activity-modal.ts';

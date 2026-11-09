@@ -7,8 +7,8 @@ import { rm } from 'node:fs/promises';
 import {
   InboxCursorStore,
   type InboxSweepSummary,
-} from '../sdk/src/platform/intake/cursor-store.ts';
-import type { InboundChannelItem } from '../sdk/src/platform/intake/provider-adapter.ts';
+} from '../platform/src/platform/intake/cursor-store.ts';
+import type { InboundChannelItem } from '../platform/src/platform/intake/provider-adapter.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 function item(over: Partial<InboundChannelItem> & { id: string }): InboundChannelItem {

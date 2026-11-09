@@ -1,7 +1,7 @@
 import {
   dispatchPolicyCommand as dispatchEnginePolicyCommand,
   type PolicyFrontDoorContext,
-} from '@goodvibes-jev/engine/sdk/platform/gate/policy';
+} from '@goodvibes-jev/engine/platform/platform/gate/policy';
 import type { CommandContext } from '../command-registry.ts';
 import { requireShellPaths } from './runtime-services.ts';
 
@@ -25,4 +25,4 @@ export async function dispatchPolicyCommand(args: string[], context: CommandCont
   await dispatchEnginePolicyCommand(args, createPolicyCommandContext(context));
 }
 
-export { renderPolicyUsage } from '@goodvibes-jev/engine/sdk/platform/gate/policy';
+export { renderPolicyUsage } from '@goodvibes-jev/engine/platform/platform/gate/policy';

@@ -9,12 +9,12 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { createECDH, randomBytes } from 'node:crypto';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { registerPairingHandoffGatewayMethods } from '../sdk/src/platform/control-plane/routes/pairing-handoff.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { registerPairingHandoffGatewayMethods } from '../platform/src/platform/control-plane/routes/pairing-handoff.ts';
 import {
   buildPairingHandoffLink,
   parsePairingHandoffLink,
-} from '../sdk/src/platform/pairing/pairing-handoff.ts';
+} from '../platform/src/platform/pairing/pairing-handoff.ts';
 
 /**
  * Real subscription key material. The hand-off registers a push subscription

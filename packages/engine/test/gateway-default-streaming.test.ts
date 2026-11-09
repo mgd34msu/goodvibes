@@ -13,18 +13,18 @@
  *     method invoke 401 by access class
  */
 import { describe, expect, test } from 'bun:test';
-import { createFeatureFlagManager } from '../sdk/src/platform/runtime/feature-flags/manager.js';
-import { ControlPlaneGateway } from '../sdk/src/platform/control-plane/gateway.js';
-import { CONTROL_PLANE_GATEWAY_FLAG_ID } from '../sdk/src/platform/control-plane/gateway-disabled-response.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { CompanionChatManager } from '../sdk/src/platform/companion/companion-chat-manager.js';
+import { createFeatureFlagManager } from '../platform/src/platform/runtime/feature-flags/manager.js';
+import { ControlPlaneGateway } from '../platform/src/platform/control-plane/gateway.js';
+import { CONTROL_PLANE_GATEWAY_FLAG_ID } from '../platform/src/platform/control-plane/gateway-disabled-response.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { CompanionChatManager } from '../platform/src/platform/companion/companion-chat-manager.js';
 import type {
   CompanionChatManagerConfig,
   CompanionLLMProvider,
   CompanionProviderChunk,
-} from '../sdk/src/platform/companion/companion-chat-manager.js';
-import { DaemonHttpRouter } from '../sdk/src/platform/daemon/http/router.js';
-import { createDaemonControlRouteHandlers } from '../daemon-sdk/src/control-routes.js';
+} from '../platform/src/platform/companion/companion-chat-manager.js';
+import { DaemonHttpRouter } from '../platform/src/platform/daemon/http/router.js';
+import { createDaemonControlRouteHandlers } from '../daemon-api/src/control-routes.js';
 
 const FLAG = CONTROL_PLANE_GATEWAY_FLAG_ID;
 

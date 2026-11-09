@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { SQLiteStorePersistence, SQLitePublicationError, type SQLitePublicationIO } from '../sdk/src/platform/state/sqlite-store-persistence.js';
+import { SQLiteStorePersistence, SQLitePublicationError, type SQLitePublicationIO } from '../platform/src/platform/state/sqlite-store-persistence.js';
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
 function path() { const root = fs.mkdtempSync(join(tmpdir(), 'ledger-publication-')); roots.push(root); return join(root, 'knowledge.sqlite'); }

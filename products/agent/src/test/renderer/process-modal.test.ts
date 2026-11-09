@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
-import type { BackgroundProcess } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { BackgroundProcess } from '@goodvibes-jev/engine/platform/platform/tools';
 import { ProcessModal, renderProcessModal } from '../../renderer/process-modal.ts';
 import { activeTokens } from '../../renderer/theme.ts';
 import { layerText, layerTextBlock } from '../helpers/surface-frame.ts';

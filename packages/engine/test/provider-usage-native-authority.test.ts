@@ -2,9 +2,9 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
-import { FavoritesStore } from '../sdk/src/platform/providers/favorites.js';
-import { createProviderApi, type ProviderApiDependencies } from '../sdk/src/platform/providers/provider-api.js';
-import type { ModelDefinition } from '../sdk/src/platform/providers/registry-types.js';
+import { FavoritesStore } from '../platform/src/platform/providers/favorites.js';
+import { createProviderApi, type ProviderApiDependencies } from '../platform/src/platform/providers/provider-api.js';
+import type { ModelDefinition } from '../platform/src/platform/providers/registry-types.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

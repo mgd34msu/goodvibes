@@ -32,9 +32,9 @@
  * verbs mean. It resolves a target, makes a request, and returns the parsed
  * body. Every decision about what the answer MEANS belongs to the daemon.
  */
-import { readControlPlaneBinding } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { readOperatorTokenFile } from '@goodvibes-jev/engine/sdk/platform/workspace';
+import { readControlPlaneBinding } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { readOperatorTokenFile } from '@goodvibes-jev/engine/platform/platform/workspace';
 
 /** Where to send a verb, and what to authenticate with. */
 export interface RemoteDaemonTarget {

@@ -5,7 +5,7 @@
 // UIFactory static methods are thin wrappers over these.
 // ---------------------------------------------------------------------------
 
-import { type Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import { type Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { renderConversationFragment } from './conversation-surface.js';
 import { activeUiTones } from './theme.js';
 import { activeTheme } from './theme.js';
@@ -13,7 +13,7 @@ import { activeTheme } from './theme.js';
 /**
  * The mid-turn message queue rendered as an EDITABLE list. Each still-undelivered
  * message shows a 1-based number so it can be named to `/queue edit <n> …` /
- * `/queue delete <n>` (the SDK editQueuedMessage / deleteQueuedMessage verbs). A
+ * `/queue delete <n>` (the platform editQueuedMessage / deleteQueuedMessage verbs). A
  * delivered message has already left the queue, so the list only ever shows what
  * is still editable, delivery is immutability, made visible.
  */

@@ -9,20 +9,20 @@
  * Run: bun examples/submit-turn-quickstart.mjs
  */
 
-import { createGoodVibesSdk, forSession } from '@goodvibes-jev/engine/sdk';
+import { createGoodVibesPlatform, forSession } from '@goodvibes-jev/engine/platform';
 
-// 1. Construct the SDK.
+// 1. Construct the platform.
 const authToken = process.env.GOODVIBES_TOKEN;
 if (!authToken) {
   throw new Error('GOODVIBES_TOKEN env var is required (operator bearer token from the daemon).');
 }
-const sdk = createGoodVibesSdk({
+const platformClient = createGoodVibesPlatform({
   baseUrl: process.env.GOODVIBES_BASE_URL ?? 'http://127.0.0.1:3421',
   authToken,
 });
 
 // 2. Create a session. All fields optional; title is a human-readable label.
-const session = await sdk.operator.sessions.create({ title: 'quickstart demo' });
+const session = await platformClient.operator.sessions.create({ title: 'quickstart demo' });
 // sessions.create() returns { session: { id, ... } }; session.session.id is the session ID.
 const sessionId = session.session.id;
 console.log(`[session] created: ${sessionId}`);
@@ -35,7 +35,7 @@ console.log(`[session] created: ${sessionId}`);
 //    callback only fires for events belonging to the given session. This
 //    removes the need to manually guard each handler with
 //    `if (e.sessionId !== sessionId) return`.
-const events = sdk.realtime.viaSse();
+const events = platformClient.realtime.viaSse();
 const sessionEvents = forSession(events, sessionId);
 
 const turnDone = new Promise((resolve) => {
@@ -51,10 +51,10 @@ const turnDone = new Promise((resolve) => {
   sessionEvents.turn.onEnvelope('TURN_CANCEL',    () => { finish('cancelled'); });
 });
 
-// 4. Submit the user message. The SDK streams assistant deltas via the SSE
+// 4. Submit the user message. The platform streams assistant deltas via the SSE
 //    subscription above. For alternative message routing (e.g., companion
 //    surfaces), see docs/companion-message-routing.md.
-const msg = await sdk.operator.sessions.messages.create(sessionId, {
+const msg = await platformClient.operator.sessions.messages.create(sessionId, {
   body: 'Say hello in exactly one sentence.',
 });
 console.log(`[message] submitted to session: ${sessionId}`);

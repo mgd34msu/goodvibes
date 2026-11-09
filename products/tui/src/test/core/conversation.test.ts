@@ -456,7 +456,7 @@ describe('ConversationManager', () => {
   });
 
   // after a session resume replays historical messages, a freshly
-  // constructed Orchestrator's `usage` starts at {0,0,0,0} (SDK gap, never
+  // constructed Orchestrator's `usage` starts at {0,0,0,0} (platform gap, never
   // persisted/reseeded). sumConversationUsage() is the TUI-side helper that
   // recomputes real totals from the replayed history so bootstrap-shell.ts
   // can hydrate orchestrator.usage before the footer's first render.

@@ -3,8 +3,8 @@
  */
 import { mkdtemp, rm, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { LLMProvider, ChatRequest, ChatResponse } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { ToolCall } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { LLMProvider, ChatRequest, ChatResponse } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
 
 // ---------------------------------------------------------------------------
 // Mock LLM Provider
@@ -93,13 +93,13 @@ export async function makeTempDir(): Promise<{ dir: string; cleanup: () => Promi
  * Extract plain text string from a Line (Cell[]).
  * Joins all cell characters, trims trailing spaces.
  */
-export function lineToString(line: import('@goodvibes-jev/engine/sdk/platform/types').Line): string {
+export function lineToString(line: import('@goodvibes-jev/engine/platform/platform/types').Line): string {
   return line.map((c) => c.char).join('').trimEnd();
 }
 
 /**
  * Extract plain text from an array of Lines.
  */
-export function linesToText(lines: import('@goodvibes-jev/engine/sdk/platform/types').Line[]): string[] {
+export function linesToText(lines: import('@goodvibes-jev/engine/platform/platform/types').Line[]): string[] {
   return lines.map(lineToString);
 }

@@ -4,7 +4,8 @@
  * These run the real runtimes over an in-memory bus: real scrypt, real x25519
  * seals, real envelopes. Nothing here models the protocol; it exercises it.
  */
-import { GROUP_MATERIAL_SECRET_KEY } from '../sdk/src/platform/cluster/group-store.js';
+import { GROUP_MATERIAL_SECRET_KEY } from '../platform/src/platform/cluster/group-store.js';
+import { ntfySurface, surfaceIdFor } from '../platform/src/platform/cluster/surface-id.js';
 import { describe, expect, test, afterEach } from 'bun:test';
 import {
   addGroupNode,
@@ -27,12 +28,12 @@ import {
   joinKeyForGroup,
   leaveGroup,
   rejoinGroup,
-} from '../sdk/src/platform/cluster/group-operations.js';
+} from '../platform/src/platform/cluster/group-operations.js';
 import {
   decideAdmission,
   encodeIdentityClassMessage,
   GROUP_MESSAGE_TYPES,
-} from '../sdk/src/platform/cluster/group-membership.js';
+} from '../platform/src/platform/cluster/group-membership.js';
 import {
   admitMember,
   createGroupStateDocument,
@@ -42,12 +43,12 @@ import {
   sweepGroupState,
   GROUP_TOMBSTONE_MAX_AGE_MS,
   MAX_GROUP_TOMBSTONES,
-} from '../sdk/src/platform/cluster/group-state.js';
+} from '../platform/src/platform/cluster/group-state.js';
 import {
   generateGroupId,
   deriveJoinSalt,
   generateNodeKeyMaterial,
-} from '../sdk/src/platform/cluster/group-crypto.js';
+} from '../platform/src/platform/cluster/group-crypto.js';
 
 let world: GroupTestWorld | null = null;
 
@@ -243,7 +244,7 @@ describe('coming back after being away', () => {
     expect(material).not.toBeNull();
     if (!material) return;
     const { deriveJoinVerifier, generateJoinKey } = await import(
-      '../sdk/src/platform/cluster/group-crypto.js'
+      '../platform/src/platform/cluster/group-crypto.js'
     );
     const newJoinKey = generateJoinKey();
     await first.runtime.commitMaterial({
@@ -662,8 +663,9 @@ describe('bounds', () => {
 describe('what reaches the wire', () => {
   test('no join key, group key, roster private key or surface name is ever on it', async () => {
     const { world: w, first, groupId, joinKey } = await makeGroupOfOne();
+    const surfaceId = surfaceIdFor(ntfySurface('https://ntfy.sh', 'ntfy-topic-mikes-private-inbox'));
     const second = await addGroupNode(w, 'node-b', {
-      surfaceHoldings: () => [{ surfaceId: 'ntfy-topic-mikes-private-inbox', reason: 'elected' }],
+      surfaceHoldings: () => [{ surfaceId, reason: 'elected' }],
     });
     await joinGroup(second.context, { groupId, joinKey });
     await advance(w, 30_000);
@@ -680,9 +682,19 @@ describe('what reaches the wire', () => {
     expect(text).not.toContain(first.runtime.keyMaterial?.joinVerifier ?? 'never-matches');
     expect(text).not.toContain(first.runtime.keyMaterial?.node.identity.privateKey ?? 'never-matches');
 
-    // A surface reported through status is hashed, never carried in the clear.
+    // Status preserves the exact elected identity; it does not hash it again.
     const holdings = second.runtime.surfaceHoldings();
-    expect(holdings?.[0]?.surfaceId).toMatch(/^s[0-9a-f]{32}$/);
+    expect(holdings?.[0]?.surfaceId).toBe(surfaceId);
+  });
+
+  test('a malformed holdings provider cannot turn a raw private topic into a status identity', async () => {
+    const { world: w } = await makeGroupOfOne();
+    let selected = surfaceIdFor(ntfySurface('https://ntfy.sh', 'private-topic'));
+    const second = await addGroupNode(w, 'node-b', { surfaceHoldings: () => [{ surfaceId: selected, reason: 'elected' }] });
+    expect(second.runtime.surfaceHoldings()?.[0]?.surfaceId).toBe(selected);
+    const before = wireText(w); selected = 'ntfy://private-topic';
+    expect(() => second.runtime.surfaceHoldings()).toThrow('already-derived surface ID');
+    expect(wireText(w)).toBe(before);
   });
 
   test('the beacon carries only the group id, its name, the member count and a version', async () => {

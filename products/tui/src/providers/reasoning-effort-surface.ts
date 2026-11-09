@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/sdk/platform/providers/reasoning-effort-surface';
+export * from '@goodvibes-jev/engine/platform/platform/providers/reasoning-effort-surface';

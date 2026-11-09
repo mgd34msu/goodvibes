@@ -1,12 +1,12 @@
 /**
  * /status, the current model and its context window with where the window
  * came from ('catalog: abacus', 'consensus of 4 providers', 'family
- * default', 'user override'), read from the SDK registry the status line
+ * default', 'user override'), read from the platform registry the status line
  * reads. Token use stays on the status line and in /context.
  */
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import type { ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { describeContextWindowSource } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
+import { describeContextWindowSource } from '@goodvibes-jev/engine/platform/platform/providers';
 import { abbreviateCount } from '../../utils/format-number.ts';
 
 /** The /status text for a model, its known window (null when unknown) and any user override. */

@@ -17,13 +17,13 @@ import {
   surfaceTrustTier,
   surfaceIsUntrusted,
   surfaceHasCommandAuthority,
-} from '../sdk/src/platform/security/untrusted-content.ts';
+} from '../platform/src/platform/security/untrusted-content.ts';
 import {
   VerificationExpectationBook,
   extractVerification,
   type CandidateEmail,
-} from '../sdk/src/platform/google/verification-expectations.ts';
-import { deliveredRecipientFromDeliveryHeaders } from '../sdk/src/platform/google/delivery-evidence.ts';
+} from '../platform/src/platform/google/verification-expectations.ts';
+import { deliveredRecipientFromDeliveryHeaders } from '../platform/src/platform/google/delivery-evidence.ts';
 import { useSecurityReadings } from './helpers/security-readings.ts';
 
 useSecurityReadings();

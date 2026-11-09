@@ -1,15 +1,15 @@
-import { KNOWLEDGE_SCHEMA_VERSION } from '../sdk/src/platform/knowledge/store-schema.js';
+import { KNOWLEDGE_SCHEMA_VERSION } from '../platform/src/platform/knowledge/store-schema.js';
 import * as nativeFs from 'node:fs';
-import type { SQLitePublicationIO } from '../sdk/src/platform/state/sqlite-store-persistence.js';
+import type { SQLitePublicationIO } from '../platform/src/platform/state/sqlite-store-persistence.js';
 import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { loadSqlJsEngine, SQLiteStore, type SqlDatabase } from '../sdk/src/platform/state/sqlite-store.js';
-import { createWorkLedger } from '../sdk/src/platform/workflow/work-ledger/service.js';
-import { acquireCrossProcessLock } from '../sdk/src/platform/workspace/checkpoint/cross-process-lock.js';
-import type { WorkLedgerDecision } from '../sdk/src/platform/workflow/work-ledger/types.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { loadSqlJsEngine, SQLiteStore, type SqlDatabase } from '../platform/src/platform/state/sqlite-store.js';
+import { createWorkLedger } from '../platform/src/platform/workflow/work-ledger/service.js';
+import { acquireCrossProcessLock } from '../platform/src/platform/workspace/checkpoint/cross-process-lock.js';
+import type { WorkLedgerDecision } from '../platform/src/platform/workflow/work-ledger/types.js';
 
 const roots: string[] = [];
 const stores: KnowledgeStore[] = [];

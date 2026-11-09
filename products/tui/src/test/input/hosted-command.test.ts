@@ -19,7 +19,7 @@ import {
 import { HostedSessionFeed } from '../../views/hosted-session-feed.ts';
 import { CommandRegistry } from '../../input/command-registry.ts';
 import { registerHostedRuntimeCommands } from '../../input/commands/hosted-runtime.ts';
-import type { HostedSessionRecord } from '@goodvibes-jev/engine/sdk/platform/hosted-sessions';
+import type { HostedSessionRecord } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
 
 function makeRecord(overrides: Partial<HostedSessionRecord> = {}): HostedSessionRecord {
   return {

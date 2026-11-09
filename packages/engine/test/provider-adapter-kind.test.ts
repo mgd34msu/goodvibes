@@ -8,15 +8,15 @@
  * /effort explainer names (describeReasoningWire in reasoning-effort.ts).
  */
 import { describe, expect, test } from 'bun:test';
-import { ProviderRegistry } from '../sdk/src/platform/providers/registry.js';
-import type { LLMProvider } from '../sdk/src/platform/providers/interface.js';
-import type { ProviderAdapterKind } from '../sdk/src/platform/providers/adapter-kind.js';
-import { providerAdapterKind } from '../sdk/src/platform/providers/adapter-kind.js';
-import { AnthropicCompatProvider } from '../sdk/src/platform/providers/anthropic-compat.js';
-import { OpenAICompatProvider } from '../sdk/src/platform/providers/openai-compat.js';
-import { GeminiProvider } from '../sdk/src/platform/providers/gemini.js';
-import { getCacheCapability } from '../sdk/src/platform/providers/cache-capability.js';
-import { describeReasoningWire, FALLBACK_REASONING_EFFORT_SPEC, type ReasoningEffortSpec } from '../sdk/src/platform/providers/reasoning-effort.js';
+import { ProviderRegistry } from '../platform/src/platform/providers/registry.js';
+import type { LLMProvider } from '../platform/src/platform/providers/interface.js';
+import type { ProviderAdapterKind } from '../platform/src/platform/providers/adapter-kind.js';
+import { providerAdapterKind } from '../platform/src/platform/providers/adapter-kind.js';
+import { AnthropicCompatProvider } from '../platform/src/platform/providers/anthropic-compat.js';
+import { OpenAICompatProvider } from '../platform/src/platform/providers/openai-compat.js';
+import { GeminiProvider } from '../platform/src/platform/providers/gemini.js';
+import { getCacheCapability } from '../platform/src/platform/providers/cache-capability.js';
+import { describeReasoningWire, FALLBACK_REASONING_EFFORT_SPEC, type ReasoningEffortSpec } from '../platform/src/platform/providers/reasoning-effort.js';
 
 type RegistryOptions = ConstructorParameters<typeof ProviderRegistry>[0];
 

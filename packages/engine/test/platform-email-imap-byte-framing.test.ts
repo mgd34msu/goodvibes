@@ -2,11 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import type { Socket } from 'node:net';
 import { StringDecoder } from 'node:string_decoder';
-import { ImapClient } from '../sdk/src/platform/email/imap-client.js';
-import { selectDraftsMailboxFrames } from '../sdk/src/platform/email/imap-draft.js';
-import { ImapSession } from '../sdk/src/platform/email/imap-session.js';
-import { parseFetchResponses, fetchSection } from '../sdk/src/platform/email/imap-fetch-response.js';
-import { extractBodyStructure, extractFetchSection, parseBodyStructure } from '../sdk/src/platform/email/imap-bodystructure.js';
+import { ImapClient } from '../platform/src/platform/email/imap-client.js';
+import { selectDraftsMailboxFrames } from '../platform/src/platform/email/imap-draft.js';
+import { ImapSession } from '../platform/src/platform/email/imap-session.js';
+import { parseFetchResponses, fetchSection } from '../platform/src/platform/email/imap-fetch-response.js';
+import { extractBodyStructure, extractFetchSection, parseBodyStructure } from '../platform/src/platform/email/imap-bodystructure.js';
 
 /** Byte-only in-memory transport. No sockets, mailbox, auth service or network. */
 class ByteSocket extends EventEmitter {

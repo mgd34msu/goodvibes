@@ -14,9 +14,9 @@
 import { describe, expect, test } from 'bun:test';
 import { composeMiddleware } from '../transport-core/src/middleware.ts';
 import type { TransportContext } from '../transport-core/src/middleware.ts';
-import { createAutoRefreshMiddleware } from '../sdk/src/client-auth/auto-refresh-middleware.ts';
-import { AutoRefreshCoordinator } from '../sdk/src/client-auth/auto-refresh.ts';
-import { createMemoryTokenStore } from '../sdk/src/auth.ts';
+import { createAutoRefreshMiddleware } from '../platform/src/client-auth/auto-refresh-middleware.ts';
+import { AutoRefreshCoordinator } from '../platform/src/client-auth/auto-refresh.ts';
+import { createMemoryTokenStore } from '../platform/src/auth.ts';
 
 function gc(): void {
   (globalThis as { Bun?: { gc?: (f: boolean) => void } }).Bun?.gc?.(true);

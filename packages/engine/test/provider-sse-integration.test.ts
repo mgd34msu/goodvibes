@@ -13,9 +13,9 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { ControlPlaneGateway, DEFAULT_DOMAINS_TEST_EXPORT } from '../sdk/src/platform/control-plane/gateway.js';
-import { RuntimeEventBus, createEventEnvelope } from '../sdk/src/platform/runtime/events/index.js';
-import type { RuntimeEventDomain } from '../sdk/src/platform/runtime/events/index.js';
+import { ControlPlaneGateway, DEFAULT_DOMAINS_TEST_EXPORT } from '../platform/src/platform/control-plane/gateway.js';
+import { RuntimeEventBus, createEventEnvelope } from '../platform/src/platform/runtime/events/index.js';
+import type { RuntimeEventDomain } from '../platform/src/platform/runtime/events/index.js';
 import { settleEvents } from './_helpers/test-timeout.js';
 
 // ---------------------------------------------------------------------------

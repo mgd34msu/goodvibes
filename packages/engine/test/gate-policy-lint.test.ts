@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   lintPolicyConfig,
   type PermissionsConfig,
-} from '../sdk/src/platform/runtime/permissions/index.ts';
+} from '../platform/src/platform/runtime/permissions/index.ts';
 import { useGateReadings } from './_helpers/gate-readings.ts';
 
 describe('lintPolicyConfig', () => {

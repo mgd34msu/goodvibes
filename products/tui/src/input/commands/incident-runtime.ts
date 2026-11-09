@@ -1,7 +1,7 @@
 import { dirname, resolve } from 'path';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import type { CommandRegistry } from '../command-registry.ts';
-import { buildIncidentMemoryAddOptions } from '@goodvibes-jev/engine/sdk/platform/state';
+import { buildIncidentMemoryAddOptions } from '@goodvibes-jev/engine/platform/platform/state';
 import { requireShellPaths } from './runtime-services.ts';
 import { getMemorySpine } from './recall-query.ts';
 

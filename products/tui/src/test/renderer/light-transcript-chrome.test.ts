@@ -20,7 +20,7 @@
  */
 
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
-import type { ToolCall } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
 import { logConversationToolResult } from '../../core/conversation-rendering.ts';
 
 /** One bead row for a finished call, drawn the way the work tree draws it. */
@@ -34,7 +34,7 @@ import { renderSystemMessage } from '../../renderer/system-message.ts';
 import { renderThinkingBlock } from '../../renderer/thinking.ts';
 import { UIFactory } from '../../renderer/ui-factory.ts';
 import { setActiveThemeMode, setActiveThemeName } from '../../renderer/theme.ts';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 
 // These fixtures pin the historical palette's per-mode values, so the suite
 // runs under goodvibes-neon (the pre-2026-09 look); textFaint is the documented

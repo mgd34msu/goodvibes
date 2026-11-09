@@ -3,7 +3,7 @@ import '../core/conversation-usage.ts';
 /**
  * context-accounting-source.ts
  *
- * Binds the SDK's `context_accounting` tool (SDK 1.6.1,
+ * Binds the platform's `context_accounting` tool (platform 1.6.1,
  * platform/tools/context-accounting) to THIS fork's own interactive
  * Orchestrator so the tool reports real, live session data instead of the
  * unbound-holder honesty message ("no live session context bound"). GoodVibes
@@ -21,15 +21,15 @@ import '../core/conversation-usage.ts';
  *   - Turn injections: Orchestrator.getTurnInjections() (public accessor).
  *   - Compaction state: Orchestrator does not expose `isCompacting` publicly
  *     (private field), so this reads runtimeStore.getState().session.compactionState
- *     instead, the SAME state the SDK's own updateSessionState reducer
+ *     instead, the SAME state the platform's own updateSessionState reducer
  *     already derives from the 'compaction' domain's runtime-bus events (see
  *     agent-runtime-events.ts's `runtimeBus.onDomain('compaction', ...)`
  *     subscription, wired before this bind call runs). compactionCount is a
  *     local counter incremented on each applied COMPACTION_RECEIPT for THIS
- *     session, the SDK does not track a running count itself.
+ *     session, the platform does not track a running count itself.
  */
-import type { ContextAccountingHolder, ContextAccountingSource } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { Orchestrator } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { ContextAccountingHolder, ContextAccountingSource } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Orchestrator } from '@goodvibes-jev/engine/platform/platform/core';
 import type { CompactionEvent, RuntimeEventBus } from '@/runtime/index.ts';
 import type { RuntimeStore } from './store/index.ts';
 
@@ -68,7 +68,7 @@ export function bindOrchestratorContextAccounting(options: BindOrchestratorConte
   const { orchestrator, holder, runtimeBus, runtimeStore, sessionId, getContextWindow } = options;
   const scope = options.scope ?? 'main session';
 
-  // Local running count of applied compactions for THIS session, the SDK
+  // Local running count of applied compactions for THIS session, the platform
   // emits the mandatory COMPACTION_RECEIPT after every compaction path
   // (agent-runtime-events.ts routes the same event into the visible system
   // message; this tracks only the count, filtered to this session so a

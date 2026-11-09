@@ -7,8 +7,8 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ConfigKey, ConfigManager as ConfigManagerType, ConfigValue } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigKey, ConfigManager as ConfigManagerType, ConfigValue } from '@goodvibes-jev/engine/platform/platform/config';
 import { buildSettingGroups } from '../../input/settings-modal-data.ts';
 import { applySettingValue } from '../../input/settings-modal-mutations.ts';
 import {
@@ -23,7 +23,7 @@ import {
 
 /**
  * Reads the 'sandbox' category directly (the same call registerAllTools makes
- * at tool-registration time) instead of cm.get(SANDBOX_*_CONFIG_KEY): the SDK's
+ * at tool-registration time) instead of cm.get(SANDBOX_*_CONFIG_KEY): the platform's
  * exported ConfigKey union is missing the egressAllowlist/workspaceWritable
  * dotted leaf entries (present for every sibling sandbox.* key), so a generic
  * cm.get(key) call with those constants can't recover a usable ConfigValue<K>.
@@ -84,7 +84,7 @@ describe('sandbox.egressAllowlist / sandbox.workspaceWritable synthetic settings
     //
     // Read through getCategory('sandbox') rather than cm.get(KEY) directly:
     // egressAllowlist/workspaceWritable are real GoodVibesConfig['sandbox']
-    // fields, but the SDK's exported ConfigKey union is missing their dotted
+    // fields, but the platform's exported ConfigKey union is missing their dotted
     // leaf entries (present for every sibling sandbox.* key, qemuBinary,
     // vmBackend, etc., but not these two), which is why sandbox-exec-config.ts
     // has to force these constants through `as ConfigKey` in the first place.
@@ -97,7 +97,7 @@ describe('sandbox.egressAllowlist / sandbox.workspaceWritable synthetic settings
     expect(entry.isDefault).toBe(true);
   });
 
-  test('a real ConfigManager writes both keys for real (applySettingValue), feeding the SDK exec sandbox directly', () => {
+  test('a real ConfigManager writes both keys for real (applySettingValue), feeding the platform exec sandbox directly', () => {
     const groups = new Map<string, ReturnType<typeof buildSandboxEgressAllowlistSyntheticEntry>[]>();
     const egressResult = applySettingValue({
       key: SANDBOX_EGRESS_ALLOWLIST_CONFIG_KEY,

@@ -3,14 +3,14 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import type { ToolLLM, ToolLLMChatOptions } from '../sdk/src/platform/config/tool-llm.js';
-import { createContractInputAuthority, revokeContractInputAuthority } from '../sdk/src/platform/contract/input-authority.js';
-import { captureContractInput, contractInputPath, materializeContractInput } from '../sdk/src/platform/contract/input-snapshot.js';
-import type { Contract } from '../sdk/src/platform/contract/types.js';
-import { createCapturedAutoHealBackend, type CapturedAutoHealBackend } from '../sdk/src/platform/tools/shared/captured-auto-heal.js';
-import { capturedInputTool } from '../sdk/src/platform/tools/shared/captured-input-tools.js';
-import { createWriteTool } from '../sdk/src/platform/tools/write/index.js';
+import type { ConfigManager } from '../platform/src/platform/config/manager.js';
+import type { ToolLLM, ToolLLMChatOptions } from '../platform/src/platform/config/tool-llm.js';
+import { createContractInputAuthority, revokeContractInputAuthority } from '../platform/src/platform/contract/input-authority.js';
+import { captureContractInput, contractInputPath, materializeContractInput } from '../platform/src/platform/contract/input-snapshot.js';
+import type { Contract } from '../platform/src/platform/contract/types.js';
+import { createCapturedAutoHealBackend, type CapturedAutoHealBackend } from '../platform/src/platform/tools/shared/captured-auto-heal.js';
+import { capturedInputTool } from '../platform/src/platform/tools/shared/captured-input-tools.js';
+import { createWriteTool } from '../platform/src/platform/tools/write/index.js';
 import { useToolReadings } from './_helpers/tool-readings.js';
 
 // Both the repair model and Jev acceptance are local fakes. No live provider,

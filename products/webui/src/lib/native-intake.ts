@@ -1,5 +1,5 @@
-import type { OperatorRemoteClient } from "@goodvibes-jev/engine/operator-sdk";
-import { createOperatorNativeWorkExecutionClient } from "@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client";
+import type { OperatorRemoteClient } from "@goodvibes-jev/engine/operator-client";
+import { createOperatorNativeWorkExecutionClient } from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client";
 import {
   createOperatorNativeConversationIntakeClient,
   nativeConversationIntakeCaptureRequestSchema,
@@ -7,8 +7,8 @@ import {
   type NativeConversationIntakeLookupResult,
   type NativeConversationIntakeUnsupportedSource,
   type NativeSelectedDiffSelector,
-} from "@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client";
-import { GOODVIBES_BASE_URL, sdk } from "./goodvibes";
+} from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client";
+import { GOODVIBES_BASE_URL, client as platformClient } from "./goodvibes";
 import {
   isClientLifetimeCurrent,
   subscribeClientLifetime,
@@ -94,7 +94,7 @@ export async function openNativeIntake(
     check();
     const current = combined(operation);
     current.throwIfAborted();
-    const auth = await sdk.operator.invoke("control.auth.current", {}, current);
+    const auth = await platformClient.operator.invoke("control.auth.current", {}, current);
     check();
     current.throwIfAborted();
     if (
@@ -124,7 +124,7 @@ export async function openNativeIntake(
     const diffScope = selectedDiff?.kind === "session" ? "read:sessions" : selectedDiff ? "read:checkpoints" : undefined;
     if (diffScope && !auth.scopes.includes("*") && !auth.scopes.includes(diffScope))
       throw new Error(`Native selected change requires current ${diffScope} permission.`);
-    const project = await sdk.operator.invoke("workLedger.project", {}, current);
+    const project = await platformClient.operator.invoke("workLedger.project", {}, current);
     check();
     current.throwIfAborted();
     if (
@@ -173,7 +173,7 @@ export async function openNativeIntake(
             ? "execution"
             : "intake"
       );
-      const result = await sdk.operator.invoke(method, input, combined(options?.signal));
+      const result = await platformClient.operator.invoke(method, input, combined(options?.signal));
       check();
       return result;
     }) as OperatorRemoteClient["invoke"];

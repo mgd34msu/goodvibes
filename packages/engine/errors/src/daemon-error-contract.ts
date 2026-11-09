@@ -57,7 +57,7 @@ export type DaemonErrorSource =
  * keys on, a `MEMORY_RECORD_NOT_FOUND` 404 is a genuine record-miss (→ null),
  * while ANY other 404 (route-not-found, or a bare legacy 404 with no code) means
  * "this daemon does not serve this verb" and must reject honestly, never silently
- * null. Emitted by daemon-sdk's memory record handlers; consumed by the
+ * null. Emitted by daemon-api's memory record handlers; consumed by the
  * memory-spine wire discriminator.
  */
 export const MEMORY_RECORD_NOT_FOUND_CODE = 'MEMORY_RECORD_NOT_FOUND';

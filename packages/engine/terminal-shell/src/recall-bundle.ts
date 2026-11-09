@@ -1,9 +1,9 @@
 import { dirname } from 'node:path';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import type { MemoryApi } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import type { MemoryBundle, MemorySearchFilter } from '@goodvibes-jev/engine/sdk/platform/state';
-import type { ShellPathService } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import type { MemoryBundle, MemorySearchFilter } from '@goodvibes-jev/engine/platform/platform/state';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { VALID_CLASSES, VALID_SCOPES, isValidClass, isValidScope, resolveBundlePath } from './recall-shared.js';
 import { afterMemory, mutationArguments, type RecallQueryContext } from './recall-query.js';
 export function createRecallBundleCommands<Context extends RecallQueryContext>(

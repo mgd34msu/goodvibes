@@ -5,11 +5,11 @@ import { join } from 'node:path';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { SQLiteStore, type SqlDatabase } from '../sdk/src/platform/state/sqlite-store.js';
-import { KnowledgeNodeActivationHeldError as Held, type KnowledgeNodeActivationOptions } from '../sdk/src/platform/knowledge/activation/types.js';
-import { JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.js';
-import { markPreparedNodeWritten, preparedNodeWrite, preparedNodeWrites, prepareNodeActivationPass, type NodeMutationDraft } from '../sdk/src/platform/knowledge/store-node-activation.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { SQLiteStore, type SqlDatabase } from '../platform/src/platform/state/sqlite-store.js';
+import { KnowledgeNodeActivationHeldError as Held, type KnowledgeNodeActivationOptions } from '../platform/src/platform/knowledge/activation/types.js';
+import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input.js';
+import { markPreparedNodeWritten, preparedNodeWrite, preparedNodeWrites, prepareNodeActivationPass, type NodeMutationDraft } from '../platform/src/platform/knowledge/store-node-activation.js';
 
 const roots: string[] = [], stores: KnowledgeStore[] = [];
 let previous: JudgmentPort | undefined;

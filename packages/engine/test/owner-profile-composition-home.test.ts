@@ -17,12 +17,12 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { redactSensitiveData } from '../sdk/src/platform/utils/redaction.ts';
+import { redactSensitiveData } from '../platform/src/platform/utils/redaction.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { composeOwnerProfile } from '../sdk/src/platform/control-plane/routes/owner-profile-composition.ts';
-import { resolveOwnerProfilePath } from '../sdk/src/platform/owner-profile/paths.ts';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { resetProcessUntrustedContentLedgerForTests } from '../sdk/src/platform/security/untrusted-content.ts';
+import { composeOwnerProfile } from '../platform/src/platform/control-plane/routes/owner-profile-composition.ts';
+import { resolveOwnerProfilePath } from '../platform/src/platform/owner-profile/paths.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { resetProcessUntrustedContentLedgerForTests } from '../platform/src/platform/security/untrusted-content.ts';
 
 // Profile writes ask the content-derivation reading whenever the process
 // ledger holds untrusted text; another test file's reads must not reach these.

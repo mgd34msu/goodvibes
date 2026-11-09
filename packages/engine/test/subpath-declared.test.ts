@@ -5,7 +5,7 @@
  * exports map, so it is a drift detector over what is already declared. A
  * top-level capability with no exports entry has no entry point to enumerate,
  * it is absent from the snapshot, absent from the diff, and absent from every
- * green run, while `import '@goodvibes-jev/engine/sdk/platform/<thing>'` fails
+ * green run, while `import '@goodvibes-jev/engine/platform/platform/<thing>'` fails
  * resolution for every consumer of the published package.
  *
  * That gap survives local development because consumers build against overlay
@@ -19,12 +19,12 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const REPO_ROOT = resolve(import.meta.dir, '..');
-const PACKAGE_DIR = join(REPO_ROOT, 'sdk');
+const PACKAGE_DIR = join(REPO_ROOT, 'platform');
 const PLATFORM_DIR = join(PACKAGE_DIR, 'src', 'platform');
 
 /**
- * The sdk's subpaths, keyed as the old sdk package declared them (./platform/x):
- * they are the engine manifest's ./sdk/* exports, each naming its source module
+ * The platform's subpaths, keyed as the old platform package declared them (./platform/x):
+ * they are the engine manifest's ./platform/* exports, each naming its source module
  * under the workspace source condition.
  */
 function exportsMap(): Record<string, unknown> {
@@ -33,8 +33,8 @@ function exportsMap(): Record<string, unknown> {
   };
   return Object.fromEntries(
     Object.entries(manifest.exports ?? {})
-      .filter(([key]) => key.startsWith('./sdk/'))
-      .map(([key, value]) => [`.${key.slice('./sdk'.length)}`, value]),
+      .filter(([key]) => key.startsWith('./platform/'))
+      .map(([key, value]) => [`.${key.slice('./platform'.length)}`, value]),
   );
 }
 
@@ -57,7 +57,7 @@ describe('every shipped capability is importable from the published package', ()
     // against a path that is not there fails at import time rather than
     // here, which is the worst place to find out.
     const source = (entry as Record<string, string>)['bun'];
-    expect(source).toBe('./sdk/src/platform/payments/index.ts');
+    expect(source).toBe('./platform/src/platform/payments/index.ts');
     expect(existsSync(join(REPO_ROOT, source!))).toBe(true);
   });
 
@@ -67,14 +67,14 @@ describe('every shipped capability is importable from the published package', ()
 
   test('every declared platform subpath names an existing sdk source module', () => {
     // The workspace consumes the engine from source through the exports map's
-    // source condition, so every ./sdk/platform entry must name a module under
-    // sdk/src that exists; one pointing anywhere else, or at nothing, fails
+    // source condition, so every ./platform/platform entry must name a module under
+    // platform/src that exists; one pointing anywhere else, or at nothing, fails
     // every importer.
     const offenders: string[] = [];
     for (const [subpath, entry] of Object.entries(exportsMap())) {
       if (!subpath.startsWith('./platform/')) continue;
       const target = entry && typeof entry === 'object' ? (entry as Record<string, unknown>)['bun'] : undefined;
-      if (typeof target !== 'string' || !target.startsWith('./sdk/src/') || !existsSync(join(REPO_ROOT, target))) {
+      if (typeof target !== 'string' || !target.startsWith('./platform/src/') || !existsSync(join(REPO_ROOT, target))) {
         offenders.push(`${subpath} -> ${String(target)}`);
       }
     }
@@ -109,7 +109,7 @@ describe('the surface a consumer needs to construct the capability', () => {
     // Reachable from source and absent from the published surface is exactly
     // the shape of gap the subpath check cannot see, because the SUBPATH was
     // declared correctly, only the symbol was missing.
-    const surface = await import('../sdk/src/platform/payments/index.js');
+    const surface = await import('../platform/src/platform/payments/index.js');
     expect(typeof surface.PaymentsGatewayServiceImpl).toBe('function');
     // And the pieces a daemon has to build to use it.
     expect(typeof surface.readPaymentsServiceConfig).toBe('function');

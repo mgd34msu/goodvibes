@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
-import { EventReplayQueue } from '@goodvibes-jev/engine/sdk/platform/core';
+import { EventReplayQueue } from '@goodvibes-jev/engine/platform/platform/core';
 import { RuntimeEventBus } from './_helpers/runtime-seam.ts';
 import { createEventEnvelope } from './_helpers/runtime-seam.ts';
 

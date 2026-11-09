@@ -7,16 +7,16 @@ import { mkdtempSync, writeFileSync, rmSync, symlinkSync, unlinkSync, renameSync
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildPerTurnKnowledgeInjection } from '../sdk/src/platform/agents/turn-knowledge-injection.js';
-import { createCapturedCodeContext } from '../sdk/src/platform/agents/captured-code-context.js';
-import { captureContractInput, materializeContractInput, contractInputPath } from '../sdk/src/platform/contract/input-snapshot.js';
-import { createContractInputAuthority, revokeContractInputAuthority, type ContractInputAuthority } from '../sdk/src/platform/contract/input-authority.js';
-import type { Contract } from '../sdk/src/platform/contract/types.js';
-import { ConfigManager } from '../sdk/src/platform/config/index.js';
-import { MemoryEmbeddingProviderRegistry, type MemoryEmbeddingRequest } from '../sdk/src/platform/state/memory-embeddings.js';
-import { createClientRuntimeServices } from '../sdk/src/platform/runtime/bootstrap.js';
-import { createRuntimeStore, RuntimeEventBus } from '../sdk/src/platform/runtime/state.js';
-import { createLaunchTolerantProviderRegistry } from '../sdk/src/platform/providers/index.js';
+import { buildPerTurnKnowledgeInjection } from '../platform/src/platform/agents/turn-knowledge-injection.js';
+import { createCapturedCodeContext } from '../platform/src/platform/agents/captured-code-context.js';
+import { captureContractInput, materializeContractInput, contractInputPath } from '../platform/src/platform/contract/input-snapshot.js';
+import { createContractInputAuthority, revokeContractInputAuthority, type ContractInputAuthority } from '../platform/src/platform/contract/input-authority.js';
+import type { Contract } from '../platform/src/platform/contract/types.js';
+import { ConfigManager } from '../platform/src/platform/config/index.js';
+import { MemoryEmbeddingProviderRegistry, type MemoryEmbeddingRequest } from '../platform/src/platform/state/memory-embeddings.js';
+import { createClientRuntimeServices } from '../platform/src/platform/runtime/bootstrap.js';
+import { createRuntimeStore, RuntimeEventBus } from '../platform/src/platform/runtime/state.js';
+import { createLaunchTolerantProviderRegistry } from '../platform/src/platform/providers/index.js';
 
 const PRIVATE = 'PRIVATE_CAPTURED_UNIT_MARKER';
 const ORIGINAL = 'CAPTURED_UNIT_ORIGINAL';

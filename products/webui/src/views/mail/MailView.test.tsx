@@ -40,7 +40,7 @@ mock.module('../../lib/goodvibes', () => ({
   // test never calls them (same gotcha CalendarView.test.tsx documents).
   getCurrentAuth: () => Promise.resolve({}),
   invokeMethod: () => Promise.resolve({}),
-  sdk: {
+  client: {
     operator: {
       email: {
         inbox: {

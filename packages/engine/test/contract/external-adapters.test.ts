@@ -6,19 +6,19 @@
  * same way, since they share the contracts package's mapping.
  */
 import { describe, expect, test } from 'bun:test';
-import { GatewayMethodCatalog } from '../../sdk/src/platform/control-plane/method-catalog.js';
-import { registerContractGatewayMethods } from '../../sdk/src/platform/control-plane/routes/contracts.js';
+import { GatewayMethodCatalog } from '../../platform/src/platform/control-plane/method-catalog.js';
+import { registerContractGatewayMethods } from '../../platform/src/platform/control-plane/routes/contracts.js';
 import {
   CONTRACT_WORK_STATUS,
   createContractOperatorService,
   type ContractExternalWorkAdapter,
   type ContractOperatorService,
-} from '../../sdk/src/platform/contract/index.js';
-import { createHostedContractWorkAdapter, EXTERNAL_CANCEL_REASON } from '../../sdk/src/platform/hosted-sessions/contract-work-adapter.js';
-import type { CreateHostedSessionInput } from '../../sdk/src/platform/hosted-sessions/types.js';
-import type { HostedSessionRecord } from '../../sdk/src/platform/hosted-sessions/types.js';
-import { createOperatorContractWorkAdapter, OPERATOR_WORK_CANCEL_REASON } from '../../operator-sdk/src/index.js';
-import type { OperatorRemoteClient } from '../../operator-sdk/src/client-core.js';
+} from '../../platform/src/platform/contract/index.js';
+import { createHostedContractWorkAdapter, EXTERNAL_CANCEL_REASON } from '../../platform/src/platform/hosted-sessions/contract-work-adapter.js';
+import type { CreateHostedSessionInput } from '../../platform/src/platform/hosted-sessions/types.js';
+import type { HostedSessionRecord } from '../../platform/src/platform/hosted-sessions/types.js';
+import { createOperatorContractWorkAdapter, OPERATOR_WORK_CANCEL_REASON } from '../../operator-client/src/index.js';
+import type { OperatorRemoteClient } from '../../operator-client/src/client-core.js';
 import { escalate, fakeRunner, pass, type FakeRunner } from './operator-support.js';
 
 const WORKDIR = '/srv/daemon-work';

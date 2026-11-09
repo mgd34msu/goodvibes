@@ -13,8 +13,8 @@
  * Colors come only from the active theme's tokens.
  */
 
-import { createEmptyLine, type Line } from '@goodvibes-jev/engine/sdk/platform/types';
-import { getDisplayWidth } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { createEmptyLine, type Line } from '@goodvibes-jev/engine/platform/platform/types';
+import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils';
 import { activeTokens } from './theme.js';
 import {
   MODAL_PAD_X,

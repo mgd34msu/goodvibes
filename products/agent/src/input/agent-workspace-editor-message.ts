@@ -1,4 +1,4 @@
-import { readEditorMessage, type EditorMessageReading } from '@goodvibes-jev/engine/sdk/platform/presentation/editor-message';
+import { readEditorMessage, type EditorMessageReading } from '@goodvibes-jev/engine/platform/platform/presentation/editor-message';
 import type { AgentWorkspaceLocalEditor } from './agent-workspace-types.ts';
 
 export type EditorMessageState =

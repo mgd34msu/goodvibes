@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // power-status.ts, the surface-facing view of host sleep ownership (power.*).
 //
-// The SDK's PowerManager owns the policy: a keep-awake toggle (daemon-held,
+// The platform's PowerManager owns the policy: a keep-awake toggle (daemon-held,
 // persisted), automatic work-signal inhibition ("held because X"), and the
 // honest lid-split note when idle-sleep can be blocked but lid-close suspend
 // can't. This module is the read-only projection every surface renders from,
@@ -12,7 +12,7 @@
 // options, the keep-awake toggle is exactly one boolean.
 // ---------------------------------------------------------------------------
 
-import { LID_SWITCH_HONEST_SPLIT, type PowerState } from '@goodvibes-jev/engine/sdk/platform/power';
+import { LID_SWITCH_HONEST_SPLIT, type PowerState } from '@goodvibes-jev/engine/platform/platform/power';
 
 /** The always-visible chip text shown while keep-awake holds (danger-mode idiom). */
 export const SLEEP_DISABLED_CHIP = 'sleep disabled';
@@ -68,7 +68,7 @@ export function powerSurfaceFromEvent(ev: PowerStateChangedPayload): PowerSurfac
 /**
  * The ops/status detail lines, the honest, plain-language account of sleep
  * ownership. Order: the chip's meaning, then each "held because X" work reason,
- * then the lid-split note VERBATIM when the SDK served it. Empty when nothing
+ * then the lid-split note VERBATIM when the platform served it. Empty when nothing
  * is held and no note applies.
  */
 export function powerStatusLines(state: PowerSurfaceState): string[] {
@@ -80,7 +80,7 @@ export function powerStatusLines(state: PowerSurfaceState): string[] {
     lines.push(`held because ${reason}`);
   }
   if (state.note) {
-    // The SDK's honest lid-split line, rendered exactly as served.
+    // The platform's honest lid-split line, rendered exactly as served.
     lines.push(state.note);
   }
   if (lines.length === 0) {
@@ -89,7 +89,7 @@ export function powerStatusLines(state: PowerSurfaceState): string[] {
   return lines;
 }
 
-/** True when the SDK served the honest lid-split note (idle blocked, lid-close is the OS's). */
+/** True when the platform served the honest lid-split note (idle blocked, lid-close is the OS's). */
 export function hasLidSplitNote(state: PowerSurfaceState): boolean {
   return state.note === LID_SWITCH_HONEST_SPLIT;
 }

@@ -1,12 +1,12 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { join } from 'node:path';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { createMemoryApi, prepareMemoryApiAdd, type MemoryAddPublication, type MemoryPreparedAdd } from '../sdk/src/platform/knowledge/index.ts';
-import { MemoryEmbeddingProviderRegistry } from '../sdk/src/platform/state/memory-embeddings.ts';
-import { MemoryStore, type MemoryRecord } from '../sdk/src/platform/state/memory-store.ts';
-import { MemoryRegistry } from '../sdk/src/platform/state/memory-registry.ts';
-import { SQLiteStore } from '../sdk/src/platform/state/sqlite-store.ts';
-import { compareByTrust } from '../sdk/src/platform/state/memory-store-helpers.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { createMemoryApi, prepareMemoryApiAdd, type MemoryAddPublication, type MemoryPreparedAdd } from '../platform/src/platform/knowledge/index.ts';
+import { MemoryEmbeddingProviderRegistry } from '../platform/src/platform/state/memory-embeddings.ts';
+import { MemoryStore, type MemoryRecord } from '../platform/src/platform/state/memory-store.ts';
+import { MemoryRegistry } from '../platform/src/platform/state/memory-registry.ts';
+import { SQLiteStore } from '../platform/src/platform/state/sqlite-store.ts';
+import { compareByTrust } from '../platform/src/platform/state/memory-store-helpers.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const cleanups: Array<() => void> = [];

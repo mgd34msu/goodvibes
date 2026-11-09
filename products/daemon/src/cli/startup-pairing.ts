@@ -1,8 +1,8 @@
 /** Credential-bearing local pairing output, separate from startup diagnostics. */
 import { accessSync, constants, statSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { availablePairingOffers, resolvePairingWebOrigin } from '@goodvibes-jev/engine/sdk/platform/pairing';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { availablePairingOffers, resolvePairingWebOrigin } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { renderPairingBanner } from '../core/pairing-banner.js';
 
 /** This equality is the webui command's placeholder rule, not authorship evidence. */

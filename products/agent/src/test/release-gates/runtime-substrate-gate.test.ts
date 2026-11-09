@@ -1,18 +1,18 @@
 // Deliberately per-repo test, byte-identical to the sibling product's copy by design: the module it exercises is this repo's own and has diverged from the sibling's, so the two copies prove different code and neither can stand in for the other.
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import { ConversationManager } from '../../core/conversation.ts';
-import { Orchestrator } from '@goodvibes-jev/engine/sdk/platform/core';
-import { PermissionManager, createPermissionConfigReader } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import type { ChatRequest, ChatResponse, LLMProvider } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { Orchestrator } from '@goodvibes-jev/engine/platform/platform/core';
+import { PermissionManager, createPermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
+import type { ChatRequest, ChatResponse, LLMProvider } from '@goodvibes-jev/engine/platform/platform/providers';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createDomainDispatch, createRuntimeStore } from '../../runtime/store/index.ts';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { AgentManager } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { AgentManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import { ForensicsCollector } from '@/runtime/index.ts';
 import { ForensicsRegistry } from '@/runtime/index.ts';
 import { PolicyRuntimeState } from '@/runtime/index.ts';
-import { ProviderError } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { HookResult } from '@goodvibes-jev/engine/sdk/platform/hooks';
+import { ProviderError } from '@goodvibes-jev/engine/platform/platform/types';
+import type { HookResult } from '@goodvibes-jev/engine/platform/platform/hooks';
 import { createTestManagers } from '../helpers/test-managers.ts';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { forgetFailureReadings, installJudgmentPort } from '@goodvibes-jev/engine/errors';

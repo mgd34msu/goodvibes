@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { dispatchCompanionChatRoutes } from '../sdk/src/platform/companion/companion-chat-routes.js';
-import type { CompanionChatRouteContext } from '../sdk/src/platform/companion/companion-chat-route-types.js';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.js';
+import { dispatchCompanionChatRoutes } from '../platform/src/platform/companion/companion-chat-routes.js';
+import type { CompanionChatRouteContext } from '../platform/src/platform/companion/companion-chat-route-types.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
 
 const FAKE_SESSION = {
   id: 'sess-test',

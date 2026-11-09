@@ -17,9 +17,9 @@ import { describe, expect, test } from 'bun:test';
 import {
   createInitialModelState,
   type ModelDomainState,
-} from '../sdk/src/platform/runtime/store/domains/model.ts';
-import { createInitialProviderHealthState } from '../sdk/src/platform/runtime/store/domains/provider-health.ts';
-import { buildFallbackChainData } from '../sdk/src/platform/runtime/ui/provider-health/fallback-visualizer.ts';
+} from '../platform/src/platform/runtime/store/domains/model.ts';
+import { createInitialProviderHealthState } from '../platform/src/platform/runtime/store/domains/provider-health.ts';
+import { buildFallbackChainData } from '../platform/src/platform/runtime/ui/provider-health/fallback-visualizer.ts';
 
 /**
  * A model whose registry key is NOT `${providerId}:${modelId}` naively joined

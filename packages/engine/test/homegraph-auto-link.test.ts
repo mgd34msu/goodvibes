@@ -5,9 +5,9 @@ import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { autoLinkHomeGraphSource, autoLinkHomeGraphSources } from '../sdk/src/platform/knowledge/home-graph/auto-link.js';
-import { readHomeGraphState } from '../sdk/src/platform/knowledge/home-graph/state.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { autoLinkHomeGraphSource, autoLinkHomeGraphSources } from '../platform/src/platform/knowledge/home-graph/auto-link.js';
+import { readHomeGraphState } from '../platform/src/platform/knowledge/home-graph/state.js';
 import { seedHomeAssistantObservation } from './_helpers/homegraph-observation-fixtures.js';
 
 const spaceId = 'homeassistant:auto-link-fixture', installationId = 'auto-link-fixture';

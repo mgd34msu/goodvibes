@@ -2,7 +2,7 @@
  * knowledge-projection.ts, turning a projection target the daemon listed into a
  * request `knowledge.projection.render` will actually accept.
  *
- * WHY THIS IS A MODULE AND NOT FOUR LINES IN THE VIEW: before the 1.19.1 SDK
+ * WHY THIS IS A MODULE AND NOT FOUR LINES IN THE VIEW: before the 1.19.1 platform
  * re-pin, `OperatorMethodInput<'knowledge.projection.render'>` resolved to a
  * permissive `{ [k: string]: unknown }` fallback, so KnowledgeView built its
  * payload as `{ kind, ...(id ? { id } : {}), limit }` and the compiler had
@@ -33,7 +33,7 @@ export type IdRequiredProjectionKind = Extract<ProjectionRenderInput, { id: stri
  *
  * The mapped type is doing real work in both directions, which is why this is
  * not a plain `Record<ProjectionKind, boolean>`:
- *   - every ProjectionKind must appear, so a kind ADDED by a future SDK is a
+ *   - every ProjectionKind must appear, so a kind ADDED by a future platform is a
  *     missing-property compile error rather than a target that quietly stops
  *     being renderable;
  *   - each value's type is pinned to whether that kind is in

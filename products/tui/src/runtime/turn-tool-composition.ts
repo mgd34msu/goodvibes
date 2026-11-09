@@ -1,7 +1,7 @@
 /** The actual local-turn producer shared by bootstrap and product regressions. */
-import { registerAllTools, type ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { PermissionManager, createPermissionConfigReader } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import { trustGatedAsk, type WorkspaceTrustLevel } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { registerAllTools, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { PermissionManager, createPermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { trustGatedAsk, type WorkspaceTrustLevel } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { readExecEnvScrubAllowlist } from '../input/exec-env-scrub-config.ts';
 import { createSandboxExecAsk, sandboxExecAskDepsFromRuntime } from '../permissions/sandbox-exec-gate.ts';
 import type { RuntimeServices } from './services.ts';
@@ -49,7 +49,7 @@ export function registerTuiTurnTools(toolRegistry: ToolRegistry, services: Runti
 
 export function createTuiTurnPermissionManager(services: RuntimeServices, requestTrustDecision: () => Promise<WorkspaceTrustLevel>): PermissionManager {
   return new PermissionManager(
-    // Composed ask layer: the workspace trust gate (outer) wraps the sandbox-aware exec gate (inner); see sandbox-exec-gate.ts. The catastrophic block is untouched. The innermost ask is the CLIENT raiser: it posts approvals.raise to the daemon and prompts here (see the SDK's platform/runtime/client/approval-raiser.ts).
+    // Composed ask layer: the workspace trust gate (outer) wraps the sandbox-aware exec gate (inner); see sandbox-exec-gate.ts. The catastrophic block is untouched. The innermost ask is the CLIENT raiser: it posts approvals.raise to the daemon and prompts here (see the platform's platform/runtime/client/approval-raiser.ts).
     trustGatedAsk(
       services.workspaceTrustManager,
       createSandboxExecAsk(

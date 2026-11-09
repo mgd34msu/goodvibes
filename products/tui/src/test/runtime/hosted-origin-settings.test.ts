@@ -2,10 +2,10 @@ import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { createHostedSessionRuntime, type CreateHostedSessionInput, type HostedSessionRuntime } from '@goodvibes-jev/engine/sdk/platform/hosted-sessions';
-import { createClientRuntimeServices, type ClientRuntimeServices } from '@goodvibes-jev/engine/sdk/platform/runtime/client-services';
-import { createRuntimeStore, RuntimeEventBus } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { createHostedSessionRuntime, type CreateHostedSessionInput, type HostedSessionRuntime } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
+import { createClientRuntimeServices, type ClientRuntimeServices } from '@goodvibes-jev/engine/platform/platform/runtime/client-services';
+import { createRuntimeStore, RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { createHostedSessionsClient } from '../../runtime/client/hosted-sessions.ts';
 import type { DaemonVerbCaller } from '../../runtime/client/operator-endpoint.ts';
 

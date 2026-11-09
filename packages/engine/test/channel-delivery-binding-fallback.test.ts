@@ -17,27 +17,27 @@
  * config value must never be sent as the literal token).
  */
 import { afterEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
-import * as fetchWithTimeoutModule from '../sdk/src/platform/utils/fetch-with-timeout.ts';
+import * as fetchWithTimeoutModule from '../platform/src/platform/utils/fetch-with-timeout.ts';
 import {
   createDiscordDeliveryStrategy,
   createNtfyDeliveryStrategy,
   createSlackDeliveryStrategy,
-} from '../sdk/src/platform/channels/delivery/strategies-core.ts';
+} from '../platform/src/platform/channels/delivery/strategies-core.ts';
 import {
   AgentDeliveryRegistry,
   createAgentDeliveryStrategy,
   type AgentConversationMessage,
-} from '../sdk/src/platform/channels/delivery/strategies-agent.ts';
-import { ChannelDeliveryRouter } from '../sdk/src/platform/channels/delivery-router.ts';
+} from '../platform/src/platform/channels/delivery/strategies-agent.ts';
+import { ChannelDeliveryRouter } from '../platform/src/platform/channels/delivery-router.ts';
 import {
   CHANNEL_DELIVERY_SURFACE_KINDS,
   type ChannelDeliveryRequest,
-} from '../sdk/src/platform/channels/delivery/types.ts';
-import { ROUTE_SURFACE_KINDS } from '../sdk/src/events/routes.ts';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import type { ServiceRegistry } from '../sdk/src/platform/config/service-registry.ts';
-import type { ArtifactStore } from '../sdk/src/platform/artifacts/index.ts';
-import type { SecretsManager } from '../sdk/src/platform/config/secrets.ts';
+} from '../platform/src/platform/channels/delivery/types.ts';
+import { ROUTE_SURFACE_KINDS } from '../platform/src/events/routes.ts';
+import type { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import type { ServiceRegistry } from '../platform/src/platform/config/service-registry.ts';
+import type { ArtifactStore } from '../platform/src/platform/artifacts/index.ts';
+import type { SecretsManager } from '../platform/src/platform/config/secrets.ts';
 
 function fakeConfigManager(values: Record<string, unknown> = {}): ConfigManager {
   return { get: (key: string) => values[key] } as unknown as ConfigManager;
@@ -336,7 +336,7 @@ describe('discord delivery resolves the channel from the binding', () => {
 });
 
 /**
- * The agent is the one delivery destination the SDK does not implement itself.
+ * The agent is the one delivery destination the platform does not implement itself.
  *
  * It was missing from the delivery surface vocabulary entirely, which made
  * `occasions.nudgeChannel = 'agent'` a setting that configured nothing: the

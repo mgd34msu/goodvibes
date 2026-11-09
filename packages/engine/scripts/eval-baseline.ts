@@ -29,14 +29,14 @@ import {
   serialiseBaseline,
   loadBaseline,
   writeBaseline,
-} from '../sdk/src/platform/runtime/eval/index.ts';
-import type { EvalSuiteResult, EvalBaseline } from '../sdk/src/platform/runtime/eval/index.ts';
+} from '../platform/src/platform/runtime/eval/index.ts';
+import type { EvalSuiteResult, EvalBaseline } from '../platform/src/platform/runtime/eval/index.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(__dirname, '..');
 const BASELINE_PATH = resolve(PROJECT_ROOT, 'eval/baseline.json');
 
-/** Fixed sentinel, deliberately NOT the SDK version (the gate must not couple to VERSION). */
+/** Fixed sentinel, deliberately NOT the engine version (the gate must not couple to VERSION). */
 const BASELINE_LABEL = 'standing-gate';
 
 const CHECK_ONLY = process.argv.includes('--check');

@@ -9,17 +9,17 @@ import {
   MemoryStore,
   resolveMemoryConsolidationConfig,
   runMemoryConsolidation,
-} from '../sdk/src/platform/state/index.js';
+} from '../platform/src/platform/state/index.js';
 import type {
   MemoryConsolidationRegistry,
   MemoryConsolidationUsageSignal,
   MemoryRecord,
   ResolvedMemoryConsolidationConfig,
-} from '../sdk/src/platform/state/index.js';
+} from '../platform/src/platform/state/index.js';
 // MemoryReviewPatch is a real exported type (memory-store.ts) but is not
 // re-exported from the state barrel (state/index.ts), pull it from source.
-import type { MemoryReviewPatch } from '../sdk/src/platform/state/memory-store.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
+import type { MemoryReviewPatch } from '../platform/src/platform/state/memory-store.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { useMemoryReadings } from './_helpers/memory-readings.ts';
 

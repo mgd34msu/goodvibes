@@ -9,9 +9,9 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { createFeatureFlagManager } from '../sdk/src/platform/runtime/feature-flags/manager.js';
-import { ControlPlaneGateway } from '../sdk/src/platform/control-plane/gateway.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
+import { createFeatureFlagManager } from '../platform/src/platform/runtime/feature-flags/manager.js';
+import { ControlPlaneGateway } from '../platform/src/platform/control-plane/gateway.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
 
 function makeGateway(): ControlPlaneGateway {
   return new ControlPlaneGateway({ runtimeBus: new RuntimeEventBus(), featureFlags: createFeatureFlagManager() });

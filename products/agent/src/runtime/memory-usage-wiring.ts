@@ -4,7 +4,7 @@ import {
   type MemoryRegistry,
   type MemoryConsolidationUsageSignal,
   type MemoryReferenceInput,
-} from '@goodvibes-jev/engine/sdk/platform/state';
+} from '@goodvibes-jev/engine/platform/platform/state';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { PromptContextReceiptDraft } from '../agent/prompt-context-receipts.ts';

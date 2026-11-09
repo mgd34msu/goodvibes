@@ -5,14 +5,14 @@ import { mkdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writ
 import { join } from 'node:path';
 import { makeProjectTempDir } from '../_helpers/project-temp.js';
 import { hashState, toJson } from '@goodvibes-jev/judgment';
-import { contractWorkReceipts, workReceiptIdentity } from '../../sdk/src/platform/contract/work-receipts.js';
-import { currentFileObservations, currentFileMatchesText, isCurrentNativeFileObservation } from '../../sdk/src/platform/contract/current-file-observations.js';
-import { reviewedFileFromObservation, reviewedFileVersionState } from '../../sdk/src/platform/contract/review-file-observations.js';
-import { ContractStore, contractPath, contractsDir, serializeContract, deserializeContract } from '../../sdk/src/platform/contract/store.js';
-import { snapshotJudgmentInput } from '../../sdk/src/platform/gate/judgment-input.js';
-import { createNativeDataWriteOwner, assertNativeReaderCompatible, nativeReaderCapabilities } from '../../sdk/src/platform/runtime/native-reader-compatibility.js';
-import { realUpdateFileIo } from '../../sdk/src/platform/runtime/self-update.js';
-import type { UnitCheck } from '../../sdk/src/platform/contract/types.js';
+import { contractWorkReceipts, workReceiptIdentity } from '../../platform/src/platform/contract/work-receipts.js';
+import { currentFileObservations, currentFileMatchesText, isCurrentNativeFileObservation } from '../../platform/src/platform/contract/current-file-observations.js';
+import { reviewedFileFromObservation, reviewedFileVersionState } from '../../platform/src/platform/contract/review-file-observations.js';
+import { ContractStore, contractPath, contractsDir, serializeContract, deserializeContract } from '../../platform/src/platform/contract/store.js';
+import { snapshotJudgmentInput } from '../../platform/src/platform/gate/judgment-input.js';
+import { createNativeDataWriteOwner, assertNativeReaderCompatible, nativeReaderCapabilities } from '../../platform/src/platform/runtime/native-reader-compatibility.js';
+import { realUpdateFileIo } from '../../platform/src/platform/runtime/self-update.js';
+import type { UnitCheck } from '../../platform/src/platform/contract/types.js';
 import { makeContract, makeUnit } from './fixtures.js';
 
 const cleanup: Array<() => void> = [];

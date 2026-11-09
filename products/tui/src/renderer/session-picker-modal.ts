@@ -9,7 +9,7 @@
  * key again, in place.
  */
 
-import type { SharedSessionRecord } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import type { SharedSessionRecord } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { activeTokens } from './theme.ts';
 import type { SessionPickerModal } from '../input/session-picker-modal.ts';
 import './modal-utils.ts';
@@ -35,12 +35,12 @@ function isClosedStatus(status: string): boolean {
 
 /**
  * Closed sessions carry an optional, honest reason for WHY they
- * closed under `metadata.closeReason` (SDK's `SharedSessionCloseReason`,
- * 'closeReason' key, see `@goodvibes-jev/engine/sdk` platform/control-plane
+ * closed under `metadata.closeReason` (platform's `SharedSessionCloseReason`,
+ * 'closeReason' key, see `@goodvibes-jev/engine/platform` platform/control-plane
  * session-broker-sessions.ts's `readSessionCloseReason`). `metadata` is an
  * open record so old readers and records from a build that predates this
  * field ignore it safely, read it duck-typed here rather than importing the
- * SDK's helper, and tolerate `metadata` itself being absent or malformed.
+ * platform's helper, and tolerate `metadata` itself being absent or malformed.
  */
 function readCloseReason(record: SharedSessionRecord): string | undefined {
   const raw = (record.metadata as Record<string, unknown> | undefined)?.['closeReason'];

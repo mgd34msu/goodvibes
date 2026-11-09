@@ -5,7 +5,7 @@
  */
 
 const TOOL_LABELS: Record<string, string> = {
-  // SDK file/shell/web tools
+  // platform file/shell/web tools
   read: 'Reading files',
   write: 'Writing a file',
   edit: 'Editing a file',

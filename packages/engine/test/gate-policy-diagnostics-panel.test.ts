@@ -7,8 +7,8 @@ import {
   type DivergenceStats,
   type EnforceGateResult,
   type PolicyBundlePayload,
-} from '../sdk/src/platform/runtime/permissions/index.ts';
-import { PolicyPanel as PolicyDiagnosticsPanel } from '../sdk/src/platform/runtime/diagnostics/panels/policy.ts';
+} from '../platform/src/platform/runtime/permissions/index.ts';
+import { PolicyPanel as PolicyDiagnosticsPanel } from '../platform/src/platform/runtime/diagnostics/panels/policy.ts';
 
 function makeBundle(id: string) {
   const payload: PolicyBundlePayload = {

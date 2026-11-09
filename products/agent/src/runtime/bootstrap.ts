@@ -10,8 +10,8 @@ import {
 } from '@goodvibes-jev/engine/terminal-shell/bootstrap-orchestrator';
 import { buildPluginStartupContext } from '@goodvibes-jev/engine/terminal-shell/plugin-startup';
 import { createPluginStartupTask } from '@goodvibes-jev/engine/terminal-shell/plugin-startup';
-import { readTierPromptSupplement } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { factsFor } from '@goodvibes-jev/engine/sdk/platform/routing';
+import { readTierPromptSupplement } from '@goodvibes-jev/engine/platform/platform/providers';
+import { factsFor } from '@goodvibes-jev/engine/platform/platform/routing';
 /**
  * Bootstrap composition root for GoodVibes Agent.
  *
@@ -23,10 +23,10 @@ import { factsFor } from '@goodvibes-jev/engine/sdk/platform/routing';
  *   - main.ts: terminal setup, render loop, stdin/stdout handlers
  *   - lifecycle.ts: save/shutdown helpers
  */
-import '@goodvibes-jev/engine/sdk/platform/core';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { collectStartupAnnouncements } from '@goodvibes-jev/engine/sdk/platform/runtime/feature-announcements';
-import type { PermissionRequestHandler } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import '@goodvibes-jev/engine/platform/platform/core';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { collectStartupAnnouncements } from '@goodvibes-jev/engine/platform/platform/runtime/feature-announcements';
+import type { PermissionRequestHandler } from '@goodvibes-jev/engine/platform/platform/permissions';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { InputHistory } from '../input/input-history.ts';
 import type { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
@@ -51,11 +51,11 @@ import { initializeBootstrapCore } from './bootstrap-core.ts';
 import { ensureBootModelResolvable } from './provider-boot.ts';
 import { bindOrchestratorContextAccounting } from './context-accounting-source.ts';
 import { createBootstrapShell } from './bootstrap-shell.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import '@goodvibes-jev/engine/terminal-shell';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { registerAgentTools } from './bootstrap-agent-tools.ts';
-import { foldLegacySpineStore } from '@goodvibes-jev/engine/sdk/platform/runtime/session-spine';
+import { foldLegacySpineStore } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
 import { reconcileMemorySpineAdoption } from './memory-spine-adoption.ts';
 import { createAgentSessionInputsClient } from './client/session-inputs.ts';
 import { AgentPromptContextReceiptStore, composeRuntimePromptWithReceipt } from '../agent/prompt-context-receipts.ts';
@@ -174,7 +174,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   const workingDir = options.workingDir;
   const configManager = options.configManager;
   const controlPlaneRecentEventsRef: {
-    value: (limit: number) => readonly import('@goodvibes-jev/engine/sdk/platform/control-plane').ControlPlaneRecentEvent[];
+    value: (limit: number) => readonly import('@goodvibes-jev/engine/platform/platform/control-plane').ControlPlaneRecentEvent[];
   } = {
     value: (_limit) => [],
   };
@@ -221,13 +221,13 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   // TURN_SUBMITTED, cleared on every terminal event for that turn.
   let activePromptTurnText: string | null = null;
   // Idle-time memory consolidation now runs on services.memoryConsolidationScheduler
-  // (the SDK's own daemon-side MemoryConsolidationScheduler, constructed in
-  // runtime/services.ts the way the SDK's own RuntimeServices composition
+  // (the platform's own daemon-side MemoryConsolidationScheduler, constructed in
+  // runtime/services.ts the way the platform's own RuntimeServices composition
   // constructs it: a standing 5-minute tick, not turn-settled events). This
   // repo's old turn-settled-driven local wiring is retired.
   // Usage-outcome instrumentation: records which memories were injected and, at
   // turn completion, whether the model output plausibly referenced them (honest
-  // heuristic overlap). No longer feeds consolidation's decay ranking (the SDK's
+  // heuristic overlap). No longer feeds consolidation's decay ranking (the platform's
   // own composition root does not wire a usageLookup into its scheduler either,
   // matched here for parity); still tracked for its own reporting.
   const memoryUsageTracker = createMemoryUsageTracker(services.shellPaths, services.memoryRegistry);
@@ -249,7 +249,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     runtimeBus.on<Extract<TurnEvent, { type: 'TURN_SUBMITTED' }>>('TURN_SUBMITTED', (event) => {
       activePromptTurnId = event.payload.turnId;
       activePromptTurnText = event.payload.prompt;
-      // Per-turn recall refresh (SDK 1.2.0 sync-recall seam): the ASYNC
+      // Per-turn recall refresh (platform 1.2.0 sync-recall seam): the ASYNC
       // pre-turn hook. getSystemPrompt below is SYNCHRONOUS and cannot await
       // this, so it is fired here (not awaited) and read back via the cached
       // recallSnapshot() a moment later when the orchestrator actually builds
@@ -382,8 +382,8 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     requestRender,
   );
   conversationFollowUpRef.value = (item) => orchestrator.enqueueConversationFollowUp(item);
-  // Bind this repo's live interactive Orchestrator into the SDK's live-turn
-  // controls holder (SDK round: sessions.toolCalls.cancel, sessions.
+  // Bind this repo's live interactive Orchestrator into the platform's live-turn
+  // controls holder (platform round: sessions.toolCalls.cancel, sessions.
   // queuedMessages.list/edit/delete). The Orchestrator's public cancelToolCall/
   // listQueuedMessages/editQueuedMessage/deleteQueuedMessage methods already
   // structurally satisfy SessionLiveTurnControls, no adapter needed. Until this
@@ -399,7 +399,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   });
   conversation.setSessionLineageTracker(services.sessionLineageTracker);
 
-  // Bind the context_accounting tool (SDK 1.6.1) to THIS Orchestrator so it
+  // Bind the context_accounting tool (platform 1.6.1) to THIS Orchestrator so it
   // reports real session data instead of the unbound-holder honesty message.
   // Must run after setCoreServices (nothing here depends on it, but this
   // keeps every orchestrator.* wiring call grouped) and before the first
@@ -415,18 +415,18 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     }),
   );
 
-  // featureFlags is REQUIRED here in practice, even though the SDK types it
+  // featureFlags is REQUIRED here in practice, even though the platform types it
   // optional. isFeatureGateEnabled(null, ...) is permissive by design, so
   // omitting it did not disable task tracking when runtime.unifiedTasks was
   // turned off, it made the setting configure nothing: createTask/etc. kept
-  // working either way. The SDK has corrected this key's recorded default to
+  // working either way. The platform has corrected this key's recorded default to
   // match the behaviour every install has always shipped (true/enabled), so
   // threading the flag manager here changes nothing for an existing install
   // and only makes turning the setting off now actually turn it off.
   const opsTaskManager = createTaskManager(store, runtimeBus, userSessionId, services.featureFlags);
 
-  // Surface-bound closure, not the raw multi-arg SDK function, see
-  // the SDK's bindWriteLastSessionPointerToSurface for why that matters.
+  // Surface-bound closure, not the raw multi-arg platform function, see
+  // the platform's bindWriteLastSessionPointerToSurface for why that matters.
   const writeLastSessionPointerForSurface = bindWriteLastSessionPointerToSurface(services.surface);
   const restoreTurnAnchorsForSurface = bindRestoreTurnAnchorsToSurface(services.surface);
 
@@ -461,7 +461,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   // Announce-once receipts due at boot (e.g. the web surface URL when
   // web.enabled). The store is shared per install, so whichever process of
   // this install boots first (daemon, TUI, or this Agent) announces; every
-  // other process stays silent. Mirrors the SDK daemon boot's collection.
+  // other process stays silent. Mirrors the platform daemon boot's collection.
   for (const announcement of collectStartupAnnouncements({
     configManager,
     store: services.featureAnnouncementStore,
@@ -532,7 +532,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       logger.debug('Deferred session-spine startup failed', { error: summarizeError(error) });
     },
   });
-  // Memory spine (SDK 1.1.0): the daemon-owned canonical memory store is
+  // Memory spine (platform 1.1.0): the daemon-owned canonical memory store is
   // single-writer, so the agent must make an explicit adopted/not-adopted decision
   // rather than trying the wire per call. Reuses the SAME reachability signal as the
   // session-spine fold above (services.sessionSpineClient.probeReachability(), one
@@ -585,7 +585,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       // reconciling for the rest of the process lifetime either way.
       await agentExternalServices.whenDiscovered();
       await reconcileMemorySpine();
-      // Prime the recall snapshot (SDK 1.2.0 sync-recall seam) so the FIRST
+      // Prime the recall snapshot (platform 1.2.0 sync-recall seam) so the FIRST
       // system prompt built after boot already has a real snapshot to read
       // instead of the honest-but-empty "not yet captured" one, see
       // recallSnapshot's doc comment on prompt-context-receipts.ts's
@@ -622,10 +622,10 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   // ── Phase 8: Background provider registration (non-blocking) ────────────
   // These run after the initial render so they don't delay startup.
   //
-  // Gated: the SDK's discovery pass probes every host on the local subnet
+  // Gated: the platform's discovery pass probes every host on the local subnet
   // unconditionally, so it is only ever invoked through runGatedLanScan,
   // which requires an explicit, persisted consent decision first and reframes
-  // whatever the SDK emits into a single honest summary line. See
+  // whatever the platform emits into a single honest summary line. See
   // src/runtime/lan-scan-consent.ts.
 
   runGatedLanScan({

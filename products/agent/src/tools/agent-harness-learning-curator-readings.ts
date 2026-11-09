@@ -1,8 +1,8 @@
-import { isClassicOperation, requireDecisionFeature } from '@goodvibes-jev/engine/sdk/platform/runtime';
-import { learningProposalQuality } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import { isClassicOperation, requireDecisionFeature } from '@goodvibes-jev/engine/platform/platform/runtime';
+import { learningProposalQuality } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { gateJudgmentRegistry, prepareJudgmentResult } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { learningCuratorScore, learningDuplicateAlignment, learningProposalTarget, learningSurvivorSelection, learningSurvivorEquivalence, memoryClass, assertProjectionCurrent, ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { gateJudgmentRegistry, prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
+import { learningCuratorScore, learningDuplicateAlignment, learningProposalTarget, learningSurvivorSelection, learningSurvivorEquivalence, memoryClass, assertProjectionCurrent, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogMethods, captureCatalogSnapshotGuard, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { STAKES_BANDS, type NamedDecision } from '@goodvibes-jev/judgment';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';

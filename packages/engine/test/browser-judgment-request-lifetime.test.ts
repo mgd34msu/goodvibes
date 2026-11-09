@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { BROWSER_JUDGMENT_PATH } from '../daemon-sdk/src/browser-judgment-contract.ts';
-import { configureJudgmentRequestLifetime } from '../sdk/src/platform/daemon/http/judgment-request-lifetime.ts';
+import { BROWSER_JUDGMENT_PATH } from '../daemon-api/src/browser-judgment-contract.ts';
+import { configureJudgmentRequestLifetime } from '../platform/src/platform/daemon/http/judgment-request-lifetime.ts';
 
 describe('browser judgment HTTP request lifetime', () => {
   test('only the exact POST route opts out of the server idle timeout', () => {

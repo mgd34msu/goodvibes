@@ -6,8 +6,8 @@ import { mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { ProfilePickerModal } from '../../input/profile-picker-modal.ts';
-import { ProfileManager } from '@goodvibes-jev/engine/sdk/platform/profiles';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ProfileManager } from '@goodvibes-jev/engine/platform/platform/profiles';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 
 // ---------------------------------------------------------------------------
 // Helpers

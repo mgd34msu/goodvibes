@@ -6,11 +6,11 @@
  * something that can be opened), PageUp/Down scroll its details, x dismisses
  * the selected one, ctrl+x clears them all. Opening marks everything as seen.
  */
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { SurfaceModal, SurfaceModalHost } from './surface-modal-host.js';
 import type { SurfaceLayer } from './renderer/surface-kit.js';
 import { renderNotificationsModal, type NotificationsModalView } from './renderer/notifications-modal.js';
-import type { NotificationFeedEntry, NotificationFeed } from '@goodvibes-jev/engine/sdk/platform/runtime/notification-feed';
+import type { NotificationFeedEntry, NotificationFeed } from '@goodvibes-jev/engine/platform/platform/runtime/notification-feed';
 export interface NotificationsModalOptions {
     readonly feed: NotificationFeed;
     /**

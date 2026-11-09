@@ -1,20 +1,20 @@
 import { describe, expect, it } from 'bun:test';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { PeerRegistry } from '../sdk/src/platform/runtime/remote/host/peer-registry.ts';
+import { PeerRegistry } from '../platform/src/platform/runtime/remote/host/peer-registry.ts';
 import {
   RemoteDispatcher,
   STDOUT_PREVIEW_LIMIT,
   type RemoteWorkEnqueuer,
-} from '../sdk/src/platform/runtime/remote/host/dispatcher.ts';
+} from '../platform/src/platform/runtime/remote/host/dispatcher.ts';
 import {
   type Backend,
   type BackendDispatchResult,
   type DispatchPayload,
   BackendDispatchError,
-} from '../sdk/src/platform/runtime/remote/host/backends/index.ts';
-import type { RemoteHostCredentialStore as DaemonCredentialStore } from '../sdk/src/platform/runtime/remote/host/context.ts';
-import type { RemoteHostLogger as HandlerLogger } from '../sdk/src/platform/runtime/remote/host/context.ts';
-import type { PeerRecord } from '../sdk/src/platform/runtime/remote/host/peer-registry.ts';
+} from '../platform/src/platform/runtime/remote/host/backends/index.ts';
+import type { RemoteHostCredentialStore as DaemonCredentialStore } from '../platform/src/platform/runtime/remote/host/context.ts';
+import type { RemoteHostLogger as HandlerLogger } from '../platform/src/platform/runtime/remote/host/context.ts';
+import type { PeerRecord } from '../platform/src/platform/runtime/remote/host/peer-registry.ts';
 
 const SECRET_REF = 'goodvibes://secrets/goodvibes/REMOTE_KEY';
 

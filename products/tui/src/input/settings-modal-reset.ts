@@ -13,7 +13,7 @@
  * directly to decide the footer state.
  */
 
-import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { isSecretConfigKey } from '../config/secret-config.ts';
 import type { SettingEntry, SettingsCategory } from './settings-modal-types.ts';
 import type { SettingsSecretsManager } from './settings-modal-secrets.ts';

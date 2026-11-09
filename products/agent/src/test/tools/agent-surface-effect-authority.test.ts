@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { MediaProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/media';
-import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '@goodvibes-jev/engine/sdk/platform/google';
-import type { ArtifactCreateInput, ArtifactDescriptor } from '@goodvibes-jev/engine/sdk/platform/artifacts';
+import { MediaProviderRegistry } from '@goodvibes-jev/engine/platform/platform/media';
+import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '@goodvibes-jev/engine/platform/platform/google';
+import type { ArtifactCreateInput, ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import { executeAdmitted } from '../helpers/admitted-tool.ts';
 import { createAgentNotifyTool } from '../../tools/agent-notify-tool.ts';
 import { createAgentMediaGenerateTool } from '../../tools/agent-media-generate-tool.ts';

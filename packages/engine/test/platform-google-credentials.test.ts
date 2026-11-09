@@ -9,7 +9,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import { commandRoots, namedCommandsAndKeys } from './_helpers/setup-vocabulary.ts';
-import { GOOGLE_REFERENCED_COMMANDS } from '../sdk/src/platform/google/setup-plan.ts';
+import { GOOGLE_REFERENCED_COMMANDS } from '../platform/src/platform/google/setup-plan.ts';
 
 /** Whether a string names a Google-flow command or a config key (see _helpers/setup-vocabulary.ts). */
 function namesCommandOrKey(text: string): boolean {
@@ -21,12 +21,12 @@ import {
   summarizeCredentials,
   type GoogleFilePort,
   type GoogleOAuthCredentials,
-} from '../sdk/src/platform/google/credential-adoption.ts';
+} from '../platform/src/platform/google/credential-adoption.ts';
 import {
   checkGoogleCredentialsAtBoot,
   GoogleTokenManager,
   type GoogleRefreshOutcome,
-} from '../sdk/src/platform/google/token-manager.ts';
+} from '../platform/src/platform/google/token-manager.ts';
 
 const SECRET_CLIENT_SECRET = 'GOCSPX-super-secret-value';
 const SECRET_REFRESH_TOKEN = '1//0refresh-token-value';

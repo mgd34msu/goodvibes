@@ -32,7 +32,7 @@ export function projectTestTmpRoot(): string {
       root = resolve(supplied);
       const identity = lstatSync(root);
       const owner: unknown = JSON.parse(readFileSync(join(root, '.goodvibes-test-owner.json'), 'utf8'));
-      if (dirname(root) !== realpathSync(parent) || !basename(root).startsWith('goodvibes-sdk-testrun-')
+      if (dirname(root) !== realpathSync(parent) || !basename(root).startsWith('goodvibes-platform-testrun-')
         || identity.isSymbolicLink() || realpathSync(root) !== root
         || !owner || typeof owner !== 'object' || !('version' in owner) || owner.version !== 1
         || !('pid' in owner) || owner.pid !== process.ppid

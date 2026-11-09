@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { WorkspaceRegistrationStore } from '@goodvibes-jev/engine/sdk/platform/workspace';
-import { WorkspaceRegistrationManager } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { WorkspaceRegistrationStore } from '@goodvibes-jev/engine/platform/platform/workspace';
+import { WorkspaceRegistrationManager } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { selfRecordWorkspaceRegistration } from '../../cli/tui-startup.ts';
 
 let home: string;

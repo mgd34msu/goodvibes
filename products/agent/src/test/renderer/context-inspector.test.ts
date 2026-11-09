@@ -7,7 +7,7 @@ import type { SurfaceLayer } from '../../renderer/surface-kit.ts';
 function linesToText(layer: SurfaceLayer): string[] {
   return layerText(layer);
 }
-import { estimateTokens, estimateConversationTokens } from '@goodvibes-jev/engine/sdk/platform/core';
+import { estimateTokens, estimateConversationTokens } from '@goodvibes-jev/engine/platform/platform/core';
 
 const W = 120;
 const H = 40;
@@ -151,7 +151,7 @@ describe('renderContextInspector', () => {
     conv.addUserMessage(content);
     const lines = renderContextInspector(conv, W, H);
     const text = linesToText(lines).join('\n');
-    // Inspector uses SDK estimateTokens per-message; total should match SDK's conversation estimator.
+    // Inspector uses platform estimateTokens per-message; total should match platform's conversation estimator.
     const msgs = conv.getMessagesForLLM();
     const expectedTotal = estimateConversationTokens(msgs);
     // The inspector renders the total, verify it shows the expected number.

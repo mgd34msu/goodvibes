@@ -3,15 +3,15 @@ import { join } from 'node:path';
 import { InputHandler } from '../../input/handler.ts';
 import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
 import { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { createPermissionConfigReader, PermissionManager } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { createPermissionConfigReader, PermissionManager } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { PolicyRuntimeState } from '@/runtime/index.ts';
 import { createDefaultUiRuntimeServices } from '../helpers/ui-services.ts';
 import { getTestProviderRegistry } from '../helpers/runtime-services.ts';
-import type { ChatRequest, ContentPart } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ChatRequest, ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer, scoreAnswer } from '@goodvibes-jev/judgment/testing';
-import { AgentManager } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { AgentManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import { handleClipboardPaste } from '../../input/handler-content-actions.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
@@ -296,8 +296,8 @@ describe('addUserMessage with ContentPart[]', () => {
 
 describe('Orchestrator capability check for non-multimodal models', () => {
   test('strips images and adds warning when model lacks multimodal capability', async () => {
-    const { ToolRegistry } = await import('@goodvibes-jev/engine/sdk/platform/tools');
-    const { Orchestrator } = await import('@goodvibes-jev/engine/sdk/platform/core');
+    const { ToolRegistry } = await import('@goodvibes-jev/engine/platform/platform/tools');
+    const { Orchestrator } = await import('@goodvibes-jev/engine/platform/platform/core');
     const { ConversationManager } = await import('../../core/conversation.ts');
     const { RuntimeEventBus } = await import('@/runtime/index.ts');
 

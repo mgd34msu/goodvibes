@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import type { AutomationRouteBinding } from '../sdk/src/platform/automation/routes.js';
-import { HomeAssistantConversationRoutes } from '../sdk/src/platform/daemon/http/homeassistant-routes.js';
+import type { AutomationRouteBinding } from '../platform/src/platform/automation/routes.js';
+import { HomeAssistantConversationRoutes } from '../platform/src/platform/daemon/http/homeassistant-routes.js';
 import {
   CompanionChatManager,
   type CompanionLLMProvider,
   type CompanionProviderChunk,
-} from '../sdk/src/platform/companion/companion-chat-manager.js';
-import type { CompanionChatTurnEvent } from '../sdk/src/platform/companion/companion-chat-types.js';
+} from '../platform/src/platform/companion/companion-chat-manager.js';
+import type { CompanionChatTurnEvent } from '../platform/src/platform/companion/companion-chat-types.js';
 
 function parseSseFrames(body: string): Array<{ readonly event: string; readonly data: Record<string, unknown> }> {
   return body

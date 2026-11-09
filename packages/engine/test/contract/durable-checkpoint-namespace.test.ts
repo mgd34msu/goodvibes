@@ -2,8 +2,8 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { contractPath, contractCheckpointsDir, contractsDir } from '../../sdk/src/platform/contract/store.js';
-import { DurableContractAdmissions, durableKeyHash, type DurableContractRequest } from '../../sdk/src/platform/contract/durable-admission.js';
+import { contractPath, contractCheckpointsDir, contractsDir } from '../../platform/src/platform/contract/store.js';
+import { DurableContractAdmissions, durableKeyHash, type DurableContractRequest } from '../../platform/src/platform/contract/durable-admission.js';
 import { makeHarness, makeRepo, oneUnitPlan, type Harness } from './runner-support.js';
 
 const roots = new Set<string>(), running = new Set<Harness>();

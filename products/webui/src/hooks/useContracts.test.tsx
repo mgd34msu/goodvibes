@@ -14,7 +14,7 @@ mock.module('../lib/goodvibes', () => ({
   getCurrentAuth: () => Promise.resolve({}),
   invokeMethod: () => Promise.resolve({}),
   hasStoredTokenSync: () => Boolean(localStorage.getItem(WEBUI_TOKEN_STORE_KEY)),
-  sdk: { streams: { open: (_path: string, handlers: { onEvent?: (name: string, payload: unknown) => void }) => { contractEvent = () => handlers.onEvent?.('contracts', {}); return Promise.resolve(() => {}); } }, operator: { contracts: {
+  client: { streams: { open: (_path: string, handlers: { onEvent?: (name: string, payload: unknown) => void }) => { contractEvent = () => handlers.onEvent?.('contracts', {}); return Promise.resolve(() => {}); } }, operator: { contracts: {
     list: (input: { includeTerminal?: boolean }, signal?: AbortSignal) => listRead(input, signal),
     get: (id: string, signal?: AbortSignal) => detailRead(id, signal),
   } } },

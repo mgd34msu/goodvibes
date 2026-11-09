@@ -32,12 +32,12 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ServiceCommandRunner } from '../sdk/src/platform/daemon/service-handover.ts';
-import { recordDaemonStartAttempt } from '../sdk/src/platform/daemon/lifecycle-marker.ts';
-import { applyVerifiedUpdate, inspectDaemonNativeInstallation, resolveDaemonNativeTargets, retainDaemonNativeFiles, rollbackKeptPrevious, type UpdateFileIo } from '../sdk/src/platform/runtime/self-update.ts';
+import type { ServiceCommandRunner } from '../platform/src/platform/daemon/service-handover.ts';
+import { recordDaemonStartAttempt } from '../platform/src/platform/daemon/lifecycle-marker.ts';
+import { applyVerifiedUpdate, inspectDaemonNativeInstallation, resolveDaemonNativeTargets, retainDaemonNativeFiles, rollbackKeptPrevious, type UpdateFileIo } from '../platform/src/platform/runtime/self-update.ts';
 import { nativeCohortFixture, nativeMemoryIo } from './_helpers/daemon-native-cohort.ts';
-import { DaemonLifecycleRuntime, type DaemonUpdateArtifact, type DaemonLifecycleRuntimeOptions } from '../sdk/src/platform/daemon/facade-lifecycle.ts';
-import { describeSecretIsolation } from '../sdk/src/platform/runtime/secrets-composition.ts';
+import { DaemonLifecycleRuntime, type DaemonUpdateArtifact, type DaemonLifecycleRuntimeOptions } from '../platform/src/platform/daemon/facade-lifecycle.ts';
+import { describeSecretIsolation } from '../platform/src/platform/runtime/secrets-composition.ts';
 
 const MACHINE_HOME = '/home/owner';
 
@@ -138,28 +138,30 @@ function makePromotionHarness(options: { readonly hasOverriddenHome?: boolean | 
 }
 
 describe('boot promotion', () => {
-  test('a daemon running from an overridden home does NOT adopt the machine service unit', () => {
+  test('a daemon running from an overridden home does NOT adopt the machine service unit', async () => {
     const h = makePromotionHarness({ hasOverriddenHome: true });
     h.runtime.onStarted();
     // This is the regression: it used to write its own scratchpad ExecStart
     // into the machine's unit and hand over.
     expect(h.adopted()).toBe(0);
     expect(h.exits).toEqual([]);
-    h.runtime.onStopping(false);
+    await h.runtime.onStopping(false);
   });
 
-  test('a daemon on the machine default home still promotes, so the feature is intact', () => {
+  test('a daemon on the machine default home still promotes, so the feature is intact', async () => {
     const h = makePromotionHarness({ hasOverriddenHome: false });
     h.runtime.onStarted();
+    await h.runtime.drainHandovers();
     expect(h.adopted()).toBe(1);
-    h.runtime.onStopping(false);
+    await h.runtime.onStopping(false);
   });
 
-  test('an unstated home is treated as the machine default, preserving existing behaviour', () => {
+  test('an unstated home is treated as the machine default, preserving existing behaviour', async () => {
     const h = makePromotionHarness({ hasOverriddenHome: undefined });
     h.runtime.onStarted();
+    await h.runtime.drainHandovers();
     expect(h.adopted()).toBe(1);
-    h.runtime.onStopping(false);
+    await h.runtime.onStopping(false);
   });
 });
 

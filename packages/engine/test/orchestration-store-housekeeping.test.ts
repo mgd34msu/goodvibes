@@ -13,19 +13,19 @@ import { afterEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CrossSessionTaskRegistry, CrossSessionGraphUnavailableError } from '../sdk/src/platform/sessions/orchestration/registry.js';
-import type { CrossSessionTaskRef, SessionTaskGraphSnapshot } from '../sdk/src/platform/sessions/orchestration/types.js';
+import { CrossSessionTaskRegistry, CrossSessionGraphUnavailableError } from '../platform/src/platform/sessions/orchestration/registry.js';
+import type { CrossSessionTaskRef, SessionTaskGraphSnapshot } from '../platform/src/platform/sessions/orchestration/types.js';
 import {
   listSnapshotWorkstreamIds,
   loadWorkstreamSnapshot,
   reapOrchestrationSnapshots,
   writeWorkstreamSnapshot,
-} from '../sdk/src/platform/orchestration/persistence.js';
-import { emptyWorkItemUsage, type WorkItem, type Workstream } from '../sdk/src/platform/orchestration/types.js';
-import { WorktreeRegistry } from '../sdk/src/platform/runtime/worktree/registry.js';
-import { GitService } from '../sdk/src/platform/git/service.js';
-import { withFileWriteLockSync } from '../sdk/src/platform/workspace/checkpoint/sync-write-lock.js';
-import { logger } from '../sdk/src/platform/utils/logger.js';
+} from '../platform/src/platform/orchestration/persistence.js';
+import { emptyWorkItemUsage, type WorkItem, type Workstream } from '../platform/src/platform/orchestration/types.js';
+import { WorktreeRegistry } from '../platform/src/platform/runtime/worktree/registry.js';
+import { GitService } from '../platform/src/platform/git/service.js';
+import { withFileWriteLockSync } from '../platform/src/platform/workspace/checkpoint/sync-write-lock.js';
+import { logger } from '../platform/src/platform/utils/logger.js';
 
 const NOW = 1_800_000_000_000; // fixed clock for every age assertion
 

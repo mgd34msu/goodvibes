@@ -4,15 +4,15 @@ import { rankStatefulCatalog } from './agent-harness-stateful-catalog-source.ts'
 import { readAgentHostPairing } from '../runtime/connected-host-pairing-store.ts';
 import { resolveConnectedHostBaseUrl } from '../config/connected-host-dial.ts';
 import { join } from 'node:path';
-import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/sdk/platform/pairing';
+import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { GOODVIBES_AGENT_PAIRING_SURFACE } from '../config/surface.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { requireShellPaths } from '../input/commands/runtime-services.ts';
 import { deriveStep1Capabilities, deriveStep1CapabilityFlags } from '../runtime/onboarding/index.ts';
 import { connectedHostOperatorTokenPath, readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
 import { clearSetupWizardCheckpoint, saveSetupWizardCheckpoint, setupWizardCheckpointPath } from '../agent/setup-wizard-checkpoint.ts';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureHarnessLocalEffect } from './agent-harness-local-effect.ts';
 import type { SetupSmokeNativeEvidence } from './agent-setup-smoke-reference.ts';
 import { DEFAULT_AGENT_SETUP_WIZARD_CLEAR_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_INSPECT_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_MARK_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_REVIEW_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_RERUN_SMOKE_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_SAVE_SMOKE_ROUTE } from '../agent/setup-wizard.ts';
@@ -405,7 +405,7 @@ export function provisionConnectedHostOperatorToken(context: CommandContext, arg
         mode: 'provision_connected_host_token',
         setupItemId: 'connected-host-auth',
         explicitUserRequest: previewHarnessText(explicitUserRequest, 160),
-        error: after.error ? previewHarnessText(after.error, 160) : 'SDK token provisioning completed but no usable connected-host token was readable.',
+        error: after.error ? previewHarnessText(after.error, 160) : 'platform token provisioning completed but no usable connected-host token was readable.',
         token: {
           path: after.path,
           present: after.present,
@@ -454,7 +454,7 @@ export function provisionConnectedHostOperatorToken(context: CommandContext, arg
       },
       policy: {
         effect: 'confirmed-local-token-provisioning',
-        source: 'SDK platform pairing helper writes the canonical connected-host operator token file with owner-only permissions.',
+        source: 'platform platform pairing helper writes the canonical connected-host operator token file with owner-only permissions.',
         secrets: 'Only path, peer id, and timestamps are returned; the raw token is not returned.',
         rotation: 'This route preserves a valid existing token and only creates or repairs the local canonical file.',
       },

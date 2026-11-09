@@ -9,18 +9,18 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { logger } from '../sdk/src/platform/utils/index.ts';
+import { logger } from '../platform/src/platform/utils/index.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { TEST_SURFACE_ROOT, makeTestSurface } from './_helpers/session-surface.ts';
-import type { SessionSurface } from '../sdk/src/platform/runtime/session-surface.ts';
-import { QUARANTINE_RETENTION_MS, UNRECOGNIZED_SUFFIX } from '../sdk/src/platform/config/read-versioned.ts';
-import { ANCHOR_SIDECAR_SETTLE_MS } from '../sdk/src/platform/rewind/turn-anchors.ts';
-import { JOURNAL_ORPHAN_MAX_AGE_MS, journalPathFor } from '../sdk/src/platform/runtime/transcript-journal.ts';
-import { LIVENESS_STALE_AFTER_MS, livenessMarkerDirFor, livenessMarkerPathFor } from '../sdk/src/platform/runtime/session-liveness-marker.ts';
+import type { SessionSurface } from '../platform/src/platform/runtime/session-surface.ts';
+import { QUARANTINE_RETENTION_MS, UNRECOGNIZED_SUFFIX } from '../platform/src/platform/config/read-versioned.ts';
+import { ANCHOR_SIDECAR_SETTLE_MS } from '../platform/src/platform/rewind/turn-anchors.ts';
+import { JOURNAL_ORPHAN_MAX_AGE_MS, journalPathFor } from '../platform/src/platform/runtime/transcript-journal.ts';
+import { LIVENESS_STALE_AFTER_MS, livenessMarkerDirFor, livenessMarkerPathFor } from '../platform/src/platform/runtime/session-liveness-marker.ts';
 import {
   runDurabilityHousekeeping,
   startDurabilityHousekeeping,
-} from '../sdk/src/platform/runtime/durability-housekeeping.ts';
+} from '../platform/src/platform/runtime/durability-housekeeping.ts';
 
 interface CapturedLog {
   readonly message: string;

@@ -14,10 +14,10 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { mkdirSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
-import { ConfigManager as SdkConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { DaemonServer } from '@goodvibes-jev/engine/sdk/platform/daemon';
-import { UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
-import { resolveCanonicalMemoryDbPath, MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/sdk/platform/state';
+import { ConfigManager as PlatformConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { DaemonServer } from '@goodvibes-jev/engine/platform/platform/daemon';
+import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
+import { resolveCanonicalMemoryDbPath, MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/platform/platform/state';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
 import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
@@ -113,7 +113,7 @@ describe('memory CLI: daemon up routes over the wire', () => {
       modelDiscovery: 'skip',
       runtimeStore: createRuntimeStore(),
       runtimeBus: new RuntimeEventBus(),
-      configManager: new SdkConfigManager({ surfaceRoot: 'tui', configDir: join(daemonHomeDir, '.goodvibes', 'tui'), workingDir: daemonWorkingDir, homeDir: daemonHomeDir }),
+      configManager: new PlatformConfigManager({ surfaceRoot: 'tui', configDir: join(daemonHomeDir, '.goodvibes', 'tui'), workingDir: daemonWorkingDir, homeDir: daemonHomeDir }),
       workingDir: daemonWorkingDir,
       homeDirectory: daemonHomeDir,
       featureFlags: createFeatureFlagManager(),

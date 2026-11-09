@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { readWalkDirectories, walkDirectoryReading } from '../sdk/src/platform/utils/directory-reading.ts';
-import { readCredentialHeader } from '../sdk/src/platform/tools/credential-header-reading.ts';
+import { readWalkDirectories, walkDirectoryReading } from '../platform/src/platform/utils/directory-reading.ts';
+import { readCredentialHeader } from '../platform/src/platform/tools/credential-header-reading.ts';
 
 let previous: ReturnType<typeof installJudgmentPort>;
 afterEach(() => installJudgmentPort(previous));

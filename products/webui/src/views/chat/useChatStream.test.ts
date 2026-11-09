@@ -22,7 +22,7 @@ import type { LocalCompanionMessage } from '../../lib/companion-chat';
 import type { Dispatch, SetStateAction } from 'react';
 
 // ---------------------------------------------------------------------------
-// Mock sdk.chat.events.stream
+// Mock platform.chat.events.stream
 // ---------------------------------------------------------------------------
 
 type StreamDisconnect = () => void;
@@ -60,7 +60,7 @@ let activeStreamControl: StreamControl | null = null;
 let allStreamControls: StreamControl[] = [];
 let streamCallCount = 0;
 
-// Mock the SDK module
+// Mock the platform module
 // Controllable behavior for the server-side stop verb: tests set this to
 // simulate an upgraded daemon (resolve), a pre-1.4 daemon (method-unavailable
 // reject), or the benign no-active-turn race.
@@ -79,7 +79,7 @@ const toolCallsCancelMock = mock((sessionId: string, callId: string) => {
 
 mock.module('../../lib/goodvibes', () => ({
   DEFAULT_SSE_RECONNECT: { enabled: true, baseDelayMs: 1_000, maxDelayMs: 30_000, backoffFactor: 2, maxAttempts: 10 },
-  sdk: {
+  client: {
     chat: {
       turns: {
         cancel: turnsCancelMock,
@@ -556,7 +556,7 @@ describe('useChatStream: stop() correctness', () => {
 // Resilience: reconnecting / stream paused / session expired / retry
 // ---------------------------------------------------------------------------
 
-describe('useChatStream: reconnect passed to the SDK', () => {
+describe('useChatStream: reconnect passed to the platform', () => {
   test('opens the stream with DEFAULT_SSE_RECONNECT so a drop actually retries', () => {
     const ctx = renderHookHelper({ activeSessionId: 'session-reconnect-opt' });
     const ctrl = activeStreamControl;
@@ -649,7 +649,7 @@ describe('useChatStream: onTerminate: the built-in reconnect gave up ("stream pa
     const ctrl = activeStreamControl;
     expect(ctrl).not.toBeNull();
 
-    // Real SDK wiring: onReconnect fires for every attempt, THEN onTerminate +
+    // Real platform wiring: onReconnect fires for every attempt, THEN onTerminate +
     // onError both fire once attempts are exhausted (see sse-stream.js: onTerminate
     // is always called, then reportStreamError calls onError with the same error).
     ctrl!.options.onReconnect?.({ attempt: 10, delayMs: 30_000 });
@@ -699,7 +699,7 @@ describe('useChatStream: token expiry mid-session hands off, never loops', () =>
       // The retry loop must be told to stop, not left burning attempts on a dead token.
       expect(ctrl!.disconnect).toHaveBeenCalled();
 
-      // A further paired onError call (defensive, the real SDK never double-fires
+      // A further paired onError call (defensive, the real platform never double-fires
       // for one failure) must not re-invoke the handoff a second time.
       ctrl!.options.onError(authError);
       expect(onAuthExpired).toHaveBeenCalledTimes(1);
@@ -732,7 +732,7 @@ describe('useChatStream: token expiry mid-session hands off, never loops', () =>
 });
 
 describe('useChatStream: retryStream() re-opens after "stream paused"', () => {
-  test('calling retryStream triggers a fresh sdk.chat.events.stream connect', () => {
+  test('calling retryStream triggers a fresh platform.chat.events.stream connect', () => {
     const ctx = renderHookHelper({ activeSessionId: 'session-retry' });
     expect(streamCallCount).toBe(1);
 
@@ -744,7 +744,7 @@ describe('useChatStream: retryStream() re-opens after "stream paused"', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Per-effect epoch: a switch/retry DURING the handshake window (the SDK stream()
+// Per-effect epoch: a switch/retry DURING the handshake window (the platform stream()
 // promise only yields its disconnect handle post-handshake) must not let the OLD
 // stream's late callbacks or late-resolving handle touch the NEW session (F1).
 // ---------------------------------------------------------------------------
@@ -913,7 +913,7 @@ describe('useChatStream: turn.cancelled terminal event', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Running tool calls + cancel (SDK 1.8.0's interaction-wins round)
+// Running tool calls + cancel (platform 1.8.0's interaction-wins round)
 // ---------------------------------------------------------------------------
 
 describe('useChatStream: activeToolCalls tracking', () => {

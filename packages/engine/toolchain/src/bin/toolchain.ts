@@ -6,7 +6,7 @@
  * It began as the route for `bunx <toolchain package> <tool>`, when the
  * toolchain was its own package: bunx resolves the bin named after the
  * package's final path segment, and without this dispatcher it silently fell
- * back to the FIRST bin in the map (sdk-pin-gate) with the intended tool name
+ * back to the FIRST bin in the map (engine-pin-gate) with the intended tool name
  * as a stray argument. The toolchain now ships inside @goodvibes-jev/engine,
  * whose bins include this one; every tool also stays directly invocable by
  * its own `goodvibes-*` bin name.
@@ -16,7 +16,7 @@
  * strings work unchanged.
  */
 const TOOLS: Record<string, string> = {
-  'sdk-pin-gate': './sdk-pin-gate.js',
+  'engine-pin-gate': './engine-pin-gate.js',
   'build-binaries': './build-binaries.js',
   'release-cut': './release-cut.js',
   'coverage-gate': './coverage-gate.js',

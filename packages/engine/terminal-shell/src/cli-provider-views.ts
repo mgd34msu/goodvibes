@@ -1,5 +1,5 @@
 import { yesNo, formatJsonOrText } from './cli-output.js';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   formatProviderModel,
   getModelIdFromProviderModel,
@@ -8,9 +8,9 @@ import {
   type ProviderRegistry,
   type FavoritesStore,
   type CanonicalModel,
-} from '@goodvibes-jev/engine/sdk/platform/providers';
-import { summarizeProviderAuthRoutes } from '@goodvibes-jev/engine/sdk/platform/providers/auth-route-presentation';
-import type { formatProviderAuthRoute as ProviderAuthRouteFormatter } from '@goodvibes-jev/engine/sdk/platform/providers/auth-route-presentation';
+} from '@goodvibes-jev/engine/platform/platform/providers';
+import { summarizeProviderAuthRoutes } from '@goodvibes-jev/engine/platform/platform/providers/auth-route-presentation';
+import type { formatProviderAuthRoute as ProviderAuthRouteFormatter } from '@goodvibes-jev/engine/platform/platform/providers/auth-route-presentation';
 
 export interface CliProviderRuntime {
   readonly cli: { readonly commandArgs: readonly string[]; readonly flags: { readonly outputFormat?: string | undefined } };

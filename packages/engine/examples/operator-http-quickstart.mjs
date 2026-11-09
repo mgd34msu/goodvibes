@@ -1,21 +1,21 @@
 /**
- * Call operator endpoints over HTTP using the umbrella SDK.
+ * Call operator endpoints over HTTP using the umbrella platform.
  *
  * Prerequisites: GoodVibes daemon at GOODVIBES_BASE_URL (default http://127.0.0.1:3421).
  *   Set GOODVIBES_TOKEN if your daemon requires auth.
  *
  * Run: bun examples/operator-http-quickstart.mjs
  */
-import { createGoodVibesSdk } from '@goodvibes-jev/engine/sdk';
+import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
 
 const authToken = process.env.GOODVIBES_TOKEN;
 if (!authToken) {
   throw new Error('GOODVIBES_TOKEN env var is required (operator bearer token from the daemon).');
 }
-const sdk = createGoodVibesSdk({
+const platformClient = createGoodVibesPlatform({
   baseUrl: process.env.GOODVIBES_BASE_URL ?? 'http://127.0.0.1:3421',
   authToken,
 });
 
-const snapshot = await sdk.operator.control.snapshot();
+const snapshot = await platformClient.operator.control.snapshot();
 console.log(JSON.stringify(snapshot, null, 2));

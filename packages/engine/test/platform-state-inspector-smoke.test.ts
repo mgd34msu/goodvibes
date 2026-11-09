@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { createStateInspector } from '../sdk/src/platform/runtime/inspection/state-inspector.js';
+import { createStateInspector } from '../platform/src/platform/runtime/inspection/state-inspector.js';
 
 describe('platform/runtime/inspection/state-inspector: behavior smoke', () => {
   test('getSnapshot returns an object with domains array and capturedAt timestamp', () => {

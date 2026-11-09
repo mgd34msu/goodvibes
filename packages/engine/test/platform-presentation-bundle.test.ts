@@ -27,7 +27,7 @@ test('a browser-target consumer can execute new themes and legacy presentation e
   const root = mkdtempSync(join(tmpdir(), 'theme-browser-consumer-'));
   try {
     const entry = join(root, 'consumer.ts');
-    const presentation = resolve(import.meta.dir, '../sdk/src/platform/presentation/index.ts');
+    const presentation = resolve(import.meta.dir, '../platform/src/platform/presentation/index.ts');
     writeFileSync(entry, `
       import { DIFF_TONES, TONE_TOKENS, getBundledTheme, listBundledThemes, resolveTheme, themeToTones } from ${JSON.stringify(presentation)};
       const resolved = resolveTheme(getBundledTheme('goodvibes').json, 'dark');

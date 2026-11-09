@@ -1,5 +1,5 @@
 import { extractionValueFixtureFor, extractionValueFixtureReading, type ExtractionValueFixtures } from './_helpers/knowledge-extraction-value-readings.js';
-import { captureStrictJudgmentJson } from '../sdk/src/platform/gate/judgment-result.js';
+import { captureStrictJudgmentJson } from '../platform/src/platform/gate/judgment-result.js';
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -7,12 +7,12 @@ import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { prepareKnowledgeExtractionValueReading, KnowledgeExtractionValueHeldError, type KnowledgeExtractionValueInput } from '../sdk/src/platform/knowledge/semantic/extraction-value/reader.js';
-import { knowledgeExtractionValue } from '../sdk/src/platform/knowledge/semantic/extraction-value/battery.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { KnowledgeSemanticService } from '../sdk/src/platform/knowledge/semantic/service.js';
-import { enrichKnowledgeSource } from '../sdk/src/platform/knowledge/semantic/enrichment.js';
-import { JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.js';
+import { prepareKnowledgeExtractionValueReading, KnowledgeExtractionValueHeldError, type KnowledgeExtractionValueInput } from '../platform/src/platform/knowledge/semantic/extraction-value/reader.js';
+import { knowledgeExtractionValue } from '../platform/src/platform/knowledge/semantic/extraction-value/battery.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { KnowledgeSemanticService } from '../platform/src/platform/knowledge/semantic/service.js';
+import { enrichKnowledgeSource } from '../platform/src/platform/knowledge/semantic/enrichment.js';
+import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input.js';
 
 let previous: JudgmentPort | undefined;
 const roots: string[] = [];

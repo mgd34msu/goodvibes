@@ -17,7 +17,7 @@ import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
  * happens and returns text; the caller decides where that text goes, the
  * console for the command, an action result panel for the workspace.
  *
- * The connector itself is `@goodvibes-jev/engine/sdk/platform/google`, the flows,
+ * The connector itself is `@goodvibes-jev/engine/platform/platform/google`, the flows,
  * the step plan, the credential handling and the browser-driven pages all live
  * there now, so the daemon can run them too. What stayed here is the wiring
  * that only this product can supply: config and secret access through the
@@ -54,13 +54,13 @@ import {
   type GoogleSetupActionDeps,
   type GoogleSetupPath,
   type GoogleSetupReport,
-} from '@goodvibes-jev/engine/sdk/platform/google';
+} from '@goodvibes-jev/engine/platform/platform/google';
 import {
   createProcessCommandPort,
   nodeGoogleFilePort,
   startLoopbackListener,
-} from '@goodvibes-jev/engine/sdk/platform/google/node';
-import { ensureConnectorConfigSections } from '@goodvibes-jev/engine/sdk/platform/config';
+} from '@goodvibes-jev/engine/platform/platform/google/node';
+import { ensureConnectorConfigSections } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   agentBrowserProfileRoot,
   agentBrowserScreenshotRoot,
@@ -109,7 +109,7 @@ export function googleSecretPort(ctx: CommandContext): GoogleSecretPort {
     set: (key, value, ownership) => manager.set(key, value, ownership),
     // Carried so a confirmation-gated removal can actually remove. Nothing
     // reaches it except `forgetGoogleCredentials`, which refuses without an
-    // explicit yes, see the SDK's credential-removal.ts.
+    // explicit yes, see the platform's credential-removal.ts.
     ...(manager.delete === undefined ? {} : { delete: (key: string) => manager.delete!(key) }),
   };
 }

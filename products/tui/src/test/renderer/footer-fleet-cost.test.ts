@@ -8,7 +8,7 @@ import { describe, test, expect } from 'bun:test';
 import { buildShellFooter } from '../../renderer/shell-surface.ts';
 import { linesToText } from '../setup.ts';
 import { fleetLeafCostTotal } from '../../views/fleet-read-model.ts';
-import type { ProcessNode } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
+import type { ProcessNode } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 
 const W = 140;
 const PRICED_MODEL = 'claude-opus-4-6'; // real catalog pricing

@@ -2,9 +2,9 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ApprovalBroker } from '../sdk/src/platform/control-plane/approval-broker.js';
-import { handleInteractiveApprovalAction } from '../sdk/src/platform/daemon/facade-approval-action.js';
-import type { PermissionPromptRequest } from '../sdk/src/platform/permissions/prompt.js';
+import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-broker.js';
+import { handleInteractiveApprovalAction } from '../platform/src/platform/daemon/facade-approval-action.js';
+import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

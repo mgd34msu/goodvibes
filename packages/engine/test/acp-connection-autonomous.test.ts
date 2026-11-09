@@ -3,11 +3,11 @@ import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibe
 import { fakePort, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { gateReadingsPort, forgetGateReadings } from './_helpers/gate-readings.ts';
-import { PermissionManager, type PermissionConfigReader } from '../sdk/src/platform/permissions/manager.ts';
-import { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.ts';
-import type { ExternalPermissionHost } from '../sdk/src/platform/permissions/external-request.ts';
-import { AcpConnection } from '../sdk/src/platform/acp/connection.ts';
-import { AcpPermissionWire } from '../sdk/src/platform/acp/permission-wire.ts';
+import { PermissionManager, type PermissionConfigReader } from '../platform/src/platform/permissions/manager.ts';
+import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
+import type { ExternalPermissionHost } from '../platform/src/platform/permissions/external-request.ts';
+import { AcpConnection } from '../platform/src/platform/acp/connection.ts';
+import { AcpPermissionWire } from '../platform/src/platform/acp/permission-wire.ts';
 let log: SqliteDecisionLog;
 let restore: ReturnType<typeof installJudgmentPort>;
 let selected = 'act';
@@ -71,7 +71,7 @@ test('missing canonical host does not fall back to human callback', async () => 
 test('one-shot permission never widens to allow_always', async () => {
   const a = acp(); const input = request(); input.options[1]!.kind = 'allow_always'; expect(await a.ask(input)).toEqual(cancelledResult);
 });
-test('an SDK response queued after cancellation cannot write an approval', async () => {
+test('an platform response queued after cancellation cannot write an approval', async () => {
   const a = acp(); expect(await a.ask(request(), () => a.controller.abort())).toEqual(cancelledResult);
 });
 test('config invalidation during pending admission cancels with no human fallback', async () => {
@@ -96,7 +96,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-test('real subprocess SDK stream reaches canonical permission and original wire response', async () => {
+test('real subprocess platform stream reaches canonical permission and original wire response', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'acp-autonomous-'));
   const report = join(dir, 'wire.json');
   const connection = new AcpConnection('stdio-child', {
@@ -113,8 +113,8 @@ test('real subprocess SDK stream reaches canonical permission and original wire 
   } finally { await connection.cancel(); await rm(dir, { recursive: true, force: true }); }
 }, 10_000);
 
-import { AcpManager } from '../sdk/src/platform/acp/manager.ts';
-import { withExternalOperationSource } from '../sdk/src/platform/permissions/external-operation-scope.ts';
+import { AcpManager } from '../platform/src/platform/acp/manager.ts';
+import { withExternalOperationSource } from '../platform/src/platform/permissions/external-operation-scope.ts';
 test('reachable AcpManager spawn inherits the admitted tool body original source and preserves it for child permissions', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'acp-manager-autonomous-'));
   const report = join(dir, 'wire.json');

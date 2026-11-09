@@ -9,9 +9,9 @@
  * plus their advertised REST routes.
  */
 import { describe, expect, test } from 'bun:test';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { registerWorkspacesGatewayMethods } from '../sdk/src/platform/control-plane/routes/workspaces.ts';
-import { GATEWAY_REST_ROUTES } from '../daemon-sdk/src/gateway-rest-routes.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { registerWorkspacesGatewayMethods } from '../platform/src/platform/control-plane/routes/workspaces.ts';
+import { GATEWAY_REST_ROUTES } from '../daemon-api/src/gateway-rest-routes.ts';
 import {
   WorkspaceRegistrationStore,
   resolveWorkspaceRegistration,
@@ -19,7 +19,7 @@ import {
   type GitRunner,
   type RegisteredWorkspaceRecord,
   type DeclinedWorkspaceRecord,
-} from '../sdk/src/platform/workspace/registration/index.ts';
+} from '../platform/src/platform/workspace/registration/index.ts';
 
 const HOME = '/home/dev';
 const STATE = '/home/dev/.goodvibes';

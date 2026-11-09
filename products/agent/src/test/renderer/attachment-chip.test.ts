@@ -9,7 +9,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { buildShellFooter } from '../../renderer/shell-surface.ts';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 
 function textOf(lines: Line[]): string {
   return lines.map(line => line.map(cell => cell.char).join('')).join('\n');

@@ -28,11 +28,11 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { Orchestrator } from '../sdk/src/platform/core/orchestrator.js';
+import { Orchestrator } from '../platform/src/platform/core/orchestrator.js';
 import {
   getProcessUntrustedContentLedger,
   resetProcessUntrustedContentLedgerForTests,
-} from '../sdk/src/platform/security/untrusted-content.ts';
+} from '../platform/src/platform/security/untrusted-content.ts';
 
 type RunTurn = (
   text: string,

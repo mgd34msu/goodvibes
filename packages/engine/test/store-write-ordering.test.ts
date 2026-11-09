@@ -34,34 +34,34 @@ import {
   type ControllableStore,
 } from './_helpers/controllable-store.js';
 
-import { UserPermissionRuleStore, type StoredUserPermissionRule } from '../sdk/src/platform/permissions/user-rule-store.js';
-import { DaemonBatchManager } from '../sdk/src/platform/batch/manager.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import type { LLMProvider, ProviderBatchResult } from '../sdk/src/platform/providers/interface.js';
-import type { ProviderRegistry } from '../sdk/src/platform/providers/registry.js';
-import { SharedSessionBroker } from '../sdk/src/platform/control-plane/session-broker.js';
-import type { RouteBindingManager } from '../sdk/src/platform/channels/index.js';
-import { ChannelPolicyManager } from '../sdk/src/platform/channels/policy-manager.js';
-import { AutomationJobStore } from '../sdk/src/platform/automation/store/jobs.js';
-import { AutomationRunStore } from '../sdk/src/platform/automation/store/runs.js';
-import { AutomationRouteStore } from '../sdk/src/platform/automation/store/routes.js';
-import type { AutomationJob } from '../sdk/src/platform/automation/jobs.js';
-import type { AutomationRun } from '../sdk/src/platform/automation/runs.js';
-import type { AutomationRouteBinding } from '../sdk/src/platform/automation/routes.js';
-import { WorkspaceRegistrationStore } from '../sdk/src/platform/workspace/registration/index.js';
-import { TaskScheduler } from '../sdk/src/platform/scheduler/scheduler.js';
-import { CiWatchService, CiWatchStore } from '../sdk/src/platform/ci-watch/index.js';
-import type { CiJob, CiStatusSource } from '../sdk/src/platform/ci-watch/index.js';
-import { PrincipalRegistry } from '../sdk/src/platform/principals/registry.js';
-import { PrincipalStore } from '../sdk/src/platform/principals/store.js';
-import { ChannelProfileRegistry } from '../sdk/src/platform/channel-profiles/registry.js';
-import { ChannelProfileStore } from '../sdk/src/platform/channel-profiles/store.js';
-import { DistributedRuntimeManager } from '../sdk/src/platform/runtime/remote/distributed-runtime-manager.js';
-import { CheckinReceiptStore } from '../sdk/src/platform/checkin/receipts.js';
-import type { CheckinReceipt } from '../sdk/src/platform/checkin/types.js';
-import { KVState } from '../sdk/src/platform/state/kv-state.js';
-import { JsonFileStore } from '../sdk/src/platform/state/json-file-store.js';
-import { InboundMailHousekeeper } from '../sdk/src/platform/email/inbound/housekeeping.js';
+import { UserPermissionRuleStore, type StoredUserPermissionRule } from '../platform/src/platform/permissions/user-rule-store.js';
+import { DaemonBatchManager } from '../platform/src/platform/batch/manager.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import type { LLMProvider, ProviderBatchResult } from '../platform/src/platform/providers/interface.js';
+import type { ProviderRegistry } from '../platform/src/platform/providers/registry.js';
+import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.js';
+import type { RouteBindingManager } from '../platform/src/platform/channels/index.js';
+import { ChannelPolicyManager } from '../platform/src/platform/channels/policy-manager.js';
+import { AutomationJobStore } from '../platform/src/platform/automation/store/jobs.js';
+import { AutomationRunStore } from '../platform/src/platform/automation/store/runs.js';
+import { AutomationRouteStore } from '../platform/src/platform/automation/store/routes.js';
+import type { AutomationJob } from '../platform/src/platform/automation/jobs.js';
+import type { AutomationRun } from '../platform/src/platform/automation/runs.js';
+import type { AutomationRouteBinding } from '../platform/src/platform/automation/routes.js';
+import { WorkspaceRegistrationStore } from '../platform/src/platform/workspace/registration/index.js';
+import { TaskScheduler } from '../platform/src/platform/scheduler/scheduler.js';
+import { CiWatchService, CiWatchStore } from '../platform/src/platform/ci-watch/index.js';
+import type { CiJob, CiStatusSource } from '../platform/src/platform/ci-watch/index.js';
+import { PrincipalRegistry } from '../platform/src/platform/principals/registry.js';
+import { PrincipalStore } from '../platform/src/platform/principals/store.js';
+import { ChannelProfileRegistry } from '../platform/src/platform/channel-profiles/registry.js';
+import { ChannelProfileStore } from '../platform/src/platform/channel-profiles/store.js';
+import { DistributedRuntimeManager } from '../platform/src/platform/runtime/remote/distributed-runtime-manager.js';
+import { CheckinReceiptStore } from '../platform/src/platform/checkin/receipts.js';
+import type { CheckinReceipt } from '../platform/src/platform/checkin/types.js';
+import { KVState } from '../platform/src/platform/state/kv-state.js';
+import { JsonFileStore } from '../platform/src/platform/state/json-file-store.js';
+import { InboundMailHousekeeper } from '../platform/src/platform/email/inbound/housekeeping.js';
 
 /** A temp directory that the caller is responsible for removing. */
 function tempDir(prefix: string): string {

@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { normalizeEverySchedule } from '@goodvibes-jev/engine/sdk/platform/automation';
+import { normalizeEverySchedule } from '@goodvibes-jev/engine/platform/platform/automation';
 import { getTestRuntimeServices, resetTestRuntimeServices, disposeTestRuntimeServicesAfterAll } from '../helpers/runtime-services.ts';
 
 // Stop the shared test runtime graph when this file ends. Called here, not

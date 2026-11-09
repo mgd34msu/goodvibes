@@ -1,6 +1,6 @@
 /** Agent command composition over the platform's complete suite updater. */
 import { installedSuiteNeedsRepair, applySuiteUpdate, rollbackSuiteUpdate, captureUpdateFileIo, realUpdateFileIo,
-  type SuiteUpdateResult, type UpdateFileIo } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+  type SuiteUpdateResult, type UpdateFileIo } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { checkReleaseUpdate, prepareReleaseUpdate, requireBinaryUpdateInstall, createSelfUpdateCommand,
   retainSuiteUpdateConfiguration, formatSuiteUpdateReport,
@@ -14,7 +14,7 @@ import { fallbackUpdateCommand, type UpdateFetchLike } from '../../runtime/updat
 
 const REPO_RELEASES_LATEST_URL = 'https://github.com/mgd34msu/goodvibes/releases/latest';
 const releaseDownloadBaseUrl = (tag: string) => `https://github.com/mgd34msu/goodvibes/releases/download/${tag}`;
-export { PREVIOUS_FILE_SUFFIX } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+export { PREVIOUS_FILE_SUFFIX } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 export type CheckForUpdateResult = ReleaseUpdateCheck;
 export async function checkForUpdate(fetchImpl: UpdateFetchLike, currentVersion: string): Promise<CheckForUpdateResult> {
   return checkReleaseUpdate(fetchImpl, currentVersion, REPO_RELEASES_LATEST_URL);

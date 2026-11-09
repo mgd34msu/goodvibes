@@ -3,17 +3,17 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { AgentManager, type AgentRecord } from '../sdk/src/platform/tools/agent/manager.js';
-import { AgentMessageBus } from '../sdk/src/platform/agents/message-bus.js';
-import { runAgentTask, type AgentOrchestratorRunContext } from '../sdk/src/platform/agents/orchestrator-runner.js';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { emitAgentCompleted, emitAgentFailed, emitAgentRunning } from '../sdk/src/platform/runtime/emitters/agents.js';
-import { registerHostRuntimeEvents, runtimeEventKey, runtimeEventOfNotice, type RuntimeEventProvenance } from '../sdk/src/platform/runtime/bootstrap-runtime-events.js';
-import type { AgentEvent } from '../sdk/src/events/agents.js';
-import type { LLMProvider } from '../sdk/src/platform/providers/interface.js';
-import type { ModelDefinition } from '../sdk/src/platform/providers/registry-types.js';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.js';
+import { AgentManager, type AgentRecord } from '../platform/src/platform/tools/agent/manager.js';
+import { AgentMessageBus } from '../platform/src/platform/agents/message-bus.js';
+import { runAgentTask, type AgentOrchestratorRunContext } from '../platform/src/platform/agents/orchestrator-runner.js';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { emitAgentCompleted, emitAgentFailed, emitAgentRunning } from '../platform/src/platform/runtime/emitters/agents.js';
+import { registerHostRuntimeEvents, runtimeEventKey, runtimeEventOfNotice, type RuntimeEventProvenance } from '../platform/src/platform/runtime/bootstrap-runtime-events.js';
+import type { AgentEvent } from '../platform/src/events/agents.js';
+import type { LLMProvider } from '../platform/src/platform/providers/interface.js';
+import type { ModelDefinition } from '../platform/src/platform/providers/registry-types.js';
+import type { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { waitFor } from './_helpers/test-timeout.js';
 
 const MODEL: ModelDefinition = {

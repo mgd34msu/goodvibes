@@ -22,13 +22,13 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { ProviderRegistry } from '../sdk/src/platform/providers/registry.ts';
-import { AgentOrchestrator } from '../sdk/src/platform/agents/orchestrator.ts';
-import { AgentMessageBus } from '../sdk/src/platform/agents/message-bus.ts';
-import type { LLMProvider } from '../sdk/src/platform/providers/interface.ts';
-import type { ModelDefinition } from '../sdk/src/platform/providers/registry-types.ts';
-import type { AgentRecord } from '../sdk/src/platform/tools/agent/manager.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { ProviderRegistry } from '../platform/src/platform/providers/registry.ts';
+import { AgentOrchestrator } from '../platform/src/platform/agents/orchestrator.ts';
+import { AgentMessageBus } from '../platform/src/platform/agents/message-bus.ts';
+import type { LLMProvider } from '../platform/src/platform/providers/interface.ts';
+import type { ModelDefinition } from '../platform/src/platform/providers/registry-types.ts';
+import type { AgentRecord } from '../platform/src/platform/tools/agent/manager.ts';
 
 const OLD_PROVIDER = 'live-config-old';
 const NEW_PROVIDER = 'live-config-new';
@@ -143,7 +143,7 @@ describe('provider.model changes reach the next agent without a restart', () => 
     // Boot state: the registry resolved the configured model at construction.
     expect(registry.getCurrentModel().registryKey).toBe(OLD_KEY);
 
-    // Exactly what daemon-sdk/src/system-routes.ts postConfig does.
+    // Exactly what daemon-api/src/system-routes.ts postConfig does.
     configManager.setDynamic('provider.model', NEW_KEY);
     expect(configManager.get('provider.model')).toBe(NEW_KEY);
 

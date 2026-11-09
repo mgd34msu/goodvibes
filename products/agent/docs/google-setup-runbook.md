@@ -1,6 +1,6 @@
 # Connecting Gmail and Google Calendar
 
-> This file is generated from the SDK's Google setup plan (`packages/sdk/src/platform/google/setup-plan.ts`). Do not edit it by hand. Edit the plan and regenerate, or the test that compares the two will fail. It exists so that when the automation cannot finish a step, there is a written route through the same work that cannot have drifted out of date.
+> This file is generated from the platform's Google setup plan (`packages/engine/platform/src/platform/google/setup-plan.ts`). Do not edit it by hand. Edit the plan and regenerate, or the test that compares the two will fail. It exists so that when the automation cannot finish a step, there is a written route through the same work that cannot have drifted out of date.
 
 ## Just ask
 
@@ -214,8 +214,8 @@ Skipping the publishing-status step means this integration silently stops workin
 2. If it is missing, install it into your home directory without root:
 3.   curl -sSLO https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-linux-x86_64.tar.gz
 4.   tar -xzf google-cloud-cli-linux-x86_64.tar.gz -C "$HOME"
-5.   "$HOME/google-cloud-sdk/install.sh" --quiet
-6.   export PATH="$HOME/google-cloud-sdk/bin:$PATH"
+5.   "$HOME/google-cloud-platform/install.sh" --quiet
+6.   export PATH="$HOME/google-cloud-platform/bin:$PATH"
 
 ### 2. Signing gcloud in to your Google account
 

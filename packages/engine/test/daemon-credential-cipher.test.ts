@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { createAtRestCipher, createDaemonCredentialStore, type DaemonCredentialStore } from '../sdk/src/platform/config/daemon-credential-store.js';
+import { createAtRestCipher, createDaemonCredentialStore, type DaemonCredentialStore } from '../platform/src/platform/config/daemon-credential-store.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SecretsManager } from '../sdk/src/platform/config/secrets.js';
+import { SecretsManager } from '../platform/src/platform/config/secrets.js';
 
 const FIXTURE_KEY = Buffer.alloc(32, 7).toString('base64');
 function store(initial: string | null) {

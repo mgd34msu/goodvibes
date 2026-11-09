@@ -19,7 +19,7 @@
  * split every caller needs and none of them should re-derive.
  */
 
-import { getOperatorContract } from '@goodvibes-jev/engine/sdk/contracts';
+import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
 
 export type JsonRecord = Record<string, unknown>;
 

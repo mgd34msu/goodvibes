@@ -23,7 +23,7 @@ export {
 } from '@goodvibes-jev/engine/terminal-shell/mcp-workspace-model';
 export type McpWorkspaceForm = McpWorkspaceFormBase;
 
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { CommandContext } from './command-registry.ts';
 import { requireMcpApi, requireShellPaths } from './commands/runtime-services.ts';
 
@@ -81,7 +81,7 @@ export class McpWorkspace extends McpWorkspaceState<CommandContext, McpWorkspace
         type: 'action',
         id: 'add',
         label: 'Add server',
-        detail: `Write a server through the SDK config manager. Default scope: ${this.form.scope}.`,
+        detail: `Write a server through the platform config manager. Default scope: ${this.form.scope}.`,
       },
       {
         type: 'action',
@@ -99,7 +99,7 @@ export class McpWorkspace extends McpWorkspaceState<CommandContext, McpWorkspace
         type: 'action',
         id: 'config',
         label: 'Config locations',
-        detail: 'Show SDK-scanned config files and writable project/global paths.',
+        detail: 'Show platform-scanned config files and writable project/global paths.',
       },
     ];
   }

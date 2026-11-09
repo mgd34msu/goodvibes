@@ -19,7 +19,7 @@ import type { ChatViewProps } from './chat/types';
 import { createChatSelectionTracker, type ChatSelectionTracker } from '../lib/chat-selection';
 
 // ---------------------------------------------------------------------------
-// sdk mock: chat.events.stream is controllable per call, so the test can fire a
+// platform mock: chat.events.stream is controllable per call, so the test can fire a
 // live turn.error event for one session, then prove it does not survive a switch
 // to another. Every other route ChatView (or a child it mounts, e.g. the composer's
 // mic/voice controls) touches is stubbed to a benign, immediately-resolved value.
@@ -73,7 +73,7 @@ mock.module('../lib/goodvibes', () => ({
   invokeMethod: () => Promise.resolve({}),
   GOODVIBES_BASE_URL: 'http://daemon.test',
   WEBUI_VERSION: 'test',
-  sdk: {
+  client: {
     chat: {
       turns: { cancel: mock(() => Promise.resolve({})) },
       events: { stream: streamMock },

@@ -1,7 +1,7 @@
 /**
  * input-devices.ts, what microphones this host actually has.
  *
- * The SDK decides what a configured `voice.wake.inputDevice` MEANS, present,
+ * The platform decides what a configured `voice.wake.inputDevice` MEANS, present,
  * absent and falling back, or a machine with no real microphone at all, but it
  * cannot go and look, because the same policy runs in a browser tab. Looking is
  * this surface's job, and it is one command.
@@ -13,7 +13,7 @@
  *
  * DEGRADING IS PART OF THE CONTRACT. A host without `pactl` is not broken and
  * must not lose wake detection over it: this returns an empty answer by
- * THROWING, which the SDK reads as "this host cannot tell" and treats the pin
+ * THROWING, which the platform reads as "this host cannot tell" and treats the pin
  * as unverified, exactly the behaviour every surface had before any of this
  * existed. Returning an empty LIST would be a different and much worse claim:
  * it means "there are no microphones here", which would stop capture on a
@@ -25,7 +25,7 @@ import {
   parsePactlSources,
   type AudioInputDevice,
   type AudioInputDeviceEnumerator,
-} from '@goodvibes-jev/engine/sdk/platform/voice/capture';
+} from '@goodvibes-jev/engine/platform/platform/voice/capture';
 import { findExecutable } from './player.ts';
 
 /** How long the listing may take before it is abandoned. */

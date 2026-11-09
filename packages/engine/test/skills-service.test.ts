@@ -1,7 +1,7 @@
 /**
  * skills-service.test.ts
  *
- * The canonical skill model + service hoisted into the SDK: frontmatter
+ * The canonical skill model + service hoisted into the platform: frontmatter
  * parse/serialize, progressive disclosure (cheap index line vs full body), and
  * CRUD with honest absence, proven over both the in-memory and filesystem
  * stores.
@@ -19,7 +19,7 @@ import {
   parseSkillIndex,
   serializeSkill,
   isValidSkillName,
-} from '../sdk/src/platform/skills/index.ts';
+} from '../platform/src/platform/skills/index.ts';
 
 describe('skill model', () => {
   const doc = [

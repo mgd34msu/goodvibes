@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { types as nodeTypes } from 'node:util';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { writeStoreJson } from '@/utils/store-file.ts';
 import { captureCatalogMethods, type CatalogRankingOptions } from '../tools/agent-harness-catalog-ranking.ts';
 import { captureModelReadingSnapshotGuard, modelReadingServicePath } from '../tools/agent-harness-model-reading-source.ts';

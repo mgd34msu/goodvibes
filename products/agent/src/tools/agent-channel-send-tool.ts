@@ -1,9 +1,9 @@
-import type { ChannelDeliveryRouter } from '@goodvibes-jev/engine/sdk/platform/channels';
+import type { ChannelDeliveryRouter } from '@goodvibes-jev/engine/platform/platform/channels';
 import { lstatSync, realpathSync } from 'node:fs';
-import { resolveAndValidatePath } from '@goodvibes-jev/engine/sdk/platform/utils';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import { ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { resolveAndValidatePath } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import { harnessCatalogInvocationAuthority } from './agent-harness-catalog-ingress.ts';
 import type { ShellPathService } from '@/runtime/index.ts';
 import {

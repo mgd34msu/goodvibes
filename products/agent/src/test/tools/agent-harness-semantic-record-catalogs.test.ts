@@ -1,12 +1,12 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { types as nodeTypes } from 'node:util';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { ProcessManager, ToolRegistry, ToolInputProjectionError, assertCurrentToolInvocation, type BackgroundProcess } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { getOperatorContract } from '@goodvibes-jev/engine/sdk/contracts';
-import { DEFAULT_CONFIG, type PermissionMode } from '@goodvibes-jev/engine/sdk/platform/config';
-import { PermissionManager, type PermissionConfigReader } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import { PolicyRuntimeState } from '@goodvibes-jev/engine/sdk/platform/runtime/security';
-import type { MemoryRecord } from '@goodvibes-jev/engine/sdk/platform/state';
+import { ProcessManager, ToolRegistry, ToolInputProjectionError, assertCurrentToolInvocation, type BackgroundProcess } from '@goodvibes-jev/engine/platform/platform/tools';
+import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
+import { DEFAULT_CONFIG, type PermissionMode } from '@goodvibes-jev/engine/platform/platform/config';
+import { PermissionManager, type PermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { PolicyRuntimeState } from '@goodvibes-jev/engine/platform/platform/runtime/security';
+import type { MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer, scoreAnswer } from '@goodvibes-jev/judgment/testing';
 import { bindAgentResearchSourceOwner } from '../../agent/protected-research-report.ts';

@@ -2,9 +2,9 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { FakeClusterClock, MemoryClusterBus, replicatedSecretKeyFor, type ClusterTransport } from '@goodvibes-jev/engine/sdk/platform/cluster';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { FakeClusterClock, MemoryClusterBus, replicatedSecretKeyFor, type ClusterTransport } from '@goodvibes-jev/engine/platform/platform/cluster';
 import { SecretsManager } from '../../config/secrets.js';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../../config/surface.js';
 import { createClusterGroupComposition, type ClusterGroupComposition } from '../../runtime/cluster-group-composition.js';

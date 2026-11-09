@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { handleBlockSave } from '../../input/handler-content-actions.ts';
 import type { ConversationManager } from '../../core/conversation.ts';
-import type { BookmarkManager } from '@goodvibes-jev/engine/sdk/platform/bookmarks';
+import type { BookmarkManager } from '@goodvibes-jev/engine/platform/platform/bookmarks';
 
 describe('block save Agent policy', () => {
   test('blocks implicit Ctrl-S file writes and does not call saveToFile', () => {

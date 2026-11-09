@@ -5,7 +5,7 @@
  * only the domain under test without reading one giant default object.
  */
 
-import type { DaemonApiRouteHandlers } from '../../daemon-sdk/src/context.js';
+import type { DaemonApiRouteHandlers } from '../../daemon-api/src/context.js';
 
 type HandlerStubs = Partial<DaemonApiRouteHandlers>;
 

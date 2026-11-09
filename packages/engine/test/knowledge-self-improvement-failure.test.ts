@@ -1,17 +1,17 @@
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.ts';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { selfImprovementFixtureReading, gapAssessmentFixture } from './_helpers/knowledge-self-improvement-readings.js';
 import { afterEach, describe, expect, test } from 'bun:test';
-import { GoodVibesSdkError, installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError, installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { AppError } from '../sdk/src/platform/types/errors.js';
-import { KnowledgeRepairProfileHeldError } from '../sdk/src/platform/knowledge/semantic/repair-profile/types.js';
-import { captureRepairFailureReader } from '../sdk/src/platform/knowledge/semantic/self-improvement-failure.js';
-import { KnowledgeRepairBudgetError, runWithRepairBudget } from '../sdk/src/platform/knowledge/semantic/self-improvement-budget.js';
-import { withSupportBudget } from '../sdk/src/platform/knowledge/semantic/support-budget.js';
-import { KnowledgeGeneratedFactSupportHeldError } from '../sdk/src/platform/knowledge/semantic/verification/types.js';
-import { KnowledgeSemanticService } from '../sdk/src/platform/knowledge/semantic/service.js';
+import { AppError } from '../platform/src/platform/types/errors.js';
+import { KnowledgeRepairProfileHeldError } from '../platform/src/platform/knowledge/semantic/repair-profile/types.js';
+import { captureRepairFailureReader } from '../platform/src/platform/knowledge/semantic/self-improvement-failure.js';
+import { KnowledgeRepairBudgetError, runWithRepairBudget } from '../platform/src/platform/knowledge/semantic/self-improvement-budget.js';
+import { withSupportBudget } from '../platform/src/platform/knowledge/semantic/support-budget.js';
+import { KnowledgeGeneratedFactSupportHeldError } from '../platform/src/platform/knowledge/semantic/verification/types.js';
+import { KnowledgeSemanticService } from '../platform/src/platform/knowledge/semantic/service.js';
 import { createStores } from './_helpers/knowledge-semantic-fixtures.js';
 import { seedKnowledgeResearchTask } from './_helpers/knowledge-semantic-activation-fixtures.js';
 
@@ -41,8 +41,8 @@ describe('knowledge repair failure cause', () => {
     [Object.assign(new Error('budget exceeded'), { code: 'ECONNREFUSED' }), 'other', 'error-code'],
     [new KnowledgeRepairProfileHeldError('budget'), 'other', 'typed-judgment-hold'],
     [new JudgmentError('unavailable', 'budget exhausted', { status: 504 }), 'other', 'typed-judgment-hold'],
-    [Object.assign(new Error('no time words'), { code: 'TIMEOUT' }), 'request_timeout', 'sdk-timeout-code'],
-    [Object.assign(new Error('no time words'), { code: 'AGENT_TIMEOUT' }), 'request_timeout', 'sdk-timeout-code'],
+    [Object.assign(new Error('no time words'), { code: 'TIMEOUT' }), 'request_timeout', 'platform-timeout-code'],
+    [Object.assign(new Error('no time words'), { code: 'AGENT_TIMEOUT' }), 'request_timeout', 'platform-timeout-code'],
     [new DOMException('budget exceeded', 'AbortError'), 'other', 'dom-exception'],
   ] as const)('structure defeats contrary wording %#', async (error, cause, basis) => {
     const fake = fixture('run_budget');
@@ -68,7 +68,7 @@ describe('knowledge repair failure cause', () => {
   });
   test('the canonical UNKNOWN code does not hide free-text evidence', async () => {
     const fake = fixture('request_timeout');
-    expect((await reader()(new GoodVibesSdkError('Remote operation ran out of time'))).cause).toBe('request_timeout');
+    expect((await reader()(new GoodVibesError('Remote operation ran out of time'))).cause).toBe('request_timeout');
     expect(fake.requests).toHaveLength(1);
   });
   test('structural and unconfigured results retain composition ownership without needing a reading', async () => {

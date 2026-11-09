@@ -1,15 +1,15 @@
 import * as fs from 'node:fs';
-import { WorkspaceCheckpointManager } from '../sdk/src/platform/workspace/checkpoint/manager.ts';
-import { realLifecycleMarkerIo, recordDaemonStartAttempt } from '../sdk/src/platform/daemon/lifecycle-marker.ts';
-import { WorkPlanStore } from '../sdk/src/platform/workflow/work-plan-store.ts';
+import { WorkspaceCheckpointManager } from '../platform/src/platform/workspace/checkpoint/manager.ts';
+import { realLifecycleMarkerIo, recordDaemonStartAttempt } from '../platform/src/platform/daemon/lifecycle-marker.ts';
+import { WorkPlanStore } from '../platform/src/platform/workflow/work-plan-store.ts';
 /** UNRUN: original filesystem readers, exclusive recovery and persisted bounds. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { captureQuarantineSource, readCapturedQuarantineSourceAsync, quarantineCorruptFile, readJsonFileOrQuarantine, reapOwnedQuarantines, reapOwnedQuarantineDirectories } from '../sdk/src/platform/utils/atomic-json-store.ts';
-import { JsonFileStore } from '../sdk/src/platform/state/json-file-store.ts';
-import { logger } from '../sdk/src/platform/utils/logger.ts';
+import { captureQuarantineSource, readCapturedQuarantineSourceAsync, quarantineCorruptFile, readJsonFileOrQuarantine, reapOwnedQuarantines, reapOwnedQuarantineDirectories } from '../platform/src/platform/utils/atomic-json-store.ts';
+import { JsonFileStore } from '../platform/src/platform/state/json-file-store.ts';
+import { logger } from '../platform/src/platform/utils/logger.ts';
 const roots: string[] = [];
 afterEach(() => { for (const path of roots.splice(0)) rmSync(path, { recursive: true, force: true }); });
 function fixture() { const root = mkdtempSync(join(tmpdir(), 'owned-quarantine-')); roots.push(root); return { root, path: join(root, 'store.json') }; }
@@ -56,7 +56,7 @@ test('the original source is retained across the actual asynchronous JsonFileSto
 test('native ownership records bound repeated corruption in a separate restarted reader process', async () => {
   const f = fixture();
   for (let index = 0; index < 8; index++) { writeFileSync(f.path, `corrupt source ${index}`); quarantineCorruptFile(f.path, { ...options, maxFiles: 100 }); }
-  const modulePath = new URL('../sdk/src/platform/utils/atomic-json-store.ts', import.meta.url).href;
+  const modulePath = new URL('../platform/src/platform/utils/atomic-json-store.ts', import.meta.url).href;
   const code = `import { reapOwnedQuarantines } from ${JSON.stringify(modulePath)}; console.log(JSON.stringify(reapOwnedQuarantines(process.argv[1], { maxFiles: 3 })));`;
   const child = Bun.spawn([process.execPath, '--eval', code, f.path], { stdout: 'pipe', stderr: 'pipe' });
   const [exit, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);

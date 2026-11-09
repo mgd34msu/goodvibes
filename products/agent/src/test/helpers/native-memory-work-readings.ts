@@ -1,8 +1,8 @@
 import { expect } from 'bun:test';
-import { DEFAULT_CONFIG } from '@goodvibes-jev/engine/sdk/platform/config';
-import { PermissionManager, type PermissionConfigReader } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import { PolicyRuntimeState } from '@goodvibes-jev/engine/sdk/platform/runtime/security';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { DEFAULT_CONFIG } from '@goodvibes-jev/engine/platform/platform/config';
+import { PermissionManager, type PermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { PolicyRuntimeState } from '@goodvibes-jev/engine/platform/platform/runtime/security';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 

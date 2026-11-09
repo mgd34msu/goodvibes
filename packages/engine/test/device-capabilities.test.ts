@@ -11,28 +11,28 @@ import { describe, expect, test, beforeEach, afterEach, setSystemTime } from 'bu
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { deviceConfigSettings } from '../sdk/src/platform/config/schema-domain-device.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { deviceConfigSettings } from '../platform/src/platform/config/schema-domain-device.ts';
 import {
   DEVICE_POSTURE_CONFIG_KEYS,
   readDeviceArtifactPolicy,
   readDeviceCapabilityPolicy,
   readDeviceGrantPolicy,
   readDeviceSweepIntervalMs,
-} from '../sdk/src/platform/devices/device-posture-config.ts';
+} from '../platform/src/platform/devices/device-posture-config.ts';
 import type {
   DevicePostureConfigKey,
   DevicePostureConfigReader,
-} from '../sdk/src/platform/devices/device-posture-config.ts';
+} from '../platform/src/platform/devices/device-posture-config.ts';
 import {
   DEVICE_NODE_ANNOUNCEMENT_KEY,
   createDevicePostureRuntime,
-} from '../sdk/src/platform/devices/device-posture-runtime.ts';
+} from '../platform/src/platform/devices/device-posture-runtime.ts';
 import type {
   DevicePeerView,
   DevicePostureRuntime,
   DeviceWorkView,
-} from '../sdk/src/platform/devices/device-posture-runtime.ts';
+} from '../platform/src/platform/devices/device-posture-runtime.ts';
 import {
   DEVICE_CAPABILITY_CATALOG,
   DEVICE_CAPABILITY_CONTRACT_VERSION,
@@ -40,35 +40,35 @@ import {
   getDeviceCapability,
   isDeviceNodeKind,
   resolveDeviceNodeProfile,
-} from '../sdk/src/platform/devices/device-capability-contract.ts';
-import type { DeviceNodeProfile } from '../sdk/src/platform/devices/device-capability-contract.ts';
-import { DeviceGrantStore } from '../sdk/src/platform/devices/device-grants.ts';
-import { DeviceCaptureArtifactStore } from '../sdk/src/platform/devices/device-capture-artifacts.ts';
-import { DeviceHousekeeper } from '../sdk/src/platform/devices/device-housekeeping.ts';
+} from '../platform/src/platform/devices/device-capability-contract.ts';
+import type { DeviceNodeProfile } from '../platform/src/platform/devices/device-capability-contract.ts';
+import { DeviceGrantStore } from '../platform/src/platform/devices/device-grants.ts';
+import { DeviceCaptureArtifactStore } from '../platform/src/platform/devices/device-capture-artifacts.ts';
+import { DeviceHousekeeper } from '../platform/src/platform/devices/device-housekeeping.ts';
 import {
   DeviceCapabilityService,
   isAllowAlwaysOffered,
   resolveDeviceRequestTimeoutMs,
   DEFAULT_DEVICE_CAPABILITY_POLICY,
-} from '../sdk/src/platform/devices/device-capability-service.ts';
+} from '../platform/src/platform/devices/device-capability-service.ts';
 import type {
   DeviceCapabilityDispatcher,
   DeviceCapabilityOutcome,
   DeviceConfirmationRequest,
   DeviceConfirmationDecision,
-} from '../sdk/src/platform/devices/device-capability-service.ts';
+} from '../platform/src/platform/devices/device-capability-service.ts';
 import {
   validateDeviceCapabilityInput,
   parseDeviceCapabilityWorkRequest,
   parseDeviceCapabilityWorkResult,
   decodeDeviceCapabilityMedia,
-} from '../sdk/src/platform/devices/device-peer-work.ts';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { registerDevicesGatewayMethods } from '../sdk/src/platform/control-plane/routes/devices.ts';
+} from '../platform/src/platform/devices/device-peer-work.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { registerDevicesGatewayMethods } from '../platform/src/platform/control-plane/routes/devices.ts';
 import {
   GatewayVerbError,
   isGatewayVerbError,
-} from '../sdk/src/platform/control-plane/routes/gateway-verb-error.ts';
+} from '../platform/src/platform/control-plane/routes/gateway-verb-error.ts';
 
 let root = '';
 

@@ -1,5 +1,5 @@
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
 import { isDeepStrictEqual } from 'node:util';
 
 const nativeGetRaw = ConfigManager.prototype.getRaw;

@@ -11,9 +11,9 @@
  * This is the source: the instruction is not issued in the first place.
  */
 import { describe, expect, test } from 'bun:test';
-import { buildOrchestratorSystemPrompt } from '../sdk/src/platform/agents/orchestrator-prompts.js';
-import { continuationContractOptions } from '../sdk/src/platform/agents/conversation-continuation.js';
-import type { AgentRecord } from '../sdk/src/platform/tools/agent/manager.js';
+import { buildOrchestratorSystemPrompt } from '../platform/src/platform/agents/orchestrator-prompts.js';
+import { continuationContractOptions } from '../platform/src/platform/agents/conversation-continuation.js';
+import type { AgentRecord } from '../platform/src/platform/tools/agent/manager.js';
 
 function record(overrides: Partial<AgentRecord> = {}): AgentRecord {
   return {

@@ -42,8 +42,8 @@
  * (reserveRight), giving way in the same order, and it is truncated into
  * what remains. It never pushes the bar off the row.
  */
-import { type Line, createEmptyLine } from '@goodvibes-jev/engine/sdk/platform/types';
-import { getDisplayWidth, interpolateColor, truncateDisplay } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { type Line, createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types';
+import { getDisplayWidth, interpolateColor, truncateDisplay } from '@goodvibes-jev/engine/platform/platform/utils';
 import { abbreviateCount } from '../format.js';
 import { activeTokens } from './theme.js';
 import { keycapHintsWidth, paintKeycapHints } from './surface-kit-parts.js';

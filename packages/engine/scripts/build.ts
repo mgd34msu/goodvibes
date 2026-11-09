@@ -6,7 +6,7 @@
  * This used to `rm -rf` every `packages/*` dist directory before running tsc.
  * The intent was only to drop ORPHANS, outputs left behind by a source file
  * that has since been renamed or deleted, but the cost was a window, minutes
- * long on a cold build, in which the SDK's compiled output did not exist.
+ * long on a cold build, in which the engine's compiled output did not exist.
  *
  * That window is not private to this repository. A consumer checkout dev-linked
  * to this one (goodvibes-tui does exactly that) resolves every
@@ -14,7 +14,7 @@
  * rebuild it could resolve NONE of them. Whole test files died at import with
  * "Cannot find module", and typechecks failed on imports that were perfectly
  * correct, always transiently, always passing on a lone re-run, which is the
- * hardest possible failure to attribute. It was seen live: an SDK build running
+ * hardest possible failure to attribute. It was seen live: an engine build running
  * in one terminal turned a consumer's typecheck red in another.
  *
  * So the tree stays in place. `tsc -b --force` rewrites every output it owns,
@@ -30,10 +30,10 @@ import { fileURLToPath } from 'node:url';
 import { withWorkspaceLock } from './workspace-lock.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SDK_ROOT = resolve(__dirname, '..');
+const ENGINE_ROOT = resolve(__dirname, '..');
 // The old packages are the engine's top-level directories.
-const PACKAGES_ROOT = SDK_ROOT;
-const REPO_ROOT = resolve(SDK_ROOT, '../..');
+const PACKAGES_ROOT = ENGINE_ROOT;
+const REPO_ROOT = resolve(ENGINE_ROOT, '../..');
 
 function run(command: string, args: readonly string[]): void {
   execFileSync(command, args, {
@@ -56,7 +56,7 @@ function buildAndListEmitted(): Set<string> {
   // and whose diagnostics belong to `bun run typecheck`. A red test tree must
   // not stop the packages building.
   const stdout = execFileSync('bunx', ['tsc', '-b', '--force', 'tsconfig.json', '--listEmittedFiles'], {
-    cwd: SDK_ROOT,
+    cwd: ENGINE_ROOT,
     encoding: 'utf8',
     // Errors still go straight to the terminal; only stdout is captured.
     stdio: ['inherit', 'pipe', 'inherit'],
@@ -66,7 +66,7 @@ function buildAndListEmitted(): Set<string> {
   for (const line of stdout.split('\n')) {
     const trimmed = line.trim();
     if (trimmed.startsWith('TSFILE:')) {
-      emitted.add(resolve(SDK_ROOT, trimmed.slice('TSFILE:'.length).trim()));
+      emitted.add(resolve(ENGINE_ROOT, trimmed.slice('TSFILE:'.length).trim()));
       continue;
     }
     if (trimmed.length > 0) console.log(trimmed);
@@ -116,14 +116,14 @@ function pruneOrphanedDistFiles(emitted: ReadonlySet<string>): void {
   for (const file of distFiles()) {
     if (emitted.has(file)) continue;
     // Only files tsc itself produces are orphan candidates. Everything else in
-    // dist belongs to a later step, prepare:sdk writes the contract artifacts
+    // dist belongs to a later step, prepare:engine writes the contract artifacts
     // there, and deleting those just to have them rewritten seconds later
     // reintroduces, in miniature, the very gap this rewrite removed.
     if (!TSC_OUTPUT_SUFFIXES.some((suffix) => file.endsWith(suffix))) continue;
-    // Ambient declarations are hand-written .d.ts inputs that prepare:sdk copies
+    // Ambient declarations are hand-written .d.ts inputs that prepare:engine copies
     // into dist so consumers can reference them. They carry a tsc output suffix
     // without being tsc output, so they need naming rather than filtering.
-    if (PREPARED_DECLARATION_PATHS.has(relative(SDK_ROOT, file))) continue;
+    if (PREPARED_DECLARATION_PATHS.has(relative(ENGINE_ROOT, file))) continue;
     // Nor anything written since this build started, for the same reason.
     try {
       if (statSync(file).mtimeMs > buildStartedAt) continue;
@@ -132,7 +132,7 @@ function pruneOrphanedDistFiles(emitted: ReadonlySet<string>): void {
     }
     rmSync(file, { force: true });
     removed += 1;
-    console.log(`build: pruned orphaned output ${relative(SDK_ROOT, file)}`);
+    console.log(`build: pruned orphaned output ${relative(ENGINE_ROOT, file)}`);
   }
   if (removed === 0) console.log('build: no orphaned outputs to prune');
 }
@@ -141,11 +141,11 @@ function pruneOrphanedDistFiles(emitted: ReadonlySet<string>): void {
 const TSC_OUTPUT_SUFFIXES = ['.js', '.mjs', '.cjs', '.d.ts', '.d.mts', '.d.cts', '.js.map', '.d.ts.map'];
 
 /**
- * Hand-written declarations `prepare:sdk` places in dist. Kept in step with
- * AMBIENT_DECLARATIONS in scripts/prepare-sdk-package.ts.
+ * Hand-written declarations `prepare:engine` places in dist. Kept in step with
+ * AMBIENT_DECLARATIONS in scripts/prepare-engine-package.ts.
  */
 const PREPARED_DECLARATION_PATHS = new Set<string>([
-  'sdk/dist/platform/types/sql-js.d.ts',
+  'platform/dist/platform/types/sql-js.d.ts',
 ]);
 
 let buildStartedAt = 0;
@@ -155,5 +155,5 @@ await withWorkspaceLock('build', () => {
   buildStartedAt = Date.now();
   const emitted = buildAndListEmitted();
   pruneOrphanedDistFiles(emitted);
-  run('bun', ['run', 'prepare:sdk']);
+  run('bun', ['run', 'prepare:engine']);
 });

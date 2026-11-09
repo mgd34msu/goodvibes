@@ -4,7 +4,7 @@
  * `channels.inbox.list` is served by the host that holds the provider
  * credentials: it attaches a handler over
  * the catalog descriptor and answers from its synced provider mirror. So what
- * this file pins is the SEAM, at the level the SDK owns it:
+ * this file pins is the SEAM, at the level the platform owns it:
  *
  *   1. The descriptor no longer claims to be uncallable, and its advertised
  *      path is in the gateway REST table.
@@ -16,26 +16,26 @@
  *      idea. The fixture stands in for the daemon's real Slack/Discord/IMAP
  *      mirror, which is not reachable from this package.
  *   3. The declared `read:channels` scope is enforced on that path.
- *   4. A build that attaches NO handler, every SDK-only process, which has no
+ *   4. A build that attaches NO handler, every platform-only process, which has no
  *      mailbox, answers 501 NOT_INVOKABLE naming the missing composition step,
  *      not the bare 404 a caller used to get. That is the honest answer, and it
  *      is why removing `invokable: false` did not just move the lie.
  */
 import { describe, expect, test } from 'bun:test';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
 import {
   DaemonControlPlaneHelper,
   type DaemonControlPlaneContext,
-} from '../sdk/src/platform/daemon/control-plane.ts';
+} from '../platform/src/platform/daemon/control-plane.ts';
 import {
   GATEWAY_REST_ROUTES,
   dispatchDaemonApiRoutes,
-} from '../daemon-sdk/src/index.ts';
+} from '../daemon-api/src/index.ts';
 import type {
   DaemonApiRouteHandlers,
   GatewayRestVerbInvocation,
-} from '../daemon-sdk/src/context.ts';
-import type { GatewayMethodInvocation } from '../sdk/src/platform/control-plane/method-catalog-shared.ts';
+} from '../daemon-api/src/context.ts';
+import type { GatewayMethodInvocation } from '../platform/src/platform/control-plane/method-catalog-shared.ts';
 
 const METHOD_ID = 'channels.inbox.list';
 
@@ -85,7 +85,7 @@ function readString(invocation: GatewayMethodInvocation, field: string): string 
 }
 
 /**
- * Attach a fixture inbox handler the way a host does: look the SDK's descriptor
+ * Attach a fixture inbox handler the way a host does: look the platform's descriptor
  * up and re-register it WITH a handler. No descriptor or schema is authored
  * here, that is the whole point of the seam.
  */
@@ -279,7 +279,7 @@ describe('read:channels is enforced on the way in', () => {
 
 // ── a build with no mailbox says so ─────────────────────────────────────────
 
-describe('an SDK-only build, with no inbox composition', () => {
+describe('an platform-only build, with no inbox composition', () => {
   test('answers 501 naming the missing composition step rather than a bare 404', async () => {
     const catalog = new GatewayMethodCatalog();
     expect(catalog.hasHandler(METHOD_ID)).toBe(false);

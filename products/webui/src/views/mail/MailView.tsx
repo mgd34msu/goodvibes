@@ -6,11 +6,11 @@
  *
  * WHY THIS EXISTS: `email.inbox.list`, `email.inbox.read`, `email.draft.create`
  * and `email.send` have been in the operator contract and in the generated
- * WEBUI_METHOD_ROUTES table since before the SDK pin this repo was stuck on, the
+ * WEBUI_METHOD_ROUTES table since before the platform pin this repo was stuck on, the
  * routing was always there and no surface ever rendered it. This view is wiring
  * over capability the daemon already publishes, not an integration: there is no
  * IMAP client, no SMTP client, no OAuth flow and no credential handling anywhere
- * in this file or anything it imports. Every call is `sdk.operator.email.*`. The
+ * in this file or anything it imports. Every call is `platform.operator.email.*`. The
  * browser never holds a mail credential because it never has one to hold.
  *
  * HONESTY CONTRACT (mail-refusal.ts owns the classification; three shapes, each
@@ -31,7 +31,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { AlertCircle, AlertTriangle, Inbox, Mail, Pencil, RefreshCw, Reply } from 'lucide-react';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import type { EmailDraftCreateInput, EmailSendInput, EmailUnreadableMessage } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { formatError } from '../../lib/errors';
@@ -157,7 +157,7 @@ export function MailView({ tabs }: MailViewProps = {}) {
   const inbox = useQuery({
     queryKey: queryKeys.emailInbox(Number(limit), unreadOnly, since),
     queryFn: () =>
-      sdk.operator.email.inbox.list({
+      platformClient.operator.email.inbox.list({
         limit: Number(limit),
         ...(unreadOnly ? { unreadOnly: true } : {}),
         ...(since ? { since: new Date(`${since}T00:00:00.000Z`).toISOString() } : {}),
@@ -213,12 +213,12 @@ export function MailView({ tabs }: MailViewProps = {}) {
         subject: snapshot.subject,
         body: snapshot.body,
         // Literal true, and only reached after the confirmation sheet resolved, the
-        // SDK marks this verb dangerous and irreversible, so the flag is set because
+        // platform marks this verb dangerous and irreversible, so the flag is set because
         // the operator saw the recipients and agreed, never on their behalf.
         confirm: true,
         ...(snapshot.inReplyTo ? { inReplyTo: snapshot.inReplyTo } : {}),
       };
-      return sdk.operator.email.send(input);
+      return platformClient.operator.email.send(input);
     },
     onSuccess: (result, snapshot) => {
       if (composerCurrent(snapshot)) clearComposer();
@@ -239,7 +239,7 @@ export function MailView({ tabs }: MailViewProps = {}) {
         body: snapshot.body,
         ...(snapshot.inReplyTo ? { inReplyTo: snapshot.inReplyTo, references: snapshot.inReplyTo } : {}),
       };
-      return sdk.operator.email.draft.create(input);
+      return platformClient.operator.email.draft.create(input);
     },
     onSuccess: (result, snapshot) => {
       if (composerCurrent(snapshot)) clearComposer();

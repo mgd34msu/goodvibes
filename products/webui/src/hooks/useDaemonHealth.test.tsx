@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useDaemonHealth } from './useDaemonHealth';
-import { sdk } from '../lib/goodvibes';
+import { client as platformClient } from '../lib/goodvibes';
 import { invalidateClientLifetime, RELAY_PAIRING_STORAGE_KEY } from '../lib/client-lifetime';
 import { closeRelayClient, setActiveRoute } from '../lib/relay-connection';
 import { activityPhrase } from '../components/shell/AccountMenu';
@@ -37,7 +37,7 @@ interface Arrival {
   source: ReadableStreamDefaultController<Uint8Array> | null;
 }
 
-// This is an owned HTTP source for the actual shipped SDK, not a fake event bus.
+// This is an owned HTTP source for the actual shipped platform, not a fake event bus.
 // It emits comments only. A successful socket or reconnect cannot make health active.
 function sourceEndpoint() {
   const arrivals: Arrival[] = [];
@@ -142,37 +142,37 @@ beforeEach(() => {
     AbortSignal: nativeRequestPrimitives.AbortSignal,
   });
   window.localStorage.removeItem(RELAY_PAIRING_STORAGE_KEY);
-  closeRelayClient(); setActiveRoute('direct'); sdk.auth.clearToken();
+  closeRelayClient(); setActiveRoute('direct'); platformClient.auth.clearToken();
 });
 afterEach(async () => {
   try {
     for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
   } finally {
-    closeRelayClient(); setActiveRoute('direct'); sdk.auth.clearToken();
+    closeRelayClient(); setActiveRoute('direct'); platformClient.auth.clearToken();
     Object.assign(globalThis, domRequestPrimitives);
   }
 });
 
-describe('health consumes the actual SDK source error and owner lifetime', () => {
-  test('an asynchronously closed native source pauses health and the real SDK reconnects without inventing active events', async () => {
+describe('health consumes the actual platform source error and owner lifetime', () => {
+  test('an asynchronously closed native source pauses health and the real platform reconnects without inventing active events', async () => {
     const endpoint = sourceEndpoint(); const health = renderHealth();
     await until(() => endpoint.arrivals.length === 1, 'Initial native SSE request did not arrive');
     endpoint.open(0); expect(health.state()).toBe('connecting');
     endpoint.end(0);
     await until(() => health.state() === 'error', 'Asynchronous native source failure did not pause health');
     expect(health.text()).toContain('live updates paused');
-    await until(() => endpoint.arrivals.length === 2, 'The SDK did not perform its original reconnect');
+    await until(() => endpoint.arrivals.length === 2, 'The platform did not perform its original reconnect');
     endpoint.open(1); expect(health.state()).toBe('error');
     expect(health.text()).not.toContain('live updates on');
   }, 10_000);
 
   test('a same-route native client retirement ignores the old transport error before adopting current source errors', async () => {
     const endpoint = sourceEndpoint(); const retiredErrors: unknown[] = []; const currentErrors: unknown[] = [];
-    const retired = sdk.realtime.viaSse({ onError: error => retiredErrors.push(error) });
+    const retired = platformClient.realtime.viaSse({ onError: error => retiredErrors.push(error) });
     cleanups.push(retired.turn.onEnvelope('TURN_STARTED', () => {}));
     await until(() => endpoint.arrivals.length === 1, 'Retired native source was not acquired');
     closeRelayClient(); // The actual pool retires its client/lifetime even when route stays direct.
-    const current = sdk.realtime.viaSse({ onError: error => currentErrors.push(error) });
+    const current = platformClient.realtime.viaSse({ onError: error => currentErrors.push(error) });
     cleanups.push(current.turn.onEnvelope('TURN_STARTED', () => {}));
     await until(() => endpoint.arrivals.length === 2, 'Replacement native source was not acquired');
     endpoint.get(0).reply(new nativeResponse('Retired source unavailable', { status: 503 }));
@@ -187,7 +187,7 @@ describe('health consumes the actual SDK source error and owner lifetime', () =>
     const endpoint = sourceEndpoint(); const original = new AbortController(); const other = new AbortController();
     const originalErrors: unknown[] = []; const replacedErrors: unknown[] = [];
     const options = { signal: original.signal, onError: (error: unknown) => originalErrors.push(error) };
-    const events = sdk.realtime.viaSse(options);
+    const events = platformClient.realtime.viaSse(options);
     cleanups.push(events.turn.onEnvelope('TURN_STARTED', () => {}));
     await until(() => endpoint.arrivals.length === 1, 'Original facade native source did not arrive');
     options.signal = other.signal;
@@ -238,7 +238,7 @@ describe('health consumes the actual SDK source error and owner lifetime', () =>
 
   test('an actual current response-body AbortError pauses health when its caller has not cancelled', async () => {
     // HTTP cannot preserve a peer's local error class. This native Response body
-    // supplies the exact reader failure through the real SDK FetchLike seam.
+    // supplies the exact reader failure through the real platform FetchLike seam.
     const originalFetch = globalThis.fetch;
     const sources: { controller: ReadableStreamDefaultController<Uint8Array>; failed: boolean }[] = [];
     const requestSignals: (AbortSignal | null | undefined)[] = [];
@@ -259,7 +259,7 @@ describe('health consumes the actual SDK source error and owner lifetime', () =>
       }
     });
     const health = renderHealth();
-    await until(() => sources.length === 1, 'The real SDK did not acquire its authored native body');
+    await until(() => sources.length === 1, 'The real platform did not acquire its authored native body');
     await new Promise<void>(resolve => setImmediate(resolve));
     const source = sources[0];
     if (!source) throw new Error('Native body source missing');

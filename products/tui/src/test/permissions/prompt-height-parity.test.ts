@@ -13,7 +13,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { PermissionPromptUI, type PermissionPromptRequest } from '../../permissions/prompt.ts';
-import { analyzePermissionRequest } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import { analyzePermissionRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
 import type { HunkSelectionState } from '../../permissions/hunk-selection.ts';
 import { promptCardLines, promptCardText } from '../helpers/permission-card.ts';
 
@@ -141,7 +141,7 @@ describe('PermissionPromptUI: attribution + remember-scope preview (Item 3 b/c)'
     return { callId: 'c', tool, args, category, analysis: analyzePermissionRequest(tool, args, category), resolve: () => {} };
   }
 
-  test('rememberScopeKey mirrors the SDK getApprovalKey: path, then command, then tool-only', () => {
+  test('rememberScopeKey mirrors the platform getApprovalKey: path, then command, then tool-only', () => {
     expect(PermissionPromptUI.rememberScopeKey(req('edit', { path: 'src/a.ts' }, 'write'))).toBe('edit:src/a.ts');
     expect(PermissionPromptUI.rememberScopeKey(req('bash', { command: 'npm test' }, 'execute'))).toBe('bash:npm test');
     expect(PermissionPromptUI.rememberScopeKey(req('list', {}, 'read'))).toBe('list');

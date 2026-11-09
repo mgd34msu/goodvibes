@@ -1,14 +1,14 @@
 #!/usr/bin/env bun
 import { execSync } from 'node:child_process';
 import { isForbiddenPackageTarballPath, requiredTarballPaths, verifyReleaseMetadata } from '../src/cli/package-verification.ts';
-import { sdkReleaseGateIssues } from './sdk-release-gates.ts';
+import { engineReleaseGateIssues } from './engine-release-gates.ts';
 
 const root = process.cwd();
 
-// SDK release gates: overlay-marker hard-fail, exact-pin, pin/lock/installed
-// agreement, and npm-only import sweep. Keeps scripts/sdk-dev.ts's local-SDK
+// engine release gates: overlay-marker hard-fail, exact-pin, pin/lock/installed
+// agreement, and npm-only import sweep. Keeps scripts/engine-dev.ts's local-engine
 // overlay from ever leaking into a published @goodvibes-jev/agent.
-for (const issue of sdkReleaseGateIssues(root)) {
+for (const issue of engineReleaseGateIssues(root)) {
   throw new Error(issue);
 }
 

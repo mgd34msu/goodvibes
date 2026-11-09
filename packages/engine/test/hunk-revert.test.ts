@@ -16,17 +16,17 @@ import {
   previewHunkRevert,
   reverseApplyHunk,
   type HunkRevertWorkspace,
-} from '../sdk/src/platform/workspace/hunk-revert.js';
-import type { WorkspaceCheckpoint } from '../sdk/src/platform/workspace/checkpoint/types.js';
+} from '../platform/src/platform/workspace/hunk-revert.js';
+import type { WorkspaceCheckpoint } from '../platform/src/platform/workspace/checkpoint/types.js';
 import {
   createCheckpointsRevertHunkHandler,
   createCheckpointsRevertHunkPreviewHandler,
   type CheckpointsEventSink,
   type CheckpointsGatewayManager,
-} from '../sdk/src/platform/control-plane/routes/checkpoints.js';
-import { RestoreTokenStore } from '../sdk/src/platform/control-plane/routes/checkpoint-restore-tokens.js';
-import { GatewayVerbError } from '../sdk/src/platform/control-plane/routes/gateway-verb-error.js';
-import type { WorkspaceEvent } from '../sdk/src/events/workspace.js';
+} from '../platform/src/platform/control-plane/routes/checkpoints.js';
+import { RestoreTokenStore } from '../platform/src/platform/control-plane/routes/checkpoint-restore-tokens.js';
+import { GatewayVerbError } from '../platform/src/platform/control-plane/routes/gateway-verb-error.js';
+import type { WorkspaceEvent } from '../platform/src/events/workspace.js';
 
 // A file that went from three lines to four (one line changed, one added).
 const FORWARD_HUNK = [

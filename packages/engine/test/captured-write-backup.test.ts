@@ -1,4 +1,4 @@
-import { judgmentInputBoundary } from '../sdk/src/platform/gate/boundary.js';
+import { judgmentInputBoundary } from '../platform/src/platform/gate/boundary.js';
 import { afterEach, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import {
@@ -9,12 +9,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 import {
   authorizeContractInputPath, createContractInputAuthority, revokeContractInputAuthority,
-} from '../sdk/src/platform/contract/input-authority.js';
-import { captureContractInput, contractInputPath, materializeContractInput } from '../sdk/src/platform/contract/input-snapshot.js';
-import type { Contract } from '../sdk/src/platform/contract/types.js';
-import type { CapturedExecAuthority } from '../sdk/src/platform/tools/exec/captured-exec.js';
-import { prepareCapturedWriteBackup } from '../sdk/src/platform/tools/shared/captured-write-backup.js';
-import type { ReadAccessFilter } from '../sdk/src/platform/tools/shared/read-access.js';
+} from '../platform/src/platform/contract/input-authority.js';
+import { captureContractInput, contractInputPath, materializeContractInput } from '../platform/src/platform/contract/input-snapshot.js';
+import type { Contract } from '../platform/src/platform/contract/types.js';
+import type { CapturedExecAuthority } from '../platform/src/platform/tools/exec/captured-exec.js';
+import { prepareCapturedWriteBackup } from '../platform/src/platform/tools/shared/captured-write-backup.js';
+import type { ReadAccessFilter } from '../platform/src/platform/tools/shared/read-access.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -222,8 +222,8 @@ test('a stalled destination permission callback is cancellable and never creates
   expect(existsSync(join(f.root, '.goodvibes'))).toBe(false);
 });
 
-import { withCapturedPublication, type CapturedPublicationLease } from '../sdk/src/platform/tools/shared/captured-publication.js';
-import { captureCapturedWriteRevision } from '../sdk/src/platform/tools/shared/captured-write-revision.js';
+import { withCapturedPublication, type CapturedPublicationLease } from '../platform/src/platform/tools/shared/captured-publication.js';
+import { captureCapturedWriteRevision } from '../platform/src/platform/tools/shared/captured-write-revision.js';
 test('backup accepts only the exact intermediate revision issued by its still-active batch', async () => {
   const f = await fixture(); let previousLease!: CapturedPublicationLease;
   await withCapturedPublication(f.authority, async (lease) => { previousLease = lease; });

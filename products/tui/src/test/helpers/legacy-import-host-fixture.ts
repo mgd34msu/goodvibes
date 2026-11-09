@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { JevDecision } from '@goodvibes-jev/judgment/decisions';
 import { LegacyImportJournal, resolveLegacyImportJournalLocation, type LegacyImportCommand } from '@goodvibes-jev/engine/terminal-shell/legacy-work-ledger-import';
-import { prepareLegacyWorkLedgerMigration, projectLegacyImportWorks, workLedgerCommandSchema } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger';
+import { prepareLegacyWorkLedgerMigration, projectLegacyImportWorks, workLedgerCommandSchema } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 import input from '../fixtures/legacy-ledger/preparation.json';
 
 export const IMPORT_FIXTURE_TOKEN = 'synthetic-import-paired-token';

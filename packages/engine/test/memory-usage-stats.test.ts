@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'bun:test';
-import { MemoryUsageStatsStore } from '../sdk/src/platform/state/index.js';
+import { MemoryUsageStatsStore } from '../platform/src/platform/state/index.js';
 
 /**
  * Per-memory usage counters (hoisted from the agent surface). Answers "was

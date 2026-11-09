@@ -1,11 +1,11 @@
-import * as webhookHttp from '@goodvibes-jev/engine/sdk/platform/utils';
+import * as webhookHttp from '@goodvibes-jev/engine/platform/platform/utils';
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { CONFIG_SCHEMA, ConfigManager, SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { WebhookNotifier } from '@goodvibes-jev/engine/sdk/platform/integrations';
-import { defaultStore } from '@goodvibes-jev/engine/sdk/platform/runtime/settings';
+import { CONFIG_SCHEMA, ConfigManager, SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
+import { defaultStore } from '@goodvibes-jev/engine/platform/platform/runtime/settings';
 import { TuiConfigManager, TUI_NOTIFICATIONS_METADATA_ONLY_KEY as KEY } from '../../config/host-settings.ts';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
 import { SettingsModal } from '../../input/settings-modal.ts';
@@ -351,7 +351,7 @@ test('open, reopen, close and manager replacement each own exactly their host su
   expect(replacementRenders).toBe(1);
 });
 
-test('a bare SDK manager neither exposes a host row nor acquires a host handle', () => {
+test('a bare platform manager neither exposes a host row nor acquires a host handle', () => {
   const { options, modal, root } = fixture();
   const bare = new ConfigManager(options);
   const handleSpy = spyOn(bare, 'getHostBooleanSetting');

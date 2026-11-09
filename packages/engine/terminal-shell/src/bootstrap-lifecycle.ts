@@ -1,7 +1,7 @@
-import { CacheRegistry, PauseController } from '@goodvibes-jev/engine/sdk/platform/runtime/memory';
-import { fireSessionStart } from '@goodvibes-jev/engine/sdk/platform/runtime/bootstrap';
-import { emitSessionStarted, emitSessionReady } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { CacheRegistry, PauseController } from '@goodvibes-jev/engine/platform/platform/runtime/memory';
+import { fireSessionStart } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+import { emitSessionStarted, emitSessionReady } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { startMcpConfigAutoReload, type McpRuntimeReloadOptions } from './mcp-runtime-reload.js';
 

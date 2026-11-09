@@ -2,8 +2,8 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { BudgetLedger, RESERVATION_TTL_MS, type BudgetLimits } from '../sdk/src/platform/payments/budget.js';
-import { DurableBudgetLedger, PaymentBudgetUnavailableError } from '../sdk/src/platform/payments/host/budget-store.js';
+import { BudgetLedger, RESERVATION_TTL_MS, type BudgetLimits } from '../platform/src/platform/payments/budget.js';
+import { DurableBudgetLedger, PaymentBudgetUnavailableError } from '../platform/src/platform/payments/host/budget-store.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

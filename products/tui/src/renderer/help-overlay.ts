@@ -17,7 +17,7 @@ import { type HelpGroup } from '@goodvibes-jev/engine/terminal-shell/renderer/he
 import type { SlashCommand } from '../input/command-registry.ts';
 import type { KeybindingsManager } from '../input/keybindings.ts';
 
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import './theme.ts';
 import './surface-kit.ts';
 import './surface-kit-list.ts';

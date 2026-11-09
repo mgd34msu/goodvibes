@@ -1,9 +1,9 @@
 /** Shell parsing never asks Jev to approve a command. These tests do not execute commands. */
 import { describe, expect, test } from 'bun:test';
 import { useGateReadings } from './_helpers/gate-readings.ts';
-import { guardExecCommand } from '../sdk/src/platform/tools/exec/ast-guard.js';
-import { readToolCall } from '../sdk/src/platform/gate/reading.js';
-import { createFeatureFlagManager } from '../sdk/src/platform/runtime/feature-flags/index.js';
+import { guardExecCommand } from '../platform/src/platform/tools/exec/ast-guard.js';
+import { readToolCall } from '../platform/src/platform/gate/reading.js';
+import { createFeatureFlagManager } from '../platform/src/platform/runtime/feature-flags/index.js';
 
 const flags = (enabledIds: readonly string[]) => ({
   isEnabled(id: string): boolean {

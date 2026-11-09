@@ -1,8 +1,8 @@
 {
   "//": "Native daemon artifacts execute on their exact Linux and Darwin hosts. Linux installation/update receipts remain separate from CI execution evidence.",
   "packageName": "@goodvibes-jev/daemon",
-  "sdkPin": {
-    "sdkPackage": "@goodvibes-jev/engine",
+  "enginePin": {
+    "enginePackage": "@goodvibes-jev/engine",
     "pinSource": "dependencies",
     "lockfile": "../../bun.lock",
     "sourceRoots": [

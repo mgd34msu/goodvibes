@@ -2,8 +2,8 @@ import { configuredSystemMessageTarget } from '@goodvibes-jev/engine/terminal-sh
 import { projectBootstrapShellCommandOptions } from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-context';
 import { join } from 'node:path';
 import type { ConversationManager } from '../core/conversation';
-import type { Orchestrator } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { Orchestrator } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { RuntimeEventBus } from '@/runtime/index.ts';
 import type { MutableRuntimeState } from '@/runtime/index.ts';
 import type { RuntimeStore } from './store/index.ts';
@@ -13,25 +13,25 @@ import type { AgentPromptContextReceiptStore } from '../agent/prompt-context-rec
 import { CommandRegistry } from '../input/command-registry.ts';
 import { registerBuiltinCommands } from '../input/commands.ts';
 import { InputHistory } from '../input/input-history.ts';
-import type { PermissionRequestHandler } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import type { PermissionRequestHandler } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { ActivityFeed } from '../core/activity-feed.ts';
 import { hydrateConversationUsage } from '../core/conversation-usage.ts';
 import { createSystemMessageRouter, type SystemMessageRouter } from '../core/system-message-router.ts';
 import { getConfigSnapshot } from '../config/index.ts';
 import { createBootstrapCommandContext } from './bootstrap-command-context.ts';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { loadBootstrapSystemPrompt } from '@/runtime/index.ts';
 import { createShellPlanRuntime, createShellRemoteCommandService } from '@/runtime/index.ts';
 import { createRuntimeFoundationClients } from '@/runtime/index.ts';
-import type { ControlPlaneRecentEvent } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { ControlPlaneRecentEvent } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { ForensicsRegistry } from '@/runtime/index.ts';
 import type { PolicyRuntimeState } from '@/runtime/index.ts';
 import type { TaskManager } from '@/runtime/index.ts';
 import type { UiRuntimeServices } from './ui-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { createKnowledgeApi } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import { createKnowledgeApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 
 export interface BootstrapShellState {
   readonly commandRegistry: CommandRegistry;

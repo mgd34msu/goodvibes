@@ -42,28 +42,28 @@
  * matrix's own text calls for ("route focus in/out events ... to drive
  * awaiting-approval alerts").
  *
- * Text (owner ruling 2026-09-29, SDK runtime/turn-notification.ts, the same
+ * Text (owner ruling 2026-09-29, platform runtime/turn-notification.ts, the same
  * words the TUI uses): the alert names what is waiting, the command for exec,
  * the file for write and edit, the URL for fetch, and the turn that asked for
  * it. Unless behavior.notificationsMetadataOnly is explicitly false it carries
  * the tool name and permission category only.
  */
-import { logger, notifyCompletion, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
-import type { PermissionRequestHandler, PermissionPromptRequest } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import { logger, notifyCompletion, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { PermissionRequestHandler, PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
 import {
   buildApprovalNotification,
   describeToolTarget,
   readNotificationsMetadataOnly,
   resolveTurnName,
   type ConfigGet,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+} from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { FocusTracker } from '@/runtime/index.ts';
 
 import { FOCUS_DISABLE } from '../renderer/terminal-escapes.ts';
 export { FOCUS_ENABLE, FOCUS_DISABLE } from '../renderer/terminal-escapes.ts';
 
 /**
- * notifyCompletion (SDK platform/utils) only rings the bell above 5s of
+ * notifyCompletion (platform platform/utils) only rings the bell above 5s of
  * "duration" and only pops a desktop notification above 30s, a heuristic
  * tuned for long-running-turn notifications (ported alongside
  * goodvibes-tui's alert-gating.ts FORCE_NOTIFY_DURATION_MS). The
@@ -122,7 +122,7 @@ export interface ApprovalTurnSource {
   getLastUserMessage(): string | null;
 }
 
-/** Title and body for an approval alert (SDK buildApprovalNotification). */
+/** Title and body for an approval alert (platform buildApprovalNotification). */
 export function describeApprovalAlert(request: PermissionPromptRequest, deps: Pick<ApprovalAlertDeps, 'configGet' | 'conversation'>): { title: string; body: string } {
   const metadataOnly = deps.configGet ? readNotificationsMetadataOnly(deps.configGet) : true;
   const conversation = deps.conversation;

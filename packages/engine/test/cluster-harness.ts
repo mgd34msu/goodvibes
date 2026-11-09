@@ -17,23 +17,23 @@
  * successor before the predecessor stopped consuming is the bug, and only an
  * interleaved log can catch it.
  */
-import { ClusterElection } from '../sdk/src/platform/cluster/election-node.js';
-import { ClusterSurfaceRegistry } from '../sdk/src/platform/cluster/surface-registry.js';
-import { FakeClusterClock } from '../sdk/src/platform/cluster/clock.js';
-import { MemoryClusterBus, type MemoryClusterTransport } from '../sdk/src/platform/cluster/memory-transport.js';
-import { decodeMessage } from '../sdk/src/platform/cluster/protocol.js';
+import { ClusterElection } from '../platform/src/platform/cluster/election-node.js';
+import { ClusterSurfaceRegistry } from '../platform/src/platform/cluster/surface-registry.js';
+import { FakeClusterClock } from '../platform/src/platform/cluster/clock.js';
+import { MemoryClusterBus, type MemoryClusterTransport } from '../platform/src/platform/cluster/memory-transport.js';
+import { decodeMessage } from '../platform/src/platform/cluster/protocol.js';
 import {
   ntfySurface,
   providerSurface,
   surfaceIdFor,
   telegramSurface,
   type ClusterSurfaceKey,
-} from '../sdk/src/platform/cluster/surface-id.js';
+} from '../platform/src/platform/cluster/surface-id.js';
 import type {
   ClusterLogger,
   ClusterSettings,
   ClusterTransport,
-} from '../sdk/src/platform/cluster/types.js';
+} from '../platform/src/platform/cluster/types.js';
 
 const SILENT: ClusterLogger = {
   debug: () => {},

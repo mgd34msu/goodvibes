@@ -21,10 +21,10 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkBunPins, collectBunPins, isExactVersion } from '../scripts/bun-pin-rule.ts';
 
-const SDK_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const ENGINE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // The engine sits at packages/engine; the root manifest that declares the bun
 // version is the monorepo's, two levels up.
-const REPO_ROOT = resolve(SDK_ROOT, '..', '..');
+const REPO_ROOT = resolve(ENGINE_ROOT, '..', '..');
 const rootPackage = JSON.parse(readFileSync(resolve(REPO_ROOT, 'package.json'), 'utf8')) as {
   packageManager: string;
   engines: { bun: string };

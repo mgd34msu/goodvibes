@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { PermissionPromptRequest } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import type { PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
 import {
   applyHunkKey,
   buildHunkSelectionState,

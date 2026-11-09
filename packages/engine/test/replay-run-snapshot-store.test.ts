@@ -10,10 +10,10 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { LocalLedgerExporter } from '../sdk/src/platform/runtime/telemetry/exporters/local-ledger.ts';
-import { DeterministicReplayEngine } from '../sdk/src/platform/core/deterministic-replay.ts';
-import { handleReplayCommand } from '../sdk/src/platform/core/replay-command-handler.ts';
-import type { RuntimeStateSnapshot } from '../sdk/src/platform/runtime/diagnostics/types.ts';
+import { LocalLedgerExporter } from '../platform/src/platform/runtime/telemetry/exporters/local-ledger.ts';
+import { DeterministicReplayEngine } from '../platform/src/platform/core/deterministic-replay.ts';
+import { handleReplayCommand } from '../platform/src/platform/core/replay-command-handler.ts';
+import type { RuntimeStateSnapshot } from '../platform/src/platform/runtime/diagnostics/types.ts';
 
 const GITHUB_TOKEN = 'ghp_0123456789012345678901234567890123456789';
 

@@ -1,8 +1,8 @@
 import { expect, spyOn, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { registerInboxSurface } from '@goodvibes-jev/engine/sdk/platform/intake';
+import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { registerInboxSurface } from '@goodvibes-jev/engine/platform/platform/intake';
 import { startDaemonFixture, type DaemonFixture } from '../../testing/daemon-fixture.js';
 import type { DaemonBootAttachment, DaemonBootOperations } from '../../runtime/boot-tasks.js';
 import type { RuntimeServices } from '../../runtime/services.js';

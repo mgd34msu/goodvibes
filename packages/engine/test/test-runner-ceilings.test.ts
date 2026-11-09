@@ -27,7 +27,7 @@ import { fileURLToPath } from 'node:url';
 import { runOwnedTestChild } from '../scripts/owned-test-child.ts';
 import { HEARTBEAT_PATH_ENV } from '../toolchain/src/test-runner/test-child-watchdog-env.ts';
 
-const SDK_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const ENGINE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 const tmpDirs: string[] = [];
 function mkTemp(): string {
@@ -124,7 +124,7 @@ function writeRunnerScript(dir: string, wedged: string, name = 'runner.ts'): str
   writeFileSync(
     path,
     [
-      `import { runOwnedTestChild } from ${JSON.stringify(join(SDK_ROOT, 'scripts/owned-test-child.ts'))};`,
+      `import { runOwnedTestChild } from ${JSON.stringify(join(ENGINE_ROOT, 'scripts/owned-test-child.ts'))};`,
       'await runOwnedTestChild({',
       `  argv: ['--timeout=600000', ${JSON.stringify(wedged)}],`,
       `  cwd: ${JSON.stringify(dir)},`,
@@ -450,14 +450,14 @@ describe('the suite dies with the process that started it', () => {
     // which would then carry a lifecycle hook of its own into every run. The
     // shared env names live in their own import-free module for this reason.
     // Invisible at runtime until something odd happens, so it is scanned for.
-    const parentSide = readFileSync(resolve(SDK_ROOT, 'toolchain/src/test-runner/owned-test-child.ts'), 'utf8');
+    const parentSide = readFileSync(resolve(ENGINE_ROOT, 'toolchain/src/test-runner/owned-test-child.ts'), 'utf8');
     const imports = [...parentSide.matchAll(/^\s*import[^;]*?from\s+'([^']+)'/gm)].map((m) => m[1]);
     expect(imports).not.toContain('bun:test');
     expect(imports).toContain('./test-child-watchdog-env.js');
     expect(imports).not.toContain('./test-child-watchdog.js');
     // And the module it does import must stay import-free itself, or the
     // separation is undone one edit later.
-    const envModule = readFileSync(resolve(SDK_ROOT, 'toolchain/src/test-runner/test-child-watchdog-env.ts'), 'utf8');
+    const envModule = readFileSync(resolve(ENGINE_ROOT, 'toolchain/src/test-runner/test-child-watchdog-env.ts'), 'utf8');
     expect(envModule).not.toMatch(/^\s*import\s/m);
   });
 });
@@ -526,7 +526,7 @@ test('both owned child groups die when their shared parent is SIGKILLed', async 
   });
   const runner = join(dir, 'shared-parent.ts');
   writeFileSync(runner, [
-    `import {runOwnedTestChild} from ${JSON.stringify(join(SDK_ROOT, 'scripts/owned-test-child.ts'))};`,
+    `import {runOwnedTestChild} from ${JSON.stringify(join(ENGINE_ROOT, 'scripts/owned-test-child.ts'))};`,
     `const files=${JSON.stringify(files)};`,
     'const deadlineAt=Date.now()+60000;',
     `await Promise.allSettled(files.map(file=>runOwnedTestChild({argv:[file],cwd:${JSON.stringify(dir)},env:{...process.env},deadlineAt,ownProcessGroup:true})));`,

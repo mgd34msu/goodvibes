@@ -1,7 +1,7 @@
 /**
  * session-spine-daemon-integration.test.ts
  *
- * Consumability proof: drives the extracted SDK SessionSpineClient against a
+ * Consumability proof: drives the extracted platform SessionSpineClient against a
  * REAL bootDaemon (isolated home, ephemeral port) over a real HttpTransport, no
  * mocked wire, using the transport adapter EXACTLY as the TUI's bootstrap builds
  * it (register/close over httpTransport.operator.sessions, resolve->ok / throw->
@@ -13,13 +13,13 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { bootDaemon, type BootedDaemon } from '../sdk/src/platform/daemon/boot.ts';
-import { createHttpTransport } from '../sdk/src/platform/runtime/transport.ts';
+import { bootDaemon, type BootedDaemon } from '../platform/src/platform/daemon/boot.ts';
+import { createHttpTransport } from '../platform/src/platform/runtime/transport.ts';
 import {
   SessionSpineClient,
   TUI_SPINE_PARTICIPANT,
   type SpineTransport,
-} from '../sdk/src/platform/runtime/session-spine/index.ts';
+} from '../platform/src/platform/runtime/session-spine/index.ts';
 
 const TOKEN = 'spine-integration-token';
 
@@ -78,9 +78,9 @@ interface Harness {
 }
 
 async function startHarness(): Promise<Harness> {
-  const homeDirectory = mkdtempSync(join(tmpdir(), 'goodvibes-sdk-spine-home-'));
+  const homeDirectory = mkdtempSync(join(tmpdir(), 'goodvibes-platform-spine-home-'));
   seedBenchmarkCache(homeDirectory, 'goodvibes');
-  const workingDir = mkdtempSync(join(tmpdir(), 'goodvibes-sdk-spine-project-'));
+  const workingDir = mkdtempSync(join(tmpdir(), 'goodvibes-platform-spine-project-'));
   const daemon = await bootDaemon({ homeDirectory, workingDir, port: 0, token: TOKEN });
   const transport = createHttpTransport({ baseUrl: daemon.url, authToken: TOKEN });
   const gate = { blocked: false };
@@ -115,7 +115,7 @@ async function stopHarness(harness: Harness): Promise<void> {
   rmSync(harness.workingDir, { recursive: true, force: true });
 }
 
-describe('SDK SessionSpineClient against a real bootDaemon (TUI-exact adapter)', () => {
+describe('platform SessionSpineClient against a real bootDaemon (TUI-exact adapter)', () => {
   let harness: Harness | null = null;
   afterEach(async () => { if (harness) await stopHarness(harness); harness = null; });
 

@@ -1,4 +1,4 @@
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.ts';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 // The execution ledger hoisted from goodvibes-agent src/runtime/execution-ledger.ts.
@@ -9,7 +9,7 @@ import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 // records the call.
 import { describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
 import {
   emitToolCancelled,
   emitToolFailed,
@@ -17,8 +17,8 @@ import {
   emitToolReceived,
   emitToolSucceeded,
   type EmitterContext,
-} from '../sdk/src/platform/runtime/emitters/index.ts';
-import { AgentExecutionLedger, EXECUTION_LEDGER_SITE } from '../sdk/src/platform/gate/policy/execution-ledger.ts';
+} from '../platform/src/platform/runtime/emitters/index.ts';
+import { AgentExecutionLedger, EXECUTION_LEDGER_SITE } from '../platform/src/platform/gate/policy/execution-ledger.ts';
 import { useGateReadings } from './_helpers/gate-readings.ts';
 
 // Argument roles (engine.gate.ledger-arg) are asked with state { tool, argument },

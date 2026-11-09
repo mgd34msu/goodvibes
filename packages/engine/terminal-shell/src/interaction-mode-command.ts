@@ -1,6 +1,6 @@
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ShellModeManagerService } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ShellModeManagerService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { requireYesFlag, stripYesFlag } from './command-confirmation.js';
 import type { TerminalSlashCommand } from './command-registry.js';
 interface InteractionModeContext {
@@ -45,7 +45,7 @@ export function createInteractionModeCommand<Context extends InteractionModeCont
         mgr.setHITLMode(newMode);
         try {
           ctx.platform.configManager.setDynamic(
-            'behavior.hitlMode' as import('@goodvibes-jev/engine/sdk/platform/config').ConfigKey,
+            'behavior.hitlMode' as import('@goodvibes-jev/engine/platform/platform/config').ConfigKey,
             newMode,
           );
         } catch (e) {

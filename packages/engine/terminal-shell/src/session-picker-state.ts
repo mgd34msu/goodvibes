@@ -1,4 +1,4 @@
-import type { SessionInfo, SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
+import type { SessionInfo, SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 /** Local saved-session navigation; products provide their resume/delete authority and other session sources. */
 export class SavedSessionPickerState {
   public active = false;

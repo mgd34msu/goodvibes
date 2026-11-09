@@ -117,7 +117,7 @@ Focused tests exercise actual Agent harness and TUI keyboard/registry routes,
 synthetic owned HTTP hosts, SQLite journal reopen, lost acknowledgement and exact
 replay, repeated submit, stale request selection, source/revision conflicts,
 revocation during shared retry, closed service, and interrupted transports.
-Compiled command fixtures exercise the real command/SDK/journal composition in
+Compiled command fixtures exercise the real command/platform/journal composition in
 new processes. Independent review, exact-head CI, product tests and compiled
 startup qualification remain required validation boundaries. Synthetic fixture
 evidence does not establish whole-product parity.
@@ -150,7 +150,7 @@ before displaying protected data. Preserve both legacy `{ sources }` and cursor
 `{ items, hasMore, nextCursor? }` source-list results with validation enabled;
 TypeScript callers narrow the output union even when omitting pagination input.
 
-Compiled protected-read validation uses real command/SDK/journal composition and
+Compiled protected-read validation uses real command/platform/journal composition and
 readable status/binding/preview lines. Cover empty status, complete paginated
 preview with one preparation, and knowledge-read revocation during the first
 page stopping before preparation. Preserve the fixed synthetic read-fixture

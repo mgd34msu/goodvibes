@@ -4,8 +4,8 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { readTarGzEntries } from '@goodvibes-jev/engine/sdk/platform/browser';
-import { UpdateTransactionError } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { readTarGzEntries } from '@goodvibes-jev/engine/platform/platform/browser';
+import { UpdateTransactionError } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { daemonCiPayloads, type DaemonNativeTarget } from '../src/cli/native-artifact.ts';
 import { assertNativeInstallHost, installDaemonNative, parseNativeInstallArgs, readDaemonInstallOwner, type DaemonInstallOwner } from './install-native.ts';
 

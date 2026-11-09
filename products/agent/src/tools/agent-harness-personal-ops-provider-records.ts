@@ -1,8 +1,8 @@
-import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { readPersonalOpsBoolean } from './agent-harness-personal-ops-readings.ts';
 import { captureCatalogMethods, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { assertPersonalOpsDataCurrent, capturePersonalOpsData, protectPersonalOpsData } from './agent-harness-personal-ops-source.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { modelReadingServicePath } from './agent-harness-model-reading-source.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
@@ -12,7 +12,7 @@ import { safeRecordIdPart } from './agent-harness-personal-ops-records.ts';
 import type { PersonalOpsFollowUpRoute, PersonalOpsLaneId, PersonalOpsLiveRecord, PersonalOpsRecordFreshness } from './agent-harness-personal-ops-types.ts';
 
 type ProviderBackedLaneId = Extract<PersonalOpsLaneId, 'inbox' | 'calendar'>;
-type ProviderReadModelSourceKind = Extract<PersonalOpsRecordFreshness['source'], 'daemon-read-model' | 'sdk-read-model'>;
+type ProviderReadModelSourceKind = Extract<PersonalOpsRecordFreshness['source'], 'daemon-read-model' | 'platform-read-model'>;
 
 interface ProviderReadModelSource {
   readonly path: string;
@@ -94,15 +94,15 @@ function providerReadModelSources(context: CommandContext, laneId: ProviderBacke
     { path: 'context.platform.readModels.email.messages', kind: 'daemon-read-model' as const },
     { path: 'context.platform.readModels.mail.threads', kind: 'daemon-read-model' as const },
     { path: 'context.platform.personalOps.inboxThreads', kind: 'daemon-read-model' as const },
-    { path: 'context.clients.operator.personalOps.inboxThreads', kind: 'sdk-read-model' as const },
-    { path: 'context.clients.operator.personalOps.emailThreads', kind: 'sdk-read-model' as const },
+    { path: 'context.clients.operator.personalOps.inboxThreads', kind: 'platform-read-model' as const },
+    { path: 'context.clients.operator.personalOps.emailThreads', kind: 'platform-read-model' as const },
   ] : [
     { path: 'context.platform.readModels.personalOps.calendarEvents', kind: 'daemon-read-model' as const },
     { path: 'context.platform.readModels.calendarEvents', kind: 'daemon-read-model' as const },
     { path: 'context.platform.readModels.calendar.events', kind: 'daemon-read-model' as const },
     { path: 'context.platform.readModels.calendar.agenda', kind: 'daemon-read-model' as const },
     { path: 'context.platform.personalOps.calendarEvents', kind: 'daemon-read-model' as const },
-    { path: 'context.clients.operator.personalOps.calendarEvents', kind: 'sdk-read-model' as const },
+    { path: 'context.clients.operator.personalOps.calendarEvents', kind: 'platform-read-model' as const },
   ];
   return paths.map(entry => ({ ...entry, source: modelReadingServicePath(context, entry.path.split('.').slice(1)) }));
 }
@@ -181,7 +181,7 @@ function providerFreshness(options: {
     ...(Object.keys(options.sampleInput).length > 0 ? { sampleInput: options.sampleInput } : {}),
     policy: options.readRoute
       ? 'The provider published a current read-model record plus a bounded read or refresh route. Run the route only for a user-requested refresh; provider mutations remain separate confirmed follow-up routes.'
-      : 'The provider published current redacted queue state through the daemon or SDK read model. Inspect it as read-only; refreshes and provider mutations require explicit published routes.',
+      : 'The provider published current redacted queue state through the daemon or platform read model. Inspect it as read-only; refreshes and provider mutations require explicit published routes.',
   };
 }
 

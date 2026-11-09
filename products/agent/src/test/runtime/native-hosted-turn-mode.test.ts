@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import type { GatePresetName } from '@goodvibes-jev/engine/sdk/platform/gate';
-import type { OperatorRemoteClient } from '@goodvibes-jev/engine/operator-sdk';
+import type { GatePresetName } from '@goodvibes-jev/engine/platform/platform/gate';
+import type { OperatorRemoteClient } from '@goodvibes-jev/engine/operator-client';
 import { createNativeHostedTurnClient } from '../../runtime/native-hosted-turn.ts';
 
 test('native start sends the surface execution choice through the authenticated start protocol only', async () => {

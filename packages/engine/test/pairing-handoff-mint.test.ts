@@ -5,9 +5,9 @@ import {
   defaultPairingTokenName,
   pairingQrContent,
   type PairingTokenMinter,
-} from '../sdk/src/platform/pairing/handoff-mint.ts';
-import { formatPairingOffers, formatPostureCapabilities, pairingPostureNotice } from '../sdk/src/platform/pairing/offer-copy.ts';
-import { LAN_PLAIN_HTTP_NOTICE, parsePairingHandoffLink } from '../sdk/src/platform/pairing/index.ts';
+} from '../platform/src/platform/pairing/handoff-mint.ts';
+import { formatPairingOffers, formatPostureCapabilities, pairingPostureNotice } from '../platform/src/platform/pairing/offer-copy.ts';
+import { LAN_PLAIN_HTTP_NOTICE, parsePairingHandoffLink } from '../platform/src/platform/pairing/index.ts';
 
 function fakeMinter(): PairingTokenMinter & { minted: string[] } {
   const minted: string[] = [];
@@ -23,7 +23,7 @@ function fakeMinter(): PairingTokenMinter & { minted: string[] } {
 }
 
 describe('mintPairingHandoff', () => {
-  test('mints a named token and builds a full deep link the SDK can parse back', () => {
+  test('mints a named token and builds a full deep link the platform can parse back', () => {
     const minter = fakeMinter();
     const handoff = mintPairingHandoff({
       pairingTokens: minter,
@@ -48,7 +48,7 @@ describe('mintPairingHandoff', () => {
     expect(handoff.posture?.capabilities.every((c) => c.available)).toBe(true);
   });
 
-  test('a plain-http LAN origin carries the SDK LAN notice verbatim and gated capabilities', () => {
+  test('a plain-http LAN origin carries the platform LAN notice verbatim and gated capabilities', () => {
     const handoff = mintPairingHandoff({
       pairingTokens: fakeMinter(),
       name: 'workshop',
@@ -56,7 +56,7 @@ describe('mintPairingHandoff', () => {
       webOrigin: 'http://workshop.local:3141',
     });
     expect(handoff.posture?.secureContext).toBe(false);
-    // The one honest line is the SDK export, byte-for-byte, never a local rewording.
+    // The one honest line is the platform export, byte-for-byte, never a local rewording.
     expect(pairingPostureNotice(handoff.posture)).toBe(LAN_PLAIN_HTTP_NOTICE);
     const caps = formatPostureCapabilities(handoff.posture);
     expect(caps.length).toBe(3);
@@ -106,7 +106,7 @@ describe('formatPairingOffers copy', () => {
     expect(lines[0]).toContain('Notifications,');
     expect(lines[1]).toContain('Passkey,');
   });
-  test('the one honest LAN line is the SDK export, a single line', () => {
+  test('the one honest LAN line is the platform export, a single line', () => {
     expect(LAN_PLAIN_HTTP_NOTICE.split('\n')).toHaveLength(1);
     expect(LAN_PLAIN_HTTP_NOTICE).toContain('unencrypted on your LAN');
   });

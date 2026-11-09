@@ -1,12 +1,12 @@
 /** Actual codec/election regressions, intentionally UNRUN during coding first. */
 import { expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
-import { compareStableRank, compareVersions } from '../sdk/src/platform/cluster/ranking.js';
-import { stableSurfaceHash } from '../sdk/src/platform/cluster/surface-id.js';
-import { CLUSTER_RANK_FEATURE, CLUSTER_V1_PEER_RANK_FEATURE, clusterProductVersion, clusterRankingWireVersion } from '../sdk/src/platform/cluster/ranking-feature.js';
-import { decodeMessage, encodeMessage } from '../sdk/src/platform/cluster/protocol.js';
-import { GroupWireRouter } from '../sdk/src/platform/cluster/group-transport.js';
-import type { ClusterMessage, ClusterTransport } from '../sdk/src/platform/cluster/types.js';
+import { compareStableRank, compareVersions } from '../platform/src/platform/cluster/ranking.js';
+import { stableSurfaceHash } from '../platform/src/platform/cluster/surface-id.js';
+import { CLUSTER_RANK_FEATURE, CLUSTER_V1_PEER_RANK_FEATURE, clusterProductVersion, clusterRankingWireVersion } from '../platform/src/platform/cluster/ranking-feature.js';
+import { decodeMessage, encodeMessage } from '../platform/src/platform/cluster/protocol.js';
+import { GroupWireRouter } from '../platform/src/platform/cluster/group-transport.js';
+import type { ClusterMessage, ClusterTransport } from '../platform/src/platform/cluster/types.js';
 import { addNode, advance, createWorld, holders, idFor, startNode } from './cluster-harness.js';
 
 const secret = 'Synthetic shared cluster credential';

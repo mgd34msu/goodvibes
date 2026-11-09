@@ -9,7 +9,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   RestoreTokenStore,
   RESTORE_TOKEN_TTL_MS,
-} from '../sdk/src/platform/control-plane/routes/checkpoint-restore-tokens.ts';
+} from '../platform/src/platform/control-plane/routes/checkpoint-restore-tokens.ts';
 
 describe('RestoreTokenStore', () => {
   test('hunk confirmation binds each original field and never consumes a checkpoint token', () => {

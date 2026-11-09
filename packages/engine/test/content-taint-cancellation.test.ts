@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { findContentTaint, evaluateOutwardEffect, UntrustedContentLedger } from '@goodvibes-jev/engine/sdk/platform/security';
+import { findContentTaint, evaluateOutwardEffect, UntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
 import { securityPort } from './helpers/security-readings.ts';
 
 const sources = [{ surface: 'web-page', origin: 'https://example.test', text: 'Unrelated source material.' }];

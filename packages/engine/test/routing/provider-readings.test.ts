@@ -8,11 +8,11 @@ import {
   readLocalServerIdentity,
   readReasoningFamily,
   readsAsAlternateApi,
-} from '../../sdk/src/platform/routing/provider-readings.js';
+} from '../../platform/src/platform/routing/provider-readings.js';
 import { authoredErrorReadingsPort, errorText } from '../_helpers/authored-error-readings.js';
-import { shouldUseOtherApi } from '../../sdk/src/platform/providers/provider-error.js';
-import { extractOpenAIStreamTextDelta, readStreamDeltaLabels } from '../../sdk/src/platform/providers/openai-stream-delta.js';
-import { scanHosts } from '../../sdk/src/platform/discovery/scanner.js';
+import { shouldUseOtherApi } from '../../platform/src/platform/providers/provider-error.js';
+import { extractOpenAIStreamTextDelta, readStreamDeltaLabels } from '../../platform/src/platform/providers/openai-stream-delta.js';
+import { scanHosts } from '../../platform/src/platform/discovery/scanner.js';
 
 let previous: ReturnType<typeof installJudgmentPort>;
 const originalFetch = globalThis.fetch;

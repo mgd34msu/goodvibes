@@ -133,10 +133,10 @@ export function readProviderHealthSignal(context: CommandContext, providerId: st
   const base: Omit<ModelProviderHealthSignal, 'status' | 'daemonPublication' | 'agentConsumption' | 'missingSignals' | 'policy'> = {
     providerId,
     ...(modelRouteId ? { modelRouteId } : {}),
-    sdkContract: {
+    engineContract: {
       providerHealthTypes: 'available',
-      importSurface: '@goodvibes-jev/engine/sdk/platform/runtime/ui',
-      note: 'The SDK publishes provider-health domain and UI enrichment types; types alone do not prove live connected-host health.',
+      importSurface: '@goodvibes-jev/engine/platform/platform/runtime/ui',
+      note: 'The platform publishes provider-health domain and UI enrichment types; types alone do not prove live connected-host health.',
     },
   };
   const policy = 'Provider health is live route-condition evidence. Local benchmark artifacts remain separate task-fit evidence and must not be treated as provider-health publication.';
@@ -278,7 +278,7 @@ export function readProviderHealthSignal(context: CommandContext, providerId: st
       evidence: 'Agent cannot attach provider status or latency to exact routes until the connected host publishes a stable feed.',
     },
     missingSignals: [
-      'SDK provider-health types are available, but no daemon-published provider.health feed is reachable in Agent CommandContext.',
+      'platform provider-health types are available, but no daemon-published provider.health feed is reachable in Agent CommandContext.',
       'Agent has not consumed provider status, configured state, live latency, rate-limit posture, or last error for this route.',
     ],
     policy,

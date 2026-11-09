@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { fileURLToPath } from 'node:url';
 import { rm } from 'node:fs/promises';
-import { InboxCursorStore } from '../sdk/src/platform/intake/cursor-store.ts';
-import { InboundPoller } from '../sdk/src/platform/intake/poller.ts';
-import { aggregateInbox } from '../sdk/src/platform/intake/aggregator.ts';
-import * as publicIntake from '../sdk/src/platform/intake/index.ts';
-import type { AdapterContext, ProviderPollOptions, ProviderPollResult } from '../sdk/src/platform/intake/provider-adapter.ts';
-import { createSlackInboxAdapter, type SlackInboxHttp, type SlackInboxMapper, type SlackInboxPorts } from '../sdk/src/platform/intake/providers/slack.ts';
+import { InboxCursorStore } from '../platform/src/platform/intake/cursor-store.ts';
+import { InboundPoller } from '../platform/src/platform/intake/poller.ts';
+import { aggregateInbox } from '../platform/src/platform/intake/aggregator.ts';
+import * as publicIntake from '../platform/src/platform/intake/index.ts';
+import type { AdapterContext, ProviderPollOptions, ProviderPollResult } from '../platform/src/platform/intake/provider-adapter.ts';
+import { createSlackInboxAdapter, type SlackInboxHttp, type SlackInboxMapper, type SlackInboxPorts } from '../platform/src/platform/intake/providers/slack.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const TOKEN = 'xoxb-synthetic-slack-inbox-fixture';
@@ -98,8 +98,8 @@ describe('private Slack adapter admission and credentials', () => {
     expect(publicIntake).not.toHaveProperty('createSlackInboxAdapter');
     expect(publicIntake.buildAdapters(f.ctx, ['slack']).size).toBe(0);
     const consumer = fileURLToPath(new URL('../../../products/daemon', import.meta.url));
-    expect(Bun.resolveSync('@goodvibes-jev/engine/sdk/platform/intake', consumer)).toBe(fileURLToPath(new URL('../sdk/src/platform/intake/index.ts', import.meta.url)));
-    expect(() => Bun.resolveSync('@goodvibes-jev/engine/sdk/platform/intake/providers/slack', consumer)).toThrow();
+    expect(Bun.resolveSync('@goodvibes-jev/engine/platform/platform/intake', consumer)).toBe(fileURLToPath(new URL('../platform/src/platform/intake/index.ts', import.meta.url)));
+    expect(() => Bun.resolveSync('@goodvibes-jev/engine/platform/platform/intake/providers/slack', consumer)).toThrow();
     expect(() => createSlackInboxAdapter(f.ctx, { http: f.ports.http } as SlackInboxPorts)).toThrow('explicit item mapper');
     expect(() => createSlackInboxAdapter(f.ctx, { mapItem: mapper } as SlackInboxPorts)).toThrow('HTTP');
     expect(f.calls).toEqual([]);

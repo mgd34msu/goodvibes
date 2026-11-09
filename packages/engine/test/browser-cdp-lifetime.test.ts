@@ -1,6 +1,6 @@
 import { expect, spyOn, test } from 'bun:test';
 import { getEventListeners } from 'node:events';
-import { cdpWebSocketHandshakeWorks } from '../sdk/src/platform/browser/browser-cdp.js';
+import { cdpWebSocketHandshakeWorks } from '../platform/src/platform/browser/browser-cdp.js';
 
 function sockets(construct?: () => void) {
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'WebSocket');

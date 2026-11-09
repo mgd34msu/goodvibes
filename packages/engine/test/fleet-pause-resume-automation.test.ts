@@ -3,13 +3,13 @@
  * surfacing into the fleet tree.
  */
 import { describe, expect, test, spyOn, type Mock } from 'bun:test';
-import { createProcessRegistry } from '../sdk/src/platform/runtime/fleet/index.js';
-import type { ProcessRegistryDeps } from '../sdk/src/platform/runtime/fleet/registry.js';
-import type { ScheduleEntry, TriggerDefinition } from '../sdk/src/platform/tools/workflow/index.js';
-import type { AutomationJob, ManagedAutomationJob } from '../sdk/src/platform/automation/index.js';
-import { ownedAutomationJob } from '../sdk/src/platform/automation/job-mutations.js';
-import { adaptAutomationJob, automationJobNodeId } from '../sdk/src/platform/runtime/fleet/adapters/automation.js';
-import { logger } from '../sdk/src/platform/utils/logger.js';
+import { createProcessRegistry } from '../platform/src/platform/runtime/fleet/index.js';
+import type { ProcessRegistryDeps } from '../platform/src/platform/runtime/fleet/registry.js';
+import type { ScheduleEntry, TriggerDefinition } from '../platform/src/platform/tools/workflow/index.js';
+import type { AutomationJob, ManagedAutomationJob } from '../platform/src/platform/automation/index.js';
+import { ownedAutomationJob } from '../platform/src/platform/automation/job-mutations.js';
+import { adaptAutomationJob, automationJobNodeId } from '../platform/src/platform/runtime/fleet/adapters/automation.js';
+import { logger } from '../platform/src/platform/utils/logger.js';
 
 const T0 = 1_750_000_000_000;
 

@@ -3,7 +3,7 @@ import { extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
-const SCAN_ROOT = resolve(ROOT, 'sdk/src/platform');
+const SCAN_ROOT = resolve(ROOT, 'platform/src/platform');
 const EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.cts']);
 const SKIP_DIRS = new Set(['dist', 'node_modules']);
 
@@ -70,11 +70,11 @@ function scanFile(file: string): Finding[] {
 
 const findings = walk(SCAN_ROOT).flatMap(scanFile);
 if (findings.length === 0) {
-  console.log('platform-console-check: OK - no executable console.* calls in sdk/src/platform.');
+  console.log('platform-console-check: OK - no executable console.* calls in engine/src/platform.');
   process.exit(0);
 }
 
-console.error('platform-console-check: FAIL - use the platform logger instead of console.* in SDK platform code.');
+console.error('platform-console-check: FAIL - use the platform logger instead of console.* in engine platform code.');
 for (const finding of findings) {
   console.error(`  ${finding.file}:${finding.line}: ${finding.text}`);
 }

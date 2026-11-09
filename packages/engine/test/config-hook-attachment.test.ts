@@ -2,8 +2,8 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import type { HookEvent } from '../sdk/src/platform/hooks/types.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import type { HookEvent } from '../platform/src/platform/hooks/types.js';
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'config-hook-owner-'));

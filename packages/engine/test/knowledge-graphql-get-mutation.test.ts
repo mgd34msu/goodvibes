@@ -4,9 +4,9 @@
  * picks the operation), not from how the document text starts.
  */
 import { describe, expect, test } from 'bun:test';
-import { createDaemonKnowledgeRouteHandlers } from '../daemon-sdk/src/knowledge-routes.ts';
-import type { DaemonKnowledgeRouteContext } from '../daemon-sdk/src/knowledge-route-types.ts';
-import { inspectKnowledgeGraphqlAccess } from '../sdk/src/platform/knowledge/graphql.ts';
+import { createDaemonKnowledgeRouteHandlers } from '../daemon-api/src/knowledge-routes.ts';
+import type { DaemonKnowledgeRouteContext } from '../daemon-api/src/knowledge-route-types.ts';
+import { inspectKnowledgeGraphqlAccess } from '../platform/src/platform/knowledge/graphql.ts';
 
 const DOCUMENT = 'query Read { status } mutation Write { reindex { ok } }';
 

@@ -1,6 +1,6 @@
 /** Private original pre-await capture; imports only narrow filesystem/location helpers. */
 import { isAbsolute, resolve } from 'node:path';
-import { isCompiledBunModuleUrl, detectInstallKind, captureUpdateFileIo, realUpdateFileIo, resolveDarwinDaemonTargets, retainNativeUpdateSources } from '@goodvibes-jev/engine/sdk/platform/runtime/compiled-native-startup';
+import { isCompiledBunModuleUrl, detectInstallKind, captureUpdateFileIo, realUpdateFileIo, resolveDarwinDaemonTargets, retainNativeUpdateSources } from '@goodvibes-jev/engine/platform/platform/runtime/compiled-native-startup';
 import type { DaemonSqliteAdmission } from '../cli/native-sqlite-runtime.js';
 import { COMPILED_VERSION } from '../version.js';
 /** Original synchronous bundled-entry observation, not a late pathname guess. */

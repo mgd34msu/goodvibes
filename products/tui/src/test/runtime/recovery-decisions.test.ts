@@ -45,7 +45,7 @@ describe('where the ledger lives', () => {
   });
 
   test('home-anchored, NOT project-anchored: one decision covers every project', () => {
-    // The snapshots this defends against include the SDK's legacy shared
+    // The snapshots this defends against include the platform's legacy shared
     // recovery directory, which is home-anchored and read by the launch of
     // every project. A project-scoped ledger would ask once per project.
     const otherProject = makeTestSurface(join(tmpDir, 'another-project'), tmpDir);

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { junitCompletion, protocolCompletion } from '../../sdk/src/platform/contract/gate-receipts.js';
+import { junitCompletion, protocolCompletion } from '../../platform/src/platform/contract/gate-receipts.js';
 
 const report = (body: string, attributes = 'tests="1" failures="0" skipped="0"') => `<?xml version="1.0"?><testsuites ${attributes}><testsuite>${body}</testsuite></testsuites>`;
 

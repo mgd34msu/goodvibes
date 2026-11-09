@@ -1,4 +1,4 @@
-import { ContractError, GoodVibesSdkError } from '@goodvibes-jev/engine/errors';
+import { ContractError, GoodVibesError } from '@goodvibes-jev/engine/errors';
 import type { ZodType } from 'zod/v4';
 import type { HttpTransport } from './http.js';
 import { openRawServerSentEventStream, type ServerSentEventHandlers } from './sse-stream.js';
@@ -37,7 +37,7 @@ export function requireContractRoute<TRoute extends ContractRouteLike>(
 ): TRoute {
   const route = routes.find((candidate) => candidate.id === routeId);
   if (!route) {
-    throw new GoodVibesSdkError(`Unknown ${kind} "${routeId}". Verify the method/route id is correct and that your contract manifest is up to date.`, { category: 'contract', source: 'contract', recoverable: false });
+    throw new GoodVibesError(`Unknown ${kind} "${routeId}". Verify the method/route id is correct and that your contract manifest is up to date.`, { category: 'contract', source: 'contract', recoverable: false });
   }
   return route;
 }

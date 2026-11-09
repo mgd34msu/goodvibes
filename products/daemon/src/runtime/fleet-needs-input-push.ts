@@ -1,6 +1,6 @@
 /**
  * fleet-needs-input-push.ts, wires the fleet "needs-input" browser-push fan-out
- * that the SDK's registerGatewayVerbGroups (reached through the terminal-shell's
+ * that the platform's registerGatewayVerbGroups (reached through the terminal-shell's
  * attachWsOnlyGatewayVerbHandlers wrapper) gates on two deps: `runtimeBus` and
  * `sessionPresence` (see push/service.js's attachFleetNeedsInputSource). When a
  * fleet node blocks on the operator, it pushes an "Input needed" notification
@@ -14,21 +14,21 @@
  *     snapshot tick into per-node lifecycle events. The terminal-shell package's
  *     createArchivableFleetRegistry only builds the registry, it does not
  *     attach the bridge, so the composition root that owns both the registry
- *     and the bus (this file) is the one place responsible for it. The SDK's
+ *     and the bus (this file) is the one place responsible for it. The platform's
  *     own daemon composition (platform/runtime/services.ts) attaches this same
  *     bridge right after building its process registry.
  *  2. registerGatewayVerbGroups has to be handed `runtimeBus` (to subscribe onto
  *     that domain) and `sessionPresence` (to suppress a push when an operator is
  *     already looking at the session).
  *
- * sessionPresence is the SDK's own hasFreshSurfaceParticipant: a session counts
- * as attended when any participant heartbeated within the SDK's freshness
+ * sessionPresence is the platform's own hasFreshSurfaceParticipant: a session counts
+ * as attended when any participant heartbeated within the platform's freshness
  * window. This is the one implementation, imported, so every surface's
  * push/suppress behavior agrees.
  */
-import { attachFleetEmitBridge } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
-import type { ArchivableProcessRegistry } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
-import { hasFreshSurfaceParticipant, SURFACE_ROUTE_FRESHNESS_MS, type SharedSessionBroker } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import { attachFleetEmitBridge } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+import type { ArchivableProcessRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+import { hasFreshSurfaceParticipant, SURFACE_ROUTE_FRESHNESS_MS, type SharedSessionBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { RuntimeEventBus } from './index.js';
 
 export interface FleetNeedsInputPushDeps {

@@ -1,4 +1,4 @@
-import { GoodVibesSdkError, HttpStatusError, createHttpStatusError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError, HttpStatusError, createHttpStatusError } from '@goodvibes-jev/engine/errors';
 import {
   type AuthTokenResolver,
   type HeaderResolver,
@@ -118,9 +118,9 @@ function isTransportError(error: unknown): error is TransportFailure {
 }
 
 export function normalizeTransportError(error: unknown): Error {
-  // Fast path: already a structured SDK error, return directly, no re-wrapping needed.
-  // Covers HttpStatusError (subclass) and GoodVibesSdkError (e.g. SSE stream errors) alike.
-  if (error instanceof GoodVibesSdkError) {
+  // Fast path: already a structured platform error, return directly, no re-wrapping needed.
+  // Covers HttpStatusError (subclass) and GoodVibesError (e.g. SSE stream errors) alike.
+  if (error instanceof GoodVibesError) {
     return error;
   }
   if (isTransportError(error)) {
@@ -164,7 +164,7 @@ export function normalizeTransportError(error: unknown): Error {
   }
   return error instanceof Error
     ? error
-    : new GoodVibesSdkError(`Transport operation failed with a non-Error value: ${String(error)}`, {
+    : new GoodVibesError(`Transport operation failed with a non-Error value: ${String(error)}`, {
         category: 'network',
         source: 'transport',
         recoverable: true,

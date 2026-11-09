@@ -8,7 +8,7 @@
  * process, and `timedOut` records that the deadline passed either way.
  */
 import { describe, expect, test } from 'bun:test';
-import { ProcessManager } from '../sdk/src/platform/tools/shared/process-manager.js';
+import { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.js';
 import { waitFor } from './_helpers/test-timeout.js';
 import { useToolReadings } from './_helpers/tool-readings.ts';
 

@@ -13,7 +13,7 @@ import {
   readVersioned,
   reapQuarantinedFiles,
   UNRECOGNIZED_SUFFIX,
-} from '../sdk/src/platform/config/read-versioned.ts';
+} from '../platform/src/platform/config/read-versioned.ts';
 
 let dir: string;
 const NOW = 1_800_000_000_000;

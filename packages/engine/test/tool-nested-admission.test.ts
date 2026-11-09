@@ -1,14 +1,14 @@
-import { assertJudgmentInput } from '../sdk/src/platform/gate/judgment-input.js';
+import { assertJudgmentInput } from '../platform/src/platform/gate/judgment-input.js';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort, type EntryType } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { ToolRegistry, assertCurrentToolEffect, currentToolAutonomySource, type CurrentToolAutonomySource } from '../sdk/src/platform/tools/registry.ts';
-import { ToolInputProjectionError, type ToolInputProjector } from '../sdk/src/platform/tools/input-projection.ts';
-import { PermissionManager, claimExternalAdmission, assertCurrentExternalAdmission, closeExternalAdmission, type PermissionConfigReader } from '../sdk/src/platform/permissions/manager.ts';
-import { DEFAULT_CONFIG, type PermissionMode, type PermissionsToolConfig } from '../sdk/src/platform/config/index.ts';
-import { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.ts';
-import type { Tool, ToolExecuteOptions } from '../sdk/src/platform/types/tools.ts';
+import { ToolRegistry, assertCurrentToolEffect, currentToolAutonomySource, type CurrentToolAutonomySource } from '../platform/src/platform/tools/registry.ts';
+import { ToolInputProjectionError, type ToolInputProjector } from '../platform/src/platform/tools/input-projection.ts';
+import { PermissionManager, claimExternalAdmission, assertCurrentExternalAdmission, closeExternalAdmission, type PermissionConfigReader } from '../platform/src/platform/permissions/manager.ts';
+import { DEFAULT_CONFIG, type PermissionMode, type PermissionsToolConfig } from '../platform/src/platform/config/index.ts';
+import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
+import type { Tool, ToolExecuteOptions } from '../platform/src/platform/types/tools.ts';
 import { forgetGateReadings, gateReadingsPort, READ_ONLY } from './_helpers/gate-readings.ts';
 
 const PARENT = 'nested_parent_fixture';

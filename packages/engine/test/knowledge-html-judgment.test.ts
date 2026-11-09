@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { extractKnowledgeArtifact } from '../sdk/src/platform/knowledge/extractors.js';
-import { extractLightweightReadableHtml, extractReadableHtml } from '../sdk/src/platform/knowledge/html-readability.js';
-import { hasUsefulKnowledgeExtractionText, KnowledgeExtractionJudgmentHoldError } from '../sdk/src/platform/knowledge/extraction-policy.js';
-import { JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.js';
-import { registry } from '../sdk/src/platform/knowledge/extraction/judgment-registry.js';
+import { extractKnowledgeArtifact } from '../platform/src/platform/knowledge/extractors.js';
+import { extractLightweightReadableHtml, extractReadableHtml } from '../platform/src/platform/knowledge/html-readability.js';
+import { hasUsefulKnowledgeExtractionText, KnowledgeExtractionJudgmentHoldError } from '../platform/src/platform/knowledge/extraction-policy.js';
+import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input.js';
+import { registry } from '../platform/src/platform/knowledge/extraction/judgment-registry.js';
 
 let previous: JudgmentPort | undefined;
 beforeEach(() => { previous = installJudgmentPort(undefined); });

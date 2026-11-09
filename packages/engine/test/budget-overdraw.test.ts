@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
-import { admitApprovedItemOverdraw } from '../sdk/src/platform/payments/budget.js';
-import type { BudgetLimits } from '../sdk/src/platform/payments/budget.js';
+import { admitApprovedItemOverdraw } from '../platform/src/platform/payments/budget.js';
+import type { BudgetLimits } from '../platform/src/platform/payments/budget.js';
 
 /**
  * budget-overdraw.test.ts, direct unit coverage for `admitApprovedItemOverdraw`.

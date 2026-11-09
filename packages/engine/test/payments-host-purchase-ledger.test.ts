@@ -9,11 +9,11 @@
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, test } from 'bun:test';
-import type { PurchaseRecord } from '../sdk/src/platform/payments/purchase-record.js';
-import { DaemonPurchaseLedger, PaymentPurchaseLedgerError, MAX_PURCHASE_LIST_LIMIT } from '../sdk/src/platform/payments/host/purchase-ledger.js';
+import type { PurchaseRecord } from '../platform/src/platform/payments/purchase-record.js';
+import { DaemonPurchaseLedger, PaymentPurchaseLedgerError, MAX_PURCHASE_LIST_LIMIT } from '../platform/src/platform/payments/host/purchase-ledger.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { acquireCrossProcessLock } from '../sdk/src/platform/workspace/checkpoint/cross-process-lock.js';
-import { capturePurchaseRecord } from '../sdk/src/platform/payments/purchase-record-codec.js';
+import { acquireCrossProcessLock } from '../platform/src/platform/workspace/checkpoint/cross-process-lock.js';
+import { capturePurchaseRecord } from '../platform/src/platform/payments/purchase-record-codec.js';
 
 function purchase(overrides: Partial<PurchaseRecord> = {}): PurchaseRecord {
   return {
@@ -237,7 +237,7 @@ test('independent concurrent ledger writers retain every admitted purchase', asy
 
 test('separate processes append through the same actual purchase mutation lock', async () => {
   const root = makeProjectTempDir('purchase-ledger-processes'), childPath = join(root, 'append.ts');
-  const module = new URL('../sdk/src/platform/payments/host/purchase-ledger.ts', import.meta.url).href;
+  const module = new URL('../platform/src/platform/payments/host/purchase-ledger.ts', import.meta.url).href;
   writeFileSync(childPath, `import { DaemonPurchaseLedger } from ${JSON.stringify(module)}; await new DaemonPurchaseLedger({ filePath: process.argv[2]! }).record(JSON.parse(process.argv[3]!));`);
   const children = Array.from({ length: 4 }, (_, index) => Bun.spawn([process.execPath, 'run', childPath, filePath, JSON.stringify(purchase({ purchaseId: `process-${index}` }))], { stdout: 'pipe', stderr: 'pipe' }));
   const results = await Promise.all(children.map(async child => {

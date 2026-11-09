@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { TtsTextChunker } from '../sdk/src/platform/voice/spoken-turn/text-chunker.js';
-import { StreamingCodeFenceFilter, stripMarkdownForSpeech } from '../sdk/src/platform/voice/spoken-turn/speech-markdown.js';
+import { TtsTextChunker } from '../platform/src/platform/voice/spoken-turn/text-chunker.js';
+import { StreamingCodeFenceFilter, stripMarkdownForSpeech } from '../platform/src/platform/voice/spoken-turn/speech-markdown.js';
 
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment/decisions';

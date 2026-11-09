@@ -1,8 +1,8 @@
 import { captureCliStatusFacts, secretPolicyLabel } from '@goodvibes-jev/engine/terminal-shell/cli-status-facts';
 import { yesNo } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import { describeConfiguredPermissions } from '../permissions/configured-posture.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { resolveDaemonEnabled } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
 import type { OnboardingCheckMarkersState } from '../runtime/onboarding/index.ts';
 import { formatRuntimeEndpointBinding, resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
 import type { RuntimeEndpointBinding, RuntimeEndpointId } from '@goodvibes-jev/engine/terminal-shell';
@@ -10,7 +10,7 @@ import { classifyBindPosture, isNetworkFacing } from './network-posture.ts';
 import type { GoodVibesCliOutputFormat } from '@goodvibes-jev/engine/terminal-shell';
 import type { CliServicePosture } from './service-posture.ts';
 import type { InstallSelfCheckFinding } from '../runtime/install-self-check.ts';
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
 import { describeConfiguredEffort } from '../providers/reasoning-effort-surface.ts';
 
 export interface CliStatusOptions {
@@ -322,7 +322,7 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
 
   const findings: CliDoctorFinding[] = [];
 
-  // An unrecognized hostMode has NO binding the SDK can produce (its bind
+  // An unrecognized hostMode has NO binding the platform can produce (its bind
   // resolver has no default case, the daemon throws before binding), so it
   // is surfaced as a doctor finding on every endpoint that carries one,
   // instead of the fallback loopback binding being presented as fact.

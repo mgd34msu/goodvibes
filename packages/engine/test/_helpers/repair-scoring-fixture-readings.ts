@@ -1,6 +1,6 @@
 import type { Question } from '@goodvibes-jev/judgment';
 import { scoreAnswer } from '@goodvibes-jev/judgment/testing';
-import { repairFactScoring } from '../../sdk/src/platform/knowledge/semantic/repair-fact-scoring/battery.js';
+import { repairFactScoring } from '../../platform/src/platform/knowledge/semantic/repair-fact-scoring/battery.js';
 import { repairUsefulFixtureReading, type RepairProfileFixtureValues, type RepairUsefulFixtureValues } from './repair-profile-fixture-readings.js';
 
 /** Authored support tuples admit only the existing exact synthetic claims. */

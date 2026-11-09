@@ -14,7 +14,7 @@
  * Any other key hands the keyboard back to the composer and is typed there,
  * so starting to type never needs an Esc first.
  */
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { WorkTreeController } from './work-tree-focus.js';
 export interface WorkTreeConversation {
     readonly workTree: WorkTreeController;

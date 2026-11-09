@@ -3,7 +3,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
 
 test('actual primary endpoint edits refuse embedded credentials/query/fragment without persisting an unusable target', () => {
   const root = mkdtempSync(join(tmpdir(), 'judgment-primary-endpoint-'));

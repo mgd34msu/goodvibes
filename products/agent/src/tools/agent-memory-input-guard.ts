@@ -1,5 +1,5 @@
 import { types as nodeTypes } from 'node:util';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { containsSecretLikeText } from '../agent/memory-safety.ts';
 
 /** Screen every original field before repair without invoking caller accessors. */

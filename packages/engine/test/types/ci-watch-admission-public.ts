@@ -1,7 +1,7 @@
 /** Consumer proof: public CI composition names its real source, admission and result types. */
 import { CiWatchAutoMinter, CiWatchService, CiWatchStore, startAdmittedCiRepair,
   type CiWatchServiceDeps, type CiRepairRequest, type CiRepairAdmissionHost, type FixSessionStarter,
-  type CiWatchSubscription, type CiWatchCheckResult } from '@goodvibes-jev/engine/sdk/platform/ci-watch';
+  type CiWatchSubscription, type CiWatchCheckResult } from '@goodvibes-jev/engine/platform/platform/ci-watch';
 declare const dependencies: CiWatchServiceDeps;
 declare const host: CiRepairAdmissionHost;
 declare const request: CiRepairRequest;

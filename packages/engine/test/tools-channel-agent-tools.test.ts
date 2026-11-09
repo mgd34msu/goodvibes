@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { ChannelPluginRegistry } from '@goodvibes-jev/engine/sdk/platform/channels';
-import { registerChannelAgentTools } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ChannelPluginRegistry } from '@goodvibes-jev/engine/platform/platform/channels';
+import { registerChannelAgentTools } from '@goodvibes-jev/engine/platform/platform/tools';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 
 describe('channel agent tools', () => {
   test('registers direct plugin-owned tools and skips duplicate names', () => {

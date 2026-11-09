@@ -21,7 +21,7 @@ import {
   pairingPostureNotice,
   renderQrToString,
   type PairingHandoffOfferKind,
-} from '@goodvibes-jev/engine/sdk/platform/pairing';
+} from '@goodvibes-jev/engine/platform/platform/pairing';
 
 export interface PairingBannerInput {
   /** The daemon version, stated so a scanned link is attributable to a build. */
@@ -56,7 +56,7 @@ export function renderPairingBanner(input: PairingBannerInput): PairingBanner {
     token: input.token,
     offers: input.offers,
   });
-  // The banner renders the SAME SDK posture the pairing verb carries: the
+  // The banner renders the SAME platform posture the pairing verb carries: the
   // labeled capability list, and the one honest LAN line only when the posture
   // holds it.
   const posture = describeOriginPosture(input.origin);

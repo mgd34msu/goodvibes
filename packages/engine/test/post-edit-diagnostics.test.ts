@@ -11,14 +11,14 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createWriteTool } from '../sdk/src/platform/tools/write/index.ts';
-import { createEditTool } from '../sdk/src/platform/tools/edit/index.ts';
-import { FileStateCache } from '../sdk/src/platform/state/file-cache.ts';
+import { createWriteTool } from '../platform/src/platform/tools/write/index.ts';
+import { createEditTool } from '../platform/src/platform/tools/edit/index.ts';
+import { FileStateCache } from '../platform/src/platform/state/file-cache.ts';
 import {
   TypeScriptSyntaxDiagnosticsProvider,
   collectPostEditDiagnostics,
   type DiagnosticsProvider,
-} from '../sdk/src/platform/tools/shared/post-edit-diagnostics.ts';
+} from '../platform/src/platform/tools/shared/post-edit-diagnostics.ts';
 
 const BROKEN_TS = 'export function broken() {\n  const x = ;\n'; // missing expr + unclosed brace
 const CLEAN_TS = 'export function ok(): number {\n  return 1;\n}\n';

@@ -5,7 +5,7 @@
  * armed release), never in ci.yml.
  *
  * Metrics (all measured in-process or in a child bun, never the TUI binary):
- *   startup.renderer_load_ms   cold import of compositor + buffer + sdk types
+ *   startup.renderer_load_ms   cold import of compositor + buffer + engine types
  *   frame.composite_p95_ms     Compositor.composite() p95 over 200 full repaints
  *   frame.composite_p99_ms     the same run's p99
  *   <line bench ids>           Line[] builders above the compositor
@@ -79,7 +79,7 @@ function measureStartup(): number {
     `const t0 = performance.now();`,
     `await import('./src/renderer/compositor.ts');`,
     `await import('./src/renderer/buffer.ts');`,
-    `await import('@goodvibes-jev/engine/sdk/platform/types');`,
+    `await import('@goodvibes-jev/engine/platform/platform/types');`,
     `const t1 = performance.now();`,
     `process.stdout.write(String(Math.round((t1 - t0) * 10) / 10));`,
   ].join(' ');

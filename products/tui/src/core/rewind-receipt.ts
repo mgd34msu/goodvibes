@@ -1,7 +1,7 @@
 /**
  * rewind-receipt.ts, transcript rendering for an applied unified rewind.
  *
- * The SDK's UnifiedRewindService returns a RewindReceipt from rewind.apply (and
+ * The platform's UnifiedRewindService returns a RewindReceipt from rewind.apply (and
  * emits a matching REWIND_APPLIED workspace event). This module turns that
  * receipt into a distinct, multi-line `[Rewind]` block, mirroring the
  * `[Compaction]` receipt (compaction-receipt.ts) so a rewind is never a silent
@@ -13,7 +13,7 @@
  * so the receipt cannot be routed away from the transcript and vanish.
  */
 
-/** The subset of the SDK's RewindReceipt this formatter renders. */
+/** The subset of the platform's RewindReceipt this formatter renders. */
 export interface RewindReceiptInput {
   readonly scope: 'files' | 'conversation' | 'both';
   readonly turnId: string | null;

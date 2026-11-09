@@ -9,7 +9,7 @@
  * string arrives INERT, no clickable link, no mention, no fake affordance,
  * rather than asserting that some particular escaping was applied.
  *
- * The class comes from the inbound-mail notice (SDK `140cbcb4`), where
+ * The class comes from the inbound-mail notice (platform `140cbcb4`), where
  * `[Approved](https://evil.example)@ourdomain.com` rendered as a real link
  * because the field's provenance was partly verified and that was mistaken for
  * the field being safe.
@@ -20,21 +20,21 @@ import {
   sanitizeOwnerNoticeField,
   breakMentionForms,
   isPlainHostname,
-} from '../sdk/src/platform/security/notice-text.js';
+} from '../platform/src/platform/security/notice-text.js';
 import {
   renderApprovalMessage,
   renderVetoMessage,
   renderCancellationReport,
   type PurchaseFacts,
-} from '../sdk/src/platform/payments/message.js';
-import { assertCartMatchesRequest, detectRecurringCharge } from '../sdk/src/platform/payments/cart.js';
-import { BudgetLedger, type BudgetLimits } from '../sdk/src/platform/payments/budget.js';
+} from '../platform/src/platform/payments/message.js';
+import { assertCartMatchesRequest, detectRecurringCharge } from '../platform/src/platform/payments/cart.js';
+import { BudgetLedger, type BudgetLimits } from '../platform/src/platform/payments/budget.js';
 import { usePaymentsReadings } from './helpers/payments-readings.ts';
 import {
   parseCurrencyCode,
   unsafeOwnerSuppliedTextForTests,
   type CurrencyCode,
-} from '../sdk/src/platform/payments/types.js';
+} from '../platform/src/platform/payments/types.js';
 
 const USD = parseCurrencyCode('USD') as CurrencyCode;
 

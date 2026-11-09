@@ -7,8 +7,8 @@ import {
   persistProviders,
   removePersistedProviders,
   type DiscoveredServer,
-} from '../sdk/src/platform/discovery/scanner.js';
-import { logger } from '../sdk/src/platform/utils/logger.js';
+} from '../platform/src/platform/discovery/scanner.js';
+import { logger } from '../platform/src/platform/utils/logger.js';
 
 const surfaceRoot = 'gv-test-surface';
 

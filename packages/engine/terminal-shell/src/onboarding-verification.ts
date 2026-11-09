@@ -1,5 +1,5 @@
-import { isGoodVibesSecretReferenceValue } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
+import { isGoodVibesSecretReferenceValue } from '@goodvibes-jev/engine/platform/platform/config';
+import type { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
 import type { OnboardingAcknowledgementTarget, OnboardingShellPaths, OnboardingStateScope } from './onboarding-state-types.js';
 import type { OnboardingRuntimeStateRecord } from './onboarding-state.js';
 import { isDeepEqual } from './onboarding-values.js';

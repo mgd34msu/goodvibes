@@ -132,7 +132,7 @@ mock.module('../../../../lib/goodvibes', () => ({
   runBrowserJudgment: () => Promise.reject(new Error('No semantic credential reading in this display fixture.')),
   getCurrentAuth: () => Promise.resolve({}),
   invokeMethod: () => Promise.resolve({}),
-  sdk: {
+  client: {
     operator: {
       providers: {
         list: () => Promise.resolve(PROVIDERS_LIST_FIXTURE),

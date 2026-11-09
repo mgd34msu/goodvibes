@@ -14,14 +14,14 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ProviderRegistry } from '../sdk/src/platform/providers/registry.js';
-import { SecretsManager } from '../sdk/src/platform/config/secrets.js';
-import { resolveApiKeys } from '../sdk/src/platform/config/api-keys.js';
+import { ProviderRegistry } from '../platform/src/platform/providers/registry.js';
+import { SecretsManager } from '../platform/src/platform/config/secrets.js';
+import { resolveApiKeys } from '../platform/src/platform/config/api-keys.js';
 import {
   assertProviderCredentialAuthority,
   verifyProviderCredentialAuthority,
-} from '../sdk/src/platform/providers/credential-authority-contract.js';
-import type { LLMProvider } from '../sdk/src/platform/providers/interface.js';
+} from '../platform/src/platform/providers/credential-authority-contract.js';
+import type { LLMProvider } from '../platform/src/platform/providers/interface.js';
 
 const GROQ_ENV = 'GROQ_API_KEY';
 let savedEnv: string | undefined;

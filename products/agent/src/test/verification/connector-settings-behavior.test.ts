@@ -25,7 +25,7 @@
  *
  *  - `buildAgentWorkspaceEmailConnectStatus` (agent-workspace-snapshot-builders.ts)
  *    is what the inbox connect wizard's entry card reports: it reads every
- *    `email.*` key through the SDK's `readEmailConfig`, runs
+ *    `email.*` key through the platform's `readEmailConfig`, runs
  *    `validateEmailConfig`, and answers connected / not-connected with the
  *    specific reasons. A key that stopped being honoured changes that answer.
  *  - `persistEmailConfigField` (input/commands/email-runtime.ts) is the single
@@ -49,8 +49,8 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { CalendarConnector } from '@goodvibes-jev/engine/sdk/platform/calendar';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { CalendarConnector } from '@goodvibes-jev/engine/platform/platform/calendar';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { buildAgentWorkspaceEmailConnectStatus } from '../../input/agent-workspace-snapshot-builders.ts';
 import {

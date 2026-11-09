@@ -16,14 +16,14 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ChannelPluginRegistry } from '../sdk/src/platform/channels/plugin-registry.js';
-import { BuiltinChannelRuntime } from '../sdk/src/platform/channels/builtin-runtime.js';
-import { ChannelHealthWatcher, type ChannelHealthAlert } from '../sdk/src/platform/channels/health-watcher.js';
-import { observeTelegramRuntime } from '../sdk/src/platform/channels/builtin/health.js';
-import { resolveChannelHealthState } from '../sdk/src/platform/channels/health.js';
-import type { ProviderRuntimeStatus } from '../sdk/src/platform/channels/provider-runtime.js';
-import type { ChannelStatusSnapshot } from '../sdk/src/platform/channels/types.js';
-import type { BuiltinChannelRuntimeDeps } from '../sdk/src/platform/channels/builtin/shared.js';
+import { ChannelPluginRegistry } from '../platform/src/platform/channels/plugin-registry.js';
+import { BuiltinChannelRuntime } from '../platform/src/platform/channels/builtin-runtime.js';
+import { ChannelHealthWatcher, type ChannelHealthAlert } from '../platform/src/platform/channels/health-watcher.js';
+import { observeTelegramRuntime } from '../platform/src/platform/channels/builtin/health.js';
+import { resolveChannelHealthState } from '../platform/src/platform/channels/health.js';
+import type { ProviderRuntimeStatus } from '../platform/src/platform/channels/provider-runtime.js';
+import type { ChannelStatusSnapshot } from '../platform/src/platform/channels/types.js';
+import type { BuiltinChannelRuntimeDeps } from '../platform/src/platform/channels/builtin/shared.js';
 
 // ── harness ─────────────────────────────────────────────────────────────────
 

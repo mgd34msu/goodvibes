@@ -2,7 +2,7 @@ import { readConnectedHostOperatorToken } from '../runtime/connected-host-auth.t
 import { basename, sep } from 'node:path';
 import type { CommandContext } from './command-registry.ts';
 import { AgentRoutineRegistry } from '../agent/routine-registry.ts';
-import { memoryRecordTemporalStatus } from '@goodvibes-jev/engine/sdk/platform/state';
+import { memoryRecordTemporalStatus } from '@goodvibes-jev/engine/platform/platform/state';
 import { describeMemoryPromptEligibility, isPromptActiveMemory } from '../agent/memory-prompt.ts';
 import { summarizeAgentBehaviorDiscovery } from '../agent/behavior-discovery-summary.ts';
 import { buildSetupWizardDurableReceipts } from '../agent/setup-wizard-artifact-receipts.ts';

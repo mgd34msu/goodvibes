@@ -1,7 +1,7 @@
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { authoredPrivacyAnswer, errorSpan, errorText } from './_helpers/authored-error-readings.ts';
-import { redactSensitiveDataAsync } from '../sdk/src/platform/utils/redaction.ts';
+import { redactSensitiveDataAsync } from '../platform/src/platform/utils/redaction.ts';
 /**
  * Data safety with no discipline: every SQLite store the platform writes
  * carries PRAGMA user_version; migrations snapshot first and auto-restore
@@ -18,7 +18,7 @@ import {
   openVersionedSchema,
   StoreMigrationError,
   StoreSchemaDowngradeError,
-} from '../sdk/src/platform/state/store-versioning.js';
+} from '../platform/src/platform/state/store-versioning.js';
 import {
   listStoreSnapshots,
   restoreStoreSnapshot,
@@ -26,17 +26,17 @@ import {
   snapshotStoreFileAsync,
   StoreSnapshotScheduler,
   storeSnapshotDir,
-} from '../sdk/src/platform/state/store-snapshots.js';
-import { RetentionPolicy } from '../sdk/src/platform/runtime/retention/policy.js';
-import { SnapshotPruner } from '../sdk/src/platform/runtime/retention/pruner.js';
-import { CodeIndexStore } from '../sdk/src/platform/state/code-index-store.js';
-import { SqliteVecMemoryIndex, resolveMemoryVectorDbPath, MEMORY_VECTOR_SCHEMA_VERSION } from '../sdk/src/platform/state/memory-vector-store.js';
-import { MemoryEmbeddingProviderRegistry } from '../sdk/src/platform/state/memory-embeddings.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { SQLiteStore } from '../sdk/src/platform/state/sqlite-store.js';
-import { createSchema as createMemorySchema, MEMORY_SCHEMA_VERSION, validateMemoryRowRevisions } from '../sdk/src/platform/state/memory-store-helpers.js';
-import { MemoryStore } from '../sdk/src/platform/state/memory-store.js';
-import { loadSqliteVecExtension } from '../sdk/src/platform/state/sqlite-vec-loader.js';
+} from '../platform/src/platform/state/store-snapshots.js';
+import { RetentionPolicy } from '../platform/src/platform/runtime/retention/policy.js';
+import { SnapshotPruner } from '../platform/src/platform/runtime/retention/pruner.js';
+import { CodeIndexStore } from '../platform/src/platform/state/code-index-store.js';
+import { SqliteVecMemoryIndex, resolveMemoryVectorDbPath, MEMORY_VECTOR_SCHEMA_VERSION } from '../platform/src/platform/state/memory-vector-store.js';
+import { MemoryEmbeddingProviderRegistry } from '../platform/src/platform/state/memory-embeddings.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
+import { createSchema as createMemorySchema, MEMORY_SCHEMA_VERSION, validateMemoryRowRevisions } from '../platform/src/platform/state/memory-store-helpers.js';
+import { MemoryStore } from '../platform/src/platform/state/memory-store.js';
+import { loadSqliteVecExtension } from '../platform/src/platform/state/sqlite-vec-loader.js';
 
 async function withScratch<T>(fn: (dir: string) => T | Promise<T>): Promise<T> {
   const dir = mkdtempSync(join(tmpdir(), 'store-safety-'));

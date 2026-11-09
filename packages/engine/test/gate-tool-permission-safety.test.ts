@@ -2,13 +2,13 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { Question } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import type { SideEffectKind } from '../sdk/src/platform/gate/batteries/side-effect.ts';
-import type { PermissionCategory, PermissionCheckResult } from '../sdk/src/platform/permissions/types.ts';
+import type { SideEffectKind } from '../platform/src/platform/gate/batteries/side-effect.ts';
+import type { PermissionCategory, PermissionCheckResult } from '../platform/src/platform/permissions/types.ts';
 import {
   installPermissionManagerSafetyGuard,
   readPermissionCategory,
   TOOL_PERMISSION_SAFETY_SITE,
-} from '../sdk/src/platform/gate/policy/tool-permission-safety.ts';
+} from '../platform/src/platform/gate/policy/tool-permission-safety.ts';
 
 /** What Jev reads for a call, keyed by text in the call; the confidence says how sure. */
 const KINDS: ReadonlyArray<readonly [text: string, kind: SideEffectKind, confidence: number]> = [

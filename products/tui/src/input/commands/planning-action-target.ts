@@ -1,4 +1,4 @@
-import type { ProjectPlanningRevision, ProjectPlanningStateExpectation } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import type { ProjectPlanningRevision, ProjectPlanningStateExpectation } from '@goodvibes-jev/engine/platform/platform/knowledge';
 
 /** Internal command transport for a selection made from one persisted view. */
 export function selectedPlanningTarget(planningId: string, revision: ProjectPlanningRevision): string[] {

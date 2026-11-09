@@ -1,14 +1,14 @@
 import { expect, spyOn, test } from 'bun:test';
 import { join } from 'node:path';
-import { ConfigManager, SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { createLaunchTolerantProviderRegistry, ProviderCapabilityRegistry, CacheHitTracker, FavoritesStore, BenchmarkStore } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { RuntimeEventBus } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
-import { AgentManager } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { createAgentExecutionGraph } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import * as composition from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import { KnowledgeStore, ProjectPlanningService } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import { ExecutionPlanManager } from '@goodvibes-jev/engine/sdk/platform/core';
-import { createRuntimeStore } from '@goodvibes-jev/engine/sdk/platform/runtime/store';
+import { ConfigManager, SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { createLaunchTolerantProviderRegistry, ProviderCapabilityRegistry, CacheHitTracker, FavoritesStore, BenchmarkStore } from '@goodvibes-jev/engine/platform/platform/providers';
+import { RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { AgentManager } from '@goodvibes-jev/engine/platform/platform/tools';
+import { createAgentExecutionGraph } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import * as composition from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { KnowledgeStore, ProjectPlanningService } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { ExecutionPlanManager } from '@goodvibes-jev/engine/platform/platform/core';
+import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
 import { createDaemonContractServices } from '../../runtime/contract-composition.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 
@@ -68,7 +68,7 @@ test('daemon dependencies compose one runner, count its ACP ownership, and resum
 
 test('explicit native daemon floor supplies both trusted owners without upgrading historical entrypoints', async () => {
   const { createDaemonNativeWorkExecutionServices } = await import('../../runtime/native-work-execution-composition.js');
-  const { WorkspaceRegistrationStore } = await import('@goodvibes-jev/engine/sdk/platform/workspace');
+  const { WorkspaceRegistrationStore } = await import('@goodvibes-jev/engine/platform/platform/workspace');
   const { SqliteDecisionLog, withDecisionLog } = await import('@goodvibes-jev/judgment');
   const { fakePort, choiceAnswer } = await import('@goodvibes-jev/judgment/testing');
   const f = fixture(); const graph = createAgentExecutionGraph(f);

@@ -68,7 +68,7 @@ function makeTurnBus() {
     },
     /**
      * Emit an arbitrary event name with a payload, for the turn events that
-     * carry one (STREAM_RETRY) and for STREAM_STALL, which the SDK's TurnEvent
+     * carry one (STREAM_RETRY) and for STREAM_STALL, which the platform's TurnEvent
      * union does not carry and wireStreamEventMetrics subscribes to through
      * its loose feed (see stream-event-wiring.ts). This stub's `emit` above
      * models only the payload-free names.
@@ -1140,7 +1140,7 @@ describe('wireStreamEventMetrics: stall metrics', () => {
     expect(opts.metrics.reconnectMaxAttempts).toBeUndefined();
   });
 
-  test('STREAM_STALL, which the SDK union does not carry, does not throw and does not disturb metrics', async () => {
+  test('STREAM_STALL, which the platform union does not carry, does not throw and does not disturb metrics', async () => {
     const turns = makeTurnBus();
     const tools = makeToolBus();
     const opts = makeOptions(turns, tools);

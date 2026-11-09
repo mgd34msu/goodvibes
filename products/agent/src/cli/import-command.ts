@@ -4,7 +4,7 @@ import {
   MemoryRegistry,
   MemoryStore,
   resolveCanonicalMemoryDbPath,
-} from '@goodvibes-jev/engine/sdk/platform/state';
+} from '@goodvibes-jev/engine/platform/platform/state';
 import { assertNoSecretLikeMemoryText } from '../agent/memory-safety.ts';
 import { buildAgentSkillRequirements } from '../agent/skill-registry.ts';
 import type { CliCommandOutput } from './types.ts';

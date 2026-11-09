@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { McpHttpConnection } from '../sdk/src/platform/mcp/http-connection.js';
+import { McpHttpConnection } from '../platform/src/platform/mcp/http-connection.js';
 
 test.each(['json', 'sse', 'error'])('explicit MCP timeout covers a stalled %s body after headers', async kind => {
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(req) {

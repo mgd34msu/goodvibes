@@ -1,5 +1,5 @@
 import { statSync } from 'node:fs';
-import { getMcpConfigLocations, type McpConfigRoots, type McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
+import { getMcpConfigLocations, type McpConfigRoots, type McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
 
 export interface McpRuntimeReloadHandle {
   stop(): void;

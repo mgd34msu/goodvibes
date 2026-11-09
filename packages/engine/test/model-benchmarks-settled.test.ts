@@ -10,7 +10,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { BenchmarkStore } from '../sdk/src/platform/providers/model-benchmarks.ts';
+import { BenchmarkStore } from '../platform/src/platform/providers/model-benchmarks.ts';
 
 const originalFetch = globalThis.fetch;
 const dirs: string[] = [];

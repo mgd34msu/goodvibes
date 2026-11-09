@@ -9,7 +9,7 @@ const WIDTH = 80;
 const lineText = lineToString;
 
 /** Get all non-empty text lines from a render result. */
-function textLines(lines: import('@goodvibes-jev/engine/sdk/platform/types').Line[]): string[] {
+function textLines(lines: import('@goodvibes-jev/engine/platform/platform/types').Line[]): string[] {
   return linesToText(lines).filter((t) => t.length > 0);
 }
 

@@ -1,5 +1,5 @@
-import { requireDefined } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { type Line, type Cell, createEmptyLine, createEmptyCell } from '@goodvibes-jev/engine/sdk/platform/types';
+import { requireDefined } from '@goodvibes-jev/engine/platform/platform/utils';
+import { type Line, type Cell, createEmptyLine, createEmptyCell } from '@goodvibes-jev/engine/platform/platform/types';
 
 const CELL_KEYS: readonly (keyof Cell)[] = ['char', 'fg', 'bg', 'bold', 'dim', 'underline', 'italic', 'strikethrough', 'link'];
 

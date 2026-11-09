@@ -17,15 +17,15 @@ import {
   mapStopReason,
   mapPermissionOutcome,
   translateAcpMcpServers,
-} from '../sdk/src/platform/acp/agent.ts';
-import type { EmbeddedSession } from '../sdk/src/platform/embed/session.ts';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
-import { createEventEnvelope } from '../sdk/src/platform/runtime/event-envelope.ts';
-import type { SharedSessionSubmission } from '../sdk/src/platform/control-plane/session-types.ts';
-import type { PermissionRequestHandler } from '../sdk/src/platform/permissions/prompt.ts';
-import type { TurnEvent } from '../sdk/src/events/turn.ts';
-import type { ToolEvent } from '../sdk/src/events/tools.ts';
-import type { McpServerConfig } from '../sdk/src/platform/mcp/config.ts';
+} from '../platform/src/platform/acp/agent.ts';
+import type { EmbeddedSession } from '../platform/src/platform/embed/session.ts';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
+import { createEventEnvelope } from '../platform/src/platform/runtime/event-envelope.ts';
+import type { SharedSessionSubmission } from '../platform/src/platform/control-plane/session-types.ts';
+import type { PermissionRequestHandler } from '../platform/src/platform/permissions/prompt.ts';
+import type { TurnEvent } from '../platform/src/events/turn.ts';
+import type { ToolEvent } from '../platform/src/events/tools.ts';
+import type { McpServerConfig } from '../platform/src/platform/mcp/config.ts';
 
 interface RecordedUpdate {
   sessionId: string;

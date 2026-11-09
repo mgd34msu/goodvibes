@@ -1,4 +1,4 @@
-import { readWebuiStatusCatalog, type StatusValue } from '@goodvibes-jev/engine/sdk/platform/judgment-browser/catalogs';
+import { readWebuiStatusCatalog, type StatusValue } from '@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs';
 import type { BadgeTone } from '../lib/presentation-bridge';
 import { Chip } from './ui/Chip';
 import type { StatusTone } from './ui/StatusDot';

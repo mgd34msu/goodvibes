@@ -4,7 +4,7 @@
  * outside a turn sees one.
  */
 import { describe, expect, test } from 'bun:test';
-import { currentTurnSurfaceId, turnSurfaceOf, withTurnSurface } from '../sdk/src/platform/security/turn-boundary.js';
+import { currentTurnSurfaceId, turnSurfaceOf, withTurnSurface } from '../platform/src/platform/security/turn-boundary.js';
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 

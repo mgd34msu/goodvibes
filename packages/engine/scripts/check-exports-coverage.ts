@@ -4,7 +4,7 @@
  *
  * ── The gap this closes ───────────────────────────────────────────────────
  *
- * `check-subpath-api-surface.ts` reads `sdk/package.json`'s `exports`
+ * `check-subpath-api-surface.ts` reads `engine/package.json`'s `exports`
  * map and iterates FROM it: for each declared subpath, it records and compares
  * the symbols that subpath exposes. That is the right check for "did a declared
  * subpath's API change", and it is structurally incapable of answering "is a
@@ -37,7 +37,7 @@ import { SOURCE_CONDITION } from './export-conditions.ts';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const PACKAGE_JSON = join(ROOT, 'package.json');
-const PLATFORM_DIR = join(ROOT, 'sdk/src/platform');
+const PLATFORM_DIR = join(ROOT, 'platform/src/platform');
 
 /**
  * Modules with an `index.ts` that are deliberately NOT part of the published
@@ -59,11 +59,11 @@ function declaredPlatformSubpaths(): ReadonlySet<string> {
   const manifest = JSON.parse(readFileSync(PACKAGE_JSON, 'utf8')) as { exports: Record<string, unknown> };
   const out = new Set<string>();
   for (const key of Object.keys(manifest.exports)) {
-    // The sdk's platform subpaths are the engine package's ./sdk/platform/* exports.
-    if (!key.startsWith('./sdk/platform/')) continue;
+    // The engine's platform subpaths are the engine package's ./platform/platform/* exports.
+    if (!key.startsWith('./platform/platform/')) continue;
     // Only the module root counts: './platform/email' covers the module,
     // './platform/email/node' is a further entry point within it.
-    const rest = key.slice('./sdk/platform/'.length);
+    const rest = key.slice('./platform/platform/'.length);
     const [head] = rest.split('/');
     if (head !== undefined && head.length > 0) out.add(head);
   }
@@ -121,7 +121,7 @@ function main(): void {
   // build. The workspace source condition names a source file, so it is always
   // checkable. Targets are relative to the engine root.
   {
-    const distBuilt = existsSync(join(ROOT, 'sdk/dist'));
+    const distBuilt = existsSync(join(ROOT, 'platform/dist'));
     const manifest = JSON.parse(readFileSync(PACKAGE_JSON, 'utf8')) as {
       exports: Record<string, Record<string, string | undefined> | string>;
     };
@@ -154,7 +154,7 @@ function main(): void {
       '',
       'Add an entry to the engine package.json:',
       '',
-      '    "./sdk/platform/<name>": "./sdk/src/platform/<name>/index.ts"',
+      '    "./platform/platform/<name>": "./platform/src/platform/<name>/index.ts"',
       '',
       'or, if it is genuinely internal, name it in INTENTIONALLY_INTERNAL in this',
       'script with the reason consumers do not need it.',

@@ -3,7 +3,7 @@ import {
   handleKillRingShortcut,
   type GlobalShortcutState,
 } from '@goodvibes-jev/engine/terminal-shell/global-shortcuts';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { CommandContext } from './command-registry.ts';
 import type { KillRing } from './kill-ring.ts';
 import { nextPermissionMode, permissionModeLabel, type PermissionModeValue } from '../core/permission-mode.ts';
@@ -98,8 +98,8 @@ export function handleGlobalShortcutToken(state: GlobalShortcutRouteState, token
 
 /**
  * Cycle the session permission mode (Shift+Tab). The change goes through the
- * SDK config surface, configManager.set('permissions.mode', ...), which is
- * what the SDK PermissionManager reads and what the orchestrator consults for
+ * platform config surface, configManager.set('permissions.mode', ...), which is
+ * what the platform PermissionManager reads and what the orchestrator consults for
  * its standing plan-mode instruction, so every attached surface converges on
  * the same mode. The footer pill re-renders off the config-key subscription
  * wired in turn-event-wiring; the printed line narrates the change inline.

@@ -1,11 +1,11 @@
 import { expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { registerInboxSurface } from '@goodvibes-jev/engine/sdk/platform/intake';
-import { createRuntimeStore } from '@goodvibes-jev/engine/sdk/platform/runtime/store';
-import type { ProjectIndex } from '@goodvibes-jev/engine/sdk/platform/state';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { registerInboxSurface } from '@goodvibes-jev/engine/platform/platform/intake';
+import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
+import type { ProjectIndex } from '@goodvibes-jev/engine/platform/platform/state';
 import { RuntimeEventBus } from '../../runtime/index.js';
 import { createRuntimeServices } from '../../runtime/services.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';

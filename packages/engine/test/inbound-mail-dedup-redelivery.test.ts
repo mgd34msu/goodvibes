@@ -18,22 +18,22 @@
  */
 
 import { afterAll, afterEach, describe, expect, test } from 'bun:test';
-import { InboundMessageDedup } from '../sdk/src/platform/adapters/inbound-dedup.ts';
+import { InboundMessageDedup } from '../platform/src/platform/adapters/inbound-dedup.ts';
 import {
   DEFAULT_INBOUND_MAIL_DEDUP_TTL_MS,
   DedupingInboundMailSink,
   createInboundMailDedup,
   inboundMailDedupKey,
   inboundMailSourceIdentity,
-} from '../sdk/src/platform/email/inbound/sink.ts';
+} from '../platform/src/platform/email/inbound/sink.ts';
 import {
   InboundMailboxWatcher,
   drainMailboxDelta,
   resolveWatcherSettings,
   type MailboxWire,
-} from '../sdk/src/platform/email/inbound/index.ts';
-import type { InboundMailboxMessage } from '../sdk/src/platform/email/inbound/ports.ts';
-import type { ImapEnvelope } from '../sdk/src/platform/email/imap-types.ts';
+} from '../platform/src/platform/email/inbound/index.ts';
+import type { InboundMailboxMessage } from '../platform/src/platform/email/inbound/ports.ts';
+import type { ImapEnvelope } from '../platform/src/platform/email/imap-types.ts';
 import { makeFakeMailbox, openMailboxSocket, type FakeMailboxServer } from './_helpers/fake-imap-mailbox.ts';
 import {
   FakeClock,

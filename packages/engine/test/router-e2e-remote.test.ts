@@ -19,8 +19,8 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { dispatchDaemonApiRoutes } from '../daemon-sdk/src/api-router.js';
-import { dispatchRemoteRoutes } from '../daemon-sdk/src/remote.js';
+import { dispatchDaemonApiRoutes } from '../daemon-api/src/api-router.js';
+import { dispatchRemoteRoutes } from '../daemon-api/src/remote.js';
 import { makeDefaultDaemonHandlerStub } from './_helpers/daemon-stub-handlers.js';
 import { makeRequest } from './_helpers/router-requests.js';
 

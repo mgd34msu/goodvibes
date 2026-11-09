@@ -1,4 +1,4 @@
-import type { UnionTask } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+import type { UnionTask } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 type TaskLifecycleState = UnionTask['task']['status'];
 type RuntimeTask = Pick<UnionTask['task'], 'result' | 'error' | 'description' | 'title'>;
 export function sortUnionTasks(tasks: readonly UnionTask[]): UnionTask[] {

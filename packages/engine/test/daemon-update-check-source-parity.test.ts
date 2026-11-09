@@ -1,7 +1,7 @@
 /** Pinned daemon update-check helpers now have one existing engine owner. No update activation. */
 import { expect, test } from 'bun:test';
-import { detectInstallKind, fallbackUpdateCommand } from '../sdk/src/platform/runtime/install-kind.js';
-import { compareVersions, normalizeVersion, parseReleaseTagFromLocation } from '../sdk/src/platform/runtime/self-update.js';
+import { detectInstallKind, fallbackUpdateCommand } from '../platform/src/platform/runtime/install-kind.js';
+import { compareVersions, normalizeVersion, parseReleaseTagFromLocation } from '../platform/src/platform/runtime/self-update.js';
 
 test('daemon install-kind preserves interpreter and exact package-path semantics on both separators', () => {
   for (const path of ['/usr/bin/bun', 'C:\\tools\\BUN.EXE', '/project/node_modules/bin/bun']) expect(detectInstallKind(path)).toBe('source');

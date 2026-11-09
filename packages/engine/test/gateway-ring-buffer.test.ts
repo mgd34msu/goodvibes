@@ -8,8 +8,8 @@
  *  4. getSnapshot().totals.surfaceMessages reflects actual ring size (capped at 200).
  */
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { RingBuffer } from '../sdk/src/platform/utils/ring-buffer.js';
-import { ControlPlaneGateway } from '../sdk/src/platform/control-plane/gateway.js';
+import { RingBuffer } from '../platform/src/platform/utils/ring-buffer.js';
+import { ControlPlaneGateway } from '../platform/src/platform/control-plane/gateway.js';
 
 // ---------------------------------------------------------------------------
 // RingBuffer unit tests

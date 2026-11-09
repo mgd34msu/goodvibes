@@ -27,8 +27,8 @@ import { createECDH, createPublicKey, randomBytes, verify as cryptoVerify } from
 import {
   createPushService,
   createPushSubscriptionStore,
-} from '../sdk/src/platform/control-plane/routes/push-composition.ts';
-import type { ConfigKey } from '../sdk/src/platform/config/schema.ts';
+} from '../platform/src/platform/control-plane/routes/push-composition.ts';
+import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
 import {
   DEFAULT_VAPID_SUBJECT,
   PushSubscriptionStore,
@@ -40,7 +40,7 @@ import {
   type PushSubscriptionPolicy,
   type PushSubscriptionSweepReport,
   type StoredPushSubscription,
-} from '../sdk/src/platform/push/index.ts';
+} from '../platform/src/platform/push/index.ts';
 
 // ---------------------------------------------------------------------------
 // Real key material, a genuine 65-byte uncompressed P-256 point + 16-byte auth.

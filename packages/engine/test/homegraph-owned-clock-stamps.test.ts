@@ -1,9 +1,9 @@
 import { expect, spyOn, test } from 'bun:test';
 import { join } from 'node:path';
-import { assertJudgmentInput } from '../sdk/src/platform/gate/judgment-input.js';
-import { knowledgeRawRepresentation } from '../sdk/src/platform/knowledge/store-record-representation.js';
-import { prepareKnowledgeRecordAdmission } from '../sdk/src/platform/knowledge/store-record-snapshot.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
+import { assertJudgmentInput } from '../platform/src/platform/gate/judgment-input.js';
+import { knowledgeRawRepresentation } from '../platform/src/platform/knowledge/store-record-representation.js';
+import { prepareKnowledgeRecordAdmission } from '../platform/src/platform/knowledge/store-record-snapshot.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { useKnowledgeAnswerReadings } from './_helpers/knowledge-answer-readings.js';
 import { createHomeGraphService, useHomeGraphFixtures } from './_helpers/homegraph-service-fixtures.js';
 

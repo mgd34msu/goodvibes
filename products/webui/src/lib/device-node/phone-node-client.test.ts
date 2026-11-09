@@ -2,7 +2,7 @@
  * phone-node-client.test.ts, the web app as a paired device node.
  *
  * The node announces only what this browser can really do, pairs through the
- * SDK peer contract, serves `device.capability` work, and discards a token the
+ * platform peer contract, serves `device.capability` work, and discards a token the
  * daemon rejects instead of retrying against a dead credential.
  */
 import { describe, expect, test } from 'bun:test';

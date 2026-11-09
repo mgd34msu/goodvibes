@@ -33,7 +33,7 @@ const FIXTURE_UNION = {
 };
 
 describe('SESSION_UPDATE intent map', () => {
-  test('maps concrete wire events to coarse intents (mirrors SDK map)', () => {
+  test('maps concrete wire events to coarse intents (mirrors platform map)', () => {
     expect(sessionUpdateIntent('session-created')).toBe('created');
     expect(sessionUpdateIntent('session-message-appended')).toBe('updated');
     expect(sessionUpdateIntent('session-reopened')).toBe('updated');
@@ -126,7 +126,7 @@ describe('badge labels', () => {
 });
 
 // B1: closed cross-surface sessions carry an optional, honest reason for WHY
-// they closed under metadata.closeReason (SDK's SharedSessionCloseReason).
+// they closed under metadata.closeReason (platform's SharedSessionCloseReason).
 // An 'idle-reaped' close auto-reopens on the next heartbeat and must render
 // distinctly from a deliberate close, never folded into "closed · history".
 describe('reaped-as-reaped (closeReason)', () => {
@@ -169,7 +169,7 @@ describe('reaped-as-reaped (closeReason)', () => {
   });
 });
 
-// Channel-origin attribution (principals.*, SDK 1.6.1's initiative family),
+// Channel-origin attribution (principals.*, platform 1.6.1's initiative family),
 // metadata.attributedPrincipalId/Name/Known, stamped by channel-profiles/intake.ts.
 describe('attribution (attributedPrincipal*)', () => {
   test('a session with no attribution metadata at all gets a null known flag and no label', () => {

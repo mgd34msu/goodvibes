@@ -7,14 +7,14 @@
  * archive verbs), checkpoints.*, sessions.search, and push.* appear in the
  * contract, but a descriptor without an attached handler answers
  * 501 "Gateway method is not invokable" over both websocket and HTTP invoke.
- * A composition root that registers those descriptors but never calls the SDK's
+ * A composition root that registers those descriptors but never calls the platform's
  * registration entry point ships exactly that 501 for the whole ws-only family
  *, the regression this package exists to make impossible to reintroduce
  * independently in each front-end. `attachWsOnlyGatewayVerbHandlers` binds the
  * descriptors and their handlers together, and the conformance helper in
  * ./conformance.ts gates that no descriptor is ever left handler-less.
  *
- * This module is a thin, dependency-injected wrapper over the SDK's own
+ * This module is a thin, dependency-injected wrapper over the platform's own
  * registration entry points. Front-ends pass their concrete managers in; the
  * package owns the wiring so it cannot drift between them.
  */
@@ -22,15 +22,15 @@ import {
   registerGatewayVerbGroups,
   type GatewayMethodCatalog,
   type GatewayVerbGroupDeps,
-} from '@goodvibes-jev/engine/sdk/platform/control-plane';
+} from '@goodvibes-jev/engine/platform/platform/control-plane';
 import {
   createProcessRegistry,
   withFleetArchive,
   type ArchivableProcessRegistry,
   type ProcessRegistryDeps,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
-import { ObservedAgentSource } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet/observed';
-import { computeUsageCostUsd, type ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
+} from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+import { ObservedAgentSource } from '@goodvibes-jev/engine/platform/platform/runtime/fleet/observed';
+import { computeUsageCostUsd, type ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 
 /**
  * Attach handlers for the ws-only gateway verb groups (fleet.* / checkpoints.* /
@@ -39,9 +39,9 @@ import { computeUsageCostUsd, type ProviderRegistry } from '@goodvibes-jev/engin
  * handler-absent (the 501 regression class).
  *
  * Call once, at composition time, after the injected managers all exist. The
- * dependency shape (`GatewayVerbGroupDeps`) is owned by the SDK; this wrapper
+ * dependency shape (`GatewayVerbGroupDeps`) is owned by the platform; this wrapper
  * exists so each front-end has a single named call site instead of reaching
- * into the SDK's registration internals directly and diverging.
+ * into the platform's registration internals directly and diverging.
  */
 export function attachWsOnlyGatewayVerbHandlers(
   gatewayMethods: GatewayMethodCatalog,
@@ -56,7 +56,7 @@ export function attachWsOnlyGatewayVerbHandlers(
  * background processes). Constructed once per composition, not per consumer,
  * so the coalesced tick and the agent-activity side-table are shared, not
  * duplicated. Archive-aware: finished agent/swarm subtrees can be moved out of
- * the live fleet view into a session-scoped archive (see the SDK's
+ * the live fleet view into a session-scoped archive (see the platform's
  * fleet/archive.ts).
  *
  * This is the registry the fleet.* gateway verbs above query, so building it

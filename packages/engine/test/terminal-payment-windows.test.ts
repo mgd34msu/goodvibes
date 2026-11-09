@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { createTerminalCommandRegistry } from '../terminal-shell/src/command-registry.js';
 import { SelectionModal, type OpenSelection } from '../terminal-shell/src/selection-modal.js';
 import { attachSelectionModalQueue, type SelectionModalCallback } from '../terminal-shell/src/selection-modal-queue.js';
@@ -10,8 +10,8 @@ import { handleSelectionModalToken } from '../terminal-shell/src/modal-input-rou
 import { createPaymentWindowCommand } from '../terminal-shell/src/payment-window-command.js';
 import { createPaymentCardCommands } from '../terminal-shell/src/card-field-prompts.js';
 import { RetainedOperatorConnection } from '../terminal-shell/src/retained-operator-connection.js';
-import type { PaymentWindowView } from '../sdk/src/platform/payments/window-view.js';
-import type { PaymentOperationView } from '../sdk/src/platform/payments/operation-view.js';
+import type { PaymentWindowView } from '../platform/src/platform/payments/window-view.js';
+import type { PaymentOperationView } from '../platform/src/platform/payments/operation-view.js';
 
 const roots: string[] = [];
 const exits: (() => void)[] = [];

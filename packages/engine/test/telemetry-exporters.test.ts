@@ -2,11 +2,11 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConsoleExporter } from '../sdk/src/platform/runtime/telemetry/exporters/console.js';
-import { LocalLedgerExporter } from '../sdk/src/platform/runtime/telemetry/exporters/local-ledger.js';
-import type { ReadableSpan } from '../sdk/src/platform/runtime/telemetry/types.js';
-import { SpanKind, SpanStatusCode } from '../sdk/src/platform/runtime/telemetry/types.js';
-import { logger } from '../sdk/src/platform/utils/logger.js';
+import { ConsoleExporter } from '../platform/src/platform/runtime/telemetry/exporters/console.js';
+import { LocalLedgerExporter } from '../platform/src/platform/runtime/telemetry/exporters/local-ledger.js';
+import type { ReadableSpan } from '../platform/src/platform/runtime/telemetry/types.js';
+import { SpanKind, SpanStatusCode } from '../platform/src/platform/runtime/telemetry/types.js';
+import { logger } from '../platform/src/platform/utils/logger.js';
 
 type LoggerWarn = typeof logger.warn;
 

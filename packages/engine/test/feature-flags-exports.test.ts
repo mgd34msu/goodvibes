@@ -17,7 +17,7 @@ import {
   getFeatureSettingsBinding,
   FEATURE_SETTINGS,
   FEATURE_SETTINGS_BINDINGS,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/feature-flags';
+} from '@goodvibes-jev/engine/platform/platform/runtime/feature-flags';
 
 describe('capability-gates public subpath', () => {
   test('FEATURE_SETTINGS is exported and covers every binding', () => {
@@ -71,8 +71,8 @@ describe('no user-reachable "feature flag" string in source', () => {
   // plumbing keep their vocabulary; everything a user or model can ever see
   // names the settings key that controls the feature instead.
   const SRC_ROOTS = [
-    resolve(import.meta.dir, '..', 'sdk', 'src'),
-    resolve(import.meta.dir, '..', 'daemon-sdk', 'src'),
+    resolve(import.meta.dir, '..', 'platform', 'src'),
+    resolve(import.meta.dir, '..', 'daemon-api', 'src'),
   ];
 
   function stripComments(source: string): string {

@@ -4,15 +4,15 @@
  * (emitting CONTRACT_CREATED to its listeners, as the runner does), records
  * cancels and replies, and lets a test emit any runner event.
  */
-import type { ContractEvent } from '../../sdk/src/events/contract.js';
+import type { ContractEvent } from '../../platform/src/events/contract.js';
 import type {
   Contract,
   ContractRunner,
   ContractView,
   OwnerReplyOutcome,
   StartContractInput,
-} from '../../sdk/src/platform/contract/index.js';
-import type { AgentRecord } from '../../sdk/src/platform/tools/agent/index.js';
+} from '../../platform/src/platform/contract/index.js';
+import type { AgentRecord } from '../../platform/src/platform/tools/agent/index.js';
 import { makeContract } from './fixtures.js';
 
 export type FakeRunnerSurface = Pick<ContractRunner, 'start' | 'get' | 'list' | 'cancel' | 'reply' | 'on'>;

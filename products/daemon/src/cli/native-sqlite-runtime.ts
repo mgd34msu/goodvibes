@@ -1,5 +1,5 @@
-import type { DarwinDaemonSqliteOwner } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
-import { isCompiledBunModuleUrl } from '@goodvibes-jev/engine/sdk/platform/runtime/compiled-native-startup';
+import type { DarwinDaemonSqliteOwner } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import { isCompiledBunModuleUrl } from '@goodvibes-jev/engine/platform/platform/runtime/compiled-native-startup';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { createHash } from 'node:crypto';
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, realpathSync } from 'node:fs';

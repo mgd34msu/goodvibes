@@ -1,4 +1,4 @@
-import type { ArtifactDescriptor } from '@goodvibes-jev/engine/sdk/platform/artifacts';
+import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { AgentSetupWizardDurableReceipt, AgentSetupWizardDurableReceiptStatus, AgentSetupWizardReceiptSchemaStatus } from './setup-wizard.ts';
 
 interface SetupReceiptInput {

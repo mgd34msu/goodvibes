@@ -1,6 +1,6 @@
 /** Generated hosted records retain the producer's optional metadata and literal ownership marker. */
 import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/contracts';
-import type { HostedSessionRecord } from '@goodvibes-jev/engine/sdk/platform/hosted-sessions';
+import type { HostedSessionRecord } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
 
 type SessionMethod = 'sessions.hosted.attach' | 'sessions.hosted.create' | 'sessions.hosted.detach' | 'sessions.hosted.kill';
 type GeneratedRecord = OperatorMethodOutput<SessionMethod>['session']

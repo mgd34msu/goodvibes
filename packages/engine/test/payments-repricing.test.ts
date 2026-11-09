@@ -1,17 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { NONE } from '@goodvibes-jev/judgment';
-import { checkoutAmountCandidates, checkoutRepriceAmount, checkoutRepriceShape, readRepricedCheckout } from '../sdk/src/platform/payments/checkout-repricing.js';
-import { checkoutTerms } from '../sdk/src/platform/payments/batteries/checkout-terms.js';
-import type { CheckoutTerms } from '../sdk/src/platform/payments/checkout-page.js';
-import type { RawCheckoutReading } from '../sdk/src/platform/payments/checkout-extraction.js';
-import { extractCheckout } from '../sdk/src/platform/payments/checkout-extraction.js';
-import { parseCurrencyCode, unsafeOwnerSuppliedTextForTests } from '../sdk/src/platform/payments/types.js';
-import { CheckoutRegistry, CheckoutRegistryError, MemoryCheckoutJournal, type InFlightCheckout } from '../sdk/src/platform/payments/checkout-registry.js';
+import { checkoutAmountCandidates, checkoutRepriceAmount, checkoutRepriceShape, readRepricedCheckout } from '../platform/src/platform/payments/checkout-repricing.js';
+import { checkoutTerms } from '../platform/src/platform/payments/batteries/checkout-terms.js';
+import type { CheckoutTerms } from '../platform/src/platform/payments/checkout-page.js';
+import type { RawCheckoutReading } from '../platform/src/platform/payments/checkout-extraction.js';
+import { extractCheckout } from '../platform/src/platform/payments/checkout-extraction.js';
+import { parseCurrencyCode, unsafeOwnerSuppliedTextForTests } from '../platform/src/platform/payments/types.js';
+import { CheckoutRegistry, CheckoutRegistryError, MemoryCheckoutJournal, type InFlightCheckout } from '../platform/src/platform/payments/checkout-registry.js';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { createBrowserCheckoutDriverFactory, type CheckoutBrowserEngine } from '../sdk/src/platform/payments/browser-checkout-driver.js';
-import { CardMaterialRedactor } from '../sdk/src/platform/payments/card-redaction.js';
-import { CheckoutSubmitRefused } from '../sdk/src/platform/payments/checkout-page.js';
+import { createBrowserCheckoutDriverFactory, type CheckoutBrowserEngine } from '../platform/src/platform/payments/browser-checkout-driver.js';
+import { CardMaterialRedactor } from '../platform/src/platform/payments/card-redaction.js';
+import { CheckoutSubmitRefused } from '../platform/src/platform/payments/checkout-page.js';
 
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Missing complete authored fixture state');

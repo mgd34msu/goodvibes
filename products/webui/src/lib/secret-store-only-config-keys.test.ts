@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { daemonSecretKeyFor as sdkDaemonSecretKeyFor } from '@goodvibes-jev/engine/sdk/platform/config';
+import { daemonSecretKeyFor as engineDaemonSecretKeyFor } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   daemonSecretKeyFor,
   isSecretStoreOnlyConfigKey,
@@ -31,10 +31,10 @@ describe('isSecretStoreOnlyConfigKey', () => {
   });
 });
 
-describe('daemonSecretKeyFor: ported derivation matches the installed SDK exactly', () => {
-  test('matches the real SDK function for every declared key', () => {
+describe('daemonSecretKeyFor: ported derivation matches the installed platform exactly', () => {
+  test('matches the real platform function for every declared key', () => {
     for (const key of SECRET_STORE_ONLY_CONFIG_KEYS) {
-      expect(daemonSecretKeyFor(key)).toBe(sdkDaemonSecretKeyFor(key));
+      expect(daemonSecretKeyFor(key)).toBe(engineDaemonSecretKeyFor(key));
     }
   });
 

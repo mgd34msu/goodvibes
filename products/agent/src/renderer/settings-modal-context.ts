@@ -8,13 +8,13 @@ import { buildMcpContext } from '@goodvibes-jev/engine/terminal-shell/renderer/m
  * text builders; settings-modal.ts lays them out with the surface kit.
  */
 
-import { GATE_PRESETS } from '@goodvibes-jev/engine/sdk/platform/gate';
-import '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { GATE_PRESETS } from '@goodvibes-jev/engine/platform/platform/gate';
+import '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { SettingsModal, SettingEntry, FlagEntry, SubscriptionEntry, SettingsCategory } from '../input/settings-modal.ts';
 import { describeUiRouting, formatValue, getSettingLabel } from './settings-modal-helpers.ts';
 import { isSecretConfigKey } from '../config/secret-config.ts';
 import '../input/concealed-input.ts';
-import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/sdk/platform/payments';
+import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/platform/platform/payments';
 import { formatProviderAuthRouteId } from '../provider-auth-route-display.ts';
 
 export const CATEGORY_INFO: Record<SettingsCategory, string> = {
@@ -92,7 +92,7 @@ export const CATEGORY_INFO: Record<SettingsCategory, string> = {
     'Every optional capability grouped by its settings domain: each feature is switched through a first-class domain settings key (shown per row), with its full description and related settings under the cursor.',
   atRest: 'Data-at-rest protection: whether stored content is redacted, and retention limits by age and total size.',
   learning:
-    "Idle-time memory consolidation: dedupe merges, confidence decay of never-referenced records, and review proposals. On by default; runs on the SDK's daemon-side scheduler (an idle trigger plus a slow schedule fallback), and every run with something to report leaves a visible notice.",
+    "Idle-time memory consolidation: dedupe merges, confidence decay of never-referenced records, and review proposals. On by default; runs on the platform's daemon-side scheduler (an idle trigger plus a slow schedule fallback), and every run with something to report leaves a visible notice.",
   agents:
     'Agent runtime tuning: the context-window fraction that triggers sub-agent conversation compaction, and the token budget, relevance floor, and code-chunk limit for per-turn passive knowledge/code injection.',
   notifications:
@@ -241,7 +241,7 @@ export const { currentSettingValue, buildSettingContext } = createSettingContext
   label: getSettingLabel,
   source: (entry) => entry.effectiveSource ?? 'default',
   detail(entry) {
-    const lines: string[] = []; // The SDK's own wording, not authored here, and never shown against 'stored'.
+    const lines: string[] = []; // The platform's own wording, not authored here, and never shown against 'stored'.
     if (entry.setting.key === 'payments.cvvHandling' && entry.currentValue === 'prompt') {
       lines.push('', CVV_PROMPT_TRADEOFF_WARNING);
     }

@@ -1,8 +1,8 @@
 import { types as nodeTypes } from 'node:util';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
-import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
+import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { rankHarnessCatalog, captureCatalogData, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 
 export interface AgentHarnessModelToolCatalogArgs {
   readonly query?: unknown;

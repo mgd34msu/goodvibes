@@ -2,11 +2,11 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SQLiteStore, loadSqlJsEngine, type SqlDatabase, type SqliteStoreInitOptions } from '../sdk/src/platform/state/sqlite-store.js';
-import { prepareNativeKnowledgeSchemaReadPlan } from '../sdk/src/platform/state/knowledge-schema-read-plan.js';
-import { createSchema, KNOWLEDGE_SCHEMA_VERSION } from '../sdk/src/platform/knowledge/store-schema.js';
-import { validateCurrentKnowledgeSchema } from '../sdk/src/platform/knowledge/store-current-schema-validation.js';
-import { createEmptyWorkLedgerState } from '../sdk/src/platform/workflow/work-ledger/service.js';
+import { SQLiteStore, loadSqlJsEngine, type SqlDatabase, type SqliteStoreInitOptions } from '../platform/src/platform/state/sqlite-store.js';
+import { prepareNativeKnowledgeSchemaReadPlan } from '../platform/src/platform/state/knowledge-schema-read-plan.js';
+import { createSchema, KNOWLEDGE_SCHEMA_VERSION } from '../platform/src/platform/knowledge/store-schema.js';
+import { validateCurrentKnowledgeSchema } from '../platform/src/platform/knowledge/store-current-schema-validation.js';
+import { createEmptyWorkLedgerState } from '../platform/src/platform/workflow/work-ledger/service.js';
 
 const roots: string[] = [], stores: SQLiteStore[] = [];
 afterEach(() => {

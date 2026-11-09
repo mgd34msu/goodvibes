@@ -15,17 +15,17 @@ import type { NativeConversationIntakeActions, NativeConversationIntakeState } f
 
 import type { ConversationManager } from '../core/conversation';
 
-import type { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/sdk/platform/workspace';
-import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import type { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/platform/platform/workspace';
+import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { ViewTarget } from './views.ts';
 import type { KeybindingsManager } from './keybindings.ts';
 import type { OnboardingWizardMode } from './onboarding/onboarding-wizard.ts';
 import type { OpenOnboardingWizardOptions } from './handler-ui-state.ts';
-import type { KnowledgeApi } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import type { MemorySpineClient } from '@goodvibes-jev/engine/sdk/platform/runtime/memory-spine';
-import type { HookApi } from '@goodvibes-jev/engine/sdk/platform/hooks';
-import type { McpApi } from '@goodvibes-jev/engine/sdk/platform/mcp';
-import type { ProviderApi } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { KnowledgeApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import type { MemorySpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
+import type { HookApi } from '@goodvibes-jev/engine/platform/platform/hooks';
+import type { McpApi } from '@goodvibes-jev/engine/platform/platform/mcp';
+import type { ProviderApi } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { OpsApi } from '@/runtime/index.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
 import type { OperatorClient } from '@/runtime/index.ts';
@@ -44,7 +44,7 @@ export type { RemoteCommandService, PlanRuntimeService } from '@/runtime/index.t
 export interface CommandRuntimeState extends TerminalCommandRuntimeState {
   /**
    * Cumulative count of direct terminal writes the output guard intercepted
-   * this session, surfaced by /debug. Optional so the SDK's MutableRuntimeState
+   * this session, surfaced by /debug. Optional so the platform's MutableRuntimeState
    * (which has no such field) stays assignable; the guard sets it lazily on the
    * shared runtime object. (item 1a.)
    */
@@ -63,7 +63,7 @@ export interface CommandUiActions extends TerminalCommandUiActions<import('./mod
   dispatchNativeIntakeTurn?: (state: NativeConversationIntakeState) => Promise<void>;
   submitInput?: (
     text: string,
-    content?: import('@goodvibes-jev/engine/sdk/platform/providers').ContentPart[],
+    content?: import('@goodvibes-jev/engine/platform/platform/providers').ContentPart[],
     context?: ProductInputContext,
   ) => void;
 
@@ -253,7 +253,7 @@ export interface CommandSessionServices extends TerminalCommandSessionServices {
   readonly conversationManager: ConversationManager;
   readonly runtime: CommandRuntimeState;
 
-  readonly contractRunner?: import('@goodvibes-jev/engine/sdk/platform/contract').ContractRunner;
+  readonly contractRunner?: import('@goodvibes-jev/engine/platform/platform/contract').ContractRunner;
 
   /**
    * Recompute the Orchestrator's session-wide usage totals from the
@@ -264,11 +264,11 @@ export interface CommandSessionServices extends TerminalCommandSessionServices {
    */
 
   /** The orchestration engine's command-facing facade, see runtime/workstream-services.ts. */
-  readonly contractOperator?: import('@goodvibes-jev/engine/sdk/platform/contract').ContractOperatorService;
+  readonly contractOperator?: import('@goodvibes-jev/engine/platform/platform/contract').ContractOperatorService;
   /** The repo source-tree code index, see runtime/code-index-services.ts. */
-  readonly codeIndexStore?: import('@goodvibes-jev/engine/sdk/platform/state').CodeIndexStore;
+  readonly codeIndexStore?: import('@goodvibes-jev/engine/platform/platform/state').CodeIndexStore;
   /** Tool-site reindex scheduler, `/codebase status` reports its last activity. */
-  readonly codeIndexReindexScheduler?: import('@goodvibes-jev/engine/sdk/platform/state').CodeIndexReindexScheduler;
+  readonly codeIndexReindexScheduler?: import('@goodvibes-jev/engine/platform/platform/state').CodeIndexReindexScheduler;
   /** Whether the (default-off) `agent-passive-code-injection` flag is on, for `/codebase status`. */
   readonly isPassiveCodeInjectionFlagEnabled?: () => boolean;
   /**
@@ -301,23 +301,23 @@ export interface CommandWorkspaceUiServices extends TerminalCommandWorkspaceUiSe
   workspaceCheckpointManager?: WorkspaceCheckpointManager;
   /** In-process gateway catalog, the /review hunk-revert flow invokes checkpoints.revertHunk(Preview) over it. */
   gatewayMethods?: GatewayMethodCatalog;
-  workspaceTrustManager?: import('@goodvibes-jev/engine/sdk/platform/runtime/operations').WorkspaceTrustManager;
-  workspaceRegistrationManager?: import('@goodvibes-jev/engine/sdk/platform/runtime/operations').WorkspaceRegistrationManager;
+  workspaceTrustManager?: import('@goodvibes-jev/engine/platform/platform/runtime/operations').WorkspaceTrustManager;
+  workspaceRegistrationManager?: import('@goodvibes-jev/engine/platform/platform/runtime/operations').WorkspaceRegistrationManager;
 }
 
 export interface CommandWorkspaceServices extends CommandWorkspaceUiServices, CommandWorkspaceShellServices {}
 
 export interface CommandPlatformConfigServices extends TerminalCommandPlatformConfigServices {
   /** Per-device pairing tokens, backs the /devices command family. */
-  readonly pairingTokens?: import('@goodvibes-jev/engine/sdk/platform/pairing').PairingTokenManager;
+  readonly pairingTokens?: import('@goodvibes-jev/engine/platform/platform/pairing').PairingTokenManager;
   /** Capability gate runtime, feature states derive from domain settings keys; surfaces read live/pending state here. */
   readonly featureFlagManager?: FeatureFlagManager;
 
   /** Direct-command consumer (`/search`) alongside the existing agent-tool consumer. */
-  readonly webSearchService?: import('@goodvibes-jev/engine/sdk/platform/web-search').WebSearchService;
+  readonly webSearchService?: import('@goodvibes-jev/engine/platform/platform/web-search').WebSearchService;
   /** Direct-command consumer (`/image`), first production caller of `.generate()`. */
-  readonly mediaProviders?: import('@goodvibes-jev/engine/sdk/platform/media').MediaProviderRegistry;
-  readonly artifactStore?: import('@goodvibes-jev/engine/sdk/platform/artifacts').ArtifactStore;
+  readonly mediaProviders?: import('@goodvibes-jev/engine/platform/platform/media').MediaProviderRegistry;
+  readonly artifactStore?: import('@goodvibes-jev/engine/platform/platform/artifacts').ArtifactStore;
   /** Background daemon/HTTP-listener/relay controller. Mutable: main.ts patches it in post-bootstrap (see bootstrap-command-parts.ts ordering note). */
   externalServices?: UiPlatformServices['externalServices'];
 }
@@ -327,7 +327,7 @@ export interface CommandPlatformServices extends CommandPlatformConfigServices, 
 export interface CommandOpsServices extends CommandOpsShellServices {}
 
 export interface CommandExtensionRegistryServices extends TerminalCommandExtensionRegistryServices {
-  readonly evalRegistry?: import('@goodvibes-jev/engine/sdk/platform/observe').EvalRegistry;
+  readonly evalRegistry?: import('@goodvibes-jev/engine/platform/platform/observe').EvalRegistry;
 }
 
 export interface CommandExtensionServices extends CommandExtensionRegistryServices, CommandExtensionShellServices {}
@@ -350,11 +350,11 @@ export interface CommandContext extends CommandUiActions, CommandShellUiOpeners 
     readonly providerApi?: ProviderApi;
     readonly knowledgeApi?: KnowledgeApi;
     /**
-     * The cross-surface memory spine client (SDK 1.2.0 full-detach). `/recall`'s
+     * The cross-surface memory spine client (platform 1.2.0 full-detach). `/recall`'s
      * browse/link/queue/export/import subcommands read and write through this,
      * not `knowledgeApi.memory`, so they fully detach from the local store file
      * when a daemon has been adopted, per
-     * docs/decisions/2026-07-06-memory-wire-full-detach.md in the SDK repo.
+     * docs/decisions/2026-07-06-memory-wire-full-detach.md in the platform repo.
      * `explain` and the `vector` diagnostic subcommand stay on `knowledgeApi.memory`
      * (host-side projection / host-only maintenance, ruled explicitly in that decision).
      */
@@ -369,7 +369,7 @@ export interface CommandContext extends CommandUiActions, CommandShellUiOpeners 
      * /permissions rules lists and revokes rules that take effect live. Served
      * by the daemon's permissions.rules.list/.delete verbs to other surfaces.
      */
-    readonly userPermissionRuleStore?: import('@goodvibes-jev/engine/sdk/platform/permissions').UserPermissionRuleStore;
+    readonly userPermissionRuleStore?: import('@goodvibes-jev/engine/platform/platform/permissions').UserPermissionRuleStore;
   };
 }
 

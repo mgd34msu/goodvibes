@@ -1,13 +1,13 @@
 import { afterEach, expect, test } from 'bun:test';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.js';
-import { InboxCursorStore } from '../sdk/src/platform/intake/cursor-store.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
+import { InboxCursorStore } from '../platform/src/platform/intake/cursor-store.js';
 import {
   createOwnedInboxSource, registerCompositeInboxSurface, INBOX_LIST_METHOD_ID,
   type InboxSurfaceContext, type OwnedInboxSource, type RegisterInboxSurfaceOptions,
-} from '../sdk/src/platform/intake/registration.js';
-import { aggregateInbox, type InboxListOutput } from '../sdk/src/platform/intake/aggregator.js';
-import { composeInboxReads } from '../sdk/src/platform/intake/composite.js';
-import type { InboundChannelItem, InboundProviderAdapter, ProviderPollResult } from '../sdk/src/platform/intake/provider-adapter.js';
+} from '../platform/src/platform/intake/registration.js';
+import { aggregateInbox, type InboxListOutput } from '../platform/src/platform/intake/aggregator.js';
+import { composeInboxReads } from '../platform/src/platform/intake/composite.js';
+import type { InboundChannelItem, InboundProviderAdapter, ProviderPollResult } from '../platform/src/platform/intake/provider-adapter.js';
 import { makeProjectTempDir } from './_helpers/project-temp.js';
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -76,7 +76,7 @@ test('merge uses SQLite BINARY UTF-8 ordering rather than JavaScript locale or U
 });
 
 test('explicit unavailable membership distinguishes configuration from outages and keeps cached rows', async () => {
-  const ctx = context(), now = Date.now(); let repoll!: import('../sdk/src/platform/intake/registration.js').InboxPollingControl;
+  const ctx = context(), now = Date.now(); let repoll!: import('../platform/src/platform/intake/registration.js').InboxPollingControl;
   const a = await source(ctx, 'slack', [row('slack', 'cached', now)], { gatePolling(_id, control) { repoll = control; } });
   await repoll.start(); await repoll.stop(); a.set({ items: [], state: 'unavailable', configured: true, error: 'Bounded outage' }); await repoll.start();
   const b = await source(ctx, 'fixture', [], { adapters: new Map([['fixture', { id: 'fixture', pollIntervalMs: 3_600_000,

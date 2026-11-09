@@ -1,8 +1,8 @@
 import { agentResearchReportSourceOwner } from '../agent/protected-research-report.ts';
 import { submitProtectedAgentResearchReport } from './agent-workspace-research-report-editor.ts';
 import { WorkspaceEditorMessage } from './agent-workspace-editor-message.ts';
-import type { MemoryApi } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import type { MemoryRecord } from '@goodvibes-jev/engine/sdk/platform/state';
+import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import type { MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
 import type { AgentConfigSetting } from '../config/settings-catalog.ts';
 import type { ShellPathService } from '@/runtime/index.ts';
 import type { CommandContext } from './command-registry.ts';

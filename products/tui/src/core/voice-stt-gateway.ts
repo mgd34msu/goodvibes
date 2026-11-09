@@ -15,9 +15,9 @@ import type { SpeechTranscriptionGateway, SpeechTranscriptionResolution } from '
  * honest refusal reasons up front rather than a throw mid-capture.
  */
 
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { GoodVibesSdkError } from '@goodvibes-jev/engine/sdk';
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/sdk';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { GoodVibesError } from '@goodvibes-jev/engine/platform';
+import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
 
 import { resolveOperatorRpc, describeOperatorRpcError } from '../input/commands/operator-rpc.ts';
 
@@ -42,13 +42,13 @@ export interface VoiceSttGatewayDeps {
 export function createVoiceSttGateway(deps: VoiceSttGatewayDeps): VoiceSttGatewayResolution {
   const rpc = resolveOperatorRpc({ configManager: deps.configManager, homeDirectory: deps.homeDirectory });
   if (!rpc.available) return { available: false, reason: rpc.reason };
-  const { sdk } = rpc;
+  const { platformClient } = rpc;
   return {
     available: true,
     gateway: {
       transcribe: async (audio, options) => {
         // Keep the daemon contract's output type at the generic invoke boundary.
-        const result = await sdk.operator.invoke<VoiceTranscriptionResult>('voice.stt', { audio }, options);
+        const result = await platformClient.operator.invoke<VoiceTranscriptionResult>('voice.stt', { audio }, options);
         return result.text;
       },
     },
@@ -62,7 +62,7 @@ export function createVoiceSttGateway(deps: VoiceSttGatewayDeps): VoiceSttGatewa
  * that reached a provider and failed, which the user can act on differently.
  */
 export function describeTranscriptionFailure(error: unknown): string {
-  if (error instanceof GoodVibesSdkError && (error.status === 501 || error.status === 404)) {
+  if (error instanceof GoodVibesError && (error.status === 501 || error.status === 404)) {
     return 'this daemon has no speech-to-text provider wired up; run /voice setup to provision the managed local runtime.';
   }
   return describeOperatorRpcError(error);

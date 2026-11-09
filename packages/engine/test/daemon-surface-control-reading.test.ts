@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { createSystemOnePort, DEFAULT_MODEL, SqliteDecisionLog, withDecisionLog, type JudgmentPort, type JudgmentRequest, type Questions } from '@goodvibes-jev/judgment';
 import { fakePort, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
-import { DaemonSurfaceActionHelper } from '../sdk/src/platform/daemon/surface-actions.ts';
-import { handleHomeAssistantSurfaceWebhook } from '../sdk/src/platform/adapters/homeassistant/index.ts';
-import type { SurfaceAdapterContext } from '../sdk/src/platform/adapters/types.ts';
-import type { ChannelPolicyDecision } from '../sdk/src/platform/channels/types.ts';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
+import { DaemonSurfaceActionHelper } from '../platform/src/platform/daemon/surface-actions.ts';
+import { handleHomeAssistantSurfaceWebhook } from '../platform/src/platform/adapters/homeassistant/index.ts';
+import type { SurfaceAdapterContext } from '../platform/src/platform/adapters/types.ts';
+import type { ChannelPolicyDecision } from '../platform/src/platform/channels/types.ts';
 
 let previous: ReturnType<typeof installJudgmentPort>;
 let requests: JudgmentRequest<Questions>[];

@@ -3,9 +3,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { createExecTool } from '../sdk/src/platform/tools/exec/runtime.ts';
-import { ProcessManager } from '../sdk/src/platform/tools/shared/process-manager.ts';
-import { OverflowHandler } from '../sdk/src/platform/tools/shared/overflow.ts';
+import { createExecTool } from '../platform/src/platform/tools/exec/runtime.ts';
+import { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.ts';
+import { OverflowHandler } from '../platform/src/platform/tools/shared/overflow.ts';
 import { toolReadingsPort } from './_helpers/tool-readings.ts';
 
 let previous: ReturnType<typeof installJudgmentPort>;

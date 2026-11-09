@@ -4,7 +4,7 @@ import {
   type JudgmentPort,
 } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { nativeIntakeCoverage, validateNativeRequirementProposal } from '../sdk/src/platform/workflow/work-ledger/native-intake-decisions.js';
+import { nativeIntakeCoverage, validateNativeRequirementProposal } from '../platform/src/platform/workflow/work-ledger/native-intake-decisions.js';
 
 const COMPLETE = 'Add JSON export.';
 const DUPLICATE = 'A: Keep logs. B: Keep logs.';

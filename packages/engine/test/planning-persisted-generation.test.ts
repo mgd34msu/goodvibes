@@ -3,8 +3,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ordinaryPlanningRevision } from './_helpers/planning-revision.ts';
-import { KnowledgeStore, ProjectPlanningService, type ProjectPlanningStateUpsertInput } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import { findCardNumberShapes } from '../sdk/src/platform/security/card-shapes.ts';
+import { KnowledgeStore, ProjectPlanningService, type ProjectPlanningStateUpsertInput } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { findCardNumberShapes } from '../platform/src/platform/security/card-shapes.ts';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -71,7 +71,7 @@ test('a conditional action holds rather than reloading over pending local batch 
 test('separate processes released from one barrier cannot both win an expected-null creation', async () => {
   const f = await fixture();
   const script = `
-    import { KnowledgeStore } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+    import { KnowledgeStore } from '@goodvibes-jev/engine/platform/platform/knowledge';
     const store = new KnowledgeStore({ dbPath: process.argv[1] });
     await store.init();
     console.log('ready');

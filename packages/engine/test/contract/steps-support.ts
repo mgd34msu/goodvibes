@@ -6,8 +6,8 @@
  */
 import { spawnSync } from 'node:child_process';
 import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import type { DecompositionRunner, DecompositionRunnerRequest } from '../../sdk/src/platform/core/plan-decomposition.js';
-import { buildAmendmentPrompt, buildFixPlannerPrompt, type ContractView } from '../../sdk/src/platform/contract/index.js';
+import type { DecompositionRunner, DecompositionRunnerRequest } from '../../platform/src/platform/core/plan-decomposition.js';
+import { buildAmendmentPrompt, buildFixPlannerPrompt, type ContractView } from '../../platform/src/platform/contract/index.js';
 import { draftUnit, plannerOutput, type AnswerContext, type DraftPlan } from './plan-support.js';
 import type { AgentScript, AgentStep, Harness } from './runner-support.js';
 

@@ -7,8 +7,8 @@ import { waitFor } from '../contract/runner-support.js';
 import { terminal } from '../contract/steps-support.js';
 import { createNativeIntegrationRepairFixture, integrationBarrier } from '../contract/native-integration-support.js';
 import { createNativeReviewedRepairFixture } from '../contract/native-reviewed-repair-support.js';
-import { createOperatorSdk } from '../../operator-sdk/src/client.js';
-import { createOperatorNativeWorkExecutionClient } from '../../sdk/src/platform/workflow/work-ledger/native-execution-client.js';
+import { createOperatorApiClient } from '../../operator-client/src/client.js';
+import { createOperatorNativeWorkExecutionClient } from '../../platform/src/platform/workflow/work-ledger/native-execution-client.js';
 
 const reviewed = process.argv.includes('--reviewed-repair');
 const reviewedFixture = reviewed ? await createNativeReviewedRepairFixture() : undefined;
@@ -34,7 +34,7 @@ const server = Bun.serve({ hostname: '127.0.0.1', port: 0, idleTimeout: 0, async
   return response;
 } });
 const baseUrl = `http://127.0.0.1:${server.port}`;
-const client = createOperatorNativeWorkExecutionClient(createOperatorSdk({ baseUrl, authToken: f.paired.token, retry: { maxAttempts: 1 } }), 'project');
+const client = createOperatorNativeWorkExecutionClient(createOperatorApiClient({ baseUrl, authToken: f.paired.token, retry: { maxAttempts: 1 } }), 'project');
 let remergeCalls = 0;
 let recovery: { starts: number; resumes: number; agents: () => number } | undefined;
 let stop = false;

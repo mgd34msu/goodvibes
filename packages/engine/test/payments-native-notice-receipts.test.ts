@@ -1,12 +1,12 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
-import { ChannelDeliveryRouter } from '../sdk/src/platform/channels/delivery-router.js';
-import { createTelegramDeliveryStrategy } from '../sdk/src/platform/channels/delivery/strategies-core.js';
-import type { ChannelDeliveryResult } from '../sdk/src/platform/channels/delivery/types.js';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import type { ServiceRegistry } from '../sdk/src/platform/config/service-registry.js';
-import type { ArtifactStore } from '../sdk/src/platform/artifacts/index.js';
-import { channelBackedPaymentNotifier } from '../sdk/src/platform/payments/host/notifier.js';
-import { createChannelPaymentNotifier } from '../sdk/src/platform/payments/notice-delivery.js';
+import { ChannelDeliveryRouter } from '../platform/src/platform/channels/delivery-router.js';
+import { createTelegramDeliveryStrategy } from '../platform/src/platform/channels/delivery/strategies-core.js';
+import type { ChannelDeliveryResult } from '../platform/src/platform/channels/delivery/types.js';
+import type { ConfigManager } from '../platform/src/platform/config/manager.js';
+import type { ServiceRegistry } from '../platform/src/platform/config/service-registry.js';
+import type { ArtifactStore } from '../platform/src/platform/artifacts/index.js';
+import { channelBackedPaymentNotifier } from '../platform/src/platform/payments/host/notifier.js';
+import { createChannelPaymentNotifier } from '../platform/src/platform/payments/notice-delivery.js';
 
 const restore: (() => void)[] = [];
 afterEach(() => { for (const close of restore.splice(0).reverse()) close(); });

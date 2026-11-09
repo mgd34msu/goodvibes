@@ -2,10 +2,10 @@ import { expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { WorkspaceCheckpointManager } from '../sdk/src/platform/workspace/checkpoint/manager.ts';
-import { SideGitRunner } from '../sdk/src/platform/workspace/checkpoint/side-git.ts';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
-import { emitTurnCompleted } from '../sdk/src/platform/runtime/emitters/turn.ts';
+import { WorkspaceCheckpointManager } from '../platform/src/platform/workspace/checkpoint/manager.ts';
+import { SideGitRunner } from '../platform/src/platform/workspace/checkpoint/side-git.ts';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
+import { emitTurnCompleted } from '../platform/src/platform/runtime/emitters/turn.ts';
 
 function deferred() {
   let resolve!: () => void;

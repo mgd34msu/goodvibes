@@ -1,15 +1,15 @@
 /** Agent settings execute without a redundant Jev permission question. */
 import { describe, expect, test } from 'bun:test';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.ts';
-import type { Tool } from '../sdk/src/platform/types/tools.ts';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
+import type { Tool } from '../platform/src/platform/types/tools.ts';
 import { useGateReadings } from './_helpers/gate-readings.ts';
 import {
   AGENT_SETTINGS_CONFIRMATION_PROPERTY,
   AGENT_SETTINGS_TOOL_DESCRIPTION,
   validateSettingsToolInvocationForAgentPolicy,
   wrapSettingsToolForAgentPolicy,
-} from '../sdk/src/platform/gate/policy/settings-write-policy.ts';
-import { explainAgentToolPolicyInvocation } from '../sdk/src/platform/gate/policy/tool-policy-guard.ts';
+} from '../platform/src/platform/gate/policy/settings-write-policy.ts';
+import { explainAgentToolPolicyInvocation } from '../platform/src/platform/gate/policy/tool-policy-guard.ts';
 
 useGateReadings([
   ['turn on auto approve', { hazard: 'approval-gate', requested: true }],

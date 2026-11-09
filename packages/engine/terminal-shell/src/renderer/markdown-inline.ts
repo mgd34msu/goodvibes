@@ -1,4 +1,4 @@
-import { requireDefined } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { requireDefined } from '@goodvibes-jev/engine/platform/platform/utils';
 /**
  * markdown-inline.ts, inline markdown tokenizer (bold, italic, inline code,
  * links, bare URLs, absolute file paths).
@@ -9,7 +9,7 @@ import { requireDefined } from '@goodvibes-jev/engine/sdk/platform/utils';
  * renderInlineMarkdown so existing importers are unaffected.
  */
 
-import type { Cell } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Cell } from '@goodvibes-jev/engine/platform/platform/types';
 import { safeTerminalLink } from '../ansi-sanitize.js';
 import { activeTheme } from './theme.js';
 

@@ -3,7 +3,7 @@ import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerMcpRuntimeCommands } from '../../input/commands/mcp-runtime.ts';
-import { loadMcpEffectiveConfig } from '@goodvibes-jev/engine/sdk/platform/mcp';
+import { loadMcpEffectiveConfig } from '@goodvibes-jev/engine/platform/platform/mcp';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 function makeShellPaths(root: string) {

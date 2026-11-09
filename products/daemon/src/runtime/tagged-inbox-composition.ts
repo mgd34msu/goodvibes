@@ -1,12 +1,12 @@
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /** Root-held credential and permission owners for explicit provider tag handles. */
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
-import type { PermissionManager } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import { daemonSecretKeyFor } from '@goodvibes-jev/engine/sdk/platform/config';
-import { createSurfaceEmailSecretReader } from '@goodvibes-jev/engine/sdk/platform/email';
-import { createOwnedInboxTagging, createTriageTagger, type OwnedInboxTagging, type OwnedInboxSource, type TriageTaggerOptions } from '@goodvibes-jev/engine/sdk/platform/intake';
+import type { PermissionManager } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { daemonSecretKeyFor } from '@goodvibes-jev/engine/platform/platform/config';
+import { createSurfaceEmailSecretReader } from '@goodvibes-jev/engine/platform/platform/email';
+import { createOwnedInboxTagging, createTriageTagger, type OwnedInboxTagging, type OwnedInboxSource, type TriageTaggerOptions } from '@goodvibes-jev/engine/platform/platform/intake';
 import type { DaemonInboxControls } from './daemon-handler-composition.js';
-import type { InboxSurfaceRegistration } from '@goodvibes-jev/engine/sdk/platform/intake';
+import type { InboxSurfaceRegistration } from '@goodvibes-jev/engine/platform/platform/intake';
 import type { SecretsManager } from '../config/secrets.js';
 export interface DaemonTriagePermissionHost {
   readonly permissionManager: PermissionManager;

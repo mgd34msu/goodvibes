@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
-// conversation-rewind-port.ts, the TUI's ConversationManager as the SDK unified
+// conversation-rewind-port.ts, the TUI's ConversationManager as the platform unified
 // rewind service's RewindConversationPort.
 //
-// The SDK's UnifiedRewindService (platform/rewind) joins files rewind (workspace
+// The platform's UnifiedRewindService (platform/rewind) joins files rewind (workspace
 // checkpoints) with conversation rewind through two ports. The conversation port
 // is "a daemon-hosted mutable conversation store": preview() reports how many
 // messages would truncate to a recorded turn boundary, and rewind() performs the
@@ -23,7 +23,7 @@
 //
 // The daemon now ASKS. This surface offers the conversation it is holding
 // (rewind.conversation.host.register), takes the questions the daemon puts to it
-// and answers them (the SDK's client/conversation-rewind-host.ts); this port is what
+// and answers them (the platform's client/conversation-rewind-host.ts); this port is what
 // produces those answers. So conversation rewind works from any surface, and a
 // session nobody has offered is reported unavailable with the reason rather
 // than as a zero that cannot be told apart from a real one.
@@ -34,10 +34,10 @@ import type {
   RewindConversationOutcome,
   RewindConversationPort,
   RewindConversationPreview,
-} from '@goodvibes-jev/engine/sdk/platform/rewind';
-import type { ConversationManager as CoreConversation } from '@goodvibes-jev/engine/sdk/platform/core';
+} from '@goodvibes-jev/engine/platform/platform/rewind';
+import type { ConversationManager as CoreConversation } from '@goodvibes-jev/engine/platform/platform/core';
 export interface RewindConversation extends Pick<CoreConversation, 'getMessageCount' | 'toJSON' | 'fromJSON' | 'removeMessagesAfter'> { rebuildHistory(): void }
-import { resolveTurnAnchor } from '@goodvibes-jev/engine/sdk/platform/rewind';
+import { resolveTurnAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
 
 type ConversationJson = Parameters<CoreConversation['fromJSON']>[0];
 
@@ -117,7 +117,7 @@ export function createConversationRewindPort(
 //
 // This process's conversations, by session id. Two readers now: the local
 // /rewind command, and the host loop that answers the DAEMON's questions about
-// a session this surface is running (the SDK's client/conversation-rewind-host.ts),
+// a session this surface is running (the platform's client/conversation-rewind-host.ts),
 // which is what makes conversation rewind work from any surface again, since
 // only the process holding the messages can count or drop them.
 // ---------------------------------------------------------------------------
@@ -143,7 +143,7 @@ function unregisterSessionConversation(sessionId: string): void {
  * here). It is the wrong answer for a rewind driven from another surface: a
  * confident zero is indistinguishable from a real zero, and that is exactly the
  * failure the surface-hosted rewind contract exists to end. The host loop
- * (the SDK's client/conversation-rewind-host.ts) checks this first and answers
+ * (the platform's client/conversation-rewind-host.ts) checks this first and answers
  * `unavailable` with a reason instead.
  */
 function hasSessionConversation(sessionId: string): boolean {

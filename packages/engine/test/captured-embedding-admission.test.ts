@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { createBuiltinMemoryEmbeddingProviders } from '../sdk/src/platform/state/memory-embedding-http.js';
+import { createBuiltinMemoryEmbeddingProviders } from '../platform/src/platform/state/memory-embedding-http.js';
 
 // No network or credentials: the HTTP transport is a scripted in-process fetch.
 test('concrete HTTP embedding admission rejects revoked attempts before fetch and forwards cancellation', async () => {

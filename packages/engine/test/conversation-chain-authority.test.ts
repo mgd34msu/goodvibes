@@ -25,18 +25,18 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SharedSessionBroker } from '../sdk/src/platform/control-plane/session-broker.js';
+import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.js';
 import { trackDisposables } from './_helpers/disposables.ts';
-import { AgentMessageBus } from '../sdk/src/platform/agents/message-bus.js';
-import { AgentManager, type AgentRecord } from '../sdk/src/platform/tools/agent/manager.js';
+import { AgentMessageBus } from '../platform/src/platform/agents/message-bus.js';
+import { AgentManager, type AgentRecord } from '../platform/src/platform/tools/agent/manager.js';
 import {
   appendSharedSessionMessage,
   buildSharedSessionContinuationTask,
   findAgentCompletionMessage,
   type SharedSessionMessageStore,
-} from '../sdk/src/platform/control-plane/session-broker-messages.js';
-import type { SharedSessionMessage, SharedSessionRecord } from '../sdk/src/platform/control-plane/session-types.js';
-import type { ConfigManager } from '../sdk/src/platform/config/index.js';
+} from '../platform/src/platform/control-plane/session-broker-messages.js';
+import type { SharedSessionMessage, SharedSessionRecord } from '../platform/src/platform/control-plane/session-types.js';
+import type { ConfigManager } from '../platform/src/platform/config/index.js';
 import { makeContract } from './contract/fixtures.js';
 
 const disposables = trackDisposables();

@@ -4,14 +4,14 @@
  * The adopt-or-start version band policy: a surface may only adopt a daemon on
  * the configured port when the daemon's reported version is in the same wire
  * band. These are pure-function tests of the policy, independent of the live
- * build VERSION (fixed version literals, no comparison against the SDK version).
+ * build VERSION (fixed version literals, no comparison against the platform version).
  */
 
 import { describe, expect, test } from 'bun:test';
 import {
   isDaemonVersionCompatible,
   describeVersionIncompatibility,
-} from '../sdk/src/platform/runtime/daemon-version-compat.ts';
+} from '../platform/src/platform/runtime/daemon-version-compat.ts';
 
 describe('isDaemonVersionCompatible: 0.y band (minor is the breaking axis)', () => {
   test('same 0.y minor is compatible regardless of patch', () => {

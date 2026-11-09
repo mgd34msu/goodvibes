@@ -1,22 +1,22 @@
 import { expect, spyOn, test } from 'bun:test';
 import { join } from 'node:path';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { contractPath } from '../sdk/src/platform/contract/store.js';
+import { contractPath } from '../platform/src/platform/contract/store.js';
 import { makeContract, makeUnit } from './contract/fixtures.js';
-import type { UnitCheck } from '../sdk/src/platform/contract/types.js';
-import { createNativeDataWriteOwner, assertNativeReaderCompatible, nativeReaderCapabilities, type NativeDataFormat } from '../sdk/src/platform/runtime/native-reader-compatibility.js';
-import { realUpdateFileIo } from '../sdk/src/platform/runtime/self-update.js';
-import { createAgentExecutionGraph, createAgentGraph } from '../sdk/src/platform/runtime/agent-graph-composition.ts';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { SubscriptionManager } from '../sdk/src/platform/config/subscriptions.ts';
-import { createLaunchTolerantProviderRegistry } from '../sdk/src/platform/providers/launch-tolerant-registry.ts';
-import { ProviderCapabilityRegistry } from '../sdk/src/platform/providers/capabilities.ts';
-import { CacheHitTracker } from '../sdk/src/platform/providers/cache-strategy.ts';
-import { FavoritesStore } from '../sdk/src/platform/providers/favorites.ts';
-import { BenchmarkStore } from '../sdk/src/platform/providers/model-benchmarks.ts';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
-import { AgentManager } from '../sdk/src/platform/tools/agent/index.ts';
-import * as composition from '../sdk/src/platform/runtime/contract-composition.ts';
+import type { UnitCheck } from '../platform/src/platform/contract/types.js';
+import { createNativeDataWriteOwner, assertNativeReaderCompatible, nativeReaderCapabilities, type NativeDataFormat } from '../platform/src/platform/runtime/native-reader-compatibility.js';
+import { realUpdateFileIo } from '../platform/src/platform/runtime/self-update.js';
+import { createAgentExecutionGraph, createAgentGraph } from '../platform/src/platform/runtime/agent-graph-composition.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { SubscriptionManager } from '../platform/src/platform/config/subscriptions.ts';
+import { createLaunchTolerantProviderRegistry } from '../platform/src/platform/providers/launch-tolerant-registry.ts';
+import { ProviderCapabilityRegistry } from '../platform/src/platform/providers/capabilities.ts';
+import { CacheHitTracker } from '../platform/src/platform/providers/cache-strategy.ts';
+import { FavoritesStore } from '../platform/src/platform/providers/favorites.ts';
+import { BenchmarkStore } from '../platform/src/platform/providers/model-benchmarks.ts';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
+import { AgentManager } from '../platform/src/platform/tools/agent/index.ts';
+import * as composition from '../platform/src/platform/runtime/contract-composition.ts';
 import { makeProjectTempDir } from '../test/_helpers/project-temp.ts';
 
 function fixture() {

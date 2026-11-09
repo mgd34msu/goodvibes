@@ -9,9 +9,9 @@ import { describe, expect, test } from 'bun:test';
 import {
   formatProviderModelSourceRejection,
   verifyProviderModelSource,
-} from '../sdk/src/platform/providers/model-source-contract.js';
-import { ProviderRegistry } from '../sdk/src/platform/providers/registry.js';
-import type { LLMProvider } from '../sdk/src/platform/providers/interface.js';
+} from '../platform/src/platform/providers/model-source-contract.js';
+import { ProviderRegistry } from '../platform/src/platform/providers/registry.js';
+import type { LLMProvider } from '../platform/src/platform/providers/interface.js';
 
 function makeRegistry(): ProviderRegistry {
   const configManager = {

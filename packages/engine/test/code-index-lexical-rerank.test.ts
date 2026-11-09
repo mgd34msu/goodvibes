@@ -15,9 +15,9 @@ import { join } from 'node:path';
 import type { EntryType } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort, JudgmentPortMissingError, JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
-import { CodeIndexStore } from '../sdk/src/platform/state/code-index-store.js';
-import { MemoryEmbeddingProviderRegistry, embedMemoryText, type MemoryEmbeddingProvider } from '../sdk/src/platform/state/memory-embeddings.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
+import { CodeIndexStore } from '../platform/src/platform/state/code-index-store.js';
+import { MemoryEmbeddingProviderRegistry, embedMemoryText, type MemoryEmbeddingProvider } from '../platform/src/platform/state/memory-embeddings.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
 
 type PairState = { readonly query: string; readonly candidate: { readonly symbol?: string; readonly path: string; readonly code?: string } };
 

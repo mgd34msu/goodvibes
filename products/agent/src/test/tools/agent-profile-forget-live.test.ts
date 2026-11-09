@@ -40,7 +40,7 @@ import { buildDaemonGatewayCatalog } from '../helpers/daemon-gateway.ts';
 import { readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createRuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
@@ -48,7 +48,7 @@ import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 import { createAgentProfileTool, registerAgentProfileTool } from '../../tools/agent-profile-tool.ts';
 import { admitLocalState } from '../helpers/local-state-admission.ts';
 import { createProfileGatewayInvoke } from '../../agent/owner-profile-gateway.ts';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 
 const PROFILE_FIXTURE = `# Mike's profile
 
@@ -144,7 +144,7 @@ async function liveProfile(): Promise<LiveProfile> {
   // here: `registerGatewayVerbGroups` is synchronous, so an awaited load would
   // have rippled through the whole composition root. The store grew `loadSync()`
   // instead, and routes/owner-profile-composition.ts calls it before returning,
-  // by then the state is one of the three, always. That is in the SDK this
+  // by then the state is one of the three, always. That is in the platform this
   // package pins, and it is the composition this suite drives.
   //
   // The wait stays because a test that depends on timing should say so rather

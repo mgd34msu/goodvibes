@@ -16,11 +16,11 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { EntryType, JudgmentPort, Question } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { forgetFailureReadings, installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { ProviderError, readRetryWait } from '../sdk/src/platform/types/errors.ts';
-import { forgetRetryWaitReadings, numberSpans, type RetryWaitUnit } from '../sdk/src/platform/types/batteries/retry-wait.ts';
-import { readFormattedError } from '../sdk/src/platform/utils/error-display.ts';
-import { SyntheticProvider, type CanonicalModel } from '../sdk/src/platform/providers/synthetic.ts';
-import type { LLMProvider } from '../sdk/src/platform/providers/interface.ts';
+import { ProviderError, readRetryWait } from '../platform/src/platform/types/errors.ts';
+import { forgetRetryWaitReadings, numberSpans, type RetryWaitUnit } from '../platform/src/platform/types/batteries/retry-wait.ts';
+import { readFormattedError } from '../platform/src/platform/utils/error-display.ts';
+import { SyntheticProvider, type CanonicalModel } from '../platform/src/platform/providers/synthetic.ts';
+import type { LLMProvider } from '../platform/src/platform/providers/interface.ts';
 import { authoredPrivacyAnswer, errorSpan, errorText } from './_helpers/authored-error-readings.ts';
 
 /** A year in a date: a number the old regex took as a wait, which is not one. */

@@ -1,6 +1,6 @@
 /** Real daemon graph plus loopback peers: connection intent and cleanup ownership. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
-import { McpClient } from '@goodvibes-jev/engine/sdk/platform/mcp';
+import { McpClient } from '@goodvibes-jev/engine/platform/platform/mcp';
 import { externalProtocolFixture, deferred, until } from '../helpers/external-protocol-fixture.js';
 
 const fixtures: Array<Awaited<ReturnType<typeof externalProtocolFixture>>> = [];

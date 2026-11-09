@@ -6,9 +6,9 @@
  * browser-local connector was flagged against 14 days and reported as 30.
  */
 import { describe, expect, test } from 'bun:test';
-import { DAY_MS, getSourceRefreshWindowMs } from '../sdk/src/platform/knowledge/shared.ts';
-import { lintKnowledgeStore, type KnowledgeLintContext } from '../sdk/src/platform/knowledge/lint.ts';
-import type { KnowledgeSourceRecord } from '../sdk/src/platform/knowledge/types.ts';
+import { DAY_MS, getSourceRefreshWindowMs } from '../platform/src/platform/knowledge/shared.ts';
+import { lintKnowledgeStore, type KnowledgeLintContext } from '../platform/src/platform/knowledge/lint.ts';
+import type { KnowledgeSourceRecord } from '../platform/src/platform/knowledge/types.ts';
 
 const historySource = {
   id: 'src-1',

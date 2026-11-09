@@ -1,9 +1,9 @@
-import { nativeHostedTurnLookupSchema } from '@goodvibes-jev/engine/sdk/platform/hosted-sessions/native-turn-client';
+import { nativeHostedTurnLookupSchema } from '@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client';
 import { nativeHostedTurnLines, type NativeHostedTurnClient, type NativeHostedTurnLookup } from './native-hosted-turn.js';
-import type { OperatorNativeWorkExecutionClient } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
+import type { OperatorNativeWorkExecutionClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
 import { nativeWorkExecutionLines, type NativeWorkExecutionState } from './native-work-execution.js';
 import { nativeConversationExecutionIntent, sameNativeExecutionIntent, inspectNativeConversationExecution, dispatchNativeConversationExecution } from './native-conversation-execution.js';
-import { nativeConversationIntakeCaptureRequestSchema, nativeConversationIntakeResultSchema, sameNativeConversationSource, type NativeConversationIntakeCaptureRequest, type NativeConversationIntakeResult, type NativeConversationIntakeSourceRef, type OperatorNativeConversationIntakeClient, type NativeConversationTurnPermit, } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
+import { nativeConversationIntakeCaptureRequestSchema, nativeConversationIntakeResultSchema, sameNativeConversationSource, type NativeConversationIntakeCaptureRequest, type NativeConversationIntakeResult, type NativeConversationIntakeSourceRef, type OperatorNativeConversationIntakeClient, type NativeConversationTurnPermit, } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 import type { NativeConversationInput } from './native-conversation-input.js';
 import type { NativeIntakeJournalBinding, NativeConversationIntakeJournal } from './native-conversation-intake-journal.js';
 /** Construction-owned product capabilities, never selected by a decision or tool argument. */

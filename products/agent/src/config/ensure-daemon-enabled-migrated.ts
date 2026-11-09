@@ -55,7 +55,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { writeStoreJson } from '@/utils/store-file.ts';
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.ts';
 
 /** Bumping this re-runs the correction for installs that only carry an older receipt. */

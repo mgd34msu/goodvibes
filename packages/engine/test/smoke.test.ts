@@ -1,17 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 import {
   FOUNDATION_METADATA,
-  createOperatorSdk,
-  createPeerSdk,
+  createOperatorApiClient,
+  createPeerApiClient,
   createRemoteRuntimeEvents,
   createTransportPaths,
-} from '../sdk/src/index.ts';
+} from '../platform/src/index.ts';
 import {
   createDaemonControlRouteHandlers,
   createDaemonKnowledgeRouteHandlers,
   StepUpService,
-} from '../sdk/src/daemon.ts';
-import { emitPresetChanged } from '../sdk/src/platform/runtime/emitters/index.ts';
+} from '../platform/src/daemon.ts';
+import { emitPresetChanged } from '../platform/src/platform/runtime/emitters/index.ts';
 
 describe('sdk public facades', () => {
   test('root re-exports contracts, transport, operator, and peer clients', () => {
@@ -22,7 +22,7 @@ describe('sdk public facades', () => {
     const paths = createTransportPaths('http://127.0.0.1:3210');
     expect(paths.tasksUrl).toBe('http://127.0.0.1:3210/api/tasks');
     expect(typeof paths.controlUrl).toBe('string'); // controlUrl is a string URL
-    expect([createOperatorSdk, createPeerSdk, createRemoteRuntimeEvents].every(f => typeof f === 'function')).toBe(true);
+    expect([createOperatorApiClient, createPeerApiClient, createRemoteRuntimeEvents].every(f => typeof f === 'function')).toBe(true);
   });
 
   test('daemon route handlers live on the explicit daemon facade', () => {

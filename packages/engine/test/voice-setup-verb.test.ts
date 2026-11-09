@@ -15,9 +15,9 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { createVoiceSetupService, captureVoiceWakeReadSource } from '@goodvibes-jev/engine/sdk/platform/runtime/voice-setup';
-import { resolveManagedWakePaths } from '../sdk/src/platform/voice/wake/provisioning.ts';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
+import { createVoiceSetupService, captureVoiceWakeReadSource } from '@goodvibes-jev/engine/platform/platform/runtime/voice-setup';
+import { resolveManagedWakePaths } from '../platform/src/platform/voice/wake/provisioning.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
 import {
   createVoiceInstallHandler,
   createVoiceStatusHandler,
@@ -26,9 +26,9 @@ import {
   createWakeStatusHandler,
   registerVoiceSetupGatewayMethods,
   type VoiceSetupGatewayService,
-} from '../sdk/src/platform/control-plane/routes/voice-setup.ts';
-import { createWakeSetupService, WAKE_MODEL_CHUNK_MAX_BYTES } from '../sdk/src/platform/runtime/wake-setup.ts';
-import { createDaemonSdkRouteProbe, reconcileHttpDescriptor } from '../sdk/src/platform/control-plane/method-catalog-route-reconcile.ts';
+} from '../platform/src/platform/control-plane/routes/voice-setup.ts';
+import { createWakeSetupService, WAKE_MODEL_CHUNK_MAX_BYTES } from '../platform/src/platform/runtime/wake-setup.ts';
+import { createDaemonApiRouteProbe, reconcileHttpDescriptor } from '../platform/src/platform/control-plane/method-catalog-route-reconcile.ts';
 
 const stubStatus = { platform: 'linux-x64', state: 'not-provisioned', tts: { engine: 'piper', binaryPresent: false, voicePresent: false, binaryPath: '/m/piper', modelPath: '/m/voice.onnx' }, stt: { engine: 'whisper-cpp', supported: false, reason: 'no prebuilt' }, offerBytes: 89666641 };
 const stubInstall = { provisioned: true, platform: 'linux-x64', tts: { engine: 'piper', state: 'provisioned', binaryPath: '/m/piper', modelPath: '/m/voice.onnx' }, stt: { engine: 'whisper-cpp', state: 'unsupported-platform', reason: 'no prebuilt' }, components: [], configured: { set: [{ key: 'voice.local.ttsEngine', value: 'piper' }], skipped: [] } };
@@ -66,7 +66,7 @@ describe('voice.local provisioning verbs are wired', () => {
   });
 
   test('both verbs reconcile as live against the real daemon dispatch chain', async () => {
-    const probe = createDaemonSdkRouteProbe();
+    const probe = createDaemonApiRouteProbe();
     const descriptors = new GatewayMethodCatalog().list();
     for (const id of ['voice.local.status', 'voice.local.install']) {
       const descriptor = descriptors.find((d) => d.id === id)!;
@@ -85,7 +85,7 @@ describe('voice.local provisioning verbs are wired', () => {
 
 describe('install single-flight + admission', () => {
   test('concurrent install calls collapse into ONE run; callers share the result; next call starts fresh', async () => {
-    const { singleFlight } = await import('../sdk/src/platform/utils/single-flight.ts');
+    const { singleFlight } = await import('../platform/src/platform/utils/single-flight.ts');
     let runs = 0;
     const gates: Array<(v: string) => void> = [];
     const run = singleFlight(() => {
@@ -108,7 +108,7 @@ describe('install single-flight + admission', () => {
   });
 
   test('failures release the flight (a later call retries instead of joining a dead promise)', async () => {
-    const { singleFlight } = await import('../sdk/src/platform/utils/single-flight.ts');
+    const { singleFlight } = await import('../platform/src/platform/utils/single-flight.ts');
     let runs = 0;
     const run = singleFlight(async () => {
       runs += 1;

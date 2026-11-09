@@ -1,10 +1,10 @@
 /** Guarded-delivery opt-in is captured explicitly without bypassing plugin lifetime ownership. */
 import { describe, expect, test } from 'bun:test';
-import { ChannelDeliveryRouter } from '../sdk/src/platform/channels/delivery-router.js';
-import type { ChannelDeliveryRequest, ChannelDeliveryStrategy } from '../sdk/src/platform/channels/delivery/types.js';
-import { createOwnedPluginCapabilities } from '../sdk/src/platform/plugins/owned-capabilities.js';
-import { PluginClosedError, PluginInFlightTracker } from '../sdk/src/platform/plugins/in-flight.js';
-import { assertDeliveryCurrent, runDeliveryPublication } from '../sdk/src/platform/utils/delivery-lifetime.js';
+import { ChannelDeliveryRouter } from '../platform/src/platform/channels/delivery-router.js';
+import type { ChannelDeliveryRequest, ChannelDeliveryStrategy } from '../platform/src/platform/channels/delivery/types.js';
+import { createOwnedPluginCapabilities } from '../platform/src/platform/plugins/owned-capabilities.js';
+import { PluginClosedError, PluginInFlightTracker } from '../platform/src/platform/plugins/in-flight.js';
+import { assertDeliveryCurrent, runDeliveryPublication } from '../platform/src/platform/utils/delivery-lifetime.js';
 
 function gate() {
   let release!: () => void;

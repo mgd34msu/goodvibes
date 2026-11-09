@@ -22,11 +22,11 @@ const previousPorts: Array<JudgmentPort | undefined> = [];
 function installRecorderPort(port: JudgmentPort | undefined): void { previousPorts.push(installJudgmentPort(port)); }
 afterEach(() => { while (previousPorts.length) installJudgmentPort(previousPorts.pop()); });
 import fixture from './fixtures/wake-word-front-end.json' with { type: 'json' };
-import { WakeWordEngine } from '../sdk/src/platform/voice/wake/engine.js';
-import { WakeListener } from '../sdk/src/platform/voice/wake/listener.js';
-import { resolveWakeRuntimeSettings } from '../sdk/src/platform/voice/wake/settings.js';
-import { WAKE_CHUNK_SAMPLES, WAKE_CLASSIFIER_FRAMES, WAKE_EMBED_DIM } from '../sdk/src/platform/voice/wake/feature-pipeline.js';
-import { voiceWakeConfigDefaults } from '../sdk/src/platform/config/schema-domain-voice-wake.js';
+import { WakeWordEngine } from '../platform/src/platform/voice/wake/engine.js';
+import { WakeListener } from '../platform/src/platform/voice/wake/listener.js';
+import { resolveWakeRuntimeSettings } from '../platform/src/platform/voice/wake/settings.js';
+import { WAKE_CHUNK_SAMPLES, WAKE_CLASSIFIER_FRAMES, WAKE_EMBED_DIM } from '../platform/src/platform/voice/wake/feature-pipeline.js';
+import { voiceWakeConfigDefaults } from '../platform/src/platform/config/schema-domain-voice-wake.js';
 import {
   createRecorderCaptureOpener,
   floatSamplesToPcm16,
@@ -34,9 +34,9 @@ import {
   type AudioCaptureHandlers,
   type CapturedUtterance,
   type CaptureChildProcess,
-} from '../sdk/src/platform/voice/capture/index.js';
-import type { WakeInferenceSession, WakeTensor } from '../sdk/src/platform/voice/wake/types.js';
-import type { VoiceDiagnosticEntry } from '../sdk/src/platform/voice/diagnostics.js';
+} from '../platform/src/platform/voice/capture/index.js';
+import type { WakeInferenceSession, WakeTensor } from '../platform/src/platform/voice/wake/types.js';
+import type { VoiceDiagnosticEntry } from '../platform/src/platform/voice/diagnostics.js';
 
 const POSITIVE: readonly number[] = fixture.scoreTraces.positive.scores;
 

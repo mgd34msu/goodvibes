@@ -1,4 +1,4 @@
-import type { ShellPathService } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 /** A missing bound service is a wiring error; never reach for another product's service. */
 export function requireContextValue<T>(value: T | null | undefined, name: string): T {
   if (value == null) throw new Error(`commandContext.${name} is required but was not wired at bootstrap`);

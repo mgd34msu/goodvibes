@@ -3,16 +3,16 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createExecTool } from '../sdk/src/platform/tools/exec/runtime.js';
-import { ProcessManager } from '../sdk/src/platform/tools/shared/process-manager.js';
-import { OverflowHandler } from '../sdk/src/platform/tools/shared/overflow.js';
-import { createCapturedExecNodeRuntimeAdmission } from '../sdk/src/platform/tools/exec/captured-exec-runtime-input.js';
-import { startCapturedBackground } from '../sdk/src/platform/tools/exec/captured-exec-background.js';
-import { runCapturedCommand, probeCapturedExecAvailability } from '../sdk/src/platform/tools/exec/captured-exec.js';
-import { detectPtyAvailability, probePtyHost } from '../sdk/src/platform/tools/exec/interactive.js';
-import { captureContractInput, contractInputPath, materializeContractInput } from '../sdk/src/platform/contract/input-snapshot.js';
-import { createContractInputAuthority, revokeContractInputAuthority } from '../sdk/src/platform/contract/input-authority.js';
-import type { Contract } from '../sdk/src/platform/contract/types.js';
+import { createExecTool } from '../platform/src/platform/tools/exec/runtime.js';
+import { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.js';
+import { OverflowHandler } from '../platform/src/platform/tools/shared/overflow.js';
+import { createCapturedExecNodeRuntimeAdmission } from '../platform/src/platform/tools/exec/captured-exec-runtime-input.js';
+import { startCapturedBackground } from '../platform/src/platform/tools/exec/captured-exec-background.js';
+import { runCapturedCommand, probeCapturedExecAvailability } from '../platform/src/platform/tools/exec/captured-exec.js';
+import { detectPtyAvailability, probePtyHost } from '../platform/src/platform/tools/exec/interactive.js';
+import { captureContractInput, contractInputPath, materializeContractInput } from '../platform/src/platform/contract/input-snapshot.js';
+import { createContractInputAuthority, revokeContractInputAuthority } from '../platform/src/platform/contract/input-authority.js';
+import type { Contract } from '../platform/src/platform/contract/types.js';
 import { useToolReadings } from './_helpers/tool-readings.js';
 useToolReadings([['CAPTURE_PROMPT', { awaitingInput: true }]]);
 const supported = (await probeCapturedExecAvailability()).available;
@@ -242,7 +242,7 @@ test.skipIf(!supported)('runtime close settles a retained job while its permissi
 });
 
 test.skipIf(!supported)('captured cancellation settles only its owner before emitting the terminal event', async () => {
-  const { finishCancelledRun, cleanupLeakedProcesses } = await import('../sdk/src/platform/agents/orchestrator-runner-finish.js');
+  const { finishCancelledRun, cleanupLeakedProcesses } = await import('../platform/src/platform/agents/orchestrator-runner-finish.js');
   const a = await fixture(); const b = await fixture();
   const bTool = createExecTool(a.manager, { capturedInput: b.binding, defaultWorkingDirectory: b.root, overflowHandler: new OverflowHandler({ baseDir: b.root }) });
   const first = await a.tool.execute({ commands: [{ cmd: 'sleep 2; echo late > late.txt', background: true }] });
@@ -254,8 +254,8 @@ test.skipIf(!supported)('captured cancellation settles only its owner before emi
   await finishCancelledRun({ processManager: a.manager,
     beforeRunSettlement: () => a.manager.stopOwnedBoundaries(a.authority),
     emitAgentCancelledEvent: () => { emitted = true; expect(a.manager.getStatus(aId)?.done).toBe(true); expect(a.manager.getStatus(bId)?.done).toBe(false); },
-  } as unknown as import('../sdk/src/platform/agents/orchestrator-run-context.js').AgentOrchestratorRunContext,
-  { id: 'a', startedAt: Date.now(), toolCallCount: 1 } as import('../sdk/src/platform/tools/agent/index.js').AgentRecord, null, new Set());
+  } as unknown as import('../platform/src/platform/agents/orchestrator-run-context.js').AgentOrchestratorRunContext,
+  { id: 'a', startedAt: Date.now(), toolCallCount: 1 } as import('../platform/src/platform/tools/agent/index.js').AgentRecord, null, new Set());
   expect(emitted).toBe(true);
   await a.manager.stopOwnedBoundaries(b.authority);
 });
@@ -296,10 +296,10 @@ import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { gateReadingsPort, forgetGateReadings } from './_helpers/gate-readings.ts';
-import { PermissionManager, type PermissionConfigReader } from '../sdk/src/platform/permissions/manager.ts';
-import { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.ts';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.ts';
-import { capturedInputTool } from '../sdk/src/platform/tools/shared/captured-input-tools.ts';
+import { PermissionManager, type PermissionConfigReader } from '../platform/src/platform/permissions/manager.ts';
+import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
+import { capturedInputTool } from '../platform/src/platform/tools/shared/captured-input-tools.ts';
 
 for (const forwarding of ['exact', 'copied-options', 'cloned-args'] as const) {
   test.skipIf(!supported)(`real admitted captured Exec enforces ${forwarding} body identity before process effects`, async () => {

@@ -1,9 +1,9 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { isHostPairingBootstrapPrincipal, isNativePairedPrincipal, readHostPairingResponse } from '@goodvibes-jev/engine/terminal-shell/native-paired-principal';
-import { createOperatorSdk } from '@goodvibes-jev/engine/operator-sdk';
-import { GoodVibesSdkError } from '@goodvibes-jev/engine/errors';
-import { resolveDaemonEnabled } from '@goodvibes-jev/engine/sdk/platform/config';
+import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
+import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveNativeHostCredential, resolveTuiHostOrigin, type NativeHostCredentialOptions } from './client/native-host-credential.ts';
 import { readTuiLegacyPairingBootstrap } from './tui-host-pairing-bootstrap.ts';
 import { beginTuiHostPairing, completeTuiHostPairing, readTuiHostPairing } from './tui-host-credential-store.ts';
@@ -50,8 +50,8 @@ export async function previewTuiHostPairing(options: TuiHostPairingOptions, name
     const sameSelection = () => homeNow() === home && resolveDaemonEnabled(options.configManager) && resolveTuiHostOrigin(options.configManager) === host;
     const auth = async (token: string, requestSignal?: AbortSignal, sourceCurrent: () => boolean = sameSelection) => {
       const expectedState = readTuiHostPairing(home, host);
-      const client = createOperatorSdk({ baseUrl: host, authToken: token, fetchImpl: (input, init) => {
-        // SDK setup and retries may await before dispatch. Recheck at the real
+      const client = createOperatorApiClient({ baseUrl: host, authToken: token, fetchImpl: (input, init) => {
+        // platform setup and retries may await before dispatch. Recheck at the real
         // network boundary so a stale selection cannot send even a read.
         if (requestSignal?.aborted || !sourceCurrent() || !sameSelection() || !isDeepStrictEqual(readTuiHostPairing(home, host), expectedState)) throw new Error('Pairing selection changed');
         return (options.fetchImpl ?? fetch)(input, { ...init, redirect: 'error' });
@@ -78,7 +78,7 @@ export async function previewTuiHostPairing(options: TuiHostPairingOptions, name
             assertCurrent();
             // A fresh read can recover an interrupted or empty host response.
             // Both attempts validate fully; migration remains a single POST.
-            if (attempt !== 0 || (!deadline.aborted && !(error instanceof GoodVibesSdkError
+            if (attempt !== 0 || (!deadline.aborted && !(error instanceof GoodVibesError
               && (error.kind === 'network' || error.kind === 'contract')))) throw error;
           }
         }

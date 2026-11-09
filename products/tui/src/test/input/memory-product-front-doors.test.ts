@@ -4,11 +4,11 @@ import { join } from 'node:path';
 import { CommandRegistry } from '../../input/command-registry.ts';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { registerBuiltinCommands } from '../../input/commands.ts';
-import { createMemoryApi } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import { MemorySpineClient, createLocalMemoryAccess, type LocalMemoryStore } from '@goodvibes-jev/engine/sdk/platform/runtime/memory-spine';
-import { MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/sdk/platform/state';
-import { MemoryEmbeddingProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/state';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { createMemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { MemorySpineClient, createLocalMemoryAccess, type LocalMemoryStore } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
+import { MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/platform/platform/state';
+import { MemoryEmbeddingProviderRegistry } from '@goodvibes-jev/engine/platform/platform/state';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createShellPathService } from '@/runtime/index.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 

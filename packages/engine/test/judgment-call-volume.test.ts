@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { createSystemOnePort, SqliteDecisionLog, withDecisionLog, noul, type DecisionEntry } from '@goodvibes-jev/judgment';
-import { judgmentVolume, judgmentVolumeBreaches, captureJudgmentVolumeBudgets } from '../sdk/src/platform/observe/judgment-volume.ts';
-import { analyzeDecisionLog } from '../sdk/src/platform/observe/analyze.ts';
+import { judgmentVolume, judgmentVolumeBreaches, captureJudgmentVolumeBudgets } from '../platform/src/platform/observe/judgment-volume.ts';
+import { analyzeDecisionLog } from '../platform/src/platform/observe/analyze.ts';
 
 async function recordedOperation() {
   const log = new SqliteDecisionLog(':memory:'); let requests = 0;

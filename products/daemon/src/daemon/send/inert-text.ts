@@ -1,5 +1,5 @@
 /** Adapted from goodvibes-daemon 254699bf; explicit one-shot send contract. */
-import type { ChannelDeliverySurfaceKind } from '@goodvibes-jev/engine/sdk/platform/channels';
+import type { ChannelDeliverySurfaceKind } from '@goodvibes-jev/engine/platform/platform/channels';
 
 const ZERO_WIDTH_SPACE = '​';
 

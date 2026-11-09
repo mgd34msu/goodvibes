@@ -1,4 +1,4 @@
-import { OwnedSelectionObservation } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { handleNativeIntakeCommand, handleNativeSubmissionCommand } from '@goodvibes-jev/engine/terminal-shell/native/work-command';
 import { createNativeWorkLedgerReadBinding } from '@goodvibes-jev/engine/terminal-shell/native/work-ledger-binding';
 import { createNativeHostFetch } from './client/native-host-fetch.ts';
@@ -20,11 +20,11 @@ import {
 } from './native-work-submission.ts';
 import { createNativeWorkSubmissionBinding, createNativeSubmissionIdentity } from './native-work-submission-host.ts';
 import { NativeWorkSourceError, readNativeWorkSourceFile } from './native-work-submission-source.ts';
-import { createOperatorSdk, type OperatorRemoteClient } from '@goodvibes-jev/engine/operator-sdk';
-import { getOperatorWorkLedgerProject } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { createOperatorApiClient, type OperatorRemoteClient } from '@goodvibes-jev/engine/operator-client';
+import { getOperatorWorkLedgerProject } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveNativeHostCredential } from './client/native-host-credential.ts';
-import '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/operator-read-client';
+import '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/operator-read-client';
 import type { NativeWorkLedgerSelectionReader } from './native-work-ledger.ts';
 import type { CommandRegistry } from '../input/command-registry.ts';
 
@@ -103,7 +103,7 @@ export function createNativeWorkLedgerHost(deps: {
         const current = () => captureSelection().identity === identity;
         if (!current()) return { available: false, reason: 'Native host selection changed.' };
         let disposed = false;
-        const operator = createOperatorSdk({
+        const operator = createOperatorApiClient({
           baseUrl: credential.baseUrl,
           authToken: credential.token,
           fetchImpl: createNativeHostFetch({ current: () => !disposed && current() }),
@@ -217,7 +217,7 @@ export function createNativeWorkLedgerHost(deps: {
     const before = captureSelection();
     if (before.projectId || !before.credential.available) return ready();
     const controller = new AbortController();
-    const operator = createOperatorSdk({
+    const operator = createOperatorApiClient({
       baseUrl: before.credential.baseUrl,
       authToken: before.credential.token,
       fetchImpl: createNativeHostFetch({ current: () => !controller.signal.aborted && captureSelection().identity === before.identity }),

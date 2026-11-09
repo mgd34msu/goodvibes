@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { renderGoodVibesVersion, renderDaemonStartupBanner } from '../../cli/help.ts';
 import { resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
 import { VERSION } from '../../version.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 
 describe('CLI help/version', () => {
   test('does not report the consuming project npm_package_version', () => {
@@ -65,13 +65,13 @@ describe('daemon startup banner', () => {
 
 /**
  * The banner's host/port come from resolveRuntimeEndpointBinding, the SAME
- * hostMode-aware resolution the SDK bind path (resolveHostBinding) uses. These
+ * hostMode-aware resolution the platform bind path (resolveHostBinding) uses. These
  * tests mirror the verifier's empirical probes: each case pins that what the
  * banner would display matches what the daemon actually binds.
  */
-describe('daemon startup banner: binding honesty (mirrors the SDK bind path)', () => {
+describe('daemon startup banner: binding honesty (mirrors the platform bind path)', () => {
   function fakeConfig(values: Record<string, unknown>): Pick<ConfigManager, 'get'> {
-    // Cast through unknown: the SDK's ConfigValue mapped type has grown into a
+    // Cast through unknown: the platform's ConfigValue mapped type has grown into a
     // very large discriminated union, and asking the compiler to structurally
     // compare a generic `<K extends ConfigKey>(key: K) => ConfigValue<K>`
     // signature against ConfigManager['get'] here hits TS's "excessive stack

@@ -10,7 +10,7 @@
  * surface reported a successful save and configured nothing the daemon could
  * see.
  *
- * `migrateDaemonOwnedConfig` (SDK, `platform/config`) is idempotent and cheap
+ * `migrateDaemonOwnedConfig` (platform, `platform/config`) is idempotent and cheap
  * on the fast path (one file read + JSON parse), so it is safe and correct to
  * call this at every composition root that is about to construct a
  * `ConfigManager`, not just the first one to run in a given process. It
@@ -23,8 +23,8 @@ import {
   daemonConfigPath,
   daemonConfigMovedPath,
   type DaemonConfigMigrationResult,
-} from '@goodvibes-jev/engine/sdk/platform/config';
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+} from '@goodvibes-jev/engine/platform/platform/config';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from './surface.ts';
 
 /**

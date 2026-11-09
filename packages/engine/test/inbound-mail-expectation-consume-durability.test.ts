@@ -37,10 +37,10 @@ import {
   InboundExpectationRegistry,
   InboundMailStore,
   PersistedExpectationStore,
-} from '../sdk/src/platform/email/inbound/index.ts';
-import type { ImapInboundMessage, InboundMailboxMessage } from '../sdk/src/platform/email/inbound/ports.ts';
-import type { StructuredNotice } from '../sdk/src/platform/email/inbound-notice.ts';
-import type { SurfaceNoticeDelivery } from '../sdk/src/platform/daemon/types.ts';
+} from '../platform/src/platform/email/inbound/index.ts';
+import type { ImapInboundMessage, InboundMailboxMessage } from '../platform/src/platform/email/inbound/ports.ts';
+import type { StructuredNotice } from '../platform/src/platform/email/inbound-notice.ts';
+import type { SurfaceNoticeDelivery } from '../platform/src/platform/daemon/types.ts';
 
 const ALIAS = 'signup-a1b2@his-catchall.test';
 const NOW = new Date('2026-07-27T10:00:00.000Z');

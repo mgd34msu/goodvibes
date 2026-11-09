@@ -1,7 +1,7 @@
 /** Shared keybinding storage and matching; product action catalogs remain explicit. */
 import { existsSync, readFileSync } from 'node:fs';
-import { resolveSurfaceDirectory } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { resolveSurfaceDirectory } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 export interface KeyCombo {
   key: string;

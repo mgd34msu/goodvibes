@@ -1,10 +1,10 @@
-import { readErrorFailure } from '@goodvibes-jev/engine/sdk/platform/types';
+import { readErrorFailure } from '@goodvibes-jev/engine/platform/platform/types';
 import { existsSync, readFileSync, renameSync } from 'node:fs';
 import { writeStoreFile } from '@/utils/store-file.ts';
-import { createBrowserGoodVibesSdk } from '@goodvibes-jev/engine/sdk/browser';
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/sdk/contracts';
-import { formatEveryInterval } from '@goodvibes-jev/engine/sdk/platform/automation';
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
+import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
+import { formatEveryInterval } from '@goodvibes-jev/engine/platform/platform/automation';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { isRoutineScheduleDeliverySurfaceKind } from './routine-schedule-args.ts';
@@ -721,8 +721,8 @@ export async function reconcileRoutineScheduleReceipts(
     };
   }
   try {
-    const sdk = createBrowserGoodVibesSdk({ baseUrl: connection.baseUrl, authToken: connection.token });
-    const output = await sdk.operator.invoke(ROUTINE_SCHEDULE_LIST_METHOD, {});
+    const platformClient = createBrowserGoodVibesPlatform({ baseUrl: connection.baseUrl, authToken: connection.token });
+    const output = await platformClient.operator.invoke(ROUTINE_SCHEDULE_LIST_METHOD, {});
     const schedules = readLiveSchedules(output);
     const result: RoutineScheduleCorrelationSuccess = {
       ok: true,
@@ -757,8 +757,8 @@ export async function fetchLiveSchedules(connection: AgentConnectedHostConnectio
     return { ok: false, schedules: [], error: `No connected-host operator token found at ${connection.tokenPath}` };
   }
   try {
-    const sdk = createBrowserGoodVibesSdk({ baseUrl: connection.baseUrl, authToken: connection.token });
-    const output = await sdk.operator.invoke(ROUTINE_SCHEDULE_LIST_METHOD, {});
+    const platformClient = createBrowserGoodVibesPlatform({ baseUrl: connection.baseUrl, authToken: connection.token });
+    const output = await platformClient.operator.invoke(ROUTINE_SCHEDULE_LIST_METHOD, {});
     return { ok: true, schedules: readLiveSchedules(output) };
   } catch (error) {
     return { ok: false, schedules: [], error: summarizeError(error) };

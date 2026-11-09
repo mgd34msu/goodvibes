@@ -1,20 +1,20 @@
 /** Namespace allocation, recovery and cleanup against real Git, without model calls. */
 import { afterEach, expect, test } from 'bun:test';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
-import { WorktreeIdentityRegistry } from '../sdk/src/platform/orchestration/worktree-identities.js';
+import { WorktreeIdentityRegistry } from '../platform/src/platform/orchestration/worktree-identities.js';
 import { createHash } from 'node:crypto';
-import { judgmentInputBoundary } from '../sdk/src/platform/gate/boundary.js';
-import { ConfigManager } from '../sdk/src/platform/config/index.js';
-import { createPermissionConfigReader, PermissionManager } from '../sdk/src/platform/permissions/manager.js';
-import { UserPermissionRuleStore } from '../sdk/src/platform/permissions/user-rule-store.js';
-import { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.js';
+import { judgmentInputBoundary } from '../platform/src/platform/gate/boundary.js';
+import { ConfigManager } from '../platform/src/platform/config/index.js';
+import { createPermissionConfigReader, PermissionManager } from '../platform/src/platform/permissions/manager.js';
+import { UserPermissionRuleStore } from '../platform/src/platform/permissions/user-rule-store.js';
+import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.js';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createWorktreeIsolationManager } from '../sdk/src/platform/orchestration/worktree-isolation.js';
-import { CURRENT_WORKSTREAM_SCHEMA_VERSION, type OrchestrationEvent, type WorkItem, type Workstream } from '../sdk/src/platform/orchestration/types.js';
-import { emptyWorkItemUsage } from '../sdk/src/platform/orchestration/types.js';
-import { serializeWorkstreamSnapshot, deserializeWorkstreamSnapshot, deserializeWorkstream } from '../sdk/src/platform/orchestration/persistence.js';
+import { createWorktreeIsolationManager } from '../platform/src/platform/orchestration/worktree-isolation.js';
+import { CURRENT_WORKSTREAM_SCHEMA_VERSION, type OrchestrationEvent, type WorkItem, type Workstream } from '../platform/src/platform/orchestration/types.js';
+import { emptyWorkItemUsage } from '../platform/src/platform/orchestration/types.js';
+import { serializeWorkstreamSnapshot, deserializeWorkstreamSnapshot, deserializeWorkstream } from '../platform/src/platform/orchestration/persistence.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

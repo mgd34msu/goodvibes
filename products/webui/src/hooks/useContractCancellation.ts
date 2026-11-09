@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { isClientLifetimeCurrent, subscribeClientLifetime, type ClientLifetime } from '../lib/client-lifetime';
-import { hasStoredTokenSync, sdk } from '../lib/goodvibes';
+import { hasStoredTokenSync, client as platformClient } from '../lib/goodvibes';
 import { queryKeys } from '../lib/queries';
 
 type Phase = 'idle' | 'confirming' | 'pending' | 'acknowledged' | 'not-cancelled' | 'unknown';
@@ -136,7 +136,7 @@ export function useContractCancellation(lifetime: ClientLifetime, id: string) {
     // is an unknown outcome, never permission to retry this mutation.
     const timer = setTimeout(() => abort.abort(), 30_000);
     try {
-      const result = await Promise.race([sdk.operator.contracts.cancel(id, abort.signal), interrupted]);
+      const result = await Promise.race([platformClient.operator.contracts.cancel(id, abort.signal), interrupted]);
       abort.signal.throwIfAborted();
       if (!owned()) return;
       update(intent, { phase: result.cancelled ? 'acknowledged' : 'not-cancelled' });

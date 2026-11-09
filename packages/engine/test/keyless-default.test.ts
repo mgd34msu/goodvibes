@@ -26,13 +26,13 @@ import {
   buildOnboardingModelCopy,
   assertKeylessDefaultPairing,
   type ModelProviderSource,
-} from '../sdk/src/platform/providers/keyless-default.ts';
-import { OpenAICompatProvider } from '../sdk/src/platform/providers/openai-compat.ts';
-import { AnthropicCompatProvider } from '../sdk/src/platform/providers/anthropic-compat.ts';
-import { registerBuiltinProviders } from '../sdk/src/platform/providers/builtin-registry.ts';
-import { coreConfigDefaults } from '../sdk/src/platform/config/schema-domain-core.ts';
-import type { LLMProvider } from '../sdk/src/platform/providers/interface.ts';
-import { ProviderError } from '../sdk/src/platform/types/errors.ts';
+} from '../platform/src/platform/providers/keyless-default.ts';
+import { OpenAICompatProvider } from '../platform/src/platform/providers/openai-compat.ts';
+import { AnthropicCompatProvider } from '../platform/src/platform/providers/anthropic-compat.ts';
+import { registerBuiltinProviders } from '../platform/src/platform/providers/builtin-registry.ts';
+import { coreConfigDefaults } from '../platform/src/platform/config/schema-domain-core.ts';
+import type { LLMProvider } from '../platform/src/platform/providers/interface.ts';
+import { ProviderError } from '../platform/src/platform/types/errors.ts';
 
 /** The openrouter registration shape from builtin-registry.ts, keyless-install state. */
 function openrouterLike(apiKey = ''): OpenAICompatProvider {

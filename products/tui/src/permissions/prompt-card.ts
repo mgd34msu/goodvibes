@@ -28,8 +28,8 @@
  * permissionButtons() with this file so the two can never disagree.
  */
 
-import type { PermissionCategory, PermissionPromptRequest, PermissionRequestAnalysis } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import { buildPermissionApprovalBrief, getDisplayArg } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import type { PermissionCategory, PermissionPromptRequest, PermissionRequestAnalysis } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { buildPermissionApprovalBrief, getDisplayArg } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { activeTokens } from '../renderer/theme.ts';
 import {
   beginModal,
@@ -166,7 +166,7 @@ function commandOf(request: PermissionPromptRequest): string {
   return typeof args.command === 'string' ? args.command : typeof args.cmd === 'string' ? args.cmd : '';
 }
 
-/** The exact session rule "Allow for session" remembers (mirrors the SDK's approval key). */
+/** The exact session rule "Allow for session" remembers (mirrors the platform's approval key). */
 export function rememberScopeKey(request: PermissionPromptRequest): string {
   const args = request.args ?? {};
   if (typeof args.path === 'string' && args.path.length > 0) return `${request.tool}:${args.path}`;

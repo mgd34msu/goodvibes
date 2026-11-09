@@ -9,7 +9,7 @@
 
 import type { StatusChip } from './status-line.js';
 import type { VoiceCaptureIndicatorState } from '../voice-capture-status.js';
-import { GLYPHS } from '@goodvibes-jev/engine/sdk/platform/presentation';
+import { GLYPHS } from '@goodvibes-jev/engine/platform/platform/presentation';
 import { activeTokens, activeUiTones } from './theme.js';
 
 const VOICE_CHIP_LABELS: Record<VoiceCaptureIndicatorState['kind'], string> = {

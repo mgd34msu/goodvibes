@@ -6,7 +6,7 @@ import { createWakeProvisionPresentation } from '@goodvibes-jev/engine/terminal-
 // The wake artifacts are checksum-pinned and provisioned ONLY by an explicit act
 // (/voice wake setup). This module is the read-only projection those surfaces
 // render from: per-artifact present / verified / corrupt / bytes taken straight
-// from the SDK's wakeProvisionStatus, which verifies by CONTENT rather than by
+// from the platform's wakeProvisionStatus, which verifies by CONTENT rather than by
 // existence, a truncated or wrong-asset file reports corrupt instead of present,
 // because a detector loading it would fail in a way the user could not diagnose.
 //
@@ -14,9 +14,9 @@ import { createWakeProvisionPresentation } from '@goodvibes-jev/engine/terminal-
 // it here, so every builder is testable against fixture shapes.
 // ---------------------------------------------------------------------------
 
-import type { WakeSurfaceCapabilities } from '@goodvibes-jev/engine/sdk/platform/voice';
-import { resolveWakeVadThreshold, WAKE_VAD_MODEL } from '@goodvibes-jev/engine/sdk/platform/voice';
-import { SPEEXDSP_PREPROCESS } from '@goodvibes-jev/engine/sdk/platform/voice/capture';
+import type { WakeSurfaceCapabilities } from '@goodvibes-jev/engine/platform/platform/voice';
+import { resolveWakeVadThreshold, WAKE_VAD_MODEL } from '@goodvibes-jev/engine/platform/platform/voice';
+import { SPEEXDSP_PREPROCESS } from '@goodvibes-jev/engine/platform/platform/voice/capture';
 
 /**
  * What the configured gate threshold does, in the head's own measured numbers.
@@ -61,7 +61,7 @@ export function agentWakeCapabilities(options: { readonly vadReady: boolean }): 
     // speexAvailable is DELIBERATELY OMITTED, not passed as a boolean. The
     // platform carries SpeexDSP's preprocessor as a WebAssembly module and
     // WakeListener wraps this surface's opener with it, so the honest answer is
-    // "does this runtime have WebAssembly", which the SDK asks itself. Asserting
+    // "does this runtime have WebAssembly", which the platform asks itself. Asserting
     // `true` here would claim a filter this file cannot see running, and `false`
     // would refuse a filter that does run.
     //
@@ -85,7 +85,7 @@ export function agentWakeCapabilities(options: { readonly vadReady: boolean }): 
 /** One artifact's line: what is on disk, verified by content. */
 
 /**
- * Blockers, in the SDK's own words. A blocker means the detector must NOT start,
+ * Blockers, in the platform's own words. A blocker means the detector must NOT start,
  * so the row's key and the written reason are both shown, a swallowed blocker is
  * a user staring at a feature that is on and doing nothing.
  */

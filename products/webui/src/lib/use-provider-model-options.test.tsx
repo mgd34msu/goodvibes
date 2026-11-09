@@ -1,7 +1,7 @@
 import { afterEach, expect, mock, test } from 'bun:test';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
-import type { BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-sdk';
+import type { BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-api';
 import { tokenStore } from './client-lifetime';
 type Request = BrowserJudgmentRequest<'webui.models.catalog-provider-match'>;
 let respond: (request: Request) => Promise<unknown>;

@@ -1,4 +1,4 @@
-import { normalizePermissionMode } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { normalizePermissionMode } from '@goodvibes-jev/engine/platform/platform/gate';
 import { NETWORK_MODE_OPTIONS, REASONING_OPTIONS, HITL_MODE_OPTIONS, GUIDANCE_MODE_OPTIONS, PERMISSION_MODE_OPTIONS, SECRET_POLICY_OPTIONS } from './onboarding-wizard-constants.ts';
 import { shouldShowCloudflareStep } from './onboarding-wizard-cloudflare.ts';
 import { buildCloudflareStep } from './onboarding-wizard-cloudflare-step.ts';

@@ -23,7 +23,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { ActivityLogger } from '../sdk/src/platform/utils/logger.js';
+import { ActivityLogger } from '../platform/src/platform/utils/logger.js';
 
 function scratch(label: string): string {
   return mkdtempSync(join(tmpdir(), `activity-dispose-${label}-`));

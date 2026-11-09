@@ -11,9 +11,9 @@
  * It parses exactly the shapes the GoodVibes family GENERATES, not a superset
  * invented here:
  *
- *   1. The SDK's companion connection payload, a JSON object
+ *   1. The platform's companion connection payload, a JSON object
  *      `{url, token, username, password?, version, surface}` produced by
- *      encodeConnectionPayload (@goodvibes-jev/engine/sdk/platform/pairing) and
+ *      encodeConnectionPayload (@goodvibes-jev/engine/platform/platform/pairing) and
  *      served by goodvibes-app's /app/pairing/connection route. This is the QR
  *      the retired Android companion existed to scan, and the reason this file
  *      exists: the scanner replaces that app.
@@ -58,10 +58,10 @@ export type ScannedPairing =
 // Field names
 // ---------------------------------------------------------------------------
 
-// The first entry of each list is the SDK's own key (companion-token.ts's
+// The first entry of each list is the platform's own key (companion-token.ts's
 // encodeConnectionPayload). The rest are aliases the retired Android companion
 // accepted, kept so its QRs still scan. `version` and `surface` ride along in
-// the SDK payload and are deliberately ignored: nothing on this screen acts on
+// the platform payload and are deliberately ignored: nothing on this screen acts on
 // them, and the daemon is the authority on both.
 const URL_KEYS = ['url', 'baseUrl', 'base_url', 'daemonUrl', 'daemon_url'] as const;
 const TOKEN_KEYS = ['token', 'bearer', 'bearerToken', 'bearer_token', 'accessToken', 'access_token'] as const;
@@ -122,7 +122,7 @@ function hasAnyField(fields: PairingFields): boolean {
 // Per-shape readers, each returns null when the text is not that shape
 // ---------------------------------------------------------------------------
 
-/** Shape 1: the SDK's companion connection payload, a JSON object. */
+/** Shape 1: the platform's companion connection payload, a JSON object. */
 function fromJson(raw: string): PairingFields | null {
   if (!raw.startsWith('{')) return null;
   let parsed: unknown;
@@ -191,7 +191,7 @@ function fromQueryString(raw: string): PairingFields | null {
  * decodeRelayPairingCode.
  *
  * Precedence when a payload carries several credentials: token, then
- * username+password, then relay. The SDK's companion payload always carries
+ * username+password, then relay. The platform's companion payload always carries
  * BOTH a token and a `username` of "admin", so the token has to win or every
  * companion QR would take the password path and fail. Relay is last because it
  * is transport-only and signs nobody in, a payload that carries a token as well

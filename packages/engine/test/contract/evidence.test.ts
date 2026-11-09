@@ -9,13 +9,13 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { CompletionReport } from '../../sdk/src/platform/agents/completion-report.js';
+import type { CompletionReport } from '../../platform/src/platform/agents/completion-report.js';
 import { estimateTokens, LIMITS, validateContextBudget } from '@goodvibes-jev/judgment';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { takeBaseline } from '../../sdk/src/platform/contract/group-runner.js';
-import { RuntimeEventBus } from '../../sdk/src/platform/runtime/events/index.js';
-import type { ContractConfigReader } from '../../sdk/src/platform/contract/config.js';
-import { runUnitCheck } from '../../sdk/src/platform/contract/check.js';
+import { takeBaseline } from '../../platform/src/platform/contract/group-runner.js';
+import { RuntimeEventBus } from '../../platform/src/platform/runtime/events/index.js';
+import type { ContractConfigReader } from '../../platform/src/platform/contract/config.js';
+import { runUnitCheck } from '../../platform/src/platform/contract/check.js';
 import {
   collectChanges,
   collectUnitEvidence,
@@ -37,10 +37,10 @@ import {
   writtenPaths,
   type ContractTurnRecord,
   type RawUnitEvidence,
-} from '../../sdk/src/platform/contract/evidence.js';
+} from '../../platform/src/platform/contract/evidence.js';
 import { checkPort } from './check-port.js';
 import { makeContract, makeCriterion, makeUnit } from './fixtures.js';
-import { buildUnitBrief } from '../../sdk/src/platform/contract/brief.js';
+import { buildUnitBrief } from '../../platform/src/platform/contract/brief.js';
 import { shapeOf } from './plan-support.js';
 
 let dir: string;

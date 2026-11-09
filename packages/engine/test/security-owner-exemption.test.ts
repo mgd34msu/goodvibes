@@ -19,12 +19,12 @@ import {
   isSendToOwnerOnly,
   resolveOwnerAddresses,
   splitRecipients,
-} from '../sdk/src/platform/security/owner-identity.ts';
+} from '../platform/src/platform/security/owner-identity.ts';
 import {
   UntrustedContentLedger,
   createUntrustedContentPort,
-} from '../sdk/src/platform/security/untrusted-content.ts';
-import { createEmailSendHandler } from '../sdk/src/platform/control-plane/routes/email.ts';
+} from '../platform/src/platform/security/untrusted-content.ts';
+import { createEmailSendHandler } from '../platform/src/platform/control-plane/routes/email.ts';
 import { useSecurityReadings } from './helpers/security-readings.ts';
 
 useSecurityReadings();

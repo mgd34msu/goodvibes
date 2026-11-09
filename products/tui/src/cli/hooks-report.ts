@@ -1,16 +1,16 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { createHookDispatcher, createHookWorkbench, getHookPointContract } from '@goodvibes-jev/engine/sdk/platform/hooks';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { HookDefinition, HookEventPath, HookPointContract, HookType } from '@goodvibes-jev/engine/sdk/platform/hooks';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { createHookDispatcher, createHookWorkbench, getHookPointContract } from '@goodvibes-jev/engine/platform/platform/hooks';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { HookDefinition, HookEventPath, HookPointContract, HookType } from '@goodvibes-jev/engine/platform/platform/hooks';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 // ---------------------------------------------------------------------------
 // Shared hooks validation core. The single source of truth for both
 // `goodvibes hooks validate` (src/cli/hooks-command.ts) and `goodvibes doctor
 // hooks` (src/cli/doctor.ts). There is NO second validator: field-level
-// acceptance comes from running the SDK's own HookDispatcher.loadFromFile (the
+// acceptance comes from running the platform's own HookDispatcher.loadFromFile (the
 // same loader the app uses at startup), and the "is this a real hook event
-// point" verdict comes from the SDK's getHookPointContract. This module only
+// point" verdict comes from the platform's getHookPointContract. This module only
 // reads and reports, it changes no config and fires no hooks.
 // ---------------------------------------------------------------------------
 

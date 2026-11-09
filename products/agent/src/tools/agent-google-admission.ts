@@ -1,9 +1,9 @@
 import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
-import { secretReferenceFor, type ConfigManager, type SecretsManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS, clientCredentialsFromInput, readClientCredentialsFromJson } from '@goodvibes-jev/engine/sdk/platform/google';
+import { secretReferenceFor, type ConfigManager, type SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS, clientCredentialsFromInput, readClientCredentialsFromJson } from '@goodvibes-jev/engine/platform/platform/google';
 import { assertCurrentToolEffect, assertProjectionExecution, commitCurrentToolSettingsPlan, ToolInputProjectionError,
-  type ToolInputProjector, type ToolPreparedSettingsMutation } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
+  type ToolInputProjector, type ToolPreparedSettingsMutation } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { retainSurfaceMethods } from './agent-surface-effect.ts';
 
 export interface GoogleAdmissionOwners {

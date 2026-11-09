@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { getNextAutomationOccurrence, normalizeCronSchedule } from '@goodvibes-jev/engine/sdk/platform/automation';
+import { getNextAutomationOccurrence, normalizeCronSchedule } from '@goodvibes-jev/engine/platform/platform/automation';
 
 describe('automation cron uses requested timezone boundaries', () => {
   test.each([
@@ -25,7 +25,7 @@ describe('requested-zone cron is independent of process-local DST setters', () =
     ['America/New_York', 'America/New_York', '30 1 * * *', '2026-11-01T06:30:00Z', '2026-11-02T06:30:00Z'],
     ['Pacific/Auckland', 'Asia/Kathmandu', '0 9 * * *', '2026-07-11T03:15:00Z', '2026-07-12T03:15:00Z'],
   ])('process %s, requested %s, %s after %s', (processZone, timezone, expression, after, expected) => {
-    const source = new URL('../sdk/src/platform/scheduler/scheduler.ts', import.meta.url).pathname;
+    const source = new URL('../platform/src/platform/scheduler/scheduler.ts', import.meta.url).pathname;
     const script = `import { TaskScheduler } from ${JSON.stringify(source)}; const from = ${Date.parse(after)}; const next = new TaskScheduler('unused-test-store.json').getNextRun(${JSON.stringify(expression)}, new Date(from), ${JSON.stringify(timezone)}).getTime(); console.log(JSON.stringify({ next, after: from, forward: next > from }));`;
     // A broken local-calendar advance used to loop forever. Bound the owned
     // child so that regression fails rather than hanging the entire test lane.

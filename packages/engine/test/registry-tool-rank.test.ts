@@ -9,9 +9,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { createRegistryTool } from '../sdk/src/platform/tools/registry-tool/index.js';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.js';
-import type { Tool } from '../sdk/src/platform/types/tools.js';
+import { createRegistryTool } from '../platform/src/platform/tools/registry-tool/index.js';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.js';
+import type { Tool } from '../platform/src/platform/types/tools.js';
 
 let workingDirectory: string;
 let homeDirectory: string;

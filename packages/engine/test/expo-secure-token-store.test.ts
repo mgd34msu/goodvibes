@@ -8,12 +8,12 @@
  * native module acquisition is replaced with an in-memory mock. Tests verify:
  *   - getToken/setToken/clearToken round-trip
  *   - expiresAt preserved via setTokenEntry/getTokenEntry
- *   - Graceful SDKError when native module is missing
+ *   - Graceful GoodVibesError when native module is missing
  *   - Options (key, keychainService, keychainAccessible) passed through correctly
  */
 
 import { describe, it, expect, mock, beforeEach } from 'bun:test';
-import { createExpoSecureTokenStore } from '../sdk/src/client-auth/expo-secure-token-store.js';
+import { createExpoSecureTokenStore } from '../platform/src/client-auth/expo-secure-token-store.js';
 
 // ---------------------------------------------------------------------------
 // Mock expo-secure-store (in-memory)
@@ -157,7 +157,7 @@ describe('createExpoSecureTokenStore (real factory + mock module)', () => {
     store.set('gv-token', '{not-json');
 
     await expect(ts.getToken()).rejects.toMatchObject({
-      code: 'SDK_TOKEN_STORE_CORRUPT',
+      code: 'ENGINE_TOKEN_STORE_CORRUPT',
       recoverable: true,
     });
     expect(store.has('gv-token')).toBe(false);
@@ -169,7 +169,7 @@ describe('createExpoSecureTokenStore (real factory + mock module)', () => {
 // ---------------------------------------------------------------------------
 
 describe('createExpoSecureTokenStore: missing peer dep', () => {
-  it('throws SDKError with kind=config and install hint when module absent', async () => {
+  it('throws GoodVibesError with kind=config and install hint when module absent', async () => {
     // No __loadModule provided, factory will try real dynamic import('expo-secure-store')
     // which fails because expo-secure-store is not installed in this test environment
     const ts = createExpoSecureTokenStore({ key: 'gv-test' });

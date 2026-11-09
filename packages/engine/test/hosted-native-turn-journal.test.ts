@@ -9,8 +9,8 @@ import {
   NATIVE_HOSTED_TURN_JOURNAL_MAX_RECORDS,
   type NativeHostedTurnDispatch,
   type NativeHostedTurnIdentity,
-} from '../sdk/src/platform/hosted-sessions/native-turn-journal.ts';
-import { AtomicWriteDurabilityError, confirmFileDurable, writeJsonFileAtomic } from '../sdk/src/platform/state/durable-file-io.ts';
+} from '../platform/src/platform/hosted-sessions/native-turn-journal.ts';
+import { AtomicWriteDurabilityError, confirmFileDurable, writeJsonFileAtomic } from '../platform/src/platform/state/durable-file-io.ts';
 
 const identity: NativeHostedTurnIdentity = {
   projectId: 'project', principalId: 'paired-owner', requestId: 'request', inputId: 'input',
@@ -96,7 +96,7 @@ test('concurrent instances have one winning claim and retain unrelated identitie
 }));
 
 test('separate processes contend on the same durable claim', async () => fixture(async path => {
-  const modulePath = fileURLToPath(new URL('../sdk/src/platform/hosted-sessions/native-turn-journal.ts', import.meta.url));
+  const modulePath = fileURLToPath(new URL('../platform/src/platform/hosted-sessions/native-turn-journal.ts', import.meta.url));
   const script = `import { NativeHostedTurnJournal } from ${JSON.stringify(modulePath)};
     process.stdout.write(JSON.stringify(await new NativeHostedTurnJournal(${JSON.stringify(path)}).claim(${JSON.stringify(identity)})));`;
   const children = Array.from({ length: 4 }, () => Bun.spawn([process.execPath, '-e', script], { stdout: 'pipe', stderr: 'pipe' }));
@@ -110,7 +110,7 @@ test('separate processes contend on the same durable claim', async () => fixture
 }));
 
 test('separate Agent and WebUI processes atomically choose one immutable surface', async () => fixture(async path => {
-  const modulePath = fileURLToPath(new URL('../sdk/src/platform/hosted-sessions/native-turn-journal.ts', import.meta.url));
+  const modulePath = fileURLToPath(new URL('../platform/src/platform/hosted-sessions/native-turn-journal.ts', import.meta.url));
   const children = (['agent', 'webui', 'agent', 'webui'] as const).map(surface => {
     const script = `import { NativeHostedTurnJournal } from ${JSON.stringify(modulePath)};
       try { process.stdout.write(JSON.stringify({ surface: ${JSON.stringify(surface)}, claimed: await new NativeHostedTurnJournal(${JSON.stringify(path)}).claim(${JSON.stringify(identity)}, [], ${JSON.stringify(surface)}) })); }

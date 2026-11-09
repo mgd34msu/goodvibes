@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'bun:test';
-import { ConfigError } from '../sdk/src/platform/types/errors.js';
+import { ConfigError } from '../platform/src/platform/types/errors.js';
 
 /**
  * tts.speed config key
@@ -25,12 +25,12 @@ afterEach(() => {
 
 describe('tts.speed config key', () => {
   test('coreConfigDefaults.tts.speed is 1.0', async () => {
-    const { coreConfigDefaults } = await import('../sdk/src/platform/config/schema-domain-core.js');
+    const { coreConfigDefaults } = await import('../platform/src/platform/config/schema-domain-core.js');
     expect(coreConfigDefaults.tts.speed).toBe(1.0);
   });
 
   test('schema definition list contains tts.speed key with correct type and default', async () => {
-    const { CONFIG_SCHEMA } = await import('../sdk/src/platform/config/schema.js');
+    const { CONFIG_SCHEMA } = await import('../platform/src/platform/config/schema.js');
     const entry = CONFIG_SCHEMA.find((s) => s.key === 'tts.speed');
     expect(entry).toBeDefined();
     expect(entry!.type).toBe('number');
@@ -41,7 +41,7 @@ describe('tts.speed config key', () => {
 
   test('TtsConfig type has speed field typed as number', async () => {
     // Runtime check: ConfigManager returns tts as TtsConfig-shaped object with speed
-    const { ConfigManager } = await import('../sdk/src/platform/config/manager.js');
+    const { ConfigManager } = await import('../platform/src/platform/config/manager.js');
     const root = mkdtempSync(join(tmpdir(), 'goodvibes-tts-speed-'));
     tmpRoots.push(root);
     const mgr = new ConfigManager({ configDir: join(root, 'config') });
@@ -51,7 +51,7 @@ describe('tts.speed config key', () => {
   });
 
   test('ConfigManager get tts.speed returns default 1.0', async () => {
-    const { ConfigManager } = await import('../sdk/src/platform/config/manager.js');
+    const { ConfigManager } = await import('../platform/src/platform/config/manager.js');
     const root = mkdtempSync(join(tmpdir(), 'goodvibes-tts-speed-get-'));
     tmpRoots.push(root);
     const mgr = new ConfigManager({ configDir: join(root, 'config') });
@@ -59,7 +59,7 @@ describe('tts.speed config key', () => {
   });
 
   test('ConfigManager set/get round-trips tts.speed', async () => {
-    const { ConfigManager } = await import('../sdk/src/platform/config/manager.js');
+    const { ConfigManager } = await import('../platform/src/platform/config/manager.js');
     const root = mkdtempSync(join(tmpdir(), 'goodvibes-tts-speed-set-'));
     tmpRoots.push(root);
     const mgr = new ConfigManager({ configDir: join(root, 'config') });
@@ -68,7 +68,7 @@ describe('tts.speed config key', () => {
   });
 
   test('ConfigManager set/get round-trips extreme valid values', async () => {
-    const { ConfigManager } = await import('../sdk/src/platform/config/manager.js');
+    const { ConfigManager } = await import('../platform/src/platform/config/manager.js');
     const root = mkdtempSync(join(tmpdir(), 'goodvibes-tts-speed-extreme-'));
     tmpRoots.push(root);
     const mgr = new ConfigManager({ configDir: join(root, 'config') });
@@ -82,7 +82,7 @@ describe('tts.speed config key', () => {
     // Ensures the key is usable with mgr.get without a type error at the call site.
     // This test imports the schema definition list and verifies the key is present
     // (the actual TypeScript union is compile-time-only; we verify data consistency).
-    const { CONFIG_SCHEMA } = await import('../sdk/src/platform/config/schema.js');
+    const { CONFIG_SCHEMA } = await import('../platform/src/platform/config/schema.js');
     const keys = CONFIG_SCHEMA.map((s) => s.key);
     expect(keys).toContain('tts.speed');
     // Confirm it sits in the tts.* group alongside its siblings
@@ -93,7 +93,7 @@ describe('tts.speed config key', () => {
   });
 
   test('ConfigManager set rejects tts.speed > 4.0 (too fast)', async () => {
-    const { ConfigManager } = await import('../sdk/src/platform/config/manager.js');
+    const { ConfigManager } = await import('../platform/src/platform/config/manager.js');
     const root = mkdtempSync(join(tmpdir(), 'goodvibes-tts-speed-hi-'));
     tmpRoots.push(root);
     const mgr = new ConfigManager({ configDir: join(root, 'config') });
@@ -105,7 +105,7 @@ describe('tts.speed config key', () => {
   });
 
   test('ConfigManager set rejects tts.speed < 0.25 (too slow)', async () => {
-    const { ConfigManager } = await import('../sdk/src/platform/config/manager.js');
+    const { ConfigManager } = await import('../platform/src/platform/config/manager.js');
     const root = mkdtempSync(join(tmpdir(), 'goodvibes-tts-speed-lo-'));
     tmpRoots.push(root);
     const mgr = new ConfigManager({ configDir: join(root, 'config') });
@@ -117,7 +117,7 @@ describe('tts.speed config key', () => {
   });
 
   test('ConfigManager set rejects tts.speed = NaN', async () => {
-    const { ConfigManager } = await import('../sdk/src/platform/config/manager.js');
+    const { ConfigManager } = await import('../platform/src/platform/config/manager.js');
     const root = mkdtempSync(join(tmpdir(), 'goodvibes-tts-speed-nan-'));
     tmpRoots.push(root);
     const mgr = new ConfigManager({ configDir: join(root, 'config') });

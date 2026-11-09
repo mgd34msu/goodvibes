@@ -1,17 +1,17 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { FavoritesStore } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { FavoritesStore } from '@goodvibes-jev/engine/platform/platform/providers';
 import { SecretsManager } from '../../config/secrets.ts';
-import { ServiceRegistry } from '@goodvibes-jev/engine/sdk/platform/config';
-import { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { BenchmarkStore } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { CacheHitTracker } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { OpenAIProvider } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { ProviderCapabilityRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { createLaunchTolerantProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { getProviderRuntimeSnapshot, getProviderUsageSnapshot } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
+import { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { BenchmarkStore } from '@goodvibes-jev/engine/platform/platform/providers';
+import { CacheHitTracker } from '@goodvibes-jev/engine/platform/platform/providers';
+import { OpenAIProvider } from '@goodvibes-jev/engine/platform/platform/providers';
+import { ProviderCapabilityRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { createLaunchTolerantProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { getProviderRuntimeSnapshot, getProviderUsageSnapshot } from '@goodvibes-jev/engine/platform/platform/providers';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 function goodVibesRef(source: string, id: string): string {

@@ -1,5 +1,5 @@
 /** Read-only projection of the public contract tree into the redesigned lane graph. */
-import { contractTree, type ContractView, type ContractUnitView, type CriterionView } from '@goodvibes-jev/engine/sdk/platform/contract';
+import { contractTree, type ContractView, type ContractUnitView, type CriterionView } from '@goodvibes-jev/engine/platform/platform/contract';
 import { cellText, type BeadStatus, type BeadSummary } from './renderer/bead.js';
 export function contractIsActive(contract: ContractView): boolean {
     return !['passed', 'failed', 'cancelled'].includes(contract.status);

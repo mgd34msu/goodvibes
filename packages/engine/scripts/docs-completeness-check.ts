@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SDK_ROOT = resolve(__dirname, '..');
+const ENGINE_ROOT = resolve(__dirname, '..');
 
 const requiredDocs = [
   'README.md',
@@ -54,19 +54,19 @@ const requiredExamples = [
 ];
 
 for (const relativePath of [...requiredDocs, ...requiredExamples]) {
-  const fullPath = resolve(SDK_ROOT, relativePath);
+  const fullPath = resolve(ENGINE_ROOT, relativePath);
   if (!existsSync(fullPath)) {
-    throw new Error(`Missing required SDK doc/example: ${relativePath}`);
+    throw new Error(`Missing required engine doc/example: ${relativePath}`);
   }
   const content = readFileSync(fullPath, 'utf8').trim();
   if (!content) {
-    throw new Error(`Empty required SDK doc/example: ${relativePath}`);
+    throw new Error(`Empty required engine doc/example: ${relativePath}`);
   }
 }
 
 // A status must precede the design body, so proposed behavior cannot silently
 // become a release claim. Reuse this docs lane rather than adding another script.
-const designDirectory = resolve(SDK_ROOT, '../../.goodvibes/dev/docs/design');
+const designDirectory = resolve(ENGINE_ROOT, '../../.goodvibes/dev/docs/design');
 for (const file of existsSync(designDirectory) ? readdirSync(designDirectory).filter(name => name.endsWith('.md')) : []) {
   const preamble = readFileSync(resolve(designDirectory, file), 'utf8').split('\n').slice(0, 10).join('\n');
   if (!/^\*{0,2}Status:/m.test(preamble)) throw new Error(`Design doc needs an explicit status preamble: ${file}`);

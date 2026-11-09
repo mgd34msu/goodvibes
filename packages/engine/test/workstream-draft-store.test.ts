@@ -14,14 +14,14 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { readdirSync, rmSync, statSync, utimesSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { WorkstreamDraft } from '../sdk/src/platform/orchestration/workstream-services.ts';
+import type { WorkstreamDraft } from '../platform/src/platform/orchestration/workstream-services.ts';
 import {
   WORKSTREAM_DRAFT_CAP,
   WORKSTREAM_DRAFT_TTL_MS,
   createWorkstreamDraftStore,
   formatWorkstreamDraftReclaim,
   type WorkstreamDraftReclaim,
-} from '../sdk/src/platform/orchestration/workstream-draft-store.ts';
+} from '../platform/src/platform/orchestration/workstream-draft-store.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const NOW = Date.now();

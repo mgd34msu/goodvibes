@@ -1,7 +1,7 @@
 /**
  * bundle-for-hermes.ts
  *
- * Bun script: bundles the SDK react-native entry + Hermes test cases into a
+ * Bun script: bundles the platform react-native entry + Hermes test cases into a
  * single flat JS file that the Hermes binary can execute.
  *
  * Uses esbuild (bundled with Bun) with target=es2019 to ensure:

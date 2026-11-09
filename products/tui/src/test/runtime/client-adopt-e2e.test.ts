@@ -34,7 +34,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../../config/surface.ts';
 import { createDaemonVerbCaller, type DaemonVerbCaller } from '../../runtime/client/operator-endpoint.ts';
 import {
@@ -44,7 +44,7 @@ import {
   createDaemonCredentialsClient,
   createDevicesClient,
   createTasksClient,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+} from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { createFleetUnionReadModel } from '../../runtime/client/fleet-union.ts';
 import { buildFleetSnapshot, createStaticFleetReadModel } from '../../views/fleet-read-model.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';

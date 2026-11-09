@@ -1,6 +1,6 @@
 /** Staged release inspection: no settings, database bootstrap or service graph. */
 import { writeSync } from 'node:fs';
-import { assertNativeReaderCompatible, nativeReaderCapabilities, NativeDataCompatibilityError, realUpdateFileIo } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { assertNativeReaderCompatible, nativeReaderCapabilities, NativeDataCompatibilityError, realUpdateFileIo } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { COMPILED_VERSION } from '../version.js';
 
 export function runInstallReaderCheck(args: readonly string[], output: {

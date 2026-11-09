@@ -1,14 +1,14 @@
 // ---------------------------------------------------------------------------
 // conversation-rewind-port.ts, the daemon's RewindConversationPort for the
-// SDK's unified rewind service.
+// platform's unified rewind service.
 //
-// The SDK's UnifiedRewindService (platform/rewind) joins files rewind (workspace
+// The platform's UnifiedRewindService (platform/rewind) joins files rewind (workspace
 // checkpoints) with conversation rewind through two ports. The conversation port
 // is "a daemon-hosted mutable conversation store": preview() reports how many
 // messages would truncate to a recorded turn boundary, and rewind() performs the
 // truncation and captures the pre-/post-truncation snapshots so the reversal can
 // be undone and re-applied. The truncation boundary is the message count recorded
-// for the anchor's turnId at TURN_COMPLETED (the SDK's platform/rewind turn
+// for the anchor's turnId at TURN_COMPLETED (the platform's platform/rewind turn
 // anchors), the same
 // join key files rewind uses against the workspace checkpoint.
 //
@@ -20,11 +20,11 @@
 // it used to answer an empty resolution with "0 messages to drop", the same
 // answer a conversation already at the anchor gives, which is a confident wrong
 // answer rather than a missing one. It now reports the anchor as UNAVAILABLE
-// with the reason, which the SDK's rewind service turns into a plan warning.
+// with the reason, which the platform's rewind service turns into a plan warning.
 //
 // The surfaces reach conversation rewind a different way now: they offer their
 // live conversation over the control plane (rewind.conversation.*), and the
-// SDK's host broker asks them directly. This port is the fallback the broker
+// platform's host broker asks them directly. This port is the fallback the broker
 // falls through to for sessions no surface has offered, which is exactly the
 // case where the daemon hosts the conversation itself. Files-scope rewind,
 // entirely daemon-owned, was never affected either way.
@@ -38,8 +38,8 @@ import type {
   RewindConversationOutcome,
   RewindConversationPort,
   RewindConversationPreview,
-} from '@goodvibes-jev/engine/sdk/platform/rewind';
-import { resolveTurnAnchor } from '@goodvibes-jev/engine/sdk/platform/rewind';
+} from '@goodvibes-jev/engine/platform/platform/rewind';
+import { resolveTurnAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
 
 /** Whatever a conversation is serialized as by the process that owns it. */
 type ConversationJson = unknown;

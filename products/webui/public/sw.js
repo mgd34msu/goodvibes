@@ -160,7 +160,7 @@ self.addEventListener('fetch', (event) => {
 
 // ─── Web Push ─────────────────────────────────────────────────────────
 //
-// The daemon sends a JSON payload shaped like the SDK's PushMessage
+// The daemon sends a JSON payload shaped like the platform's PushMessage
 // ({ title, body, data }). For an approval the daemon sets
 // data = { kind: 'approval', approvalId }. We render the notification and, on
 // tap, deep-link to the view that action lives in.
@@ -263,7 +263,7 @@ function linkForNotification(data, action) {
 // another context's localStorage (it is a separate global scope; there is no
 // synchronous cross-context storage API for this). So the SW best-effort
 // notifies any ALREADY-OPEN tab via postMessage, which reconciles with its own
-// authenticated sdk client. If no tab is open, this rotation is picked up the
+// authenticated client. If no tab is open, this rotation is picked up the
 // next time the app opens: reconcilePushSubscriptionOnOpen
 // (src/lib/push/push-client.ts) compares the live subscription (now the
 // rotated one) against the daemon's stale record and heals it then. A rotation

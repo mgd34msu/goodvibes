@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   writeDaemonSetting,
-} from '../sdk/src/platform/workspace/daemon-home.js';
+} from '../platform/src/platform/workspace/daemon-home.js';
 
 function tempDir(suffix: string): string {
   const d = join(tmpdir(), `gv-sec02-${suffix}-${Date.now()}`);

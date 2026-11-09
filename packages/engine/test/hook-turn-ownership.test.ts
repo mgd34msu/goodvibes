@@ -1,6 +1,6 @@
-import { HookActivityTracker } from '../sdk/src/platform/hooks/activity.ts';
+import { HookActivityTracker } from '../platform/src/platform/hooks/activity.ts';
 import { expect, test } from 'bun:test';
-import { TurnHookOwner } from '../sdk/src/platform/hooks/turn-ownership.ts';
+import { TurnHookOwner } from '../platform/src/platform/hooks/turn-ownership.ts';
 
 function gate() {
   let release!: () => void;

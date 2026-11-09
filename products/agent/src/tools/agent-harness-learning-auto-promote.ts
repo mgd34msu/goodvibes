@@ -1,8 +1,8 @@
 import { learningPromotionReference } from './agent-harness-learning-curator-common.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { types as nodeTypes } from 'node:util';
-import { prepareMemoryApiAdd } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import type { MemoryApi } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import { prepareMemoryApiAdd } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { AgentPersonaRegistry } from '../agent/persona-registry.ts';
 import { AgentRoutineRegistry } from '../agent/routine-registry.ts';

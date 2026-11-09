@@ -4,7 +4,7 @@ import {
   composeConversationLayers,
   type ModalEntry,
 } from '@goodvibes-jev/engine/terminal-shell/renderer/conversation-overlays';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ConversationManager } from '../core/conversation';
 import type { CommandRegistry } from '../input/command-registry.ts';
 import type { InputHandler } from '../input/handler.ts';

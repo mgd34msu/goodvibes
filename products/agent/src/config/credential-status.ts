@@ -8,7 +8,7 @@
  * bytes: the wire contract (CREDENTIALS_SNAPSHOT_SCHEMA) carries status metadata
  * only. This is a VISIBILITY path, not secret transport.
  *
- * Host-vs-client (see the SDK decision record 2026-07-06-config-sharing): a surface
+ * Host-vs-client (see the platform decision record 2026-07-06-config-sharing): a surface
  * that IS the daemon host reads its own local SecretsManager directly (no wire hop,
  * src/config/secrets.ts). A surface acting as a daemon client reads STATUS here.
  * Secret RESOLUTION (the value provider auth needs) always stays local/env; only the

@@ -2,11 +2,11 @@ import { afterEach, expect, test } from 'bun:test';
 import { decisionModelPolicyState, installJudgmentPort, type DecisionModelPolicy } from '@goodvibes-jev/engine/errors';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
-import { readNaturalLanguageSchedule } from '../sdk/src/platform/automation/schedule-reading.js';
-import { createHookApi } from '../sdk/src/platform/hooks/hook-api.js';
-import { listHookPointContracts } from '../sdk/src/platform/hooks/contracts.js';
-import { findPlaybooksBySymptom } from '../sdk/src/platform/runtime/ops/index.js';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
+import { readNaturalLanguageSchedule } from '../platform/src/platform/automation/schedule-reading.js';
+import { createHookApi } from '../platform/src/platform/hooks/hook-api.js';
+import { listHookPointContracts } from '../platform/src/platform/hooks/contracts.js';
+import { findPlaybooksBySymptom } from '../platform/src/platform/runtime/ops/index.js';
 
 let previous: JudgmentPort | undefined, installed = false;
 afterEach(() => { if (installed) installJudgmentPort(previous); installed = false; });

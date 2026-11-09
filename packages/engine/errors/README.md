@@ -1,8 +1,8 @@
 # @goodvibes-jev/engine/errors
 
-Public GoodVibes error package for structured SDK, transport, and daemon failures.
+Public GoodVibes error module for structured platform, transport, and daemon failures.
 
-Most applications should install `@goodvibes-jev/engine` and import `@goodvibes-jev/engine/sdk/errors`. These modules are subpath exports of the engine package.
+Most applications should install `@goodvibes-jev/engine` and import `@goodvibes-jev/engine/platform/errors`. These modules are subpath exports of the engine package.
 
 ## Install
 
@@ -12,15 +12,15 @@ npm install @goodvibes-jev/engine
 
 ## The error model
 
-Every error thrown from the SDK's public surface is a `GoodVibesSdkError`. The `kind` field is the primary discriminant. Switch on it instead of `instanceof` chains or message parsing:
+Every error thrown from the platform's public surface is a `GoodVibesError`. The `kind` field is the primary discriminant. Switch on it instead of `instanceof` chains or message parsing:
 
 ```ts
-import { GoodVibesSdkError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes-jev/engine/errors';
 
 try {
   await callIntegration();
 } catch (err) {
-  if (err instanceof GoodVibesSdkError) {
+  if (err instanceof GoodVibesError) {
     switch (err.kind) {
       case 'auth':       /* re-authenticate */ break;
       case 'rate-limit': await delay(err.retryAfterMs ?? 1000); break;
@@ -48,10 +48,10 @@ try {
 }
 ```
 
-The same symbols are re-exported from the SDK facade, so SDK consumers can import them from `@goodvibes-jev/engine/sdk/errors` instead:
+The same symbols are re-exported from the platform facade, so platform consumers can import them from `@goodvibes-jev/engine/platform/errors` instead:
 
 ```ts
-import { HttpStatusError } from '@goodvibes-jev/engine/sdk/errors';
+import { HttpStatusError } from '@goodvibes-jev/engine/platform/errors';
 ```
 
 ## Branch on structured fields
@@ -62,7 +62,7 @@ Use the structured fields instead of fragile message parsing:
 - error category (`category`) and source (`source`)
 - recovery hints (`recoverable`, `hint`, `retryAfterMs`)
 - request correlation (`requestId`)
-- typed code (`code`): match it with `isErrorCode(err, SDKErrorCodes.RATE_LIMITED)`
+- typed code (`code`): match it with `isErrorCode(err, EngineErrorCodes.RATE_LIMITED)`
 
 ## Daemon wire contract
 
@@ -82,6 +82,6 @@ The exported fields are intended to replace fragile message parsing in client an
 
 ## Documentation
 
-- [SDK Error Kinds](../docs/error-kinds.md): per-kind consumer reference
+- [platform Error Kinds](../docs/error-kinds.md): per-kind consumer reference
 - [Error Handling](../docs/error-handling.md): handling patterns
 - [Error Architecture](../docs/errors.md): internal source map

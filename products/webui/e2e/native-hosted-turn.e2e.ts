@@ -1,6 +1,6 @@
 /** Production browser bundle + Chromium IndexedDB + unchanged paired daemon/model captures. */
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { nativeHostedTurnLookupSchema } from "@goodvibes-jev/engine/sdk/platform/hosted-sessions/native-turn-client";
+import { nativeHostedTurnLookupSchema } from "@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client";
 import { expectNoHorizontalScroll } from "./support/app";
 import {
   isLegacyExecutionMutation,

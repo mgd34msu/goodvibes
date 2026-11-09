@@ -10,7 +10,7 @@
 import { describe, expect, test } from 'bun:test';
 import { handleModelPickerToken } from '../../input/handler-picker-routes.ts';
 import { buildLocalFitRecommendations, buildSignInRow } from '../../input/model-picker-local-fit.ts';
-import type { ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { ModelPickerModal } from '../../input/model-picker.ts';
 
 const STUB_PROFILE = {

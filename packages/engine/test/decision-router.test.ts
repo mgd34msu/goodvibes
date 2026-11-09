@@ -1,11 +1,11 @@
 import { expect, test } from 'bun:test';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { captureDecisionRouterSettings, DEFAULT_DECISION_ROUTER_SETTINGS } from '../sdk/src/platform/config/decision-router-settings.ts';
-import { DecisionRouterProvider, prepareDecisionRouterTurn, chatWithDecisionRoute } from '../sdk/src/platform/providers/decision-router.ts';
-import { buildDecisionRoutingPreview, selectedRoutingFiles } from '../sdk/src/platform/providers/decision-router-context.ts';
-import type { ChatRequest, ChatResponse, LLMProvider } from '../sdk/src/platform/providers/interface.ts';
-import type { ModelDefinition } from '../sdk/src/platform/providers/registry-types.ts';
+import { captureDecisionRouterSettings, DEFAULT_DECISION_ROUTER_SETTINGS } from '../platform/src/platform/config/decision-router-settings.ts';
+import { DecisionRouterProvider, prepareDecisionRouterTurn, chatWithDecisionRoute } from '../platform/src/platform/providers/decision-router.ts';
+import { buildDecisionRoutingPreview, selectedRoutingFiles } from '../platform/src/platform/providers/decision-router-context.ts';
+import type { ChatRequest, ChatResponse, LLMProvider } from '../platform/src/platform/providers/interface.ts';
+import type { ModelDefinition } from '../platform/src/platform/providers/registry-types.ts';
 
 const general = { provider: 'answer', model: 'general' };
 const coding = { provider: 'other', model: 'coding', effort: 'high' };

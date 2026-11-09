@@ -2,8 +2,8 @@
 import { describe, expect, test } from 'bun:test';
 import {
   buildPolicyPreflightReview,
-} from '../sdk/src/platform/runtime/permissions/index.ts';
-import type { GoodVibesConfig } from '../sdk/src/platform/config/index.ts';
+} from '../platform/src/platform/runtime/permissions/index.ts';
+import type { GoodVibesConfig } from '../platform/src/platform/config/index.ts';
 
 const baseConfig = {
   permissions: {

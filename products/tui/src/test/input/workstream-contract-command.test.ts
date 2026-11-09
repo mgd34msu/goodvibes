@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createContractOperatorService, type OperatorContractRunner, type ContractView } from '@goodvibes-jev/engine/sdk/platform/contract';
+import { createContractOperatorService, type OperatorContractRunner, type ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerWorkstreamRuntimeCommands } from '../../input/commands/workstream-runtime.ts';
 import { contractFixture } from '../helpers/contract-work-tree-fixtures.ts';

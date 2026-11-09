@@ -3,7 +3,7 @@ import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createLegacyPostConfigHandler } from './fixtures/settings/legacy-post-config.js';
-import { createDaemonSystemRouteHandlers } from '../daemon-sdk/src/system-routes.js';
+import { createDaemonSystemRouteHandlers } from '../daemon-api/src/system-routes.js';
 
 function fixture(body: Record<string, unknown>, version: 'legacy' | 'current' = 'current') {
   const writes: { key: string; value: unknown }[] = [];

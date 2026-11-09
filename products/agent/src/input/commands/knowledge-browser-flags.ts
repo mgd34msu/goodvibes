@@ -1,4 +1,4 @@
-import type { BrowserKnowledgeKind, BrowserKnowledgeSourceKind } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import type { BrowserKnowledgeKind, BrowserKnowledgeSourceKind } from '@goodvibes-jev/engine/platform/platform/knowledge';
 
 const BROWSER_KINDS = ['chrome', 'chromium', 'brave', 'edge', 'vivaldi', 'arc', 'opera', 'firefox', 'zen', 'librewolf', 'waterfox', 'floorp', 'safari', 'orion', 'epiphany'] as const satisfies readonly BrowserKnowledgeKind[];
 const BROWSER_SOURCE_KINDS = ['history', 'bookmark'] as const satisfies readonly BrowserKnowledgeSourceKind[];

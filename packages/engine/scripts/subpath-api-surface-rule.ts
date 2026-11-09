@@ -302,7 +302,7 @@ export const EMPTY_SUBPATH_ALLOWLIST: ReadonlyMap<string, string> = new Map([
     'Ambient module declaration for the untyped `sql.js` package. Its whole '
       + 'content is a `declare module` block, which contributes no exported '
       + 'symbol to this package, a consumer picks it up with '
-      + '`/// <reference types="@goodvibes-jev/engine/sdk/sql-js" />`, not by '
+      + '`/// <reference types="@goodvibes-jev/engine/platform/sql-js" />`, not by '
       + 'importing from it. An empty recorded surface is correct here, not a '
       + 'resolution failure.',
   ],

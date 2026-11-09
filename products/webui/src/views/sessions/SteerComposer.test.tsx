@@ -27,7 +27,7 @@ mock.module('../../lib/goodvibes', () => ({
   hasStoredTokenSync: () => Boolean(localStorage.getItem(WEBUI_TOKEN_STORE_KEY)),
   getCurrentAuth: () => Promise.resolve({}),
   invokeMethod: () => Promise.resolve({}),
-  sdk: {
+  client: {
     operator: {
       sessions: {
         steer: (id: string) => {

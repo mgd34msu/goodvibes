@@ -6,12 +6,12 @@
 
 import { describe, expect, test } from 'bun:test';
 import { resolve } from 'node:path';
-import { GitService, conflictPathsFromMergeOutput } from '../sdk/src/platform/git/service.js';
+import { GitService, conflictPathsFromMergeOutput } from '../platform/src/platform/git/service.js';
 
 const CWD = resolve(import.meta.dir, '..');
 
 describe('platform/git: behavior smoke', () => {
-  test('GitService.isGitRepo returns true for the SDK repo', async () => {
+  test('GitService.isGitRepo returns true for the platform repo', async () => {
     const result = await GitService.isGitRepo(CWD);
     expect(result).toBe(true);
   });
@@ -21,7 +21,7 @@ describe('platform/git: behavior smoke', () => {
     expect(svc.getCwd()).toBe(CWD);
   });
 
-  test('GitService.getRepoRoot returns a non-empty string for the SDK repo', async () => {
+  test('GitService.getRepoRoot returns a non-empty string for the platform repo', async () => {
     const root = await GitService.getRepoRoot(CWD);
     expect(typeof root).toBe('string');
     expect((root as string).length).toBeGreaterThan(0);

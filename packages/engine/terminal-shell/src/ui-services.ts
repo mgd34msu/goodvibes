@@ -1,5 +1,5 @@
-import { createUiRuntimeEvents, type UiReadModels } from '@goodvibes-jev/engine/sdk/platform/runtime/ui';
-import type { RuntimeEventBus } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
+import { createUiRuntimeEvents, type UiReadModels } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
+import type { RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 const GROUPS = {
   environment: ['workingDirectory', 'homeDirectory', 'shellPaths'],
   shell: ['keybindingsManager', 'processManager', 'profileManager', 'bookmarkManager'],

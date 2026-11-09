@@ -5,12 +5,12 @@ import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { KnowledgeService } from '../sdk/src/platform/knowledge/service.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { KnowledgeService } from '../platform/src/platform/knowledge/service.js';
 import { buildKnowledgePacket, buildKnowledgePromptPacket, prepareKnowledgePromptPacket, readPreparedKnowledgePromptPacket,
-  searchKnowledge, type KnowledgePacketContext, type PreparedKnowledgePromptPacket } from '../sdk/src/platform/knowledge/packet.js';
-import { estimateTokens, renderKnowledgePacketItem } from '../sdk/src/platform/knowledge/shared.js';
-import { knowledgeScopeSelection } from '../sdk/src/platform/knowledge/batteries/scope-selection.js';
+  searchKnowledge, type KnowledgePacketContext, type PreparedKnowledgePromptPacket } from '../platform/src/platform/knowledge/packet.js';
+import { estimateTokens, renderKnowledgePacketItem } from '../platform/src/platform/knowledge/shared.js';
+import { knowledgeScopeSelection } from '../platform/src/platform/knowledge/batteries/scope-selection.js';
 
 const roots: string[] = [];
 // These authored ordinary documents have independent scope and query-relevance readings.

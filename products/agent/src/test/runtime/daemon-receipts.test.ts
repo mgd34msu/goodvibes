@@ -8,7 +8,7 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { AgentDaemonReceiptFeed, type DaemonReceipt } from '../../runtime/daemon-receipts.ts';
-import { createSessionSpineReceiptConsumer as createSpineReceiptConsumer } from '@goodvibes-jev/engine/sdk/platform/runtime/session-spine';
+import { createSessionSpineReceiptConsumer as createSpineReceiptConsumer } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
 
 describe('AgentDaemonReceiptFeed', () => {
   test('buffers receipts captured before the renderer attaches, then flushes in order', () => {

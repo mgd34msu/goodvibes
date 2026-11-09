@@ -23,8 +23,8 @@ import { describe, expect, test } from 'bun:test';
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, statSync, utimesSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { acquireCrossProcessLock } from '../sdk/src/platform/workspace/checkpoint/cross-process-lock.js';
-import { WorkspaceCheckpointManager } from '../sdk/src/platform/workspace/checkpoint/manager.js';
+import { acquireCrossProcessLock } from '../platform/src/platform/workspace/checkpoint/cross-process-lock.js';
+import { WorkspaceCheckpointManager } from '../platform/src/platform/workspace/checkpoint/manager.js';
 
 function tempDir(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));

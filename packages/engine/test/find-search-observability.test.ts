@@ -4,10 +4,10 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { executeContentQuery } from '../sdk/src/platform/tools/find/content.ts';
-import { executeFilesQuery } from '../sdk/src/platform/tools/find/files.ts';
-import { FindRuntimeService, type ImportGraphLike } from '../sdk/src/platform/tools/find/shared.ts';
-import { ImportGraph } from '../sdk/src/platform/intelligence/import-graph.ts';
+import { executeContentQuery } from '../platform/src/platform/tools/find/content.ts';
+import { executeFilesQuery } from '../platform/src/platform/tools/find/files.ts';
+import { FindRuntimeService, type ImportGraphLike } from '../platform/src/platform/tools/find/shared.ts';
+import { ImportGraph } from '../platform/src/platform/intelligence/import-graph.ts';
 
 let previous: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previous = installJudgmentPort(fakePort(() => noulAnswer(0.001)).port); });

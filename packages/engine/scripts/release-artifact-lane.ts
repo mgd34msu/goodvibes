@@ -10,7 +10,7 @@
  * catalog/daemon composed FROM THE PACKED ARTIFACTS, never from the workspace
  * source. It proves the tarballs are internally coherent before they are
  * published; consumer repos run their own suites against the pins at release
- * time, and this lane is the SDK half of that standing consumer-matrix gate.
+ * time, and this lane is the engine half of that standing consumer-matrix gate.
  *
  * Per-check honesty: the in-scratch conformance script prints one PASS/FAIL line
  * per check and exits non-zero if any fails, so a partial failure is never
@@ -18,7 +18,7 @@
  *
  * Checks (all run against the installed tarballs' public API):
  *   - packed catalog vs packed contract parity: the operator contract rebuilt
- *     from the packed SDK's GatewayMethodCatalog matches the packed
+ *     from the packed engine's GatewayMethodCatalog matches the packed
  *     @goodvibes-jev/engine/contracts artifact (method ids + REST bindings).
  *   - descriptors-have-handlers: the shipped conformance kit run against a
  *     catalog with the packed terminal-shell ws-only handlers attached, the
@@ -41,7 +41,7 @@ import { retryTransientInstall } from './install-retry.ts';
 import {
   cleanupStage,
   collectTarballs,
-  createSdkTempDir,
+  createPlatformTempDir,
   packStage,
   run,
   stagePackages,
@@ -59,7 +59,7 @@ import {
   findMethodsMissingHandlers,
   assertEveryDescriptorHasHandler,
 } from '@goodvibes-jev/engine/contracts/testing';
-import { GatewayMethodCatalog, buildOperatorContract } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import { GatewayMethodCatalog, buildOperatorContract } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { attachWsOnlyGatewayVerbHandlers } from '@goodvibes-jev/engine/terminal-shell';
 
 const failures = [];
@@ -97,7 +97,7 @@ check('packed-catalog-vs-contract-parity', () => {
   const contractIds = [...OPERATOR_METHOD_IDS].sort();
   assert(
     rebuiltIds.length === contractIds.length && rebuiltIds.every((id, i) => id === contractIds[i]),
-    'packed SDK catalog method ids differ from packed contract OPERATOR_METHOD_IDS',
+    'packed engine catalog method ids differ from packed contract OPERATOR_METHOD_IDS',
   );
   const contractById = new Map(OPERATOR_CONTRACT.operator.methods.map((m) => [m.id, m]));
   for (const method of rebuilt.operator.methods) {
@@ -105,7 +105,7 @@ check('packed-catalog-vs-contract-parity', () => {
     assert(contractMethod, 'packed contract missing method ' + method.id);
     const a = method.http ? method.http.method + ' ' + method.http.path : null;
     const b = contractMethod.http ? contractMethod.http.method + ' ' + contractMethod.http.path : null;
-    assert(a === b, 'REST binding mismatch for ' + method.id + ': packed-sdk=' + a + ' packed-contract=' + b);
+    assert(a === b, 'REST binding mismatch for ' + method.id + ': packed-engine=' + a + ' packed-contract=' + b);
   }
 });
 
@@ -166,7 +166,7 @@ console.log('artifact-lane conformance ok');
 function writeConsumerFiles(projectDir: string): void {
   writeFileSync(
     resolve(projectDir, 'package.json'),
-    `${JSON.stringify({ name: 'goodvibes-sdk-artifact-lane', private: true, type: 'module' }, null, 2)}\n`,
+    `${JSON.stringify({ name: 'goodvibes-artifact-lane', private: true, type: 'module' }, null, 2)}\n`,
   );
   writeFileSync(resolve(projectDir, 'conformance.mjs'), `${CONFORMANCE_SCRIPT.trim()}\n`);
   // Run the same consumer fixture against the installed tarball, whose source
@@ -179,8 +179,8 @@ function writeConsumerFiles(projectDir: string): void {
 async function main(): Promise<void> {
   console.log('[artifact-lane] packing workspace packages exactly as publish would...');
   const { tempRoot, publicStages } = await stagePackages();
-  const packDestination = createSdkTempDir('goodvibes-sdk-artifact-lane-tarballs-');
-  const projectDir = createSdkTempDir('goodvibes-sdk-artifact-lane-consumer-');
+  const packDestination = createPlatformTempDir('goodvibes-artifact-lane-tarballs-');
+  const projectDir = createPlatformTempDir('goodvibes-artifact-lane-consumer-');
   try {
     const packResults = publicStages.map((stage) => packStage(stage.stageDir, packDestination));
     const tarballs = collectTarballs(packResults, packDestination);

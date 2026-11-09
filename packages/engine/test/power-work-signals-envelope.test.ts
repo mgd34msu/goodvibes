@@ -2,7 +2,7 @@
  * power-work-signals-envelope.test.ts, regression test for the work-signals
  * envelope-shape defect.
  *
- * bindPowerWorkSignals (packages/sdk/src/platform/power/work-signals.ts) used
+ * bindPowerWorkSignals (packages/platform/src/platform/power/work-signals.ts) used
  * to declare its bus slice with a hand-written envelope shape,
  * `{ event: Record<string, unknown> }`, that has never matched the real
  * `EventEnvelope` (packages/transport-core/src/event-envelope.ts:
@@ -21,13 +21,13 @@
  * stub, which would pass against the bug just as happily as against the fix.
  */
 import { describe, expect, test } from 'bun:test';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
-import type { EmitterContext } from '../sdk/src/platform/runtime/emitters/index.ts';
-import { emitTurnSubmitted, emitTurnCompleted } from '../sdk/src/platform/runtime/emitters/turn.ts';
-import { emitAgentSpawning, emitAgentCompleted } from '../sdk/src/platform/runtime/emitters/agents.ts';
-import { emitAutomationRunQueued, emitAutomationRunCompleted } from '../sdk/src/platform/runtime/emitters/automation.ts';
-import { bindPowerWorkSignals, type PowerWorkSignalBus } from '../sdk/src/platform/power/work-signals.ts';
-import type { PowerManager } from '../sdk/src/platform/power/manager.ts';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
+import type { EmitterContext } from '../platform/src/platform/runtime/emitters/index.ts';
+import { emitTurnSubmitted, emitTurnCompleted } from '../platform/src/platform/runtime/emitters/turn.ts';
+import { emitAgentSpawning, emitAgentCompleted } from '../platform/src/platform/runtime/emitters/agents.ts';
+import { emitAutomationRunQueued, emitAutomationRunCompleted } from '../platform/src/platform/runtime/emitters/automation.ts';
+import { bindPowerWorkSignals, type PowerWorkSignalBus } from '../platform/src/platform/power/work-signals.ts';
+import type { PowerManager } from '../platform/src/platform/power/manager.ts';
 
 /**
  * work-signals.ts's own doc comment on `PowerWorkSignalBus` claims

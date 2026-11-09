@@ -39,25 +39,25 @@ import { join } from 'node:path';
 import {
   GoogleApiClient,
   type GoogleApiFetchPort,
-} from '../sdk/src/platform/google/api-client.ts';
-import { GoogleTokenManager } from '../sdk/src/platform/google/token-manager.ts';
-import type { GoogleOAuthCredentials } from '../sdk/src/platform/google/credential-adoption.ts';
-import { collectHistoryDelta } from '../sdk/src/platform/google/history-delta.ts';
-import type { HistoryDeltaDeps } from '../sdk/src/platform/google/history-delta.ts';
-import { createInboundMailIntake } from '../sdk/src/platform/email/inbound/intake.ts';
-import { InboundMailStore } from '../sdk/src/platform/email/inbound/record-store.ts';
-import { VerificationExpectationBook } from '../sdk/src/platform/google/verification-expectations.ts';
+} from '../platform/src/platform/google/api-client.ts';
+import { GoogleTokenManager } from '../platform/src/platform/google/token-manager.ts';
+import type { GoogleOAuthCredentials } from '../platform/src/platform/google/credential-adoption.ts';
+import { collectHistoryDelta } from '../platform/src/platform/google/history-delta.ts';
+import type { HistoryDeltaDeps } from '../platform/src/platform/google/history-delta.ts';
+import { createInboundMailIntake } from '../platform/src/platform/email/inbound/intake.ts';
+import { InboundMailStore } from '../platform/src/platform/email/inbound/record-store.ts';
+import { VerificationExpectationBook } from '../platform/src/platform/google/verification-expectations.ts';
 import {
   INBOUND_CAPABILITY_POLICY_DEFAULT,
   NOTICE_ONLY_CAPABLE_REASONS,
   resolveInboundCapabilityPolicy,
-} from '../sdk/src/platform/email/inbound/capability-policy.ts';
-import { stateForReason } from '../sdk/src/platform/email/inbound/capability.ts';
-import { createInboundMailSourceFactory } from '../sdk/src/platform/email/inbound/source-factory.ts';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import type { InboundCapabilityReason } from '../sdk/src/platform/email/inbound/ports.ts';
-import type { GmailInboundMessage } from '../sdk/src/platform/email/inbound/ports.ts';
-import type { StructuredNotice } from '../sdk/src/platform/email/inbound-notice.ts';
+} from '../platform/src/platform/email/inbound/capability-policy.ts';
+import { stateForReason } from '../platform/src/platform/email/inbound/capability.ts';
+import { createInboundMailSourceFactory } from '../platform/src/platform/email/inbound/source-factory.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import type { InboundCapabilityReason } from '../platform/src/platform/email/inbound/ports.ts';
+import type { GmailInboundMessage } from '../platform/src/platform/email/inbound/ports.ts';
+import type { StructuredNotice } from '../platform/src/platform/email/inbound-notice.ts';
 
 const METADATA_SCOPE = 'https://www.googleapis.com/auth/gmail.metadata';
 const READONLY_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';

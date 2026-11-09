@@ -1,5 +1,5 @@
 import type { OverlayFilter } from '../overlay-filter.js';
-import { getDisplayWidth } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils';
 import { activeTokens } from './theme.js';
 import { NARROW_MODAL_BREAKPOINT, beginModal, finishModal, searchRow, scrollCountText, standardModalWidth, wrapLines, MODAL_MARK_INSET, type KitHint, type SurfaceCanvas, type SurfaceLayer } from './surface-kit.js';
 import { drawTextBlock } from './surface-kit-extra.js';

@@ -3,8 +3,8 @@ import { CommandRegistry, type CommandContext } from '../../input/command-regist
 import { registerLegacyWorkLedgerImportCommands } from '../../input/commands/legacy-work-ledger-import-runtime.ts';
 import { runCommand } from '../../tools/agent-harness-command-runner.ts';
 import { describeHarnessCommand } from '../../tools/agent-harness-command-catalog.ts';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { prepareLegacyWorkLedgerMigration } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { prepareLegacyWorkLedgerMigration } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 import fixture from '../fixtures/legacy-ledger/preparation.json';
 
 const forbidden = async (): Promise<never> => { throw new Error('Unexpected mutation'); };

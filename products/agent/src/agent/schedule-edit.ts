@@ -1,13 +1,13 @@
-import { createBrowserGoodVibesSdk } from '@goodvibes-jev/engine/sdk/browser';
-import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/sdk/contracts';
+import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
+import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
 import {
   formatEveryInterval,
   normalizeAtSchedule,
   normalizeCronSchedule,
   normalizeEverySchedule,
   type AutomationScheduleDefinition,
-} from '@goodvibes-jev/engine/sdk/platform/automation';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+} from '@goodvibes-jev/engine/platform/platform/automation';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import {
   buildAutonomySchedulePrompt,
 } from './autonomy-schedule.ts';
@@ -376,8 +376,8 @@ export async function enrichScheduleEditPreviewFromConnectedHost(
 ): Promise<ScheduleEditPreview> {
   if (!connection.token) return preview;
   try {
-    const sdk = createBrowserGoodVibesSdk({ baseUrl: connection.baseUrl, authToken: connection.token });
-    const output = await sdk.operator.invoke(ROUTINE_SCHEDULE_LIST_METHOD, {});
+    const platformClient = createBrowserGoodVibesPlatform({ baseUrl: connection.baseUrl, authToken: connection.token });
+    const output = await platformClient.operator.invoke(ROUTINE_SCHEDULE_LIST_METHOD, {});
     return {
       ...preview,
       current: buildCurrentScheduleContext(preview, output),
@@ -414,8 +414,8 @@ export async function editConnectedSchedule(
     };
   }
   try {
-    const sdk = createBrowserGoodVibesSdk({ baseUrl: connection.baseUrl, authToken: connection.token });
-    const schedule = await sdk.operator.invoke(SCHEDULE_EDIT_METHOD, preview.payload);
+    const platformClient = createBrowserGoodVibesPlatform({ baseUrl: connection.baseUrl, authToken: connection.token });
+    const schedule = await platformClient.operator.invoke(SCHEDULE_EDIT_METHOD, preview.payload);
     return {
       ok: true,
       kind: SCHEDULE_EDIT_METHOD,

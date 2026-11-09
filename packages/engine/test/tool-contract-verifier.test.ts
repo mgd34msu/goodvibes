@@ -11,9 +11,9 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { Question } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { forgetDescriptionReadings, ToolContractVerifier } from '../sdk/src/platform/runtime/tools/contract-verifier.ts';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.ts';
-import type { Tool } from '../sdk/src/platform/types/tools.ts';
+import { forgetDescriptionReadings, ToolContractVerifier } from '../platform/src/platform/runtime/tools/contract-verifier.ts';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
+import type { Tool } from '../platform/src/platform/types/tools.ts';
 
 const GOOD = 'Read a file from the workspace. Use it before editing a file or to see what a file contains.';
 const VAGUE = 'Helper tool.';

@@ -3,7 +3,7 @@
  * every recognized command word, every global flag, and the parse result a
  * caller consumes.
  */
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 
 export type GoodVibesCliCommand =
   | 'tui'

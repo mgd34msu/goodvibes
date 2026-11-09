@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { withDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
-import { createClassicProtectedSourceOwner } from '@goodvibes-jev/engine/sdk/platform/security';
+import { withDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
+import { createClassicProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { fakePort } from '@goodvibes-jev/judgment/testing';
 import { rankHarnessCatalog } from '../../tools/agent-harness-catalog-ranking.ts';

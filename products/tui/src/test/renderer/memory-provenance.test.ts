@@ -6,18 +6,18 @@ import {
   readMemoryShowProvenance,
   MEMORY_SHOW_PROVENANCE_DEFAULT,
 } from '../../core/memory-provenance.ts';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { buildSettingGroups } from '../../input/settings-modal-data.ts';
 import { createTestManagers } from '../helpers/test-managers.ts';
 
 // ---------------------------------------------------------------------------
 // STEP 4, the optional "used N memories" turn chip (default OFF), built against
-// the SDK's metadata.memory.recordIds convention (the same field the webui
+// the platform's metadata.memory.recordIds convention (the same field the webui
 // chip reads). When on, a turn that used memories shows the chip with a
 // drill-in listing them; when off, zero rendering and the metadata is not read.
 // ---------------------------------------------------------------------------
 
-/** A fixture turn payload carrying metadata.memory.recordIds (the SDK convention). */
+/** A fixture turn payload carrying metadata.memory.recordIds (the platform convention). */
 function turnWithMemories(recordIds: string[]): unknown {
   return { type: 'TURN_COMPLETED', turnId: 't1', response: 'ok', stopReason: 'completed', metadata: { memory: { recordIds } } };
 }
@@ -144,7 +144,7 @@ describe('memory settings domain (STEP 4)', () => {
     const groups = buildSettingGroups(configManager);
     const memory = groups.get('memory') ?? [];
     // memory.showProvenance is a TUI-local synthetic key, not yet part of the
-    // SDK's ConfigKey union, compare as plain strings (see memory-provenance.ts).
+    // platform's ConfigKey union, compare as plain strings (see memory-provenance.ts).
     const entry = memory.find((e) => (e.setting.key as string) === 'memory.showProvenance');
     expect(entry).toBeDefined();
     expect(entry!.setting.type).toBe('boolean');

@@ -20,10 +20,10 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { EXPLICIT_USER_REQUEST_HEADER } from '../daemon-sdk/src/control-routes.ts';
-import { refuseNonUserRequest } from '../sdk/src/platform/control-plane/routes/explicit-user-request.ts';
-import { GatewayVerbError } from '../sdk/src/platform/control-plane/routes/gateway-verb-error.ts';
-import type { GatewayMethodInvocation } from '../sdk/src/platform/control-plane/method-catalog-shared.ts';
+import { EXPLICIT_USER_REQUEST_HEADER } from '../daemon-api/src/control-routes.ts';
+import { refuseNonUserRequest } from '../platform/src/platform/control-plane/routes/explicit-user-request.ts';
+import { GatewayVerbError } from '../platform/src/platform/control-plane/routes/gateway-verb-error.ts';
+import type { GatewayMethodInvocation } from '../platform/src/platform/control-plane/method-catalog-shared.ts';
 
 function invocation(metadata?: Record<string, unknown>): GatewayMethodInvocation {
   return {

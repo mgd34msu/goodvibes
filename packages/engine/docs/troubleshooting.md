@@ -17,7 +17,7 @@ See [Runtime Surfaces](./surfaces.md) for the full surface breakdown.
 ## `WebSocket implementation is required`
 
 This affects:
-- `sdk.realtime.viaWebSocket()`
+- `platformClient.realtime.viaWebSocket()`
 - React Native / Expo realtime
 
 Inject `WebSocketImpl` when your runtime does not expose `globalThis.WebSocket`.
@@ -30,7 +30,7 @@ Check:
 - required scopes
 - auth mode expected by the endpoint
 
-Structured errors expose `err.kind` (an `SDKErrorKind` value) and `err.code` as the primary fields for programmatic handling, plus:
+Structured errors expose `err.kind` (an `EngineErrorKind` value) and `err.code` as the primary fields for programmatic handling, plus:
 - `status`
 - `category`
 - `source`
@@ -72,9 +72,9 @@ If the client is mobile, prefer WebSocket over SSE.
 
 ## Read-only token resolver surprises
 
-If `sdk.auth.setToken(...)` throws a configuration error, you created the SDK with `getAuthToken` only.
+If `platformClient.auth.setToken(...)` throws a configuration error, you created the platform with `getAuthToken` only.
 
-Pass `tokenStore` if the SDK needs to mutate token state.
+Pass `tokenStore` if the platform needs to mutate token state.
 
 ## Next reads
 

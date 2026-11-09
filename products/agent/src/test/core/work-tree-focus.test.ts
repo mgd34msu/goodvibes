@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
 import { ConversationManager } from '../../core/conversation.ts';
 import { boundFoldState, loadWorkTreeFolds, MAX_FOLD_KEYS, saveWorkTreeFolds, sweepOrphanWorkTreeFolds } from '../../core/work-tree-fold-store.ts';
 import { lanesScene, openBeadScene } from '../helpers/work-tree-scenes.ts';

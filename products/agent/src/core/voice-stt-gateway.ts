@@ -18,7 +18,7 @@ import type { SpeechTranscriptionGateway, SpeechTranscriptionResolution } from '
  * not exist on a machine where it demonstrably did.
  *
  * Nobody using this cares which process owns whisper. So the route is resolved
- * rather than assumed, the SDK owns the policy (platform/voice/stt-routing.ts)
+ * rather than assumed, the platform owns the policy (platform/voice/stt-routing.ts)
  * so every surface gets the same behaviour, and this file supplies the two
  * candidate routes: the connected host's `voice.stt` verb, and this process's
  * own voice service. A fallback states what it fell back from, and every
@@ -26,7 +26,7 @@ import type { SpeechTranscriptionGateway, SpeechTranscriptionResolution } from '
  * notification that scrolls away.
  */
 
-import { GoodVibesSdkError } from '@goodvibes-jev/engine/sdk';
+import { GoodVibesError } from '@goodvibes-jev/engine/platform';
 import {
   recordVoiceDiagnostic,
   transcribeThroughBestRoute,
@@ -34,8 +34,8 @@ import {
   type SttRouteCandidate,
   type VoiceProviderRegistry,
   type VoiceService,
-} from '@goodvibes-jev/engine/sdk/platform/voice';
-import type { DaemonVerbCaller } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+} from '@goodvibes-jev/engine/platform/platform/voice';
+import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 
 /** The narrow verb surface a capture consumer needs. */
 export interface VoiceSttGateway extends SpeechTranscriptionGateway {
@@ -119,7 +119,7 @@ export function createVoiceSttGateway(deps: VoiceSttGatewayDeps): VoiceSttGatewa
         configSource: "this process's own voice.local.* settings",
         transcribe: async (audio) => {
           // `metadata` is required on the service's artifact and absent from the
-          // capture layer's, which is deliberate: the SDK's artifact carries only
+          // capture layer's, which is deliberate: the platform's artifact carries only
           // what the encoder knows. Empty is what the verb sends for a caller that
           // supplied none.
           const result = await deps.voiceService.transcribe(undefined, { audio: { ...audio, metadata: {} } });
@@ -166,7 +166,7 @@ export function describeTranscriptionFailure(error: unknown): string {
     // Every route's own reason, so "it did not work" is never the whole answer.
     return error.message;
   }
-  if (error instanceof GoodVibesSdkError && error.code === 'PROVIDER_NOT_CONFIGURED') {
+  if (error instanceof GoodVibesError && error.code === 'PROVIDER_NOT_CONFIGURED') {
     return `${error.message}, the managed voice runtime provisions a local one, or a configured voice provider supplies it.`;
   }
   return error instanceof Error ? error.message : String(error);

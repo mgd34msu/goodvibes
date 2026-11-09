@@ -1,13 +1,13 @@
 /**
  * useVoiceLocalSetup, the managed local-voice provisioning state and one-act install
- * (voice.local.status / voice.local.install, SDK 1.9.0-dev's memory-relay-voice-
+ * (voice.local.status / voice.local.install, platform 1.9.0-dev's memory-relay-voice-
  * hardening work).
  *
  * No wire event exists for this domain (unlike power.*, which rides OPS_POWER_STATE_
  * CHANGED), VoiceSettings refetches manually / on install-mutation success, the same
  * standing gap fleet.*, checkpoints.*, and memory.* document in queries.ts.
  *
- * Live install progress (SDK 5357f09e): while the install mutation is in flight, the
+ * Live install progress (platform 5357f09e): while the install mutation is in flight, the
  * status query polls on a short refetchInterval, the same react-query polling idiom
  * FleetView's snapshot uses, because voice.local.status carries an OPTIONAL
  * `installInProgress` section during an active install (the install verb itself stays
@@ -22,7 +22,7 @@
  * unrelated refetch.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { sdk } from '../lib/goodvibes';
+import { client as platformClient } from '../lib/goodvibes';
 import { queryKeys } from '../lib/queries';
 import { readVoiceLocalInstallResult, readVoiceLocalStatus } from '../lib/voice/voice-local-setup';
 
@@ -30,7 +30,7 @@ export function useVoiceLocalStatus(enabled: boolean, pollForInstallProgress = f
   return useQuery({
     queryKey: queryKeys.voiceLocalStatus,
     queryFn: async () => {
-      const raw = await sdk.operator.voice.local.status();
+      const raw = await platformClient.operator.voice.local.status();
       // Defensive wire parse: a 200 whose body carries no runtime state is an honest,
       // retriable error, never a crash or an 'undefined' label (see voice-local-setup.ts).
       const status = readVoiceLocalStatus(raw);
@@ -52,7 +52,7 @@ export function useVoiceLocalInstall() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      const raw = await sdk.operator.voice.local.install();
+      const raw = await platformClient.operator.voice.local.install();
       const result = readVoiceLocalInstallResult(raw);
       if (!result) {
         throw new Error('The daemon answered, but its response did not carry an install receipt.');

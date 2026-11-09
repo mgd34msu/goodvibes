@@ -1,4 +1,4 @@
-import { prepareConfiguredProjectContext } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import { prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { initialTerminalRuntimeFields } from '@goodvibes-jev/engine/terminal-shell/bootstrap-primitives';
 import { projectAgentToolDependencies } from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-context';
 import {
@@ -29,20 +29,20 @@ import { createShellNoticeSink } from './notification-dispatch.ts';
 import { getSharedNotificationFeed } from '../views/notifications-feed.ts';
 import { registerSessionConversation } from './conversation-rewind-port.ts';
 import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { getConfiguredSystemPrompt } from '@goodvibes-jev/engine/sdk/platform/config';
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { registerAllTools } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { getConfiguredSystemPrompt } from '@goodvibes-jev/engine/platform/platform/config';
+import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { registerAllTools } from '@goodvibes-jev/engine/platform/platform/tools';
 import { createSandboxContainmentNotice } from './daemon-attach-notices.ts';
-import type { PermissionManager } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import type { PermissionManager } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { Compositor } from '../renderer/compositor.ts';
 import { activeTokens } from '../renderer/theme.ts';
-import type { PermissionRequestHandler } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import type { PermissionRequestHandler } from '@goodvibes-jev/engine/platform/platform/permissions';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
-import type { ConversationFollowUpItem } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { OrchestratorUserInputOptions } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { ControlPlaneRecentEvent } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import type { ConversationFollowUpItem } from '@goodvibes-jev/engine/platform/platform/core';
+import type { OrchestratorUserInputOptions } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ControlPlaneRecentEvent } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { BootstrapOptions } from './context.ts';
 import { type RuntimeStore } from './store/index.ts';
 import {
@@ -57,16 +57,16 @@ import {
   registerBootstrapRuntimeEvents,
 } from '@/runtime/index.ts';
 import { createRuntimeServices, type RuntimeServices } from './services.ts';
-import { registerClientPhoneTool } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
-import { createHostPowerSeam } from '@goodvibes-jev/engine/sdk/platform/power';
-import { runBootMemoryFold } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import { wireCostPricing } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { registerClientPhoneTool } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import { createHostPowerSeam } from '@goodvibes-jev/engine/platform/platform/power';
+import { runBootMemoryFold } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { wireCostPricing } from '@goodvibes-jev/engine/platform/platform/providers';
 import { createUiRuntimeServices, type UiRuntimeServices } from './ui-services.ts';
 import { join } from 'node:path';
 import type { SystemMessagePriority } from '../core/system-message-router.ts';
-import { SessionSpineClient, SessionUnionCache, TUI_SPINE_PARTICIPANT } from '@goodvibes-jev/engine/sdk/platform/runtime/session-spine';
+import { SessionSpineClient, SessionUnionCache, TUI_SPINE_PARTICIPANT } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
 import { SessionInboundInputPoller, createBootstrapInboundInputPoller } from './session-inbound-inputs.ts';
-import type { WorkspaceTrustLevel } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import type { WorkspaceTrustLevel } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { attachTypedRuntimeNotifications, createRuntimeNotifier, syncNotifierQueueIntegrations } from './bootstrap-notifier-sync.ts';
 
 // --- Pre-router buffer ---
@@ -148,7 +148,7 @@ export interface BootstrapCoreState {
   readonly requestRender: () => void;
   readonly setRenderRequest: (fn: () => void) => void;
   readonly runtimeSessionIdRef: { value: string };
-  /** Cross-surface identity mirror; dormant for local-only, and for the SDK's 'embedded' HostServiceMode, which no product-facing setting can select, this product only ever adopts an external daemon or runs local-only (see the ADOPT ONLY guard in bootstrap.ts) (docs/decisions/2026-07-06-session-spine-mode-branch-is-permanent.md). Activated by bootstrap.ts only for an adopted 'external' daemon. */
+  /** Cross-surface identity mirror; dormant for local-only, and for the platform's 'embedded' HostServiceMode, which no product-facing setting can select, this product only ever adopts an external daemon or runs local-only (see the ADOPT ONLY guard in bootstrap.ts) (docs/decisions/2026-07-06-session-spine-mode-branch-is-permanent.md). Activated by bootstrap.ts only for an adopted 'external' daemon. */
   readonly sessionSpine: SessionSpineClient;
   /** Inbound steer/follow-up delivery; dormant until bootstrap.ts activates it. */
   readonly sessionInboundInputs: SessionInboundInputPoller;
@@ -252,7 +252,7 @@ export async function initializeBootstrapCore(
 
   // Gate states derive from the domain settings keys; the bridge keeps live
   // config writes flowing (honest pending-restart markers for startup-gated
-  // features). Mirrors the SDK composition root's owned-manager wiring.
+  // features). Mirrors the platform composition root's owned-manager wiring.
   const featureFlags = createTerminalFeatureFlags(configManager);
 
   const userSessionId = `user-${generateUserSessionId()}`;
@@ -284,8 +284,8 @@ export async function initializeBootstrapCore(
   });
 
   const { approvalBroker, hookDispatcher, hookWorkbench, memoryStore, sessionBroker: sharedSessionBroker } = services;
-  // Dormant for local-only, and for the SDK's 'embedded' HostServiceMode, no product-facing
-  // setting can select it (SDK-internal embedder/test machinery); bootstrap.ts activates this spine only for an adopted 'external' daemon.
+  // Dormant for local-only, and for the platform's 'embedded' HostServiceMode, no product-facing
+  // setting can select it (platform-internal embedder/test machinery); bootstrap.ts activates this spine only for an adopted 'external' daemon.
   const sessionSpine = new SessionSpineClient({ participant: TUI_SPINE_PARTICIPANT, recordKind: 'tui' });
   // Cache-backed read facade over the local broker (passthrough until bootstrap.ts
   // activates the adopted-daemon wire union for 'external').
@@ -321,7 +321,7 @@ export async function initializeBootstrapCore(
       notify: (text) => conversation.log(`[Sandbox] ${text}`, { fg: activeTokens().secondary }),
     }),
   });
-  registerClientPhoneTool(toolRegistry, services.devices); // the `phone` tool follows the LOOP, so it is registered here; the posture runtime it used to call is the daemon's now and this tool reaches it over the devices.* verbs (see the SDK's client/phone-tool.ts)
+  registerClientPhoneTool(toolRegistry, services.devices); // the `phone` tool follows the LOOP, so it is registered here; the posture runtime it used to call is the daemon's now and this tool reaches it over the devices.* verbs (see the platform's client/phone-tool.ts)
   services.agentOrchestrator.setDependencies({
     ...projectAgentToolDependencies({ services, fileCache, projectIndex, configManager }),
     contractHooks: services.contractRunner.hooks(),
@@ -506,7 +506,7 @@ export async function initializeBootstrapCore(
   services.liveSessionIdRef.value = runtime.sessionId; // the session an ask raised on the daemon belongs to
   // The live conversation, for this process's own /rewind AND for the daemon's
   // questions about it, only the process holding the messages can count or
-  // drop them (conversation-rewind-port.ts, the SDK's client/conversation-rewind-host.ts).
+  // drop them (conversation-rewind-port.ts, the platform's client/conversation-rewind-host.ts).
   registerSessionConversation(runtime.sessionId, conversation);
   void sharedSessionBroker
     .createSession({

@@ -20,8 +20,8 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { logger } from '../sdk/src/platform/utils/logger.ts';
-import { HandlerSqliteStore } from '../sdk/src/platform/state/daemon-handler-sqlite-store.ts';
+import { logger } from '../platform/src/platform/utils/logger.ts';
+import { HandlerSqliteStore } from '../platform/src/platform/state/daemon-handler-sqlite-store.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const FILE_NAME = 'recovery-probe.sqlite';

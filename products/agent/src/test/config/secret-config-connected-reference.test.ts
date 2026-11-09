@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
-import { isDaemonOwnedConfigKey, type ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
+import { isDaemonOwnedConfigKey, type ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { installAgentDaemonConfigClient } from '../../config/daemon-config-routing.ts';
 import { installAgentDaemonCredentialsClient } from '../../config/daemon-credential-routing.ts';
 import {

@@ -1,4 +1,4 @@
-import type { ArtifactDescriptor } from '@goodvibes-jev/engine/sdk/platform/artifacts';
+import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { CommandContext } from './command-registry.ts';
 import { readSetupWizardCheckpoint } from '../agent/setup-wizard-checkpoint.ts';
 import { readOnboardingCompletionMarker } from '../runtime/onboarding/index.ts';

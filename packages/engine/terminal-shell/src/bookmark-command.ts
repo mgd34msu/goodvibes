@@ -1,4 +1,4 @@
-import type { BookmarkManager } from '@goodvibes-jev/engine/sdk/platform/bookmarks';
+import type { BookmarkManager } from '@goodvibes-jev/engine/platform/platform/bookmarks';
 import type { SelectionItem, SelectionResult, SelectionAction } from './selection-modal.js';
 export interface BookmarkCommandContext {
   readonly print: (text: string) => void;

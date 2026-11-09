@@ -4,12 +4,12 @@
  * The agent's own notification paths: the approval alert (this file drives the
  * real wrapper and reads the text through its notify seam) and the settings
  * workspace row for behavior.notificationsMetadataOnly. The end-of-turn popup
- * and the webhook bodies come from the SDK (orchestrator finalizeTurn and
- * WebhookNotifier), covered by the SDK's turn-notification tests.
+ * and the webhook bodies come from the platform (orchestrator finalizeTurn and
+ * WebhookNotifier), covered by the platform's turn-notification tests.
  */
 import { describe, expect, test } from 'bun:test';
-import type { PermissionPromptRequest } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import { FocusTracker } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import type { PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { wrapRequestPermissionWithApprovalAlert, describeApprovalAlert } from '../../shell/terminal-focus-mode.ts';
 import { AGENT_WORKSPACE_CATEGORIES } from '../../input/agent-workspace-categories.ts';
 

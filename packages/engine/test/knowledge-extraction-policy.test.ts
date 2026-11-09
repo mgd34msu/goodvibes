@@ -12,11 +12,11 @@ import {
   looksBinaryLikeText,
   looksLikeRawPdfPayload,
   readKnowledgeSearchText,
-} from '../sdk/src/platform/knowledge/extraction-policy.js';
-import { extractionReadability, pdfTextDecoding } from '../sdk/src/platform/knowledge/batteries/extraction-readability.js';
-import { registry } from '../sdk/src/platform/knowledge/extraction/judgment-registry.js';
-import { JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.js';
-import type { KnowledgeExtractionRecord } from '../sdk/src/platform/knowledge/types.js';
+} from '../platform/src/platform/knowledge/extraction-policy.js';
+import { extractionReadability, pdfTextDecoding } from '../platform/src/platform/knowledge/batteries/extraction-readability.js';
+import { registry } from '../platform/src/platform/knowledge/extraction/judgment-registry.js';
+import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input.js';
+import type { KnowledgeExtractionRecord } from '../platform/src/platform/knowledge/types.js';
 
 let previous: JudgmentPort | undefined;
 beforeEach(() => { previous = installJudgmentPort(undefined); });

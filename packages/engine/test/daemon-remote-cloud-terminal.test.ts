@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { createCloudTerminalBackend } from '../sdk/src/platform/runtime/remote/host/backends/cloud-terminal.ts';
-import type { Backend, BackendContext } from '../sdk/src/platform/runtime/remote/host/backends/types.ts';
-import type { CloudProvider, PeerRecord } from '../sdk/src/platform/runtime/remote/host/peer-registry.ts';
+import { createCloudTerminalBackend } from '../platform/src/platform/runtime/remote/host/backends/cloud-terminal.ts';
+import type { Backend, BackendContext } from '../platform/src/platform/runtime/remote/host/backends/types.ts';
+import type { CloudProvider, PeerRecord } from '../platform/src/platform/runtime/remote/host/peer-registry.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const CREDENTIAL = 'dummy-cloud-credential-for-fixture';

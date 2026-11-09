@@ -2,7 +2,7 @@ import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-c
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { providerCommand } from '../../input/commands/provider.ts';
-import { isFeatureFlagEnabled } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { isFeatureFlagEnabled } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { createRuntimeProviderApi } from '@/runtime/index.ts';
 import {
   getTestRuntimeServices,

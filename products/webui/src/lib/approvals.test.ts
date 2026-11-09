@@ -1,8 +1,8 @@
 /**
  * approvals.ts, unit coverage for the decision-trail helpers.
  *
- * The SDK's approval record carries a required `audit` array
- * (SharedApprovalAuditRecord, packages/sdk/src/platform/control-plane/
+ * The platform's approval record carries a required `audit` array
+ * (SharedApprovalAuditRecord, packages/engine/platform/src/platform/control-plane/
  * approval-broker.ts) that this client's hand-typed ApprovalRecord previously
  * omitted entirely. `audit` is optional on this client's type because
  * invokeMethod reads the wire response as-is with no runtime schema

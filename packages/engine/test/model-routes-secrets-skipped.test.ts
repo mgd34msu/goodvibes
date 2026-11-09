@@ -8,13 +8,13 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { dispatchModelRoutes } from '../sdk/src/platform/daemon/http/model-routes.js';
-import type { ModelRouteContext } from '../sdk/src/platform/daemon/http/model-routes.js';
-import { DaemonHttpRouter } from '../sdk/src/platform/daemon/http/router.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import type { ProviderRegistry } from '../sdk/src/platform/providers/registry.js';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import type { ModelDefinition } from '../sdk/src/platform/providers/registry-types.js';
+import { dispatchModelRoutes } from '../platform/src/platform/daemon/http/model-routes.js';
+import type { ModelRouteContext } from '../platform/src/platform/daemon/http/model-routes.js';
+import { DaemonHttpRouter } from '../platform/src/platform/daemon/http/router.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import type { ProviderRegistry } from '../platform/src/platform/providers/registry.js';
+import type { ConfigManager } from '../platform/src/platform/config/manager.js';
+import type { ModelDefinition } from '../platform/src/platform/providers/registry-types.js';
 
 // ---------------------------------------------------------------------------
 // Test doubles

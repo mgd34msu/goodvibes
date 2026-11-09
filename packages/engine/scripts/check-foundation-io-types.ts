@@ -41,13 +41,13 @@ import { assertCoversMethodIds, descriptorSchemas, parseMethodIds } from './foun
 import { renderType } from './foundation-io-render.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SDK_ROOT = resolve(__dirname, '..');
+const ENGINE_ROOT = resolve(__dirname, '..');
 const CHECK_ONLY = process.argv.includes('--check');
 const FOUNDATION_TYPES_PATH = resolve(
-  SDK_ROOT,
+  ENGINE_ROOT,
   'contracts/src/generated/foundation-client-types.ts',
 );
-const METHOD_IDS_PATH = resolve(SDK_ROOT, 'contracts/src/generated/operator-method-ids.ts');
+const METHOD_IDS_PATH = resolve(ENGINE_ROOT, 'contracts/src/generated/operator-method-ids.ts');
 
 const methodIds = parseMethodIds(readFileSync(METHOD_IDS_PATH, 'utf8'));
 assertCoversMethodIds(methodIds);

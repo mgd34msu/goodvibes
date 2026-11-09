@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import type { GatePresetName } from '@goodvibes-jev/engine/sdk/platform/gate';
+import type { GatePresetName } from '@goodvibes-jev/engine/platform/platform/gate';
 import { createRemoteConversationRouter, type ConnectedHostResolution } from '../../runtime/client/remote-conversation.ts';
 import { mockFetch } from '../helpers/typed-fetch-mock.ts';
 

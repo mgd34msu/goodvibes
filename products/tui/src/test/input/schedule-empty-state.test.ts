@@ -20,7 +20,7 @@ describe('/schedule list: automation empty state', () => {
     await registry.execute('schedule', ['list'], ctx);
 
     const text = printed.join('\n');
-    // The SDK's empty-state title, plus THIS registry's real command pointer.
+    // The platform's empty-state title, plus THIS registry's real command pointer.
     expect(text).toContain('No routines yet');
     expect(text).toContain('/schedule add');
     // Never a command this registry does not have.

@@ -21,13 +21,13 @@
 import { BeadContentCache } from './bead-content-cache.js';
 import { MessageLineCache } from './conversation-line-cache.js';
 import type { BlockMeta } from './work-tree-types.js';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { ContractRunner, ContractView } from '@goodvibes-jev/engine/sdk/platform/contract';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
+import type { ContractRunner, ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
 import { contractIsActive } from './work-tree-contract.js';
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { AgentManager, ProcessManager } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { ProcessNode, SteerResult } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
+import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
+import type { AgentManager, ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ProcessNode, SteerResult } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import type { TerminalConversationManager } from './terminal-conversation.js';
 import { SessionFocus, sameTarget, type SessionMark, type SessionTarget } from './session-focus.js';
 import { ProcessOutputLog } from './process-output-log.js';
@@ -41,7 +41,7 @@ import type { ShellFooterView } from './shell-footer-view.js';
 import type { SessionViewControls } from './session-view-input.js';
 import { activeTokens } from './renderer/theme.js';
 import { formatElapsed } from './format.js';
-import { interpolateColor } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { interpolateColor } from '@goodvibes-jev/engine/platform/platform/utils';
 import { copyToClipboard } from './clipboard.js';
 export interface SessionViewsDeps {
     readonly conversation: Pick<TerminalConversationManager, 'laneColorOf' | 'getWorkTreeSources' | 'getTreeGlyphSet'>;

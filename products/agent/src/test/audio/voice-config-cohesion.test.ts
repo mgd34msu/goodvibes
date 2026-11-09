@@ -9,17 +9,17 @@
  *
  * This suite locks that in three ways:
  *  1. The tts.* keys the Agent's audio pipeline actually reads (tts.provider,
- *     tts.voice, and tts.speed inside the SDK-owned SpokenTurnController that
+ *     tts.voice, and tts.speed inside the platform-owned SpokenTurnController that
  *     spoken-turn-wiring.ts constructs, plus tts.llmProvider/tts.llmModel in
  *     spoken-turn-model-routing.ts and tts.provider/tts.voice in
- *     tts-settings-actions.ts) exist in the SDK's shared CONFIG_SCHEMA with
+ *     tts-settings-actions.ts) exist in the platform's shared CONFIG_SCHEMA with
  *     the shared defaults, not a schema the Agent invented for itself.
  *  2. A real ConfigManager, constructed the exact way the Agent's entrypoint
  *     constructs it (surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT, a fresh temp
  *     home directory, no local overrides on disk), resolves tts.* to those
  *     same shared defaults out of the box.
  *  3. The source files that read/write tts.* import ConfigManager's type
- *     from the shared SDK package, not a local reimplementation, so a
+ *     from the shared platform package, not a local reimplementation, so a
  *     future change can't quietly introduce an Agent-local voice-config
  *     silo without this test's import-scan catching it.
  *
@@ -37,12 +37,12 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { extractOnnxRuntimeAssets } from '../../audio/wake-inference.ts';
 import { createVoiceSttGateway, describeTranscriptionFailure } from '../../core/voice-stt-gateway.ts';
-import { GoodVibesSdkError } from '@goodvibes-jev/engine/sdk';
+import { GoodVibesError } from '@goodvibes-jev/engine/platform';
 
 describe('Voice config cohesion: cross-surface proof (2026-07-06 shared config tier)', () => {
   // Mike's label is "one voice across terminal, desktop, and agent." Schema
@@ -211,7 +211,7 @@ describe('the wake path transcribes through the platform voice service', () => {
   });
 
   test('a provider that is registered but not configured is described as that, not as a generic failure', () => {
-    const notConfigured = new GoodVibesSdkError('Voice STT provider is not registered', { code: 'PROVIDER_NOT_CONFIGURED' });
+    const notConfigured = new GoodVibesError('Voice STT provider is not registered', { code: 'PROVIDER_NOT_CONFIGURED' });
     const described = describeTranscriptionFailure(notConfigured);
     expect(described).toContain('Voice STT provider is not registered');
     // It says what the PLATFORM does about it, and hands over no command: an

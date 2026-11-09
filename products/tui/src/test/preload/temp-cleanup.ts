@@ -37,15 +37,15 @@
  *
  * THE LATE WRITER IS FIXED UPSTREAM, AND THIS STAYS. The suite that recreated
  * its directory after teardown was src/test/daemon/server.test.ts, and the
- * writer was the SDK's ActivityLogger: `dispose()` flushed through a path that
+ * writer was the platform's ActivityLogger: `dispose()` flushed through a path that
  * REBUILDS a log directory that has vanished, and a disposed logger still
  * accepted entries and re-armed its flush timer. Both are fixed in
- * goodvibes-sdk (ActivityLogger.dispose now flushes with
+ * goodvibes-platform (ActivityLogger.dispose now flushes with
  * recreateDestination: false and marks the logger inert). Measured against
  * this worktree with only that file replaced: 4 residue directories before, 0
  * after.
  *
- * This repository consumes the PUBLISHED SDK, so it does not have that fix
+ * This repository consumes the PUBLISHED platform, so it does not have that fix
  * until the next release, and the containment below is what keeps the suite
  * clean in the meantime. Keep it afterwards too: it is the regression guard
  * for the whole class, not a workaround for one logger.

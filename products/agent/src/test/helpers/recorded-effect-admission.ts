@@ -1,8 +1,8 @@
-import { DEFAULT_CONFIG, type PermissionMode, type PermissionsToolConfig } from '@goodvibes-jev/engine/sdk/platform/config';
-import { PermissionManager, type PermissionConfigReader } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import { PolicyRuntimeState } from '@goodvibes-jev/engine/sdk/platform/runtime/security';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { Tool, ToolResult } from '@goodvibes-jev/engine/sdk/platform/types';
+import { DEFAULT_CONFIG, type PermissionMode, type PermissionsToolConfig } from '@goodvibes-jev/engine/platform/platform/config';
+import { PermissionManager, type PermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { PolicyRuntimeState } from '@goodvibes-jev/engine/platform/platform/runtime/security';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool, ToolResult } from '@goodvibes-jev/engine/platform/platform/types';
 
 /** Real manager/registry admission; callers install recorded synthetic readings. */
 export function recordedEffectFixture(tool: Tool, initialMode: PermissionMode = 'prompt', tools: PermissionsToolConfig = {}, directory = '/synthetic/effect-fixture') {

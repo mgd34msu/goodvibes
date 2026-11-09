@@ -160,7 +160,7 @@ describe('readConversationMessageSnapshots – rejection cases', () => {
     );
   });
 
-  test('malformed usage retains the transcript but is rejected by the SDK usage fold', () => {
+  test('malformed usage retains the transcript but is rejected by the platform usage fold', () => {
     // usage present but missing required inputTokens field
     const input = [{ role: 'assistant', content: 'ok', usage: { outputTokens: 5 } }];
     const restored = readConversationMessageSnapshots(input);
@@ -168,7 +168,7 @@ describe('readConversationMessageSnapshots – rejection cases', () => {
     expect(() => sumConversationUsage(restored)).toThrow(TypeError);
   });
 
-  test('wrong-typed usage is retained for strict SDK billing validation', () => {
+  test('wrong-typed usage is retained for strict platform billing validation', () => {
     const input = [{ role: 'assistant', content: 'ok', usage: { inputTokens: '10', outputTokens: 5 } }];
     const restored = readConversationMessageSnapshots(input);
     expect<unknown>(restored).toEqual(input);

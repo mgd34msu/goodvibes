@@ -3,35 +3,35 @@ import {
   captureContractInput,
   contractInputPath,
   materializeContractInput,
-} from '../../sdk/src/platform/contract/input-snapshot.js';
-import { createExecTool } from '../../sdk/src/platform/tools/exec/runtime.js';
-import { OverflowHandler } from '../../sdk/src/platform/tools/shared/overflow.js';
-import type { Contract } from '../../sdk/src/platform/contract/types.js';
-import { probeCapturedExecAvailability } from '../../sdk/src/platform/tools/exec/captured-exec.js';
-import { MemoryStore } from '../../sdk/src/platform/state/memory-store.js';
-import { MemoryRegistry } from '../../sdk/src/platform/state/memory-registry.js';
-import { MemoryEmbeddingProviderRegistry } from '../../sdk/src/platform/state/memory-embeddings.js';
-import { resumeContracts } from '../../sdk/src/platform/runtime/contract-composition.js';
+} from '../../platform/src/platform/contract/input-snapshot.js';
+import { createExecTool } from '../../platform/src/platform/tools/exec/runtime.js';
+import { OverflowHandler } from '../../platform/src/platform/tools/shared/overflow.js';
+import type { Contract } from '../../platform/src/platform/contract/types.js';
+import { probeCapturedExecAvailability } from '../../platform/src/platform/tools/exec/captured-exec.js';
+import { MemoryStore } from '../../platform/src/platform/state/memory-store.js';
+import { MemoryRegistry } from '../../platform/src/platform/state/memory-registry.js';
+import { MemoryEmbeddingProviderRegistry } from '../../platform/src/platform/state/memory-embeddings.js';
+import { resumeContracts } from '../../platform/src/platform/runtime/contract-composition.js';
 import {
   getContractInputAuthority,
   assertContractInputAuthority,
   createContractInputAuthority,
   type ContractInputAuthority,
-} from '../../sdk/src/platform/contract/input-authority.js';
+} from '../../platform/src/platform/contract/input-authority.js';
 /** Real contract -> planner/member -> AgentManager -> AgentOrchestrator -> tools -> scripted provider. */
 import { expect, test } from 'bun:test';
 import { writeFileSync, readFileSync, rmSync, mkdirSync, copyFileSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { ConfigManager } from '../../sdk/src/platform/config/index.js';
-import { createClientRuntimeServices } from '../../sdk/src/platform/runtime/bootstrap.js';
-import { RuntimeEventBus, createRuntimeStore } from '../../sdk/src/platform/runtime/state.js';
-import { createLaunchTolerantProviderRegistry } from '../../sdk/src/platform/providers/index.js';
-import { createContractRunner } from '../../sdk/src/platform/contract/runner.js';
-import { ContractStore } from '../../sdk/src/platform/contract/store.js';
-import { createAgentManagerDecompositionRunner } from '../../sdk/src/platform/agents/planner-decomposition-runner.js';
-import { createOrchestrationEngine } from '../../sdk/src/platform/orchestration/engine.js';
-import type { LLMProvider } from '../../sdk/src/platform/providers/interface.js';
+import { ConfigManager } from '../../platform/src/platform/config/index.js';
+import { createClientRuntimeServices } from '../../platform/src/platform/runtime/bootstrap.js';
+import { RuntimeEventBus, createRuntimeStore } from '../../platform/src/platform/runtime/state.js';
+import { createLaunchTolerantProviderRegistry } from '../../platform/src/platform/providers/index.js';
+import { createContractRunner } from '../../platform/src/platform/contract/runner.js';
+import { ContractStore } from '../../platform/src/platform/contract/store.js';
+import { createAgentManagerDecompositionRunner } from '../../platform/src/platform/agents/planner-decomposition-runner.js';
+import { createOrchestrationEngine } from '../../platform/src/platform/orchestration/engine.js';
+import type { LLMProvider } from '../../platform/src/platform/providers/interface.js';
 import { withDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '../../errors/src/index.js';

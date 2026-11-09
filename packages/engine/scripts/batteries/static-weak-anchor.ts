@@ -2,12 +2,12 @@ import { defineSelector, DEFAULT_MODEL, STAKES_BANDS } from '@goodvibes-jev/judg
 import { DEFERRED_WORK_INSTRUCTIONS, INTERNAL_IDENTIFIER_INSTRUCTIONS, STATIC_ANCHOR_FIT_INSTRUCTIONS, STATIC_ANCHOR_INSTRUCTIONS } from './static-source.ts';
 
 const fixture = (name: string, rule: string, source: string, text: string, expect: 'candidate' | 'none') => ({
-  name, context: { rule, source, path: 'sdk/src/example.ts' },
+  name, context: { rule, source, path: 'platform/src/example.ts' },
   candidates: [{ id: 'candidate', content: { id: 'candidate', line: 1, col: 1, text } }], expect,
 });
 
 const metadataFixture = (name: string, source: string, text: string, id: string, expect: string, literalValues?: readonly string[]) => ({
-  name, context: { rule: INTERNAL_IDENTIFIER_INSTRUCTIONS, source, path: 'sdk/src/example.ts' },
+  name, context: { rule: INTERNAL_IDENTIFIER_INSTRUCTIONS, source, path: 'platform/src/example.ts' },
   candidates: [{ id, content: { id, line: 128, col: 1, lexicalKind: 'source-text', text, ...(literalValues ? { literalValues: [...literalValues] } : {}) } }], expect,
 });
 

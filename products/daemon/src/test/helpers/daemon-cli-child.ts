@@ -3,11 +3,11 @@ import { spyOn } from 'bun:test';
 import { join } from 'node:path';
 import { writeSync } from 'node:fs';
 import { createInterface } from 'node:readline';
-import { registerInboxSurface } from '@goodvibes-jev/engine/sdk/platform/intake';
-import { ProviderRegistry, BenchmarkStore } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
+import { registerInboxSurface } from '@goodvibes-jev/engine/platform/platform/intake';
+import { ProviderRegistry, BenchmarkStore } from '@goodvibes-jev/engine/platform/platform/providers';
+import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
 
-if (process.env.GOODVIBES_SDK_TEST_RUNNER !== '1') throw new Error('Guarded CLI fixture required');
+if (process.env.GOODVIBES_ENGINE_TEST_RUNNER !== '1') throw new Error('Guarded CLI fixture required');
 const hosts = await import(new URL('../../../dist/runtime/daemon-host.js', import.meta.url).href) as typeof import('../../runtime/daemon-host.js');
 const createHost = hosts.createDaemonHost;
 spyOn(hosts, 'createDaemonHost').mockImplementation((options) => createHost(options, {

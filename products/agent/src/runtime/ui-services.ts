@@ -6,8 +6,8 @@ import {
 import type { RuntimeServices } from './services.ts';
 import { createUiReadModels, type UiReadModelOptions } from './ui-read-models.ts';
 import type { ForensicsRegistry } from '@/runtime/index.ts';
-import type { ControlPlaneRecentEvent } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import type { SharedSessionBroker } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import type { ControlPlaneRecentEvent } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import type { SharedSessionBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { HostServiceStatus } from '@/runtime/index.ts';
 import type { SecretsManager } from '../config/secrets.ts';
 

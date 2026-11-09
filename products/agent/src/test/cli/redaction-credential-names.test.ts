@@ -22,7 +22,7 @@ import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/test
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { SECRET_CONFIG_KEYS } from '../../config/secret-config.ts';
 import { REDACTED_VALUE, isSensitiveConfigPath, redactConfig, redactText, redactSerializedSecrets } from '@goodvibes-jev/engine/terminal-shell';
-import { registerAccountIdentityRedaction } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { registerAccountIdentityRedaction } from '@goodvibes-jev/engine/platform/platform/utils';
 import { cliRedactionAnswer } from '../helpers/cli-redaction-readings.ts';
 
 /** Every path that holds credential material and is missed by the word list. */

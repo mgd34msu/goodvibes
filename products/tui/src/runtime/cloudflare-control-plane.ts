@@ -1,6 +1,6 @@
 import { join } from 'node:path';
-import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/sdk/platform/pairing';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/platform/platform/pairing';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 
 export const CLOUDFLARE_COMPONENT_IDS = [
   'workers',
@@ -70,7 +70,7 @@ export interface CloudflareTokenRequirementsResult {
   readonly components: Readonly<Record<CloudflareComponent, boolean>>;
   readonly permissions: readonly CloudflareTokenRequirement[];
   readonly bootstrapToken: {
-    readonly requiredForSdkCreation: boolean;
+    readonly requiredForPlatformCreation: boolean;
     readonly storeInGoodVibes: false;
     readonly instructions: readonly string[];
   };

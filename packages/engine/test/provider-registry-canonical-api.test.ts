@@ -9,20 +9,20 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ProviderRegistry } from '../sdk/src/platform/providers/registry.js';
-import { ProviderNotFoundError } from '../sdk/src/platform/providers/provider-not-found-error.js';
-import { getProviderUsageSnapshot } from '../sdk/src/platform/providers/runtime-snapshot.js';
+import { ProviderRegistry } from '../platform/src/platform/providers/registry.js';
+import { ProviderNotFoundError } from '../platform/src/platform/providers/provider-not-found-error.js';
+import { getProviderUsageSnapshot } from '../platform/src/platform/providers/runtime-snapshot.js';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
-import { readFallbackContextWindow } from '../sdk/src/platform/providers/context-window-fallback.js';
-import { forgetModelLimitReadings } from '../sdk/src/platform/routing/model-limit-readings.js';
-import type { LLMProvider } from '../sdk/src/platform/providers/interface.js';
+import { readFallbackContextWindow } from '../platform/src/platform/providers/context-window-fallback.js';
+import { forgetModelLimitReadings } from '../platform/src/platform/routing/model-limit-readings.js';
+import type { LLMProvider } from '../platform/src/platform/providers/interface.js';
 import {
   getCatalogCachePath,
   getCatalogTmpPath,
   saveCatalogCache,
   type CatalogModel,
-} from '../sdk/src/platform/providers/model-catalog.js';
+} from '../platform/src/platform/providers/model-catalog.js';
 
 // ---------------------------------------------------------------------------
 // Test doubles

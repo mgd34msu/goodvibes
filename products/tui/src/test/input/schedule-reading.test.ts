@@ -3,7 +3,7 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { createSystemOnePort, DEFAULT_MODEL, type JudgmentConfig, type JudgmentPort, type Questions } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { withPublicErrorText } from '../helpers/user-error-reading.ts';
-import type { CreateAutomationJobInput } from '@goodvibes-jev/engine/sdk/platform/automation';
+import type { CreateAutomationJobInput } from '@goodvibes-jev/engine/platform/platform/automation';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerScheduleRuntimeCommands } from '../../input/commands/schedule-runtime.ts';
 import { ScheduleReadingLifetime } from '../../input/commands/schedule-reading-lifetime.ts';

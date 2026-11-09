@@ -4,7 +4,7 @@
  *
  *   - a node the daemon flagged as needsAttention shows a distinct badge, floats to
  *     the top of its sibling group, and drives a count badge on the Fleet nav entry;
- *   - 'pick' and 'conflict' (SDK 1.8.0) are the SAME waiting-on-human class as
+ *   - 'pick' and 'conflict' (platform 1.8.0) are the SAME waiting-on-human class as
  *     approval/input, each shows its own reason-specific badge text and is counted
  *     by the exact same nav badge, with no separate code path;
  *   - a needs-input push deep link (?view=fleet#fleet-node=…&fleet-session=…) opens

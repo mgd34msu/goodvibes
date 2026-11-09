@@ -6,9 +6,9 @@ session state.
 
 Public API surfaces:
 
-- `@goodvibes-jev/engine/sdk/platform/core`
-- `@goodvibes-jev/engine/sdk/platform/runtime`
-- `@goodvibes-jev/engine/sdk/platform/orchestration`
+- `@goodvibes-jev/engine/platform/platform/core`
+- `@goodvibes-jev/engine/platform/platform/runtime`
+- `@goodvibes-jev/engine/platform/platform/orchestration`
 
 > See [Public surface reference](./public-surface.md) for stability status and the full list of exported platform subpaths.
 
@@ -19,7 +19,7 @@ provider/model, checks context limits, builds prompt context, streams provider
 deltas, executes requested tools, reconciles unresolved tool calls, records
 usage, emits runtime events, and performs post-turn context maintenance.
 
-All SDK-owned turn paths append a small harness-awareness instruction to the
+All platform-owned turn paths append a small harness-awareness instruction to the
 system prompt. The instruction tells the model to use `goodvibes_context`
 before answering questions about GoodVibes settings, configured integrations,
 host capabilities, surfaces, provider/model state, or available tools. It also
@@ -143,7 +143,7 @@ units. The planner runs as the `planner` template.
 ## Contracts
 
 A contract is the unit of checked work. The contract runner
-(`@goodvibes-jev/engine/sdk/platform/contract`, `createContractRunner` in
+(`@goodvibes-jev/engine/platform/platform/contract`, `createContractRunner` in
 `contract/runner.ts`) plans the work, runs it through sub-agents, and has Jev
 judge it while it runs. It replaces the retired write-review-fix-confirm loop:
 Jev reads the work continuously and nudges the sub-agent instead of running
@@ -152,7 +152,7 @@ for criterion tracing, checking and review inventory.
 
 ### Where contracts start
 
-SDK callers await `runner.start()`, `startFromPlan()`, `startForOwner()` and
+platform callers await `runner.start()`, `startFromPlan()`, `startForOwner()` and
 `startOwnedForOwner()`. Repository placement is resolved asynchronously before
 the contract is published. Their optional `ContractStartOptions` retains the
 original cancellation signal and synchronous `assertCurrent` host callback;
@@ -299,7 +299,7 @@ reading whose strictness is `contract.acceptanceStakes`.
 ### Events and fleet
 
 Contracts report on the `contracts` runtime event domain (`CONTRACT_*` types,
-`packages/engine/sdk/src/events/contract.ts`); every type is listed in the
+`packages/engine/platform/src/events/contract.ts`); every type is listed in the
 [Runtime events reference](./reference-runtime-events.md#contracts). The
 fleet shows `contract`, `contract-group` and `contract-unit` nodes, with each
 criterion's latest verdict on the node's check summary. The fleet verbs
@@ -309,7 +309,7 @@ groups `g1`, `g2` and its units `u1`, `u2`.
 
 ## Orchestration engine
 
-`@goodvibes-jev/engine/sdk/platform/orchestration` is the phase/work-item
+`@goodvibes-jev/engine/platform/platform/orchestration` is the phase/work-item
 pipeline the contract runner runs on: one engine per contract, one workstream
 per contract group, one work item per unit. A workstream holds one or more
 ordered phases, each with a `PhaseKind` that determines the role of the agent

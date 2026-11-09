@@ -4,8 +4,8 @@ import * as crypto from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { applyVerifiedUpdate, assertStagedClientReaderCompatible, nativeReaderCapabilities, sha256, realUpdateFileIo, createNativeDataWriteOwner,
-  verifiedUpdateStageMembers, type VerifiedUpdateStage } from '../sdk/src/platform/runtime/self-update.js';
-import { clientReaderAsset, type ClientReaderArtifact } from '../sdk/src/platform/runtime/client-reader-artifact.js';
+  verifiedUpdateStageMembers, type VerifiedUpdateStage } from '../platform/src/platform/runtime/self-update.js';
+import { clientReaderAsset, type ClientReaderArtifact } from '../platform/src/platform/runtime/client-reader-artifact.js';
 import { makeProjectTempDir } from './_helpers/project-temp.js';
 
 function fixture() {
@@ -26,7 +26,7 @@ function fixture() {
   ] };
 }
 
-test('forward reader admission reuses the SDK verified pins instead of hashing payloads a second time', async () => {
+test('forward reader admission reuses the platform verified pins instead of hashing payloads a second time', async () => {
   const f = fixture(), hash = spyOn(crypto, 'createHash'); let retained: VerifiedUpdateStage | undefined;
   try {
     await applyVerifiedUpdate({ fetchImpl: f.fetchImpl, downloadBaseUrl: 'https://fixture.invalid/release', targets: f.targets, io: realUpdateFileIo, platform: 'darwin', native: true,

@@ -17,7 +17,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { sdk } from '../../../../lib/goodvibes';
+import { client as platformClient } from '../../../../lib/goodvibes';
 import { queryKeys } from '../../../../lib/queries';
 import { asRecord, bestTitle, firstString, readPath } from '../../../../lib/object';
 import {
@@ -66,9 +66,9 @@ export function priceLabel(model: unknown): string {
 }
 
 function useProviderData() {
-  const providers = useQuery({ queryKey: queryKeys.providers, queryFn: () => sdk.operator.providers.list() });
-  const modelCatalog = useQuery({ queryKey: ['models'], queryFn: () => sdk.operator.models.list() });
-  const currentModel = useQuery({ queryKey: ['models', 'current'], queryFn: () => sdk.operator.models.current.get() });
+  const providers = useQuery({ queryKey: queryKeys.providers, queryFn: () => platformClient.operator.providers.list() });
+  const modelCatalog = useQuery({ queryKey: ['models'], queryFn: () => platformClient.operator.models.list() });
+  const currentModel = useQuery({ queryKey: ['models', 'current'], queryFn: () => platformClient.operator.models.current.get() });
 
   const catalogProviderOptions = useMemo(() => providerOptionsFromResponse(modelCatalog.data), [modelCatalog.data]);
   const providerOptions = useMemo(() => {
@@ -226,12 +226,12 @@ function ProviderDetail({
   const detail = useQuery({
     queryKey: ['providers', providerId],
     enabled: Boolean(providerId),
-    queryFn: () => sdk.operator.providers.get(providerId),
+    queryFn: () => platformClient.operator.providers.get(providerId),
   });
   const usage = useQuery({
     queryKey: ['providers', providerId, 'usage'],
     enabled: Boolean(providerId),
-    queryFn: () => sdk.operator.providers.usage(providerId),
+    queryFn: () => platformClient.operator.providers.usage(providerId),
   });
   // Status reads BOTH the merged list record (carries the catalog's flat
   // configured / configuredVia / routes) and the freshest providers.get
@@ -247,7 +247,7 @@ function ProviderDetail({
   const selectModel = useMutation({
     mutationFn: (registryKey: string) => {
       if (!providerModels.hasCurrentModel(registryKey)) throw new Error('Model options changed. Choose a current model.');
-      return sdk.operator.models.current.set(registryKey);
+      return platformClient.operator.models.current.set(registryKey);
     },
     onSuccess: async (_data, registryKey) => {
       await Promise.all([

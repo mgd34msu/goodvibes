@@ -2,10 +2,10 @@ import { afterEach, expect, test } from 'bun:test';
 import { DecisionModelsDisabledError, decisionModelPolicyState, installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
-import { classifyInboundIntent, parseWorkProposalReply, renderWorkProposalMessage } from '../sdk/src/platform/agents/conversation-gate.js';
-import { readConnectorCapabilities } from '../sdk/src/platform/agents/connector-reading.js';
-import { readConversationIntent, readProposalReply } from '../sdk/src/platform/agents/conversation-reading.js';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
+import { classifyInboundIntent, parseWorkProposalReply, renderWorkProposalMessage } from '../platform/src/platform/agents/conversation-gate.js';
+import { readConnectorCapabilities } from '../platform/src/platform/agents/connector-reading.js';
+import { readConversationIntent, readProposalReply } from '../platform/src/platform/agents/conversation-reading.js';
 
 let previous: JudgmentPort | undefined, installed = false;
 afterEach(() => { if (installed) installJudgmentPort(previous); installed = false; });

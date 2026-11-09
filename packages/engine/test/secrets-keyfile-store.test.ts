@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SecretsManager, SecretStoreUnreadableError } from '../sdk/src/platform/config/secrets.js';
+import { SecretsManager, SecretStoreUnreadableError } from '../platform/src/platform/config/secrets.js';
 
 describe('SecretsManager keyfile-encrypted store', () => {
   const scratchDirs: string[] = [];

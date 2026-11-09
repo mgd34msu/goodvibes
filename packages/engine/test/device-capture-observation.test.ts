@@ -4,9 +4,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSy
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
-import { DeviceCaptureArtifactStore } from '../sdk/src/platform/devices/device-capture-artifacts.js';
-import { createNativeDataWriteOwner, assertNativeReaderCompatible, nativeReaderCapabilities } from '../sdk/src/platform/runtime/native-reader-compatibility.js';
-import { realUpdateFileIo } from '../sdk/src/platform/runtime/self-update.js';
+import { DeviceCaptureArtifactStore } from '../platform/src/platform/devices/device-capture-artifacts.js';
+import { createNativeDataWriteOwner, assertNativeReaderCompatible, nativeReaderCapabilities } from '../platform/src/platform/runtime/native-reader-compatibility.js';
+import { realUpdateFileIo } from '../platform/src/platform/runtime/self-update.js';
 
 const cleanup: (() => void)[] = [];
 afterEach(() => { for (const close of cleanup.splice(0).reverse()) close(); });
@@ -124,7 +124,7 @@ test('a failed capture replacement stays protected even if the first quarantine 
 });
 
 test.each([2, 3])('a real killed writer preserves unproved empties and reclaims only its durable original crash spool (stage %i)', async stopAt => {
-  const f = fixture(), module = new URL('../sdk/src/platform/devices/device-capture-artifacts.ts', import.meta.url).href;
+  const f = fixture(), module = new URL('../platform/src/platform/devices/device-capture-artifacts.ts', import.meta.url).href;
   const script = `import { DeviceCaptureArtifactStore } from ${JSON.stringify(module)};
 let calls = 0;
 const store = new DeviceCaptureArtifactStore(${JSON.stringify(f.directory)}, { beforeObservationWrite() { if (++calls === ${stopAt}) process.kill(process.pid, 'SIGKILL'); } });

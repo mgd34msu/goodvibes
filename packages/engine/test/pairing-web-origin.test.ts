@@ -1,13 +1,13 @@
 import { describe, test, expect } from 'bun:test';
-import { resolvePairingWebOrigin, ensurePublicBaseUrl, isHttpOnLan } from '../sdk/src/platform/pairing/web-origin.ts';
-import type { StableHostInputs } from '../sdk/src/platform/pairing/stable-host.ts';
-import type { ConfigKey, ConfigManager } from '../sdk/src/platform/config/index.ts';
+import { resolvePairingWebOrigin, ensurePublicBaseUrl, isHttpOnLan } from '../platform/src/platform/pairing/web-origin.ts';
+import type { StableHostInputs } from '../platform/src/platform/pairing/stable-host.ts';
+import type { ConfigKey, ConfigManager } from '../platform/src/platform/config/index.ts';
 
 /**
  * Minimal config double: a map of keys to values, plus a setDynamic recorder.
  *
  * `get` is cast through `unknown` straight to ConfigManager's own method type
- * (rather than reconstructed as an independent generic signature): the SDK's
+ * (rather than reconstructed as an independent generic signature): the platform's
  * ConfigValue mapped type is a very large discriminated union, and asking the
  * compiler to structurally verify a freshly-written `get<K extends
  * ConfigKey>` against it here hits TS's "excessive stack depth" recursion

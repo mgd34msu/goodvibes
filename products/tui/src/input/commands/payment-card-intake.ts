@@ -32,8 +32,8 @@ import { createCardFieldPrompter, CARD_SECRET_FIELDS } from '@goodvibes-jev/engi
  * `ctx.platform.configManager` directly, the same real ConfigManager every
  * other command in this app uses, not a TUI-local store. See
  * payments-config.ts's header comment for why these particular keys
- * (`payments.cardNumber`, etc., flat sub-keys under the SDK's real
- * `payments` section) are ConfigManager-safe even though the SDK's
+ * (`payments.cardNumber`, etc., flat sub-keys under the platform's real
+ * `payments` section) are ConfigManager-safe even though the platform's
  * CONFIG_SCHEMA has no scalar entry for them yet: `payments.` is a
  * daemon-owned config prefix, so the reference lands in the daemon's own
  * settings file and is visible to the daemon, the webui and the agent,
@@ -41,7 +41,7 @@ import { createCardFieldPrompter, CARD_SECRET_FIELDS } from '@goodvibes-jev/engi
  *
  * ── Card details are entered only at a local terminal or the webui ────────
  *
- * Owner ruling (see the SDK's platform/payments/entry-surface.ts): card
+ * Owner ruling (see the platform's platform/payments/entry-surface.ts): card
  * material may be TYPED only on `tui`, `agent-terminal`, or `webui`, never
  * over Telegram, ntfy, Discord, Slack, WhatsApp, Signal, a webhook, or any
  * other remote messaging surface. A card number typed into a hosted chat is
@@ -53,25 +53,25 @@ import { createCardFieldPrompter, CARD_SECRET_FIELDS } from '@goodvibes-jev/engi
  * never merged into one check.
  *
  * This command always runs inside the TUI's own composer (CARD_ENTRY_SURFACE
- * below), which the SDK's allowlist accepts, so this gate changes nothing
+ * below), which the platform's allowlist accepts, so this gate changes nothing
  * about today's behavior. What it buys is that the refusal already exists
  * the moment this app (or a shared command registry) ever grows a path that
  * lets `/payments card` be reached from somewhere else: the check is real
- * and SDK-driven, not an implicit "this is the TUI so it's fine" assumption.
+ * and platform-driven, not an implicit "this is the TUI so it's fine" assumption.
  */
 
 import type { CommandContext } from '../command-registry.ts';
 import { persistSecretBackedConfigValue } from '../../config/secret-config.ts';
 import { openPendingPaymentWindows } from './payments-pending.ts';
 
-import '@goodvibes-jev/engine/sdk/platform/payments';
+import '@goodvibes-jev/engine/platform/platform/payments';
 import '../payments-config.ts';
 
 /**
  * This command is wired only into the TUI's own composer command registry,
  * it is never reachable from a channel bridge (Telegram, Discord, ...), each
  * of which has its own separate command surface in the daemon. The constant
- * still names the surface explicitly and is checked through the SDK's own
+ * still names the surface explicitly and is checked through the platform's own
  * allowlist below, rather than skipping the check because "this is the TUI".
  */
 export const CARD_ENTRY_SURFACE = 'tui';
@@ -95,7 +95,7 @@ function renderCardStatus(ctx: CommandContext): string[] {
 /** Chain a masked prompt for each card secret field, storing each through the daemon-scoped secret tier. */
 
 /**
- * Start the card-entry flow, gated on the SDK's own entry-surface allowlist
+ * Start the card-entry flow, gated on the platform's own entry-surface allowlist
  * rather than an assumption baked into this command. `surface` defaults to
  * this command's real, fixed identity (CARD_ENTRY_SURFACE), exposed as a
  * parameter only so tests can drive the refusal path without needing this

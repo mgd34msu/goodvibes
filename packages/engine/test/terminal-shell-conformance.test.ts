@@ -8,7 +8,7 @@
  * same one shipped to consumers so they can run it against their own
  * composition; here we exercise it two ways:
  *   1. against a hand-built fake catalog (documents the consumer contract), and
- *   2. against the real SDK GatewayMethodCatalog, before and after
+ *   2. against the real platform GatewayMethodCatalog, before and after
  *      attachWsOnlyGatewayVerbHandlers, proving the ws-only verb family goes
  *      from handler-less (501) to invokable.
  */
@@ -20,8 +20,8 @@ import {
   type GatewayCatalogConformanceView,
   type GatewayVerbGroupDeps,
 } from '@goodvibes-jev/engine/terminal-shell';
-import { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { createDisposalScope } from '@goodvibes-jev/engine/sdk/platform/runtime/disposal';
+import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { createDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
 import { trackDisposables } from './_helpers/disposables.ts';
 
 const disposables = trackDisposables();
@@ -98,7 +98,7 @@ describe('conformance helper: consumer contract', () => {
   });
 });
 
-describe('attachWsOnlyGatewayVerbHandlers: real SDK catalog', () => {
+describe('attachWsOnlyGatewayVerbHandlers: real platform catalog', () => {
   test('ws-only verb family goes from handler-less to invokable', () => {
     // A fresh catalog carries the ws-only DESCRIPTORS but no handlers: exactly
     // the state that answered 501 in production.

@@ -24,7 +24,7 @@ afterEach(() => { restoreUserErrorReading(); });
 // ---------------------------------------------------------------------------
 
 import { describe, expect, test } from 'bun:test';
-import type { ReasoningEffortSpec } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ReasoningEffortSpec } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { StreamMetrics, WireStreamEventMetricsOptions } from '../../core/stream-event-wiring.ts';
 import { wireStreamEventMetrics } from '../../core/stream-event-wiring.ts';
 import { createFailoverTurnState } from '../../core/active-model-identity.ts';

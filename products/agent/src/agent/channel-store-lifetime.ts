@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
-import { readFileObservation } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { readFileObservation } from '@goodvibes-jev/engine/platform/platform/utils';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { DaemonInvokeOptions, DaemonOperatorInvoke } from './daemon-operator-client.ts';
 
 export interface ChannelStoreEffectOptions extends DaemonInvokeOptions {

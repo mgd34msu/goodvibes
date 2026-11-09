@@ -13,8 +13,8 @@
  */
 
 import { expect, test } from 'bun:test';
-import { HostedWorkspaceFloors, type HostedWorkspaceFloor, type HostedWorkspaceFloorLease } from '../sdk/src/platform/hosted-sessions/workspace-floor.ts';
-import type { ClientRuntimeServices } from '../sdk/src/platform/runtime/client-services.ts';
+import { HostedWorkspaceFloors, type HostedWorkspaceFloor, type HostedWorkspaceFloorLease } from '../platform/src/platform/hosted-sessions/workspace-floor.ts';
+import type { ClientRuntimeServices } from '../platform/src/platform/runtime/client-services.ts';
 
 /** A floor stand-in that records its own construction and disposal. */
 /** The cache tests never run a session on a floor, so no runner method is ever called. */

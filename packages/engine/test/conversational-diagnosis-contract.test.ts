@@ -19,9 +19,9 @@
  * applies.
  */
 import { describe, expect, test } from 'bun:test';
-import { CONVERSATIONAL_DIAGNOSIS_SECTION } from '../sdk/src/platform/agents/conversational-contract.ts';
-import { buildOrchestratorSystemPrompt } from '../sdk/src/platform/agents/orchestrator-prompts.ts';
-import type { AgentRecord } from '../sdk/src/platform/tools/agent/manager.ts';
+import { CONVERSATIONAL_DIAGNOSIS_SECTION } from '../platform/src/platform/agents/conversational-contract.ts';
+import { buildOrchestratorSystemPrompt } from '../platform/src/platform/agents/orchestrator-prompts.ts';
+import type { AgentRecord } from '../platform/src/platform/tools/agent/manager.ts';
 
 function record(overrides: Partial<AgentRecord> = {}): AgentRecord {
   return {

@@ -6,6 +6,6 @@
 - Changed: WRFC chains run isolated in their own git worktree, automatically, with no step for you. A passed chain commits only its own changes plus edits made by GoodVibes' own tools, runs your git hooks, and leaves your other uncommitted edits in place.
 - Fixed: indented read bodies, wrapped code lines, finished turn headers, ended processes no longer counted as running, and printed command output that survives resizes.
 - Changed: every open dependency advisory is closed; undici, brace-expansion, the Anthropic client (0.92), qs, body-parser, ip-address, fflate, fast-uri, js-yaml and sharp move to patched versions.
-- Changed: pins move to sdk/terminal-shell/toolchain 2.1.0 and daemon 1.29.0; reusable-workflow pins repoint to the 2.1.0 release commit.
+- Changed: pins move to platform/terminal-shell/toolchain 2.1.0 and daemon 1.29.0; reusable-workflow pins repoint to the 2.1.0 release commit.
 
 GoodVibes Agent 2.1.0 - 2026-09-30

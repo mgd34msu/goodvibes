@@ -9,17 +9,17 @@ import { choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import {
   createSystemOnePort, DEFAULT_MODEL, SqliteDecisionLog, withDecisionLog, type EntryType, type Questions,
 } from '@goodvibes-jev/judgment';
-import type { EngineerReport } from '../../sdk/src/platform/agents/completion-report.js';
+import type { EngineerReport } from '../../platform/src/platform/agents/completion-report.js';
 import {
   CONTRACTS_GET_OUTPUT_SCHEMA, CONTRACTS_LIST_OUTPUT_SCHEMA,
-} from '../../sdk/src/platform/control-plane/operator-contract-schemas-contracts.js';
-import { GatewayMethodCatalog } from '../../sdk/src/platform/control-plane/method-catalog.js';
-import { registerContractGatewayMethods } from '../../sdk/src/platform/control-plane/routes/contracts.js';
-import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../../sdk/src/platform/daemon/control-plane.js';
-import { dispatchDaemonApiRoutes } from '../../daemon-sdk/src/index.js';
-import type { DaemonApiRouteHandlers, GatewayRestVerbInvocation } from '../../daemon-sdk/src/context.js';
+} from '../../platform/src/platform/control-plane/operator-contract-schemas-contracts.js';
+import { GatewayMethodCatalog } from '../../platform/src/platform/control-plane/method-catalog.js';
+import { registerContractGatewayMethods } from '../../platform/src/platform/control-plane/routes/contracts.js';
+import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../../platform/src/platform/daemon/control-plane.js';
+import { dispatchDaemonApiRoutes } from '../../daemon-api/src/index.js';
+import type { DaemonApiRouteHandlers, GatewayRestVerbInvocation } from '../../daemon-api/src/context.js';
 import {
-  createContractOperatorService, type NativeContractSource } from '../../sdk/src/platform/contract/index.js';
+  createContractOperatorService, type NativeContractSource } from '../../platform/src/platform/contract/index.js';
 import { makeHarness, oneUnitPlan, startContract, runnerPort, waitFor, type Harness } from './runner-support.js';
 
 type ContractInspection = OperatorMethodOutput<'contracts.get'>;

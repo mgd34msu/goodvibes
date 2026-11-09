@@ -1,6 +1,6 @@
 /**
  * memory-governance.ts, the MemoryGovernor observability shape and pure helper
- * functions (ops.memory.get, SDK 1.9.0-dev's memory-relay-voice-hardening work).
+ * functions (ops.memory.get, platform 1.9.0-dev's memory-relay-voice-hardening work).
  * Derives labels/tones from data the daemon already serves. No `any`. No side effects.
  *
  * ops.memory.get carries a real generated OperatorMethodInputMap/OutputMap entry

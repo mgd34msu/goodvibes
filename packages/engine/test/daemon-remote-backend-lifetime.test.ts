@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import { BackendLifetime } from '../sdk/src/platform/runtime/remote/host/backends/backend-lifetime.ts';
-import { runProcess } from '../sdk/src/platform/runtime/remote/host/backends/process-runner.ts';
+import { BackendLifetime } from '../platform/src/platform/runtime/remote/host/backends/backend-lifetime.ts';
+import { runProcess } from '../platform/src/platform/runtime/remote/host/backends/process-runner.ts';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;

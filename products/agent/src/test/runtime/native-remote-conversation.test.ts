@@ -1,7 +1,7 @@
 import { readExecutionMode, setExecutionMode } from '../../permissions/execution-mode.ts';
 import { expect, test } from 'bun:test';
 import type { BootstrapContext } from '../../runtime/bootstrap.ts';
-import type { NativeHostedTurnSnapshot } from '@goodvibes-jev/engine/sdk/platform/hosted-sessions/native-turn-client';
+import type { NativeHostedTurnSnapshot } from '@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client';
 import type { NativeConversationIntakeActions, NativeConversationIntakeState } from '../../runtime/native-conversation-intake.ts';
 import { createRemoteConversationRouter } from '../../runtime/client/remote-conversation.ts';
 import { installRemoteConversationRouting } from '../../shell/remote-conversation-wiring.ts';

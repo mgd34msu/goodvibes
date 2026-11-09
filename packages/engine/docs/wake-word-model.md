@@ -2,12 +2,12 @@
 
 The pinned wake-word classifier, its measured behavior, and the attribution it
 ships with. The pin itself lives in
-`packages/engine/sdk/src/platform/voice/provisioning/wake-word-manifest.ts`.
+`packages/engine/platform/src/platform/voice/provisioning/wake-word-manifest.ts`.
 
 The wake-word **engine, config surface, provisioning flow and recovery
-housekeeping** live under `packages/engine/sdk/src/platform/voice/wake/`. The **capture
+housekeeping** live under `packages/engine/platform/src/platform/voice/wake/`. The **capture
 capability** they sit on lives beside them in
-`packages/engine/sdk/src/platform/voice/capture/`, and it serves the whole voice stack
+`packages/engine/platform/src/platform/voice/capture/`, and it serves the whole voice stack
 rather than the wake word alone. Push-to-talk speech-to-text and wake detection
 are two consumers of ONE device path, because a wake does not end a capture
 session. It starts one, and re-opening the microphone at that moment would drop
@@ -69,7 +69,7 @@ by `voice.wake.model.get` (`component=tflite`), so a runtime that cannot load
 onnx has the same access to the model as one that can.
 
 It does **not** gate
-`ready`, the only pinned artifact that does not. The detector this SDK runs needs
+`ready`, the only pinned artifact that does not. The detector this platform runs needs
 the `.onnx` build, the front end, and **both** attribution NOTICEs, so a host that
 got those four and missed the twin is a host that detects, and reporting otherwise
 would be false in the unhelpful direction.
@@ -83,7 +83,7 @@ ordinary outcome of installing goodvibes was a wake word that could not start,
 waiting on a download most people would never go and find.
 
 Three seams, one policy
-(`packages/engine/sdk/src/platform/voice/wake/install-provision.ts`):
+(`packages/engine/platform/src/platform/voice/wake/install-provision.ts`):
 
 | when | who calls it | what happens |
 |---|---|---|

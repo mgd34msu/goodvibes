@@ -2,8 +2,8 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SecretsManager } from '../sdk/src/platform/config/secrets.js';
-import { acquireCrossProcessLock } from '../sdk/src/platform/workspace/checkpoint/cross-process-lock.js';
+import { SecretsManager } from '../platform/src/platform/config/secrets.js';
+import { acquireCrossProcessLock } from '../platform/src/platform/workspace/checkpoint/cross-process-lock.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -80,7 +80,7 @@ test('a retired caller queued on the real store lock cannot persist a credential
 
 test('an exact write transition survives only its own pre-lock intent and settlement', async () => {
   const { manager, release } = await fixture();
-  let token: import('../sdk/src/platform/config/secrets.js').SecretWriteTransition | undefined;
+  let token: import('../platform/src/platform/config/secrets.js').SecretWriteTransition | undefined;
   let receipt = false;
   const before = manager.getCredentialMutationState().generation;
   const pending = manager.set('SYNTHETIC_FENCE_KEY', 'synthetic-exact', { scope: 'user', medium: 'plaintext', effect: transition => {

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { captureSourceSpans } from '../sdk/src/platform/security/source-spans.js';
+import { captureSourceSpans } from '../platform/src/platform/security/source-spans.js';
 
 const invalidMessage = 'Invalid source spans';
 const range = () => ({ start: 0, end: 1 });

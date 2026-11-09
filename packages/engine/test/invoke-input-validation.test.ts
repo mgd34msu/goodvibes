@@ -12,7 +12,7 @@ import {
   classifyInputSchema,
   summarizeInvokeValidationCoverage,
   validateInvocationInput,
-} from '../sdk/src/platform/control-plane/invoke-input-validation.js';
+} from '../platform/src/platform/control-plane/invoke-input-validation.js';
 import {
   EMPTY_OBJECT_SCHEMA,
   JSON_OBJECT_SCHEMA,
@@ -25,7 +25,7 @@ import {
   objectSchema,
   requirementBranch,
   type GatewayMethodDescriptor,
-} from '../sdk/src/platform/control-plane/method-catalog-shared.js';
+} from '../platform/src/platform/control-plane/method-catalog-shared.js';
 
 function verb(inputSchema: Record<string, unknown> | undefined): GatewayMethodDescriptor {
   return methodDescriptor({

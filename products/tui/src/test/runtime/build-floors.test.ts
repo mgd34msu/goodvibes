@@ -10,7 +10,7 @@
  * TUI_DAEMON_BUILD_FLOOR is named in one sentence carrying both versions, and
  * the sentence is not repeated on every reconnect against the same old daemon.
  *
- * The comparison itself is the SDK's; what is pinned here is this process's own
+ * The comparison itself is the platform's; what is pinned here is this process's own
  * state, the latch, the buffered-until-attached notice, and the announce-once.
  */
 import { describe, expect, test } from 'bun:test';
@@ -19,7 +19,7 @@ import {
   DaemonBuildFloor,
   TUI_DAEMON_BUILD_FLOOR,
 } from '../../runtime/client/build-floors.ts';
-import type { ClientCompatibilityVerdict } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import type { ClientCompatibilityVerdict } from '@goodvibes-jev/engine/platform/platform/control-plane';
 
 describe('ClientBuildGuard', () => {
   test('a build above the daemon floor keeps taking shared-session work, silently', () => {

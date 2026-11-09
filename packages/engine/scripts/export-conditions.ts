@@ -30,8 +30,8 @@ export function withoutSourceCondition(exports: unknown): unknown {
 
 /**
  * One old package's export map, read from the engine's `./<pkg>` subpaths:
- * keys become relative to the old package (`./sdk/auth` is `./auth`), targets
- * under `./<pkg>/` become relative to it (`./sdk/dist/auth.js` is
+ * keys become relative to the old package (`./platform/auth` is `./auth`), targets
+ * under `./<pkg>/` become relative to it (`./platform/dist/auth.js` is
  * `./dist/auth.js`), the source condition is dropped, and JSON assets outside
  * the old package keep their engine-relative path.
  */

@@ -44,18 +44,18 @@
 import { afterEach, beforeEach, describe, expect, setSystemTime, test } from 'bun:test';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   DEVICE_CAPABILITY_CONTRACT_VERSION,
   DEVICE_CAPABILITY_IDS,
   getDeviceCapability,
-} from '@goodvibes-jev/engine/sdk/platform/devices';
+} from '@goodvibes-jev/engine/platform/platform/devices';
 import type {
   DeviceCapabilityId,
   DeviceCapabilityOutcome,
   DeviceCaptureArtifact,
-} from '@goodvibes-jev/engine/sdk/platform/devices';
-import type { PermissionPromptDecision, PermissionPromptRequest } from '@goodvibes-jev/engine/sdk/platform/permissions';
+} from '@goodvibes-jev/engine/platform/platform/devices';
+import type { PermissionPromptDecision, PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
 import type {
   DistributedPeerRecord,
   DistributedPendingWork,
@@ -65,7 +65,7 @@ import {
   createDevicePostureRuntime,
   DEVICE_NODE_ANNOUNCEMENT_KEY,
   type DevicePostureRuntime,
-} from '@goodvibes-jev/engine/sdk/platform/devices';
+} from '@goodvibes-jev/engine/platform/platform/devices';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 

@@ -1,21 +1,21 @@
 import { expect, spyOn, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { readNaturalLanguageSchedule } from '@goodvibes-jev/engine/sdk/platform/automation';
+import { readNaturalLanguageSchedule } from '@goodvibes-jev/engine/platform/platform/automation';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { sourceFindings } from '../scripts/judgment-lint-rules.ts';
-import { registry } from '../sdk/src/platform/automation/judgment-registry.ts';
+import { registry } from '../platform/src/platform/automation/judgment-registry.ts';
 
-const path = 'packages/engine/sdk/src/platform/automation/schedule-reading.ts';
+const path = 'packages/engine/platform/src/platform/automation/schedule-reading.ts';
 
 test('actual schedule source is attributable only while its decision is registered', () => {
-  const source = readFileSync(new URL('../sdk/src/platform/automation/schedule-reading.ts', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../platform/src/platform/automation/schedule-reading.ts', import.meta.url), 'utf8');
   const registered = new Set(registry.list().map(decision => decision.name));
   expect(sourceFindings(path, source, registered)).toEqual([]);
   expect(sourceFindings(path, source, new Set()).some(finding => finding.rule === 'registered-use')).toBe(true);
 });
 
 test('public scheduling and calibration invoke the same registered owner', async () => {
-  const module = await import('../sdk/src/platform/automation/schedule-reading.ts');
+  const module = await import('../platform/src/platform/automation/schedule-reading.ts');
   const owner = Reflect.get(module, 'scheduleReading') as typeof module.scheduleReading | undefined;
   expect(owner).toBeDefined();
   if (owner === undefined) throw new Error('The schedule decision owner is missing');

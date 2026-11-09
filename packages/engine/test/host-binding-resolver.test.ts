@@ -8,7 +8,7 @@
  * that surface-registry / announcements / the tailscale verb anchor to.
  */
 import { describe, expect, test } from 'bun:test';
-import { resolveHostBinding, resolveWebBinding, resolveWebPort } from '../sdk/src/platform/daemon/host-resolver.ts';
+import { resolveHostBinding, resolveWebBinding, resolveWebPort } from '../platform/src/platform/daemon/host-resolver.ts';
 
 describe('resolveHostBinding unrecognized-value posture', () => {
   test('recognized modes resolve exactly as before, flagged recognized', () => {

@@ -1,11 +1,11 @@
-import * as approvalRules from '../sdk/src/platform/permissions/approval-rules.js';
+import * as approvalRules from '../platform/src/platform/permissions/approval-rules.js';
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ApprovalBroker } from '../sdk/src/platform/control-plane/approval-broker.js';
-import type { ExplicitApprovalDisposition } from '../sdk/src/platform/control-plane/approval-disposition.js';
-import type { PermissionPromptRequest } from '../sdk/src/platform/permissions/prompt.js';
+import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-broker.js';
+import type { ExplicitApprovalDisposition } from '../platform/src/platform/control-plane/approval-disposition.js';
+import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

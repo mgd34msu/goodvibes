@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { NativeWorkLedgerModel } from '../../runtime/native-work-ledger.ts';
 import { createNativeWorkLedgerView, type NativeLedgerHost } from '../../runtime/native-work-ledger-host.ts';
 import { nativeWorkLedgerLines } from '../../renderer/native-work-ledger.ts';
-import type { WorkLedgerReadClient, WorkLedgerReadSnapshot, WorkLedgerEvent } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger';
+import type { WorkLedgerReadClient, WorkLedgerReadSnapshot, WorkLedgerEvent } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 const flush = async () => { for (let i = 0; i < 15; i++) await Promise.resolve(); };
 const snapshot = (cursor = 0, projectId = 'p'): WorkLedgerReadSnapshot => ({ projectId, revision: cursor, cursor, works: [] });
 const event = (sequence: number): Exclude<WorkLedgerEvent, { type: 'import_legacy' }> => ({ sequence, type: 'create', actorId: 'owner', requestId: `r${sequence}`, workId: 'work-stable', attemptId: null, at: 1, attempts: [], evidence: null, reason: null, work: { source: null, id: 'work-stable', title: 'Ship', goal: 'Working feature', criteria: ['Tests pass'], revision: sequence, criteriaRevision: 1, reportedState: 'complete', currentAttemptId: null, createdAt: 1, updatedAt: 1 } });
@@ -103,8 +103,8 @@ test('an explicit command waiting on discovery cannot retarget a newly selected 
 for (const replacement of ['baseUrl', 'token', 'workspace'] as const) {
   test(`${replacement} replacement aborts pending native execution and discards the response`, async () => {
     let host = { baseUrl: 'https://one.invalid', token: 'synthetic', workspace: '/one' };
-    let signal: AbortSignal | undefined; let finish!: (value: import('@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client').NativeWorkExecutionSnapshot) => void;
-    let identity!: import('@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client').NativeWorkExecutionIdentity;
+    let signal: AbortSignal | undefined; let finish!: (value: import('@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client').NativeWorkExecutionSnapshot) => void;
+    let identity!: import('@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client').NativeWorkExecutionIdentity;
     const f = fixture(); const base = event(1).work;
     f.client.readSnapshot = async () => ({ ...snapshot(), works: [{ work: { ...base, reportedState: 'in_progress', currentAttemptId: 'attempt' }, attempt: { id: 'attempt', workId: base.id, predecessorId: null, ownerId: 'owner', revision: 1, state: 'active', report: null, blocker: null, createdAt: 1, updatedAt: 1 }, verification: { state: 'unverified', reason: 'No proof', evidence: null }, attention: [] }] });
     const view = createNativeWorkLedgerView(() => host, () => {}, () => ({ available: true, client: f.client, execution: {

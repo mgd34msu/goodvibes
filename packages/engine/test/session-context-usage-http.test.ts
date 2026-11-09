@@ -4,16 +4,16 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { firstJsonSchemaFailure } from '../transport-http/src/client-plumbing.js';
 import type { OperatorMethodOutput } from '../contracts/src/index.js';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.js';
-import { buildOperatorContract } from '../sdk/src/platform/control-plane/operator-contract.js';
-import { createSessionRuntimeControls, registerSessionRuntimeGatewayMethods, SessionLiveTurnControlsHolder } from '../sdk/src/platform/control-plane/routes/session-runtime.js';
-import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../sdk/src/platform/daemon/control-plane.js';
-import { createRuntimeStore } from '../sdk/src/platform/runtime/store/index.js';
-import { ModelLimitsService } from '../sdk/src/platform/providers/model-limits.js';
-import type { ModelDefinition } from '../sdk/src/platform/providers/registry-types.js';
-import { createDaemonControlRouteHandlers } from '../daemon-sdk/src/control-routes.js';
-import { dispatchGatewayRestRoutes } from '../daemon-sdk/src/gateway-rest-routes.js';
-import { createOperatorSdk } from '../operator-sdk/src/client.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
+import { buildOperatorContract } from '../platform/src/platform/control-plane/operator-contract.js';
+import { createSessionRuntimeControls, registerSessionRuntimeGatewayMethods, SessionLiveTurnControlsHolder } from '../platform/src/platform/control-plane/routes/session-runtime.js';
+import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../platform/src/platform/daemon/control-plane.js';
+import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.js';
+import { ModelLimitsService } from '../platform/src/platform/providers/model-limits.js';
+import type { ModelDefinition } from '../platform/src/platform/providers/registry-types.js';
+import { createDaemonControlRouteHandlers } from '../daemon-api/src/control-routes.js';
+import { dispatchGatewayRestRoutes } from '../daemon-api/src/gateway-rest-routes.js';
+import { createOperatorApiClient } from '../operator-client/src/client.js';
 
 const SESSION_ID = 's-context-local';
 const HOSTED_SESSION_ID = 's-context-hosted';
@@ -95,10 +95,10 @@ test('real HTTP facade carries nullable capacity and provenance without exposing
       scenarios[name] = { method: 'GET', path, status: response.status, body };
     }
     current = definitions.provider_api!;
-    const sdk = createOperatorSdk({ baseUrl, authToken: TOKEN });
-    const local = await sdk.invoke<OperatorMethodOutput<'sessions.contextUsage.get'>>('sessions.contextUsage.get', { sessionId: SESSION_ID });
+    const platformClient = createOperatorApiClient({ baseUrl, authToken: TOKEN });
+    const local = await platformClient.invoke<OperatorMethodOutput<'sessions.contextUsage.get'>>('sessions.contextUsage.get', { sessionId: SESSION_ID });
     expect(local).toMatchObject({ contextWindow: 100_000, contextUsagePct: 40, contextWindowSource: 'provider_api' });
-    expect(await sdk.invoke<OperatorMethodOutput<'sessions.contextUsage.get'>>('sessions.contextUsage.get', { sessionId: 'runtime' })).toEqual({ ...local, sessionId: 'runtime' });
+    expect(await platformClient.invoke<OperatorMethodOutput<'sessions.contextUsage.get'>>('sessions.contextUsage.get', { sessionId: 'runtime' })).toEqual({ ...local, sessionId: 'runtime' });
     for (const id of [HOSTED_SESSION_ID, 'not-hosted']) {
       const path = `/api/sessions/${id}/context-usage`;
       const response = await fetch(`${baseUrl}${path}`, { headers: { authorization: `Bearer ${TOKEN}` } });
@@ -110,7 +110,7 @@ test('real HTTP facade carries nullable capacity and provenance without exposing
     }
     // Broader local control identity is intentionally unchanged.
     expect(controls.isLocalSession(HOSTED_SESSION_ID)).toBe(true);
-    expect((await sdk.invoke<OperatorMethodOutput<'sessions.queuedMessages.list'>>('sessions.queuedMessages.list', { sessionId: HOSTED_SESSION_ID })).messages).toEqual([]);
+    expect((await platformClient.invoke<OperatorMethodOutput<'sessions.queuedMessages.list'>>('sessions.queuedMessages.list', { sessionId: HOSTED_SESSION_ID })).messages).toEqual([]);
     const capture = {
       source: 'packages/engine/test/session-context-usage-http.test.ts', sessionId: SESSION_ID, hostedSessionId: HOSTED_SESSION_ID, scenarios,
     };

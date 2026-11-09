@@ -28,19 +28,19 @@ import {
   type MerchantJudgeInput,
   type MerchantJudgePort,
   type MerchantJudgement,
-} from '../sdk/src/platform/payments/merchant-recourse.js';
-import { isThirdPartySale } from '../sdk/src/platform/payments/marketplace-listing.js';
-import { renderPurchaseNotice } from '../sdk/src/platform/payments/message.js';
-import { BudgetLedger } from '../sdk/src/platform/payments/budget.js';
+} from '../platform/src/platform/payments/merchant-recourse.js';
+import { isThirdPartySale } from '../platform/src/platform/payments/marketplace-listing.js';
+import { renderPurchaseNotice } from '../platform/src/platform/payments/message.js';
+import { BudgetLedger } from '../platform/src/platform/payments/budget.js';
 import {
   parseCurrencyCode,
   unsafeOwnerSuppliedTextForTests,
   type CurrencyCode,
-} from '../sdk/src/platform/payments/types.js';
-import { paymentsConfigDefaults } from '../sdk/src/platform/config/schema-domain-payments.js';
-import { evaluateMarketplaceListing } from '../sdk/src/platform/payments/marketplace-listing.js';
-import { evaluatePaymentTaint } from '../sdk/src/platform/payments/taint-gate.js';
-import { UntrustedContentLedger } from '../sdk/src/platform/security/untrusted-content.js';
+} from '../platform/src/platform/payments/types.js';
+import { paymentsConfigDefaults } from '../platform/src/platform/config/schema-domain-payments.js';
+import { evaluateMarketplaceListing } from '../platform/src/platform/payments/marketplace-listing.js';
+import { evaluatePaymentTaint } from '../platform/src/platform/payments/taint-gate.js';
+import { UntrustedContentLedger } from '../platform/src/platform/security/untrusted-content.js';
 import { usePaymentsReadings } from './helpers/payments-readings.ts';
 
 usePaymentsReadings();
@@ -128,7 +128,7 @@ describe('owner-initiated versus content-initiated', () => {
     // evaluateOutwardEffect would let this through. The payment path is not on
     // that code path, and this is the test that keeps it that way.
     const { grantOwnerApproval } = await import(
-      '../sdk/src/platform/security/untrusted-content.js'
+      '../platform/src/platform/security/untrusted-content.js'
     );
     const approval = grantOwnerApproval({ action: 'payments.purchase', surface: 'owner-direct' });
     expect(approval).not.toBeNull();

@@ -31,11 +31,11 @@ import {
   JOURNAL_SCHEMA_VERSION,
   journalPathFor,
   openTranscriptJournal,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+} from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import {
   replayJournalForSession,
   replayJournalIntoConversation,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+} from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { ConversationManager } from '../../core/conversation.ts';
 import { createResumeSessionHandler } from '../../runtime/bootstrap-hook-bridge.ts';
 import type { ResumeSessionOptions } from '../../runtime/bootstrap-hook-bridge.ts';

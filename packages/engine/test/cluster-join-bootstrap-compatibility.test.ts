@@ -4,9 +4,9 @@
  */
 import { expect, test } from 'bun:test';
 import { createHmac } from 'node:crypto';
-import { deriveJoinSalt, deriveJoinVerifier, generateGroupId, generateNodeKeyMaterial } from '../sdk/src/platform/cluster/group-crypto.ts';
-import { createGroup, rotateGroupKey } from '../sdk/src/platform/cluster/group-operations.ts';
-import { encodeJoinClassMessage, GROUP_MESSAGE_TYPES, openGrant } from '../sdk/src/platform/cluster/group-membership.ts';
+import { deriveJoinSalt, deriveJoinVerifier, generateGroupId, generateNodeKeyMaterial } from '../platform/src/platform/cluster/group-crypto.ts';
+import { createGroup, rotateGroupKey } from '../platform/src/platform/cluster/group-operations.ts';
+import { encodeJoinClassMessage, GROUP_MESSAGE_TYPES, openGrant } from '../platform/src/platform/cluster/group-membership.ts';
 import { addGroupNode, createGroupWorld, destroyGroupWorld, settle, stopGroupWorld } from './cluster-group-harness.ts';
 function releasedSalt(id: string) {
   // Exact original public-label protocol, not a local identity/checksum hash.

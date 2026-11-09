@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { BrowserJudgmentError, type AuthenticatedPrincipal } from '../daemon-sdk/src/index.ts';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { createWebuiBrowserJudgment } from '../sdk/src/platform/judgment-browser/webui-runtime.ts';
-import { withWebuiAnswerBoundary } from '../sdk/src/platform/judgment-browser/batteries/webui-answers.ts';
+import { BrowserJudgmentError, type AuthenticatedPrincipal } from '../daemon-api/src/index.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { createWebuiBrowserJudgment } from '../platform/src/platform/judgment-browser/webui-runtime.ts';
+import { withWebuiAnswerBoundary } from '../platform/src/platform/judgment-browser/batteries/webui-answers.ts';
 const CARD = 'webui.settings.card-material-key';
 const PROVIDER = 'webui.models.catalog-provider-match';
 function fixture(battery: typeof CARD | typeof PROVIDER, options: { providerId?: string; probability?: number; barrier?: Promise<void>; hidden?: string; names?: readonly { key: string; description: string }[] } = {}) {

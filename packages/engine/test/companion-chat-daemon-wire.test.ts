@@ -8,16 +8,16 @@ import { describe, expect, test, beforeEach, afterEach } from 'bun:test';
 import { settleEvents } from './_helpers/test-timeout.js';
 
 
-import { CompanionChatManager } from '../sdk/src/platform/companion/companion-chat-manager.js';
+import { CompanionChatManager } from '../platform/src/platform/companion/companion-chat-manager.js';
 import type {
   CompanionChatManagerConfig,
   CompanionChatEventPublisher,
   CompanionLLMProvider,
   CompanionProviderChunk,
-} from '../sdk/src/platform/companion/companion-chat-manager.js';
-import { dispatchCompanionChatRoutes, isCompanionChatPath } from '../sdk/src/platform/companion/companion-chat-routes.js';
-import type { CompanionChatRouteContext } from '../sdk/src/platform/companion/companion-chat-route-types.js';
-import { DaemonHttpRouter } from '../sdk/src/platform/daemon/http/router.js';
+} from '../platform/src/platform/companion/companion-chat-manager.js';
+import { dispatchCompanionChatRoutes, isCompanionChatPath } from '../platform/src/platform/companion/companion-chat-routes.js';
+import type { CompanionChatRouteContext } from '../platform/src/platform/companion/companion-chat-route-types.js';
+import { DaemonHttpRouter } from '../platform/src/platform/daemon/http/router.js';
 
 // ---------------------------------------------------------------------------
 // Minimal mock provider

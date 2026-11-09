@@ -12,13 +12,13 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
-import { SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
+import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { readLastSessionPointer, writeRecoveryFile } from '@/runtime/index.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
 import { ConversationManager } from '../../core/conversation.ts';
 import { buildRecoveryOfferWiring } from '../../runtime/recovery-offer-wiring.ts';
 import { offerRecoverySnapshot, type SelectionOpener,  resetAnsweredRecoveryOffersForTest } from '../../runtime/recovery-prompt.ts';
-import { bindWriteLastSessionPointerToSurface } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { bindWriteLastSessionPointerToSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { ageRecoverySnapshot, makeTestSurface } from '../helpers/session-surface.ts';
 

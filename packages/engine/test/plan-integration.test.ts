@@ -7,15 +7,15 @@ import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import {
   ProjectPlanningService,
-} from '../sdk/src/platform/knowledge/index.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { ExecutionPlanManager } from '../sdk/src/platform/core/execution-plan.js';
+} from '../platform/src/platform/knowledge/index.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { ExecutionPlanManager } from '../platform/src/platform/core/execution-plan.js';
 import {
   assemblePlanProposal,
   planProposalToExecutionPlanItems,
   planProposalToPlanningState,
   type RawDecomposition,
-} from '../sdk/src/platform/core/plan-proposal.js';
+} from '../platform/src/platform/core/plan-proposal.js';
 
 const tmpRoots: string[] = [];
 let previousPort: JudgmentPort | undefined;

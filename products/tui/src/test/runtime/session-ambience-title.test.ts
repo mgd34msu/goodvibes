@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { wireSessionAmbience, type SessionAmbienceDeps } from '../../runtime/session-ambience-wiring.ts';
 import { ConversationManager } from '../../core/conversation.ts';
-import { SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
+import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { resumeSessionCore } from '../../core/session-resume-core.ts';
 import { makeTestSurface } from '../helpers/session-surface.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';

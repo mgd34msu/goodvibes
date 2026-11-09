@@ -33,19 +33,19 @@ import {
   type AudioCaptureStream,
   type CaptureChildProcess,
   type NoiseSuppressionStage,
-} from '../sdk/src/platform/voice/capture/index.js';
+} from '../platform/src/platform/voice/capture/index.js';
 import {
   SPEEXDSP_WASM_BASE64,
   SPEEXDSP_WASM_BYTES,
-} from '../sdk/src/platform/voice/capture/vendor/speexdsp-wasm.js';
-import { base64ToBytes } from '../sdk/src/platform/voice/capture/frames.js';
-import { WakeWordEngine } from '../sdk/src/platform/voice/wake/engine.js';
-import { WakeListener } from '../sdk/src/platform/voice/wake/listener.js';
-import { resolveWakeRuntimeSettings } from '../sdk/src/platform/voice/wake/settings.js';
-import { WAKE_CHUNK_SAMPLES, WAKE_EMBED_DIM } from '../sdk/src/platform/voice/wake/feature-pipeline.js';
-import { voiceWakeConfigDefaults } from '../sdk/src/platform/config/schema-domain-voice-wake.js';
-import type { CapturedUtterance } from '../sdk/src/platform/voice/capture/voice-input.js';
-import type { WakeInferenceSession } from '../sdk/src/platform/voice/wake/types.js';
+} from '../platform/src/platform/voice/capture/vendor/speexdsp-wasm.js';
+import { base64ToBytes } from '../platform/src/platform/voice/capture/frames.js';
+import { WakeWordEngine } from '../platform/src/platform/voice/wake/engine.js';
+import { WakeListener } from '../platform/src/platform/voice/wake/listener.js';
+import { resolveWakeRuntimeSettings } from '../platform/src/platform/voice/wake/settings.js';
+import { WAKE_CHUNK_SAMPLES, WAKE_EMBED_DIM } from '../platform/src/platform/voice/wake/feature-pipeline.js';
+import { voiceWakeConfigDefaults } from '../platform/src/platform/config/schema-domain-voice-wake.js';
+import type { CapturedUtterance } from '../platform/src/platform/voice/capture/voice-input.js';
+import type { WakeInferenceSession } from '../platform/src/platform/voice/wake/types.js';
 
 const RATE = 16_000;
 const REPO_ROOT = new URL('..', import.meta.url).pathname;

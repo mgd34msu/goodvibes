@@ -10,10 +10,10 @@ import type { Mock } from 'bun:test';
 import { existsSync, mkdirSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { WatcherRegistry } from '../sdk/src/platform/watchers/registry.ts';
-import { logger } from '../sdk/src/platform/utils/logger.ts';
-import type { AutomationSourceRecord } from '../sdk/src/platform/automation/sources.ts';
-import { createRuntimeStore } from '../sdk/src/platform/runtime/store/index.ts';
+import { WatcherRegistry } from '../platform/src/platform/watchers/registry.ts';
+import { logger } from '../platform/src/platform/utils/logger.ts';
+import type { AutomationSourceRecord } from '../platform/src/platform/automation/sources.ts';
+import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.ts';
 
 /** The watcher-framework gate every registry operation sits behind. */
 const watcherFlagsOn = { isEnabled: (id: string): boolean => id === 'watcher-framework' };

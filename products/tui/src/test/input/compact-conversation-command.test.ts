@@ -4,8 +4,8 @@
  * compactConversation() (src/input/commands/runtime-services.ts) previously:
  *  1. Filtered agents down to running/pending only before building
  *     CompactionContext.agents, discarding all completed/failed subagent work
- *     before the SDK's compaction section builders ever saw it.
- *  2. Never set CompactionContext.originalTask at all, so the SDK's
+ *     before the platform's compaction section builders ever saw it.
+ *  2. Never set CompactionContext.originalTask at all, so the platform's
  *     "Original task" fallback (meant only for the very first compaction of a
  *     session) fired on every manual /compact, mislabeling the current task
  *     as "original".
@@ -16,8 +16,8 @@
 import { describe, expect, test } from 'bun:test';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { compactConversation } from '../../input/commands/runtime-services.ts';
-import type { AgentRecord } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { CompactionContext } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { AgentRecord } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { CompactionContext } from '@goodvibes-jev/engine/platform/platform/core';
 
 function makeAgentRecord(overrides: Partial<AgentRecord> & { id: string; task: string }): AgentRecord {
   return {

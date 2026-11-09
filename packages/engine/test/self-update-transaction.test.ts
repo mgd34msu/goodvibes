@@ -6,7 +6,7 @@ import {
   applyVerifiedUpdate, compareVersions, resolveLatestReleaseTag, rollbackKeptPrevious,
   sha256, swapFileAtomically, UpdateTransactionError,
   type UpdateFetchLike, type UpdateFileIo, type UpdateTarget,
-} from '../sdk/src/platform/runtime/self-update.js';
+} from '../platform/src/platform/runtime/self-update.js';
 
 const targets: readonly UpdateTarget[] = [
   { label: 'daemon', path: '/fixture/daemon', assetName: 'daemon', executable: true },

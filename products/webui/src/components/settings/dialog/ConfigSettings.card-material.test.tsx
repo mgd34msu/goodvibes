@@ -5,14 +5,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ToastProvider } from '../../../lib/toast';
 import { tokenStore } from '../../../lib/client-lifetime';
 import { displayConfigValue } from '../../../lib/config-redaction';
-import type { BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-sdk';
+import type { BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-api';
 type Request = BrowserJudgmentRequest<'webui.config.credential-key' | 'webui.settings.card-material-key'>;
 let config: unknown;
 let barrier: Promise<void> | undefined;
 let held = false;
 const requests: Request[] = [];
 mock.module('../../../lib/goodvibes', () => ({
-  sdk: { operator: { config: { get: async () => config, set: async () => ({ success: true }) } } },
+  client: { operator: { config: { get: async () => config, set: async () => ({ success: true }) } } },
   runBrowserJudgment: async (request: Request) => {
     requests.push(request); const wait = barrier; await wait;
     const isCard = request.battery === 'webui.settings.card-material-key';

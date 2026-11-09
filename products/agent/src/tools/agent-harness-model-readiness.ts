@@ -1,10 +1,10 @@
-import { decisionOrClassic, isClassicOperation } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { decisionOrClassic, isClassicOperation } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 import { arch, cpus, freemem, platform, totalmem } from 'node:os';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { prepareJudgmentResult } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { routingRegistry, routeReadiness, localRecipeFit, routeReadinessFrom, localRecipeFitFrom } from '@goodvibes-jev/engine/sdk/platform/routing';
-import { assertProjectionCurrent, ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
+import { routingRegistry, routeReadiness, localRecipeFit, routeReadinessFrom, localRecipeFitFrom } from '@goodvibes-jev/engine/platform/platform/routing';
+import { assertProjectionCurrent, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext } from '../input/command-registry.ts';
 import { readProviderHealthSignal } from './agent-harness-model-provider-health.ts';
 import { listProviderRegistryProviders } from './agent-harness-model-catalog.ts';

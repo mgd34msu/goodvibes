@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs';
 import { dirname, join } from 'node:path';
 import { readYesNo } from '@goodvibes-jev/judgment';
-import { inboxTriage } from '../sdk/src/platform/intake/triage/battery.js';
-import { captureTriageInputs, settleTriage, triageBinding } from '../sdk/src/platform/intake/triage/evidence.js';
-import { SqliteTriageStore } from '../sdk/src/platform/intake/triage/store.js';
-import type { TriageEvidence, TriageReceipt } from '../sdk/src/platform/intake/triage/types.js';
-import { loadSqlJsEngine, type SqlDatabase } from '../sdk/src/platform/state/sqlite-store.js';
+import { inboxTriage } from '../platform/src/platform/intake/triage/battery.js';
+import { captureTriageInputs, settleTriage, triageBinding } from '../platform/src/platform/intake/triage/evidence.js';
+import { SqliteTriageStore } from '../platform/src/platform/intake/triage/store.js';
+import type { TriageEvidence, TriageReceipt } from '../platform/src/platform/intake/triage/types.js';
+import { loadSqlJsEngine, type SqlDatabase } from '../platform/src/platform/state/sqlite-store.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 function binding(id: string, subject = 'Synthetic routine update') {

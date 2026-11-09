@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { executeToolCalls } from '@goodvibes-jev/engine/sdk/platform/core';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { executeToolCalls } from '@goodvibes-jev/engine/platform/platform/core';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';

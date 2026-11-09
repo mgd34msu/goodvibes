@@ -13,9 +13,9 @@ import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 let previous: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previous = installJudgmentPort(fakePort(() => noulAnswer(0.99)).port); });
 afterEach(() => { installJudgmentPort(previous); });
-import { compactMessages } from '../sdk/src/platform/core/context-compaction.js';
-import type { CompactionContext } from '../sdk/src/platform/core/compaction-types.js';
-import type { ProviderRegistry } from '../sdk/src/platform/providers/registry.js';
+import { compactMessages } from '../platform/src/platform/core/context-compaction.js';
+import type { CompactionContext } from '../platform/src/platform/core/compaction-types.js';
+import type { ProviderRegistry } from '../platform/src/platform/providers/registry.js';
 
 // Canonical membership uses a synthetic port; the legacy older-work prose
 // provider is unavailable. These tests make no live model calls.
@@ -101,7 +101,7 @@ describe('compaction: instruction / skill re-injection', () => {
 // The handoff-header constant is the transcript renderers' detection contract
 // for folding compaction-continuation messages, it must stay byte-identical
 // to what buildHandoffHeader() actually emits.
-import { buildHandoffHeader, COMPACTION_HANDOFF_HEADER } from '../sdk/src/platform/core/compaction-sections.js';
+import { buildHandoffHeader, COMPACTION_HANDOFF_HEADER } from '../platform/src/platform/core/compaction-sections.js';
 
 describe('compaction handoff header constant', () => {
   test('COMPACTION_HANDOFF_HEADER matches buildHandoffHeader output', () => {

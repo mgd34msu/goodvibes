@@ -6,19 +6,19 @@ import {
   normalizeCronSchedule,
   normalizeEverySchedule,
   readNaturalLanguageSchedule,
-} from '@goodvibes-jev/engine/sdk/platform/automation';
-import type { AutomationManager } from '@goodvibes-jev/engine/sdk/platform/automation';
-import type { AutomationJob } from '@goodvibes-jev/engine/sdk/platform/automation';
-import type { AutomationScheduleDefinition } from '@goodvibes-jev/engine/sdk/platform/automation';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { REASONING_EFFORT_SEVERITY, reasoningEffortRank } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { buildAutomationEmptyState } from '@goodvibes-jev/engine/sdk/platform/runtime/feature-announcements';
+} from '@goodvibes-jev/engine/platform/platform/automation';
+import type { AutomationManager } from '@goodvibes-jev/engine/platform/platform/automation';
+import type { AutomationJob } from '@goodvibes-jev/engine/platform/platform/automation';
+import type { AutomationScheduleDefinition } from '@goodvibes-jev/engine/platform/platform/automation';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { REASONING_EFFORT_SEVERITY, reasoningEffortRank } from '@goodvibes-jev/engine/platform/platform/providers';
+import { buildAutomationEmptyState } from '@goodvibes-jev/engine/platform/platform/runtime/feature-announcements';
 import type {
   AutomationExecutionPolicy,
   AutomationExternalContentSource,
   AutomationSessionTarget,
   AutomationWakeMode,
-} from '@goodvibes-jev/engine/sdk/platform/automation';
+} from '@goodvibes-jev/engine/platform/platform/automation';
 
 function formatSchedule(schedule: AutomationScheduleDefinition): string {
   switch (schedule.kind) {
@@ -55,7 +55,7 @@ function parseAutomationTarget(raw: string | undefined): AutomationSessionTarget
  * Validate a `--effort` argument.
  *
  * Not a fixed four-value list: which levels exist is per-model, so this checks
- * the SDK's severity ladder, narrowed to the current model's own resolved
+ * the platform's severity ladder, narrowed to the current model's own resolved
  * levels whenever the runtime has published them. A scheduled job may well run
  * on a different model than the one in use now, so a level this model does not
  * offer is still accepted when it is a real level, it is re-resolved against
@@ -134,7 +134,7 @@ export function registerScheduleRuntimeCommands(registry: CommandRegistry): void
       if (!sub || sub === 'list') {
         const jobs = manager.listJobs();
         if (jobs.length === 0) {
-          // The SDK owns the presence + title of the how-to-create-your-first-
+          // The platform owns the presence + title of the how-to-create-your-first-
           // routine empty state (shown while automation is on and idle). Its
           // body points at a command name this registry doesn't have, so we
           // render its title with THIS surface's real /schedule commands, a

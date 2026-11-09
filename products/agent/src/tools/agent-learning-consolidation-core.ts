@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { writeStoreJson } from '@/utils/store-file.ts';
-import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { MemoryBundle, MemoryRecord, MemoryRegistry } from '@goodvibes-jev/engine/sdk/platform/state';
+import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { MemoryBundle, MemoryRecord, MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { CommandContext } from '../input/command-registry.ts';

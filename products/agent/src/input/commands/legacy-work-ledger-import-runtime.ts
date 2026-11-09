@@ -1,6 +1,6 @@
-import { OwnedSelectionObservation } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { realpathSync } from 'node:fs';
-import { resolveConnectedHostDialEnabled } from '@goodvibes-jev/engine/sdk/platform/config';
+import { resolveConnectedHostDialEnabled } from '@goodvibes-jev/engine/platform/platform/config';
 import { openLegacyImportOperator, registerLegacyImportCommands, resolveLegacyImportJournalLocation, retainLegacyImportJournalOwner, type LegacyImportOperatorSession } from '@goodvibes-jev/engine/terminal-shell/legacy-work-ledger-import';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { connectedHostBaseUrl } from '../../config/connected-host-dial.ts';

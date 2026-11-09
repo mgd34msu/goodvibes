@@ -15,7 +15,7 @@ import { writeVoiceDraft } from '@goodvibes-jev/engine/terminal-shell/audio/voic
  * import shell-UI.
  */
 
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { ShellPathService } from '@/runtime/index.ts';
 import type { VoiceCaptureIndicatorState } from '../core/voice-capture-status.ts';
@@ -25,7 +25,7 @@ export interface VoiceCaptureShellDeps {
   readonly configManager: ConfigManager;
   readonly shellPaths: Pick<ShellPathService, 'resolveUserPath'>;
   readonly homeDirectory: string | (() => string);
-  /** Names retained wake clips so the SDK's sweeper reaps them when this session ends. */
+  /** Names retained wake clips so the platform's sweeper reaps them when this session ends. */
   readonly sessionId: string;
   /** The Alt+V seam is hung here (commandContext.toggleVoiceInput). */
   readonly commandContext: CommandContext;

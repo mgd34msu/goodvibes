@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerHostPairingCommands } from '../../input/commands/host-pairing.ts';
 import { createShellPathService } from '../../runtime/index.ts';

@@ -1,5 +1,5 @@
-import type { MemoryApi } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import type { MemoryRecord, MemorySearchFilter, MemoryLink } from '@goodvibes-jev/engine/sdk/platform/state';
+import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import type { MemoryRecord, MemorySearchFilter, MemoryLink } from '@goodvibes-jev/engine/platform/platform/state';
 import { VALID_CLASSES, VALID_SCOPES, isValidClass, isValidScope, temporalStatusLabel } from './recall-shared.js';
 export interface RecallQueryContext {
   readonly print: (message: string) => void;

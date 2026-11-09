@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { runtimeEventOfNotice } from '../../sdk/src/platform/runtime/bootstrap-runtime-events.js';
+import { runtimeEventOfNotice } from '../../platform/src/platform/runtime/bootstrap-runtime-events.js';
 import { makeHarness, oneUnitPlan, startContract, waitFor, type Harness } from './runner-support.js';
 import { finishes, git, terminal } from './steps-support.js';
 import { plannerOutput } from './plan-support.js';

@@ -15,13 +15,13 @@ import { buildAwayDigest, formatDigestTime, formatRelativeTime } from '../core/a
 import type { AwayDigestScheduleItem } from '../core/away-digest.ts';
 import { LastSeenStore } from '../core/last-seen-store.ts';
 import type { AutomationRunsSinceResult } from '../agent/automation-runs-source.ts';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { AgentCalendarRegistry } from '../agent/calendar-registry.ts';
-import { executeToolCalls } from '@goodvibes-jev/engine/sdk/platform/core';
+import { executeToolCalls } from '@goodvibes-jev/engine/platform/platform/core';
 import type { RuntimeServices } from '../runtime/services.ts';
 import type { CommandContext } from '../input/command-registry.ts';
-import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogMethods } from '../tools/agent-harness-catalog-ranking.ts';
 import { modelReadingServicePath } from '../tools/agent-harness-model-reading-source.ts';
 

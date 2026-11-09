@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { extractOpenAIStreamTextDelta } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { extractOpenAIStreamTextDelta } from '@goodvibes-jev/engine/platform/platform/providers';
 
 describe('extractOpenAIStreamTextDelta', () => {
   test('untyped content array entries remain answer content', () => {

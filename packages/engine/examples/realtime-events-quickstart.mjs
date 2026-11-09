@@ -1,18 +1,18 @@
 /**
  * Subscribe to runtime events over SSE and clean up the subscription.
  */
-import { createGoodVibesSdk } from '@goodvibes-jev/engine/sdk';
+import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
 
 const authToken = process.env.GOODVIBES_TOKEN;
 if (!authToken) {
   throw new Error('GOODVIBES_TOKEN env var is required (operator bearer token from the daemon).');
 }
-const sdk = createGoodVibesSdk({
+const platformClient = createGoodVibesPlatform({
   baseUrl: process.env.GOODVIBES_BASE_URL ?? 'http://127.0.0.1:3421',
   authToken,
 });
 
-const events = sdk.realtime.viaSse();
+const events = platformClient.realtime.viaSse();
 
 const unsubscribe = events.agents.on('AGENT_COMPLETED', (event) => {
   console.log('AGENT_COMPLETED', event);

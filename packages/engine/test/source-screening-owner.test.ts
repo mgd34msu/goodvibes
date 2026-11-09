@@ -2,17 +2,17 @@ import { screeningAnswers } from './_helpers/screening-answers.js';
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { createProtectedSourceOwner } from '../sdk/src/platform/security/source-screening/owner.js';
+import { createProtectedSourceOwner } from '../platform/src/platform/security/source-screening/owner.js';
 import type { ProtectedSourceOwner, ProtectedSourceOwnerOptions, SourceScreeningReceipt,
-} from '../sdk/src/platform/security/source-screening/types.js';
-import { createProtectedInboxMapper } from '../sdk/src/platform/intake/protected-preview.js';
-import { createSlackInboxAdapter } from '../sdk/src/platform/intake/providers/slack.js';
-import { registerInboxSurface } from '../sdk/src/platform/intake/registration.js';
-import { InboxCursorStore } from '../sdk/src/platform/intake/cursor-store.js';
-import { digestSender } from '../sdk/src/platform/intake/text-normalization.js';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.js';
+} from '../platform/src/platform/security/source-screening/types.js';
+import { createProtectedInboxMapper } from '../platform/src/platform/intake/protected-preview.js';
+import { createSlackInboxAdapter } from '../platform/src/platform/intake/providers/slack.js';
+import { registerInboxSurface } from '../platform/src/platform/intake/registration.js';
+import { InboxCursorStore } from '../platform/src/platform/intake/cursor-store.js';
+import { digestSender } from '../platform/src/platform/intake/text-normalization.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
 import { makeProjectTempDir } from './_helpers/project-temp.js';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { promise, resolve }; }

@@ -13,9 +13,9 @@
  * Request, and assert the caps hold and nothing stays pinned after Bun.gc(true).
  */
 import { describe, expect, test } from 'bun:test';
-import { DaemonControlPlaneHelper } from '../sdk/src/platform/daemon/control-plane.ts';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { methodDescriptor, objectSchema } from '../sdk/src/platform/control-plane/method-catalog-shared.ts';
+import { DaemonControlPlaneHelper } from '../platform/src/platform/daemon/control-plane.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { methodDescriptor, objectSchema } from '../platform/src/platform/control-plane/method-catalog-shared.ts';
 
 function gc(): void {
   (globalThis as { Bun?: { gc?: (f: boolean) => void } }).Bun?.gc?.(true);
@@ -277,8 +277,8 @@ describe('methodId arm shares the in-flight cap (no unbounded handler concurrenc
   test('a 5,000-frame methodId burst is capped at 256 concurrent handler invocations, refused with 503, visible in stats', async () => {
     // Mirror of the reviewer's probe: a registered-handler verb invoked via the
     // WS call frame's methodId arm (previously uncapped and invisible).
-    const { GatewayMethodCatalog: Catalog } = await import('../sdk/src/platform/control-plane/method-catalog.ts');
-    const { methodDescriptor, objectSchema } = await import('../sdk/src/platform/control-plane/method-catalog-shared.ts');
+    const { GatewayMethodCatalog: Catalog } = await import('../platform/src/platform/control-plane/method-catalog.ts');
+    const { methodDescriptor, objectSchema } = await import('../platform/src/platform/control-plane/method-catalog-shared.ts');
     const catalog = new Catalog();
     let inHandler = 0;
     let peak = 0;

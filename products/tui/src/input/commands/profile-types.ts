@@ -7,7 +7,7 @@
  * ## The shapes come from the contract, not from a copy of it
  *
  * Every type below is derived from `OperatorMethodOutput<'profile.…'>`, the
- * types generated from the SDK's own output schemas
+ * types generated from the platform's own output schemas
  * (`platform/control-plane/method-catalog-owner-profile.ts`). Nothing here
  * restates a field name, so this file cannot drift from the contract: if a
  * verb's shape changes, the checkers stop compiling against it.
@@ -36,7 +36,7 @@
  * the same failure §4.4 forbids in the parser: content disappearing without
  * anyone being told.
  */
-import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/sdk';
+import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
 
 /** Returned by every checker when the response does not match the contract. */
 export const MALFORMED: unique symbol = Symbol('malformed-profile-response');
@@ -82,7 +82,7 @@ type UnionKeys<T> = T extends unknown ? keyof T : never;
  * typed parameter. Seeding inline literals proves only the cases someone thought
  * to seed; this closes the shape.
  *
- * There is a second reason it earns its place here. The SDK's `invoke` is
+ * There is a second reason it earns its place here. The platform's `invoke` is
  * OVERLOADED, a typed signature plus a loose
  * `invoke<T = unknown>(methodId: string, input?: Record<string, unknown>)`. At a
  * bare call site a body the typed overload rejects does not raise an

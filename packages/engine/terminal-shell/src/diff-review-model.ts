@@ -3,7 +3,7 @@
 // comment-on-hunk review loop (see the diff review view).
 //
 // The diff this operates on is the git working tree vs a base ref (HEAD),
-// filtered to the files the current session actually edited (the SDK's
+// filtered to the files the current session actually edited (the platform's
 // SessionChangeTracker). That is the honest source: it is CURRENT working-tree
 // content, not a turn-start snapshot, the diff review view labels it exactly that way.
 // ---------------------------------------------------------------------------

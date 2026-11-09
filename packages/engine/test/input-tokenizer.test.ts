@@ -11,7 +11,7 @@
  * silently break the one thing the TUI's focus-tracking feature depends on.
  */
 import { describe, expect, test } from 'bun:test';
-import { InputTokenizer, type InputToken } from '../sdk/src/platform/core/tokenizer.js';
+import { InputTokenizer, type InputToken } from '../platform/src/platform/core/tokenizer.js';
 
 describe('InputTokenizer: focus-reporting sequences (CSI ?1004h)', () => {
   test('\\x1b[I parses to a focus-in token', () => {

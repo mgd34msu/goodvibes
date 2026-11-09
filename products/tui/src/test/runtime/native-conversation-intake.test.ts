@@ -2,7 +2,7 @@ import { nativeConversationIntakeFixture as fixture } from '../helpers/native-co
 import { expect, test } from 'bun:test';
 import { captureNativeConversationInput } from '../../runtime/native-conversation-input.ts';
 import { routeNativeConversationInput } from '../../runtime/native-conversation-ingress.ts';
-import type { NativeConversationIntakeCaptureRequest, NativeConversationIntakeResult } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
+import type { NativeConversationIntakeCaptureRequest, NativeConversationIntakeResult } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 
 const original = { text: '  Explain the answer\r\n界 e\u0301 😀  ', unsupportedSources: [] };
 

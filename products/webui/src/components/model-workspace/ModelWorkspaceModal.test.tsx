@@ -32,7 +32,7 @@ const selectCalls: string[] = [];
 const configSetCalls: [string, unknown][] = [];
 
 mock.module('../../lib/goodvibes', () => ({
-  sdk: {
+  client: {
     operator: {
       providers: { list: () => { providerCalls += 1; return Promise.resolve(providersResponse); } },
       models: {

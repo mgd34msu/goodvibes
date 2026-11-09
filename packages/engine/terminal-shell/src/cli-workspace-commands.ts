@@ -1,8 +1,8 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { findSessionCandidates, type SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
-import type { RuntimeStore } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
-import type { ShellPathService } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
+import { findSessionCandidates, type SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
+import type { RuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { formatJsonOrText } from './cli-output.js';
 interface WorkspaceCommandRuntime {
   readonly cli: { readonly commandArgs: readonly string[]; readonly flags: { readonly outputFormat?: string | undefined } };

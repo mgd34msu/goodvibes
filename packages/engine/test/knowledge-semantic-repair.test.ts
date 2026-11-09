@@ -1,20 +1,20 @@
 import { extractionValueFixtureFor } from './_helpers/knowledge-extraction-value-readings.js';
 import { gapAssessmentFixture, intrinsicAssessmentFixture, answerGapAssessmentFixtures, semanticRepairAssessmentCoverage } from './_helpers/knowledge-self-improvement-readings.js';
-import { upsertObservedKnowledgeNode } from '../sdk/src/platform/knowledge/store-node-observation.js';
+import { upsertObservedKnowledgeNode } from '../platform/src/platform/knowledge/store-node-observation.js';
 import { seedHomeAssistantObservation } from './_helpers/homegraph-observation-fixtures.js';
 import { seedKnowledgeResearchTask, useSemanticActivationFixtures } from './_helpers/knowledge-semantic-activation-fixtures.js';
 import { describe, expect, test } from 'bun:test';
 import { useKnowledgeAnswerReadings } from './_helpers/knowledge-answer-readings.js';
 import { semanticRepairProfileValues, semanticRepairUsefulValues } from './_helpers/repair-profile-fixture-readings.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { judgmentInputProblem } from '../sdk/src/platform/gate/judgment-input.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { judgmentInputProblem } from '../platform/src/platform/gate/judgment-input.js';
 import {
   createProviderBackedKnowledgeSemanticLlm,
   createWebKnowledgeGapRepairer,
   HomeGraphService,
   KnowledgeSemanticService,
   homeAssistantKnowledgeSpaceId,
-} from '../sdk/src/platform/knowledge/index.js';
+} from '../platform/src/platform/knowledge/index.js';
 import {
   BoilerplateAnswerLlm,
   FakeKnowledgeLlm,

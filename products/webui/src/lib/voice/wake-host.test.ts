@@ -1,7 +1,7 @@
 /**
  * wake-host.ts, the tab as a wake-word surface, end to end.
  *
- * These tests drive the REAL SDK engine, the REAL WakeListener, the REAL feature
+ * These tests drive the REAL platform engine, the REAL WakeListener, the REAL feature
  * pipeline and the REAL browser capture opener. The only things stubbed are the two
  * things a browser genuinely supplies from outside: the onnxruntime sessions (scripted
  * scores, so a wake can be made to happen on a chosen frame) and the daemon calls.
@@ -25,12 +25,12 @@ import { describe, expect, test } from 'bun:test';
 import {
   CAPTURE_SAMPLE_RATE,
   type NoiseSuppressionFactory,
-} from '@goodvibes-jev/engine/sdk/platform/voice/capture';
-import type { UtteranceAudioArtifact } from '@goodvibes-jev/engine/sdk/platform/voice/capture';
+} from '@goodvibes-jev/engine/platform/platform/voice/capture';
+import type { UtteranceAudioArtifact } from '@goodvibes-jev/engine/platform/platform/voice/capture';
 import type {
   WakeInferenceSession,
   WakeRuntimeSettings,
-} from '@goodvibes-jev/engine/sdk/platform/voice/wake/runtime';
+} from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
 import { createBrowserCaptureOpener, type CaptureEnv } from './capture';
 import { MicArbiter } from './mic-arbiter';
 import { resolveWebuiWakeSettings } from './wake-config';
@@ -38,7 +38,7 @@ import { createWakeHost, PINNED_WAKE_MODEL_ID, type WakeModelSet } from './wake-
 import { loadWakeRuntime, type OrtModule } from './wake-runtime';
 
 const FRAME_SAMPLES = 1280;
-/** How many frames the SDK front end needs before it produces any features. */
+/** How many frames the platform front end needs before it produces any features. */
 const WARMUP_FRAMES = 16;
 
 // ─── A getUserMedia spy behind the real opener ────────────────────────────────
@@ -205,7 +205,7 @@ function loudFrame(): Float32Array {
   return out;
 }
 
-/** Below the SDK's silence floor (180 on the int16 scale). */
+/** Below the platform's silence floor (180 on the int16 scale). */
 function quietFrame(): Float32Array {
   return new Float32Array(FRAME_SAMPLES).fill(0.001);
 }

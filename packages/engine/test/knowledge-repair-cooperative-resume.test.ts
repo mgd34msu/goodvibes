@@ -6,10 +6,10 @@ import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import type { KnowledgeNodeRecord, KnowledgeSourceRecord } from '../sdk/src/platform/knowledge/types.js';
-import { upsertObservedKnowledgeNode } from '../sdk/src/platform/knowledge/store-node-observation.js';
-import { promoteRepairSources, type SelfImprovePromotionContext } from '../sdk/src/platform/knowledge/semantic/self-improvement-promotion.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import type { KnowledgeNodeRecord, KnowledgeSourceRecord } from '../platform/src/platform/knowledge/types.js';
+import { upsertObservedKnowledgeNode } from '../platform/src/platform/knowledge/store-node-observation.js';
+import { promoteRepairSources, type SelfImprovePromotionContext } from '../platform/src/platform/knowledge/semantic/self-improvement-promotion.js';
 import { repairSubjectFixtureReading } from './_helpers/repair-subject-fixture-readings.js';
 import { repairUsefulFixtureReading } from './_helpers/repair-profile-fixture-readings.js';
 

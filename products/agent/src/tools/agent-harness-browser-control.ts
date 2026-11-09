@@ -1,12 +1,12 @@
 import { types as nodeTypes } from 'node:util';
-import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext } from '../input/command-registry.ts';
 import { acquireInteractiveRuntimeSnapshot, type InteractiveRuntimeSnapshot } from './agent-harness-interactive-runtime-records.ts';
 import { isAgentMcpCallRouteInstalled } from './agent-mcp-call-route.ts';
 import { toolsDeclaringCapability } from './agent-tool-capability-declarations.ts';
 import type { AgentHarnessInteractiveRuntimeRecord } from './agent-harness-interactive-runtime-records.ts';
 import { captureCatalogData, captureCatalogMethods, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 
 type BrowserControlStatus = 'ready' | 'attention' | 'setup-needed';
 type BrowserControlDecisionStatus = 'ready-to-inspect-tool' | 'review-connector-first' | 'setup-needed';

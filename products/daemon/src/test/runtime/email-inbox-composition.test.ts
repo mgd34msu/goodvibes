@@ -5,15 +5,15 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Socket } from 'node:net';
-import { ConfigManager, createDaemonCredentialStore } from '@goodvibes-jev/engine/sdk/platform/config';
-import { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { EmailService } from '@goodvibes-jev/engine/sdk/platform/email';
+import { ConfigManager, createDaemonCredentialStore } from '@goodvibes-jev/engine/platform/platform/config';
+import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { EmailService } from '@goodvibes-jev/engine/platform/platform/email';
 import { createEmailInboxOwner, digestSender, registerInboxSurface,
   type EmailInboxAccount, type EmailInboxOwner, type ImapUidCheckpoint,
-  type InboxListOutput, type InboxPollingControl } from '@goodvibes-jev/engine/sdk/platform/intake';
-import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { createRuntimeStore } from '@goodvibes-jev/engine/sdk/platform/runtime/store';
-import { UserAuthManager, type ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/sdk/platform/security';
+  type InboxListOutput, type InboxPollingControl } from '@goodvibes-jev/engine/platform/platform/intake';
+import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
+import { UserAuthManager, type ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/platform/platform/security';
 import { SnapshotSocket } from '../helpers/email-snapshot-socket.js';
 import type { HandlerContext } from '../../daemon/handlers/context.js';
 import type { DaemonInboxControls, DaemonInboxFactory } from '../../runtime/daemon-handler-composition.js';

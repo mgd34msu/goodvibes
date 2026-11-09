@@ -17,7 +17,7 @@
  *
  * ── What is asserted, and what is deliberately not ────────────────────────
  *
- * The classification comes from the SDK's config-ownership tables and is not
+ * The classification comes from the platform's config-ownership tables and is not
  * re-listed here, a second copy of those lists is how the web UI's ownership
  * badge drifted. What is pinned is the ROUTING: a daemon-owned key reaches the
  * daemon writer, a surface-owned key does not, and a daemon that refuses is
@@ -30,8 +30,8 @@ import {
   ConfigManager as RealConfigManager,
   daemonConfigPath,
   isDaemonOwnedConfigKey,
-} from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+} from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { applySettingValue, type DaemonOwnedConfigWriter } from '../../input/settings-modal-mutations.ts';
 import { setSecretBackedSettingValue } from '../../input/settings-modal-secrets.ts';
 import { registerConfigCommand } from '../../input/commands/config.ts';

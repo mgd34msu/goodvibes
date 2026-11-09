@@ -259,9 +259,9 @@ describe('version stamps agree after the bump', () => {
 });
 
 describe('package-facing text preserves public engine references and legacy exclusions', () => {
-  test('public engine and SDK export names are valid package-facing text', () => {
+  test('public engine and platform export names are valid package-facing text', () => {
     withFixture((dir) => {
-      writeFileSync(join(dir, 'README.md'), 'Built on @goodvibes-jev/engine and @goodvibes-jev/engine/sdk.\n');
+      writeFileSync(join(dir, 'README.md'), 'Built on @goodvibes-jev/engine and @goodvibes-jev/engine/platform.\n');
       writeFileSync(join(dir, 'CHANGELOG.md'), '# Changelog\n');
       expect(verifyPackageFacingText(dir).failures).toEqual([]);
     });
@@ -273,14 +273,14 @@ describe('package-facing text preserves public engine references and legacy excl
         '# GoodVibes Agent',
         'Install with `bun add -g @goodvibes-jev/agent`.',
         'It ships with the bundled GoodVibes platform runtime.',
-        'Built on @goodvibes-jev/engine/sdk.',
-        'Legacy package: @goodvibes-jev/goodvibes-legacy-sdk.',
+        'Built on @goodvibes-jev/engine/platform.',
+        'Legacy package: @goodvibes-jev/goodvibes-legacy-platform.',
         'Or run `npm install -g @goodvibes-jev/agent`.',
         '',
       ].join('\n'));
       writeFileSync(join(dir, 'CHANGELOG.md'), '# Changelog\n\n## 2.1.0 - 2026-09-30\n\n- Notes.\n');
       expect(verifyPackageFacingText(dir).failures).toEqual([
-        'package-facing text README.md:5 references non-Agent GoodVibes package: @goodvibes-jev/goodvibes-legacy-sdk',
+        'package-facing text README.md:5 references non-Agent GoodVibes package: @goodvibes-jev/goodvibes-legacy-platform',
         'package-facing text README.md:6 contains non-Bun Agent install/run instruction.',
       ]);
     });

@@ -14,14 +14,14 @@
  *   3. the remediation told a binary user to install the npm package.
  *
  * The browser engine, the resolver and the provisioning policy are
- * `@goodvibes-jev/engine/sdk/platform/browser` now, and the SDK's own
+ * `@goodvibes-jev/engine/platform/platform/browser` now, and the platform's own
  * browser-driver-* suites cover them. What stays here is what only this repo
  * can answer, and every one of these is a place the agent and the platform
  * have to AGREE rather than merely resemble each other:
  *
  *   - the release asset this repo publishes, extracted by this repo's own
- *     tar reader (the one `/update` uses), landing where the SDK resolver looks;
- *   - the agent's capability probe reaching the same verdict as the SDK
+ *     tar reader (the one `/update` uses), landing where the platform resolver looks;
+ *   - the agent's capability probe reaching the same verdict as the platform
  *     resolver, including the completeness rule;
  *   - the agent's install-kind profile producing the right remediation;
  *   - the agent's storage root binding, so the driver, profiles and screenshots
@@ -33,7 +33,7 @@ import { gzipSync } from 'node:zlib';
 import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { extractTarGzTree, readTarGzEntries } from '../../runtime/tar-archive.ts';
-import { DRIVER_REQUIRED_FILES, findDriverDirectory } from '@goodvibes-jev/engine/sdk/platform/browser';
+import { DRIVER_REQUIRED_FILES, findDriverDirectory } from '@goodvibes-jev/engine/platform/platform/browser';
 import { runCapabilityProbe, emptyProbeContext } from '../../capabilities/capability-probe-runner.ts';
 import { browserControlDeclaration } from '../../capabilities/builtin-capabilities.ts';
 import {

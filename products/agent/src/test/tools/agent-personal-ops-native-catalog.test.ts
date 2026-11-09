@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { getOperatorContract } from '@goodvibes-jev/engine/sdk/contracts';
+import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { contractMethodsForLane, contractMethodsForLanes } from '../../tools/agent-harness-personal-ops-discovery.ts';
 import { captureModelReadingInput } from '../../tools/agent-harness-model-reading-source.ts';

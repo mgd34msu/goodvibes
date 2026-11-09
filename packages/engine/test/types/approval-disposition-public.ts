@@ -1,6 +1,6 @@
-import type { PermissionPromptDecision } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import { ApprovalBroker, type SharedApprovalDecision, type SharedApprovalDisposition } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { createWorkspaceTrustDecisionAsk } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import type { PermissionPromptDecision } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { ApprovalBroker, type SharedApprovalDecision, type SharedApprovalDisposition } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { createWorkspaceTrustDecisionAsk } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 
 declare const ordinary: PermissionPromptDecision;
 // @ts-expect-error Provenance is intentionally not added to the ordinary awaited result.

@@ -10,9 +10,9 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { ConfigManager } from '../sdk/src/platform/config/index.ts';
-import type { ConfigKey } from '../sdk/src/platform/config/index.ts';
-import { computeBudgetBreach, readBudgetAlertUsd, BUDGET_ALERT_USD_DEFAULT, BUDGET_ALERT_USD_CONFIG_KEY } from '../sdk/src/platform/providers/session-cost.ts';
+import { ConfigManager } from '../platform/src/platform/config/index.ts';
+import type { ConfigKey } from '../platform/src/platform/config/index.ts';
+import { computeBudgetBreach, readBudgetAlertUsd, BUDGET_ALERT_USD_DEFAULT, BUDGET_ALERT_USD_CONFIG_KEY } from '../platform/src/platform/providers/session-cost.ts';
 
 describe('computeBudgetBreach', () => {
   test('false when no budget is configured (threshold <= 0)', () => {
@@ -63,11 +63,11 @@ describe('readBudgetAlertUsd', () => {
 /**
  * readBudgetAlertUsd persistence across a real ConfigManager restart.
  *
- * budgetAlertUsd is a "synthetic" key: it was never registered in the SDK's
+ * budgetAlertUsd is a "synthetic" key: it was never registered in the platform's
  * CONFIG_SCHEMA (cost-tracker-panel.ts writes it via configAccess.set with a
  * plain string key, bypassing schema validation entirely). That raises a
  * real question the pure-predicate tests above can't answer: does a value
- * written through the *actual* SDK ConfigManager survive being reloaded from
+ * written through the *actual* platform ConfigManager survive being reloaded from
  * disk by a brand-new instance (what happens on every real process restart),
  * given the key has no schema entry, no default in DEFAULT_CONFIG.behavior,
  * and is deep-merged in as a bare extra property? These tests exercise the

@@ -1,18 +1,18 @@
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import {
   offersConfigurableEffort,
   requestedEffortLevel,
   servingEffortForLevel,
   toEffortModel,
   type RequestedEffortReader,
-} from '@goodvibes-jev/engine/sdk/platform/providers/reasoning-effort-surface';
-import type { ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
+} from '@goodvibes-jev/engine/platform/platform/providers/reasoning-effort-surface';
+import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { ModelPickerModal } from './model-picker.js';
 import type { CapabilityFilter, CategoryFilter } from './model-picker-types.js';
 import { isTextBackspace } from './delete-key-policy.js';
 export interface ModelPickerCommandContext {
   readonly provider: {
-    readonly providerRegistry: Pick<import('@goodvibes-jev/engine/sdk/platform/providers').ProviderRegistry, 'getSelectableModels'>;
+    readonly providerRegistry: Pick<import('@goodvibes-jev/engine/platform/platform/providers').ProviderRegistry, 'getSelectableModels'>;
   };
   readonly platform?:
     | {

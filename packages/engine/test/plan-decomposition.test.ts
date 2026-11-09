@@ -7,13 +7,13 @@
  * with a reason + honest event; timeout/kill fall back with reason 'cancelled';
  * a dependency cycle is rejected; config can force the heuristic path. The LLM
  * transport is not touched, a stubbed DecompositionRunner supplies canned
- * agent output, mirroring how the SDK's orchestrator-turn-loop tests script a
+ * agent output, mirroring how the platform's orchestrator-turn-loop tests script a
  * fake provider.
  */
 import { describe, expect, test } from 'bun:test';
 import { useCoreReadings } from './_helpers/core-readings.ts';
 const readings = useCoreReadings({ strategy: 'cohort' });
-import { AdaptivePlanner, type PlannerInputs } from '../sdk/src/platform/core/adaptive-planner.js';
+import { AdaptivePlanner, type PlannerInputs } from '../platform/src/platform/core/adaptive-planner.js';
 import {
   decomposeGoal,
   parseDecomposition,
@@ -24,7 +24,7 @@ import {
   type DecompositionServiceConfig,
   type DecompositionOutcome,
   type DecomposeGoalRequest,
-} from '../sdk/src/platform/core/plan-decomposition.js';
+} from '../platform/src/platform/core/plan-decomposition.js';
 
 const BOUNDS = { maxTurns: 6, tokenCeiling: 120_000, wallTimeoutMs: 60_000 };
 const AGENT_CONFIG: DecompositionServiceConfig = { mode: 'agent', bounds: BOUNDS };

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { snapshotJudgmentEvidence, snapshotJudgmentInput } from '../sdk/src/platform/gate/judgment-input.ts';
+import { snapshotJudgmentEvidence, snapshotJudgmentInput } from '../platform/src/platform/gate/judgment-input.ts';
 
 describe('observational credential redaction tokens', () => {
   test.each([

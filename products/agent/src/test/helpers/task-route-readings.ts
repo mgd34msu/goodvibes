@@ -6,7 +6,7 @@ import {
   type NamedIdKind,
   type PersonalOpsLaneId,
   type TaskRouteSlots,
-} from '@goodvibes-jev/engine/sdk/platform/routing';
+} from '@goodvibes-jev/engine/platform/platform/routing';
 import type { EntryType } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 

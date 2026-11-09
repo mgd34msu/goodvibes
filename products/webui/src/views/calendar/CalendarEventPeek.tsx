@@ -6,19 +6,19 @@
  * CalendarEventBody, which renders the facts and description.
  */
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import { formatError } from '../../lib/errors';
 import { Button } from '../../components/ui';
 import { EmptyState, Facts, DetailSection, SkeletonRows } from '../../components/data-view/DataView';
 import { AlertCircle } from 'lucide-react';
 
-export type CalendarEventDetailData = Awaited<ReturnType<typeof sdk.operator.calendar.events.get>>;
+export type CalendarEventDetailData = Awaited<ReturnType<typeof platformClient.operator.calendar.events.get>>;
 
 export function useCalendarEventDetail(eventId: string, calendarId?: string): UseQueryResult<CalendarEventDetailData> {
   return useQuery({
     queryKey: ['calendar', 'event', eventId, calendarId ?? ''],
     enabled: Boolean(eventId),
-    queryFn: () => sdk.operator.calendar.events.get(eventId, calendarId),
+    queryFn: () => platformClient.operator.calendar.events.get(eventId, calendarId),
   });
 }
 

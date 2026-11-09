@@ -1,9 +1,9 @@
 import { resetSessionUntrustedContentLedgerForTests } from '../../trust/untrusted-content.ts';
 import { executeAdmitted } from '../helpers/admitted-tool.ts';
 import { beforeEach, describe, expect, test } from 'bun:test';
-import type { ArtifactCreateInput, ArtifactDescriptor } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import { MediaProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/media';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { ArtifactCreateInput, ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import { MediaProviderRegistry } from '@goodvibes-jev/engine/platform/platform/media';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import {
   createAgentMediaGenerateTool,
   registerAgentMediaGenerateTool,

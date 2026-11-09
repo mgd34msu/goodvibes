@@ -5,7 +5,7 @@
  * fake value is typed through REAL production code, and every payload this
  * surface can produce is then searched for it, the test fails if it is found.
  * Nothing is mocked except `globalThis.fetch`, which is the actual network
- * boundary; the component, the sdk client, the route table, the transport and
+ * boundary; the component, the platform client, the route table, the transport and
  * the query cache are all the real ones.
  *
  * The payloads searched are the browser's equivalents of the TUI's export file
@@ -383,7 +383,7 @@ describe('a surface the gate refuses is never even offered the fields', () => {
     }
     expect(container.querySelector('[data-testid="payment-card-submit"]')).toBeNull();
 
-    // And it says which surface it refused, in the SDK's own words.
+    // And it says which surface it refused, in the platform's own words.
     expect(container.textContent).toContain("can't take card details over telegram");
     unmount();
   });

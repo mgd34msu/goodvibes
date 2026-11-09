@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { InputTokenizer } from '@goodvibes-jev/engine/sdk/platform/core';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { PermissionManager, createPermissionConfigReader } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import { PolicyRuntimeState } from '@goodvibes-jev/engine/sdk/platform/runtime/security';
+import { InputTokenizer } from '@goodvibes-jev/engine/platform/platform/core';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { PermissionManager, createPermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { PolicyRuntimeState } from '@goodvibes-jev/engine/platform/platform/runtime/security';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import type { ToolResult } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { ToolResult } from '@goodvibes-jev/engine/platform/platform/types';
 import { CommandRegistry, isDirectOwnerCommandContext, type CommandContext } from '../../input/command-registry.ts';
 import { registerOnboardingRuntimeCommands } from '../../input/commands/onboarding-runtime.ts';
 import { SetupPairingController } from '../../shell/setup-pairing-controller.ts';

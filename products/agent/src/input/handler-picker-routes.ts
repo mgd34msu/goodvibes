@@ -7,7 +7,7 @@ import { createModelPickerTokenHandler, closeModelPickerRoute } from '@goodvibes
 import type { CommandContext } from './command-registry.ts';
 import type { ModelPickerModal } from './model-picker.ts';
 import { MODEL_PICKER_CHROME_LINES } from '../renderer/model-workspace.ts';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { ProcessEntry } from '../renderer/process-modal.ts';
 import { isLocalFitRecommendation, isProviderSignInRow } from './model-picker-local-fit.ts';
 export const handleModelPickerToken = createModelPickerTokenHandler<CommandContext, ModelPickerModal>({

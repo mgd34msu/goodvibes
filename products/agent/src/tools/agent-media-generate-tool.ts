@@ -1,8 +1,8 @@
-import type { ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import type { MediaProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/media';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import { assertCurrentToolEffect, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { snapshotJudgmentInput, captureStrictJudgmentJson } from '@goodvibes-jev/engine/sdk/platform/gate';
+import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { MediaProviderRegistry } from '@goodvibes-jev/engine/platform/platform/media';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { assertCurrentToolEffect, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { snapshotJudgmentInput, captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
 import { evaluateOutwardEffect, getSessionUntrustedContentLedger } from '../trust/untrusted-content.ts';
 import { CardMaterialRefusedError, screenOutboundForCardMaterial } from '../agent/payments-channel-guard.ts';
 import { retainSurfaceMethods } from './agent-surface-effect.ts';

@@ -4,11 +4,11 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { captureContractInput, contractInputPath, materializeContractInput } from '../sdk/src/platform/contract/input-snapshot.js';
-import { createContractInputAuthority, revokeContractInputAuthority, type ContractInputAuthority } from '../sdk/src/platform/contract/input-authority.js';
-import type { Contract } from '../sdk/src/platform/contract/types.js';
-import { createCapturedExecBunRuntimeAdmission } from '../sdk/src/platform/tools/exec/captured-bun-runtime-input.js';
-import { probeCapturedExecAvailability, runCapturedCommand, type CapturedExecAuthority } from '../sdk/src/platform/tools/exec/captured-exec.js';
+import { captureContractInput, contractInputPath, materializeContractInput } from '../platform/src/platform/contract/input-snapshot.js';
+import { createContractInputAuthority, revokeContractInputAuthority, type ContractInputAuthority } from '../platform/src/platform/contract/input-authority.js';
+import type { Contract } from '../platform/src/platform/contract/types.js';
+import { createCapturedExecBunRuntimeAdmission } from '../platform/src/platform/tools/exec/captured-bun-runtime-input.js';
+import { probeCapturedExecAvailability, runCapturedCommand, type CapturedExecAuthority } from '../platform/src/platform/tools/exec/captured-exec.js';
 
 const roots: string[] = [];
 const ownedAuthorities = new Set<Parameters<typeof revokeContractInputAuthority>[0]>();

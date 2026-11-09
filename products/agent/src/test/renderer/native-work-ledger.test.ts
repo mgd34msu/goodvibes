@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { InputTokenizer } from '@goodvibes-jev/engine/sdk/platform/core';
+import { InputTokenizer } from '@goodvibes-jev/engine/platform/platform/core';
 import { AgentWorkspace } from '../../input/agent-workspace.ts';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerAgentWorkspaceRuntimeCommands } from '../../input/commands/agent-workspace-runtime.ts';

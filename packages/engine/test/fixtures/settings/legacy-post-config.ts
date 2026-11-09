@@ -6,9 +6,9 @@
  * wrapper and imports are supplied here. error-response.ts is unchanged
  * (blob 94ae3f581a8e373851ce9ecb2996618309b86c23).
  */
-import type { DaemonSystemRouteContext } from '../../../daemon-sdk/src/system-route-types.js';
-import type { DaemonSystemRouteHandlers } from '../../../daemon-sdk/src/context.js';
-import { jsonErrorResponse, readJsonErrorResponse } from '../../../daemon-sdk/src/error-response.js';
+import type { DaemonSystemRouteContext } from '../../../daemon-api/src/system-route-types.js';
+import type { DaemonSystemRouteHandlers } from '../../../daemon-api/src/context.js';
+import { jsonErrorResponse, readJsonErrorResponse } from '../../../daemon-api/src/error-response.js';
 
 export function createLegacyPostConfigHandler(context: DaemonSystemRouteContext): DaemonSystemRouteHandlers['postConfig'] {
   return async (req) => {

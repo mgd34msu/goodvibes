@@ -1,6 +1,6 @@
 import { writeBenchmarksCache } from './provider-cache.ts';
-import type { BenchmarkEntry } from '../../sdk/src/platform/providers/model-benchmarks.ts';
-import { createShellPathService } from '../../sdk/src/platform/runtime/shell-paths.ts';
+import type { BenchmarkEntry } from '../../platform/src/platform/providers/model-benchmarks.ts';
+import { createShellPathService } from '../../platform/src/platform/runtime/shell-paths.ts';
 
 export const fixtureBenchmark: BenchmarkEntry = {
   modelId: 'fixture-benchmark-model',

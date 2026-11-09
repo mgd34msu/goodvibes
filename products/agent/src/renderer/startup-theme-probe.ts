@@ -16,7 +16,7 @@
 import { installBackgroundThemeProbe, type ThemeProbeHandle } from './terminal-bg-probe.ts';
 import { refreshForTerminalPalette, registerThemeRefresh, setActiveThemeMode, setActiveThemeName } from './theme.ts';
 import { resolveConfiguredThemeName } from './theme-mode-config.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 
 export interface StartupThemeProbeDeps {
   readonly configManager: Pick<ConfigManager, 'get'>;

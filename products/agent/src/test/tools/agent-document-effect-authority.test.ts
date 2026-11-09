@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { ArtifactStore, type ArtifactRecord } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import type { PermissionMode } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ArtifactStore, type ArtifactRecord } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { PermissionMode } from '@goodvibes-jev/engine/platform/platform/config';
 import { createShellPathService } from '@/runtime/index.ts';
 import { AgentDocumentRegistry } from '../../agent/document-registry.ts';
 import { createAgentArtifactsTool } from '../../tools/agent-artifacts-tool.ts';

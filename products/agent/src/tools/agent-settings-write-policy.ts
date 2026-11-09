@@ -26,7 +26,7 @@
  * ## What replaced it
  *
  * The credential half of the original concern still holds, and still runs, in
- * the SDK tool itself, which refuses a raw secret in a credential-shaped key and
+ * the platform tool itself, which refuses a raw secret in a credential-shaped key and
  * names the `goodvibes://` reference that would work instead. That protection is
  * value-shaped, not key-shaped, so it belongs there and is not duplicated here.
  *
@@ -52,7 +52,7 @@
  * exists.
  */
 
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 
 /** Why an unattended write to a key is the hazard, in the user's language. */
 export interface ConfirmationRequiredConfigKey {
@@ -70,7 +70,7 @@ export interface ConfirmationRequiredConfigKey {
  * Deliberately NOT here, and why: `surfaces.*` (chat surfaces the user is
  * actively configuring, the whole point), `provider.*` and `display.*`
  * (ordinary preferences), and every credential-shaped key, whose protection is
- * the SDK tool's raw-secret refusal rather than a confirmation prompt.
+ * the platform tool's raw-secret refusal rather than a confirmation prompt.
  */
 export const AGENT_CONFIRMATION_REQUIRED_CONFIG_KEYS: readonly ConfirmationRequiredConfigKey[] = Object.freeze([
   // 1. Approval gates. Writing these is the Agent widening its own permissions.

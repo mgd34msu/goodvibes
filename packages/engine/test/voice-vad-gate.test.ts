@@ -8,24 +8,24 @@
  *
  * The probabilities here are not invented. `test/fixtures/wake-vad.json` carries
  * the head's output for every frame of one held-out noise recording and one
- * held-out speech recording, run through the SDK's own melspectrogram and the
+ * held-out speech recording, run through the platform's own melspectrogram and the
  * pinned embedding session by the training harness (kept beside the artifacts;
- * see docs/wake-word-model.md). The SDK has no inference runtime of its own, the
+ * see docs/wake-word-model.md). The platform has no inference runtime of its own, the
  * host supplies one, so this is the same shape the wake-word tests already use
  * for the classifier: the real model's real output, replayed.
  */
 import { describe, expect, test } from 'bun:test';
 import fixture from './fixtures/wake-vad.json' with { type: 'json' };
-import { WakeWordEngine } from '../sdk/src/platform/voice/wake/engine.js';
-import { WakeDetector } from '../sdk/src/platform/voice/wake/detector.js';
-import { resolveWakeRuntimeSettings } from '../sdk/src/platform/voice/wake/settings.js';
-import { WAKE_CHUNK_SAMPLES, WAKE_EMBED_DIM } from '../sdk/src/platform/voice/wake/feature-pipeline.js';
+import { WakeWordEngine } from '../platform/src/platform/voice/wake/engine.js';
+import { WakeDetector } from '../platform/src/platform/voice/wake/detector.js';
+import { resolveWakeRuntimeSettings } from '../platform/src/platform/voice/wake/settings.js';
+import { WAKE_CHUNK_SAMPLES, WAKE_EMBED_DIM } from '../platform/src/platform/voice/wake/feature-pipeline.js';
 import {
   resolveWakeVadThreshold,
   WAKE_VAD_MODEL,
-} from '../sdk/src/platform/voice/provisioning/wake-word-manifest.js';
-import { voiceWakeConfigDefaults } from '../sdk/src/platform/config/schema-domain-voice-wake.js';
-import type { WakeInferenceSession, WakeTensor } from '../sdk/src/platform/voice/wake/types.js';
+} from '../platform/src/platform/voice/provisioning/wake-word-manifest.js';
+import { voiceWakeConfigDefaults } from '../platform/src/platform/config/schema-domain-voice-wake.js';
+import type { WakeInferenceSession, WakeTensor } from '../platform/src/platform/voice/wake/types.js';
 
 const RECOMMENDED = WAKE_VAD_MODEL.recommendedThreshold;
 

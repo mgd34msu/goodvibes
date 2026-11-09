@@ -3,13 +3,13 @@ import { operationJudgmentRequests } from '../helpers/field-name-privacy-request
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { withDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { BenchmarkStore, ProviderRegistry, type ChatRequest, type ChatResponse, type LLMProvider, type ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { WorkspaceRegistrationStore, sharedWorkspaceRegisterPath, legacyWorkspaceRegisterPath } from '@goodvibes-jev/engine/sdk/platform/workspace';
-import { registerInboxSurface } from '@goodvibes-jev/engine/sdk/platform/intake';
-import { createOperatorSdk } from '@goodvibes-jev/engine/operator-sdk';
-import { createOperatorNativeConversationIntakeClient } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
-import { getOperatorWorkLedgerProject, createOperatorNativeWorkExecutionClient } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
-import { createOperatorWorkLedgerReadClient } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/operator-read-client';
+import { BenchmarkStore, ProviderRegistry, type ChatRequest, type ChatResponse, type LLMProvider, type ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
+import { WorkspaceRegistrationStore, sharedWorkspaceRegisterPath, legacyWorkspaceRegisterPath } from '@goodvibes-jev/engine/platform/platform/workspace';
+import { registerInboxSurface } from '@goodvibes-jev/engine/platform/platform/intake';
+import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
+import { createOperatorNativeConversationIntakeClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
+import { getOperatorWorkLedgerProject, createOperatorNativeWorkExecutionClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
+import { createOperatorWorkLedgerReadClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/operator-read-client';
 import { startDaemonFixture } from '../../testing/daemon-fixture.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 
@@ -52,12 +52,12 @@ async function fixture(options: { route?: 'contract' | 'converse'; final?: strin
     homeDir: daemon.homeDirectory, daemonStateDir: paths.resolveUserPath() });
   await scopes.add(daemon.workingDirectory);
   const paired = daemon.services.pairingTokens.mint({ name: 'Owned conversation source fixture' });
-  const sdk = createOperatorSdk({ baseUrl: daemon.baseUrl, authToken: paired.token, retry: { maxAttempts: 1 } });
-  const projectId = await getOperatorWorkLedgerProject(sdk);
-  const client = createOperatorNativeConversationIntakeClient(sdk, projectId);
-  const reader = createOperatorWorkLedgerReadClient(sdk, projectId);
+  const platformClient = createOperatorApiClient({ baseUrl: daemon.baseUrl, authToken: paired.token, retry: { maxAttempts: 1 } });
+  const projectId = await getOperatorWorkLedgerProject(platformClient);
+  const client = createOperatorNativeConversationIntakeClient(platformClient, projectId);
+  const reader = createOperatorWorkLedgerReadClient(platformClient, projectId);
   cleanups.push(() => { client.dispose(); reader.dispose(); });
-  return { daemon, paired, sdk, projectId, client, reader, fake, requests };
+  return { daemon, paired, platformClient, projectId, client, reader, fake, requests };
 }
 const source = () => ({ requestId: 'source-request', inputId: 'logical-input', text: '  Add JSON export.\r\nKeep CSV output unchanged. 🌻  ', unsupportedSources: [] });
 
@@ -74,7 +74,7 @@ test('production capture/route/extraction atomically publishes exact source2 wor
   expect(await f.client.get({ inputId: input.inputId })).toEqual(result);
   expect(await f.client.capture(input)).toEqual(result); expect(await f.client.resume(target)).toEqual(result);
   expect((await f.reader.readSnapshot()).revision).toBe(1); expect(f.requests).toHaveLength(1);
-  const execution = createOperatorNativeWorkExecutionClient(f.sdk, f.projectId);
+  const execution = createOperatorNativeWorkExecutionClient(f.platformClient, f.projectId);
   await expect(execution.status({ workId: result.receipt.workId, attemptId: result.receipt.attemptId, expectedRevision: result.receipt.expectedRevision })).rejects.toMatchObject({ code: 'NATIVE_EXECUTION_NOT_FOUND' });
   execution.dispose(); expect(f.daemon.services.agentManager.list()).toHaveLength(0);
   expect(f.daemon.services.contractRunner.list({ includeTerminal: true })).toHaveLength(0);
@@ -82,7 +82,7 @@ test('production capture/route/extraction atomically publishes exact source2 wor
 
 test('lost admission acknowledgement reconciles original source and work without another reading or proposer', async () => {
   const f = await fixture(); const input = source(); const captured = await f.client.capture(input);
-  const original = f.sdk.invoke.bind(f.sdk); let lost = false;
+  const original = f.platformClient.invoke.bind(f.platformClient); let lost = false;
   const client = createOperatorNativeConversationIntakeClient({ invoke: async <T>(method: string, body?: Record<string, unknown>, options?: { signal?: AbortSignal }) => {
     const result = await original<T>(method, body, options);
     if (method === 'workLedger.intake.admit' && !lost) { lost = true; throw new Error('Owned lost admission response'); }

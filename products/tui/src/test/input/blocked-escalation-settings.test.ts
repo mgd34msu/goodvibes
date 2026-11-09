@@ -1,7 +1,7 @@
 import { describe, test, expect, afterEach } from 'bun:test';
 import { rmSync } from 'node:fs';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { buildSettingGroups } from '../../input/settings-modal-data.ts';
 import { getSettingLabel } from '../../renderer/settings-modal-helpers.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
@@ -22,7 +22,7 @@ const KEYS: readonly ConfigKey[] = [
 ];
 
 describe('blocked-too-long escalation settings surface', () => {
-  test('all three keys land in the notifications settings domain, from the SDK schema', () => {
+  test('all three keys land in the notifications settings domain, from the platform schema', () => {
     const groups = buildSettingGroups(makeConfig());
     const notifications = groups.get('notifications') ?? [];
     const keysInDomain = new Set(notifications.map((e) => e.setting.key));

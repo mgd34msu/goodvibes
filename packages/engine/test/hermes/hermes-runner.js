@@ -16,19 +16,19 @@ var print = typeof globalThis.print === 'function' ? globalThis.print : console.
 // Imports are hoisted by the bundler; place them at the top before any code
 // that depends on them. Bun resolves these from the workspace.
 import {
-  createReactNativeGoodVibesSdk,
-} from '@goodvibes-jev/engine/sdk/react-native';
+  createReactNativeGoodVibesPlatform,
+} from '@goodvibes-jev/engine/platform/react-native';
 
 import {
-  createExpoGoodVibesSdk,
-} from '@goodvibes-jev/engine/sdk/expo';
+  createExpoGoodVibesPlatform,
+} from '@goodvibes-jev/engine/platform/expo';
 
 import {
-  GoodVibesSdkError,
+  GoodVibesError,
   ConfigurationError,
   ContractError,
   HttpStatusError,
-} from '@goodvibes-jev/engine/sdk/errors';
+} from '@goodvibes-jev/engine/platform/errors';
 
 // ---------------------------------------------------------------------------
 // Tiny test runner (Hermes-safe: no async test queue, synchronous execution)
@@ -152,8 +152,8 @@ describe('Hermes engine feature parity', function () {
 
   test('Array.prototype.at is available', function () {
     // Added in Hermes 0.11+ / RN 0.74. Absent in older Hermes.
-    // SDK USAGE: Array.prototype.at() is used in
-    // packages/sdk/src/platform/runtime/forensics/registry.ts (lines 73, 119) for last-element access.
+    // platform USAGE: Array.prototype.at() is used in
+    // packages/platform/src/platform/runtime/forensics/registry.ts (lines 73, 119) for last-element access.
     var arr = [1, 2, 3];
     if (typeof arr.at !== 'function') {
       throw new Error('Array.prototype.at is not available -- Hermes version too old or polyfill missing');
@@ -163,9 +163,9 @@ describe('Hermes engine feature parity', function () {
 
   test('structuredClone is available', function () {
     // Added in Hermes bundled with RN 0.73+.
-    // SDK USAGE: structuredClone is used pervasively in packages/sdk/src/platform/config/manager.ts,
-    // packages/sdk/src/platform/core/conversation-utils.ts, packages/sdk/src/platform/runtime/settings/control-plane.ts,
-    // and several other SDK modules for deep-cloning state snapshots.
+    // platform USAGE: structuredClone is used pervasively in packages/platform/src/platform/config/manager.ts,
+    // packages/platform/src/platform/core/conversation-utils.ts, packages/platform/src/platform/runtime/settings/control-plane.ts,
+    // and several other platform modules for deep-cloning state snapshots.
     if (typeof structuredClone !== 'function') {
       throw new Error('structuredClone is not available -- Hermes version too old or polyfill missing');
     }
@@ -177,9 +177,9 @@ describe('Hermes engine feature parity', function () {
 
   test('[advisory] regex lookbehind assertion is supported', function () {
     // Hermes had incomplete lookbehind support in older releases.
-    // SDK USAGE: Regex lookbehind (?<=...) is NOT currently used in any SDK source file.
+    // platform USAGE: Regex lookbehind (?<=...) is NOT currently used in any platform source file.
     // This probe is an advisory Hermes-version indicator: a failure signals an old
-    // Hermes build but does NOT indicate a broken SDK feature on that Hermes version.
+    // Hermes build but does NOT indicate a broken platform feature on that Hermes version.
     var re = /(?<=foo)bar/;
     var match = 'foobar'.match(re);
     if (!match) {
@@ -189,10 +189,10 @@ describe('Hermes engine feature parity', function () {
   });
 
   test('[advisory] WeakRef is available', function () {
-    // SDK USAGE: WeakRef is NOT currently used in any SDK source file.
+    // platform USAGE: WeakRef is NOT currently used in any platform source file.
     // This probe is an advisory Hermes-version indicator: a failure means
     // the Hermes build is older than 0.11 (RN < 0.70) but does NOT indicate
-    // a broken SDK feature on that Hermes version.
+    // a broken platform feature on that Hermes version.
     if (typeof WeakRef !== 'function') {
       throw new Error('WeakRef is not available -- Hermes version too old');
     }
@@ -253,17 +253,17 @@ describe('Hermes engine feature parity', function () {
 });
 
 // ---------------------------------------------------------------------------
-// SDK surface smoke tests -- validates the react-native bundle API shape
+// platform surface smoke tests -- validates the react-native bundle API shape
 // These tests do NOT make network calls; they exercise factory + error paths.
 // ---------------------------------------------------------------------------
 
-describe('SDK react-native factory -- ConfigurationError on bad inputs', function () {
+describe('platform react-native factory -- ConfigurationError on bad inputs', function () {
 
-  test('createReactNativeGoodVibesSdk throws ConfigurationError on empty baseUrl', function () {
+  test('createReactNativeGoodVibesPlatform throws ConfigurationError on empty baseUrl', function () {
     var threw = false;
     var caught = null;
     try {
-      createReactNativeGoodVibesSdk({ baseUrl: '', authToken: 'tok' });
+      createReactNativeGoodVibesPlatform({ baseUrl: '', authToken: 'tok' });
     } catch (e) {
       threw = true;
       caught = e;
@@ -272,48 +272,48 @@ describe('SDK react-native factory -- ConfigurationError on bad inputs', functio
     expect(caught).toBeInstanceOf(ConfigurationError);
   });
 
-  test('createExpoGoodVibesSdk is a callable function', function () {
-    expect(typeof createReactNativeGoodVibesSdk).toBe('function');
-    expect(typeof createExpoGoodVibesSdk).toBe('function');
+  test('createExpoGoodVibesPlatform is a callable function', function () {
+    expect(typeof createReactNativeGoodVibesPlatform).toBe('function');
+    expect(typeof createExpoGoodVibesPlatform).toBe('function');
   });
 
-  test('createReactNativeGoodVibesSdk returns object with realtime.runtime method', function () {
-    var sdk = createReactNativeGoodVibesSdk({
+  test('createReactNativeGoodVibesPlatform returns object with realtime.runtime method', function () {
+    var platformClient = createReactNativeGoodVibesPlatform({
       baseUrl: 'https://example.com',
       authToken: 'test-token',
       // Provide a stub WebSocket so we do not fail on the WebSocket check.
       // In bare Hermes, globalThis.WebSocket does not exist.
       WebSocketImpl: function FakeWebSocket() {},
     });
-    expect(typeof sdk).toBe('object');
-    expect(typeof sdk.realtime).toBe('object');
-    expect(typeof sdk.realtime.runtime).toBe('function');
-    expect(typeof sdk.realtime.viaWebSocket).toBe('function');
+    expect(typeof platformClient).toBe('object');
+    expect(typeof platformClient.realtime).toBe('object');
+    expect(typeof platformClient.realtime.runtime).toBe('function');
+    expect(typeof platformClient.realtime.viaWebSocket).toBe('function');
   });
 
-  test('createReactNativeGoodVibesSdk returns object with auth namespace', function () {
-    var sdk = createReactNativeGoodVibesSdk({
+  test('createReactNativeGoodVibesPlatform returns object with auth namespace', function () {
+    var platformClient = createReactNativeGoodVibesPlatform({
       baseUrl: 'https://example.com',
       authToken: 'test-token',
       WebSocketImpl: function FakeWebSocket() {},
     });
-    expect(typeof sdk.auth).toBe('object');
-    expect(typeof sdk.auth.getToken).toBe('function');
+    expect(typeof platformClient.auth).toBe('object');
+    expect(typeof platformClient.auth.getToken).toBe('function');
   });
 
-  test('sdk.auth.getToken returns the initial token', function () {
-    var sdk = createReactNativeGoodVibesSdk({
+  test('platform.auth.getToken returns the initial token', function () {
+    var platformClient = createReactNativeGoodVibesPlatform({
       baseUrl: 'https://example.com',
       authToken: 'my-static-token',
       WebSocketImpl: function FakeWebSocket() {},
     });
-    var token = sdk.auth.getToken();
+    var token = platformClient.auth.getToken();
     expect(token).toBe('my-static-token');
   });
 
   test('realtime.runtime() throws ConfigurationError when WebSocket unavailable', function () {
     // Do NOT pass WebSocketImpl and globalThis.WebSocket is absent in bare Hermes.
-    var sdk = createReactNativeGoodVibesSdk({
+    var platformClient = createReactNativeGoodVibesPlatform({
       baseUrl: 'https://example.com',
       authToken: 'tok',
       // WebSocketImpl deliberately omitted
@@ -322,7 +322,7 @@ describe('SDK react-native factory -- ConfigurationError on bad inputs', functio
       var threw = false;
       var caught = null;
       try {
-        sdk.realtime.runtime();
+        platformClient.realtime.runtime();
       } catch (e) {
         threw = true;
         caught = e;
@@ -335,12 +335,12 @@ describe('SDK react-native factory -- ConfigurationError on bad inputs', functio
 
 });
 
-describe('SDK error taxonomy -- Hermes prototype chain integrity', function () {
+describe('platform error taxonomy -- Hermes prototype chain integrity', function () {
 
   test('ConfigurationError instanceof Error', function () {
     var err = new ConfigurationError('test');
     expect(err instanceof Error).toBe(true);
-    expect(err instanceof GoodVibesSdkError).toBe(true);
+    expect(err instanceof GoodVibesError).toBe(true);
     expect(err instanceof ConfigurationError).toBe(true);
   });
 
@@ -349,15 +349,15 @@ describe('SDK error taxonomy -- Hermes prototype chain integrity', function () {
     expect(err.kind).toBe('config');
   });
 
-  test('ContractError instanceof GoodVibesSdkError', function () {
+  test('ContractError instanceof GoodVibesError', function () {
     var err = new ContractError('bad contract');
-    expect(err instanceof GoodVibesSdkError).toBe(true);
+    expect(err instanceof GoodVibesError).toBe(true);
     expect(err instanceof Error).toBe(true);
   });
 
-  test('HttpStatusError instanceof GoodVibesSdkError', function () {
+  test('HttpStatusError instanceof GoodVibesError', function () {
     var err = new HttpStatusError('not found', { status: 404, url: 'https://example.com/api', method: 'GET', body: null });
-    expect(err instanceof GoodVibesSdkError).toBe(true);
+    expect(err instanceof GoodVibesError).toBe(true);
     expect(err instanceof Error).toBe(true);
   });
 
@@ -371,48 +371,48 @@ describe('SDK error taxonomy -- Hermes prototype chain integrity', function () {
     for (var i = 0; i < errors.length; i++) {
       var e = errors[i];
       expect(e instanceof Error).toBe(true);
-      expect(e instanceof GoodVibesSdkError).toBe(true);
+      expect(e instanceof GoodVibesError).toBe(true);
       expect(typeof e.message).toBe('string');
       expect(typeof e.kind).toBe('string');
     }
   });
 
-  test('GoodVibesSdkError has name property', function () {
+  test('GoodVibesError has name property', function () {
     var err = new ConfigurationError('test');
     expect(typeof err.name).toBe('string');
   });
 
 });
 
-describe('SDK observable patterns -- synchronous surface verification', function () {
+describe('platform observable patterns -- synchronous surface verification', function () {
 
-  test('sdk.operator is accessible', function () {
-    var sdk = createReactNativeGoodVibesSdk({
+  test('platform.operator is accessible', function () {
+    var platformClient = createReactNativeGoodVibesPlatform({
       baseUrl: 'https://example.com',
       authToken: 'tok',
       WebSocketImpl: function FakeWebSocket() {},
     });
-    // The operator sub-SDK should expose an observable agents surface.
+    // The operator sub-platform should expose an observable agents surface.
     // We do not call network methods -- just verify the shape.
-    expect(typeof sdk.operator).toBe('object');
+    expect(typeof platformClient.operator).toBe('object');
   });
 
-  test('sdk.operator.agents is accessible', function () {
-    var sdk = createReactNativeGoodVibesSdk({
+  test('platform.operator.agents is accessible', function () {
+    var platformClient = createReactNativeGoodVibesPlatform({
       baseUrl: 'https://example.com',
       authToken: 'tok',
       WebSocketImpl: function FakeWebSocket() {},
     });
-    expect(typeof sdk.operator.agents).toBe('object');
+    expect(typeof platformClient.operator.agents).toBe('object');
   });
 
-  test('sdk.peer sub-SDK is accessible', function () {
-    var sdk = createReactNativeGoodVibesSdk({
+  test('platform.peer sub-platform is accessible', function () {
+    var platformClient = createReactNativeGoodVibesPlatform({
       baseUrl: 'https://example.com',
       authToken: 'tok',
       WebSocketImpl: function FakeWebSocket() {},
     });
-    expect(typeof sdk.peer).toBe('object');
+    expect(typeof platformClient.peer).toBe('object');
   });
 
 });

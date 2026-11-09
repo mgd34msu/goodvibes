@@ -4,9 +4,9 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { applySuiteUpdate, configuredSuiteWebuiDirectory, installedSuiteNeedsRepair, retainSuiteUpdateConfiguration, rollbackSuiteUpdate } from '../sdk/src/platform/runtime/suite-update.js';
-import { ConfigManager } from '../sdk/src/platform/config/index.js';
-import { realUpdateFileIo } from '../sdk/src/platform/runtime/self-update.js';
+import { applySuiteUpdate, configuredSuiteWebuiDirectory, installedSuiteNeedsRepair, retainSuiteUpdateConfiguration, rollbackSuiteUpdate } from '../platform/src/platform/runtime/suite-update.js';
+import { ConfigManager } from '../platform/src/platform/config/index.js';
+import { realUpdateFileIo } from '../platform/src/platform/runtime/self-update.js';
 import { suiteReleaseFixture } from './_helpers/suite-release-fixture.js';
 
 const roots: string[] = [];

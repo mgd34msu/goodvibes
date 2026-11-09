@@ -24,18 +24,18 @@
  */
 import { afterAll, describe, expect, setSystemTime, spyOn, test } from 'bun:test';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import {
   DEVICE_CAPABILITY_CONTRACT_VERSION,
   DEVICE_NODE_ANNOUNCEMENT_KEY,
   DEVICE_CAPABILITY_IDS,
-} from '@goodvibes-jev/engine/sdk/platform/devices';
+} from '@goodvibes-jev/engine/platform/platform/devices';
 import type {
   DeviceApprovalBridge,
   DevicePeerTransport,
   DevicePeerView,
-} from '@goodvibes-jev/engine/sdk/platform/devices';
+} from '@goodvibes-jev/engine/platform/platform/devices';
 import { createDevicePostureServices, DAEMON_DEVICE_ACTOR } from '../../runtime/device-posture-composition.ts';
 import { makeOwnedTempDir as makeProjectTempDir } from '../helpers/owned-temp.js';
 import { useDeviceJudgmentRuntime, deviceJudgmentFixture, type DeviceReading } from '../helpers/device-judgment-fixture.js';

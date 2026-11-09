@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
 import { fakePort } from '@goodvibes-jev/judgment/testing';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.ts';
-import type { ToolInputProjector } from '../sdk/src/platform/tools/input-projection.ts';
-import type { Tool } from '../sdk/src/platform/types/tools.ts';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
+import type { ToolInputProjector } from '../platform/src/platform/tools/input-projection.ts';
+import type { Tool } from '../platform/src/platform/types/tools.ts';
 
 const NAME = 'registry_metadata_guard_fixture';
 

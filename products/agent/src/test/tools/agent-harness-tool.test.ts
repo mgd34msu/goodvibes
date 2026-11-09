@@ -4,7 +4,7 @@ import { installJudgmentPort, judgmentPort } from '@goodvibes-jev/engine/errors'
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { join } from 'node:path';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { createAgentWorkspaceTool } from '../../tools/agent-workspace-tool.ts';
 import { registerAgentPersonalOpsTool } from '../../tools/agent-personal-ops-tool.ts';
 import { makeFixture, executeHarnessJson, createHarnessFixtureReadings } from "./agent-harness-tool-fixture.ts";

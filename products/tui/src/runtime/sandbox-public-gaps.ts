@@ -1,9 +1,9 @@
 import {
   buildSandboxReview,
   type ConfigManagerLike,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/sandbox';
+} from '@goodvibes-jev/engine/platform/platform/runtime/sandbox';
 
-/** Product presentation only: all sandbox state comes from the public SDK. */
+/** Product presentation only: all sandbox state comes from the public platform. */
 export function renderSandboxDoctor(manager: ConfigManagerLike): string {
   const review = buildSandboxReview(manager);
   const probe = review.backendProbe;

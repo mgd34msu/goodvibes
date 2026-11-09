@@ -18,10 +18,10 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { migrateDaemonEmbedInProcessRemoval } from '../sdk/src/platform/config/migrations.js';
-import { applyDaemonEmbedInProcessMigrationPass } from '../sdk/src/platform/config/manager-migration-passes.js';
-import { CONFIG_SCHEMA, DEFAULT_CONFIG } from '../sdk/src/platform/config/schema.js';
-import { decideDaemonAdoption } from '../sdk/src/platform/runtime/daemon-adoption-policy.js';
+import { migrateDaemonEmbedInProcessRemoval } from '../platform/src/platform/config/migrations.js';
+import { applyDaemonEmbedInProcessMigrationPass } from '../platform/src/platform/config/manager-migration-passes.js';
+import { CONFIG_SCHEMA, DEFAULT_CONFIG } from '../platform/src/platform/config/schema.js';
+import { decideDaemonAdoption } from '../platform/src/platform/runtime/daemon-adoption-policy.js';
 
 describe('the key is gone from the schema', () => {
   test('no schema row offers daemon.embedInProcess', () => {

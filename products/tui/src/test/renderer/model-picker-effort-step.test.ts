@@ -11,7 +11,7 @@
 
 import { frameFromLayer } from '../helpers/surface-frame.ts';
 import { describe, expect, test } from 'bun:test';
-import type { ModelDefinition, ReasoningEffortSpec } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ModelDefinition, ReasoningEffortSpec } from '@goodvibes-jev/engine/platform/platform/providers';
 import { ModelPickerModal } from '../../input/model-picker.ts';
 import { renderModelWorkspace } from '../../renderer/model-workspace.ts';
 import { linesToText } from '../setup.ts';

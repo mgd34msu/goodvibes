@@ -1,4 +1,4 @@
-import type { BrowserJudgmentService } from '@goodvibes-jev/engine/sdk/platform/judgment-browser';
+import type { BrowserJudgmentService } from '@goodvibes-jev/engine/platform/platform/judgment-browser';
 /**
  * runtime-services-types.ts, the public contract createRuntimeServices() takes
  * and returns.
@@ -12,63 +12,63 @@ import type { BrowserJudgmentService } from '@goodvibes-jev/engine/sdk/platform/
  * anywhere else in the app had to change.
  */
 
-import type { ConfigManager, ServiceRegistry, SubscriptionManager, ToolLLM } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager, ServiceRegistry, SubscriptionManager, ToolLLM } from '@goodvibes-jev/engine/platform/platform/config';
 import type { SecretsManager } from '../config/secrets.js';
-import type { AutomationDeliveryManager, AutomationManager } from '@goodvibes-jev/engine/sdk/platform/automation';
-import type { ChannelDeliveryRouter, ChannelPolicyManager, ChannelPluginRegistry, RouteBindingManager, SurfaceRegistry } from '@goodvibes-jev/engine/sdk/platform/channels';
-import type { ApprovalBroker, GatewayMethodCatalog, SessionLiveTurnControlsHolder, SharedSessionBroker } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import type { PowerManager } from '@goodvibes-jev/engine/sdk/platform/power';
+import type { AutomationDeliveryManager, AutomationManager } from '@goodvibes-jev/engine/platform/platform/automation';
+import type { ChannelDeliveryRouter, ChannelPolicyManager, ChannelPluginRegistry, RouteBindingManager, SurfaceRegistry } from '@goodvibes-jev/engine/platform/platform/channels';
+import type { ApprovalBroker, GatewayMethodCatalog, SessionLiveTurnControlsHolder, SharedSessionBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import type { PowerManager } from '@goodvibes-jev/engine/platform/platform/power';
 
-import type { StepUpService } from '@goodvibes-jev/engine/sdk/daemon';
-import type { PairingTokenManager } from '@goodvibes-jev/engine/sdk/platform/pairing';
-import type { WatcherRegistry } from '@goodvibes-jev/engine/sdk/platform/watchers';
-import type { ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import type { HomeGraphService, KnowledgeService, ProjectPlanningService } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import type { MediaProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/media';
-import type { MultimodalService } from '@goodvibes-jev/engine/sdk/platform/multimodal';
-import type { AgentMessageBus, AgentOrchestrator, ArchetypeLoader } from '@goodvibes-jev/engine/sdk/platform/agents';
-import type { AgentManager, ContextAccountingHolder, OverflowHandler, ProcessManager, WorkflowServices } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { FileUndoManager, MemoryConsolidationScheduler, MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore, ModeManager, ProjectIndex, CodeIndexStore, CodeIndexReindexScheduler } from '@goodvibes-jev/engine/sdk/platform/state';
-import type { StoreSnapshotScheduler } from '@goodvibes-jev/engine/sdk/platform/state/store-snapshots';
-import type { PermissionManager, UserPermissionRuleStore } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import type { buildExecPromptAnswerHandler } from '@goodvibes-jev/engine/sdk/platform/runtime/permissions/exec-prompt-wiring';
-import type { buildLocalhostFetchApproval } from '@goodvibes-jev/engine/sdk/platform/runtime/permissions/localhost-fetch-approval';
-import type { operations } from '@goodvibes-jev/engine/sdk/platform/runtime';
-import type { MemorySpineClient } from '@goodvibes-jev/engine/sdk/platform/runtime/memory-spine';
-import type { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/sdk/platform/workspace';
-import type { DomainDispatch, RuntimeStore } from '@goodvibes-jev/engine/sdk/platform/runtime/store';
-import type { DevicePostureRuntime } from '@goodvibes-jev/engine/sdk/platform/devices';
+import type { StepUpService } from '@goodvibes-jev/engine/platform/daemon';
+import type { PairingTokenManager } from '@goodvibes-jev/engine/platform/platform/pairing';
+import type { WatcherRegistry } from '@goodvibes-jev/engine/platform/platform/watchers';
+import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { HomeGraphService, KnowledgeService, ProjectPlanningService } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import type { MediaProviderRegistry } from '@goodvibes-jev/engine/platform/platform/media';
+import type { MultimodalService } from '@goodvibes-jev/engine/platform/platform/multimodal';
+import type { AgentMessageBus, AgentOrchestrator, ArchetypeLoader } from '@goodvibes-jev/engine/platform/platform/agents';
+import type { AgentManager, ContextAccountingHolder, OverflowHandler, ProcessManager, WorkflowServices } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { FileUndoManager, MemoryConsolidationScheduler, MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore, ModeManager, ProjectIndex, CodeIndexStore, CodeIndexReindexScheduler } from '@goodvibes-jev/engine/platform/platform/state';
+import type { StoreSnapshotScheduler } from '@goodvibes-jev/engine/platform/platform/state/store-snapshots';
+import type { PermissionManager, UserPermissionRuleStore } from '@goodvibes-jev/engine/platform/platform/permissions';
+import type { buildExecPromptAnswerHandler } from '@goodvibes-jev/engine/platform/platform/runtime/permissions/exec-prompt-wiring';
+import type { buildLocalhostFetchApproval } from '@goodvibes-jev/engine/platform/platform/runtime/permissions/localhost-fetch-approval';
+import type { operations } from '@goodvibes-jev/engine/platform/platform/runtime';
+import type { MemorySpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
+import type { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/platform/platform/workspace';
+import type { DomainDispatch, RuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
+import type { DevicePostureRuntime } from '@goodvibes-jev/engine/platform/platform/devices';
 import type { RuntimeEventBus, DistributedRuntimeManager, RemoteRunnerRegistry, RemoteSupervisor, IntegrationHelperService, PanelManagerLike, KeybindingsManagerLike, IdempotencyStore, ComponentHealthMonitor, WorktreeRegistry, SandboxSessionRegistry, ShellPathService, FeatureFlagManager, PolicyRuntimeState, SessionSurface } from './index.js';
-import type { VoiceProviderRegistry, VoiceService } from '@goodvibes-jev/engine/sdk/platform/voice';
-import type { CacheRegistry, PauseController, MemoryGovernor } from '@goodvibes-jev/engine/sdk/platform/runtime/memory';
-import type { WebSearchProviderRegistry, WebSearchService } from '@goodvibes-jev/engine/sdk/platform/web-search';
-import type { HookActivityTracker } from '@goodvibes-jev/engine/sdk/platform/hooks';
-import type { HookDispatcher, HookWorkbench } from '@goodvibes-jev/engine/sdk/platform/hooks';
-import type { PluginManager } from '@goodvibes-jev/engine/sdk/platform/plugins';
-import type { BookmarkManager } from '@goodvibes-jev/engine/sdk/platform/bookmarks';
-import type { ProfileManager } from '@goodvibes-jev/engine/sdk/platform/profiles';
-import type { SessionManager, CrossSessionTaskRegistry, SessionChangeTracker } from '@goodvibes-jev/engine/sdk/platform/sessions';
-import type { ApiTokenAuditor, UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
-import type { WebhookNotifier } from '@goodvibes-jev/engine/sdk/platform/integrations';
-import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
-import type { BenchmarkStore, CacheHitTracker, FavoritesStore, ModelLimitsService, ProviderCapabilityRegistry, ProviderOptimizer, ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { AdaptivePlanner, DeterministicReplayEngine, ExecutionPlanManager, SessionLineageTracker, SessionMemoryStore } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { ArchivableProcessRegistry } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
-import type { WorkPlanStore } from '@goodvibes-jev/engine/sdk/platform/workflow';
-import type { WorkLedgerService } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger';
+import type { VoiceProviderRegistry, VoiceService } from '@goodvibes-jev/engine/platform/platform/voice';
+import type { CacheRegistry, PauseController, MemoryGovernor } from '@goodvibes-jev/engine/platform/platform/runtime/memory';
+import type { WebSearchProviderRegistry, WebSearchService } from '@goodvibes-jev/engine/platform/platform/web-search';
+import type { HookActivityTracker } from '@goodvibes-jev/engine/platform/platform/hooks';
+import type { HookDispatcher, HookWorkbench } from '@goodvibes-jev/engine/platform/platform/hooks';
+import type { PluginManager } from '@goodvibes-jev/engine/platform/platform/plugins';
+import type { BookmarkManager } from '@goodvibes-jev/engine/platform/platform/bookmarks';
+import type { ProfileManager } from '@goodvibes-jev/engine/platform/platform/profiles';
+import type { SessionManager, CrossSessionTaskRegistry, SessionChangeTracker } from '@goodvibes-jev/engine/platform/platform/sessions';
+import type { ApiTokenAuditor, UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
+import type { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
+import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
+import type { BenchmarkStore, CacheHitTracker, FavoritesStore, ModelLimitsService, ProviderCapabilityRegistry, ProviderOptimizer, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { AdaptivePlanner, DeterministicReplayEngine, ExecutionPlanManager, SessionLineageTracker, SessionMemoryStore } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ArchivableProcessRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+import type { WorkPlanStore } from '@goodvibes-jev/engine/platform/platform/workflow';
+import type { WorkLedgerService } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 import type { DaemonHandlerSurfaces } from '../daemon/handlers/index.js';
 import type { ClusterGroupComposition } from './cluster-group-composition.js';
-import type { ClusterCoordinator } from '@goodvibes-jev/engine/sdk/platform/cluster';
+import type { ClusterCoordinator } from '@goodvibes-jev/engine/platform/platform/cluster';
 
-import type { ContractRunner, ContractOperatorService } from '@goodvibes-jev/engine/sdk/platform/contract';
-import type { JudgmentServices } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import type { SessionSnapshot } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import type { ContractRunner, ContractOperatorService } from '@goodvibes-jev/engine/platform/platform/contract';
+import type { JudgmentServices } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import type { SessionSnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { DaemonInboxFactory } from './daemon-handler-composition.js';
-import type { TriggerManager } from '@goodvibes-jev/engine/sdk/platform/triggers';
+import type { TriggerManager } from '@goodvibes-jev/engine/platform/platform/triggers';
 import type { DaemonBootController, DaemonBootOperations } from './boot-tasks.js';
 
 export interface RuntimeServicesOptions {
-  readonly nativeDataWriter?: import('@goodvibes-jev/engine/sdk/platform/runtime/self-update').NativeDataWriteOwner | undefined;
+  readonly nativeDataWriter?: import('@goodvibes-jev/engine/platform/platform/runtime/self-update').NativeDataWriteOwner | undefined;
   readonly capturedBunRuntimeExecutable?: string | undefined;
   /**
    * Explicit boot composition, constructed synchronously without starting its
@@ -101,9 +101,9 @@ export interface RuntimeServicesOptions {
   readonly daemonHomeDirectory?: string | undefined;
   /** Opt-in (daemon-side only): fold host-observed external coding-agent sessions
    * into the fleet as 'observed-external' rows. Interactive leaves it off and reads
-   * the daemon snapshot. Mirrors the SDK's own createRuntimeServices option. */
+   * the daemon snapshot. Mirrors the platform's own createRuntimeServices option. */
   readonly observeExternalAgents?: boolean | undefined;
-  /** Host power seam opt-in. Left out, the SDK's idle-power wiring falls back to
+  /** Host power seam opt-in. Left out, the platform's idle-power wiring falls back to
    * the non-spawning unavailable seam; the daemon entrypoint passes the real
    * host seam, which is what starts systemd-inhibit and the sleep-edge watcher. */
   readonly powerSeam?: operations.IdlePowerServicesDeps['powerSeam'];
@@ -119,8 +119,8 @@ export interface RuntimeServicesOptions {
 }
 
 export interface RuntimeServices {
-  readonly nativeDataWriter?: import('@goodvibes-jev/engine/sdk/platform/runtime/self-update').NativeDataWriteOwner | undefined;
-  readonly nativeMutationHost?: import('@goodvibes-jev/engine/sdk/platform/control-plane').NativeMutationHost | undefined;
+  readonly nativeDataWriter?: import('@goodvibes-jev/engine/platform/platform/runtime/self-update').NativeDataWriteOwner | undefined;
+  readonly nativeMutationHost?: import('@goodvibes-jev/engine/platform/platform/control-plane').NativeMutationHost | undefined;
   /** Absent when the host did not supply the pending product boot composition. */
   readonly bootTasks?: DaemonBootController | undefined;
   readonly workingDirectory: string;
@@ -153,7 +153,7 @@ export interface RuntimeServices {
   readonly localhostFetchApproval: ReturnType<typeof buildLocalhostFetchApproval>;
   /** Terminal prompt-answer handler that rides the approval broker; shared by the tool registry and orchestrator so an interactive command's prompt gets an ask/card on every surface. */
   readonly execPromptAnswerHandler: ReturnType<typeof buildExecPromptAnswerHandler>;
-  /** Durable user-origin permission rules (remembered approvals); permissions.rules.* surface. Mirrors the SDK composition. */
+  /** Durable user-origin permission rules (remembered approvals); permissions.rules.* surface. Mirrors the platform composition. */
   readonly userPermissionRuleStore: UserPermissionRuleStore;
   readonly sessionBroker: SharedSessionBroker;
   readonly deliveryManager: AutomationDeliveryManager;
@@ -175,7 +175,7 @@ export interface RuntimeServices {
   readonly serviceRegistry: ServiceRegistry;
   readonly secretsManager: SecretsManager;
   readonly stepUpService: StepUpService;
-  readonly pairingTokens: PairingTokenManager; // backs pairing.tokens.* verbs + the settings device surface (mirrors the SDK composition)
+  readonly pairingTokens: PairingTokenManager; // backs pairing.tokens.* verbs + the settings device surface (mirrors the platform composition)
   readonly subscriptionManager: SubscriptionManager;
   readonly localUserAuthManager: UserAuthManager;
   readonly profileManager: ProfileManager;
@@ -252,7 +252,7 @@ export interface RuntimeServices {
   /** The repo source-tree code index. */
   readonly codeIndexStore: CodeIndexStore;
   readonly codeIndexReindexScheduler: CodeIndexReindexScheduler; // tool-site reindex
-  /** Daily snapshots of every SQLite store this runtime writes, with bounded retention; unref'd timers (mirrors the SDK composition, hosts that tear down a runtime stop() it themselves). */
+  /** Daily snapshots of every SQLite store this runtime writes, with bounded retention; unref'd timers (mirrors the platform composition, hosts that tear down a runtime stop() it themselves). */
   readonly storeSnapshotScheduler: StoreSnapshotScheduler;
   readonly appendOnlyRetentionScheduler: operations.DurabilityServices['appendOnlyRetentionScheduler']; // periodic append-only sweep; unref'd timers, stop() on teardown
   /** Stops the recurring crash-residue sweep; idempotent, unref'd timer (hosts that tear a runtime down call it). */
@@ -298,5 +298,5 @@ export interface RuntimeServices {
   cancelHostedAgentRuns(): number;
   /** Await before replacing this graph or removing its owned files. */
   close(): Promise<void>;
-  dispose(): void; // Stops every poller this graph started: best-effort, total, idempotent. This surface owns its graph, and the SDK's disposal scope drives it.
+  dispose(): void; // Stops every poller this graph started: best-effort, total, idempotent. This surface owns its graph, and the platform's disposal scope drives it.
 }

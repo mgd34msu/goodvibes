@@ -7,7 +7,7 @@
  * (the body wrapped through a prose word-wrapper that drops leading spaces).
  */
 import { describe, expect, test } from 'bun:test';
-import type { ToolCall } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
 import { beadBody } from '../../renderer/lane-graph/bead.ts';
 import { laneGlyphs } from '../../renderer/lane-graph/glyphs.ts';
 import { paintBody } from '../../renderer/lane-graph/paint.ts';

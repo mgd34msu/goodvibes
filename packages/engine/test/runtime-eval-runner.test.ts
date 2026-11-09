@@ -5,7 +5,7 @@
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort } from '@goodvibes-jev/judgment/testing';
 import { authoredPrivacyAnswer, errorText } from './_helpers/authored-error-readings.ts';
-import { redactSensitiveDataAsync } from '../sdk/src/platform/utils/redaction.ts';
+import { redactSensitiveDataAsync } from '../platform/src/platform/utils/redaction.ts';
 import { afterEach, beforeEach, describe, it, expect } from 'bun:test';
 import { EvalRunner } from './_helpers/runtime-seam.ts';
 import { scoreScenario, DIMENSION_FLOOR } from './_helpers/runtime-seam.ts';

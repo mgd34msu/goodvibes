@@ -10,7 +10,7 @@ import { createWakeProvisionPresentation } from '@goodvibes-jev/engine/terminal-
 // below name it where it helps and do not imply it is a required step.
 //
 // This module is the read-only projection the /voice wake surfaces render from:
-// per-artifact present / verified / corrupt / bytes taken straight from the SDK's
+// per-artifact present / verified / corrupt / bytes taken straight from the platform's
 // wakeProvisionStatus, which verifies by CONTENT rather than by existence, a
 // truncated or wrong-asset file reports corrupt instead of present, because a
 // detector loading it would fail in a way the user could not diagnose.
@@ -20,8 +20,8 @@ import { createWakeProvisionPresentation } from '@goodvibes-jev/engine/terminal-
 // against fixture shapes.
 // ---------------------------------------------------------------------------
 
-import type { WakeProvisionStatus, WakeSurfaceCapabilities } from '@goodvibes-jev/engine/sdk/platform/voice';
-import { noiseSuppressionSupport } from '@goodvibes-jev/engine/sdk/platform/voice/capture';
+import type { WakeProvisionStatus, WakeSurfaceCapabilities } from '@goodvibes-jev/engine/platform/platform/voice';
+import { noiseSuppressionSupport } from '@goodvibes-jev/engine/platform/platform/voice/capture';
 import { formatVoiceBytes } from './voice-provision-status.ts';
 
 /**
@@ -32,9 +32,9 @@ import { formatVoiceBytes } from './voice-provision-status.ts';
  */
 export function terminalWakeCapabilities(status?: Pick<WakeProvisionStatus, 'vadReady'>): WakeSurfaceCapabilities {
   return {
-    // Asked of the SDK rather than declared here. The filter is a WebAssembly
+    // Asked of the platform rather than declared here. The filter is a WebAssembly
     // module carried in the package, so the only question is whether this runtime
-    // has WebAssembly at all, which the SDK answers, with a reason a settings
+    // has WebAssembly at all, which the platform answers, with a reason a settings
     // surface can show. A host constant would go stale the moment the stage
     // shipped, which is exactly what happened to the previous one.
     speexAvailable: noiseSuppressionSupport().supported,
@@ -52,7 +52,7 @@ export function terminalWakeCapabilities(status?: Pick<WakeProvisionStatus, 'vad
 /** One artifact's line: what is on disk, verified by content. */
 
 /**
- * Blockers, in the SDK's own words. A blocker means the detector must NOT start,
+ * Blockers, in the platform's own words. A blocker means the detector must NOT start,
  * so the row's key and the written reason are both shown, a swallowed blocker is
  * a user staring at a feature that is on and doing nothing.
  */

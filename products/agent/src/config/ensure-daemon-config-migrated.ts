@@ -2,7 +2,7 @@
  * ensure-daemon-config-migrated.ts, run the one-time move of daemon-owned
  * keys into the daemon's own store before any ConfigManager is constructed.
  *
- * The migration itself lives in the SDK (`daemon-config-migration.ts`) so every
+ * The migration itself lives in the platform (`daemon-config-migration.ts`) so every
  * product performs the identical move; this wrapper exists to make it (a) safe
  * to call from a composition root and (b) impossible to bring the process down.
  * It is idempotent and its fast path is one file read plus one JSON parse, so
@@ -13,9 +13,9 @@ import {
   describeDaemonConfigMigration,
   migrateDaemonOwnedConfig,
   type DaemonConfigMigrationResult,
-} from '@goodvibes-jev/engine/sdk/platform/config';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+} from '@goodvibes-jev/engine/platform/platform/config';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 /**
  * Move daemon-owned settings into `~/.goodvibes/daemon/settings.json` if that

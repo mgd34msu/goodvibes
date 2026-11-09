@@ -1,6 +1,6 @@
-import { buildContractPlannerRequest } from '../sdk/src/platform/contract/planner.js';
-import { buildUnitBrief } from '../sdk/src/platform/contract/brief.js';
-import { buildFixPlannerRequest } from '../sdk/src/platform/contract/fix-plan.js';
+import { buildContractPlannerRequest } from '../platform/src/platform/contract/planner.js';
+import { buildUnitBrief } from '../platform/src/platform/contract/brief.js';
+import { buildFixPlannerRequest } from '../platform/src/platform/contract/fix-plan.js';
 import { makeContract } from './contract/fixtures.js';
 import { shapeOf } from './contract/plan-support.js';
 import { expect, test } from 'bun:test';
@@ -8,13 +8,13 @@ import { createHash } from 'node:crypto';
 import {
   canonicalNativeConversationContinuation, captureNativeConversationContinuation,
   nativeConversationContinuationSchema,
-} from '../sdk/src/platform/workflow/work-ledger/native-continuation-context.js';
-import { nativeConversationSourceRevision } from '../sdk/src/platform/workflow/work-ledger/native-intake-types.js';
-import { nativeConversationIntakeCaptureRequestSchema, nativeConversationIntakeResultSchema } from '../sdk/src/platform/workflow/work-ledger/native-intake-wire.js';
-import { createOperatorNativeConversationIntakeClient, readNativeConversationTurnPermit } from '../sdk/src/platform/workflow/work-ledger/native-intake-client.js';
-import type { OperatorRemoteClient } from '../operator-sdk/src/index.js';
-import { captureAutonomousSource } from '../sdk/src/platform/permissions/autonomous.js';
-import { captureNativeContractSource } from '../sdk/src/platform/contract/native-source.js';
+} from '../platform/src/platform/workflow/work-ledger/native-continuation-context.js';
+import { nativeConversationSourceRevision } from '../platform/src/platform/workflow/work-ledger/native-intake-types.js';
+import { nativeConversationIntakeCaptureRequestSchema, nativeConversationIntakeResultSchema } from '../platform/src/platform/workflow/work-ledger/native-intake-wire.js';
+import { createOperatorNativeConversationIntakeClient, readNativeConversationTurnPermit } from '../platform/src/platform/workflow/work-ledger/native-intake-client.js';
+import type { OperatorRemoteClient } from '../operator-client/src/index.js';
+import { captureAutonomousSource } from '../platform/src/platform/permissions/autonomous.js';
+import { captureNativeContractSource } from '../platform/src/platform/contract/native-source.js';
 
 function context() {
   const sessionId = 'hosted-owned'; const messages = [{ role: 'assistant' as const, content: '  Previous answer. 🌻\r\n' }];

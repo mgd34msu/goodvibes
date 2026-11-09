@@ -9,7 +9,7 @@ import { CONFIG_SCHEMA_ENTRIES } from "../../../lib/generated/config-schema";
 type ConfigOutcome = "ok" | "admin-required" | "network-error";
 let outcome: ConfigOutcome = "ok";
 const configSetCalls: [string, unknown][] = [];
-// Controls what sdk.operator.config.set does, independent of `outcome` above (which only
+// Controls what platform.operator.config.set does, independent of `outcome` above (which only
 // governs config.get). 'reject' simulates the real requestJson behavior on a non-2xx or
 // network failure, a rejected promise, never a resolved { success: false }.
 type SetOutcome = "ok" | "reject";
@@ -48,7 +48,7 @@ mock.module("../../../lib/goodvibes", () => ({
     semanticCalls++;
     throw new Error("No semantic reading fixture");
   },
-  sdk: {
+  client: {
     operator: {
       payments: {
         purchase: { status: () => Promise.resolve({ windows: [], operations: [] }) },

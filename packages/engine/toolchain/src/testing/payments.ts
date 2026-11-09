@@ -5,8 +5,8 @@
  */
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { readPaymentsServiceConfig, parseCurrencyCode, type ProtectedPaymentRequest,
-  type CheckoutWindowCheckpoint, type OwnerSuppliedText } from '@goodvibes-jev/engine/sdk/platform/payments';
-import { retainTaintEvidence, UntrustedContentLedger } from '@goodvibes-jev/engine/sdk/platform/security';
+  type CheckoutWindowCheckpoint, type OwnerSuppliedText } from '@goodvibes-jev/engine/platform/platform/payments';
+import { retainTaintEvidence, UntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
 
 export function protectedPaymentRequest(purchaseId = 'original-owner-request'): ProtectedPaymentRequest {
   const ledger = new UntrustedContentLedger();

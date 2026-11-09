@@ -1,18 +1,18 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { ConversationManager } from '../../core/conversation.ts';
 import { knowledgeCommand } from '../../input/commands/knowledge.ts';
-import { createKnowledgeApi, KnowledgeService, KnowledgeStore } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import { MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/sdk/platform/state';
-import { MemoryEmbeddingProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/state';
+import { createKnowledgeApi, KnowledgeService, KnowledgeStore } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/platform/platform/state';
+import { MemoryEmbeddingProviderRegistry } from '@goodvibes-jev/engine/platform/platform/state';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { withPublicKnowledgeReadings } from '../helpers/public-knowledge-readings.ts';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { redactSensitiveDataAsync } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { redactSensitiveDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
 import { publicErrorTextAnswer } from '../helpers/user-error-reading.ts';
 
 let server: ReturnType<typeof Bun.serve>;
@@ -298,7 +298,7 @@ describe('knowledgeCommand', () => {
     expect(knowledgeStore.getIssue('issue-1')?.status).toBe('resolved');
   });
 
-  test('asks knowledge and renders SDK semantic answer fields', async () => {
+  test('asks knowledge and renders platform semantic answer fields', async () => {
     await knowledgeCommand.handler(
       ['ask', 'what', 'does', 'the', 'manual', 'say?', '--space', 'homeassistant:test', '--mode', 'detailed'],
       makeKnowledgeAskCommandContext(printed, {
@@ -306,7 +306,7 @@ describe('knowledgeCommand', () => {
         spaceId: 'homeassistant:test',
         query: 'what does the manual say?',
         answer: {
-          text: 'The SDK answer text.',
+          text: 'The platform answer text.',
           mode: 'detailed',
           confidence: 91,
           synthesized: true,
@@ -372,7 +372,7 @@ describe('knowledgeCommand', () => {
     );
 
     const output = printed.join('\n');
-    expect(output).toContain('The SDK answer text.');
+    expect(output).toContain('The platform answer text.');
     expect(output).toContain('Sources:');
     expect(output).toContain('Device manual.pdf');
     expect(output).toContain('Facts:');

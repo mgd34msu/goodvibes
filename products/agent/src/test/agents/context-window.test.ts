@@ -1,6 +1,6 @@
 import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { fieldKind, redactionCredential, residualCredential } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { fieldKind, redactionCredential, residualCredential } from '@goodvibes-jev/engine/platform/platform/utils';
 import { authoredPrivacyAnswer, errorText } from '../helpers/authored-diagnostic-readings.ts';
 /**
  * Agent context window awareness tests.
@@ -13,9 +13,9 @@ import { authoredPrivacyAnswer, errorText } from '../helpers/authored-diagnostic
  *  5. Feature flag disabled → no compaction, error re-thrown
  */
 import { describe, test, expect, beforeEach, mock } from 'bun:test';
-import { AgentOrchestrator } from '@goodvibes-jev/engine/sdk/platform/agents';
-import type { AgentRecord } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { LLMProvider, ChatRequest, ChatResponse } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { AgentOrchestrator } from '@goodvibes-jev/engine/platform/platform/agents';
+import type { AgentRecord } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { LLMProvider, ChatRequest, ChatResponse } from '@goodvibes-jev/engine/platform/platform/providers';
 import { getTestAgentOrchestrator, getTestProviderRegistry, resetTestRuntimeServices } from '../helpers/runtime-services.ts';
 
 // ---------------------------------------------------------------------------

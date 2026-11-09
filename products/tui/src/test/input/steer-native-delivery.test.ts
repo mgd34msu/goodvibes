@@ -5,15 +5,15 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { runAgentTask, type AgentOrchestratorRunContext } from '@goodvibes-jev/engine/sdk/platform/agents';
-import { AgentMessageBus } from '@goodvibes-jev/engine/sdk/platform/agents';
-import { RuntimeEventBus } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
-import { createProcessRegistry, STEER_TTL_MS } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { AgentRecord } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { LLMProvider, ChatResponse } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { runAgentTask, type AgentOrchestratorRunContext } from '@goodvibes-jev/engine/platform/platform/agents';
+import { AgentMessageBus } from '@goodvibes-jev/engine/platform/platform/agents';
+import { RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { createProcessRegistry, STEER_TTL_MS } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { AgentRecord } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { LLMProvider, ChatResponse } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 
 
 function flushMicrotasks(): Promise<void> {

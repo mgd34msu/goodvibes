@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import {
@@ -14,8 +14,8 @@ import {
   vibeBodyToConstraintOptions,
   VIBE_PROJECTION_HEADING,
   VIBE_PROJECTION_CAVEAT,
-} from '../sdk/src/platform/state/index.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
+} from '../platform/src/platform/state/index.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
 
 /**
  * VIBE.md as a projection of persona/constraint records.

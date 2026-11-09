@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { ToolCall } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
 import {
   beadArgument,
   beadBody,

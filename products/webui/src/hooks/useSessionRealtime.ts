@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { sdk, DEFAULT_SSE_RECONNECT } from '../lib/goodvibes';
+import { client as platformClient, DEFAULT_SSE_RECONNECT } from '../lib/goodvibes';
 import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime } from '../lib/client-lifetime';
 import { getActiveRoute, subscribeActiveRoute } from '../lib/relay-connection';
 import { queryKeys } from '../lib/queries';
@@ -72,7 +72,7 @@ export function useSessionRealtime(enabled: boolean): SessionRealtimeState {
       void queryClient.invalidateQueries({ queryKey: queryKeys.hostedSessionsAll });
     };
 
-    sdk.streams
+    platformClient.streams
       .open(
         SESSION_EVENTS_PATH,
         {

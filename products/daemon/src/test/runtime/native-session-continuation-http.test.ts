@@ -3,8 +3,8 @@ import { expect, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { WEBUI_METHOD_ROUTES } from '@goodvibes-jev/engine/contracts/generated/webui-facade';
-import { nativeConversationIntakeLookupResultSchema } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
-import { nativeHostedSessionLookupSchema, nativeHostedTurnLookupSchema, type NativeHostedTurnRequest } from '@goodvibes-jev/engine/sdk/platform/hosted-sessions/native-turn-client';
+import { nativeConversationIntakeLookupResultSchema } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
+import { nativeHostedSessionLookupSchema, nativeHostedTurnLookupSchema, type NativeHostedTurnRequest } from '@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client';
 import { createNativeIntakeHttpFixture, intakeBarrier } from '../helpers/native-intake-http-fixture.js';
 
 const FIRST = '  Initial café e\u0301 🌻\nRemember the first original.  ';

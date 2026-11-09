@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
-import { BudgetLedger, MAX_RESERVATIONS, type BudgetLimits } from '../sdk/src/platform/payments/budget.js';
-import { CheckoutRegistry, CheckoutRegistryError, MemoryCheckoutJournal, type InFlightCheckout } from '../sdk/src/platform/payments/checkout-registry.js';
-import { parseCurrencyCode, unsafeOwnerSuppliedTextForTests } from '../sdk/src/platform/payments/types.js';
+import { BudgetLedger, MAX_RESERVATIONS, type BudgetLimits } from '../platform/src/platform/payments/budget.js';
+import { CheckoutRegistry, CheckoutRegistryError, MemoryCheckoutJournal, type InFlightCheckout } from '../platform/src/platform/payments/checkout-registry.js';
+import { parseCurrencyCode, unsafeOwnerSuppliedTextForTests } from '../platform/src/platform/payments/types.js';
 
 function record(purchaseId = 'purchase', sessionId = 'session', pageId = 'page'): InFlightCheckout {
   const currency = parseCurrencyCode('USD');

@@ -3,31 +3,31 @@ import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { JsonFileStore } from '../sdk/src/platform/state/json-file-store.ts';
-import { PersistentStore } from '../sdk/src/platform/state/persistent-store.ts';
-import { ProjectIndex } from '../sdk/src/platform/state/project-index.ts';
-import { FileStateCache } from '../sdk/src/platform/state/file-cache.ts';
-import { TelemetryDB } from '../sdk/src/platform/state/telemetry.ts';
-import { KVState } from '../sdk/src/platform/state/kv-state.ts';
+import { JsonFileStore } from '../platform/src/platform/state/json-file-store.ts';
+import { PersistentStore } from '../platform/src/platform/state/persistent-store.ts';
+import { ProjectIndex } from '../platform/src/platform/state/project-index.ts';
+import { FileStateCache } from '../platform/src/platform/state/file-cache.ts';
+import { TelemetryDB } from '../platform/src/platform/state/telemetry.ts';
+import { KVState } from '../platform/src/platform/state/kv-state.ts';
 import { trackDisposables } from './_helpers/disposables.ts';
-import { SQLiteStore } from '../sdk/src/platform/state/sqlite-store.ts';
-import { AutomationJobStore } from '../sdk/src/platform/automation/store/jobs.ts';
-import { AutomationRunStore } from '../sdk/src/platform/automation/store/runs.ts';
-import { AutomationRouteStore } from '../sdk/src/platform/automation/store/routes.ts';
-import { AutomationSourceStore } from '../sdk/src/platform/automation/store/sources.ts';
-import { TaskScheduler } from '../sdk/src/platform/scheduler/scheduler.ts';
-import { DaemonBatchManager } from '../sdk/src/platform/batch/manager.ts';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { ApprovalBroker } from '../sdk/src/platform/control-plane/approval-broker.ts';
-import { loadSessionBrokerState } from '../sdk/src/platform/control-plane/session-broker-state.ts';
-import { ChannelPolicyManager } from '../sdk/src/platform/channels/policy-manager.ts';
-import { DistributedRuntimeManager } from '../sdk/src/platform/runtime/remote/distributed-runtime-manager.ts';
-import { rowToRecord } from '../sdk/src/platform/state/memory-store-helpers.ts';
-import { loadWatcherSnapshotFromPath } from '../sdk/src/platform/watchers/store.ts';
-import { createTeamTool } from '../sdk/src/platform/tools/team/index.ts';
-import { createWorklistTool } from '../sdk/src/platform/tools/worklist/index.ts';
-import type { LLMProvider } from '../sdk/src/platform/providers/interface.ts';
-import type { ProviderRegistry } from '../sdk/src/platform/providers/registry.ts';
+import { SQLiteStore } from '../platform/src/platform/state/sqlite-store.ts';
+import { AutomationJobStore } from '../platform/src/platform/automation/store/jobs.ts';
+import { AutomationRunStore } from '../platform/src/platform/automation/store/runs.ts';
+import { AutomationRouteStore } from '../platform/src/platform/automation/store/routes.ts';
+import { AutomationSourceStore } from '../platform/src/platform/automation/store/sources.ts';
+import { TaskScheduler } from '../platform/src/platform/scheduler/scheduler.ts';
+import { DaemonBatchManager } from '../platform/src/platform/batch/manager.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-broker.ts';
+import { loadSessionBrokerState } from '../platform/src/platform/control-plane/session-broker-state.ts';
+import { ChannelPolicyManager } from '../platform/src/platform/channels/policy-manager.ts';
+import { DistributedRuntimeManager } from '../platform/src/platform/runtime/remote/distributed-runtime-manager.ts';
+import { rowToRecord } from '../platform/src/platform/state/memory-store-helpers.ts';
+import { loadWatcherSnapshotFromPath } from '../platform/src/platform/watchers/store.ts';
+import { createTeamTool } from '../platform/src/platform/tools/team/index.ts';
+import { createWorklistTool } from '../platform/src/platform/tools/worklist/index.ts';
+import type { LLMProvider } from '../platform/src/platform/providers/interface.ts';
+import type { ProviderRegistry } from '../platform/src/platform/providers/registry.ts';
 
 function tempDir(label: string): string {
   return join(tmpdir(), `gv-${label}-${randomUUID()}`);
@@ -233,7 +233,7 @@ describe('state persistence failures', () => {
     // `.why` receipt, never deleted, never re-parsed) and treated exactly
     // like "no snapshot yet" so the caller rebuilds from live registrations,
     // instead of throwing and crash-looping the process. See
-    // packages/sdk/src/platform/watchers/store.ts.
+    // packages/platform/src/platform/watchers/store.ts.
     const dir = tempDir('watcher-store');
     mkdirSync(dir, { recursive: true });
     const file = join(dir, 'watchers.json');

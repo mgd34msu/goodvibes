@@ -1,6 +1,6 @@
-import type { ContractView, ContractUnitView } from '@goodvibes-jev/engine/sdk/platform/contract';
-import type { AgentManager } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { RuntimeAgent } from '@goodvibes-jev/engine/sdk/platform/runtime/store';
+import type { ContractView, ContractUnitView } from '@goodvibes-jev/engine/platform/platform/contract';
+import type { AgentManager } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { RuntimeAgent } from '@goodvibes-jev/engine/platform/platform/runtime/store';
 
 type AgentRecord = NonNullable<ReturnType<AgentManager['getStatus']>>;
 export type ProcessSummaryAgent = Pick<AgentRecord, 'id'> & Partial<Pick<AgentRecord, 'progress' | 'status' | 'contractRole'>>;

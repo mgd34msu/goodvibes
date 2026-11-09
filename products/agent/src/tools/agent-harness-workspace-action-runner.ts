@@ -1,5 +1,5 @@
 import { captureStatefulCatalogRequest } from './agent-harness-stateful-catalog-source.ts';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { AgentHarnessToolDeps } from './agent-harness-tool-types.ts';
 import { clearSetupCheckpoint, markSetupCheckpoint, setupCheckpointSummary } from './agent-harness-setup-posture.ts';
 import { runLocalWorkspaceAction } from './agent-harness-local-operations.ts';

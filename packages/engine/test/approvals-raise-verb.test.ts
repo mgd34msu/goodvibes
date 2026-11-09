@@ -18,16 +18,16 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ApprovalBroker } from '../sdk/src/platform/control-plane/approval-broker.ts';
-import { ControlPlaneGateway } from '../sdk/src/platform/control-plane/gateway.ts';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
-import { createApprovalRaiseHandler } from '../sdk/src/platform/control-plane/routes/approvals-raise.ts';
-import { isGatewayVerbError } from '../sdk/src/platform/control-plane/routes/gateway-verb-error.ts';
-import { builtinGatewayControlCoreMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-control-core.ts';
-import { builtinGatewayEventDescriptors } from '../sdk/src/platform/control-plane/method-catalog-events.ts';
-import { EVENT_DOMAIN } from '../sdk/src/platform/control-plane/gateway-scope-enforcement.ts';
-import type { RuntimeEventDomain } from '../sdk/src/platform/runtime/events/index.ts';
-import type { GatewayMethodInvocation } from '../sdk/src/platform/control-plane/method-catalog-shared.ts';
+import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-broker.ts';
+import { ControlPlaneGateway } from '../platform/src/platform/control-plane/gateway.ts';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
+import { createApprovalRaiseHandler } from '../platform/src/platform/control-plane/routes/approvals-raise.ts';
+import { isGatewayVerbError } from '../platform/src/platform/control-plane/routes/gateway-verb-error.ts';
+import { builtinGatewayControlCoreMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-control-core.ts';
+import { builtinGatewayEventDescriptors } from '../platform/src/platform/control-plane/method-catalog-events.ts';
+import { EVENT_DOMAIN } from '../platform/src/platform/control-plane/gateway-scope-enforcement.ts';
+import type { RuntimeEventDomain } from '../platform/src/platform/runtime/events/index.ts';
+import type { GatewayMethodInvocation } from '../platform/src/platform/control-plane/method-catalog-shared.ts';
 
 function makeBroker(): { broker: ApprovalBroker; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), 'gv-approvals-raise-'));

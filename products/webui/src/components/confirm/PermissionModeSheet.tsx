@@ -11,7 +11,7 @@
 import { Check } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Dialog } from '../ui/Dialog';
-import { GATE_PRESETS, SESSION_GATE_PRESET_NAMES, type SettableGatePresetName } from '@goodvibes-jev/engine/sdk/platform/gate/presets';
+import { GATE_PRESETS, SESSION_GATE_PRESET_NAMES, type SettableGatePresetName } from '@goodvibes-jev/engine/platform/platform/gate/presets';
 
 export interface PermissionModeSheetProps {
   open: boolean;

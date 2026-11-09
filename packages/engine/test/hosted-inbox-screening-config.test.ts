@@ -13,9 +13,9 @@ import {
   screenSettingsForIngestion,
   type ConfigValue,
   type HostedInboxScreening,
-} from '../sdk/src/platform/config/index.js';
-import { getFeatureFlagConfig } from '../sdk/src/platform/runtime/feature-flags/flag-config-map.js';
-import { SurfaceRegistry } from '../sdk/src/platform/channels/surface-registry.js';
+} from '../platform/src/platform/config/index.js';
+import { getFeatureFlagConfig } from '../platform/src/platform/runtime/feature-flags/flag-config-map.js';
+import { SurfaceRegistry } from '../platform/src/platform/channels/surface-registry.js';
 
 const roots: string[] = [];
 afterEach(() => {

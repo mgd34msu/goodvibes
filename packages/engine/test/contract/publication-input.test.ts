@@ -3,12 +3,12 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeRepo } from './runner-support.js';
-import { captureContractInput, materializeContractInput } from '../../sdk/src/platform/contract/input-snapshot.js';
-import { pinContractInputAdmission } from '../../sdk/src/platform/contract/input-authority.js';
-import { admitPublicationInput, publicationInputOwner } from '../../sdk/src/platform/contract/publication-input.js';
-import { applyCapturedInputDelta } from '../../sdk/src/platform/contract/input-apply.js';
-import { ContractPublicationConflictError } from '../../sdk/src/platform/contract/publication-conflict.js';
-import type { Contract } from '../../sdk/src/platform/contract/types.js';
+import { captureContractInput, materializeContractInput } from '../../platform/src/platform/contract/input-snapshot.js';
+import { pinContractInputAdmission } from '../../platform/src/platform/contract/input-authority.js';
+import { admitPublicationInput, publicationInputOwner } from '../../platform/src/platform/contract/publication-input.js';
+import { applyCapturedInputDelta } from '../../platform/src/platform/contract/input-apply.js';
+import { ContractPublicationConflictError } from '../../platform/src/platform/contract/publication-conflict.js';
+import type { Contract } from '../../platform/src/platform/contract/types.js';
 
 function git(root: string, ...args: string[]): string {
   const result = spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' });

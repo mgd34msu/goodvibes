@@ -7,7 +7,7 @@ import {
   encodeConnectionPayload,
   generateQrMatrix,
   renderQrToString,
-} from '@goodvibes-jev/engine/sdk/platform/pairing';
+} from '@goodvibes-jev/engine/platform/platform/pairing';
 import { GOODVIBES_AGENT_PAIRING_SURFACE } from '../../config/surface.ts';
 import { resolveRuntimeEndpointBinding } from '../../cli/endpoints.ts';
 import { connectedHostTokenRequiredMessage, readConnectedHostOperatorToken } from '../../runtime/connected-host-auth.ts';

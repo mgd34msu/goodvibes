@@ -37,7 +37,7 @@ import {
   type ThemeJson,
   type ThemeMode,
   type ThemeTokens,
-} from '../sdk/src/platform/presentation/index.ts';
+} from '../platform/src/platform/presentation/index.ts';
 
 
 const HEX6 = /^#[0-9a-f]{6}$/;

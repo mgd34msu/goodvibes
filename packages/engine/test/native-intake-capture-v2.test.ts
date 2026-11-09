@@ -4,18 +4,18 @@ import * as crypto from 'node:crypto';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { loadSqlJsEngine } from '../sdk/src/platform/state/sqlite-store.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { loadSqlJsEngine } from '../platform/src/platform/state/sqlite-store.js';
 import {
   createNativeConversationCapture, parseNativeConversationCapture, nativeConversationDecisionBinding,
   nativeConversationSourceId, nativeConversationSourceRevision, nativeConversationProposalRevision,
   isValidatedNativeConversationCapture, validatedNativeCaptureContinuation, type NativeConversationCapture,
-} from '../sdk/src/platform/workflow/work-ledger/native-intake-types.js';
-import { createNativeContinuationSnapshotOwner, captureNativeConversationContinuation } from '../sdk/src/platform/workflow/work-ledger/native-continuation-context.js';
-import { nativeIntakeContinuationCatalog, nativeIntakeDecisionSite } from '../sdk/src/platform/workflow/work-ledger/native-intake-recovery.js';
-import { captureNativeContractSource, nativeContractSourceData } from '../sdk/src/platform/contract/native-source.js';
-import { nativeConversationIntakeResultSchema } from '../sdk/src/platform/workflow/work-ledger/native-intake-wire.js';
-import { ContractStore, contractPath } from '../sdk/src/platform/contract/store.js';
+} from '../platform/src/platform/workflow/work-ledger/native-intake-types.js';
+import { createNativeContinuationSnapshotOwner, captureNativeConversationContinuation } from '../platform/src/platform/workflow/work-ledger/native-continuation-context.js';
+import { nativeIntakeContinuationCatalog, nativeIntakeDecisionSite } from '../platform/src/platform/workflow/work-ledger/native-intake-recovery.js';
+import { captureNativeContractSource, nativeContractSourceData } from '../platform/src/platform/contract/native-source.js';
+import { nativeConversationIntakeResultSchema } from '../platform/src/platform/workflow/work-ledger/native-intake-wire.js';
+import { ContractStore, contractPath } from '../platform/src/platform/contract/store.js';
 import { makeContract, makeCriterion } from './contract/fixtures.js';
 
 const roots: string[] = [], stores: KnowledgeStore[] = [];

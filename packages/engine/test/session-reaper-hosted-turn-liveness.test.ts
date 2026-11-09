@@ -2,14 +2,14 @@ import { describe, expect, test } from 'bun:test';
 import {
   closeOrphanedSessionsAtBoot,
   sweepSharedSessions,
-} from '../sdk/src/platform/control-plane/session-broker-gc.ts';
+} from '../platform/src/platform/control-plane/session-broker-gc.ts';
 import {
   isSystemClosedSession,
   readSessionCloseReason,
-} from '../sdk/src/platform/control-plane/session-broker-sessions.ts';
-import { createHostedSessionLivenessProbe } from '../sdk/src/platform/hosted-sessions/liveness-probe.ts';
-import type { HostedSessionRecord } from '../sdk/src/platform/hosted-sessions/types.ts';
-import type { SharedSessionRecord } from '../sdk/src/platform/control-plane/session-types.ts';
+} from '../platform/src/platform/control-plane/session-broker-sessions.ts';
+import { createHostedSessionLivenessProbe } from '../platform/src/platform/hosted-sessions/liveness-probe.ts';
+import type { HostedSessionRecord } from '../platform/src/platform/hosted-sessions/types.ts';
+import type { SharedSessionRecord } from '../platform/src/platform/control-plane/session-types.ts';
 
 // The bookkeeping contradiction this pins: control-plane sessions.json closed a
 // session "idle-reaped" at 21:45Z while its turn demonstrably went on running

@@ -4,10 +4,10 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { ChannelPolicyManager } from '../sdk/src/platform/channels/policy-manager.ts';
-import { DaemonSurfaceActionHelper } from '../sdk/src/platform/daemon/surface-actions.ts';
-import { logger } from '../sdk/src/platform/utils/logger.ts';
-import type { ChannelIngressPolicyInput, ChannelPolicyRecord } from '../sdk/src/platform/channels/types.ts';
+import { ChannelPolicyManager } from '../platform/src/platform/channels/policy-manager.ts';
+import { DaemonSurfaceActionHelper } from '../platform/src/platform/daemon/surface-actions.ts';
+import { logger } from '../platform/src/platform/utils/logger.ts';
+import type { ChannelIngressPolicyInput, ChannelPolicyRecord } from '../platform/src/platform/channels/types.ts';
 
 let previous: ReturnType<typeof installJudgmentPort>;
 let readings: ReturnType<typeof fakePort>;

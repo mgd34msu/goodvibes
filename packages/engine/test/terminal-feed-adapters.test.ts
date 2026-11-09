@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { captureModalFeedState, capturePromptKeyState, refreshCommandAutocomplete } from '../terminal-shell/src/input-feed-adapters.js';
 import { InfiniteBuffer } from '../terminal-shell/src/conversation-history.js';
 import type { SelectionResult } from '../terminal-shell/src/selection-modal.js';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { BlockMeta } from '../terminal-shell/src/terminal-conversation.js';
 
 const key: InputToken = { type: 'key', name: 'f', logicalName: 'f', ctrl: true, shift: false, meta: false };

@@ -92,7 +92,7 @@ export function registerWorktreeRuntimeCommands(registry: CommandRegistry): void
         }
         ctx.print(`[worktree setup] Re-running cold-start setup for ${path}...`);
         try {
-          const { setup } = await rpc.sdk.operator.invoke('worktrees.setup.run', { path });
+          const { setup } = await rpc.platformClient.operator.invoke('worktrees.setup.run', { path });
           if (setup.state === 'skipped') {
             ctx.print('[worktree setup] skipped: no setup commands or carry-over globs are configured.');
           } else if (setup.state === 'succeeded') {
@@ -162,7 +162,7 @@ export function registerWorktreeRuntimeCommands(registry: CommandRegistry): void
           return;
         }
         try {
-          const receipt = await rpc.sdk.operator.invoke('worktrees.discard', { path });
+          const receipt = await rpc.platformClient.operator.invoke('worktrees.discard', { path });
           if (receipt.ok) {
             ctx.print([
               `[worktree discard] Discarded ${receipt.path}`,

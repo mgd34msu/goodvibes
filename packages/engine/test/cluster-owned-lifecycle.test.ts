@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { ClusterOwnedLifecycle, ClusterPeriodicTasks } from '../sdk/src/platform/cluster/owned-lifecycle.js';
-import type { ClusterClock, ClusterLogger } from '../sdk/src/platform/cluster/types.js';
+import { ClusterOwnedLifecycle, ClusterPeriodicTasks } from '../platform/src/platform/cluster/owned-lifecycle.js';
+import type { ClusterClock, ClusterLogger } from '../platform/src/platform/cluster/types.js';
 
 function deferred() {
   let resolve!: () => void;

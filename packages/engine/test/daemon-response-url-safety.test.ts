@@ -4,9 +4,9 @@
 // address. A response URL arrives with an inbound request, so it is not
 // trusted by where it says it points.
 import { afterEach, describe, expect, test } from 'bun:test';
-import { deliverSlackAgentReply, deliverSurfaceProgress } from '../sdk/src/platform/daemon/surface-direct-delivery.ts';
-import { deliverSlackApprovalUpdate } from '../sdk/src/platform/daemon/surface-approval-delivery.ts';
-import type { HostResolver } from '../sdk/src/platform/tools/fetch/pinned-request.ts';
+import { deliverSlackAgentReply, deliverSurfaceProgress } from '../platform/src/platform/daemon/surface-direct-delivery.ts';
+import { deliverSlackApprovalUpdate } from '../platform/src/platform/daemon/surface-approval-delivery.ts';
+import type { HostResolver } from '../platform/src/platform/tools/fetch/pinned-request.ts';
 
 const DNS: Readonly<Record<string, readonly string[]>> = {
   'metadata.google.internal': ['169.254.169.254'],

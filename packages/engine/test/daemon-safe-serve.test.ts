@@ -2,7 +2,7 @@ import { describe, expect, mock, test } from 'bun:test';
 import {
   createHostRequestFailureResponse,
   createSafeHostServeFactory,
-} from '../sdk/src/platform/daemon/safe-serve.ts';
+} from '../platform/src/platform/daemon/safe-serve.ts';
 
 type CapturedFetch = (
   request: Request,

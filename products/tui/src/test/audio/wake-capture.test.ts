@@ -10,13 +10,13 @@ import type {
   WakeInferenceSession,
   WakeTensor,
   NoiseSuppressionFactory,
-} from '@goodvibes-jev/engine/sdk/platform/voice';
+} from '@goodvibes-jev/engine/platform/platform/voice';
 import {
   provisionWakeWordModelsAtInstall,
   resolveManagedWakePaths,
   retainedClipFileName,
   wakeProvisionStatus,
-} from '@goodvibes-jev/engine/sdk/platform/voice';
+} from '@goodvibes-jev/engine/platform/platform/voice';
 import { createTuiCaptureOpener } from '../../audio/capture.ts';
 import { extractOnnxRuntimeAssets } from '../../audio/wake-inference.ts';
 import { wireWakeRuntime, type WakeRuntimeDeps } from '../../audio/wake-runtime.ts';
@@ -29,7 +29,7 @@ import { makeProjectTempDir } from '../helpers/project-temp.ts';
  * sessions. No real microphone, no real recorder, no model file, no network.
  *
  * What these assert is the chain that was missing outright before capture was
- * wired: recorder bytes -> whole frames -> the real SDK engine and front end ->
+ * wired: recorder bytes -> whole frames -> the real platform engine and front end ->
  * a confirmed wake -> the activation sound -> the utterance that followed ->
  * `voice.stt` -> the composer or a submitted turn. Plus the two rules that must
  * hold no matter what: a disabled configuration opens NO device, and a recorder
@@ -51,7 +51,7 @@ type DataListener = (chunk: Uint8Array) => void;
 type CloseListener = (code: number | null, signal: string | null) => void;
 
 /**
- * A recorder subprocess under test control. Mirrors what the SDK's capture
+ * A recorder subprocess under test control. Mirrors what the platform's capture
  * opener actually consumes: stdout data, stderr data, 'error', 'close', kill.
  */
 class FakeRecorder implements CaptureChildProcess {
@@ -74,7 +74,7 @@ class FakeRecorder implements CaptureChildProcess {
   kill(signal?: string): unknown {
     this.killSignals.push(signal ?? 'SIGTERM');
     // A real recorder exits on SIGTERM; emitting on a microtask (not synchronously)
-    // matches that ordering, and lets the SDK's bounded stop() settle immediately
+    // matches that ordering, and lets the platform's bounded stop() settle immediately
     // instead of waiting out its escalation timer.
     void Promise.resolve().then(() => this.emitClose(0));
     return true;
@@ -132,7 +132,7 @@ function pcmBytes(samples: readonly number[]): Uint8Array {
   return bytes;
 }
 
-/** A run of loud audio, well above the SDK's silence floor of 180 RMS. */
+/** A run of loud audio, well above the platform's silence floor of 180 RMS. */
 function loudSamples(count: number, seed = 1): number[] {
   return Array.from({ length: count }, (_unused, index) => (index % 2 === 0 ? 9000 + seed : -9000 - seed));
 }
@@ -177,7 +177,7 @@ function scriptedClassifierSession(scores: readonly number[]): { session: WakeIn
 }
 
 /**
- * A stand-in for the speexdsp filter. The SDK owns whether the filter's numbers
+ * A stand-in for the speexdsp filter. The platform owns whether the filter's numbers
  * are right; what a host test can only get wrong is whether captured frames reach
  * a stage at all, so this counts and marks instead of filtering.
  */
@@ -290,7 +290,7 @@ interface WakeHarnessOptions {
   /** Makes the suppression stage fail to start, the way a broken filter would. */
   readonly suppressionFails?: string;
   /**
-   * Drop the provision-status seam entirely, so the runtime uses the SDK's REAL
+   * Drop the provision-status seam entirely, so the runtime uses the platform's REAL
    * content-verifying read against `managedRoot`. Used by the install tests
    * below, where stubbing the very check under test would prove nothing.
    */
@@ -399,7 +399,7 @@ function makeWakeHarness(options: WakeHarnessOptions = {}): WakeHarness {
 }
 
 /**
- * Feed enough frames to fill the SDK front end's 16-frame window, so the next
+ * Feed enough frames to fill the platform front end's 16-frame window, so the next
  * frames are the ones that actually get scored.
  */
 async function primeFrontEnd(recorder: FakeRecorder): Promise<void> {
@@ -579,7 +579,7 @@ describe('a confirmed wake drives the whole downstream chain', () => {
     await harness.runtime.stop();
   });
 
-  test('retainAudio: session-temp writes the clip where the SDK sweeper can reap it', async () => {
+  test('retainAudio: session-temp writes the clip where the platform sweeper can reap it', async () => {
     const managedRoot = makeProjectTempDir('goodvibes-wake');
     cleanupPaths.push(managedRoot);
     const harness = makeWakeHarness({
@@ -600,7 +600,7 @@ describe('a confirmed wake drives the whole downstream chain', () => {
 
     const retained = readdirSync(resolveManagedWakePaths(managedRoot).retainedDir);
     expect(retained.length).toBe(1);
-    // The name comes from the SDK's own contract, not from a local convention: the
+    // The name comes from the platform's own contract, not from a local convention: the
     // sweeper reads the owning session id off the first `--`-delimited segment, so a
     // clip named any other way is reaped as an orphan while this session still wants
     // it. Compared against the helper rather than a hand-written pattern so a change
@@ -850,7 +850,7 @@ describe('the two rows that used to be refused now run a real stage', () => {
 
     await harness.runtime.stop();
     // The filter's memory is released with the stream rather than left to the
-    // collector. Counted as "at least once" on purpose: the SDK declares close()
+    // collector. Counted as "at least once" on purpose: the platform declares close()
     // idempotent and calls it on both the stop and the stream-ended paths, so a
     // count of exactly one would pin an implementation detail instead of the
     // property that matters.
@@ -941,7 +941,7 @@ describe('enabling wake detection after the installation provisioned the model',
   test('the listener starts on the two enablement rows alone, loading the artifacts the installer wrote', async () => {
     const managedRoot = makeProjectTempDir('wake-install');
     // The paths the install policy writes to. Nothing here re-derives them: they
-    // come from the same SDK function the installer, the daemon and the detector
+    // come from the same platform function the installer, the daemon and the detector
     // all call, which is the whole point, an installer that wrote 6 MB into a
     // directory the detector never reads would report success and detect nothing.
     const paths = resolveManagedWakePaths(managedRoot);
@@ -1002,7 +1002,7 @@ describe('enabling wake detection after the installation provisioned the model',
     expect(outcome.state).toBe('degraded');
     expect(outcome.message).toContain('/voice wake setup');
 
-    // Now enable the feature, with the SDK's REAL content check, no stub, because
+    // Now enable the feature, with the platform's REAL content check, no stub, because
     // the content check is the thing being trusted here.
     const harness = makeWakeHarness({ managedRoot, realProvisionStatus: true });
     await harness.runtime.refresh();

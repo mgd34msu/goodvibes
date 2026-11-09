@@ -1,4 +1,4 @@
-import type { ArtifactDescriptor } from '@goodvibes-jev/engine/sdk/platform/artifacts';
+import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { CommandContext } from './command-registry.ts';
 import { AgentDocumentRegistry, type AgentDocumentRecord } from '../agent/document-registry.ts';
 import type { AgentWorkspaceReviewPacketDefaults, AgentWorkspaceReviewPacketTimeline, AgentWorkspaceReviewPacketTimelineEvent, AgentWorkspaceReviewPacketWizard, AgentWorkspaceReviewPacketWizardStep, AgentWorkspaceReviewPacketWizardStepStatus, AgentWorkspaceReviewerReadinessBadge } from './agent-workspace-types.ts';

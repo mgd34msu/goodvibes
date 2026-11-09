@@ -6,7 +6,7 @@ import { localModelServerEndpoints, localModelServerHealthMap } from '../../tool
 import { choiceAnswer, fakePort, noulAnswer, scoreAnswer } from '@goodvibes-jev/judgment/testing';
 import { cleanupResearchScreeningFixtures, researchScreeningFixture } from '../helpers/research-screening.ts';
 import { cliRedactionAnswer } from '../helpers/cli-redaction-readings.ts';
-import { localRecipeFit, routeReadiness } from '@goodvibes-jev/engine/sdk/platform/routing';
+import { localRecipeFit, routeReadiness } from '@goodvibes-jev/engine/platform/platform/routing';
 import { localModelRecipes } from '../../tools/agent-harness-local-model-cookbook.ts';
 
 afterAll(cleanupResearchScreeningFixtures);

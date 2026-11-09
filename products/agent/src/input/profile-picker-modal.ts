@@ -1,6 +1,6 @@
 import { ProfilePickerModal as PlatformProfiles } from '@goodvibes-jev/engine/terminal-shell/profile-picker-state';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ProfileManager } from '@goodvibes-jev/engine/sdk/platform/profiles';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ProfileManager } from '@goodvibes-jev/engine/platform/platform/profiles';
 function configProfileDeletionDisabledMessage(name: string): string {
   return `Config-profile deletion is disabled in Agent for ${name}. Open Agent Workspace -> Profiles for isolated Agent profile homes.`;
 }

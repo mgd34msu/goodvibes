@@ -1,7 +1,7 @@
 import { captureCliStatusFacts, secretPolicyLabel } from '@goodvibes-jev/engine/terminal-shell/cli-status-facts';
 import { yesNo } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import type { ConnectedHostReadiness } from '../runtime/connected-host-readiness.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { OnboardingCheckMarkersState } from '../runtime/onboarding/index.ts';
 import { resolveRuntimeEndpointBinding } from './endpoints.ts';
 import type { GoodVibesCliOutputFormat } from './types.ts';
@@ -167,7 +167,7 @@ function connectedHostMetricsLines(snapshot: CliConnectedHostMetricsSnapshot | n
   }
 }
 
-/** permissions.tools.* keys, mirrors PermissionsToolConfig in the SDK config schema. */
+/** permissions.tools.* keys, mirrors PermissionsToolConfig in the platform config schema. */
 /** Display the same effective execution preset used by the permission owner. */
 function readApprovalPosture(config: Pick<ConfigManager, 'get'>): ApprovalPosture {
   return readApprovalPostureFromConfig(config);

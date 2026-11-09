@@ -19,7 +19,7 @@ import type { PermissionAuditEntry } from '@/runtime/index.ts';
 import type { PolicyLintFinding } from '@/runtime/index.ts';
 import type { PolicySimulationSummary } from '@/runtime/index.ts';
 import type { PolicyPreflightReview } from '@/runtime/index.ts';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 
 /**
  * A point-in-time snapshot of policy state for diagnostics rendering.

@@ -1,5 +1,5 @@
-import type { ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { EFFORT_DESCRIPTIONS } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
+import { EFFORT_DESCRIPTIONS } from '@goodvibes-jev/engine/platform/platform/providers';
 import { effortPresentationForModel, toEffortModel } from '../providers/reasoning-effort-surface.ts';
 import type { PickerItem } from './model-picker-types.ts';
 

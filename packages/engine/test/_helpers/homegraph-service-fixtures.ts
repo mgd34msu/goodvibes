@@ -3,9 +3,9 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { deflateSync } from 'node:zlib';
 import { afterEach } from 'bun:test';
-import { ArtifactStore } from '../../sdk/src/platform/artifacts/index.js';
-import { HomeGraphService } from '../../sdk/src/platform/knowledge/index.js';
-import { KnowledgeStore } from '../../sdk/src/platform/knowledge/store.js';
+import { ArtifactStore } from '../../platform/src/platform/artifacts/index.js';
+import { HomeGraphService } from '../../platform/src/platform/knowledge/index.js';
+import { KnowledgeStore } from '../../platform/src/platform/knowledge/store.js';
 import { waitFor as _canonicalWaitFor } from './test-timeout.js';
 
 const tmpRoots: string[] = [];

@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import { makeViewScene, type ViewScene } from '../helpers/session-view-scenes.ts';
 import { SurfacePointer } from '../../input/surface-pointer.ts';
 import { beginModal, finishModal } from '../../renderer/surface-kit.ts';

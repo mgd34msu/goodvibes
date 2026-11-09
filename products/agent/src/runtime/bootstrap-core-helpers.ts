@@ -12,8 +12,8 @@ export {companionMessageToOrchestratorInputOptions,type CompanionMessagePayload}
  * bootstrap-core.ts re-exports all four names, so every existing importer is
  * unaffected.
  */
-import { WebhookNotifier } from '@goodvibes-jev/engine/sdk/platform/integrations';
-import type { PermissionPromptRequest } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
+import type { PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
 
 import { RuntimeEventBus } from '@/runtime/index.ts';
 
@@ -50,7 +50,7 @@ export function registerWebhookNotifier(
  * into it, see the `services.agentOrchestrator.setDependencies(...)` call
  * below and orchestrator.test.ts's "background agent permission gating"
  * suite). Forwarding `attribution.agentId` into the shared approval's
- * `metadata.agentId` is what lets the SDK's fleet ProcessRegistry
+ * `metadata.agentId` is what lets the platform's fleet ProcessRegistry
  * (runtime/fleet/registry.js, collectPendingApprovals) attribute the pending
  * ask to that agent's ProcessNode, deriving
  * `state: 'awaiting-approval'` / `needsAttention: { reason: 'approval' }` on
@@ -58,7 +58,7 @@ export function registerWebhookNotifier(
  * entry the fleet plane cannot attach to anything. Foreground asks (no
  * attribution) return undefined, preserving today's un-attributed shape.
  *
- * PermissionAttribution is a discriminated union (SDK 1.6.1 added
+ * PermissionAttribution is a discriminated union (platform 1.6.1 added
  * `mcp-server` and `sandbox-escalation` alongside the original
  * `background-agent`); only `background-agent` carries an `agentId` the
  * fleet ProcessRegistry can attach a pending approval to, so only that kind

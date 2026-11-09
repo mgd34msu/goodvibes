@@ -12,7 +12,7 @@
  *     composer has text and interrupt only when it is empty.
  */
 import { describe, expect, test } from 'bun:test';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import { handleProcessModalToken } from '../../input/handler-picker-routes.ts';
 import { handleSessionViewToken, type SessionViewRouteState } from '../../input/handler-session-view-route.ts';
 import type { ProcessEntry } from '../../renderer/process-modal.ts';

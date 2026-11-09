@@ -23,8 +23,8 @@ import {
   surfaceFeatureGateId,
   createFeatureFlagManager,
   FEATURE_SETTINGS,
-} from '../sdk/src/platform/runtime/feature-flags/index.ts';
-import { CONFIG_SCHEMA } from '../sdk/src/platform/config/schema.ts';
+} from '../platform/src/platform/runtime/feature-flags/index.ts';
+import { CONFIG_SCHEMA } from '../platform/src/platform/config/schema.ts';
 
 const CONFIG_KEYS = new Set(CONFIG_SCHEMA.map((s) => s.key));
 

@@ -2,7 +2,7 @@
  * payments-money-format.ts, detects which config settings hold a plain
  * currency amount.
  *
- * SDK 2.0.5 renamed every `payments.budget.*` amount key (the `Cents` suffix
+ * platform 2.0.5 renamed every `payments.budget.*` amount key (the `Cents` suffix
  * is gone) and changed what the stored number means: it is now the amount a
  * person would say out loud, written exactly as typed, `100` is a hundred,
  * `19.99` is nineteen ninety-nine, rather than an integer count of the
@@ -11,8 +11,8 @@
  * identical to a plain number setting's, since the stored value already IS
  * the display value.
  *
- * The SDK's own config-set path (`coerceSchemaValue` / `coerceMoneyAmount` in
- * the SDK's platform/config/money-value.ts) is what tolerates a leading
+ * The platform's own config-set path (`coerceSchemaValue` / `coerceMoneyAmount` in
+ * the platform's platform/config/money-value.ts) is what tolerates a leading
  * currency symbol or thousands grouping on write and refuses anything else;
  * nothing here re-implements that parsing.
  *
@@ -21,7 +21,7 @@
  * matching the key's NAME, the name-suffix scheme this replaces is exactly
  * what tied every consumer of these keys to one spelling.
  */
-import type { ConfigSetting } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
 
 /** True when the schema marks `setting` as holding an amount of `payments.currency`. */
 export function isMoneyConfigKey(setting: ConfigSetting): boolean {

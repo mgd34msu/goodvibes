@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { LID_SWITCH_HONEST_SPLIT } from '@goodvibes-jev/engine/sdk/platform/power';
+import { LID_SWITCH_HONEST_SPLIT } from '@goodvibes-jev/engine/platform/platform/power';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerPowerRuntimeCommands } from '../../input/commands/power-runtime.ts';
 import { buildSettingGroups } from '../../input/settings-modal-data.ts';
@@ -64,7 +64,7 @@ describe('/power command (STEP 3)', () => {
 });
 
 describe('power settings domain (STEP 3)', () => {
-  test('the SDK power.* schema settings surface under the power category', () => {
+  test('the platform power.* schema settings surface under the power category', () => {
     const { configManager } = createTestManagers();
     const groups = buildSettingGroups(configManager);
     const power = groups.get('power') ?? [];

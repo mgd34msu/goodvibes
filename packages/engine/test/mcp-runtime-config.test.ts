@@ -8,9 +8,9 @@ import {
   type McpServerConfig,
   removeMcpServerConfig,
   upsertMcpServerConfig,
-} from '../sdk/src/platform/mcp/config.js';
-import { McpRegistry } from '../sdk/src/platform/mcp/registry.js';
-import { dispatchMcpRoutes } from '../sdk/src/platform/daemon/http/mcp-routes.js';
+} from '../platform/src/platform/mcp/config.js';
+import { McpRegistry } from '../platform/src/platform/mcp/registry.js';
+import { dispatchMcpRoutes } from '../platform/src/platform/daemon/http/mcp-routes.js';
 
 function tempRoots() {
   const root = mkdtempSync(join(tmpdir(), 'gv-mcp-runtime-config-'));

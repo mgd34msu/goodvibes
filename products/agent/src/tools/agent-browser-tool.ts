@@ -1,7 +1,7 @@
-import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { Tool, ToolExecuteOptions } from '@goodvibes-jev/engine/sdk/platform/types';
-import { BrowserEngine, BrowserSessionError, StaleElementError, UntrustedEffectError } from '@goodvibes-jev/engine/sdk/platform/browser';
-import type { BrowserExtractField, BrowserTarget, UntrustedContentPort } from '@goodvibes-jev/engine/sdk/platform/browser';
+import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool, ToolExecuteOptions } from '@goodvibes-jev/engine/platform/platform/types';
+import { BrowserEngine, BrowserSessionError, StaleElementError, UntrustedEffectError } from '@goodvibes-jev/engine/platform/platform/browser';
+import type { BrowserExtractField, BrowserTarget, UntrustedContentPort } from '@goodvibes-jev/engine/platform/platform/browser';
 import { createAgentBrowserEngine } from '../runtime/agent-browser.ts';
 import { captureCatalogMethods, captureCatalogSnapshotGuard } from './agent-harness-catalog-ranking.ts';
 import { declareToolCapability } from './agent-tool-capability-declarations.ts';

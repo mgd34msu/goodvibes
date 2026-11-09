@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { resolveAndValidatePath } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { resolveAndValidatePath } from '@goodvibes-jev/engine/platform/platform/utils';
 
 // Tests run relative to the repo root, so we validate paths against that explicit root.
 

@@ -7,7 +7,7 @@
  * behaviour it pinned is real and still worth pinning, at the process that
  * implements it. Here the catalog is `createRuntimeServices(...).gatewayMethods`.
  *
- * The SDK registers checkin.* handlers only when channelDeliveryRouter,
+ * The platform registers checkin.* handlers only when channelDeliveryRouter,
  * providerRegistry, automationManager and sessionLister are ALL present (see
  * register-gateway-verb-groups.ts). This composition threads all four, so the
  * verbs answer for real rather than 501 "Gateway method is not invokable".

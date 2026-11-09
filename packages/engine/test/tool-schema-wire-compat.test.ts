@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { editSchema } from '../sdk/src/platform/tools/edit/schema.ts';
+import { editSchema } from '../platform/src/platform/tools/edit/schema.ts';
 
 /**
  * Strict OpenAI-compatible request validators (RouteLLM among them) forbid the
@@ -24,7 +24,7 @@ function findOneOfPaths(value: unknown, path: string, hits: string[]): void {
   }
 }
 
-const TOOLS_ROOT = join(import.meta.dir, '..', 'sdk', 'src', 'platform', 'tools');
+const TOOLS_ROOT = join(import.meta.dir, '..', 'platform', 'src', 'platform', 'tools');
 
 function schemaModulePaths(dir: string): string[] {
   const out: string[] = [];

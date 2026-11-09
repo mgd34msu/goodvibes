@@ -6,7 +6,7 @@ import {
   getOrCreateCompanionToken,
   regenerateCompanionToken,
   type CompanionTokenRecord,
-} from '../sdk/src/platform/pairing/companion-token.ts';
+} from '../platform/src/platform/pairing/companion-token.ts';
 
 const roots: string[] = [];
 afterEach(() => {

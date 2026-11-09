@@ -3,11 +3,11 @@
 [![CI](https://github.com/mgd34msu/goodvibes/actions/workflows/ci.yml/badge.svg)](https://github.com/mgd34msu/goodvibes/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-The engine is the typed TypeScript platform layer behind the GoodVibes Jev products: sessions, provider/model routing, in-process agents, a knowledge and memory store, a control-plane HTTP and realtime API, and the transports that carry it all. The daemon is its own product, built on the engine. Full-surface consumers embed runtime behavior in a Bun process and connect to daemon services as clients. Companion consumers, including the WebUI and mobile clients, use HTTP, SSE and WebSocket. The workspace package `@goodvibes-jev/engine` carries the platform through explicit subpaths such as `@goodvibes-jev/engine/sdk`, `@goodvibes-jev/engine/contracts` and `@goodvibes-jev/engine/errors`.
+The engine is the typed TypeScript platform layer behind the GoodVibes Jev products: sessions, provider/model routing, in-process agents, a knowledge and memory store, a control-plane HTTP and realtime API, and the transports that carry it all. The daemon is its own product, built on the engine. Full-surface consumers embed runtime behavior in a Bun process and connect to daemon services as clients. Companion consumers, including the WebUI and mobile clients, use HTTP, SSE and WebSocket. The workspace package `@goodvibes-jev/engine` carries the platform through explicit subpaths such as `@goodvibes-jev/engine/platform`, `@goodvibes-jev/engine/contracts` and `@goodvibes-jev/engine/errors`.
 
 Use the [monorepo installation guide](../../docs/installation.md) to install the
 application suite. Engine integration and product acceptance remain in progress;
-older SDK release history does not certify this checkout. Current behavior for
+earlier release history does not certify this checkout. Current behavior for
 [completion verification](docs/runtime-orchestration.md#completion-verification),
 [project review inventory](docs/contract-criteria.md#project-review-inventory) and
 [owner-configured tool access](docs/tool-safety.md#owner-configured-access) lives
@@ -25,13 +25,13 @@ and the retained review evidence.
 ```mermaid
 flowchart LR
     subgraph pkg["packages/engine (one workspace package)"]
-        sdk["@goodvibes-jev/engine/sdk<br/>facade: platform runtime + daemon + clients"]
+        platform["@goodvibes-jev/engine/platform<br/>facade: platform runtime + daemon + clients"]
         contracts["@goodvibes-jev/engine/contracts"]
-        siblings["errors, transport-core/-http/-realtime,<br/>daemon-sdk, operator-sdk, peer-sdk"]
+        siblings["errors, transport-core/-http/-realtime,<br/>daemon-api, operator-client, peer-client"]
         toolchain["@goodvibes-jev/engine/toolchain<br/>CI/CD tools"]
     end
-    sdk --> contracts
-    sdk --> siblings
+    platform --> contracts
+    platform --> siblings
 
     tui["GoodVibes terminal app<br/>(Bun runtime and daemon client)"]
     agent["GoodVibes agent<br/>(Bun runtime and daemon client)"]
@@ -39,10 +39,10 @@ flowchart LR
     webui["GoodVibes web UI<br/>(companion surface, browser)"]
     ha["Home Assistant integration<br/>(separate project, talks to the daemon)"]
 
-    sdk --> tui
-    sdk --> agent
-    sdk --> daemon
-    sdk --> webui
+    platform --> tui
+    platform --> agent
+    platform --> daemon
+    platform --> webui
     tui -. HTTP/SSE/WebSocket .-> daemon
     agent -. HTTP/SSE/WebSocket .-> daemon
     webui -. HTTP/SSE/WebSocket .-> daemon
@@ -64,33 +64,33 @@ bun run build
 ```
 
 Products depend on `@goodvibes-jev/engine` through `workspace:*`; import only
-declared entry points. For a Bun host (terminal app, agent, CLI, daemon), the SDK
+declared entry points. For a Bun host (terminal app, agent, CLI, daemon), the platform
 client factory talks to a reachable GoodVibes daemon:
 
 ```ts
-import { createGoodVibesSdk } from '@goodvibes-jev/engine/sdk';
-import { createMemoryTokenStore } from '@goodvibes-jev/engine/sdk/auth';
+import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
+import { createMemoryTokenStore } from '@goodvibes-jev/engine/platform/auth';
 
-const sdk = createGoodVibesSdk({
+const platformClient = createGoodVibesPlatform({
   baseUrl: process.env.GOODVIBES_BASE_URL ?? 'http://127.0.0.1:3421',
   tokenStore: createMemoryTokenStore(process.env.GOODVIBES_TOKEN ?? null),
 });
 
-const snapshot = await sdk.operator.control.snapshot();
+const snapshot = await platformClient.operator.control.snapshot();
 ```
 
 Building a browser or web UI client instead, the companion entry point carries no Bun globals and bundles cleanly with Vite, webpack, and esbuild:
 
 ```ts
-import { createBrowserGoodVibesSdk } from '@goodvibes-jev/engine/sdk/browser';
-import { createBrowserTokenStore } from '@goodvibes-jev/engine/sdk/auth';
+import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
+import { createBrowserTokenStore } from '@goodvibes-jev/engine/platform/auth';
 
-const sdk = createBrowserGoodVibesSdk({
+const platformClient = createBrowserGoodVibesPlatform({
   baseUrl: 'https://goodvibes.example.com',
   tokenStore: createBrowserTokenStore(),
 });
 
-const stop = sdk.realtime.viaSse().agents.on('AGENT_COMPLETED', (event) => {
+const stop = platformClient.realtime.viaSse().agents.on('AGENT_COMPLETED', (event) => {
   console.log('agent completed', event);
 });
 ```
@@ -103,25 +103,25 @@ React Native, Expo, and Cloudflare Worker bridges follow the same pattern from t
 
 | Entry point | What it is |
 | --- | --- |
-| [`@goodvibes-jev/engine/sdk`](./sdk) | The full platform runtime (sessions, agents, providers, knowledge, control plane, daemon route handlers) plus thin client factories for Bun, browser, React Native, Expo, and Cloudflare Workers. |
+| [`@goodvibes-jev/engine/platform`](./platform) | The full platform runtime (sessions, agents, providers, knowledge, control plane, daemon route handlers) plus thin client factories for Bun, browser, React Native, Expo, and Cloudflare Workers. |
 | [`@goodvibes-jev/engine/toolchain`](./toolchain) | The CI/CD toolchain: release cut, npm publish, per-job-green verification, and coverage checks. Invoked as `bunx @goodvibes-jev/engine/toolchain <tool>` from every GoodVibes repo's release workflow. |
-| [`@goodvibes-jev/engine/contracts`](./contracts) | Runtime-neutral operator and peer contract artifacts, generated method IDs, and lookup helpers that the `sdk` entry points and every client surface share. |
+| [`@goodvibes-jev/engine/contracts`](./contracts) | Runtime-neutral operator and peer contract artifacts, generated method IDs, and lookup helpers that the `platform` entry points and every client surface share. |
 
-The same install also carries `errors`, `transport-core`, `transport-http`, `transport-realtime`, `daemon-sdk`, `operator-sdk`, `peer-sdk`, and `terminal-shell`, each imported as `@goodvibes-jev/engine/<name>`; none is a separate install step. The full entry-point matrix is [docs/packages.md](./docs/packages.md).
+The same install also carries `errors`, `transport-core`, `transport-http`, `transport-realtime`, `daemon-api`, `operator-client`, `peer-client`, and `terminal-shell`, each imported as `@goodvibes-jev/engine/<name>`; none is a separate install step. The full entry-point matrix is [docs/packages.md](./docs/packages.md).
 
 ### Entry points at a glance
 
 | Entry point | Use it for |
 | --- | --- |
-| `@goodvibes-jev/engine/sdk` | Full Bun SDK: client factory plus contracts, daemon, auth, operator, peer, and transports |
-| `@goodvibes-jev/engine/sdk/daemon` | Daemon route dispatch and embedding helpers for a Bun server host |
-| `@goodvibes-jev/engine/sdk/browser`, `/web` | Full browser and web UI client factories with the complete operator contract |
-| `@goodvibes-jev/engine/sdk/react-native`, `/expo` | React Native and Expo client factories with mobile secure token stores |
-| `@goodvibes-jev/engine/sdk/workers` | Cloudflare Worker bridge for daemon batch endpoints |
-| `@goodvibes-jev/engine/sdk/contracts` | Runtime-neutral contract types, schemas, and method IDs |
-| `@goodvibes-jev/engine/sdk/auth` | Token stores, login, and OAuth helpers, shared by every surface |
+| `@goodvibes-jev/engine/platform` | Full Bun platform: client factory plus contracts, daemon, auth, operator, peer, and transports |
+| `@goodvibes-jev/engine/platform/daemon` | Daemon route dispatch and embedding helpers for a Bun server host |
+| `@goodvibes-jev/engine/platform/browser`, `/web` | Full browser and web UI client factories with the complete operator contract |
+| `@goodvibes-jev/engine/platform/react-native`, `/expo` | React Native and Expo client factories with mobile secure token stores |
+| `@goodvibes-jev/engine/platform/workers` | Cloudflare Worker bridge for daemon batch endpoints |
+| `@goodvibes-jev/engine/platform/contracts` | Runtime-neutral contract types, schemas, and method IDs |
+| `@goodvibes-jev/engine/platform/auth` | Token stores, login, and OAuth helpers, shared by every surface |
 
-This is a starting point, not the full list. There is no root `@goodvibes-jev/engine/sdk/platform` entry and no `platform/*` wildcard export. The canonical, stability-leveled reference for every entry point is [docs/public-surface.md](./docs/public-surface.md).
+This is a starting point, not the full list. There is no root `@goodvibes-jev/engine/platform/platform` entry and no `platform/*` wildcard export. The canonical, stability-leveled reference for every entry point is [docs/public-surface.md](./docs/public-surface.md).
 
 ---
 
@@ -134,7 +134,7 @@ This is a starting point, not the full list. There is no root `@goodvibes-jev/en
 - **Realtime transports.** SSE and WebSocket with reconnect and typed, session-filtered event domains: [docs/realtime-and-telemetry.md](./docs/realtime-and-telemetry.md).
 - **Knowledge and memory.** The SQLite-backed knowledge/wiki system, ingestion, retrieval, and project planning artifacts: [docs/knowledge.md](./docs/knowledge.md).
 - **Provider and model runtime.** Daemon-side routing, failover, and catalogs across model providers: [docs/providers.md](./docs/providers.md).
-- **Errors.** A typed `SDKErrorKind` model. Match on `err.kind`, never on `err.message`: [docs/error-kinds.md](./docs/error-kinds.md).
+- **Errors.** A typed `EngineErrorKind` model. Match on `err.kind`, never on `err.message`: [docs/error-kinds.md](./docs/error-kinds.md).
 
 Full index: [docs/README.md](./docs/README.md).
 

@@ -1,5 +1,5 @@
-import type { MemoryApi } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import type { MemoryClass, MemoryRecord, MemoryScope } from '@goodvibes-jev/engine/sdk/platform/state';
+import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import type { MemoryClass, MemoryRecord, MemoryScope } from '@goodvibes-jev/engine/platform/platform/state';
 import { assertNoSecretLikeMemoryText } from '../agent/memory-safety.ts';
 import type { AgentWorkspaceLocalEditor } from './agent-workspace-types.ts';
 import { splitList } from './agent-workspace-editors.ts';

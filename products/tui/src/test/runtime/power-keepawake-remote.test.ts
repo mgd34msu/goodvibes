@@ -6,10 +6,10 @@
 
 import { describe, expect, test } from 'bun:test';
 import { existsSync, rmSync } from 'node:fs';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { createUnavailablePowerSeam } from '@goodvibes-jev/engine/sdk/platform/power';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { createUnavailablePowerSeam } from '@goodvibes-jev/engine/platform/platform/power';
 import { fetchDaemonPowerState, forwardKeepAwakeToDaemon, installKeepAwakeRemoteForward } from '../../runtime/power-keepawake-remote.ts';
-import { wireIdlePowerAndLiveTurn } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { wireIdlePowerAndLiveTurn } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 function spyConfig() {
@@ -63,7 +63,7 @@ describe('keep-awake survives the TUI closing; external topology', () => {
     const calls: Array<{ id: string; input: unknown }> = [];
     const resolveRpc = (() => ({
       available: true,
-      sdk: { operator: { invoke: async (id: string, input: unknown) => { calls.push({ id, input }); return {}; } } },
+      platformClient: { operator: { invoke: async (id: string, input: unknown) => { calls.push({ id, input }); return {}; } } },
     })) as never;
     const { configManager } = spyConfig();
     await forwardKeepAwakeToDaemon(true, { configManager, homeDirectory: '/tmp/home', isExternalDaemon: () => true, resolveRpc });
@@ -74,7 +74,7 @@ describe('keep-awake survives the TUI closing; external topology', () => {
     const daemonState = { platform: 'linux', work: { held: false, reasons: [], grantedClasses: [] }, keepAwake: { enabled: true, held: true, note: null } };
     const resolveRpc = (() => ({
       available: true,
-      sdk: { operator: { invoke: async () => daemonState } },
+      platformClient: { operator: { invoke: async () => daemonState } },
     })) as never;
     const { configManager } = spyConfig();
     const state = await fetchDaemonPowerState({ configManager, homeDirectory: '/tmp/home', isExternalDaemon: () => true, resolveRpc });

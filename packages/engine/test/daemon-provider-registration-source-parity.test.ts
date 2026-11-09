@@ -2,8 +2,8 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ProviderRegistry } from '../sdk/src/platform/providers/registry.js';
-import type { DiscoveredServer } from '../sdk/src/platform/discovery/index.js';
+import { ProviderRegistry } from '../platform/src/platform/providers/registry.js';
+import type { DiscoveredServer } from '../platform/src/platform/discovery/index.js';
 
 function makeRegistry(): ProviderRegistry {
   const root = mkdtempSync(join(tmpdir(), 'goodvibes-provider-registry-live-model-discovery-'));

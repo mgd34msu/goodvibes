@@ -9,7 +9,7 @@ import {
 } from '@goodvibes-jev/judgment';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { makeHarness, oneUnitPlan, runnerPort, startContract, waitFor } from './runner-support.js';
-import type { NativeContractSource } from '../../sdk/src/platform/contract/types.js';
+import type { NativeContractSource } from '../../platform/src/platform/contract/types.js';
 const source: NativeContractSource = {
   sourceId: 'review-failure',
   sourceRevision: '1',

@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { forgetModelLimitReadings } from '../sdk/src/platform/routing/model-limit-readings.js';
-import { AnthropicProvider } from '../sdk/src/platform/providers/anthropic.js';
+import { forgetModelLimitReadings } from '../platform/src/platform/routing/model-limit-readings.js';
+import { AnthropicProvider } from '../platform/src/platform/providers/anthropic.js';
 import {
   extractTextToolCalls,
   fromOpenAIToolCalls,
-} from '../sdk/src/platform/providers/tool-formats.js';
+} from '../platform/src/platform/providers/tool-formats.js';
 
 
 /** routing.anthropic-output-cap reads every model id into the 64K row, so request bodies can be built. */

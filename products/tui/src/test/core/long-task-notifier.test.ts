@@ -18,7 +18,7 @@ import {
   NOTIFY_AFTER_SECONDS_DEFAULT,
   NOTIFY_AFTER_SECONDS_OFF,
 } from '../../core/long-task-notifier.ts';
-import { FocusTracker } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -100,7 +100,7 @@ describe('maybeNotifyLongTask: off-state', () => {
       kind: 'turn',
       sessionId: 'sess-abc-123',
       thresholdSeconds: NOTIFY_AFTER_SECONDS_OFF,
-      webhookNotifier: notifier as unknown as import('@goodvibes-jev/engine/sdk/platform/integrations').WebhookNotifier,
+      webhookNotifier: notifier as unknown as import('@goodvibes-jev/engine/platform/platform/integrations').WebhookNotifier,
     });
     expect(result).toBe(false);
     expect(notifier.sendNotification).not.toHaveBeenCalled();
@@ -128,7 +128,7 @@ describe('maybeNotifyLongTask: content privacy pin', () => {
       name: CONVERSATION_SENTINEL,
       reason: CONVERSATION_SENTINEL,
       configGet: makeConfigGet({ 'behavior.notificationsMetadataOnly': true }),
-      webhookNotifier: notifier as unknown as import('@goodvibes-jev/engine/sdk/platform/integrations').WebhookNotifier,
+      webhookNotifier: notifier as unknown as import('@goodvibes-jev/engine/platform/platform/integrations').WebhookNotifier,
     });
 
     // The sent message must contain structural metadata only.
@@ -167,7 +167,7 @@ describe('maybeNotifyLongTask: content privacy pin', () => {
       kind: 'agent',
       sessionId: 'sess-deadbeef-0000',
       thresholdSeconds: 60,
-      webhookNotifier: notifier as unknown as import('@goodvibes-jev/engine/sdk/platform/integrations').WebhookNotifier,
+      webhookNotifier: notifier as unknown as import('@goodvibes-jev/engine/platform/platform/integrations').WebhookNotifier,
     });
     await settleTestWebhookNotifications();
     const sentText = notifier._sentMessages[0] ?? '';
@@ -196,7 +196,7 @@ describe('maybeNotifyLongTask: webhook delivery', () => {
       kind: 'turn',
       sessionId: 'sess-abc-123',
       thresholdSeconds: 60,
-      webhookNotifier: notifier as unknown as import('@goodvibes-jev/engine/sdk/platform/integrations').WebhookNotifier,
+      webhookNotifier: notifier as unknown as import('@goodvibes-jev/engine/platform/platform/integrations').WebhookNotifier,
     });
     // send() is called synchronously (fire-and-forget promise); verify call count
     expect(notifier.sendNotification).toHaveBeenCalledTimes(1);
@@ -210,7 +210,7 @@ describe('maybeNotifyLongTask: webhook delivery', () => {
       kind: 'turn',
       sessionId: 'sess-abc-123',
       thresholdSeconds: 60,
-      webhookNotifier: notifier as unknown as import('@goodvibes-jev/engine/sdk/platform/integrations').WebhookNotifier,
+      webhookNotifier: notifier as unknown as import('@goodvibes-jev/engine/platform/platform/integrations').WebhookNotifier,
     });
     expect(notifier.sendNotification).not.toHaveBeenCalled();
   });
@@ -223,7 +223,7 @@ describe('maybeNotifyLongTask: webhook delivery', () => {
       kind: 'turn',
       sessionId: 'sess-abc-123',
       thresholdSeconds: 60,
-      webhookNotifier: notifier as unknown as import('@goodvibes-jev/engine/sdk/platform/integrations').WebhookNotifier,
+      webhookNotifier: notifier as unknown as import('@goodvibes-jev/engine/platform/platform/integrations').WebhookNotifier,
     });
     expect(notifier.sendNotification).not.toHaveBeenCalled();
   });
@@ -237,7 +237,7 @@ describe('maybeNotifyLongTask: webhook delivery', () => {
         kind: 'turn',
         sessionId: 'sess-abc-123',
         thresholdSeconds: 60,
-        webhookNotifier: notifier as unknown as import('@goodvibes-jev/engine/sdk/platform/integrations').WebhookNotifier,
+        webhookNotifier: notifier as unknown as import('@goodvibes-jev/engine/platform/platform/integrations').WebhookNotifier,
       })
     ).not.toThrow();
   });
@@ -272,7 +272,7 @@ describe('maybeNotifyLongTask: focus gating', () => {
       kind: 'turn',
       sessionId: 'sess-abc-123',
       thresholdSeconds: 60,
-      webhookNotifier: notifier as unknown as import('@goodvibes-jev/engine/sdk/platform/integrations').WebhookNotifier,
+      webhookNotifier: notifier as unknown as import('@goodvibes-jev/engine/platform/platform/integrations').WebhookNotifier,
       focusTracker: tracker,
       configGet: makeConfigGet({}),
     });
@@ -289,7 +289,7 @@ describe('maybeNotifyLongTask: focus gating', () => {
       kind: 'turn',
       sessionId: 'sess-abc-123',
       thresholdSeconds: 60,
-      webhookNotifier: notifier as unknown as import('@goodvibes-jev/engine/sdk/platform/integrations').WebhookNotifier,
+      webhookNotifier: notifier as unknown as import('@goodvibes-jev/engine/platform/platform/integrations').WebhookNotifier,
       focusTracker: tracker,
       configGet: makeConfigGet({}),
     });
@@ -306,7 +306,7 @@ describe('maybeNotifyLongTask: focus gating', () => {
       kind: 'turn',
       sessionId: 'sess-abc-123',
       thresholdSeconds: 60,
-      webhookNotifier: notifier as unknown as import('@goodvibes-jev/engine/sdk/platform/integrations').WebhookNotifier,
+      webhookNotifier: notifier as unknown as import('@goodvibes-jev/engine/platform/platform/integrations').WebhookNotifier,
       focusTracker: tracker,
       configGet: makeConfigGet({}),
     });
@@ -324,7 +324,7 @@ describe('maybeNotifyLongTask: focus gating', () => {
       kind: 'turn',
       sessionId: 'sess-abc-123',
       thresholdSeconds: 60,
-      webhookNotifier: notifier as unknown as import('@goodvibes-jev/engine/sdk/platform/integrations').WebhookNotifier,
+      webhookNotifier: notifier as unknown as import('@goodvibes-jev/engine/platform/platform/integrations').WebhookNotifier,
       focusTracker: tracker,
       configGet: makeConfigGet({ 'behavior.notifyOnlyWhenUnfocused': false }),
     });
@@ -340,7 +340,7 @@ describe('maybeNotifyLongTask: focus gating', () => {
       kind: 'turn',
       sessionId: 'sess-abc-123',
       thresholdSeconds: 60,
-      webhookNotifier: notifier as unknown as import('@goodvibes-jev/engine/sdk/platform/integrations').WebhookNotifier,
+      webhookNotifier: notifier as unknown as import('@goodvibes-jev/engine/platform/platform/integrations').WebhookNotifier,
     });
     expect(result).toBe(true);
     expect(notifier.sendNotification).toHaveBeenCalledTimes(1);

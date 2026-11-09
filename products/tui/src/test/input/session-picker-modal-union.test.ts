@@ -10,7 +10,7 @@
  *  (3) stale union (aged past the freshness window) -> stale note rendered.
  *  (4) closed session shown as 'closed'; unknown kind rendered verbatim.
  *
- * Drives the real SessionUnionCache (the SDK's SessionReadFacade
+ * Drives the real SessionUnionCache (the platform's SessionReadFacade
  * implementation) with fake local/wire readers, same style as
  * src/test/runtime/session-union-cache.test.ts, so this is real facade
  * behavior, not a hand-rolled stand-in.
@@ -18,9 +18,9 @@
 import { frameFromLayer } from '../helpers/surface-frame.ts';
 import { describe, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
-import { SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
-import type { SharedSessionRecord } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { SessionUnionCache, type LocalSessionReader, type WireSessionReader } from '@goodvibes-jev/engine/sdk/platform/runtime/session-spine';
+import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
+import type { SharedSessionRecord } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { SessionUnionCache, type LocalSessionReader, type WireSessionReader } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
 import { SessionPickerModal } from '../../input/session-picker-modal.ts';
 import { renderSessionPickerModal } from '../../renderer/session-picker-modal.ts';
 import { linesToText } from '../setup.ts';

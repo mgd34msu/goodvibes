@@ -23,14 +23,14 @@ function makeTmpDir(): string {
 
 describe('platform/plugins: smoke', () => {
   test('discoverPlugins returns an array for a non-existent directory', async () => {
-    const { discoverPlugins } = await import('../sdk/src/platform/plugins/index.js');
+    const { discoverPlugins } = await import('../platform/src/platform/plugins/index.js');
     const dir = makeTmpDir();
     const result = discoverPlugins({ cwd: dir, homeDir: dir });
     expect(result).toBeInstanceOf(Array);
   });
 
   test('getUserPluginDirectory returns a non-empty string path', async () => {
-    const { getUserPluginDirectory } = await import('../sdk/src/platform/plugins/index.js');
+    const { getUserPluginDirectory } = await import('../platform/src/platform/plugins/index.js');
     const dir = makeTmpDir();
     const result = getUserPluginDirectory({ cwd: dir, homeDir: dir });
     expect(result.length).toBeGreaterThan(0);

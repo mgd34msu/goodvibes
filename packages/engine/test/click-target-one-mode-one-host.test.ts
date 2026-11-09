@@ -27,7 +27,7 @@ import {
   resolveClickTargetHost,
   resolveClickTargetMode,
   resolveReachableBaseUrl,
-} from '../sdk/src/platform/utils/reachable-base-url.ts';
+} from '../platform/src/platform/utils/reachable-base-url.ts';
 
 const LAN_ADDRESS = '192.168.1.42';
 const LAN = () => ({ eth0: [{ address: LAN_ADDRESS, family: 'IPv4', internal: false }] });

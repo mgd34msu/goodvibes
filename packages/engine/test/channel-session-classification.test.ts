@@ -28,20 +28,20 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SharedSessionBroker } from '../sdk/src/platform/control-plane/session-broker.ts';
-import { RouteBindingManager } from '../sdk/src/platform/channels/route-manager.ts';
-import { AutomationRouteStore } from '../sdk/src/platform/automation/store/routes.ts';
-import type { AutomationRouteBinding } from '../sdk/src/platform/automation/routes.ts';
-import { ChannelPolicyManager } from '../sdk/src/platform/channels/policy-manager.ts';
+import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.ts';
+import { RouteBindingManager } from '../platform/src/platform/channels/route-manager.ts';
+import { AutomationRouteStore } from '../platform/src/platform/automation/store/routes.ts';
+import type { AutomationRouteBinding } from '../platform/src/platform/automation/routes.ts';
+import { ChannelPolicyManager } from '../platform/src/platform/channels/policy-manager.ts';
 import {
   attributeInboundSession,
   installInboundIntakeEnrichment,
   ATTRIBUTED_PRINCIPAL_ID_KEY,
   ATTRIBUTED_PRINCIPAL_NAME_KEY,
   ATTRIBUTED_PRINCIPAL_KNOWN_KEY,
-} from '../sdk/src/platform/channel-profiles/index.ts';
-import { PrincipalRegistry, PrincipalStore, UNKNOWN_PRINCIPAL_ID, OWNER_PRINCIPAL_ID } from '../sdk/src/platform/principals/index.ts';
-import { isChannelSurfaceKind } from '../sdk/src/events/surfaces.ts';
+} from '../platform/src/platform/channel-profiles/index.ts';
+import { PrincipalRegistry, PrincipalStore, UNKNOWN_PRINCIPAL_ID, OWNER_PRINCIPAL_ID } from '../platform/src/platform/principals/index.ts';
+import { isChannelSurfaceKind } from '../platform/src/events/surfaces.ts';
 import { trackDisposables } from './_helpers/disposables.ts';
 
 const disposables = trackDisposables();

@@ -9,15 +9,15 @@
  * count, jump key, and push from the classification.
  */
 import { describe, expect, test } from 'bun:test';
-import { adaptContract, adaptContractUnit } from '../sdk/src/platform/runtime/fleet/adapters/contract.ts';
-import { deriveNeedsAttention } from '../sdk/src/platform/runtime/fleet/adapters/agent.ts';
-import { attachFleetEmitBridge } from '../sdk/src/platform/runtime/fleet/emit-bridge.ts';
-import type { FleetSnapshot, ProcessNode } from '../sdk/src/platform/runtime/fleet/types.ts';
-import { PushService } from '../sdk/src/platform/push/index.ts';
-import type { FleetNotice, PushMessage, PushSubscriptionStore, VapidManager } from '../sdk/src/platform/push/index.ts';
-import type { Contract, ContractView, Escalation } from '../sdk/src/platform/contract/types.ts';
+import { adaptContract, adaptContractUnit } from '../platform/src/platform/runtime/fleet/adapters/contract.ts';
+import { deriveNeedsAttention } from '../platform/src/platform/runtime/fleet/adapters/agent.ts';
+import { attachFleetEmitBridge } from '../platform/src/platform/runtime/fleet/emit-bridge.ts';
+import type { FleetSnapshot, ProcessNode } from '../platform/src/platform/runtime/fleet/types.ts';
+import { PushService } from '../platform/src/platform/push/index.ts';
+import type { FleetNotice, PushMessage, PushSubscriptionStore, VapidManager } from '../platform/src/platform/push/index.ts';
+import type { Contract, ContractView, Escalation } from '../platform/src/platform/contract/types.ts';
 import { makeContract, makeUnit } from './contract/fixtures.ts';
-import type { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
+import type { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
 import { EventEmitter } from 'node:events';
 import { trackDisposables } from './_helpers/disposables.ts';
 import { cancellableEscalationScheduler } from './_helpers/push-escalation.ts';

@@ -17,7 +17,7 @@ import { decisionModelPolicyState, tryClassicDecisionFallback } from './decision
  * regex phrase lists that used to guess it (types/errors.ts inferErrorCategory,
  * isBillingOrCreditError, isRateLimitOrQuotaError, isContextSizeExceededError,
  * isNonTransientProviderFailure; utils/error-display.ts
- * inferCategory, inferSource and NETWORK_ERROR_PATTERNS; daemon-sdk
+ * inferCategory, inferSource and NETWORK_ERROR_PATTERNS; daemon-api
  * error-response.ts inferCategory, inferCategoryFromMessage and
  * NETWORK_ERROR_PATTERNS). Status codes and structured error codes stay code;
  * only the meaning of the message text is read here.

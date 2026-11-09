@@ -1,9 +1,9 @@
 /**
  * sessions-union.ts, pure, tolerant readers for the cross-surface session union.
  *
- * The union list is served by GET /api/sessions (sdk.operator.sessions.list) and
+ * The union list is served by GET /api/sessions (platform.operator.sessions.list) and
  * wrapped as `{ totals, sessions }` where each entry is a SharedSessionRecordResponse
- * (packages/daemon-sdk/src/runtime-session-routes.ts). This module reads that wire
+ * (packages/daemon-api/src/runtime-session-routes.ts). This module reads that wire
  * shape defensively: `kind` / `status` / `project` are treated as OPEN STRINGS even
  * though the wire enum is a closed union, so a spine daemon newer than the pinned
  * 0.38 client can return a kind we have never seen and we render it verbatim rather
@@ -32,9 +32,9 @@ export type KnownSessionKind = (typeof KNOWN_SESSION_KINDS)[number];
 export const SESSION_UPDATE_WIRE_EVENT = 'session-update';
 
 /**
- * Local mirror of the SDK's SESSION_UPDATE_INTENT_MAP. Kept here (not imported)
- * because the SDK does not re-export it to the browser bundle; verified against
- * packages/sdk/src/platform/control-plane/method-catalog-events.ts. If the daemon
+ * Local mirror of the platform's SESSION_UPDATE_INTENT_MAP. Kept here (not imported)
+ * because the platform does not re-export it to the browser bundle; verified against
+ * packages/engine/platform/src/platform/control-plane/method-catalog-events.ts. If the daemon
  * adds a new wire event we do not know, sessionUpdateIntent() returns null and the
  * caller invalidates the whole list defensively rather than guessing an intent.
  */
@@ -82,9 +82,9 @@ export interface UnionSessionRecord {
   activeAgentId: string;
   lastError: string;
   /**
-   * Why a closed session closed, when the daemon reported one, the SDK's
+   * Why a closed session closed, when the daemon reported one, the platform's
    * SharedSessionCloseReason ('idle-reaped' | 'user' | 'surface'), carried on
-   * the wire under `metadata.closeReason` (see the SDK's
+   * the wire under `metadata.closeReason` (see the platform's
    * platform/control-plane/session-broker-sessions.ts, SESSION_CLOSE_REASON_METADATA_KEY).
    * Empty string when absent, a build that predates this field, or a session
    * that was never closed. Read tolerantly (not validated against the known
@@ -92,7 +92,7 @@ export interface UnionSessionRecord {
    */
   closeReason: string;
   /**
-   * Channel-origin attribution (principals.*, SDK 1.6.1's initiative family):
+   * Channel-origin attribution (principals.*, platform 1.6.1's initiative family):
    * bridge-channel intake stamps `metadata.attributedPrincipalId/Name/Known` on a
    * session it originates (channel-profiles/intake.ts, ATTRIBUTED_PRINCIPAL_*_KEY).
    * `attributedPrincipalKnown` is null when the wire never stamped this session at
@@ -227,7 +227,7 @@ export function retentionLabel(record: UnionSessionRecord): string | null {
 }
 
 /**
- * Attribution label (principals.*, SDK 1.6.1's initiative family). Returns null when
+ * Attribution label (principals.*, platform 1.6.1's initiative family). Returns null when
  * the wire never stamped this session with attribution at all (attributedPrincipalKnown
  * is null, most sessions), so a plain, unattributed session renders no line. Otherwise
  * "known:false" (unmapped sender identity) renders "unknown principal" PLAINLY, never

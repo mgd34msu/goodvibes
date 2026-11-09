@@ -1,5 +1,5 @@
-import { isConversationUsageAvailable, type Orchestrator } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { ContextAccountingSource } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { isConversationUsageAvailable, type Orchestrator } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ContextAccountingSource } from '@goodvibes-jev/engine/platform/platform/tools';
 /** Read real counters at use time; products bind the compaction owner and active context window. */
 export function createLiveContextAccountingSource(options: {
   readonly orchestrator: Pick<Orchestrator, 'usage' | 'lastInputTokens' | 'getTurnInjections'>;

@@ -3,9 +3,9 @@
 // before each request hop (the first and every redirect), and the request is
 // pinned to the checked address so a second lookup cannot rebind it.
 import { afterEach, describe, expect, test } from 'bun:test';
-import { executeFetchInput, FetchRuntimeService } from '../sdk/src/platform/tools/fetch/runtime.ts';
-import { classifyHostTrustTier, classifyResolvedAddress } from '../sdk/src/platform/tools/fetch/trust-tiers.ts';
-import type { HostResolver } from '../sdk/src/platform/tools/fetch/pinned-request.ts';
+import { executeFetchInput, FetchRuntimeService } from '../platform/src/platform/tools/fetch/runtime.ts';
+import { classifyHostTrustTier, classifyResolvedAddress } from '../platform/src/platform/tools/fetch/trust-tiers.ts';
+import type { HostResolver } from '../platform/src/platform/tools/fetch/pinned-request.ts';
 
 const DNS: Readonly<Record<string, readonly string[]>> = {
   'loopback.test': ['127.0.0.1'],

@@ -1,7 +1,7 @@
 /** Fixed companion paths/provenance source. Runtime execution deferred. */
 import { expect, test } from 'bun:test';
 import { clientReaderPayloadPaths, clientReaderMemberPath, clientReaderMemberAsset, parseClientReaderArtifact,
-  nativeReaderCapabilities } from '../sdk/src/platform/runtime/self-update.js';
+  nativeReaderCapabilities } from '../platform/src/platform/runtime/self-update.js';
 for (const arch of ['x64', 'arm64'] as const) test(`Darwin ${arch} daemon readers bind exactly their binary, vector and compiled SQLite companions`, () => {
   const target = `darwin-${arch}` as const, packageName = '@goodvibes-jev/daemon' as const, root = '/fixture/native', execPath = root + '/goodvibes-daemon';
   const paths = clientReaderPayloadPaths(packageName, target);

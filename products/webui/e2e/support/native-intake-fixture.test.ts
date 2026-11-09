@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { createOperatorNativeConversationIntakeClient } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
+import { createOperatorNativeConversationIntakeClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 import { NATIVE_INTAKE_CAPTURES } from './native-intake-fixture';
 
 test('real auth captures identify a paired admin with both ledger scopes, without retaining credentials', () => {

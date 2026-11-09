@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import type { BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-sdk';
+import type { BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-api';
 import type { OperatorMethodOutput } from '@goodvibes-jev/engine/contracts';
-import { WEBUI_COMMAND_CATALOG_VERSION } from '@goodvibes-jev/engine/sdk/platform/judgment-browser/catalogs';
+import { WEBUI_COMMAND_CATALOG_VERSION } from '@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs';
 import { rankCommandSnapshot, readCommandRankResponse } from './command-judgment';
 import { getCommands, getCommandRegistryRevision, registerCommand, unregisterCommand } from './commands';
-import { readBrowserDecisionPolicy, sdk, tokenStore } from './goodvibes';
+import { readBrowserDecisionPolicy, client as platformClient, tokenStore } from './goodvibes';
 import { browserDecisionPolicy } from './decision-policy';
 import { closeRelayClient, setActiveRoute } from './relay-connection';
 import { clearStoredRelayPairing, storeRelayPairing } from './relay-pairing';
@@ -239,9 +239,9 @@ describe('authenticated palette reader', () => {
 
   for (const [name, change] of [
     ['logout', () => tokenStore.clearToken()],
-    ['account switch', () => sdk.auth.setToken('offline-account-b')],
+    ['account switch', () => platformClient.auth.setToken('offline-account-b')],
     ['account A to B to A', async () => { await tokenStore.setToken('offline-account-b'); await tokenStore.setToken('offline-fixture-token'); }],
-    ['sign out and back in', async () => { await sdk.auth.clearToken(); await sdk.auth.setToken('offline-fixture-token'); }],
+    ['sign out and back in', async () => { await platformClient.auth.clearToken(); await platformClient.auth.setToken('offline-fixture-token'); }],
     ['expiring token entry', () => tokenStore.setTokenEntry('offline-account-b', Date.now() + 60_000)],
     ['route away and back', () => { setActiveRoute('relay'); setActiveRoute('direct'); }],
     ['reconnect', () => closeRelayClient()],

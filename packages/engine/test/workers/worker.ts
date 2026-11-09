@@ -1,8 +1,8 @@
 /**
- * Cloudflare Workers test script for @goodvibes-jev/engine/sdk.
+ * Cloudflare Workers test script for @goodvibes-jev/engine/platform.
  *
  * This script runs inside the Miniflare Workers isolate. It exercises the
- * SDK's ./web entry point against mock HTTP responses to prove the bundle
+ * platform's ./web entry point against mock HTTP responses to prove the bundle
  * loads, initialises, and operates correctly under the Workers V8 runtime.
  *
  * Entry selection: ./web (dist/web.js), the same entry used by browser
@@ -11,17 +11,17 @@
  *
  * Static imports: Miniflare 4 requires static import specifiers (no dynamic
  * import with variable paths). We import from relative paths that Miniflare
- * resolves via modulesRoot pointing to packages/sdk/dist.
+ * resolves via modulesRoot pointing to packages/platform/dist.
  *
  * Workers-specific notes embedded in each handler.
  */
 
 import type { ExportedHandler, ExecutionContext } from '@cloudflare/workers-types';
-// Static imports resolved via Miniflare modulesRoot -> packages/sdk/dist
+// Static imports resolved via Miniflare modulesRoot -> packages/platform/dist
 // @ts-expect-error resolved by esbuild at bundle time, not tsc
-import { createWebGoodVibesSdk } from './web.js';
+import { createWebGoodVibesPlatform } from './web.js';
 // @ts-expect-error resolved by esbuild at bundle time, not tsc
-import * as SdkErrors from './errors.js';
+import * as PlatformErrors from './errors.js';
 
 interface Env {}
 
@@ -33,16 +33,16 @@ function json(data: unknown): Response {
 }
 
 /**
- * /smoke, SDK import + factory call succeeds in isolate.
+ * /smoke, platform import + factory call succeeds in isolate.
  *
  * Workers concern: globalThis.location.origin is undefined in Workers
- * (no browser location object). The SDK's browser.ts resolver throws
+ * (no browser location object). The platform's browser.ts resolver throws
  * ConfigurationError when baseUrl is omitted and location.origin is
  * unavailable. We always pass an explicit baseUrl, this is the correct
  * Workers usage pattern.
  */
 function handleSmoke(): Response {
-  const sdk = createWebGoodVibesSdk({
+  const platformClient = createWebGoodVibesPlatform({
     // Use localhost URL, normalizeBaseUrl requires https:// or a local
     // (127.x / localhost) host for http://. 'mock-daemon.internal' is neither.
     baseUrl: 'http://127.0.0.1:9999',
@@ -50,16 +50,16 @@ function handleSmoke(): Response {
   });
 
   // n-1 guard: typeof x === 'object' returns true for null, check x != null first
-  const hasOperator = sdk.operator != null && typeof sdk.operator === 'object';
-  const hasAuth = sdk.auth != null && typeof sdk.auth === 'object';
-  const hasRealtime = sdk.realtime != null && typeof sdk.realtime === 'object';
+  const hasOperator = platformClient.operator != null && typeof platformClient.operator === 'object';
+  const hasAuth = platformClient.auth != null && typeof platformClient.auth === 'object';
+  const hasRealtime = platformClient.realtime != null && typeof platformClient.realtime === 'object';
 
   return json({
     ok: true,
     hasOperator,
     hasAuth,
     hasRealtime,
-    sdkKeys: Object.keys(sdk).sort(),
+    engineKeys: Object.keys(platformClient).sort(),
   });
 }
 
@@ -71,12 +71,12 @@ function handleSmoke(): Response {
  */
 async function handleAuth(): Promise<Response> {
   const token = 'workers-auth-token-abc123';
-  const sdk = createWebGoodVibesSdk({
+  const platformClient = createWebGoodVibesPlatform({
     baseUrl: 'http://127.0.0.1:9999',
     authToken: token,
   });
 
-  const storedToken = await sdk.auth.getToken();
+  const storedToken = await platformClient.auth.getToken();
   const tokenMatches = storedToken === token;
 
   return json({ ok: true, tokenMatches, storedToken });
@@ -92,7 +92,7 @@ async function handleAuth(): Promise<Response> {
  *
  * fetch is native in Workers, no polyfill needed.
  *
- * Route: sdk.operator.sessions.list() sends GET /api/sessions.
+ * Route: platform.operator.sessions.list() sends GET /api/sessions.
  * The mock returns a real-shape JSON response so result is populated.
  */
 async function handleTransportSuccess(): Promise<Response> {
@@ -119,7 +119,7 @@ async function handleTransportSuccess(): Promise<Response> {
     }],
   };
 
-  // Mock fetch matching the real SDK route: GET /api/sessions
+  // Mock fetch matching the real platform route: GET /api/sessions
   const mockFetch = async (input: RequestInfo | URL, _init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url;
     if (url.includes('/api/sessions')) {
@@ -131,19 +131,19 @@ async function handleTransportSuccess(): Promise<Response> {
     return new Response('Not Found', { status: 404 });
   };
 
-  const sdk = createWebGoodVibesSdk({
+  const platformClient = createWebGoodVibesPlatform({
     baseUrl: 'http://127.0.0.1:9999',
     authToken: 'test-token',
     fetch: mockFetch,
     retry: { maxAttempts: 1 }, // no retries: avoid cross-request timer issues
   });
 
-  // sdk.operator.sessions.list(), GET /api/sessions
+  // platform.operator.sessions.list(), GET /api/sessions
   let result: unknown = null;
   let kind: string | null = null;
   let ctor: string | null = null;
   try {
-    result = await sdk.operator.sessions.list();
+    result = await platformClient.operator.sessions.list();
   } catch (err: unknown) {
     kind = (err as Record<string, unknown>)?.kind as string ?? null;
     ctor = (err as Record<string, unknown>)?.constructor instanceof Function
@@ -162,7 +162,7 @@ async function handleTransportSuccess(): Promise<Response> {
 /**
  * /transport-error, HTTP transport with 5xx response (error path).
  *
- * Mock returns a 500 to verify the SDK's error taxonomy surfaces
+ * Mock returns a 500 to verify the platform's error taxonomy surfaces
  * a typed 'service' error kind rather than a raw runtime crash.
  */
 async function handleTransportError(): Promise<Response> {
@@ -177,7 +177,7 @@ async function handleTransportError(): Promise<Response> {
     );
   };
 
-  const sdk = createWebGoodVibesSdk({
+  const platformClient = createWebGoodVibesPlatform({
     baseUrl: 'http://127.0.0.1:9999',
     authToken: 'test-token',
     fetch: mockFetch,
@@ -188,10 +188,10 @@ async function handleTransportError(): Promise<Response> {
   let kind: string | null = null;
   let ctor: string | null = null;
   try {
-    result = await sdk.operator.sessions.list();
+    result = await platformClient.operator.sessions.list();
   } catch (err: unknown) {
     // Return kind and ctor as separate fields to avoid conflating
-    // typed SDKErrorKind values with raw constructor names.
+    // typed EngineErrorKind values with raw constructor names.
     kind = (err as Record<string, unknown>)?.kind as string ?? null;
     ctor = (err as Record<string, unknown>)?.constructor instanceof Function
       ? ((err as Record<string, unknown>).constructor as { name?: string }).name ?? null
@@ -210,30 +210,30 @@ async function handleTransportError(): Promise<Response> {
  * /errors, error taxonomy is present and typed in Workers isolate.
  *
  * Workers concern: none for pure error class instantiation.
- * The SDK error classes use no node: or Bun.* APIs.
+ * The platform error classes use no node: or Bun.* APIs.
  */
 function handleErrors(): Response {
   // Only include actual Error subclasses, not plain functions or non-Error exports.
-  const errorClassNames = Object.keys(SdkErrors).filter((k) => {
-    const v = (SdkErrors as Record<string, unknown>)[k];
+  const errorClassNames = Object.keys(PlatformErrors).filter((k) => {
+    const v = (PlatformErrors as Record<string, unknown>)[k];
     return typeof v === 'function' && (v as { prototype?: unknown }).prototype instanceof Error;
   });
 
-  let sdkErrorWorks = false;
-  const GoodVibesSdkError = (SdkErrors as Record<string, unknown>).GoodVibesSdkError as
+  let engineErrorWorks = false;
+  const GoodVibesError = (PlatformErrors as Record<string, unknown>).GoodVibesError as
     | (new (msg: string, meta: Record<string, unknown>) => Error)
     | undefined;
-  if (GoodVibesSdkError) {
-    const e = new GoodVibesSdkError('test', {
+  if (GoodVibesError) {
+    const e = new GoodVibesError('test', {
       kind: 'unknown',
       category: 'internal',
       source: 'transport',
       recoverable: false,
     });
-    sdkErrorWorks = e instanceof Error && e.message === 'test';
+    engineErrorWorks = e instanceof Error && e.message === 'test';
   }
 
-  return json({ ok: true, errorClassNames, sdkErrorWorks });
+  return json({ ok: true, errorClassNames, engineErrorWorks });
 }
 
 /**

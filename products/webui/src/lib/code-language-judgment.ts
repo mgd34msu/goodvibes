@@ -1,8 +1,8 @@
-import { WEBUI_CODE_LANGUAGES, type WebuiCodeLanguage } from '@goodvibes-jev/engine/sdk/platform/judgment-browser/catalogs';
-import type { BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-sdk';
+import { WEBUI_CODE_LANGUAGES, type WebuiCodeLanguage } from '@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs';
+import type { BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-api';
 import { captureChoiceAnswer } from '@goodvibes-jev/judgment/decisions';
 import { runBrowserJudgment } from './goodvibes';
-import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/sdk/browser/decision-policy';
+import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/platform/browser/decision-policy';
 import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime } from './client-lifetime';
 import { randomUuid } from './uuid';
 

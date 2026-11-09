@@ -9,8 +9,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { choiceAnswer } from '@goodvibes-jev/judgment/testing';
-import { AttemptError } from '../../sdk/src/platform/orchestration/attempts.js';
-import { qualifyId, splitQualifiedId } from '../../sdk/src/platform/contract/index.js';
+import { AttemptError } from '../../platform/src/platform/orchestration/attempts.js';
+import { qualifyId, splitQualifiedId } from '../../platform/src/platform/contract/index.js';
 import type { AnswerContext } from './plan-support.js';
 import { makeHarness, oneUnitPlan, startContract, waitFor, type AgentScript, type Harness } from './runner-support.js';
 

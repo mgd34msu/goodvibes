@@ -1,6 +1,6 @@
-import { GitService } from '@goodvibes-jev/engine/sdk/platform/git';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { GitService } from '@goodvibes-jev/engine/platform/platform/git';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 /** Git state shown in the header bar. */
 export interface GitHeaderInfo {

@@ -1,19 +1,19 @@
 /** UNRUN native resource lifecycle regressions: actual Git and private identity
  * bookkeeping, no model answers or generated fixture expectations. */
 import crypto from 'node:crypto';
-import * as lockModule from '../sdk/src/platform/workspace/checkpoint/cross-process-lock.js';
+import * as lockModule from '../platform/src/platform/workspace/checkpoint/cross-process-lock.js';
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { WorktreeIdentityRegistry, WORKTREE_IDENTITY_FILE } from '../sdk/src/platform/orchestration/worktree-identities.js';
-import { createWorktreeIsolationManager } from '../sdk/src/platform/orchestration/worktree-isolation.js';
-import { IsolatedWorktree } from '../sdk/src/platform/agents/worktree.js';
-import { GitService } from '../sdk/src/platform/git/service.js';
-import { CURRENT_WORKSTREAM_SCHEMA_VERSION, emptyWorkItemUsage, type OrchestrationEvent, type WorkItem, type Workstream } from '../sdk/src/platform/orchestration/types.js';
-import { createNativeDataWriteOwner, assertNativeReaderCompatible, nativeReaderCapabilities } from '../sdk/src/platform/runtime/native-reader-compatibility.js';
-import { realUpdateFileIo } from '../sdk/src/platform/runtime/self-update.js';
-import type { NativeDataWriteOwner } from '../sdk/src/platform/runtime/native-reader-compatibility.js';
+import { WorktreeIdentityRegistry, WORKTREE_IDENTITY_FILE } from '../platform/src/platform/orchestration/worktree-identities.js';
+import { createWorktreeIsolationManager } from '../platform/src/platform/orchestration/worktree-isolation.js';
+import { IsolatedWorktree } from '../platform/src/platform/agents/worktree.js';
+import { GitService } from '../platform/src/platform/git/service.js';
+import { CURRENT_WORKSTREAM_SCHEMA_VERSION, emptyWorkItemUsage, type OrchestrationEvent, type WorkItem, type Workstream } from '../platform/src/platform/orchestration/types.js';
+import { createNativeDataWriteOwner, assertNativeReaderCompatible, nativeReaderCapabilities } from '../platform/src/platform/runtime/native-reader-compatibility.js';
+import { realUpdateFileIo } from '../platform/src/platform/runtime/self-update.js';
+import type { NativeDataWriteOwner } from '../platform/src/platform/runtime/native-reader-compatibility.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const path of roots.splice(0)) rmSync(path, { recursive: true, force: true }); });
@@ -53,7 +53,7 @@ test('fresh exact tuples persist opaque labels with no checksum and concurrent m
 
 test('two actual processes serialize allocation of the same private tuple', async () => {
   const f = fixture();
-  const moduleUrl = new URL('../sdk/src/platform/orchestration/worktree-identities.ts', import.meta.url).href;
+  const moduleUrl = new URL('../platform/src/platform/orchestration/worktree-identities.ts', import.meta.url).href;
   const source = `import { WorktreeIdentityRegistry } from ${JSON.stringify(moduleUrl)}; const row = await new WorktreeIdentityRegistry(process.argv[1]).reserve(JSON.parse(process.argv[2])); process.stdout.write(row.branch);`;
   const start = () => Bun.spawn([process.execPath, '--eval', source, f.common, JSON.stringify(key)], { stdout: 'pipe', stderr: 'pipe' });
   const one = start(), two = start();

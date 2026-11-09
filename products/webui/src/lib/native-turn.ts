@@ -3,8 +3,8 @@ import {
   nativeHostedTurnRequestSchema,
   type NativeHostedTurnRequest,
   type NativeHostedTurnSnapshot,
-} from "@goodvibes-jev/engine/sdk/platform/hosted-sessions/native-turn-client";
-import type { NativeConversationIntakeLookupResult } from "@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client";
+} from "@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client";
+import type { NativeConversationIntakeLookupResult } from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client";
 import type {
   NativeIntakeBrowserBinding,
   NativeIntakeBrowserRecord,

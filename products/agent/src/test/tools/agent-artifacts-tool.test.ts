@@ -6,8 +6,8 @@ import { inflateRawSync } from 'node:zlib';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort } from '@goodvibes-jev/judgment/testing';
 import { authoredPrivacyAnswer, errorText } from '../helpers/authored-diagnostic-readings.ts';
-import type { ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { createAgentArtifactsTool, registerAgentArtifactsTool } from '../../tools/agent-artifacts-tool.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 

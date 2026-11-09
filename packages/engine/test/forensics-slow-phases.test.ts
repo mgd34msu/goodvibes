@@ -10,8 +10,8 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { EntryType, Question } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { readSlowPhases } from '../sdk/src/platform/runtime/forensics/slow-phases.ts';
-import type { PhaseTimingEntry } from '../sdk/src/platform/runtime/forensics/types.ts';
+import { readSlowPhases } from '../platform/src/platform/runtime/forensics/slow-phases.ts';
+import type { PhaseTimingEntry } from '../platform/src/platform/runtime/forensics/types.ts';
 
 type PhaseState = { readonly phase: string; readonly durationMs: number };
 

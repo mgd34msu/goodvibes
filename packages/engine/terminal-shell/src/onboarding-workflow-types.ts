@@ -1,4 +1,4 @@
-import type { SecretScope } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { SecretScope } from '@goodvibes-jev/engine/platform/platform/config';
 import type { OnboardingNetworkMode, OnboardingReopenEditAcknowledgementState, OnboardingProviderRoutingSnapshot, OnboardingRuntimeDefaultsSnapshot, OnboardingServicesSnapshot, OnboardingSubscriptionsSnapshot, OnboardingSecretsSnapshot, OnboardingAuthSnapshot, OnboardingSurfacesSnapshot, OnboardingSurfaceRecord, } from './onboarding-data-types.js';
 import type { OnboardingMode, OnboardingAcknowledgementTarget, OnboardingAcknowledgementSnapshot } from './onboarding-state-types.js';
 import type { SnapshotReadIssue } from './onboarding-snapshot-reads.js';

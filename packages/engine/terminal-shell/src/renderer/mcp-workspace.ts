@@ -1,6 +1,6 @@
 import { formRows } from './mcp-form-rows.js';
-import { peekSystemMessagePresentation } from '@goodvibes-jev/engine/sdk/platform/runtime';
-import type { RegisteredTool } from '@goodvibes-jev/engine/sdk/platform/mcp';
+import { peekSystemMessagePresentation } from '@goodvibes-jev/engine/platform/platform/runtime';
+import type { RegisteredTool } from '@goodvibes-jev/engine/platform/platform/mcp';
 import type { McpWorkspaceRow, McpWorkspaceServerRow, McpWorkspaceFormField } from '../mcp-workspace-model.js';
 import { activeTokens } from './theme.js';
 import { beginModal, finishModal, searchRow, scrollCountText, type KitHint, type ModalFrame, type SurfaceLayer } from './surface-kit.js';

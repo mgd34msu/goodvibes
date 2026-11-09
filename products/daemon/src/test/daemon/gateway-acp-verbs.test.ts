@@ -9,7 +9,7 @@
  * runtime/service-graph.ts threaded no ACP host, so both were cataloged,
  * advertised as invokable, and served by nothing. service-graph.ts now constructs
  * an AcpHostService (wired to the shared approval broker and shared session
- * broker, exactly like the SDK's own reference composition) and threads it
+ * broker, exactly like the platform's own reference composition) and threads it
  * into the gateway verb group registration and the fleet registry.
  *
  * ── What this file does NOT do ────────────────────────────────────────────

@@ -4,8 +4,8 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { gzipSync } from 'node:zlib';
-import { nativeReaderCapabilities, sha256, clientReaderMemberAsset, clientReaderPayloadPaths } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
-import { type ClientReaderArtifact, type ClientReaderPackage, type ClientReaderTarget } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { nativeReaderCapabilities, sha256, clientReaderMemberAsset, clientReaderPayloadPaths } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import { type ClientReaderArtifact, type ClientReaderPackage, type ClientReaderTarget } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 
 export function suiteArchive(files: Readonly<Record<string, string>>): Buffer {
   const blocks: Buffer[] = [];

@@ -4,11 +4,11 @@ import {
   acquireCrossProcessLock,
   confirmFileDurable,
   writeJsonFileAtomic,
-} from '@goodvibes-jev/engine/sdk/platform/state/durable-file-io';
+} from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
 import {
   nativeWorkSubmissionRequestSchema,
   type NativeWorkSubmissionRequest,
-} from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-submission-client';
+} from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-submission-client';
 
 export const NATIVE_SUBMISSION_JOURNAL_MAX_RECORDS = 16;
 export const NATIVE_SUBMISSION_JOURNAL_MAX_BYTES = 2 * 1024 * 1024;

@@ -6,9 +6,9 @@ import { SavedSessionPickerState } from '@goodvibes-jev/engine/terminal-shell/se
  * and handles load actions.
  */
 
-import type { SessionInfo, SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
+import type { SessionInfo, SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import type { ConversationManager } from '../core/conversation';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { readConversationMessageSnapshots } from '../core/conversation-message-snapshot.ts';
 import { quoteSlashCommandArg } from './slash-command-parser.ts';
 

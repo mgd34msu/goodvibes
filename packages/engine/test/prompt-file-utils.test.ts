@@ -2,9 +2,9 @@ import { afterEach, describe, expect, it, spyOn, type Mock } from 'bun:test';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readPromptFile } from '../sdk/src/platform/utils/prompt-loader.js';
-import { walkDir } from '../sdk/src/platform/utils/walk-dir.js';
-import { logger } from '../sdk/src/platform/utils/logger.js';
+import { readPromptFile } from '../platform/src/platform/utils/prompt-loader.js';
+import { walkDir } from '../platform/src/platform/utils/walk-dir.js';
+import { logger } from '../platform/src/platform/utils/logger.js';
 
 const tempRoots: string[] = [];
 

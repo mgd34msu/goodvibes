@@ -20,22 +20,22 @@ import { join } from 'node:path';
 import { waitFor } from './_helpers/test-timeout.js';
 import { makeControllableStore, readOnDisk, replaceInternalStore } from './_helpers/controllable-store.js';
 
-import { AutomationJobStore } from '../sdk/src/platform/automation/store/jobs.js';
-import { AutomationRunStore } from '../sdk/src/platform/automation/store/runs.js';
-import { AutomationRouteStore } from '../sdk/src/platform/automation/store/routes.js';
-import { AutomationSourceStore } from '../sdk/src/platform/automation/store/sources.js';
-import type { AutomationSourceRecord } from '../sdk/src/platform/automation/sources.js';
-import type { AutomationJob } from '../sdk/src/platform/automation/jobs.js';
-import type { AutomationRun } from '../sdk/src/platform/automation/runs.js';
-import type { AutomationRouteBinding } from '../sdk/src/platform/automation/routes.js';
-import { WorkspaceRegistrationStore } from '../sdk/src/platform/workspace/registration/index.js';
-import { TaskScheduler } from '../sdk/src/platform/scheduler/scheduler.js';
-import { CiWatchService, CiWatchStore } from '../sdk/src/platform/ci-watch/index.js';
-import type { CiJob, CiStatusSource } from '../sdk/src/platform/ci-watch/index.js';
-import { PrincipalRegistry } from '../sdk/src/platform/principals/registry.js';
-import { PrincipalStore } from '../sdk/src/platform/principals/store.js';
-import { ChannelProfileRegistry } from '../sdk/src/platform/channel-profiles/registry.js';
-import { ChannelProfileStore } from '../sdk/src/platform/channel-profiles/store.js';
+import { AutomationJobStore } from '../platform/src/platform/automation/store/jobs.js';
+import { AutomationRunStore } from '../platform/src/platform/automation/store/runs.js';
+import { AutomationRouteStore } from '../platform/src/platform/automation/store/routes.js';
+import { AutomationSourceStore } from '../platform/src/platform/automation/store/sources.js';
+import type { AutomationSourceRecord } from '../platform/src/platform/automation/sources.js';
+import type { AutomationJob } from '../platform/src/platform/automation/jobs.js';
+import type { AutomationRun } from '../platform/src/platform/automation/runs.js';
+import type { AutomationRouteBinding } from '../platform/src/platform/automation/routes.js';
+import { WorkspaceRegistrationStore } from '../platform/src/platform/workspace/registration/index.js';
+import { TaskScheduler } from '../platform/src/platform/scheduler/scheduler.js';
+import { CiWatchService, CiWatchStore } from '../platform/src/platform/ci-watch/index.js';
+import type { CiJob, CiStatusSource } from '../platform/src/platform/ci-watch/index.js';
+import { PrincipalRegistry } from '../platform/src/platform/principals/registry.js';
+import { PrincipalStore } from '../platform/src/platform/principals/store.js';
+import { ChannelProfileRegistry } from '../platform/src/platform/channel-profiles/registry.js';
+import { ChannelProfileStore } from '../platform/src/platform/channel-profiles/store.js';
 
 function tempDir(prefix: string): string {
   return mkdtempSync(join(tmpdir(), `gv-${prefix}-`));

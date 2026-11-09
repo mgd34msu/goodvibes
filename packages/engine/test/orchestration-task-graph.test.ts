@@ -6,7 +6,7 @@
  * cycle is dropped.
  */
 import { describe, expect, test } from 'bun:test';
-import { ELASTIC_PHASE_CAPACITY, clusterOf, planTaskGraph, type GraphTask } from '../sdk/src/platform/orchestration/index.js';
+import { ELASTIC_PHASE_CAPACITY, clusterOf, planTaskGraph, type GraphTask } from '../platform/src/platform/orchestration/index.js';
 
 const task = (id: string, files: string[], severity: GraphTask['severity'] = 'major', dependsOn: string[] = []): GraphTask => ({ id, title: id, task: `do ${id}`, severity, files, dependsOn });
 

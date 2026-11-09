@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { readTarGzEntries } from '@goodvibes-jev/engine/sdk/platform/browser';
+import { readTarGzEntries } from '@goodvibes-jev/engine/platform/platform/browser';
 import { assertDaemonSqliteArchitecture, daemonSqliteRuntime, type DaemonSqliteOwner } from '../src/cli/native-sqlite-runtime.ts';
 import { VERSION } from '../src/version.ts';
 
@@ -45,7 +45,7 @@ export async function buildDaemonSqliteRuntime(root: string, target: string): Pr
   try {
     for (const file of selected) writeFileSync(join(scratch, file.name), file.bytes, { flag: 'wx', mode: 0o600 });
     const library = join(scratch, 'libsqlite3.dylib');
-    execFileSync('xcrun', ['--sdk', 'macosx', 'clang', '-arch', arch === 'x64' ? 'x86_64' : 'arm64',
+    execFileSync('xcrun', ['--engine', 'macosx', 'clang', '-arch', arch === 'x64' ? 'x86_64' : 'arm64',
       '-dynamiclib', '-O2', '-DSQLITE_THREADSAFE=1', '-DSQLITE_ENABLE_COLUMN_METADATA', '-DSQLITE_ENABLE_FTS5',
       '-DSQLITE_ENABLE_RTREE', '-DSQLITE_ENABLE_DBSTAT_VTAB', '-DSQLITE_ENABLE_LOAD_EXTENSION',
       '-Wl,-install_name,@rpath/libsqlite3.dylib', join(scratch, 'sqlite3.c'), '-o', library],

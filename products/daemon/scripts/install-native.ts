@@ -6,7 +6,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
   applyVerifiedUpdate, captureUpdateFileIo, realUpdateFileIo, rollbackKeptPrevious, sha256, UpdateTransactionError,
   assertDaemonNativePayloadBytes, retainDaemonNativeFiles, assertNativeReaderCompatible, resolveDaemonInstallationReaders, type UpdateFileIo, type UpdateFetchLike,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+} from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { readVerifiedDaemonCiArtifact } from './ci-artifact.ts';
 import { assertNativeInstallHost, assertPath, expectedModes, inspectInstallation, inspectInstallationIdentity, targetPaths, validateOwner, type DaemonInstallOwner, type InstallationReceipt } from '../src/cli/native-installation.ts';
 import { daemonCiPayloads, daemonNativeHost, type DaemonNativeTarget } from '../src/cli/native-artifact.ts';

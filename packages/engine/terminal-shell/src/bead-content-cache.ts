@@ -1,4 +1,4 @@
-import type { ToolCall } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
 import { beadBody, beadSummary, needsAttention, type BeadBody, type BeadStatus, type BeadSummary } from './renderer/bead.js';
 
 interface Entry {

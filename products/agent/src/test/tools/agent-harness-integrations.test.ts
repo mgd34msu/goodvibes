@@ -1,11 +1,11 @@
 import { localEndpointId } from '../../tools/agent-harness-local-model-endpoints.ts';
-import { createObservabilityReadModels } from '@goodvibes-jev/engine/sdk/platform/runtime/ui';
-import { ApiTokenAuditor } from '@goodvibes-jev/engine/sdk/platform/security';
-import { PluginManager } from '@goodvibes-jev/engine/sdk/platform/plugins';
-import { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
-import { SandboxSessionRegistry } from '@goodvibes-jev/engine/sdk/platform/runtime/sandbox';
+import { createObservabilityReadModels } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
+import { ApiTokenAuditor } from '@goodvibes-jev/engine/platform/platform/security';
+import { PluginManager } from '@goodvibes-jev/engine/platform/platform/plugins';
+import { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
+import { SandboxSessionRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/sandbox';
 import { createRuntimeStore } from '@/runtime/index.ts';
-import { VoiceProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/voice';
+import { VoiceProviderRegistry } from '@goodvibes-jev/engine/platform/platform/voice';
 import { cleanupResearchScreeningFixtures } from '../helpers/research-screening.ts';
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
@@ -13,8 +13,8 @@ import { resetAgentMcpCallRouteForTests } from '../../tools/agent-mcp-call-route
 import { SqliteDecisionLog, withDecisionLog, choice, score, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import { PolicyRuntimeState } from '@goodvibes-jev/engine/sdk/platform/runtime/security';
+import { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import { PolicyRuntimeState } from '@goodvibes-jev/engine/platform/platform/runtime/security';
 import { registerAgentArtifactsTool } from '../../tools/agent-artifacts-tool.ts';
 import { recordAgentChannelDeliveryReceipt } from '../../agent/channel-delivery-receipts.ts';
 import { AgentDocumentRegistry } from '../../agent/document-registry.ts';
@@ -1738,7 +1738,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
             readonly missingSignals: readonly string[];
             readonly providerHealth: {
               readonly status: string;
-              readonly sdkContract: {
+              readonly engineContract: {
                 readonly providerHealthTypes: string;
                 readonly importSurface: string;
               };
@@ -1782,12 +1782,12 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(cloud?.readiness?.dimensions.find((dimension) => dimension.id === 'latency')?.summary).toContain('rubric reading');
       expect(cloud?.readiness?.missingSignals.join('\n')).not.toContain('No live latency benchmark');
       expect(cloud?.readiness?.providerHealth.status).toBe('not-reachable-in-command-context');
-      expect(cloud?.readiness?.providerHealth.sdkContract.providerHealthTypes).toBe('available');
-      expect(cloud?.readiness?.providerHealth.sdkContract.importSurface).toBe('@goodvibes-jev/engine/sdk/platform/runtime/ui');
+      expect(cloud?.readiness?.providerHealth.engineContract.providerHealthTypes).toBe('available');
+      expect(cloud?.readiness?.providerHealth.engineContract.importSurface).toBe('@goodvibes-jev/engine/platform/platform/runtime/ui');
       expect(cloud?.readiness?.providerHealth.daemonPublication.status).toBe('not-published');
       expect(cloud?.readiness?.providerHealth.daemonPublication.requiredPath).toBe('context.platform.readModels.providerHealth');
       expect(cloud?.readiness?.providerHealth.agentConsumption.status).toBe('waiting-for-published-feed');
-      expect(cloud?.readiness?.providerHealth.missingSignals.join('\n')).toContain('SDK provider-health types are available');
+      expect(cloud?.readiness?.providerHealth.missingSignals.join('\n')).toContain('platform provider-health types are available');
       expect(cloud?.readiness?.nextStep).toContain('separately confirmed');
 
       const local = routing.models.find((model) => model.modelRouteId === 'ollama:qwen2.5-coder:7b');

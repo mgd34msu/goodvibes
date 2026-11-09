@@ -6,13 +6,13 @@
  * point) and returns the ones read as a match, in catalog order. A blank
  * filter lists everything without asking.
  */
-import { JudgmentHeldError } from '../sdk/src/platform/types/judgment-held.ts';
+import { JudgmentHeldError } from '../platform/src/platform/types/judgment-held.ts';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { Question } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { createHookApi } from '../sdk/src/platform/hooks/hook-api.ts';
-import { listHookPointContracts } from '../sdk/src/platform/hooks/contracts.ts';
+import { createHookApi } from '../platform/src/platform/hooks/hook-api.ts';
+import { listHookPointContracts } from '../platform/src/platform/hooks/contracts.ts';
 
 /** A port that reads each hook point's match from `probabilities` by pattern (default no). */
 function contractPort(probabilities: Readonly<Record<string, number>>) {

@@ -4,7 +4,7 @@ import type {
   DaemonErrorSource,
   StructuredDaemonErrorBody,
 } from './daemon-error-contract.js';
-import { SDKErrorCodes, isErrorCode, isKnownErrorCode, type SDKErrorCode } from './error-codes.js';
+import { EngineErrorCodes, isErrorCode, isKnownErrorCode, type EngineErrorCode } from './error-codes.js';
 
 export type {
   DaemonErrorSource,
@@ -13,25 +13,25 @@ export type {
 export { DaemonErrorCategory, MEMORY_RECORD_NOT_FOUND_CODE } from './daemon-error-contract.js';
 // Re-exported unchanged from error-codes.ts (split out to stay under the file's
 // 800-line cap, see that file's header comment).
-export { SDKErrorCodes, isErrorCode, isKnownErrorCode, type SDKErrorCode };
+export { EngineErrorCodes, isErrorCode, isKnownErrorCode, type EngineErrorCode };
 
 /**
- * `'contract'` is an SDK-internal category used when the daemon returns
+ * `'contract'` is an platform-internal category used when the daemon returns
  * a response that violates the expected contract schema. It is NOT part of the
  * daemon wire schema (`DaemonErrorCategory`) and MUST NOT be marshalled over
  * the wire, doing so will cause the daemon to schema-reject the error envelope.
- * Treat `'contract'` as a local SDK sentinel only.
+ * Treat `'contract'` as a local platform sentinel only.
  */
 export type ErrorCategory = DaemonErrorCategory | 'contract';
 
 export type ErrorSource = DaemonErrorSource | 'contract';
 
 /**
- * Tagged union discriminant for all SDK errors. Use this for exhaustive
+ * Tagged union discriminant for all platform errors. Use this for exhaustive
  * switch/if-else handling instead of `instanceof` chains.
  *
  * @example
- * if (error instanceof GoodVibesSdkError) {
+ * if (error instanceof GoodVibesError) {
  *   if (error.kind === 'rate-limit') {
  *     await delay(error.retryAfterMs ?? 1000);
  *   } else if (error.kind === 'auth') {
@@ -39,7 +39,7 @@ export type ErrorSource = DaemonErrorSource | 'contract';
  *   }
  * }
  */
-export type SDKErrorKind =
+export type EngineErrorKind =
   | 'auth'
   | 'config'
   | 'contract'
@@ -53,7 +53,7 @@ export type SDKErrorKind =
   | 'validation'
   | 'unknown';
 
-function inferKind(category: ErrorCategory): SDKErrorKind {
+function inferKind(category: ErrorCategory): EngineErrorKind {
   switch (category) {
     case 'authentication':
     case 'authorization':
@@ -88,17 +88,17 @@ function inferKind(category: ErrorCategory): SDKErrorKind {
 }
 
 /**
- * Infers the canonical {@link SDKErrorCode} from an {@link ErrorCategory}.
+ * Infers the canonical {@link EngineErrorCode} from an {@link ErrorCategory}.
  * Used internally to populate `code` when no explicit code is provided.
  * @internal
  */
-function inferCodeFromCategory(category: ErrorCategory): SDKErrorCode {
+function inferCodeFromCategory(category: ErrorCategory): EngineErrorCode {
   switch (category) {
     case 'authentication': return 'AUTH_REQUIRED';
     case 'authorization': return 'PERMISSION_DENIED';
     case 'billing': return 'PAYMENT_REQUIRED';
     case 'permission': return 'PERMISSION_DENIED';
-    case 'config': return 'SDK_CONFIGURATION_ERROR';
+    case 'config': return 'ENGINE_CONFIGURATION_ERROR';
     case 'contract': return 'CONTRACT_MISMATCH';
     case 'network': return 'NETWORK_UNREACHABLE';
     case 'timeout': return 'TIMEOUT';
@@ -115,13 +115,13 @@ function inferCodeFromCategory(category: ErrorCategory): SDKErrorCode {
   }
 }
 
-export interface GoodVibesSdkErrorOptions {
+export interface GoodVibesErrorOptions {
   /**
-   * A typed error code for programmatic matching. May be an {@link SDKErrorCode}
+   * A typed error code for programmatic matching. May be an {@link EngineErrorCode}
    * literal or any custom string for caller-supplied codes.
-   * When omitted, the SDK infers a code from `category` or `status`.
+   * When omitted, the platform infers a code from `category` or `status`.
    */
-  readonly code?: SDKErrorCode | (string & {}) | undefined;
+  readonly code?: EngineErrorCode | (string & {}) | undefined;
   readonly category?: ErrorCategory | undefined;
   readonly source?: ErrorSource | undefined;
   readonly recoverable?: boolean | undefined;
@@ -157,13 +157,13 @@ function inferCategory(status?: number): ErrorCategory {
 }
 
 /**
- * Infers the canonical {@link SDKErrorCode} for HTTP status codes that have a
+ * Infers the canonical {@link EngineErrorCode} for HTTP status codes that have a
  * direct 1-to-1 mapping, used when no explicit code is present in the response
  * body. Returns `undefined` when the code should fall through to category-based
  * inference (e.g. for structured-body responses that supply their own category).
  * @internal
  */
-function inferCodeFromStatus(status: number): SDKErrorCode | undefined {
+function inferCodeFromStatus(status: number): EngineErrorCode | undefined {
   switch (status) {
     case 400: return 'VALIDATION_FAILED';
     case 401: return 'AUTH_REQUIRED';
@@ -198,8 +198,8 @@ const ERROR_CATEGORIES = new Set<ErrorCategory>([
   'unknown',
 ]);
 
-const GOODVIBES_SDK_ERROR_BRAND = Symbol.for('pellux.goodvibes.sdk.error');
-const HTTP_STATUS_ERROR_BRAND = Symbol.for('pellux.goodvibes.sdk.http-status-error');
+const GOODVIBES_ERROR_BRAND = Symbol.for('goodvibes.engine.error');
+const HTTP_STATUS_ERROR_BRAND = Symbol.for('goodvibes.engine.http-status-error');
 
 function readErrorCategory(value: unknown): ErrorCategory | undefined {
   return typeof value === 'string' && ERROR_CATEGORIES.has(value as ErrorCategory)
@@ -229,24 +229,24 @@ function inferCategoryFromCause(cause: unknown, seen = new Set<object>(), depth 
 }
 
 /**
- * Base error class for all errors thrown by the GoodVibes SDK.
+ * Base error class for all errors thrown by the GoodVibes platform.
  *
  * Every error carries a structured `category`, `source`, and `code` that allow
  * callers to handle specific failure modes without string-matching messages.
  *
- * The `code` field is typed as `SDKErrorCode | (string & {})`, SDK-produced
- * errors always carry a known {@link SDKErrorCode}, while caller-supplied codes
+ * The `code` field is typed as `EngineErrorCode | (string & {})`, platform-produced
+ * errors always carry a known {@link EngineErrorCode}, while caller-supplied codes
  * remain valid arbitrary strings.
  *
  * ### Narrowing by code
  * ```ts
- * import { GoodVibesSdkError, isErrorCode, SDKErrorCodes } from '@goodvibes-jev/engine/errors';
+ * import { GoodVibesError, isErrorCode, EngineErrorCodes } from '@goodvibes-jev/engine/errors';
  *
  * catch (err) {
- *   if (err instanceof GoodVibesSdkError) {
- *     if (isErrorCode(err, SDKErrorCodes.RATE_LIMITED)) {
+ *   if (err instanceof GoodVibesError) {
+ *     if (isErrorCode(err, EngineErrorCodes.RATE_LIMITED)) {
  *       await delay(err.retryAfterMs ?? 1000);
- *     } else if (isErrorCode(err, SDKErrorCodes.TOKEN_EXPIRED)) {
+ *     } else if (isErrorCode(err, EngineErrorCodes.TOKEN_EXPIRED)) {
  *       await refreshToken();
  *     }
  *   }
@@ -255,35 +255,35 @@ function inferCategoryFromCause(cause: unknown, seen = new Set<object>(), depth 
  *
  * ### Narrowing by kind
  * ```ts
- * import { GoodVibesSdkError, HttpStatusError, ConfigurationError } from '@goodvibes-jev/engine/errors';
+ * import { GoodVibesError, HttpStatusError, ConfigurationError } from '@goodvibes-jev/engine/errors';
  *
  * try {
- *   await sdk.operator.agents.list();
+ *   await platform.operator.agents.list();
  * } catch (err) {
  *   if (err instanceof HttpStatusError && err.category === 'rate_limit') {
  *     // Back off and retry after err.retryAfterMs
  *   } else if (err instanceof ConfigurationError) {
- *     // Invalid SDK setup, not recoverable
- *   } else if (err instanceof GoodVibesSdkError) {
+ *     // Invalid platform setup, not recoverable
+ *   } else if (err instanceof GoodVibesError) {
  *     console.error(err.category, err.hint);
  *   }
  * }
  * ```
  */
-export class GoodVibesSdkError extends Error {
-  public readonly kind: SDKErrorKind;
+export class GoodVibesError extends Error {
+  public readonly kind: EngineErrorKind;
   /**
-   * Typed error code for programmatic matching. SDK-produced errors always set
-   * a {@link SDKErrorCode}; caller-supplied codes may be any string.
+   * Typed error code for programmatic matching. platform-produced errors always set
+   * a {@link EngineErrorCode}; caller-supplied codes may be any string.
    *
    * **Note:** `code` and `category` are inferred independently and can diverge.
-   * For example, `new GoodVibesSdkError('…', { status: 409 })` yields
+   * For example, `new GoodVibesError('…', { status: 409 })` yields
    * `code === 'CONFLICT'` (from `inferCodeFromStatus`) while
    * `category === 'unknown'` (because `inferCategory` intentionally returns
    * `'unknown'` for 409, the caller must supply `category` explicitly to get
    * a meaningful category for conflict-style errors).
    */
-  public readonly code: SDKErrorCode | (string & {});
+  public readonly code: EngineErrorCode | (string & {});
   public readonly category: ErrorCategory;
   public readonly source: ErrorSource;
   public readonly recoverable: boolean;
@@ -302,23 +302,23 @@ export class GoodVibesSdkError extends Error {
   public override readonly cause?: unknown | undefined;
 
   static override [Symbol.hasInstance](value: unknown): boolean {
-    if (this !== GoodVibesSdkError) {
+    if (this !== GoodVibesError) {
       return typeof value === 'object'
         && value !== null
         && this.prototype.isPrototypeOf(value);
     }
     if (typeof value !== 'object' || value === null) return false;
     const record = value as Record<PropertyKey, unknown>;
-    return record[GOODVIBES_SDK_ERROR_BRAND] === true;
+    return record[GOODVIBES_ERROR_BRAND] === true;
   }
 
-  constructor(message: string, options: GoodVibesSdkErrorOptions = {}) {
+  constructor(message: string, options: GoodVibesErrorOptions = {}) {
     const category = options.category
       ?? inferCategoryFromCause(options.cause)
       ?? inferCategory(options.status);
     super(message, options.cause === undefined ? undefined : { cause: options.cause });
     this.name = this.constructor.name;
-    Object.defineProperty(this, GOODVIBES_SDK_ERROR_BRAND, {
+    Object.defineProperty(this, GOODVIBES_ERROR_BRAND, {
       value: true,
       enumerable: false,
       configurable: false,
@@ -403,29 +403,29 @@ function omitUndefined(record: Record<string, unknown>): Record<string, unknown>
 }
 
 /**
- * Thrown when the SDK is misconfigured (e.g. missing `baseUrl`, no fetch
+ * Thrown when the platform is misconfigured (e.g. missing `baseUrl`, no fetch
  * implementation available, or calling a mutation on a read-only auth resolver).
  *
  * Always non-recoverable (`recoverable: false`).
- * Category: `'config'`. Kind: `'config'`. Code: `'SDK_CONFIGURATION_ERROR'`.
+ * Category: `'config'`. Kind: `'config'`. Code: `'ENGINE_CONFIGURATION_ERROR'`.
  *
  * @example
  * import { ConfigurationError } from '@goodvibes-jev/engine/errors';
  *
  * try {
- *   await sdk.auth.setToken('x');
+ *   await platform.auth.setToken('x');
  * } catch (err) {
  *   if (err instanceof ConfigurationError) {
- *     // SDK was constructed with getAuthToken, token mutation not supported
+ *     // platform was constructed with getAuthToken, token mutation not supported
  *   }
  * }
  */
-export class ConfigurationError extends GoodVibesSdkError {
+export class ConfigurationError extends GoodVibesError {
   /**
    * Brand contract, `code` is the source of truth, not the prototype chain.
-   * A `GoodVibesSdkError` constructed directly with `code: 'SDK_CONFIGURATION_ERROR'`
+   * A `GoodVibesError` constructed directly with `code: 'ENGINE_CONFIGURATION_ERROR'`
    * will pass `instanceof ConfigurationError` even if its prototype is only
-   * `GoodVibesSdkError`. Callers that need strict prototype checking should use
+   * `GoodVibesError`. Callers that need strict prototype checking should use
    * `Object.getPrototypeOf(err) === ConfigurationError.prototype` instead.
    */
   static override [Symbol.hasInstance](value: unknown): boolean {
@@ -434,16 +434,16 @@ export class ConfigurationError extends GoodVibesSdkError {
         && value !== null
         && this.prototype.isPrototypeOf(value);
     }
-    // Require both the brand (real SDK error instance) and matching code
-    // to prevent plain objects like { code: 'SDK_CONFIGURATION_ERROR' } from passing.
-    return GoodVibesSdkError[Symbol.hasInstance](value)
-      && (value as Record<PropertyKey, unknown>).code === 'SDK_CONFIGURATION_ERROR';
+    // Require both the brand (real platform error instance) and matching code
+    // to prevent plain objects like { code: 'ENGINE_CONFIGURATION_ERROR' } from passing.
+    return GoodVibesError[Symbol.hasInstance](value)
+      && (value as Record<PropertyKey, unknown>).code === 'ENGINE_CONFIGURATION_ERROR';
   }
 
-  constructor(message: string, options: GoodVibesSdkErrorOptions = {}) {
+  constructor(message: string, options: GoodVibesErrorOptions = {}) {
     super(message, {
       ...options,
-      code: options.code ?? 'SDK_CONFIGURATION_ERROR',
+      code: options.code ?? 'ENGINE_CONFIGURATION_ERROR',
       category: 'config',
       source: options.source ?? 'config',
       recoverable: false,
@@ -456,26 +456,26 @@ export class ConfigurationError extends GoodVibesSdkError {
  * (unexpected shape, missing required fields, etc.).
  *
  * Always non-recoverable (`recoverable: false`).
- * Category: `'contract'`. Kind: `'contract'`. Code: `'SDK_CONTRACT_ERROR'`.
+ * Category: `'contract'`. Kind: `'contract'`. Code: `'ENGINE_CONTRACT_ERROR'`.
  *
  * @example
  * import { ContractError } from '@goodvibes-jev/engine/errors';
  *
  * try {
- *   const result = await sdk.operator.agents.get({ id: agentId });
+ *   const result = await platform.operator.agents.get({ id: agentId });
  * } catch (err) {
  *   if (err instanceof ContractError) {
- *     // Daemon returned an unexpected shape, SDK version mismatch?
+ *     // Daemon returned an unexpected shape, platform version mismatch?
  *     console.error('Contract violation:', err.message);
  *   }
  * }
  */
-export class ContractError extends GoodVibesSdkError {
+export class ContractError extends GoodVibesError {
   /**
    * Brand contract, `code` is the source of truth, not the prototype chain.
-   * A `GoodVibesSdkError` constructed directly with `code: 'SDK_CONTRACT_ERROR'`
+   * A `GoodVibesError` constructed directly with `code: 'ENGINE_CONTRACT_ERROR'`
    * will pass `instanceof ContractError` even if its prototype is only
-   * `GoodVibesSdkError`. Callers that need strict prototype checking should use
+   * `GoodVibesError`. Callers that need strict prototype checking should use
    * `Object.getPrototypeOf(err) === ContractError.prototype` instead.
    */
   static override [Symbol.hasInstance](value: unknown): boolean {
@@ -484,16 +484,16 @@ export class ContractError extends GoodVibesSdkError {
         && value !== null
         && this.prototype.isPrototypeOf(value);
     }
-    // Require both the brand (real SDK error instance) and matching code
-    // to prevent plain objects like { code: 'SDK_CONTRACT_ERROR' } from passing.
-    return GoodVibesSdkError[Symbol.hasInstance](value)
-      && (value as Record<PropertyKey, unknown>).code === 'SDK_CONTRACT_ERROR';
+    // Require both the brand (real platform error instance) and matching code
+    // to prevent plain objects like { code: 'ENGINE_CONTRACT_ERROR' } from passing.
+    return GoodVibesError[Symbol.hasInstance](value)
+      && (value as Record<PropertyKey, unknown>).code === 'ENGINE_CONTRACT_ERROR';
   }
 
-  constructor(message: string, options: GoodVibesSdkErrorOptions = {}) {
+  constructor(message: string, options: GoodVibesErrorOptions = {}) {
     super(message, {
       ...options,
-      code: options.code ?? 'SDK_CONTRACT_ERROR',
+      code: options.code ?? 'ENGINE_CONTRACT_ERROR',
       category: 'contract',
       source: options.source ?? 'contract',
       recoverable: false,
@@ -535,7 +535,7 @@ export class ContractError extends GoodVibesSdkError {
  * import { HttpStatusError } from '@goodvibes-jev/engine/errors';
  *
  * try {
- *   await sdk.operator.agents.list();
+ *   await platform.operator.agents.list();
  * } catch (err) {
  *   if (err instanceof HttpStatusError) {
  *     if (err.category === 'rate_limit') {
@@ -546,13 +546,13 @@ export class ContractError extends GoodVibesSdkError {
  *   }
  * }
  */
-export class HttpStatusError extends GoodVibesSdkError {
+export class HttpStatusError extends GoodVibesError {
   /**
    * Brand contract: `instanceof HttpStatusError` relies on a dedicated Symbol
    * brand stamped in the constructor, enabling cross-realm identity checks that
    * are independent of the `code` field.
    *
-   * A `GoodVibesSdkError` constructed directly with `code: 'SDK_HTTP_STATUS_ERROR'`
+   * A `GoodVibesError` constructed directly with `code: 'ENGINE_HTTP_STATUS_ERROR'`
    * will also pass `instanceof HttpStatusError` for backward compatibility with
    * callers that serialise/deserialise errors by code. Callers that need strict
    * prototype checking should use
@@ -564,20 +564,20 @@ export class HttpStatusError extends GoodVibesSdkError {
         && value !== null
         && this.prototype.isPrototypeOf(value);
     }
-    if (!GoodVibesSdkError[Symbol.hasInstance](value)) return false;
+    if (!GoodVibesError[Symbol.hasInstance](value)) return false;
     const record = value as Record<PropertyKey, unknown>;
     // Primary: dedicated brand symbol (set in constructor, works in same realm).
     if (record[HTTP_STATUS_ERROR_BRAND] === true) return true;
     // Fallback: code-based brand for cross-realm / serialised-error compat.
-    return record.code === 'SDK_HTTP_STATUS_ERROR';
+    return record.code === 'ENGINE_HTTP_STATUS_ERROR';
   }
 
-  constructor(message: string, options: GoodVibesSdkErrorOptions = {}) {
+  constructor(message: string, options: GoodVibesErrorOptions = {}) {
     super(message, {
       ...options,
-      // Default code retains 'SDK_HTTP_STATUS_ERROR' when no explicit code is
+      // Default code retains 'ENGINE_HTTP_STATUS_ERROR' when no explicit code is
       // supplied. Use createHttpStatusError() for status-specific semantic codes.
-      code: options.code ?? 'SDK_HTTP_STATUS_ERROR',
+      code: options.code ?? 'ENGINE_HTTP_STATUS_ERROR',
       source: options.source ?? 'transport',
     });
     // Stamp the brand AFTER super() so the symbol is always present on instances
@@ -655,8 +655,8 @@ export function createHttpStatusError(
 
   return new HttpStatusError(message, {
     // Explicitly inject the status-inferred code so HttpStatusError's own
-    // default ('SDK_HTTP_STATUS_ERROR') does not suppress the specific code.
-    code: inferCodeFromStatus(status) ?? 'SDK_HTTP_STATUS_ERROR',
+    // default ('ENGINE_HTTP_STATUS_ERROR') does not suppress the specific code.
+    code: inferCodeFromStatus(status) ?? 'ENGINE_HTTP_STATUS_ERROR',
     status,
     url,
     method,

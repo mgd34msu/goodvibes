@@ -16,7 +16,7 @@ import {
   evaluateCommandAST,
   tokenize,
   buildDenialExplanation,
-} from '../sdk/src/platform/runtime/permissions/normalization/index.js';
+} from '../platform/src/platform/runtime/permissions/normalization/index.js';
 
 const HEREDOC = "NODE_PATH=/tmp node - <<'NODE'\nconsole.log(1); rm -rf /x\nNODE";
 

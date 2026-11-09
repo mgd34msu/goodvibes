@@ -18,17 +18,17 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { InboundExpectationRegistry } from '../sdk/src/platform/email/inbound/expectation-registry.ts';
-import { PersistedExpectationStore } from '../sdk/src/platform/email/inbound/expectation-store.ts';
+import { InboundExpectationRegistry } from '../platform/src/platform/email/inbound/expectation-registry.ts';
+import { PersistedExpectationStore } from '../platform/src/platform/email/inbound/expectation-store.ts';
 import {
   createEmailExpectationCancelHandler,
   createEmailExpectationListHandler,
   createEmailExpectationOpenHandler,
   registerEmailExpectationGatewayMethods,
   type EmailExpectationService,
-} from '../sdk/src/platform/control-plane/routes/email-expectations.ts';
-import { builtinGatewayEmailMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-email.ts';
-import type { GatewayMethodInvocation } from '../sdk/src/platform/control-plane/method-catalog-shared.ts';
+} from '../platform/src/platform/control-plane/routes/email-expectations.ts';
+import { builtinGatewayEmailMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-email.ts';
+import type { GatewayMethodInvocation } from '../platform/src/platform/control-plane/method-catalog-shared.ts';
 
 const dirs: string[] = [];
 

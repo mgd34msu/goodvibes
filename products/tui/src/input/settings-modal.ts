@@ -17,7 +17,7 @@ import { moveSettingsSelection, selectSettingsTarget } from '@goodvibes-jev/engi
  *   - Feature-unit headers (each capability's real enablement row in its domain)
  *
  * Every save is a plain configManager.set(key, value) on a domain settings
- * key; the SDK settings bridge keeps the runtime gate manager in sync, and
+ * key; the platform settings bridge keeps the runtime gate manager in sync, and
  * this modal re-reads the manager after enablement writes so pending-restart
  * markers are shown honestly at the point of change.
  *
@@ -25,17 +25,17 @@ import { moveSettingsSelection, selectSettingsTarget } from '@goodvibes-jev/engi
  * Mutation logic delegates to settings-modal-mutations.ts (applySettingValue, etc.).
  */
 
-import { type ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
+import { type ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ModelPickerTarget } from './model-picker.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ServiceInspectionQuery } from '@/runtime/index.ts';
 import { setSecretBackedSettingValue, type SettingsDaemonCredentialWriter, type SettingsSecretsManager } from './settings-modal-secrets.ts';
-import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/sdk/platform/payments';
+import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/platform/platform/payments';
 import { PAYMENTS_CVV_HANDLING_CONFIG_KEY } from './payments-config.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
-import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
-import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
+import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { ConnectionStatus } from './commands/connection-status.ts';
 import { initialConnectionEntries, refreshConnectionEntries } from './settings-modal-connections.ts';
 
@@ -830,7 +830,7 @@ export class SettingsModal extends TerminalSettingsModalState<
       ...(this.reportError ? { onAsyncError: this.reportError } : {}),
     });
 
-    // Feature-unit headers write plain domain keys; the SDK settings bridge
+    // Feature-unit headers write plain domain keys; the platform settings bridge
     // has already applied the change to the gate manager (live flip for
     // runtime-toggleable features, pending-restart marker for startup-gated
     // ones). Re-read the manager for every header bound to this key so the
@@ -847,7 +847,7 @@ export class SettingsModal extends TerminalSettingsModalState<
 
     // Selecting 'prompt' for payments.cvvHandling states the tradeoff at the
     // moment of selection, not just in the documentation region, see the
-    // SDK's own CVV_PROMPT_TRADEOFF_WARNING (platform/payments).
+    // platform's own CVV_PROMPT_TRADEOFF_WARNING (platform/payments).
     if (key === PAYMENTS_CVV_HANDLING_CONFIG_KEY && value === 'prompt') {
       this.lastSettingEffectMessage = CVV_PROMPT_TRADEOFF_WARNING;
     }

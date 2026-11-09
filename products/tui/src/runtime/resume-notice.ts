@@ -38,11 +38,11 @@
  *     as well would announce the same snapshot twice.
  */
 
-import { readLastSessionPointer } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import type { SessionSurface } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import type { ContractView } from '@goodvibes-jev/engine/sdk/platform/contract';
-import type { SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
-import type { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/sdk/platform/workspace';
+import { readLastSessionPointer } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import type { SessionSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import type { ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
+import type { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
+import type { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/platform/platform/workspace';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
 
 /** Recorded lifecycle outcomes are authoritative; active persisted work is resumable. */

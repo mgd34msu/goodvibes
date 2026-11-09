@@ -3,29 +3,29 @@
  *
  * Every GoodVibes repo keeps a small `toolchain.config.json` (or a
  * `toolchain.config.ts` that default-exports a {@link ToolchainConfig}) at its
- * root. The published the `@goodvibes-jev/engine` toolchain package holds the behavior;
+ * root. The `@goodvibes-jev/engine` toolchain holds the behavior;
  * the config holds the repo-specific values (package names, binary matrix,
  * coverage floors, publish ordering) so one implementation serves every repo.
  *
  * The full contract and per-repo examples are documented in
- * `docs/release-and-publishing.md` (SDK repo).
+ * `docs/release-and-publishing.md` (engine repo).
  */
 
 import { z } from 'zod/v4';
 
-/** Where the SDK dependency pin lives and how the pin gate is parameterized. */
-export interface SdkPinConfig {
+/** Where the engine dependency pin lives and how the pin gate is parameterized. */
+export interface EnginePinConfig {
   /** Name of the engine package the repo depends on, e.g. `@goodvibes-jev/engine`. */
-  readonly sdkPackage: string;
-  /** Manifest group the pin is read from. TUI/webui use `dependencies`; the agent bundles the SDK as a `devDependencies` pin. */
+  readonly enginePackage: string;
+  /** Manifest group the pin is read from. TUI/webui use `dependencies`; the agent bundles the engine as a `devDependencies` pin. */
   readonly pinSource: 'dependencies' | 'devDependencies';
   /** Lockfile whose text must resolve the pin, e.g. `bun.lock`. */
   readonly lockfile: string;
   /** Path (relative to repo root) of the dev-link overlay marker whose presence blocks a cut. */
   readonly overlayMarker: string;
-  /** Source roots scanned for non-npm SDK imports. */
+  /** Source roots scanned for non-npm engine imports. */
   readonly sourceRoots: readonly string[];
-  /** When true, also assert every SDK subpath import resolves to a key in the installed package's `exports` map (webui browser-bundle gate). */
+  /** When true, also assert every engine subpath import resolves to a key in the installed package's `exports` map (webui browser-bundle gate). */
   readonly enforceExportsMap: boolean;
 }
 
@@ -133,7 +133,7 @@ export interface PerJobGreenConfig {
 export interface ToolchainConfig {
   /** npm name of the repo's primary package, e.g. `@goodvibes-jev/engine`. */
   readonly packageName: string;
-  readonly sdkPin?: SdkPinConfig;
+  readonly enginePin?: EnginePinConfig;
   readonly build?: BuildConfig;
   readonly coverage?: CoverageConfig;
   readonly smoke?: SmokeConfig;
@@ -142,7 +142,7 @@ export interface ToolchainConfig {
   readonly perJobGreen?: PerJobGreenConfig;
 }
 
-export const DEFAULT_SDK_PACKAGE = '@goodvibes-jev/engine';
+export const DEFAULT_ENGINE_PACKAGE = '@goodvibes-jev/engine';
 export const DEFAULT_LOCKFILE = 'bun.lock';
 export const DEFAULT_REGISTRY = 'https://registry.npmjs.org';
 export const DEFAULT_POLL_INTERVAL_MS = 20_000;
@@ -153,14 +153,15 @@ export const DEFAULT_DEADLINE_MS = 1_800_000;
 export const DEFAULT_RETRY_ATTEMPTS = 8;
 export const DEFAULT_RETRY_DELAY_MS = 7_000;
 
-/** Fill an SdkPinConfig with the conventional defaults for any missing field. */
-export function resolveSdkPinConfig(partial: Partial<SdkPinConfig> | undefined): SdkPinConfig {
-  const sdkPackage = partial?.sdkPackage ?? DEFAULT_SDK_PACKAGE;
+/** Fill an EnginePinConfig with the conventional defaults for any missing field. */
+export function resolveEnginePinConfig(partial: Partial<EnginePinConfig> | undefined): EnginePinConfig {
+  const enginePackage = partial?.enginePackage ?? DEFAULT_ENGINE_PACKAGE;
+  if (!/^(?:@[^/\s]+\/)?[^/@\s]+$/.test(enginePackage)) throw new Error('enginePackage must name a package root, not an export subpath.');
   return {
-    sdkPackage,
+    enginePackage,
     pinSource: partial?.pinSource ?? 'dependencies',
     lockfile: partial?.lockfile ?? DEFAULT_LOCKFILE,
-    overlayMarker: partial?.overlayMarker ?? `node_modules/${sdkPackage}/.local-sdk-overlay.json`,
+    overlayMarker: partial?.overlayMarker ?? `node_modules/${enginePackage}/.local-engine-overlay.json`,
     sourceRoots: partial?.sourceRoots ?? ['src'],
     enforceExportsMap: partial?.enforceExportsMap ?? false,
   };
@@ -188,15 +189,15 @@ export function resolvePerJobGreenConfig(partial: Partial<PerJobGreenConfig> & P
 // pattern for "keep unknown keys" (see zod-schemas/events.ts's
 // RuntimeEventRecordSchema), preferred over the deprecated `.passthrough()`.
 //
-// sdkPin and perJobGreen are the two sections with a `resolve*Config`
+// enginePin and perJobGreen are the two sections with a `resolve*Config`
 // function that fills every field from a `Partial<...>` plus defaults, so
 // requiredness for those two lives in the resolver, not here: every field
 // below is optional and the resolver decides what is missing. The other
 // sections (build, coverage, smoke, releaseCut, publish) have no resolver,
 // their consumers read the parsed fields directly, so their required fields
 // stay required here.
-const SdkPinConfigSchema = z.object({
-  sdkPackage: z.string().optional(),
+const EnginePinConfigSchema = z.object({
+  enginePackage: z.string().optional(),
   pinSource: z.enum(['dependencies', 'devDependencies']).optional(),
   lockfile: z.string().optional(),
   overlayMarker: z.string().optional(),
@@ -265,7 +266,7 @@ const PerJobGreenConfigSchema = z.object({
 
 const ToolchainConfigSchema = z.object({
   packageName: z.string().min(1, 'must be a non-empty string'),
-  sdkPin: SdkPinConfigSchema.optional(),
+  enginePin: EnginePinConfigSchema.optional(),
   build: BuildConfigSchema.optional(),
   coverage: CoverageConfigSchema.optional(),
   smoke: SmokeConfigSchema.optional(),

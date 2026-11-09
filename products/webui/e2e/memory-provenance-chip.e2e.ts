@@ -1,7 +1,7 @@
 /**
- * The memory-provenance chip proof, end to end: the SDK's TURN_COMPLETED wire field
- * (`metadata.memory.recordIds`, packages/sdk/src/events/turn.ts's TurnCompletedMetadata,
- * stamped by the orchestrator turn loop, SDK commit 89690d07) is read by
+ * The memory-provenance chip proof, end to end: the platform's TURN_COMPLETED wire field
+ * (`metadata.memory.recordIds`, packages/engine/platform/src/events/turn.ts's TurnCompletedMetadata,
+ * stamped by the orchestrator turn loop, platform commit 89690d07) is read by
  * lib/memory-provenance.ts's honest-absence convention and rendered by
  * MemoryProvenanceChip.tsx, gated on the owner-ruled default-OFF
  * memoryProvenanceChipEnabled preference (lib/ui-preferences.ts).

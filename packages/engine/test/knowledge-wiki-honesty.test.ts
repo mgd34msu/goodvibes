@@ -1,35 +1,35 @@
-import { configureKnowledgeArtifactReferences } from '../sdk/src/platform/knowledge/artifact-reference-ensemble.js';
+import { configureKnowledgeArtifactReferences } from '../platform/src/platform/knowledge/artifact-reference-ensemble.js';
 import { extractionValueFixtureFor, extractionValueFixtureReading } from './_helpers/knowledge-extraction-value-readings.js';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import type { Question } from '@goodvibes-jev/judgment';
-import { SQLiteStore } from '../sdk/src/platform/state/sqlite-store.js';
-import { createSchema } from '../sdk/src/platform/knowledge/store-schema.js';
-import { writeKnowledgeNodeRow } from '../sdk/src/platform/knowledge/store-node-history.js';
-import { KnowledgeNodeActivationHeldError } from '../sdk/src/platform/knowledge/activation/types.js';
+import { SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
+import { createSchema } from '../platform/src/platform/knowledge/store-schema.js';
+import { writeKnowledgeNodeRow } from '../platform/src/platform/knowledge/store-node-history.js';
+import { KnowledgeNodeActivationHeldError } from '../platform/src/platform/knowledge/activation/types.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { KnowledgeService } from '../sdk/src/platform/knowledge/service.js';
-import { KnowledgeSemanticService } from '../sdk/src/platform/knowledge/semantic/service.js';
-import type { KnowledgeSemanticLlm } from '../sdk/src/platform/knowledge/semantic/types.js';
-import { ArtifactStore } from '../sdk/src/platform/artifacts/index.js';
-import { HomeGraphService } from '../sdk/src/platform/knowledge/home-graph/service.js';
-import { isRepairedAnswerGap } from '../sdk/src/platform/knowledge/semantic/answer-gaps.js';
-import { resetHomeGraphSpace } from '../sdk/src/platform/knowledge/home-graph/reset.js';
-import { homeAssistantKnowledgeSpaceId, knowledgeSpaceMetadata } from '../sdk/src/platform/knowledge/spaces.js';
-import type { KnowledgeNodeRecord } from '../sdk/src/platform/knowledge/types.js';
-import { createDaemonKnowledgeRouteHandlers } from '../daemon-sdk/dist/index.js';
-import type { DaemonKnowledgeRouteContext } from '../daemon-sdk/dist/index.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { KnowledgeService } from '../platform/src/platform/knowledge/service.js';
+import { KnowledgeSemanticService } from '../platform/src/platform/knowledge/semantic/service.js';
+import type { KnowledgeSemanticLlm } from '../platform/src/platform/knowledge/semantic/types.js';
+import { ArtifactStore } from '../platform/src/platform/artifacts/index.js';
+import { HomeGraphService } from '../platform/src/platform/knowledge/home-graph/service.js';
+import { isRepairedAnswerGap } from '../platform/src/platform/knowledge/semantic/answer-gaps.js';
+import { resetHomeGraphSpace } from '../platform/src/platform/knowledge/home-graph/reset.js';
+import { homeAssistantKnowledgeSpaceId, knowledgeSpaceMetadata } from '../platform/src/platform/knowledge/spaces.js';
+import type { KnowledgeNodeRecord } from '../platform/src/platform/knowledge/types.js';
+import { createDaemonKnowledgeRouteHandlers } from '../daemon-api/dist/index.js';
+import type { DaemonKnowledgeRouteContext } from '../daemon-api/dist/index.js';
 import { trackDisposables } from './_helpers/disposables.ts';
-import type { MemoryRegistry } from '../sdk/src/platform/state/memory-registry.js';
-import type { MemoryStore } from '../sdk/src/platform/state/memory-store.js';
+import type { MemoryRegistry } from '../platform/src/platform/state/memory-registry.js';
+import type { MemoryStore } from '../platform/src/platform/state/memory-store.js';
 import { useArtifactKindReadings } from './helpers/artifact-kind-readings.ts';
 import { withPublicKnowledgeReadings } from './_helpers/public-knowledge-readings.ts';
-import { homeGraphPagePriorityInstructions } from '../sdk/src/platform/knowledge/home-graph/batteries/page-priority.js';
+import { homeGraphPagePriorityInstructions } from '../platform/src/platform/knowledge/home-graph/batteries/page-priority.js';
 
 useArtifactKindReadings();
 
@@ -83,7 +83,7 @@ afterEach(async () => {
 });
 
 // KnowledgeService's constructor builds a KnowledgeScheduleService that owns a
-// setTimeout chain (packages/sdk/src/platform/knowledge/scheduling.ts); dispose()
+// setTimeout chain (packages/platform/src/platform/knowledge/scheduling.ts); dispose()
 // is declared private (compile-time only), so the disposer casts to reach it.
 const disposables = trackDisposables();
 function disposeKnowledgeService(service: KnowledgeService): void {
@@ -419,7 +419,7 @@ describe('knowledge wiki honesty: packet truncation disclosure', () => {
 
   test('the knowledge.packet wire schema exposes the truncation disclosure fields', async () => {
     const { KNOWLEDGE_PACKET_SCHEMA } = await import(
-      '../sdk/src/platform/control-plane/operator-contract-schemas-knowledge.js'
+      '../platform/src/platform/control-plane/operator-contract-schemas-knowledge.js'
     );
     const schema = KNOWLEDGE_PACKET_SCHEMA as { properties?: Record<string, unknown>; required?: string[] };
     for (const field of ['truncated', 'totalCandidates', 'droppedCount', 'droppedForBudget', 'budgetExhausted']) {

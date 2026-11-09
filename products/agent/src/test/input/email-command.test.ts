@@ -21,8 +21,8 @@ import { rmSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerEmailRuntimeCommands } from '../../input/commands/email-runtime.ts';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { ensureEmailConfigDefaults } from '@goodvibes-jev/engine/sdk/platform/email';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { ensureEmailConfigDefaults } from '@goodvibes-jev/engine/platform/platform/email';
 import type { ConfigKey } from '../../config/index.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 

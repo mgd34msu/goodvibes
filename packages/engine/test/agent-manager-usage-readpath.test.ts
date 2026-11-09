@@ -13,15 +13,15 @@
  *    reflect real numbers once the executor finishes. This test spawns an
  *    agent with a stub executor that mimics orchestrator-runner's real
  *    behaviour (accumulate usage, then flip status to 'completed') and
- *    asserts the manager's own read path sees it, no SDK change needed here.
+ *    asserts the manager's own read path sees it, no platform change needed here.
  *
  * 2. The contract owner path is covered separately in the contract runner's
  *    tests, where the owner AgentRecord never runs an LLM turn itself and needs
  *    its usage/toolCallCount rolled up from its units' agents when it settles.
  */
 import { describe, expect, test } from 'bun:test';
-import { AgentManager } from '../sdk/src/platform/tools/agent/manager.js';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.js';
+import { AgentManager } from '../platform/src/platform/tools/agent/manager.js';
+import type { ConfigManager } from '../platform/src/platform/config/manager.js';
 
 describe('AgentManager: usage read path after direct-executed completion', () => {
   test('getStatus() and list() return real usage/toolCallCount after a direct agent completes', async () => {

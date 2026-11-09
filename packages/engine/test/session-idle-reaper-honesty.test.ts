@@ -1,17 +1,17 @@
 import { describe, expect, test } from 'bun:test';
-import { sweepSharedSessions } from '../sdk/src/platform/control-plane/session-broker-gc.ts';
+import { sweepSharedSessions } from '../platform/src/platform/control-plane/session-broker-gc.ts';
 import {
   closeSharedSessionRecord,
   readSessionCloseReason,
   registerSharedSession,
   reopenSharedSessionRecord,
   type RegisterBrokerOps,
-} from '../sdk/src/platform/control-plane/session-broker-sessions.ts';
+} from '../platform/src/platform/control-plane/session-broker-sessions.ts';
 import type {
   SharedSessionParticipant,
   SharedSessionRecord,
   RegisterSharedSessionInput,
-} from '../sdk/src/platform/control-plane/session-types.ts';
+} from '../platform/src/platform/control-plane/session-types.ts';
 
 // IDLE-EMPTY REAPER must not close LIVE surface sessions, and a
 // system-reaped session must reopen honestly on the next heartbeat while a

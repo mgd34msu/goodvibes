@@ -1,5 +1,5 @@
 import { screeningAnswers } from './screening-answers.js';
-import { createProtectedSourceOwner } from '../../sdk/src/platform/security/source-screening/owner.js';
+import { createProtectedSourceOwner } from '../../platform/src/platform/security/source-screening/owner.js';
 
 export interface RouteSourceProposal { readonly revision: string; readonly parts: readonly string[]; }
 export interface RouteSourceSpan { readonly part: number; readonly start: number; readonly end: number; }

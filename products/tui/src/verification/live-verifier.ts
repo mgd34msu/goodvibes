@@ -13,7 +13,7 @@ export type { LiveVerificationStatus, LiveVerificationCheck } from '@goodvibes-j
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { auditGoodVibesHome } from '../config/goodvibes-home-audit.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 export interface LiveVerificationOptions {
   homeDir: string;
@@ -167,9 +167,9 @@ export async function buildLiveVerificationReport(options: LiveVerificationOptio
     await fetchCheck('daemon-status', 'Authenticated daemon /status', `${daemonBaseUrl}/status`, token, (status, body) => {
       if (status !== 200) return { status: 'fail', summary: `/status returned ${status}.` };
       try {
-        const parsed = JSON.parse(body) as { version?: unknown; sdkVersion?: unknown };
+        const parsed = JSON.parse(body) as { version?: unknown; engineVersion?: unknown };
         const version =
-          typeof parsed.sdkVersion === 'string' ? parsed.sdkVersion : typeof parsed.version === 'string' ? parsed.version : 'unknown';
+          typeof parsed.engineVersion === 'string' ? parsed.engineVersion : typeof parsed.version === 'string' ? parsed.version : 'unknown';
         return { status: 'pass', summary: `/status returned 200, version ${version}.` };
       } catch {
         return { status: 'warn', summary: '/status returned 200 but was not parseable JSON.' };

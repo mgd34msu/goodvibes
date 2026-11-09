@@ -6,9 +6,9 @@
  * architecture line ceiling, and cohesive on its own: everything here answers
  * "when does this process stop, and what do we call the way it stopped".
  */
-import type { BackgroundProcess } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { BackgroundProcess } from '@goodvibes-jev/engine/platform/platform/tools';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import { withLongLivedProcessReading, type ProcessClassificationOptions } from './agent-harness-process-classification.ts';
 import type { AgentHarnessBackgroundProcessArgs } from './agent-harness-background-processes-types.ts';
 

@@ -1,7 +1,7 @@
 import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 import { resolveConnectedHostBaseUrl } from '../config/connected-host-dial.ts';
-import { getOperatorContract } from '@goodvibes-jev/engine/sdk/contracts';
+import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
 import { requirePlatform, requireShellPaths } from '../input/commands/runtime-services.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { CliServicePosture } from '../cli/service-posture.ts';
@@ -102,7 +102,7 @@ export async function connectedHostAuthPosture(
       manualTokenRoute: 'agent_harness mode:"pairing_route" pairingRouteId:"manual-token-display"',
       provisionTokenRoute: provisionConnectedHostTokenRoute(),
       tokenProvisioningOwner: 'connected GoodVibes host canonical token store',
-      tokenProvisioningSource: 'SDK getOrCreateCompanionToken writes ~/.goodvibes/daemon/operator-tokens.json with mode 0600; Agent exposes it only through confirmed setup and never returns the raw token',
+      tokenProvisioningSource: 'platform getOrCreateCompanionToken writes ~/.goodvibes/daemon/operator-tokens.json with mode 0600; Agent exposes it only through confirmed setup and never returns the raw token',
     },
   };
 }
@@ -461,7 +461,7 @@ export function connectedHostBootstrapPlan(
         purpose: 'Install the package that provides both the TUI and goodvibes-daemon launchers.',
         commands: [
           'bun add -g @goodvibes-jev/tui',
-          'bun pm trust -g @goodvibes-jev/tui @goodvibes-jev/engine/sdk core-js tree-sitter-css tree-sitter-javascript tree-sitter-json tree-sitter-python tree-sitter-typescript',
+          'bun pm trust -g @goodvibes-jev/tui @goodvibes-jev/engine/platform core-js tree-sitter-css tree-sitter-javascript tree-sitter-json tree-sitter-python tree-sitter-typescript',
         ],
         expected: 'Global package install completes and Bun reports lifecycle scripts are trusted.',
         fallback: 'If release assets cannot download, use the goodvibes-tui source checkout and run bun install before bun run daemon.',

@@ -1,6 +1,6 @@
-import type { ShellPathService } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
-import type { MemoryClass, MemoryReviewState, MemoryScope } from '@goodvibes-jev/engine/sdk/platform/state';
-import { memoryRecordTemporalStatus } from '@goodvibes-jev/engine/sdk/platform/state';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import type { MemoryClass, MemoryReviewState, MemoryScope } from '@goodvibes-jev/engine/platform/platform/state';
+import { memoryRecordTemporalStatus } from '@goodvibes-jev/engine/platform/platform/state';
 
 export const VALID_CLASSES: MemoryClass[] = ['decision', 'constraint', 'incident', 'pattern', 'fact', 'risk', 'runbook', 'architecture', 'ownership'];
 export const VALID_SCOPES: MemoryScope[] = ['session', 'project', 'team'];

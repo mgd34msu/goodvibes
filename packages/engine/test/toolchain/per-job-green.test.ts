@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { verifyPerJobGreen, resolvePerJobGreenConfig, runIdFromDetailsUrl, captureLogger, type HttpResponse } from '@goodvibes-jev/engine/toolchain';
 
-const config = resolvePerJobGreenConfig({ owner: 'mgd34msu', repo: 'goodvibes-sdk', pollIntervalMs: 1, deadlineMs: 1000, retryAttempts: 3, retryDelayMs: 1 });
+const config = resolvePerJobGreenConfig({ owner: 'mgd34msu', repo: 'goodvibes-platform', pollIntervalMs: 1, deadlineMs: 1000, retryAttempts: 3, retryDelayMs: 1 });
 
 function deps(responses: (url: string, call: number) => HttpResponse) {
   let call = 0;
@@ -124,8 +124,8 @@ describe('per-job-green', () => {
           status: 200,
           body: {
             check_runs: [
-              { name: 'gitleaks', conclusion: 'success', details_url: 'https://github.com/mgd34msu/goodvibes-sdk/security' },
-              { name: 'CI / build', conclusion: 'success', details_url: 'https://github.com/mgd34msu/goodvibes-sdk/actions/runs/7331/job/9001' },
+              { name: 'gitleaks', conclusion: 'success', details_url: 'https://github.com/mgd34msu/goodvibes/security' },
+              { name: 'CI / build', conclusion: 'success', details_url: 'https://github.com/mgd34msu/goodvibes/actions/runs/7331/job/9001' },
             ],
           },
         };
@@ -152,8 +152,8 @@ describe('per-job-green', () => {
             check_runs: [
               // Another push workflow's check run appears FIRST, resolution
               // must not take it just because it parses.
-              { name: 'voice-runtimes / build', conclusion: 'success', details_url: 'https://github.com/mgd34msu/goodvibes-sdk/actions/runs/111/job/1' },
-              { name: 'CI / build', conclusion: 'success', details_url: 'https://github.com/mgd34msu/goodvibes-sdk/actions/runs/222/job/2' },
+              { name: 'voice-runtimes / build', conclusion: 'success', details_url: 'https://github.com/mgd34msu/goodvibes/actions/runs/111/job/1' },
+              { name: 'CI / build', conclusion: 'success', details_url: 'https://github.com/mgd34msu/goodvibes/actions/runs/222/job/2' },
             ],
           },
         };
@@ -174,7 +174,7 @@ describe('per-job-green', () => {
       if (url.includes('/actions/runs?')) return { status: 503, body: null };
       if (url.includes('/check-suites')) return { status: 200, body: { check_suites: [{ status: 'completed', conclusion: 'success' }] } };
       if (url.includes('/check-runs')) {
-        return { status: 200, body: { check_runs: [{ name: 'voice / build', conclusion: 'success', details_url: 'https://github.com/mgd34msu/goodvibes-sdk/actions/runs/111/job/1' }] } };
+        return { status: 200, body: { check_runs: [{ name: 'voice / build', conclusion: 'success', details_url: 'https://github.com/mgd34msu/goodvibes/actions/runs/111/job/1' }] } };
       }
       if (url.includes('/actions/runs/111')) return { status: 200, body: { id: 111, path: '.github/workflows/voice-runtimes.yml' } };
       return { status: 404, body: null };
@@ -210,8 +210,8 @@ describe('per-job-green', () => {
           status: 200,
           body: {
             check_runs: [
-              { name: 'CI / build', conclusion: 'success', details_url: 'https://github.com/mgd34msu/goodvibes-sdk/actions/runs/7331/job/9001' },
-              { name: 'CI / eval-gate', conclusion: 'skipped', details_url: 'https://github.com/mgd34msu/goodvibes-sdk/actions/runs/7331/job/9002' },
+              { name: 'CI / build', conclusion: 'success', details_url: 'https://github.com/mgd34msu/goodvibes/actions/runs/7331/job/9001' },
+              { name: 'CI / eval-gate', conclusion: 'skipped', details_url: 'https://github.com/mgd34msu/goodvibes/actions/runs/7331/job/9002' },
             ],
           },
         };
@@ -243,8 +243,8 @@ describe('per-job-green', () => {
           status: 200,
           body: {
             check_runs: [
-              { name: 'CI / build', conclusion: 'success', details_url: 'https://github.com/mgd34msu/goodvibes-sdk/actions/runs/7331/job/9001' },
-              { name: 'CI / publint', conclusion: 'neutral', details_url: 'https://github.com/mgd34msu/goodvibes-sdk/actions/runs/7331/job/9003' },
+              { name: 'CI / build', conclusion: 'success', details_url: 'https://github.com/mgd34msu/goodvibes/actions/runs/7331/job/9001' },
+              { name: 'CI / publint', conclusion: 'neutral', details_url: 'https://github.com/mgd34msu/goodvibes/actions/runs/7331/job/9003' },
             ],
           },
         };
@@ -270,7 +270,7 @@ describe('per-job-green', () => {
       if (url.includes('/check-runs')) {
         return {
           status: 200,
-          body: { check_runs: [{ name: 'CI / test', conclusion: 'failure', details_url: 'https://github.com/mgd34msu/goodvibes-sdk/actions/runs/7331/job/9001' }] },
+          body: { check_runs: [{ name: 'CI / test', conclusion: 'failure', details_url: 'https://github.com/mgd34msu/goodvibes/actions/runs/7331/job/9001' }] },
         };
       }
       return { status: 404, body: null };
@@ -294,11 +294,11 @@ describe('per-job-green', () => {
           status: 200,
           body: {
             check_runs: [
-              { name: 'action-self-test / probe', conclusion: 'neutral', details_url: 'https://github.com/mgd34msu/goodvibes-sdk/actions/runs/111/job/1' },
-              { name: 'action-self-test / cleanup', conclusion: 'skipped', details_url: 'https://github.com/mgd34msu/goodvibes-sdk/actions/runs/111/job/2' },
+              { name: 'action-self-test / probe', conclusion: 'neutral', details_url: 'https://github.com/mgd34msu/goodvibes/actions/runs/111/job/1' },
+              { name: 'action-self-test / cleanup', conclusion: 'skipped', details_url: 'https://github.com/mgd34msu/goodvibes/actions/runs/111/job/2' },
               { name: 'dependabot', conclusion: 'neutral' },
-              { name: 'CI / build', conclusion: 'success', details_url: 'https://github.com/mgd34msu/goodvibes-sdk/actions/runs/222/job/3' },
-              { name: 'CI / test', conclusion: 'success', details_url: 'https://github.com/mgd34msu/goodvibes-sdk/actions/runs/222/job/4' },
+              { name: 'CI / build', conclusion: 'success', details_url: 'https://github.com/mgd34msu/goodvibes/actions/runs/222/job/3' },
+              { name: 'CI / test', conclusion: 'success', details_url: 'https://github.com/mgd34msu/goodvibes/actions/runs/222/job/4' },
             ],
           },
         };
@@ -327,8 +327,8 @@ describe('per-job-green', () => {
           status: 200,
           body: {
             check_runs: [
-              { name: 'action-self-test / probe', conclusion: 'success', details_url: 'https://github.com/mgd34msu/goodvibes-sdk/actions/runs/111/job/1' },
-              { name: 'CI / eval-gate', conclusion: 'failure', details_url: 'https://github.com/mgd34msu/goodvibes-sdk/actions/runs/222/job/2' },
+              { name: 'action-self-test / probe', conclusion: 'success', details_url: 'https://github.com/mgd34msu/goodvibes/actions/runs/111/job/1' },
+              { name: 'CI / eval-gate', conclusion: 'failure', details_url: 'https://github.com/mgd34msu/goodvibes/actions/runs/222/job/2' },
             ],
           },
         };

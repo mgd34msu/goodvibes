@@ -5,7 +5,7 @@ import {
   type PairingTailscaleStatus,
   type PairingTailscaleServeReceipt,
 } from '../../../views/modals/pairing-modal.ts';
-import { describeOriginPosture, LAN_PLAIN_HTTP_NOTICE } from '@goodvibes-jev/engine/sdk/platform/pairing';
+import { describeOriginPosture, LAN_PLAIN_HTTP_NOTICE } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { ConfigModal } from '../../../input/config-modal.ts';
 import { renderConfigModal } from '../../../renderer/config-modal.ts';
 import { frameFromLayer } from '../../helpers/surface-frame.ts';
@@ -18,7 +18,7 @@ const FIXED_INFO: PairingModalConnectionInfo = {
   tokenName: 'my laptop',
   deepLink: 'http://workshop.local:3141/#pair=secret-token-abc123&offers=notifications~relay',
   offers: ['notifications', 'relay'],
-  // A plain-http LAN origin ⇒ posture carries the SDK LAN notice + gated capabilities.
+  // A plain-http LAN origin ⇒ posture carries the platform LAN notice + gated capabilities.
   posture: describeOriginPosture('http://workshop.local:3141'),
 };
 
@@ -67,7 +67,7 @@ describe('pairing modal surface', () => {
     // The labeled capability list (what the device will get), from the posture.
     expect(text).toContain('This device will get:');
     expect(text).toContain('Push notifications, needs https, available via tailscale');
-    // The ONE honest LAN line is the SDK export verbatim, never a local rewording.
+    // The ONE honest LAN line is the platform export verbatim, never a local rewording.
     expect(text).toContain(LAN_PLAIN_HTTP_NOTICE);
   });
 

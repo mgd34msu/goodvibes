@@ -1,5 +1,5 @@
-import { mayOfferCardEntryFlow, describeCardEntryRefusal } from '@goodvibes-jev/engine/sdk/platform/payments';
-import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
+import { mayOfferCardEntryFlow, describeCardEntryRefusal } from '@goodvibes-jev/engine/platform/platform/payments';
+import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   PAYMENTS_CARD_NUMBER_CONFIG_KEY,
   PAYMENTS_CARD_EXPIRY_CONFIG_KEY,
@@ -141,7 +141,7 @@ export function createPaymentCardCommands<Context extends CardPromptContext>(pol
 }
 
 export function cardFieldConfigured(
-  manager: Pick<import('@goodvibes-jev/engine/sdk/platform/config').ConfigManager, 'get'>,
+  manager: Pick<import('@goodvibes-jev/engine/platform/platform/config').ConfigManager, 'get'>,
   field: CardField,
 ): boolean {
   const value: unknown = manager.get(field.key);

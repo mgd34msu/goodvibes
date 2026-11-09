@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { FavoritesStore } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { FavoritesStore } from '@goodvibes-jev/engine/platform/platform/providers';
 import { SecretsManager } from '../../config/secrets.ts';
-import { ServiceRegistry } from '@goodvibes-jev/engine/sdk/platform/config';
-import { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { BenchmarkStore } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { ProviderCapabilityRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { CacheHitTracker } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { createLaunchTolerantProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
+import { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { BenchmarkStore } from '@goodvibes-jev/engine/platform/platform/providers';
+import { ProviderCapabilityRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { CacheHitTracker } from '@goodvibes-jev/engine/platform/platform/providers';
+import { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { createLaunchTolerantProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 const CLEAN_ENV_KEYS = [
@@ -125,14 +125,14 @@ describe('provider runtime expansion', () => {
     const bedrockRuntime = await providerRegistry.describeRuntime('amazon-bedrock');
     const bedrock = expectPresent(bedrockRuntime, 'amazon-bedrock runtime metadata');
     expect(bedrock.auth?.routes?.map((route) => route.route)).toContain('anonymous');
-    expect(bedrock.policy?.streamProtocol).toBe('anthropic-sdk-stream');
+    expect(bedrock.policy?.streamProtocol).toBe('anthropic-platform-stream');
 
     const vertexProvider = providerRegistry.getRegistered('anthropic-vertex');
     expect(typeof vertexProvider.describeRuntime).toBe('function');
     const vertexRuntime = await providerRegistry.describeRuntime('anthropic-vertex');
     const vertex = expectPresent(vertexRuntime, 'anthropic-vertex runtime metadata');
     expect(vertex.auth?.routes?.map((route) => route.route)).toContain('anonymous');
-    expect(vertex.policy?.streamProtocol).toBe('anthropic-sdk-stream');
+    expect(vertex.policy?.streamProtocol).toBe('anthropic-platform-stream');
 
     const copilotProvider = providerRegistry.getRegistered('github-copilot');
     expect(typeof copilotProvider.describeRuntime).toBe('function');

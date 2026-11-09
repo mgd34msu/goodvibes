@@ -2,7 +2,7 @@
 // rewind-runtime.ts, /rewind (message-anchored, unified files + conversation),
 // plus the /undo rewind and /redo rewind reversals over the last receipt.
 //
-// The rewind engine is the SDK's UnifiedRewindService (platform/rewind:
+// The rewind engine is the platform's UnifiedRewindService (platform/rewind:
 // plan() previews + issues a single-use confirm token; apply() is token-gated
 // and returns a receipt carrying an undo block). It JOINS the platform's three
 // existing history stores, it never adds a fourth. This module wires that
@@ -33,22 +33,22 @@ import {
   type RewindCheckpointView,
   type RewindReceipt,
   type RewindRestoreResult,
-  type RewindScope as SdkRewindScope,
+  type RewindScope as PlatformRewindScope,
   type RewindWorkspacePort,
-} from '@goodvibes-jev/engine/sdk/platform/rewind';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
-import type { WorkspaceCheckpoint, WorkspaceCheckpointManager } from '@goodvibes-jev/engine/sdk/platform/workspace';
+} from '@goodvibes-jev/engine/platform/platform/rewind';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { WorkspaceCheckpoint, WorkspaceCheckpointManager } from '@goodvibes-jev/engine/platform/platform/workspace';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { buildRewindReceiptBlock } from '../../core/rewind-receipt.ts';
-import { getTurnAnchors, type TurnAnchor } from '@goodvibes-jev/engine/sdk/platform/rewind';
+import { getTurnAnchors, type TurnAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { createConversationRewindPort, type ConversationRewindPort } from '../../runtime/conversation-rewind-port.ts';
 import { shortId } from './checkpoint-runtime.ts';
 
-export type RewindScope = SdkRewindScope;
+export type RewindScope = PlatformRewindScope;
 const REWIND_SCOPES: readonly RewindScope[] = ['files', 'conversation', 'both'];
 
 // ---------------------------------------------------------------------------
-// Ports, bridge the SDK rewind service onto the TUI's in-process stores.
+// Ports, bridge the platform rewind service onto the TUI's in-process stores.
 // ---------------------------------------------------------------------------
 
 /**
@@ -72,7 +72,7 @@ function makeWorkspacePort(mgr: WorkspaceCheckpointManager): RewindWorkspacePort
 }
 
 // ---------------------------------------------------------------------------
-// Per-session rewind state, the SDK service (with its wired ports) plus the
+// Per-session rewind state, the platform service (with its wired ports) plus the
 // TUI-owned undo/redo stacks of applied receipts.
 // ---------------------------------------------------------------------------
 

@@ -4,11 +4,11 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { executeToolCalls, type ToolExecutionDeps } from '@goodvibes-jev/engine/sdk/platform/core';
-import { TurnHookOwner } from '@goodvibes-jev/engine/sdk/platform/hooks';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { PermissionManager, PermissionCheckResult, PermissionExecutionOptions } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { executeToolCalls, type ToolExecutionDeps } from '@goodvibes-jev/engine/platform/platform/core';
+import { TurnHookOwner } from '@goodvibes-jev/engine/platform/platform/hooks';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { PermissionManager, PermissionCheckResult, PermissionExecutionOptions } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { JudgmentError, SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { RuntimeEventBus } from '@/runtime/index.ts';
@@ -16,7 +16,7 @@ import { composeAgentPermissionManager } from '../../runtime/bootstrap-core.ts';
 import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 
-import { installPermissionManagerSafetyGuard as sharedGuard } from '@goodvibes-jev/engine/sdk/platform/gate/policy';
+import { installPermissionManagerSafetyGuard as sharedGuard } from '@goodvibes-jev/engine/platform/platform/gate/policy';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 const runtimes: RuntimeServices[] = [];

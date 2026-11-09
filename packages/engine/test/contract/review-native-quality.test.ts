@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { makeHarness, oneUnitPlan, startContract, waitFor } from './runner-support.js';
 import { terminal } from './steps-support.js';
-import type { NativeContractSource } from '../../sdk/src/platform/contract/types.js';
+import type { NativeContractSource } from '../../platform/src/platform/contract/types.js';
 const source: NativeContractSource = { sourceId: 'quality-work', sourceRevision: '1', inputRevision: '1', criteriaId: 'criteria', criteriaRevision: '1', goal: 'Deliver the parser', criteria: ['Preserve parser behavior'] };
 test('review: a likely clean quality reading passes without repeated judgment or owner input', async () => {
   let qualityReads = 0;

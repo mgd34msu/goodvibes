@@ -16,15 +16,15 @@ import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
-import { createRuntimeStore } from '../sdk/src/platform/runtime/store/index.ts';
-import { createClientRuntimeServices } from '../sdk/src/platform/runtime/client-services.ts';
-import { SessionLiveTurnControlsHolder } from '../sdk/src/platform/control-plane/routes/session-runtime.ts';
-import { HostedSessionManager } from '../sdk/src/platform/hosted-sessions/manager.ts';
-import { HostedSessionStore } from '../sdk/src/platform/hosted-sessions/store.ts';
-import type { HostedWorkspaceFloor } from '../sdk/src/platform/hosted-sessions/workspace-floor.ts';
-import type { HostedSessionUpdatePayload } from '../sdk/src/platform/hosted-sessions/types.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
+import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.ts';
+import { createClientRuntimeServices } from '../platform/src/platform/runtime/client-services.ts';
+import { SessionLiveTurnControlsHolder } from '../platform/src/platform/control-plane/routes/session-runtime.ts';
+import { HostedSessionManager } from '../platform/src/platform/hosted-sessions/manager.ts';
+import { HostedSessionStore } from '../platform/src/platform/hosted-sessions/store.ts';
+import type { HostedWorkspaceFloor } from '../platform/src/platform/hosted-sessions/workspace-floor.ts';
+import type { HostedSessionUpdatePayload } from '../platform/src/platform/hosted-sessions/types.ts';
 import { escalate, fakeRunner, pass, type FakeRunner } from './contract/operator-support.ts';
 
 let root: string;

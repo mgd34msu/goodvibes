@@ -29,11 +29,11 @@ import {
   GatewayMethodCatalog,
   createConversationRewindHostBroker,
   registerRewindConversationHostGatewayMethods,
-} from '../sdk/src/platform/control-plane/index.ts';
-import { createConversationRewindHost } from '../sdk/src/platform/runtime/client/conversation-rewind-host.ts';
-import type { ConversationRewindHostOptions } from '../sdk/src/platform/runtime/client/conversation-rewind-host.ts';
-import type { DaemonVerbCaller } from '../sdk/src/platform/runtime/client/daemon-verbs.ts';
-import type { RewindConversationPort } from '../sdk/src/platform/rewind/types.ts';
+} from '../platform/src/platform/control-plane/index.ts';
+import { createConversationRewindHost } from '../platform/src/platform/runtime/client/conversation-rewind-host.ts';
+import type { ConversationRewindHostOptions } from '../platform/src/platform/runtime/client/conversation-rewind-host.ts';
+import type { DaemonVerbCaller } from '../platform/src/platform/runtime/client/daemon-verbs.ts';
+import type { RewindConversationPort } from '../platform/src/platform/rewind/types.ts';
 
 const SESSION = 'session-under-test';
 

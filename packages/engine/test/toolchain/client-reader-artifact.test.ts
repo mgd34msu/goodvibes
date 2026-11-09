@@ -3,7 +3,7 @@ import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { nativeReaderCapabilities } from '../../sdk/src/platform/runtime/self-update.js';
+import { nativeReaderCapabilities } from '../../platform/src/platform/runtime/self-update.js';
 import { inspectTerminalReaderArtifact, recordTerminalReaderArtifact, retainTerminalReaderCohort, verifyTerminalReaderArtifact } from '../../toolchain/src/lib/client-reader-artifact.js';
 import { makeProjectTempDir } from '../_helpers/project-temp.js';
 

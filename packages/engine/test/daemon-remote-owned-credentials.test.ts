@@ -2,7 +2,7 @@ import { describe, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import * as fsPromises from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import { OwnedCredentialDirectory, probeCredentialOwner, type CredentialOwnerStatus } from '../sdk/src/platform/runtime/remote/host/backends/owned-credential-directory.ts';
+import { OwnedCredentialDirectory, probeCredentialOwner, type CredentialOwnerStatus } from '../platform/src/platform/runtime/remote/host/backends/owned-credential-directory.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const logger = { info() {}, warn() {}, error() {} };

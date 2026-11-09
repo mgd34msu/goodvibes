@@ -1,7 +1,7 @@
 /**
  * transport-parity.test.ts  (Transport parity gate)
  *
- * THE PARITY GATE. HTTP + WebSocket parity is automatic (the operator-sdk client is
+ * THE PARITY GATE. HTTP + WebSocket parity is automatic (the operator-client client is
  * contract-driven), but DirectTransport (the TUI's in-process path) is HAND-WIRED in
  * runtime/operator-client.ts, a method can be HTTP-reachable while being invisible
  * in-process, and nothing caught that today. This gate makes the asymmetry fail loudly so
@@ -21,14 +21,14 @@
  * backstops.
  */
 import { describe, expect, test } from 'bun:test';
-import { buildOperatorContract } from '../sdk/src/platform/control-plane/operator-contract.js';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.js';
-import { createOperatorClient } from '../sdk/src/platform/runtime/operator-client.js';
-import type { OperatorClientServices } from '../sdk/src/platform/runtime/foundation-services.js';
-import { createOperatorRemoteClient } from '../operator-sdk/src/client-core.js';
+import { buildOperatorContract } from '../platform/src/platform/control-plane/operator-contract.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
+import { createOperatorClient } from '../platform/src/platform/runtime/operator-client.js';
+import type { OperatorClientServices } from '../platform/src/platform/runtime/foundation-services.js';
+import { createOperatorRemoteClient } from '../operator-client/src/client-core.js';
 import { createHttpTransport } from '../transport-http/dist/index.js';
 import { getOperatorContract } from '../contracts/dist/index.js';
-import { GoodVibesSdkError } from '../errors/dist/index.js';
+import { GoodVibesError } from '../errors/dist/index.js';
 
 /**
  * Bun's `typeof fetch` carries a `preconnect` namespace member alongside the
@@ -120,7 +120,7 @@ const DIRECT_TRANSPORT_COVERAGE: Record<string, string> = {
   'sessions.hosted.kill': 'http-only',
   'sessions.hosted.list': 'http-only',
   // fleet.*: the TUI's fleet panel (src/panels/fleet-read-model.ts)
-  // already holds a direct reference to the SDK's ProcessRegistry and calls
+  // already holds a direct reference to the platform's ProcessRegistry and calls
   // `registry.query()` in-process, it does NOT go through operator-client
   // at all, so no DirectTransport wrapper is needed here. fleet.snapshot/
   // fleet.list exist for REMOTE consumers (webui, a detached session view)
@@ -390,7 +390,7 @@ describe('Parity gate: cataloged-but-not-invokable is honest', () => {
       operator: { methods: [{ id: 'internal.only', description: 'internal', http: null }] },
     } as unknown as ReturnType<typeof getOperatorContract>;
     const client = createOperatorRemoteClient(transport, contract);
-    expect(() => client.invoke('internal.only' as never)).toThrow(GoodVibesSdkError);
+    expect(() => client.invoke('internal.only' as never)).toThrow(GoodVibesError);
   });
 
   test('HTTP parity is automatic: listOperations enumerates every contract method', () => {

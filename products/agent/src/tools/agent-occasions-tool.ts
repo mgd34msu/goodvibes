@@ -51,9 +51,9 @@
  * looks, so nothing there takes an authority or can refuse a write.
  */
 
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import { captureProfileDelegation } from '@goodvibes-jev/engine/sdk/platform/owner-profile';
-import { assertCurrentToolEffect, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { captureProfileDelegation } from '@goodvibes-jev/engine/platform/platform/owner-profile';
+import { assertCurrentToolEffect, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogData, captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 import { agentLocalStateWrite, assertAgentLocalStateCurrent, createAgentLocalStateInputProjector } from './agent-local-state-admission.ts';
 import { captureOccasionsGatewayCurrent, captureOccasionsGatewayLocalState } from '../agent/occasions-gateway.ts';

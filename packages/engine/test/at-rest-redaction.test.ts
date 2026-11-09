@@ -26,9 +26,9 @@ import {
   enforceFileRetention,
   DEFAULT_AT_REST_POLICY,
   AT_REST_CONFIG_KEYS,
-} from '../sdk/src/platform/runtime/at-rest-persistence.ts';
-import { AgentSession } from '../sdk/src/platform/agents/session.ts';
-import { LocalLedgerExporter } from '../sdk/src/platform/runtime/telemetry/exporters/local-ledger.ts';
+} from '../platform/src/platform/runtime/at-rest-persistence.ts';
+import { AgentSession } from '../platform/src/platform/agents/session.ts';
+import { LocalLedgerExporter } from '../platform/src/platform/runtime/telemetry/exporters/local-ledger.ts';
 
 const tmpDirs: string[] = [];
 function mkTemp(): string {

@@ -2,22 +2,22 @@
  * /context window, view, set, or clear a custom context window for the
  * current model.
  *
- * The override is stored by the SDK's ProviderRegistry (persisted under the
+ * The override is stored by the platform's ProviderRegistry (persisted under the
  * control-plane config dir with provenance 'configured_cap'), so it survives
  * restarts, applies to any model (cloud or local), and is honored by every
  * consumer of the same home. Clearing returns the model to its automatic
  * window (catalog / provider API / family fallback). The source line names
- * where the window came from, with the SDK's describeContextWindowSource
+ * where the window came from, with the platform's describeContextWindowSource
  * ('catalog: abacus', 'consensus of 4 providers', 'family default').
  */
-import type { ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 export interface ContextWindowCommandContext {
   readonly provider: { readonly providerRegistry: Pick<ProviderRegistry, 'getCurrentModel' | 'getKnownContextWindowForModel' | 'getModelContextCap' | 'getObservedContextWindow' | 'clearModelContextCap' | 'setModelContextCap'> };
   readonly print: (text: string) => void;
   readonly renderRequest: () => void;
 }
-import type { ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { MAX_CONTEXT_WINDOW_OVERRIDE, describeContextWindowSource } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
+import { MAX_CONTEXT_WINDOW_OVERRIDE, describeContextWindowSource } from '@goodvibes-jev/engine/platform/platform/providers';
 
 /**
  * Parse a user-supplied context window size. Accepts plain token counts

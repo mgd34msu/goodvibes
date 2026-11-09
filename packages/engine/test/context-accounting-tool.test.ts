@@ -3,8 +3,8 @@ import {
   ContextAccountingHolder,
   createContextAccountingTool,
   type ContextAccountingSource,
-} from '../sdk/src/platform/tools/context-accounting/index.js';
-import type { TurnInjectionRecord } from '../sdk/src/platform/agents/turn-knowledge-injection.js';
+} from '../platform/src/platform/tools/context-accounting/index.js';
+import type { TurnInjectionRecord } from '../platform/src/platform/agents/turn-knowledge-injection.js';
 
 function makeInjection(over: Partial<TurnInjectionRecord>): TurnInjectionRecord {
   return {

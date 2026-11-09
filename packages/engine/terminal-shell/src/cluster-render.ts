@@ -8,7 +8,7 @@
  * CLI, a TUI's `/cluster`, and a web UI render the same answers each in their
  * own way.
  */
-import { generateQrMatrix, renderQrToString } from '@goodvibes-jev/engine/sdk/platform/pairing';
+import { generateQrMatrix, renderQrToString } from '@goodvibes-jev/engine/platform/platform/pairing';
 import type {
   RotateKeyResult,
   CreateGroupResult,
@@ -18,7 +18,7 @@ import type {
   JoinGroupResult,
   JoinKeyResult,
   NodesResult,
-} from '@goodvibes-jev/engine/sdk/platform/cluster';
+} from '@goodvibes-jev/engine/platform/platform/cluster';
 
 /** How long ago, in words. Never a raw timestamp, nobody reads epoch millis. */
 export function describeAge(at: number, now: number): string {
@@ -265,7 +265,7 @@ export function renderRotated(result: RotateKeyResult): string[] {
 /**
  * The join key as a QR code, for typing it into a phone or a second terminal.
  *
- * This reuses the SDK's own QR renderer verbatim, the same one a pairing
+ * This reuses the platform's own QR renderer verbatim, the same one a pairing
  * flow already prints to a terminal, rather than introducing any new
  * machinery for it. Opt-in behind `--qr`, because a QR block is tall and most
  * of the time the operator is copying the key with the mouse or the clipboard.

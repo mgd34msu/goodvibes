@@ -11,11 +11,11 @@ import {
   type NativeWorkExecutionIdentity,
   type NativeWorkExecutionSnapshot,
   type NativeWorkExecutionExecutionSnapshot,
-} from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
-import { createOperatorRemoteClient, type OperatorRemoteClient } from '../operator-sdk/src/client-core.js';
+} from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
+import { createOperatorRemoteClient, type OperatorRemoteClient } from '../operator-client/src/client-core.js';
 import { getOperatorContract } from '@goodvibes-jev/engine/contracts';
-import { CONTRACT_STATUSES } from '../sdk/src/events/contract.js';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.js';
+import { CONTRACT_STATUSES } from '../platform/src/events/contract.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
 import { createHttpTransport, firstJsonSchemaFailure } from '../transport-http/src/index.js';
 
 const projectId = 'native-client-project';
@@ -84,17 +84,17 @@ describe('native execution transport-only contract', () => {
   });
 
   test('the public package subpath is browser-safe and excludes host/authority imports', async () => {
-    const path = join(import.meta.dir, '../sdk/src/platform/workflow/work-ledger/native-execution-client.ts');
+    const path = join(import.meta.dir, '../platform/src/platform/workflow/work-ledger/native-execution-client.ts');
     const bundled = await bundleBrowserEntrypoint(path);
     expect(bundled).not.toContain('createNativeWorkExecution');
     expect(bundled).not.toContain('captureJevDecisionContext');
     const manifest = JSON.parse(readFileSync(join(import.meta.dir, '../package.json'), 'utf8'));
-    expect(manifest.exports['./sdk/platform/workflow/work-ledger/native-execution-client']).toEqual({
-      bun: './sdk/src/platform/workflow/work-ledger/native-execution-client.ts',
-      types: './sdk/dist/platform/workflow/work-ledger/native-execution-client.d.ts',
-      import: './sdk/dist/platform/workflow/work-ledger/native-execution-client.js',
+    expect(manifest.exports['./platform/platform/workflow/work-ledger/native-execution-client']).toEqual({
+      bun: './platform/src/platform/workflow/work-ledger/native-execution-client.ts',
+      types: './platform/dist/platform/workflow/work-ledger/native-execution-client.d.ts',
+      import: './platform/dist/platform/workflow/work-ledger/native-execution-client.js',
     });
-    for (const barrel of ['../sdk/src/platform/workflow/work-ledger/index.ts', '../operator-sdk/src/index.ts']) {
+    for (const barrel of ['../platform/src/platform/workflow/work-ledger/index.ts', '../operator-client/src/index.ts']) {
       expect(readFileSync(join(import.meta.dir, barrel), 'utf8')).not.toContain('native-execution-client');
     }
   });

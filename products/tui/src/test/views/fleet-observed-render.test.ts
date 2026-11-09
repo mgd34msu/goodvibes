@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { ProcessNode, ProcessObserved } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
+import type { ProcessNode, ProcessObserved } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import { renderObservedRowLine, renderObservedDetailLines, isObservedExternalNode, type ObservedNode } from '../../views/fleet-observed-render.ts';
 import { buildFleetSnapshot } from '../../views/fleet-read-model.ts';
 import { lineToString } from '../setup.ts';

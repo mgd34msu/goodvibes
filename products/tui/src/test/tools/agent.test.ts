@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { createAgentTool, AgentManager } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { AgentMessageBus, ArchetypeLoader } from '@goodvibes-jev/engine/sdk/platform/agents';
-import { ContractStore, createContractRunner } from '@goodvibes-jev/engine/sdk/platform/contract';
-import { RuntimeEventBus } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
-import type { AgentEvent } from '@goodvibes-jev/engine/sdk/events';
+import { createAgentTool, AgentManager } from '@goodvibes-jev/engine/platform/platform/tools';
+import { AgentMessageBus, ArchetypeLoader } from '@goodvibes-jev/engine/platform/platform/agents';
+import { ContractStore, createContractRunner } from '@goodvibes-jev/engine/platform/platform/contract';
+import { RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import type { AgentEvent } from '@goodvibes-jev/engine/platform/events';
 import { configGetStub, configGetCategoryStub } from '../helpers/config-manager-stub.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
@@ -65,7 +65,7 @@ async function runAgent(args: Record<string, unknown>) {
 }
 function spawn(task: string, extra: Record<string, unknown> = {}) {
   // The public API now requires this explicit flag for ordinary direct agents;
-  // default spawn goes through the contract runner and is covered in the SDK.
+  // default spawn goes through the contract runner and is covered in the platform.
   return runAgent({ mode: 'spawn', task, outsideContract: true, ...extra });
 }
 

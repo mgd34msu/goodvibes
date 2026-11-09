@@ -21,7 +21,7 @@ import { settleSyntaxHighlighting } from '../../renderer/code-block.ts';
 // ---------------------------------------------------------------------------
 
 import { describe, expect, test } from 'bun:test';
-import { createEmptyLine, type Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import { createEmptyLine, type Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { UIFactory } from '../../renderer/ui-factory.ts';
 import { withHeaderGap } from '../../renderer/header-line.ts';
 import { appendConversationMessages, type ConversationRenderContext } from '../../core/conversation-rendering.ts';

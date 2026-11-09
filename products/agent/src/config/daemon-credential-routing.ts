@@ -45,8 +45,8 @@
  * daemon that was never there. A test that wants the routing installs its own
  * client and says so.
  */
-import { isDaemonOwnedConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { DaemonCredentialsClient } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+import { isDaemonOwnedConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import type { DaemonCredentialsClient } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 
 let installed: DaemonCredentialsClient | null = null;
 

@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SessionManager, CURRENT_SESSION_SCHEMA_VERSION } from '../sdk/src/platform/sessions/manager.js';
-import { logger } from '../sdk/src/platform/utils/logger.js';
+import { SessionManager, CURRENT_SESSION_SCHEMA_VERSION } from '../platform/src/platform/sessions/manager.js';
+import { logger } from '../platform/src/platform/utils/logger.js';
 
 function makeTmpDir(): string {
   return mkdtempSync(join(tmpdir(), 'session-schema-'));

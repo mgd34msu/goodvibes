@@ -14,7 +14,7 @@
  *     named, used by both the field builder and the apply writer.
  */
 
-import type { LLMProvider } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { LLMProvider } from '@goodvibes-jev/engine/platform/platform/providers';
 import type {
   OnboardingProviderAccountRecord,
   OnboardingProviderAccountsSnapshot,

@@ -29,15 +29,15 @@ import { afterEach, describe, expect, test, beforeEach } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ProfileDocumentView } from '../sdk/src/platform/owner-profile/index.ts';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { composeOwnerProfile } from '../sdk/src/platform/control-plane/routes/owner-profile-composition.ts';
-import { openTierContextBlock } from '../sdk/src/platform/owner-profile/context-block.ts';
-import { registerProfileRedactionValues } from '../sdk/src/platform/utils/redaction.ts';
-import { registerOpenTierContextBlock } from '../sdk/src/platform/owner-profile/context-block.ts';
-import { registerSignupBaseAddressFallback } from '../sdk/src/platform/google/account-registry.ts';
-import { resetProcessUntrustedContentLedgerForTests } from '../sdk/src/platform/security/untrusted-content.ts';
+import type { ProfileDocumentView } from '../platform/src/platform/owner-profile/index.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { composeOwnerProfile } from '../platform/src/platform/control-plane/routes/owner-profile-composition.ts';
+import { openTierContextBlock } from '../platform/src/platform/owner-profile/context-block.ts';
+import { registerProfileRedactionValues } from '../platform/src/platform/utils/redaction.ts';
+import { registerOpenTierContextBlock } from '../platform/src/platform/owner-profile/context-block.ts';
+import { registerSignupBaseAddressFallback } from '../platform/src/platform/google/account-registry.ts';
+import { resetProcessUntrustedContentLedgerForTests } from '../platform/src/platform/security/untrusted-content.ts';
 
 // Profile writes ask the content-derivation reading whenever the process
 // ledger holds untrusted text; another test file's reads must not reach these.

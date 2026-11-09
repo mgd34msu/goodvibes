@@ -4,12 +4,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { bindJudgmentPortAuthority, decisionModelPolicyState, installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError } from '@goodvibes-jev/judgment';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { proveVoiceRoundTrip, type ProofEngineRunner } from '../sdk/src/platform/voice/provisioning/round-trip-proof.js';
-import { createVoiceSetupService } from '../sdk/src/platform/runtime/voice-setup.js';
-import { createVoiceInstallHandler } from '../sdk/src/platform/control-plane/routes/voice-setup.js';
-import { readVoiceDiagnostics } from '../sdk/src/platform/voice/diagnostics.js';
+import { proveVoiceRoundTrip, type ProofEngineRunner } from '../platform/src/platform/voice/provisioning/round-trip-proof.js';
+import { createVoiceSetupService } from '../platform/src/platform/runtime/voice-setup.js';
+import { createVoiceInstallHandler } from '../platform/src/platform/control-plane/routes/voice-setup.js';
+import { readVoiceDiagnostics } from '../platform/src/platform/voice/diagnostics.js';
 
 const engine = { ttsEngine: 'piper', ttsBinary: '/managed/piper', ttsModelPath: '/managed/voice.onnx',
   sttEngine: 'whisper-cpp', sttBinary: '/managed/whisper', sttModelPath: '/managed/model.bin' };

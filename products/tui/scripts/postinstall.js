@@ -237,8 +237,8 @@ function deployBundledFiles() {
  * Everything needed to detect "hey goodvibes" already shipped, and provisioning
  * was reachable only by typing `/voice wake setup`, so the ordinary outcome of
  * installing was a wake word that could not start. The pins (URLs, byte counts,
- * checksums) live in the SDK's wake-word manifest and stay there; this calls the
- * SDK's install policy, which:
+ * checksums) live in the platform wake-word manifest and stay there; this calls the
+ * platform install policy, which:
  *
  *   - never throws (an absent network, DNS, a proxy serving HTML, an unwritable
  *     home directory and a provisioner that itself threw all come back as an
@@ -267,7 +267,7 @@ async function installWakeWordModel() {
   }
   try {
     const { provisionWakeWordModelsAtInstall, resolveManagedVoiceRoot } =
-      await import('@goodvibes-jev/engine/sdk/platform/voice');
+      await import('@goodvibes-jev/engine/platform/platform/voice');
     const outcome = await provisionWakeWordModelsAtInstall({
       managedRoot: resolveManagedVoiceRoot(home),
       recoveryHint: '/voice wake setup',

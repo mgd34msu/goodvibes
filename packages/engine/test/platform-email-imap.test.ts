@@ -24,12 +24,12 @@ import {
   ImapOpenError,
   imapQuoteCredential,
   IMAP_MAX_FETCH_UIDS,
-} from '../sdk/src/platform/email/imap-client.ts';
+} from '../platform/src/platform/email/imap-client.ts';
 import {
   describeEmailCapabilityFailure,
   resolveIdleSupport,
-} from '../sdk/src/platform/email/imap-open.ts';
-import { formatImapDate } from '../sdk/src/platform/email/imap-headers.ts';
+} from '../platform/src/platform/email/imap-open.ts';
+import { formatImapDate } from '../platform/src/platform/email/imap-headers.ts';
 import {
   connectSocket,
   makeFakeImapServer,

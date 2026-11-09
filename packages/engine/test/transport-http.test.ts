@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { ContractError, GoodVibesSdkError, HttpStatusError } from '../errors/dist/index.js';
+import { ContractError, GoodVibesError, HttpStatusError } from '../errors/dist/index.js';
 import { createHttpTransport, openServerSentEventStream } from '../transport-http/dist/index.js';
 import { createTransportError, createNetworkTransportError } from '../transport-http/src/http-core.js';
 import { normalizeTransportError } from '../transport-http/src/http.js';
@@ -112,14 +112,14 @@ describe('transport-http structured throws', () => {
     expect(err.transport.cause).toBe(cause);
   });
 
-  test('createStreamError via SSE stream produces GoodVibesSdkError with kind network', async () => {
+  test('createStreamError via SSE stream produces GoodVibesError with kind network', async () => {
     const transport = createHttpTransport({
       baseUrl: 'http://127.0.0.1:3210',
       fetch: createFetchStub(async () => new Response('service unavailable', { status: 503 })),
     });
     const caught = await openServerSentEventStream(transport, '/api/stream', {}).catch((e: unknown) => e);
-    expect(caught).toBeInstanceOf(GoodVibesSdkError);
-    const err = caught as GoodVibesSdkError;
+    expect(caught).toBeInstanceOf(GoodVibesError);
+    const err = caught as GoodVibesError;
     expect(err.kind).toBe('network');
     expect(err.category).toBe('network');
     expect(err.source).toBe('transport');

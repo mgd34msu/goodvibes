@@ -8,14 +8,14 @@ import { describe, expect, test } from 'bun:test';
  */
 describe('correlation ids', () => {
   test('getCorrelationContext returns empty object when no context is active', async () => {
-    const { getCorrelationContext } = await import('../sdk/src/platform/runtime/correlation.js');
+    const { getCorrelationContext } = await import('../platform/src/platform/runtime/correlation.js');
     const ctx = getCorrelationContext();
     // toBeTypeOf('object') already proves ctx is defined; check the empty-ctx contract directly.
     expect(ctx).toBeTypeOf('object');
   });
 
   test('correlationCtx.run provides requestId within the callback', async () => {
-    const { correlationCtx, getCorrelationContext } = await import('../sdk/src/platform/runtime/correlation.js');
+    const { correlationCtx, getCorrelationContext } = await import('../platform/src/platform/runtime/correlation.js');
     let captured: ReturnType<typeof getCorrelationContext> = {};
     correlationCtx.run({ requestId: 'req-abc' }, () => {
       captured = getCorrelationContext();
@@ -24,7 +24,7 @@ describe('correlation ids', () => {
   });
 
   test('correlationCtx.run propagates context through async callbacks', async () => {
-    const { correlationCtx, getCorrelationContext } = await import('../sdk/src/platform/runtime/correlation.js');
+    const { correlationCtx, getCorrelationContext } = await import('../platform/src/platform/runtime/correlation.js');
     let captured: ReturnType<typeof getCorrelationContext> = {};
     await new Promise<void>((resolve) => {
       correlationCtx.run({ sessionId: 'sess-xyz' }, async () => {
@@ -37,7 +37,7 @@ describe('correlation ids', () => {
   });
 
   test('nested correlationCtx.run merges parent context', async () => {
-    const { correlationCtx, getCorrelationContext } = await import('../sdk/src/platform/runtime/correlation.js');
+    const { correlationCtx, getCorrelationContext } = await import('../platform/src/platform/runtime/correlation.js');
     let captured: ReturnType<typeof getCorrelationContext> = {};
     correlationCtx.run({ requestId: 'outer' }, () => {
       correlationCtx.run({ ...getCorrelationContext(), sessionId: 'inner-sess' }, () => {
@@ -49,7 +49,7 @@ describe('correlation ids', () => {
   });
 
   test('context does not leak outside the callback', async () => {
-    const { correlationCtx, getCorrelationContext } = await import('../sdk/src/platform/runtime/correlation.js');
+    const { correlationCtx, getCorrelationContext } = await import('../platform/src/platform/runtime/correlation.js');
     correlationCtx.run({ requestId: 'ephemeral' }, () => { /* nothing */ });
     const ctx = getCorrelationContext();
     expect(ctx.requestId).toBeUndefined();
@@ -57,8 +57,8 @@ describe('correlation ids', () => {
 
   // Integration: buildAttributes in api-helpers merges correlation context into event attributes
   test('buildAttributes includes requestId from active correlationCtx', async () => {
-    const { correlationCtx } = await import('../sdk/src/platform/runtime/correlation.js');
-    const { buildAttributes } = await import('../sdk/src/platform/runtime/telemetry/api-helpers.js');
+    const { correlationCtx } = await import('../platform/src/platform/runtime/correlation.js');
+    const { buildAttributes } = await import('../platform/src/platform/runtime/telemetry/api-helpers.js');
     let captured: Record<string, unknown> = {};
     correlationCtx.run({ requestId: 'integ-req-001' }, () => {
       captured = buildAttributes('session', {
@@ -73,7 +73,7 @@ describe('correlation ids', () => {
 
   // Integration: two concurrent correlationCtx.run scopes carry independent requestIds
   test('concurrent correlationCtx.run scopes have independent requestIds', async () => {
-    const { correlationCtx, getCorrelationContext } = await import('../sdk/src/platform/runtime/correlation.js');
+    const { correlationCtx, getCorrelationContext } = await import('../platform/src/platform/runtime/correlation.js');
     const ids: string[] = [];
     await Promise.all([
       new Promise<void>((resolve) => {

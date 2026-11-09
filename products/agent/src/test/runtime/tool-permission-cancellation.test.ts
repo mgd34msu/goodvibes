@@ -1,14 +1,14 @@
-import type { HookDispatcher } from '@goodvibes-jev/engine/sdk/platform/hooks';
+import type { HookDispatcher } from '@goodvibes-jev/engine/platform/platform/hooks';
 import { expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   createPermissionConfigReader, PermissionManager, UserPermissionRuleStore,
   type PermissionAttribution, type PermissionCheckResult,
-} from '@goodvibes-jev/engine/sdk/platform/permissions';
-import { security } from '@goodvibes-jev/engine/sdk/platform/runtime';
+} from '@goodvibes-jev/engine/platform/platform/permissions';
+import { security } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { installPermissionManagerSafetyGuard } from '../../runtime/tool-permission-safety.ts';
 

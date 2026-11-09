@@ -15,15 +15,15 @@
  * admission and drains preflight, browser operations, interrupted recovery and
  * accepted reply readings before the stores/catalog can be reused.
  */
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { controlPlaneStorePath } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { createJevMerchantJudge, readCvvHandling, PaymentReplyInbox } from '@goodvibes-jev/engine/sdk/platform/payments';
-import type { BudgetLedger, PaymentsConfigReader } from '@goodvibes-jev/engine/sdk/platform/payments';
-import { getProcessUntrustedContentLedger } from '@goodvibes-jev/engine/sdk/platform/security';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { controlPlaneStorePath } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { createJevMerchantJudge, readCvvHandling, PaymentReplyInbox } from '@goodvibes-jev/engine/platform/platform/payments';
+import type { BudgetLedger, PaymentsConfigReader } from '@goodvibes-jev/engine/platform/platform/payments';
+import { getProcessUntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { SecretsManager } from '../config/secrets.js';
-import type { ChannelDeliveryRouter } from '@goodvibes-jev/engine/sdk/platform/channels';
+import type { ChannelDeliveryRouter } from '@goodvibes-jev/engine/platform/platform/channels';
 import type { ShellPathService } from './index.js';
 import {
   DaemonApprovalStore,
@@ -39,13 +39,13 @@ import {
   registerPaymentsMethods,
   type CheckoutComposition,
   type PaymentsSecretStore,
-} from '@goodvibes-jev/engine/sdk/platform/payments';
+} from '@goodvibes-jev/engine/platform/platform/payments';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import type { BrowserCheckoutSeamHolder } from './browser-checkout-seam-holder.js';
 
 export interface PaymentsCompositionOptions {
-  readonly paymentContinuationOwner?: Pick<import('@goodvibes-jev/engine/sdk/platform/payments').NativeCheckoutWindowRestorationOptions, 'pairing' | 'scopes'> | undefined;
-  readonly nativeDataWriter?: import('@goodvibes-jev/engine/sdk/platform/runtime/self-update').NativeDataWriteOwner | undefined;
+  readonly paymentContinuationOwner?: Pick<import('@goodvibes-jev/engine/platform/platform/payments').NativeCheckoutWindowRestorationOptions, 'pairing' | 'scopes'> | undefined;
+  readonly nativeDataWriter?: import('@goodvibes-jev/engine/platform/platform/runtime/self-update').NativeDataWriteOwner | undefined;
   readonly configManager: Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager, 'preparePostalAddress'>>;
   readonly shellPaths: ShellPathService;
   readonly secretsManager: Pick<SecretsManager, 'get' | 'set' | 'delete'>;
@@ -54,7 +54,7 @@ export interface PaymentsCompositionOptions {
   /**
    * Whether this node is the one currently allowed to spend.
    *
-   * Reported by `payments.budget.status` and never defaulted, see the SDK's
+   * Reported by `payments.budget.status` and never defaulted, see the platform's
    * gates.ts: on a clustered install the wrong answer is a double-spend.
    */
   readonly isPaymentsLeader: () => boolean;
@@ -69,7 +69,7 @@ export interface PaymentsServices {
   readonly purchases: DaemonPurchaseLedger;
   readonly budget: BudgetLedger;
   /**
-   * Resolves once every payments verb is attached; the SDK runs its boot
+   * Resolves once every payments verb is attached; the platform runs its boot
    * recovery sweep first, so attachment lands a beat after composition.
    * Rejects if attaching the daemon's local handlers failed, so whoever drops
    * this promise must handle that (daemon-handler-composition.ts logs it).

@@ -1,10 +1,10 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { ToolRegistry, ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { registerAccountIdentityRedaction, registerProfileRedactionValues } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { ToolRegistry, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { registerAccountIdentityRedaction, registerProfileRedactionValues } from '@goodvibes-jev/engine/platform/platform/utils';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { executionVerification } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { executionVerification } from '@goodvibes-jev/engine/platform/platform/gate';
 import type { CommandContext } from '../../input/command-registry.ts';
 import type { AgentExecutionRecord } from '../../runtime/execution-ledger.ts';
 import { agentOrchestrationSummary, describeAgentOrchestrationAgent } from '../../tools/agent-harness-agent-orchestration.ts';

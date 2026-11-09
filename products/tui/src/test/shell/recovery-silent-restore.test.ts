@@ -30,7 +30,7 @@ import { ConversationManager } from '../../core/conversation.ts';
 import { announceResumeState } from '../../runtime/resume-notice.ts';
 import { checkRecoveryFile, deleteRecoveryFile, writeRecoveryFile } from '@/runtime/index.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
-import { journalPathFor, openTranscriptJournal } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { journalPathFor, openTranscriptJournal } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { ageRecoverySnapshot, makeTestSurface } from '../helpers/session-surface.ts';
 

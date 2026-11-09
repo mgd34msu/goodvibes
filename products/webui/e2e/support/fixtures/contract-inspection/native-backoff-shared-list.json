@@ -7,7 +7,7 @@
       "origin": "cli",
       "ask": "Add a CSV parser module and wire it into the convert command.",
       "ownerAgentId": "agent-e4d497d4",
-      "projectRoot": "/tmp/goodvibes-sdk-testrun-2-1ed65473/contract-runner-ApHYl0",
+      "projectRoot": "/tmp/goodvibes-platform-testrun-2-1ed65473/contract-runner-ApHYl0",
       "isolation": "shared",
       "nativeSource": {
         "sourceId": "native-work",

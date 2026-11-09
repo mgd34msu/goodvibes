@@ -10,7 +10,7 @@
  * WHY NOT THE REAL PINNED MODELS. They are 3.7 MB of downloaded artifacts that live
  * on a provisioned host, and the harness is hermetic by construction, no daemon, no
  * network, nothing outside this repo. So this builds the smallest models that satisfy
- * the SDK engine's two shape contracts, from scratch, as ONNX protobuf:
+ * the platform engine's two shape contracts, from scratch, as ONNX protobuf:
  *
  *   embedding:  float32[1,76,32,1] -> Identity -> float32[1,76,32,1]   (>= 96 values)
  *   classifier: float32[1,16,96]   -> Identity -> float32[1,16,96]     (>= 1 value)

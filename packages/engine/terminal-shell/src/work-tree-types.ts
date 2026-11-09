@@ -1,17 +1,17 @@
 /** Shared rendered transcript metadata; execution authority stays in platform core. */
-import type { BlockMeta as SdkBlockMeta } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { BlockMeta as PlatformBlockMeta } from '@goodvibes-jev/engine/platform/platform/core';
 /**
- * TUI extends the SDK BlockMeta with rendering position fields, plus a
+ * TUI extends the platform BlockMeta with rendering position fields, plus a
  * TUI-only block type: 'tool_group' is the synthetic header block that folds
  * a run of >=2 consecutive tool-result messages under one collapsible header
  * (see conversation-tool-groups.ts). Defined as an intersection rather than
- * `interface X extends SdkBlockMeta` because TypeScript requires an extending
+ * `interface X extends PlatformBlockMeta` because TypeScript requires an extending
  * interface's members to be subtypes of the base interface's, widening the
  * `type` union that way is a compile error. Omit + intersection adds the new
- * variant without touching the SDK's published type.
+ * variant without touching the platform's published type.
  */
-export type BlockMeta = Omit<SdkBlockMeta, 'type'> & {
-    type: SdkBlockMeta['type'] | 'assistant_turn';
+export type BlockMeta = Omit<PlatformBlockMeta, 'type'> & {
+    type: PlatformBlockMeta['type'] | 'assistant_turn';
     /** Index of this block (increments per renderable block). */
     blockIndex: number;
     /** First rendered line index in the history buffer. */

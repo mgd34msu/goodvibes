@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { createScreeningTransport } from '../../sdk/src/platform/security/source-screening/transport.ts';
-import { createProtectedSourceOwner } from '../../sdk/src/platform/security/source-screening/owner.ts';
+import { createScreeningTransport } from '../../platform/src/platform/security/source-screening/transport.ts';
+import { createProtectedSourceOwner } from '../../platform/src/platform/security/source-screening/owner.ts';
 
 // A fresh owned process, never the shared test process. Bun's native proxy
 // routing can outlive set/delete of process.env, so finally restoration alone

@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { readVerificationArtifact } from '../sdk/src/platform/google/verification-reading.js';
-import type { CandidateEmail, VerificationExpectation } from '../sdk/src/platform/google/verification-expectations.js';
-import type { ProtectedSourceOwner } from '../sdk/src/platform/security/source-screening/types.js';
+import { readVerificationArtifact } from '../platform/src/platform/google/verification-reading.js';
+import type { CandidateEmail, VerificationExpectation } from '../platform/src/platform/google/verification-expectations.js';
+import type { ProtectedSourceOwner } from '../platform/src/platform/security/source-screening/types.js';
 
 /** Synthetic admission only; this does not establish the live privacy screen's accuracy. */
 function sourceOwner(): ProtectedSourceOwner {

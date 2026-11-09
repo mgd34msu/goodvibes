@@ -9,10 +9,10 @@ import {
   type OAuthProviderConfig,
   type ProviderSubscription,
   type SubscriptionManager,
-} from '@goodvibes-jev/engine/sdk/platform/config';
-import { inspectProviderAuth } from '@goodvibes-jev/engine/sdk/platform/runtime/security';
-import { openExternalUrl, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
-import type { ShellPathService } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
+} from '@goodvibes-jev/engine/platform/platform/config';
+import { inspectProviderAuth } from '@goodvibes-jev/engine/platform/platform/runtime/security';
+import { openExternalUrl, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { extractAuthorizationCode } from './settings-subscriptions.js';
 import { requireYesFlag, stripYesFlag, type CommandConfirmationContext } from './command-confirmation.js';

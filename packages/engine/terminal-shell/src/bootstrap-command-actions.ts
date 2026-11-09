@@ -1,4 +1,4 @@
-import type { PermissionRequestHandler } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import type { PermissionRequestHandler } from '@goodvibes-jev/engine/platform/platform/permissions';
 import type { createModelSelectionAction } from './model-selection-action.js';
 import { activeTokens } from './renderer/theme.js';
 /** Initial command actions before the product shell attaches live routes. */

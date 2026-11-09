@@ -12,7 +12,7 @@
  *     next launch (never faked live).
  *
  * Uses a real FeatureFlagManager and a real on-disk ConfigManager wired with
- * the SDK's own settings bridge, no mocks, so persistence and bridge
+ * the platform's own settings bridge, no mocks, so persistence and bridge
  * behavior are exercised for real, including through the modal's
  * toggleSelectedFlag path.
  */
@@ -20,8 +20,8 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { ConfigManager, ServiceRegistry, SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { bindFeatureSettingsBridge, deriveFeatureStates } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
+import { ConfigManager, ServiceRegistry, SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { bindFeatureSettingsBridge, deriveFeatureStates } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { createFeatureFlagManager } from '../../runtime/index.ts';
 import type { FeatureFlagManager } from '../../runtime/index.ts';
 import { SecretsManager } from '../../config/secrets.ts';

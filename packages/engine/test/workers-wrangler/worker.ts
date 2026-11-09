@@ -1,5 +1,5 @@
 /**
- * Cloudflare Workers test script for @goodvibes-jev/engine/sdk, wrangler-CLI harness.
+ * Cloudflare Workers test script for @goodvibes-jev/engine/platform, wrangler-CLI harness.
  *
  * Mirrors test/workers/worker.ts exactly. This version is bundled by wrangler dev
  * (esbuild pipeline) rather than Miniflare's programmatic API.
@@ -11,13 +11,13 @@
  * config surface, not a different runtime. To verify production-workerd behaviour
  * (where EventSource is truly absent), a real CF deployment is required.
  *
- * Imports resolve against packages/sdk/dist via the relative path from this file.
+ * Imports resolve against packages/platform/dist via the relative path from this file.
  * wrangler dev bundles via its own esbuild pipeline before handing to Miniflare 4.
  */
 
 import type { ExportedHandler, ExecutionContext } from '@cloudflare/workers-types';
-import { createWebGoodVibesSdk } from '../../sdk/dist/web.js';
-import * as SdkErrors from '../../sdk/dist/errors.js';
+import { createWebGoodVibesPlatform } from '../../platform/dist/web.js';
+import * as PlatformErrors from '../../platform/dist/errors.js';
 
 interface Env {}
 
@@ -29,32 +29,32 @@ function json(data: unknown): Response {
 }
 
 function handleSmoke(): Response {
-  const sdk = createWebGoodVibesSdk({
+  const platformClient = createWebGoodVibesPlatform({
     baseUrl: 'http://127.0.0.1:9999',
     authToken: 'test-token',
   });
 
-  const hasOperator = sdk.operator != null && typeof sdk.operator === 'object';
-  const hasAuth = sdk.auth != null && typeof sdk.auth === 'object';
-  const hasRealtime = sdk.realtime != null && typeof sdk.realtime === 'object';
+  const hasOperator = platformClient.operator != null && typeof platformClient.operator === 'object';
+  const hasAuth = platformClient.auth != null && typeof platformClient.auth === 'object';
+  const hasRealtime = platformClient.realtime != null && typeof platformClient.realtime === 'object';
 
   return json({
     ok: true,
     hasOperator,
     hasAuth,
     hasRealtime,
-    sdkKeys: Object.keys(sdk).sort(),
+    engineKeys: Object.keys(platformClient).sort(),
   });
 }
 
 async function handleAuth(): Promise<Response> {
   const token = 'workers-auth-token-abc123';
-  const sdk = createWebGoodVibesSdk({
+  const platformClient = createWebGoodVibesPlatform({
     baseUrl: 'http://127.0.0.1:9999',
     authToken: token,
   });
 
-  const storedToken = await sdk.auth.getToken();
+  const storedToken = await platformClient.auth.getToken();
   const tokenMatches = storedToken === token;
 
   return json({ ok: true, tokenMatches, storedToken });
@@ -94,7 +94,7 @@ async function handleTransportSuccess(): Promise<Response> {
     return new Response('Not Found', { status: 404 });
   };
 
-  const sdk = createWebGoodVibesSdk({
+  const platformClient = createWebGoodVibesPlatform({
     baseUrl: 'http://127.0.0.1:9999',
     authToken: 'test-token',
     fetch: mockFetch as unknown as typeof fetch,
@@ -105,7 +105,7 @@ async function handleTransportSuccess(): Promise<Response> {
   let kind: string | null = null;
   let ctor: string | null = null;
   try {
-    result = await sdk.operator.sessions.list();
+    result = await platformClient.operator.sessions.list();
   } catch (err: unknown) {
     kind = (err as Record<string, unknown>)?.kind as string ?? null;
     ctor = (err as Record<string, unknown>)?.constructor instanceof Function
@@ -124,7 +124,7 @@ async function handleTransportError(): Promise<Response> {
     );
   };
 
-  const sdk = createWebGoodVibesSdk({
+  const platformClient = createWebGoodVibesPlatform({
     baseUrl: 'http://127.0.0.1:9999',
     authToken: 'test-token',
     fetch: mockFetch as unknown as typeof fetch,
@@ -135,7 +135,7 @@ async function handleTransportError(): Promise<Response> {
   let kind: string | null = null;
   let ctor: string | null = null;
   try {
-    result = await sdk.operator.sessions.list();
+    result = await platformClient.operator.sessions.list();
   } catch (err: unknown) {
     kind = (err as Record<string, unknown>)?.kind as string ?? null;
     ctor = (err as Record<string, unknown>)?.constructor instanceof Function
@@ -147,26 +147,26 @@ async function handleTransportError(): Promise<Response> {
 }
 
 function handleErrors(): Response {
-  const errorClassNames = Object.keys(SdkErrors).filter((k) => {
-    const v = (SdkErrors as Record<string, unknown>)[k];
+  const errorClassNames = Object.keys(PlatformErrors).filter((k) => {
+    const v = (PlatformErrors as Record<string, unknown>)[k];
     return typeof v === 'function' && (v as { prototype?: unknown }).prototype instanceof Error;
   });
 
-  let sdkErrorWorks = false;
-  const GoodVibesSdkError = (SdkErrors as Record<string, unknown>).GoodVibesSdkError as
+  let engineErrorWorks = false;
+  const GoodVibesError = (PlatformErrors as Record<string, unknown>).GoodVibesError as
     | (new (msg: string, meta: Record<string, unknown>) => Error)
     | undefined;
-  if (GoodVibesSdkError) {
-    const e = new GoodVibesSdkError('test', {
+  if (GoodVibesError) {
+    const e = new GoodVibesError('test', {
       kind: 'unknown',
       category: 'internal',
       source: 'transport',
       recoverable: false,
     });
-    sdkErrorWorks = e instanceof Error && e.message === 'test';
+    engineErrorWorks = e instanceof Error && e.message === 'test';
   }
 
-  return json({ ok: true, errorClassNames, sdkErrorWorks });
+  return json({ ok: true, errorClassNames, engineErrorWorks });
 }
 
 async function handleCrypto(): Promise<Response> {

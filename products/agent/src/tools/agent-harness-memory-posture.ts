@@ -1,11 +1,11 @@
-import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import {
   MemoryUsageStatsStore,
   type MemoryDoctorReport,
   type MemoryEmbeddingProviderStatus,
   type MemoryVectorStats,
   type MemoryUsageSummary,
-} from '@goodvibes-jev/engine/sdk/platform/state';
+} from '@goodvibes-jev/engine/platform/platform/state';
 import type { CommandContext } from '../input/command-registry.ts';
 import { buildAgentWorkspaceMemorySnapshot, type buildAgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace-snapshot.ts';
 import { buildAgentWorkspaceSessionMemoryCount } from '../input/agent-workspace-snapshot-builders.ts';
@@ -16,7 +16,7 @@ import { captureCatalogMethods, rankHarnessCatalog, type CatalogRankingOptions }
 import { modelReadingServicePath } from './agent-harness-model-reading-source.ts';
 import { capturePersonalOpsSnapshot, protectPersonalOpsData } from './agent-harness-personal-ops-source.ts';
 import { assertMemoryCurrent, retainMemoryReadingOptions, selectMemoryProvider } from './agent-harness-memory-provider-readings.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { EXTERNAL_MEMORY_RECEIPT_FIELDS, EXTERNAL_MEMORY_REQUIRED_CONTRACTS, aggregateExternalProviderLiveRecord, aggregateExternalProviderSetupStatus, externalMemoryLiveProviderRecords, externalMemoryProviderCatalog, externalMemoryReceiptEvidence, externalProviderLiveReady, liveRecordForProvider, receiptEvidenceForProvider, setupStatusFromLiveRecord } from './agent-harness-memory-external-providers.ts';
 import type { ExternalMemoryProviderCatalogEntry, MemoryExternalProviderContractCheck, MemoryExternalProviderContractStatus, MemoryExternalProviderLiveRecord, MemoryExternalProviderReceiptContract, MemoryExternalProviderReceiptEvidence, MemoryExternalProviderRoute, MemoryExternalProviderSetupGuide, MemoryExternalProviderStatus, MemoryPostureProvider, MemoryProviderResolution } from './agent-harness-memory-external-providers.ts';
 
@@ -295,7 +295,7 @@ function externalProviderNextRoutes(
       label: 'Inspect provider contract',
       modelRoute: `memory action:"provider" providerId:${JSON.stringify(provider.id)} includeParameters:true`,
       effect: 'read-only',
-      why: 'Shows the current SDK/daemon contract checklist, missing receipt fields, credential boundary, and local fallback.',
+      why: 'Shows the current platform/daemon contract checklist, missing receipt fields, credential boundary, and local fallback.',
     },
     {
       id: 'inspect-host-capability',
@@ -349,7 +349,7 @@ function externalProviderContractChecklist(
       label: 'Certified provider schema/publication evidence',
       status: providerCertificationPublished,
       requiredFor: 'Treat provider readiness as release-grade instead of a legacy host hint.',
-      owner: 'goodvibes-sdk-or-daemon',
+      owner: 'goodvibes-platform-or-daemon',
       inspectRoute: liveInspectRoute,
     },
     {
@@ -357,7 +357,7 @@ function externalProviderContractChecklist(
       label: 'Provider status/readiness record',
       status: statusRecordStatus,
       requiredFor: 'Show whether the provider is configured, reachable, and safe to use.',
-      owner: 'goodvibes-sdk-or-daemon',
+      owner: 'goodvibes-platform-or-daemon',
       inspectRoute: liveInspectRoute,
     },
     {
@@ -365,7 +365,7 @@ function externalProviderContractChecklist(
       label: 'Credential reference without raw secret values',
       status: credentialStatus,
       requiredFor: 'Let the user repair auth without exposing API keys or memory payloads.',
-      owner: 'goodvibes-sdk-or-daemon',
+      owner: 'goodvibes-platform-or-daemon',
       inspectRoute: liveRecord?.setupRoute ?? 'settings action:"list" query:"memory" includeHidden:true',
     },
     {
@@ -373,7 +373,7 @@ function externalProviderContractChecklist(
       label: 'Bounded read/search route',
       status: readStatus,
       requiredFor: 'Review external memories with redaction, provenance, and source limits before prompt use.',
-      owner: 'goodvibes-sdk-or-daemon',
+      owner: 'goodvibes-platform-or-daemon',
       inspectRoute: liveRecord?.readRoute ?? `agent_harness mode:"mcp_servers" query:${JSON.stringify(provider.id)}`,
     },
     {
@@ -381,7 +381,7 @@ function externalProviderContractChecklist(
       label: 'Confirmed write/upsert/import route',
       status: writeStatus,
       requiredFor: 'Write external memories only after explicit user request and confirmation.',
-      owner: 'goodvibes-sdk-or-daemon',
+      owner: 'goodvibes-platform-or-daemon',
       inspectRoute: liveRecord?.writeRoute ?? `host action:"capability" query:${JSON.stringify(providerQuery)}`,
     },
     {
@@ -389,7 +389,7 @@ function externalProviderContractChecklist(
       label: 'Forget/delete or explicit not-supported contract',
       status: forgetStatus,
       requiredFor: 'Prove provider memory can be removed or that removal is explicitly unsupported before the provider is relied on.',
-      owner: 'goodvibes-sdk-or-daemon',
+      owner: 'goodvibes-platform-or-daemon',
       inspectRoute: liveRecord?.forgetRoute ?? liveInspectRoute,
     },
     {
@@ -397,7 +397,7 @@ function externalProviderContractChecklist(
       label: 'Sync/import/export receipts',
       status: syncStatus,
       requiredFor: 'Prove what crossed the provider boundary, when it happened, and what failed.',
-      owner: 'goodvibes-sdk-or-daemon',
+      owner: 'goodvibes-platform-or-daemon',
       inspectRoute: liveRecord?.receiptRoute ?? liveRecord?.syncRoute ?? (hasReceipts
         ? receipts[0]!.inspectRoute
         : `memory action:"provider" providerId:${JSON.stringify(provider.id)} includeParameters:true`),
@@ -407,7 +407,7 @@ function externalProviderContractChecklist(
       label: 'Prompt eligibility policy',
       status: promptPolicyStatus,
       requiredFor: 'Prevent external provider records from silently entering the Agent prompt.',
-      owner: 'goodvibes-sdk-or-daemon',
+      owner: 'goodvibes-platform-or-daemon',
       inspectRoute: 'context action:"prompt" includeParameters:true',
     },
   ];
@@ -463,14 +463,14 @@ function externalProviderSetupGuide(
     status: liveSetupStatus ?? (latestReceipt ? 'receipt-evidence-found' : 'contract-needed'),
     userOutcome: liveRecord
       ? `Use ${provider.label} as an external memory backend through the daemon-published read model, with bounded reads visible before prompt use and every write/sync/forget route treated as confirmed external provider effect.`
-      : `Use ${provider.label} as an external memory backend only after the SDK/daemon publishes provider setup, status, read, write, and receipt contracts for Agent to consume.`,
+      : `Use ${provider.label} as an external memory backend only after the platform/daemon publishes provider setup, status, read, write, and receipt contracts for Agent to consume.`,
     currentState: liveRecord?.operationProvenance === 'classic'
       ? `Classic operation retains the published ${provider.label} facts (${readiness}), but operation roles and certification are unassessed. Inspect the native host methods before selecting an external-memory operation.`
       : liveRecord
       ? `Live ${provider.label} provider record from ${liveRecord.source} reports ${readiness || liveRecord.status}.${latestReceipt ? ` Latest durable receipt artifact ${latestReceipt.artifactId} reports ${latestReceipt.operation} ${latestReceipt.status}.` : ''}`
       : latestReceipt
-      ? `Latest durable ${provider.label} receipt artifact ${latestReceipt.artifactId} reports ${latestReceipt.operation} ${latestReceipt.status}; live provider status/read/write records are still not published by the current SDK/daemon contract.`
-      : `No concrete ${provider.label} provider record is published by the current SDK/daemon contract.`,
+      ? `Latest durable ${provider.label} receipt artifact ${latestReceipt.artifactId} reports ${latestReceipt.operation} ${latestReceipt.status}; live provider status/read/write records are still not published by the current platform/daemon contract.`
+      : `No concrete ${provider.label} provider record is published by the current platform/daemon contract.`,
     safeFirstStep: liveRecord?.operationProvenance === 'classic'
       ? `Inspect the native ${provider.label} host or MCP methods directly; automatic route interpretation is unavailable. Keep existing owner approvals for external effects.`
       : liveRecord
@@ -515,7 +515,7 @@ function describeExternalProvider(
       ? liveSummary
       : latestReceipt
       ? `Durable external memory receipt ${latestReceipt.artifactId} reports ${latestReceipt.operation} ${latestReceipt.status}; live provider records are still not published.`
-      : 'External memory backend records are not published by the current GoodVibes SDK/daemon contract.', includeParameters ? 180 : 96),
+      : 'External memory backend records are not published by the current GoodVibes platform/daemon contract.', includeParameters ? 180 : 96),
     modelRoute: `memory action:"provider" providerId:${JSON.stringify(provider.id)}`,
     setupRoute: 'host action:"capability" query:"memory provider"',
     configured: liveRecord?.configured ?? (liveRecord ? externalProviderLiveReady(liveRecord) : latestReceipt ? latestReceipt.status === 'succeeded' : false),
@@ -663,7 +663,7 @@ function nextActions(
   if (snapshot.localMemoryReviewQueueCount > 0) actions.push('Use learning_curator or memory review routes to clear the memory review queue.');
   if (vectorStatusValue === 'attention') actions.push('Run memory vector doctor, then rebuild the vector index if the reported issue is fixed.');
   if (doctor?.embeddings.warnings.length) actions.push('Inspect the active embedding provider warning before semantic recall or rebuild work.');
-  actions.push('Inspect memory action:"provider" for one external backend to see the exact SDK/daemon setup contracts Agent can consume before use.');
+  actions.push('Inspect memory action:"provider" for one external backend to see the exact platform/daemon setup contracts Agent can consume before use.');
   return actions.slice(0, 6);
 }
 
@@ -805,7 +805,7 @@ async function ownedMemoryPostureSummary(context: CommandContext, args: AgentHar
           label: 'Inspect one provider contract',
           modelRoute: 'memory action:"provider" providerId:"<id>" includeParameters:true',
           effect: 'read-only',
-          why: 'Shows provider-specific missing SDK/daemon contracts, receipt requirements, credential policy, and next routes.',
+          why: 'Shows provider-specific missing platform/daemon contracts, receipt requirements, credential policy, and next routes.',
         },
         {
           id: 'inspect-host-memory-capability',
@@ -819,7 +819,7 @@ async function ownedMemoryPostureSummary(context: CommandContext, args: AgentHar
         ? 'Inspect the matching live provider record before any provider read; keep write, sync, import/export, forget/delete, and prompt-eligibility changes on confirmed routes with durable receipts.'
         : receiptEvidence.length > 0
         ? 'Review the latest external-memory receipt artifact, then keep Agent-local memory as the active prompt path until live provider status/read/write records are published.'
-        : 'Use Agent-local memory now. Inspect one external provider for the required SDK/daemon setup/status/read/write/receipt contracts Agent can consume before provider use.',
+        : 'Use Agent-local memory now. Inspect one external provider for the required platform/daemon setup/status/read/write/receipt contracts Agent can consume before provider use.',
       inspectRoute: 'host action:"capability" query:"memory provider"',
       providerLookup: 'memory action:"provider" providerId:"<id>" includeParameters:true',
     },

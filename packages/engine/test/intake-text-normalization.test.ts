@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   digestSender, normalizeWhitespace, sha256First, stripMarkup,
-} from '../sdk/src/platform/intake/text-normalization.js';
+} from '../platform/src/platform/intake/text-normalization.js';
 
 const text = (input: string): string => normalizeWhitespace(stripMarkup(input));
 function multipart(parts: readonly (readonly [string, string])[], boundary = 'BOUNDARY', newline = '\r\n'): string {

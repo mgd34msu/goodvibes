@@ -3,11 +3,11 @@ import { afterAll, beforeAll } from 'bun:test';
 import { SqliteDecisionLog, withDecisionLog, type EntryType } from '@goodvibes-jev/judgment';
 import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { executeToolCalls, type ToolExecutionDeps } from '@goodvibes-jev/engine/sdk/platform/core';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { PermissionManager, createPermissionConfigReader } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import { PolicyRuntimeState } from '@goodvibes-jev/engine/sdk/platform/runtime/security';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { executeToolCalls, type ToolExecutionDeps } from '@goodvibes-jev/engine/platform/platform/core';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { PermissionManager, createPermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { PolicyRuntimeState } from '@goodvibes-jev/engine/platform/platform/runtime/security';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { makeOwnedTempDir } from './owned-temp.js';
 import { gateReadingsPort } from './synthetic-gate-readings.js';
 export interface DeviceReading {

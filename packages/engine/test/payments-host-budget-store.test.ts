@@ -7,17 +7,17 @@ import * as fs from 'node:fs';
  * restarted mid-day handed back a full daily budget it had already spent, the
  * exact failure `payments-composition.ts`'s own header used to flag as correct
  * "ONLY while checkout is unattached". These tests exercise the persistence
- * this class adds over the SDK's own `BudgetLedger`, not the pool arithmetic
+ * this class adds over the platform's own `BudgetLedger`, not the pool arithmetic
  * itself (budget.ts's own tests already cover that; this class changes
  * nothing about it).
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import { logger } from '../sdk/src/platform/utils/logger.js';
-import { dayKey } from '../sdk/src/platform/payments/day.js';
-import type { BudgetLimits } from '../sdk/src/platform/payments/budget.js';
-import { DurableBudgetLedger, PaymentBudgetUnavailableError } from '../sdk/src/platform/payments/host/budget-store.js';
+import { logger } from '../platform/src/platform/utils/logger.js';
+import { dayKey } from '../platform/src/platform/payments/day.js';
+import type { BudgetLimits } from '../platform/src/platform/payments/budget.js';
+import { DurableBudgetLedger, PaymentBudgetUnavailableError } from '../platform/src/platform/payments/host/budget-store.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const LIMITS: BudgetLimits = {

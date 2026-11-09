@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { LID_SWITCH_HONEST_SPLIT } from '@goodvibes-jev/engine/sdk/platform/power';
+import { LID_SWITCH_HONEST_SPLIT } from '@goodvibes-jev/engine/platform/platform/power';
 import {
   IDLE_POWER_STATE,
   SLEEP_DISABLED_CHIP,
@@ -12,7 +12,7 @@ import {
 // ---------------------------------------------------------------------------
 // STEP 3, power surfaces. The ops/status projection: the "sleep disabled"
 // chip meaning, "held because X" work-inhibition reasons, and the honest
-// lid-split note rendered VERBATIM when the SDK serves it.
+// lid-split note rendered VERBATIM when the platform serves it.
 // ---------------------------------------------------------------------------
 
 describe('powerStatusLines (STEP 3)', () => {

@@ -3,11 +3,11 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { ApprovalBroker, type SharedApprovalRecord } from '../sdk/src/platform/control-plane/approval-broker.js';
-import { WorkspaceTrustManager } from '../sdk/src/platform/runtime/workspace-trust.js';
-import { createWorkspaceTrustDecisionAsk, trustGatedApprovalRaiser } from '../sdk/src/platform/runtime/workspace-trust-approval.js';
-import type { PermissionPromptRequest } from '../sdk/src/platform/permissions/prompt.js';
-import { PersistentStore } from '../sdk/src/platform/state/persistent-store.js';
+import { ApprovalBroker, type SharedApprovalRecord } from '../platform/src/platform/control-plane/approval-broker.js';
+import { WorkspaceTrustManager } from '../platform/src/platform/runtime/workspace-trust.js';
+import { createWorkspaceTrustDecisionAsk, trustGatedApprovalRaiser } from '../platform/src/platform/runtime/workspace-trust-approval.js';
+import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.js';
+import { PersistentStore } from '../platform/src/platform/state/persistent-store.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

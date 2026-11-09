@@ -1,4 +1,4 @@
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import { isTextBackspace } from './delete-key-policy.js';
 import { syncRuntimeAfterSettingReset, type RuntimeSettingResetContext } from './runtime-setting-reset.js';
 export type SettingsRouteState<Context, Target, Action extends string> = {

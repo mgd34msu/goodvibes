@@ -6,7 +6,7 @@
  *
  * A message that arrives on Telegram, Slack, email or any other channel reaches
  * this process as a shared-session continuation (client/session-inputs.ts polls
- * `sessions.inputs.list`; the SDK's wire dispatch hands each one to the bound
+ * `sessions.inputs.list`; the platform's wire dispatch hands each one to the bound
  * continuation runner). The runner's answer has always been the same: spawn an
  * agent HERE. That answer ends when this process ends.
  *
@@ -55,9 +55,9 @@
  * be done.
  */
 import { isAbsolute } from 'node:path';
-import type { DaemonVerbCaller } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
-import type { HostedSessionRecord } from '@goodvibes-jev/engine/sdk/platform/hosted-sessions';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import type { HostedSessionRecord } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { ConnectedHostVerbError, describeConnectedHostVerbError } from './daemon-verbs.ts';
 
 /** How many characters of the owner's message become the hosted session's title. */

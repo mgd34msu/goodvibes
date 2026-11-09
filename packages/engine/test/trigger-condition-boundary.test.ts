@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { fireTriggers } from '../sdk/src/platform/workflow/trigger-executor.ts';
-import type { HookEvent } from '../sdk/src/platform/hooks/types.ts';
-import type { TriggerDefinition } from '../sdk/src/platform/tools/workflow/index.ts';
+import { fireTriggers } from '../platform/src/platform/workflow/trigger-executor.ts';
+import type { HookEvent } from '../platform/src/platform/hooks/types.ts';
+import type { TriggerDefinition } from '../platform/src/platform/tools/workflow/index.ts';
 
 // An empty action reaches executeAction but cannot launch a process. Its
 // explicit error distinguishes a passed condition from a rejected condition.

@@ -3,9 +3,9 @@ import { spawnSync } from 'node:child_process';
 import { rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Client } from 'undici/index.js';
-import * as directClient from '../sdk/src/platform/security/source-screening/direct-client.ts';
-import { createSlackInboxHttpOwner } from '../sdk/src/platform/intake/providers/slack-http.ts';
-import type { SlackInboxHttp } from '../sdk/src/platform/intake/providers/slack.ts';
+import * as directClient from '../platform/src/platform/security/source-screening/direct-client.ts';
+import { createSlackInboxHttpOwner } from '../platform/src/platform/intake/providers/slack-http.ts';
+import type { SlackInboxHttp } from '../platform/src/platform/intake/providers/slack.ts';
 import { isolatedTestEnvironment } from '../scripts/test-isolation.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 

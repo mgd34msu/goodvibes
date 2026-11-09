@@ -1,6 +1,6 @@
 import { MODAL_TONES } from './modal-theme.ts';
 import { infoRow, headerRow } from './modal-surface-helpers.ts';
-import type { TokenAuditResult } from '@goodvibes-jev/engine/sdk/platform/security';
+import type { TokenAuditResult } from '@goodvibes-jev/engine/platform/platform/security';
 import { registerThemeRefresh } from '../../renderer/theme.ts';
 import type { ModalSectionStyle } from '../../input/config-modal-types.ts';
 import type { UiReadModel, UiSecuritySnapshot } from '../../runtime/ui-read-models.ts';

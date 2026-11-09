@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { join } from 'node:path';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { FakeClusterClock, type ClusterTransport } from '@goodvibes-jev/engine/sdk/platform/cluster';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { FakeClusterClock, type ClusterTransport } from '@goodvibes-jev/engine/platform/platform/cluster';
 import type { ShellPathService } from '../../runtime/index.js';
 import { createClusterGroupComposition } from '../../runtime/cluster-group-composition.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';

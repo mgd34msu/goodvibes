@@ -1,6 +1,6 @@
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireLocalUserAuthManager } from './runtime-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 function formatRoles(roles: readonly string[]): string {
   return roles.length > 0 ? roles.join(', ') : '(none)';

@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { ChannelPluginRegistry } from '../sdk/src/platform/channels/plugin-registry.js';
-import { BuiltinChannelRuntime } from '../sdk/src/platform/channels/builtin-runtime.js';
-import type { ChannelSurface } from '../sdk/src/platform/channels/types.js';
-import type { BuiltinChannelRuntimeDeps, ManagedSurface } from '../sdk/src/platform/channels/builtin/shared.js';
+import { ChannelPluginRegistry } from '../platform/src/platform/channels/plugin-registry.js';
+import { BuiltinChannelRuntime } from '../platform/src/platform/channels/builtin-runtime.js';
+import type { ChannelSurface } from '../platform/src/platform/channels/types.js';
+import type { BuiltinChannelRuntimeDeps, ManagedSurface } from '../platform/src/platform/channels/builtin/shared.js';
 
 const EXPECTED_SURFACES = [
   'tui',
@@ -101,7 +101,7 @@ function createBuiltinRuntimeDeps(channelPlugins: ChannelPluginRegistry): Builti
 }
 
 describe('built-in channel plugin contract', () => {
-  test('registers every SDK-owned surface with stable ids and lookup keys', () => {
+  test('registers every platform-owned surface with stable ids and lookup keys', () => {
     const registry = new ChannelPluginRegistry();
     new BuiltinChannelRuntime(createBuiltinRuntimeDeps(registry)).registerPlugins();
 

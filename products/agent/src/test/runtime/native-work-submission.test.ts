@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { NativeWorkSubmissionControls, nativeWorkSubmissionLines, type NativeWorkSubmissionSelection } from '../../runtime/native-work-submission.ts';
 import { parseNativeWorkSourceJson, readNativeWorkSourceFile } from '../../runtime/native-work-submission-source.ts';
 import type { NativeSubmissionJournalBinding, NativeSubmissionJournalRecord } from '../../runtime/native-work-submission-journal.ts';
-import type { NativeWorkSubmissionRequest, NativeWorkSubmissionReceipt, OperatorNativeWorkSubmissionClient } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-submission-client';
+import type { NativeWorkSubmissionRequest, NativeWorkSubmissionReceipt, OperatorNativeWorkSubmissionClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-submission-client';
 const tick = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
 const source = { goal: '  Original goal\nkeep spaces  ', criteria: ['  first  ', 'second\nline', '  first  '] };
 const receipt = (command: NativeWorkSubmissionRequest): NativeWorkSubmissionReceipt => ({

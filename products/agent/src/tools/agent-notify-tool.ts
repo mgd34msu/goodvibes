@@ -1,7 +1,7 @@
-import type { WebhookNotifierSendResult } from '@goodvibes-jev/engine/sdk/platform/integrations';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import { assertCurrentToolEffect, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { snapshotJudgmentInput, captureStrictJudgmentJson } from '@goodvibes-jev/engine/sdk/platform/gate';
+import type { WebhookNotifierSendResult } from '@goodvibes-jev/engine/platform/platform/integrations';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { assertCurrentToolEffect, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { snapshotJudgmentInput, captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
 import { retainSurfaceRead, retainSurfaceMethods } from './agent-surface-effect.ts';
 import { evaluateOutwardEffect, getSessionUntrustedContentLedger } from '../trust/untrusted-content.ts';
 import { screenOutboundForCardMaterial, CardMaterialRefusedError } from '../agent/payments-channel-guard.ts';

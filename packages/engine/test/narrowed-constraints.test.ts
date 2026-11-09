@@ -16,7 +16,7 @@ import type { EntryType, Question } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { authoredErrorReadingsPort, errorText } from './_helpers/authored-error-readings.ts';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { forgetModelLimitReadings } from '../sdk/src/platform/routing/model-limit-readings.ts';
+import { forgetModelLimitReadings } from '../platform/src/platform/routing/model-limit-readings.ts';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -25,17 +25,17 @@ import {
   redactSensitiveDataAsync,
   redactIssuerCredentials,
   registerAccountIdentityRedaction,
-} from '../sdk/src/platform/utils/redaction.ts';
-import { redactAtRestLine } from '../sdk/src/platform/runtime/at-rest-persistence.ts';
-import { upsertMcpServerConfig } from '../sdk/src/platform/mcp/config.ts';
-import { getCatalogModelDefinitionsFrom, modelCapabilityFactsFromCatalog } from '../sdk/src/platform/providers/model-catalog.ts';
-import type { CatalogModel } from '../sdk/src/platform/providers/model-catalog.ts';
-import { runResumeRepair } from '../sdk/src/platform/runtime/compaction/resume-repair.ts';
-import { CompactionManager } from '../sdk/src/platform/runtime/compaction/manager.ts';
-import type { BoundaryCommit } from '../sdk/src/platform/runtime/compaction/types.ts';
-import { ProviderCapabilityRegistry } from '../sdk/src/platform/providers/capabilities.ts';
-import { createCredentialStatusProvider } from '../sdk/src/platform/config/credential-status.ts';
-import { AnthropicProvider } from '../sdk/src/platform/providers/anthropic.ts';
+} from '../platform/src/platform/utils/redaction.ts';
+import { redactAtRestLine } from '../platform/src/platform/runtime/at-rest-persistence.ts';
+import { upsertMcpServerConfig } from '../platform/src/platform/mcp/config.ts';
+import { getCatalogModelDefinitionsFrom, modelCapabilityFactsFromCatalog } from '../platform/src/platform/providers/model-catalog.ts';
+import type { CatalogModel } from '../platform/src/platform/providers/model-catalog.ts';
+import { runResumeRepair } from '../platform/src/platform/runtime/compaction/resume-repair.ts';
+import { CompactionManager } from '../platform/src/platform/runtime/compaction/manager.ts';
+import type { BoundaryCommit } from '../platform/src/platform/runtime/compaction/types.ts';
+import { ProviderCapabilityRegistry } from '../platform/src/platform/providers/capabilities.ts';
+import { createCredentialStatusProvider } from '../platform/src/platform/config/credential-status.ts';
+import { AnthropicProvider } from '../platform/src/platform/providers/anthropic.ts';
 
 const tmpDirs: string[] = [];
 function mkTemp(): string {
@@ -59,18 +59,18 @@ const FIXTURE_API_KEY = 'sk-ABCDEFGHIJKLMNOPQRSTUVWX';
 
 describe('at-rest redaction masks credentials without anonymising the owner', () => {
   test('a home path survives the at-rest writer intact', () => {
-    const line = JSON.stringify({ cwd: '/home/mike/Projects/goodvibes-sdk' });
+    const line = JSON.stringify({ cwd: '/home/mike/Projects/goodvibes-platform' });
     const out = redactAtRestLine(line);
     // The whole point: the journal file LIVES in this directory. Rewriting it
     // to /home/[REDACTED]/... irreversibly, at write time, costs the entry the
     // one detail that makes it worth reading later and protects nobody.
-    expect(out).toContain('/home/mike/Projects/goodvibes-sdk');
+    expect(out).toContain('/home/mike/Projects/goodvibes-platform');
     expect(out).not.toContain('[REDACTED]');
   });
 
   test('a credential in the same line is still masked', () => {
     const line = JSON.stringify({
-      cwd: '/home/mike/Projects/goodvibes-sdk',
+      cwd: '/home/mike/Projects/goodvibes-platform',
       body: `run with ${FIXTURE_API_KEY} and Authorization: Bearer abcdef.ghijkl`,
     });
     const out = redactAtRestLine(line);
@@ -80,7 +80,7 @@ describe('at-rest redaction masks credentials without anonymising the owner', ()
     // Still a parseable line, a redacted record must not become unreadable.
     expect(() => JSON.parse(out) as unknown).not.toThrow();
     // …and the path is still there alongside the masked secret.
-    expect(out).toContain('/home/mike/Projects/goodvibes-sdk');
+    expect(out).toContain('/home/mike/Projects/goodvibes-platform');
   });
 
   test('the EGRESS helper still anonymises, because that text leaves the machine', async () => {

@@ -21,14 +21,14 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createOrchestrationEngine } from '../sdk/src/platform/orchestration/engine.js';
-import { ELASTIC_PHASE_CAPACITY, planTaskGraph, type GraphTask } from '../sdk/src/platform/orchestration/task-graph.js';
-import { dependencySatisfied } from '../sdk/src/platform/orchestration/scheduler.js';
-import { countOwnedActiveAgents, fleetCapacityProbeFrom } from '../sdk/src/platform/runtime/orchestration/fleet-count.js';
-import { migrateFleetMaxSizeRename } from '../sdk/src/platform/config/migrations.js';
-import { applyFleetMaxSizeMigrationPass } from '../sdk/src/platform/config/manager-migration-passes.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import type { OrchestrationEvent, WorkItem, Workstream } from '../sdk/src/platform/orchestration/types.js';
+import { createOrchestrationEngine } from '../platform/src/platform/orchestration/engine.js';
+import { ELASTIC_PHASE_CAPACITY, planTaskGraph, type GraphTask } from '../platform/src/platform/orchestration/task-graph.js';
+import { dependencySatisfied } from '../platform/src/platform/orchestration/scheduler.js';
+import { countOwnedActiveAgents, fleetCapacityProbeFrom } from '../platform/src/platform/runtime/orchestration/fleet-count.js';
+import { migrateFleetMaxSizeRename } from '../platform/src/platform/config/migrations.js';
+import { applyFleetMaxSizeMigrationPass } from '../platform/src/platform/config/manager-migration-passes.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import type { OrchestrationEvent, WorkItem, Workstream } from '../platform/src/platform/orchestration/types.js';
 import {
   createOrchestrationHarness,
   engineerReportOutput,

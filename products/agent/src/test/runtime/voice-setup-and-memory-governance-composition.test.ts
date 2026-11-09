@@ -1,11 +1,11 @@
 /**
  * voice-setup-and-memory-governance-composition.test.ts
  *
- * Pins two adopted SDK seams through the real composition root
+ * Pins two adopted platform seams through the real composition root
  * (createRuntimeServices), in the same style as
  * power-keep-awake-composition.test.ts:
  *
- *  1. `services.voiceSetup` is real, live wiring over the SDK's own managed
+ *  1. `services.voiceSetup` is real, live wiring over the platform's own managed
  *     voice provisioning, created by the platform's createVoiceSetupService
  *     rather than mirrored here, which is also what gives this surface the
  *     wake-word artifact service. Both the direct service (what /voice status,
@@ -13,9 +13,9 @@
  *     gateway verbs (what a remote surface would invoke) are pinned to the SAME
  *     instance and produce a real, non-fabricated answer.
  *
- *  2. The SDK memory-governance layer is composed FOR REAL: the MemoryGovernor
- *     is constructed AND STARTED by default (a safety feature) via the SDK's
- *     own public wireDaemonMemoryGovernance (exported since sdk 4d5e247b,
+ *  2. The platform memory-governance layer is composed FOR REAL: the MemoryGovernor
+ *     is constructed AND STARTED by default (a safety feature) via the platform's
+ *     own public wireDaemonMemoryGovernance (exported since platform 4d5e247b,
  *     which fixed the export-surface gap this composition previously reported
  *     and carried as an honest divergence), this fork's caches (knowledge
  *     stores + shared session broker) and pausable background jobs are
@@ -39,7 +39,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { buildDaemonGatewayCatalog } from '../helpers/daemon-gateway.ts';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type { MemoryGovernorSnapshot } from '@goodvibes-jev/engine/sdk/platform/runtime/memory';
+import type { MemoryGovernorSnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/memory';
 import { ConfigManager } from '../../config/index.ts';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
@@ -164,15 +164,15 @@ describe('voice-setup + memory-governance composition', () => {
   test('the MemoryGovernor is composed, STARTED by default, and its registered members are this fork\'s real caches and jobs', () => {
     const services = makeServices();
     try {
-      // Present: the real SDK class instances, not stand-ins.
+      // Present: the real platform class instances, not stand-ins.
       expect(services.memoryGovernor).toBeDefined();
       expect(services.cacheRegistry).toBeDefined();
       expect(services.pauseController).toBeDefined();
 
-      // Started by default, a safety feature, like the SDK's own daemon
+      // Started by default, a safety feature, like the platform's own daemon
       // composition. start() sets the (unref'd) sampling interval; the timer
       // handle is the only truthful started/stopped tell the class exposes,
-      // so this is a deliberate white-box probe: if the SDK renames the
+      // so this is a deliberate white-box probe: if the platform renames the
       // field, this pin should fail and be re-anchored, not deleted.
       const timerOf = (): unknown => (services.memoryGovernor as unknown as { timer: unknown }).timer;
       expect(timerOf()).not.toBeNull();

@@ -8,7 +8,7 @@ import { READINGS_PATH as README_READINGS_PATH, readmeAdvisories, readmeState } 
 import { loadStoredReadings } from './ci-readings/stored-readings.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SDK_ROOT = resolve(__dirname, '..');
+const ENGINE_ROOT = resolve(__dirname, '..');
 // The old root package.json is the repo root package.json.
 const rootPackage = JSON.parse(readFileSync(resolve(REPO_ROOT, 'package.json'), 'utf8'));
 
@@ -63,7 +63,7 @@ function assertSourceConditionFirst(dir: string, exports: Record<string, unknown
 
 function assertSourceTargetExists(dir: string, entry: ExportEntry): void {
   if (!entry.target) return;
-  if (!existsSync(resolve(SDK_ROOT, dir, entry.target))) {
+  if (!existsSync(resolve(ENGINE_ROOT, dir, entry.target))) {
     throw new Error(`${dir}/package.json source condition names a missing file: ${entry.keyPath} -> ${entry.target}`);
   }
 }
@@ -82,35 +82,35 @@ function assertCleanExportEntry(dir: string, entry: ExportEntry): void {
 
 function resolveExportBackingPath(dir: string, target: string): string | null {
   if (target === './package.json') {
-    return resolve(SDK_ROOT, dir, 'package.json');
+    return resolve(ENGINE_ROOT, dir, 'package.json');
   }
   if (target.startsWith('./artifacts/')) {
-    return resolve(SDK_ROOT, dir, target);
+    return resolve(ENGINE_ROOT, dir, target);
   }
   // The engine keeps each old package's output under its own directory
-  // (./sdk/dist, ./contracts/dist, ...), so the dist root is either ./dist or
+  // (./platform/dist, ./contracts/dist, ...), so the dist root is either ./dist or
   // ./<pkg>/dist, and its artifacts either ./artifacts or ./<pkg>/artifacts.
   const layout = /^\.\/(?:([^/]+)\/)?(dist|artifacts)\//.exec(target);
   if (!layout) {
     return null;
   }
   if (layout[2] === 'artifacts' || target.endsWith('.json')) {
-    return resolve(SDK_ROOT, dir, target);
+    return resolve(ENGINE_ROOT, dir, target);
   }
   if (target.endsWith('.js') || target.endsWith('.d.ts')) {
     // A hand-written ambient declaration keeps its own name on both sides: tsc
-    // never emits it, so prepare:sdk copies src/**/x.d.ts to dist/**/x.d.ts
+    // never emits it, so prepare:engine copies src/**/x.d.ts to dist/**/x.d.ts
     // unchanged. Check that form first; everything else in dist is emitted from
     // a .ts of the same stem.
     if (target.endsWith('.d.ts')) {
-      const declarationSource = resolve(SDK_ROOT, dir, target.replace('/dist/', '/src/'));
+      const declarationSource = resolve(ENGINE_ROOT, dir, target.replace('/dist/', '/src/'));
       if (existsSync(declarationSource)) return declarationSource;
     }
     const sourcePath = target
       .replace('/dist/', '/src/')
       .replace(/\.d\.ts$/, '.ts')
       .replace(/\.js$/, '.ts');
-    return resolve(SDK_ROOT, dir, sourcePath);
+    return resolve(ENGINE_ROOT, dir, sourcePath);
   }
   return null;
 }
@@ -130,25 +130,25 @@ function assertNoInternalManifestFields(dir: string, pkg: Record<string, unknown
   }
 }
 
-function sdkExportKey(entrypoint: string): string {
-  // The sdk's entry points are subpaths of the engine package.
+function engineExportKey(entrypoint: string): string {
+  // The engine's entry points are subpaths of the engine package.
   const packageName = '@goodvibes-jev/engine';
   if (entrypoint === packageName) return '.';
   if (entrypoint.startsWith(`${packageName}/`)) return `.${entrypoint.slice(packageName.length)}`;
   return entrypoint;
 }
 
-function assertSdkCapabilitiesExported(pkg: Record<string, unknown>): void {
+function assertPlatformCapabilitiesExported(pkg: Record<string, unknown>): void {
   if (!pkg.exports || typeof pkg.exports !== 'object' || Array.isArray(pkg.exports)) return;
   const source = readFileSync(
-    resolve(SDK_ROOT, 'sdk/src/platform/node/capabilities.ts'),
+    resolve(ENGINE_ROOT, 'platform/src/platform/node/capabilities.ts'),
     'utf8',
   );
   const entrypoints = new Set(
-    [...source.matchAll(/'@goodvibes-jev\/engine\/sdk(?:\/[^']*)?'/g)].map((match) => match[0].slice(1, -1)),
+    [...source.matchAll(/'@goodvibes-jev\/engine\/platform(?:\/[^']*)?'/g)].map((match) => match[0].slice(1, -1)),
   );
   const exports = pkg.exports as Record<string, unknown>;
-  const missing = [...entrypoints].map(sdkExportKey).filter((key) => !(key in exports));
+  const missing = [...entrypoints].map(engineExportKey).filter((key) => !(key in exports));
   if (missing.length > 0) {
     throw new Error(`package.json is missing exports declared by runtime capabilities: ${missing.join(', ')}`);
   }
@@ -156,7 +156,7 @@ function assertSdkCapabilitiesExported(pkg: Record<string, unknown>): void {
 
 function collectGeneratedFoundationTypeNames(): readonly string[] {
   const source = readFileSync(
-    resolve(SDK_ROOT, 'contracts/src/generated/foundation-client-types.ts'),
+    resolve(ENGINE_ROOT, 'contracts/src/generated/foundation-client-types.ts'),
     'utf8',
   );
   return [...source.matchAll(/^export\s+(?:interface|type)\s+([A-Za-z0-9_]+)/gm)]
@@ -165,7 +165,7 @@ function collectGeneratedFoundationTypeNames(): readonly string[] {
 }
 
 function assertContractsGeneratedTypesReexported(): void {
-  const source = readFileSync(resolve(SDK_ROOT, 'contracts/src/index.ts'), 'utf8');
+  const source = readFileSync(resolve(ENGINE_ROOT, 'contracts/src/index.ts'), 'utf8');
   const missing = collectGeneratedFoundationTypeNames().filter((name) => !new RegExp(`\\b${name}\\b`).test(source));
   if (missing.length > 0) {
     throw new Error(`contracts/src/index.ts must re-export generated foundation client types: ${missing.join(', ')}`);
@@ -226,7 +226,7 @@ function assertBunPinAgreement(): void {
       + `to match engines.bun (found: ${JSON.stringify(typesBun)})`,
     );
   }
-  const examples = JSON.parse(readFileSync(resolve(SDK_ROOT, 'examples/package.json'), 'utf8'));
+  const examples = JSON.parse(readFileSync(resolve(ENGINE_ROOT, 'examples/package.json'), 'utf8'));
   const examplesTypesBun: unknown = examples.devDependencies?.['@types/bun'];
   if (examplesTypesBun !== `^${expected}`) {
     throw new Error(
@@ -261,7 +261,7 @@ function reportReadmeAdvisories(): void {
 }
 
 for (const dir of packageDirs) {
-  const pkg = JSON.parse(readFileSync(resolve(SDK_ROOT, dir, 'package.json'), 'utf8'));
+  const pkg = JSON.parse(readFileSync(resolve(ENGINE_ROOT, dir, 'package.json'), 'utf8'));
   assertNoInternalManifestFields(dir, pkg);
   if (pkg.version !== rootPackage.version) {
     throw new Error(`${dir}/package.json version ${pkg.version} does not match root version ${rootPackage.version}`);
@@ -335,13 +335,13 @@ for (const dir of packageDirs) {
     assertExportTargetBacked(dir, entry);
   }
   if (dir === '.') {
-    assertSdkCapabilitiesExported(pkg);
+    assertPlatformCapabilitiesExported(pkg);
   }
-  const readmePath = resolve(SDK_ROOT, dir, 'README.md');
+  const readmePath = resolve(ENGINE_ROOT, dir, 'README.md');
   if (!existsSync(readmePath)) {
     throw new Error(`${dir} is missing README.md`);
   }
-  const state = readmeState(resolve(SDK_ROOT, dir));
+  const state = readmeState(resolve(ENGINE_ROOT, dir));
   if (state.readme.length === 0) {
     throw new Error(`${dir}/README.md is empty`);
   }

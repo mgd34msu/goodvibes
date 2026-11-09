@@ -23,7 +23,7 @@
 
 import { activeTokens } from '../../renderer/theme.ts';
 import { expect } from 'bun:test';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 
 /** Box-drawing chrome + gutter/selection markers whose positions define the frame skeleton. */
 export const DEFAULT_STRUCTURAL_GLYPHS: ReadonlySet<string> = new Set([

@@ -15,8 +15,8 @@
  */
 
 import { describe, expect, test, beforeEach, afterEach, spyOn, type Mock } from 'bun:test';
-import { WebhookNotifier } from '../sdk/src/platform/integrations/webhooks.ts';
-import * as webhookTransport from '../sdk/src/platform/utils/url-safety.ts';
+import { WebhookNotifier } from '../platform/src/platform/integrations/webhooks.ts';
+import * as webhookTransport from '../platform/src/platform/utils/url-safety.ts';
 
 // A hostname that passes the SSRF trust-tier filter (public, non-private) so
 // suppression, not the SSRF filter, is what's under test here.

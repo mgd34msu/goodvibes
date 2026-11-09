@@ -2,8 +2,8 @@
  * buildOperatorContract must use the catalog parameter.
  */
 import { describe, expect, test } from 'bun:test';
-import { buildOperatorContract } from '../sdk/src/platform/control-plane/operator-contract.js';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.js';
+import { buildOperatorContract } from '../platform/src/platform/control-plane/operator-contract.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
 
 function asRecord(value: unknown, label: string): Record<string, unknown> {
   expect(value, label).toBeTruthy();
@@ -136,7 +136,7 @@ describe('buildOperatorContract preserves static contract fields', () => {
     expect(contract.auth.modes).toEqual(['shared-bearer', 'session-login']);
   });
 
-  test('version is set to current SDK VERSION string', () => {
+  test('version is set to current platform VERSION string', () => {
     const catalog = makeMinimalCatalog({ methods: 0, events: 0 });
     const contract = buildOperatorContract(catalog);
     // Version must be a semver-like string set dynamically by the contract builder.

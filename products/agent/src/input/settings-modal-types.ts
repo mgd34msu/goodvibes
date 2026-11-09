@@ -127,7 +127,7 @@ export const SETTINGS_CATEGORY_GROUPS: ReadonlyArray<{
   // `cluster` belongs here rather than being hidden. The Agent composes no
   // inbound channel consumer of its own, a guard test holds that, so it is
   // never a candidate in an election. But every cluster.* key is DAEMON-owned
-  // (the SDK's config-ownership.ts), so a write from this surface routes to the
+  // (the platform's config-ownership.ts), so a write from this surface routes to the
   // daemon that acts on it, exactly like every other key in this group. Hiding
   // them would leave the owner unable to configure which of his machines reads
   // the inbox from the surface he actually uses, which is the same mistake the

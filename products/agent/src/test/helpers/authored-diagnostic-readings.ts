@@ -1,6 +1,6 @@
 import type { EntryType, Question } from '@goodvibes-jev/judgment/decisions';
 import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { fieldKind, redactionCredential, residualCredential } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { fieldKind, redactionCredential, residualCredential } from '@goodvibes-jev/engine/platform/platform/utils';
 
 type RedactionPart = { readonly kind: 'text'; readonly text: string }
   | { readonly kind: 'span'; readonly reference: string; readonly syntax: 'assignment-value'; readonly field: string };

@@ -3,12 +3,12 @@
  * on the runtime this package vendors, not merely described.
  *
  * Regression context (same class as gateway-ws-only-invokable.test.ts and
- * gateway-initiative-verbs.test.ts): the SDK installs occasions.* by calling
+ * gateway-initiative-verbs.test.ts): the platform installs occasions.* by calling
  * installOccasions from inside composeOwnerProfile
  * (routes/owner-profile-composition.ts), reached through
  * registerGatewayVerbGroups via the terminal-shell's
  * attachWsOnlyGatewayVerbHandlers wrapper. A composition root that never
- * mirrors a new wiring step added to the SDK's composition root ships
+ * mirrors a new wiring step added to the platform's composition root ships
  * descriptors with no attached handler, and the ws-only conformance gate does
  * not catch it: it
  * scopes assertEveryDescriptorHasHandler to the ws-only ids, so an occasions

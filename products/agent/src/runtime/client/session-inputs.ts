@@ -1,7 +1,7 @@
 /**
  * session-inputs.ts, the inbound half of the session wire, for this product.
  *
- * The SDK's `createWireSessionDispatch` takes a `SessionInputsWireClient`: two
+ * The platform's `createWireSessionDispatch` takes a `SessionInputsWireClient`: two
  * methods over `sessions.inputs.list` and `sessions.inputs.deliver`. It is
  * declared structurally there precisely so each product supplies its own,
  * because building it is the same connection-resolution concern the verb caller
@@ -11,8 +11,8 @@
  * every verb. Nothing here is policy: the poller decides what to do with an
  * input, the daemon decides what an input IS, and this shapes two calls.
  */
-import type { DaemonVerbCaller, SessionInputsWireClient } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
-import type { SharedSessionInputRecord } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import type { DaemonVerbCaller, SessionInputsWireClient } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import type { SharedSessionInputRecord } from '@goodvibes-jev/engine/platform/platform/control-plane';
 
 /** What `sessions.inputs.list` answers with, tolerating a bare array. */
 function readInputs(payload: unknown): readonly SharedSessionInputRecord[] {

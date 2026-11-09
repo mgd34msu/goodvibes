@@ -4,7 +4,7 @@ The knowledge system is a persistent, structured memory layer for GoodVibes
 agents and clients. The SQLite store is the source of truth; markdown/wiki
 output is a projection generated from structured records.
 
-Accessible via `@goodvibes-jev/engine/sdk/platform/knowledge` (daemon embedders). Consumer apps interact through operator methods documented below.
+Accessible via `@goodvibes-jev/engine/platform/platform/knowledge` (daemon embedders). Consumer apps interact through operator methods documented below.
 
 Snapshot generations are opaque SQLite-issued row revisions. Preserve them exactly
 when submitting a conditional write or a selected planning action; do not derive
@@ -73,11 +73,11 @@ Current ingest paths (operator method ids):
   multipart file upload, or raw binary upload and run extraction.
 - `knowledge.ingest.browserHistory`: index local browser history and bookmarks as metadata-first knowledge.
 
-The bullets above are operator method ids, not SDK method names. The SDK ingest
+The bullets above are operator method ids, not platform method names. The platform ingest
 helpers on `createKnowledgeApi().ingest.*` use their own camelCase names: `url()`,
 `artifact()`, `browserHistory()`, `bookmarksFile()`, `urlsFile()`,
 `bookmarkSeeds()`, `withConnector()`, and `connectorInput()`. So a valid operator
-id such as `knowledge.ingest.bookmarks` is not a callable SDK method. Call
+id such as `knowledge.ingest.bookmarks` is not a callable platform method. Call
 `knowledge.ingest.bookmarksFile()` instead. These helpers wrap the
 `KnowledgeService` methods `ingestUrl()`, `ingestArtifact()`,
 `syncBrowserHistory()`, `importBookmarksFromFile()`, `importUrlsFromFile()`,
@@ -135,19 +135,19 @@ compiles that evidence into durable graph records:
   `knowledge.answer_gap` issues when the store cannot answer a useful question
 
 The semantic layer is provider-backed when the daemon has a usable current LLM
-provider/model. If no provider is available or a provider call fails, the SDK
+provider/model. If no provider is available or a provider call fails, the platform
 falls back to deterministic extraction so ingest/reindex still produces
 source-grounded facts, pages, and gaps. LLM output is accepted only as JSON and
 is treated as an interpretation of stored evidence, not as a replacement for
 the source artifact or extraction record. Provider-backed semantic calls are
-bounded: the SDK serializes semantic LLM requests by default, passes abort
+bounded: the platform serializes semantic LLM requests by default, passes abort
 signals into provider calls, and treats timeouts as a deterministic fallback
 rather than letting reindex or ask hang indefinitely.
 
 Semantic enrichment runs from the shared knowledge ingest path, can be refreshed
 with the `knowledge-semantic-enrichment` job, and is also run by
 `KnowledgeService.reindex()`. Enrichment is hash-aware: if the source and
-extraction have not changed, the SDK skips the source instead of reprocessing it
+extraction have not changed, the platform skips the source instead of reprocessing it
 on every run.
 
 Deterministic enrichment is a lower-quality fallback, not a final
@@ -173,7 +173,7 @@ Home Assistant extensions reuse the base knowledge/retrieval system even though
 their rows live in the Home Graph store.
 
 Self-improvement is not limited to Ask. After ingest, reindex, and Home Graph
-snapshot sync, the SDK runs bounded semantic maintenance. The pass:
+snapshot sync, the platform runs bounded semantic maintenance. The pass:
 
 - looks for concrete subjects such as devices, services, providers, products,
   and capabilities
@@ -204,7 +204,7 @@ scoring. The repairer compares already-indexed sources and web-search results
 against the concrete subject, model/manufacturer hints, the gap wording, and
 the current query.
 
-Already-indexed official/vendor sources are usable repair evidence; the SDK
+Already-indexed official/vendor sources are usable repair evidence; the platform
 links and promotes them instead of blocking only because the source was not
 newly fetched. One official/vendor source can close a gap when it is strong
 enough, while non-official evidence still needs corroboration across distinct
@@ -212,7 +212,7 @@ domains.
 
 Repair does not stop after one broad search: it tries progressively more
 targeted queries for the subject and gap, then accepts at most five
-high-confidence sources for that gap. The SDK stores accepted and
+high-confidence sources for that gap. The platform stores accepted and
 rejected source assessments, confidence reasons, selected URLs, search queries,
 original source IDs, gap IDs, and linked object IDs in `metadata.sourceDiscovery`,
 so the graph can explain why automatic source evidence was trusted.
@@ -258,13 +258,13 @@ Run results also include operational guardrails:
 
 - `candidateGaps` is the number of matching gaps found
 - `requestedLimit` is the caller's requested batch size
-- `effectiveLimit` is the SDK cap applied to the run
+- `effectiveLimit` is the platform cap applied to the run
 - `processedGaps` is the count actually attempted
 - `truncated` is true when more work remains after this foreground batch
 - `budgetExhausted` is true when the configured run window expired
 
 `POST /api/knowledge/refinement/run` accepts `maxRunMs` for shorter foreground
-runs, but the SDK still caps broad requests internally. Clients should repeat
+runs, but the platform still caps broad requests internally. Clients should repeat
 or schedule refinement runs instead of using one unbounded call for an entire
 large knowledge space. The foreground cap is currently 24 gaps per run.
 
@@ -279,7 +279,7 @@ request made while another repair run is active returns a bounded skipped
 result instead of launching another batch of search/LLM work.
 
 Repair tasks that exhaust their current run budget are not left as dead
-failures. The SDK marks them blocked with retry metadata, updates the gap with
+failures. The platform marks them blocked with retry metadata, updates the gap with
 `repairStatus: "deferred"` and `nextRepairAttemptAt`, and lets a later
 scheduled/manual run continue. If a repair pass accepts source evidence but
 does not have enough corroboration to close the gap, those accepted sources are
@@ -306,15 +306,15 @@ and ranked search results. This is the generic layer used by Home Graph and
 other knowledge spaces, so clients should not implement their own
 snippet-to-answer logic.
 
-Answer synthesis has an SDK-owned hard timeout; if a provider ignores its own
+Answer synthesis has a platform-owned hard timeout; if a provider ignores its own
 timeout or abort signal, Ask falls back instead of pinning the daemon.
 
-If Ask identifies answer gaps and semantic gap repair is configured, the SDK
+If Ask identifies answer gaps and semantic gap repair is configured, the platform
 queues refinement tasks and starts repair.
 
 For concrete Home Assistant object questions with weak or missing evidence, Ask
 also performs one bounded foreground repair/re-answer pass. That pass is still
-capped by the caller timeout and the SDK's source limits, but it lets direct
+capped by the caller timeout and the platform's source limits, but it lets direct
 feature/specification questions use newly repaired official/vendor evidence
 immediately when extraction and promotion finish in time. If the bounded pass
 cannot produce usable facts, Ask returns the current best answer plus
@@ -327,13 +327,13 @@ space inferred from linked objects or evidence, rather than to the alias itself.
 
 For concrete feature/specification questions, Ask also checks whether the
 matched evidence is strong enough to answer the user's intent. If the object is
-identified but the evidence is only a weak profile/generated-page match, the SDK
+identified but the evidence is only a weak profile/generated-page match, the platform
 adds an answer gap explaining that more source-backed feature or specification
 facts are needed. That gap becomes a normal refinement task instead of forcing
 clients to infer from a low-confidence answer with no repair trail.
 
 Semantic reindex follows the same pattern with an additional daemon-safety
-guard: foreground source enrichment is capped by a run budget, then the SDK
+guard: foreground source enrichment is capped by a run budget, then the platform
 queues repairable gaps and starts only a small delayed background repair pass.
 Large spaces should use explicit `/api/knowledge/refinement/run` calls or a
 schedule for deeper repair instead of expecting reindex to perform every web
@@ -416,7 +416,7 @@ budget, and promoted fact nodes are linked back to the concrete subject with
 Gap repair does not invent facts from search snippets. It gives the normal
 ingest, extraction, semantic enrichment, review, and later ask paths more source
 evidence to work with. When useful extracted evidence is available from an
-accepted official or vendor source, the SDK promotes typed
+accepted official or vendor source, the platform promotes typed
 feature/capability/specification facts so the official evidence can drive
 follow-up answers and generated pages instead of remaining a passive URL.
 
@@ -440,7 +440,7 @@ are two durable review lanes:
 - issue review: `POST /api/knowledge/issues/{id}/review`, exposed as
   `knowledge.issue.review`, records accept/reject/resolve/reopen/edit/forget
   decisions for deterministic knowledge issues. The decision can include a
-  semantic `value.fact` object that the SDK applies to the linked source or
+  semantic `value.fact` object that the platform applies to the linked source or
   node as reviewed facts.
 - consolidation review: `POST /api/knowledge/candidates/{id}/decide`, exposed
   as `knowledge.candidate.decide`, accepts, rejects, or supersedes generated
@@ -448,14 +448,14 @@ are two durable review lanes:
   candidates are written into reviewed memory with provenance.
 
 Generated issue refreshes preserve resolved review state. If a deterministic
-lint or quality pass emits the same issue id again, the SDK keeps the resolved
+lint or quality pass emits the same issue id again, the platform keeps the resolved
 status and review metadata instead of recreating it as an open issue. When a
 generator provides `metadata.subjectFingerprint` and that fingerprint changes,
 the issue can reopen because the underlying subject materially changed.
 
 ## Browser-local knowledge
 
-Browser history and bookmarks add behavioral signal to the graph. The SDK reads
+Browser history and bookmarks add behavioral signal to the graph. The platform reads
 local profile files, folds entries by canonical URL, records profile/source-kind
 metadata, and links sources to domain, profile, folder, and topic nodes.
 
@@ -470,7 +470,7 @@ Assistant data out of the default wiki while reusing source, artifact,
 extraction, node, edge, issue, markdown, refinement, and operator-contract
 semantics.
 
-The SDK-owned `HomeGraphService` supports:
+The platform-owned `HomeGraphService` supports:
 
 - snapshot sync for entities, devices, areas, automations, scripts, scenes,
   labels, integrations, and helpers
@@ -498,7 +498,7 @@ The SDK-owned `HomeGraphService` supports:
 
 Every object in the Home Graph is a node with one of fifteen kinds, and every
 link between nodes (or from a stored source to a node) is an edge carrying a
-relation name. The SDK exports both vocabularies as constants, but the link
+relation name. The platform exports both vocabularies as constants, but the link
 verbs accept the relation as a plain string, so the lists below are the
 published vocabulary rather than a schema gate. Knowing which kinds and
 relations the pipeline creates on its own, and which exist only for
@@ -688,7 +688,7 @@ into every room.
 The Home Graph map route uses the shared knowledge map renderer. It returns
 both layout data and SVG for visualizing the knowledge base, can include sources
 or show only graph nodes, and filters edges to the rendered node set so clients
-can embed the SDK SVG or build a native interactive map from the same node/edge
+can embed the platform SVG or build a native interactive map from the same node/edge
 payload. Home Assistant facet filters can be sent under `ha` or through
 top-level aliases such as `domains`, `areaIds`, and `objectKinds`.
 
@@ -706,7 +706,7 @@ daemon routes and operator method ids.
 
 ## Project planning
 
-Project Planning is a passive SDK-backed knowledge feature for the TUI's
+Project Planning is a passive platform-backed knowledge feature for the TUI's
 conversational planning loop. The TUI owns intent detection, repo/doc
 inspection, the relentless one-question-at-a-time interview, the planning
 panel, user approval, and agent execution handoff. The daemon stores and
@@ -754,9 +754,9 @@ token-bounded context bundles for agents:
 
 - `knowledge.search` (operator id)
 - `knowledge.packet` (operator id)
-- `knowledge.graph.items.search()` (async SDK)
-- `knowledge.packets.build()` and `knowledge.packets.buildPrompt()` (async SDK)
-- `knowledge.packets.preparePrompt()` (async SDK preparation)
+- `knowledge.graph.items.search()` (async platform)
+- `knowledge.packets.build()` and `knowledge.packets.buildPrompt()` (async platform)
+- `knowledge.packets.preparePrompt()` (async platform preparation)
 - `readPreparedKnowledgePromptPacket()` (synchronous rendering of the exact prepared handle)
 
 `KnowledgeService.search()` and `searchScoped()` now return promises. The old
@@ -793,7 +793,7 @@ The projection service renders structured knowledge as markdown:
 markdown artifact and a stable generated source. Generated projection sources
 use `metadata.generatedProjection: true`, `metadata.generatedKnowledgePage:
 true`, `metadata.projectionKind`, and `metadata.pageEditable: true`. If a
-projection is rendered again with identical markdown, the SDK reuses the
+projection is rendered again with identical markdown, the platform reuses the
 existing artifact instead of creating duplicate artifact records. Projection
 files are inspectable outputs, not the canonical database.
 
@@ -856,7 +856,7 @@ device/area/source edges instead of an isolated node list. The renderer also
 suppresses self-loop edges so contaminated or self-referential source data does
 not produce visually meaningless links. The Home Graph route accepts
 query-string `GET`, trailing-slash `GET`, and JSON `POST` forms so authenticated
-Home Assistant panel bridges can call the same SDK map renderer without
+Home Assistant panel bridges can call the same platform map renderer without
 depending on one exact URL spelling.
 
 ## GraphQL

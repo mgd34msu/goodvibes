@@ -1,5 +1,5 @@
 import { expect } from 'bun:test';
-import { fieldKind } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { fieldKind } from '@goodvibes-jev/engine/platform/platform/utils';
 
 interface ObservedRequest {
   readonly state: unknown;

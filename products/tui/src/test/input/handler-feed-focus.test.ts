@@ -3,7 +3,7 @@
  *
  * Covers the tokenizer note: focus-reporting sequences (\x1b[I / \x1b[O)
  * arrive through the same input pipeline as every other keystroke, tokenized
- * by the SDK's InputTokenizer, and must be consumed by the FIRST branch in
+ * by the platform's InputTokenizer, and must be consumed by the FIRST branch in
  * the feed loop, never reaching the composer's text/key routing, and never
  * mutating `prompt`/`cursorPos`.
  *
@@ -15,9 +15,9 @@
  * leaking an escape sequence into the prompt buffer.
  */
 import { describe, test, expect } from 'bun:test';
-import { InputTokenizer } from '@goodvibes-jev/engine/sdk/platform/core';
+import { InputTokenizer } from '@goodvibes-jev/engine/platform/platform/core';
 import { feedInputTokens, type InputFeedContext } from '../../input/handler-feed.ts';
-import { FocusTracker } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 
 function unexpected(name: string) {
   return () => { throw new Error(`unexpected call: ${name}; a focus token must never reach this`); };

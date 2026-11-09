@@ -8,7 +8,7 @@
  * side, so a tinted row reads as tinted at a glance instead of on inspection.
  */
 import { afterAll, describe, expect, test } from 'bun:test';
-import { listBundledThemes } from '@goodvibes-jev/engine/sdk/platform/presentation';
+import { listBundledThemes } from '@goodvibes-jev/engine/platform/platform/presentation';
 import { diffRowTints } from '../../renderer/diff-tint.ts';
 import { activeTokens, getActiveThemeName, getActiveThemeMode, setActiveThemeMode, setActiveThemeName } from '../../renderer/theme.ts';
 import { drawDiffRow, type DiffRow } from '../../renderer/lane-graph/diff-rows.ts';

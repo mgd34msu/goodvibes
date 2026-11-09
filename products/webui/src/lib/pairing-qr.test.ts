@@ -4,7 +4,7 @@
  * The payload shapes asserted here are the ones the GoodVibes family actually
  * mints, not invented examples:
  *
- *   - COMPANION_JSON mirrors @goodvibes-jev/engine/sdk/platform/pairing's
+ *   - COMPANION_JSON mirrors @goodvibes-jev/engine/platform/platform/pairing's
  *     encodeConnectionPayload output field for field (url, token, username,
  *     version, surface). That is what goodvibes-app's /app/pairing/connection
  *     route serves and what the retired Android companion existed to read, so
@@ -39,7 +39,7 @@ const RELAY_CODE = encodeRelayPairingString({
   daemonPublicKey: 'ZGFlbW9uLWtleQ',
 });
 
-describe('parseScannedPairing: the SDK companion connection payload', () => {
+describe('parseScannedPairing: the platform companion connection payload', () => {
   test('reads the token and the daemon address out of the JSON form', () => {
     const scanned = parseScannedPairing(COMPANION_JSON);
     expect(scanned.kind).toBe('token');

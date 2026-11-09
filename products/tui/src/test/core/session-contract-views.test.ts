@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createSessionContractViews } from '../../core/session-contract-views.ts';
-import type { ContractRunner, ContractView } from '@goodvibes-jev/engine/sdk/platform/contract';
+import type { ContractRunner, ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
 
 test('agent lookups reuse a detached snapshot and refresh after events and session changes', () => {
   let changed: (() => void) | undefined;

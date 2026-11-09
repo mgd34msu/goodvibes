@@ -17,9 +17,9 @@ import { describe, test, expect, mock, spyOn, afterEach, beforeEach } from 'bun:
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { wireTurnEventHandlers } from '../../core/turn-event-wiring.ts';
 import type { WireTurnEventHandlersOptions } from '../../core/turn-event-wiring.ts';
-import type { WebhookNotifier } from '@goodvibes-jev/engine/sdk/platform/integrations';
-import { FocusTracker } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import { journalPathFor } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import type { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
+import { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { journalPathFor } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { makeTestSurface } from '../helpers/session-surface.ts';
 
@@ -351,9 +351,9 @@ describe('wireTurnEventHandlers: agent/chain-failure alerts', () => {
     if (stdoutTTY) Object.defineProperty(process.stdout, 'isTTY', stdoutTTY);
     else Reflect.deleteProperty(process.stdout, 'isTTY');
   });
-  // notifyCompletion (SDK) writes a terminal bell ('\x07') synchronously for
+  // notifyCompletion (platform) writes a terminal bell ('\x07') synchronously for
   // any durationMs > 5000, the alert modules pass FORCE_NOTIFY_DURATION_MS
-  // (30_001) precisely so this is observable without mocking the SDK module
+  // (30_001) precisely so this is observable without mocking the platform module
   // (process-global module mocking is disallowed by this repo's test
   // discipline rules). Same technique as src/test/utils/notify.test.ts.
 
@@ -425,7 +425,7 @@ describe('wireTurnEventHandlers: agent/chain-failure alerts', () => {
   test('CONTRACT_CANCELLED still alerts (operator-cancel branch, WO item 2)', async () => {
     // The cancelled branch narrates a cancellation rather than a failure but must
     // still ring the bell when unfocused, the operator asked to stop and wants to
-    // know it stopped. (The distinct title is asserted at the SDK narration level;
+    // know it stopped. (The distinct title is asserted at the platform narration level;
     // process-global module mocking to read the title is disallowed here.)
     const spy = spyOnStdoutWrite();
     const tracker = new FocusTracker();

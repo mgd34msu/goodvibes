@@ -2,8 +2,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'bun:test';
-import { MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore } from '../sdk/src/platform/state/index.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
+import { MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore } from '../platform/src/platform/state/index.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { useMemoryReadings } from './_helpers/memory-readings.ts';
 
 // The queue order is the memory-review-priority reading; the fake port answers it.
@@ -167,7 +167,7 @@ describe('MemoryRegistry.reviewQueue scope filter', () => {
 
 describe('HTTP handler: GET /api/memory/review-queue', () => {
   async function makeHandlers(root: string) {
-    const { createDaemonIntegrationRouteHandlers } = await import('../daemon-sdk/src/integration-routes.js');
+    const { createDaemonIntegrationRouteHandlers } = await import('../daemon-api/src/integration-routes.js');
     const configManager = new ConfigManager({ configDir: join(root, 'config') });
     const store = new MemoryStore(join(root, 'memory.sqlite'), {
       embeddingRegistry: new MemoryEmbeddingProviderRegistry({ configManager }),

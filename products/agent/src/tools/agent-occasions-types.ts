@@ -27,7 +27,7 @@
  * TRANSPORT rather than about an occasion.
  */
 
-import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/sdk/contracts';
+import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
 import type { AuthoritySurface } from '../trust/untrusted-content.ts';
 
 /**

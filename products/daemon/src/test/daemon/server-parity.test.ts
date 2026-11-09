@@ -10,17 +10,17 @@
  * Immediate-work ingress cases select the documented legacy conversation mode;
  * the default proposal mode is exercised separately through the same HTTP owner.
  */
-import { executeToolCalls } from '@goodvibes-jev/engine/sdk/platform/core';
+import { executeToolCalls } from '@goodvibes-jev/engine/platform/platform/core';
 import { Client } from 'undici/index.js';
-import { createSlackInboxOwner } from '@goodvibes-jev/engine/sdk/platform/intake';
+import { createSlackInboxOwner } from '@goodvibes-jev/engine/platform/platform/intake';
 import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { DaemonServer, HttpListener } from '@goodvibes-jev/engine/sdk/platform/daemon';
-import { UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { createRuntimeStore } from '@goodvibes-jev/engine/sdk/platform/runtime/store';
-import { ProviderRegistry, BenchmarkStore } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { DaemonServer, HttpListener } from '@goodvibes-jev/engine/platform/platform/daemon';
+import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
+import { ProviderRegistry, BenchmarkStore } from '@goodvibes-jev/engine/platform/platform/providers';
 import { RuntimeEventBus, createFeatureFlagManager, deriveFeatureStates, type TransportEvent } from '../../runtime/index.js';
 import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.js';
 import { createProductionDaemonInboxFactory } from '../../runtime/production-inbox-composition.js';
@@ -29,9 +29,9 @@ import { installProviderPricingFixture } from '../helpers/provider-pricing-fixtu
 import { withDecisionLog } from '@goodvibes-jev/judgment';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { buildOperatorContract } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import { buildOperatorContract } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { createHmac } from 'node:crypto';
-import { GOODVIBES_NTFY_AGENT_TOPIC } from '@goodvibes-jev/engine/sdk/platform/integrations';
+import { GOODVIBES_NTFY_AGENT_TOPIC } from '@goodvibes-jev/engine/platform/platform/integrations';
 const parityReadings = fakePort((wireName, question, state) => {
     const name = wireName.replace(/^(effect|risk|edge)__/, '');
   if (name === 'security_code' || name === 'wanted' || name === 'serve' || name === 'keep' || name === 'attached') return noulAnswer(0.01);

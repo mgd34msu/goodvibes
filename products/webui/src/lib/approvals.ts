@@ -1,9 +1,9 @@
 /**
  * approvals.ts, tolerant readers + display helpers for approvals.* (existing
- * verb family; per-hunk selection lives in packages/sdk/src/platform/
+ * verb family; per-hunk selection lives in packages/engine/platform/src/platform/
  * control-plane/approval-hunk-apply.ts).
  *
- * Edit hunks are read DEFENSIVELY off `request.args.edits`, mirrors the SDK's
+ * Edit hunks are read DEFENSIVELY off `request.args.edits`, mirrors the platform's
  * own `readApprovalEditHunks` (approval-hunk-apply.ts): a request whose args
  * are not edit-shaped (no `edits` array, empty, or any entry missing
  * path/find/replace) simply has no hunks to render, never a crash.
@@ -51,7 +51,7 @@ function isEditHunkLike(value: unknown): value is ApprovalEditHunk {
 
 /**
  * Extract a validated edit-hunk list from an approval's request args, or null
- * if the args are not edit-shaped. Mirrors the SDK's readApprovalEditHunks
+ * if the args are not edit-shaped. Mirrors the platform's readApprovalEditHunks
  * exactly so "this approval has hunks to render" agrees with "the daemon will
  * accept a selectedHunks index array for it".
  */
@@ -192,7 +192,7 @@ function isRememberOptionLike(value: unknown): value is ApprovalRememberOption {
 /**
  * The remember-tier options offered on an ask, read defensively off
  * `request.rememberOptions` (a record from a pre-tier daemon simply offers
- * none). Options render VERBATIM, label/detail come from the SDK's
+ * none). Options render VERBATIM, label/detail come from the platform's
  * buildRememberOptions, never re-derived policy language.
  */
 export function readRememberOptions(record: ApprovalRecord): ApprovalRememberOption[] {
@@ -218,7 +218,7 @@ export interface ExecPromptAsk {
 /**
  * Read an exec-prompt ask, a RUNNING command blocked on its terminal, from
  * an approval record. Detected by the attribution's discriminated kind first,
- * with the tool id as the fallback tell (both stamped by the SDK's
+ * with the tool id as the fallback tell (both stamped by the platform's
  * buildExecPromptAnswerHandler). Field values come from `request.args`
  * ({ command, prompt, recentOutput }); missing strings degrade to '' so a
  * partial record still renders as an exec prompt rather than a generic ask.

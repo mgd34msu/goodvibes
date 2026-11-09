@@ -9,18 +9,18 @@
  * returns directly, not a stub.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.js';
-import { registerRuntimeMetricsGatewayMethods } from '../sdk/src/platform/control-plane/routes/runtime-metrics.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
+import { registerRuntimeMetricsGatewayMethods } from '../platform/src/platform/control-plane/routes/runtime-metrics.js';
 import {
   DaemonControlPlaneHelper,
   type DaemonControlPlaneContext,
-} from '../sdk/src/platform/daemon/control-plane.js';
+} from '../platform/src/platform/daemon/control-plane.js';
 import {
   httpRequestsTotal,
   resetMetrics,
   snapshotMetrics,
   type RuntimeMetricsSnapshot,
-} from '../sdk/src/platform/runtime/metrics.js';
+} from '../platform/src/platform/runtime/metrics.js';
 
 afterEach(() => {
   resetMetrics();

@@ -7,7 +7,7 @@
 import { describe, test, expect, mock, spyOn } from 'bun:test';
 import type { InputFeedContext } from '../../input/handler-feed.ts';
 import * as handlerFeedModule from '../../input/handler-feed.ts';
-import { FocusTracker } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
 
 describe('InputFeedContext reuse (α1)', () => {

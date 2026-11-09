@@ -5,11 +5,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fakePort, noulAnswer, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '../errors/src/index.js';
-import { captureContractInput, contractInputPath, materializeContractInput } from '../sdk/src/platform/contract/input-snapshot.js';
-import { createContractInputAuthority, revokeContractInputAuthority } from '../sdk/src/platform/contract/input-authority.js';
-import type { Contract } from '../sdk/src/platform/contract/types.js';
-import { capturedInputTool } from '../sdk/src/platform/tools/shared/captured-input-tools.js';
-import { createAnalyzeTool } from '../sdk/src/platform/tools/analyze/index.js';
+import { captureContractInput, contractInputPath, materializeContractInput } from '../platform/src/platform/contract/input-snapshot.js';
+import { createContractInputAuthority, revokeContractInputAuthority } from '../platform/src/platform/contract/input-authority.js';
+import type { Contract } from '../platform/src/platform/contract/types.js';
+import { capturedInputTool } from '../platform/src/platform/tools/shared/captured-input-tools.js';
+import { createAnalyzeTool } from '../platform/src/platform/tools/analyze/index.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -183,11 +183,11 @@ test('captured upgrade cancellation reaches the existing network request and wit
 
 for (const captured of [false, true]) {
   test(`actual default engine contract-member archetype executes all historical analyze modes (${captured ? 'captured' : 'ordinary control'})`, async () => {
-    const { ConfigManager } = await import('../sdk/src/platform/config/index.js');
-    const { createClientRuntimeServices } = await import('../sdk/src/platform/runtime/bootstrap.js');
-    const { createRuntimeStore, RuntimeEventBus } = await import('../sdk/src/platform/runtime/state.js');
-    const { createLaunchTolerantProviderRegistry } = await import('../sdk/src/platform/providers/index.js');
-    const { unitTemplate } = await import('../sdk/src/platform/contract/workstreams.js');
+    const { ConfigManager } = await import('../platform/src/platform/config/index.js');
+    const { createClientRuntimeServices } = await import('../platform/src/platform/runtime/bootstrap.js');
+    const { createRuntimeStore, RuntimeEventBus } = await import('../platform/src/platform/runtime/state.js');
+    const { createLaunchTolerantProviderRegistry } = await import('../platform/src/platform/providers/index.js');
+    const { unitTemplate } = await import('../platform/src/platform/contract/workstreams.js');
     const f = await fixture(true);
     const config = new ConfigManager({ surfaceRoot: 'agent', configDir: join(f.root, '.goodvibes', 'cfg'), workingDir: f.root, homeDir: f.root });
     config.set('permissions.engine', 'policy-engine'); config.set('permissions.mode', 'prompt');
@@ -253,7 +253,7 @@ for (const captured of [false, true]) {
 
 test('retained captured paths and a copied scope cannot create historical read authority', async () => {
   const f = await fixture();
-  const { withCapturedAnalyzeInput } = await import('../sdk/src/platform/tools/analyze/captured-git.js');
+  const { withCapturedAnalyzeInput } = await import('../platform/src/platform/tools/analyze/captured-git.js');
   const result = await createAnalyzeTool({ chat: f.chat }, undefined, f.view).execute({ mode: 'diff' });
   expect(result.success).toBe(false); expect(result.output).toBeUndefined();
   const scope = await withCapturedAnalyzeInput(f.authority, f.root, undefined,

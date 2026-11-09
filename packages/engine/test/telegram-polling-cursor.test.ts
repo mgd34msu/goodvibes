@@ -2,10 +2,10 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { TelegramOffsetStore } from '../sdk/src/platform/channels/telegram/offset-store.js';
-import { TelegramIngressSupervisor } from '../sdk/src/platform/channels/telegram/ingress.js';
-import { TelegramBotApi } from '../sdk/src/platform/channels/telegram/api.js';
-import { createTelegramSourceAccountOwner } from '../sdk/src/platform/channels/telegram/source-account.js';
+import { TelegramOffsetStore } from '../platform/src/platform/channels/telegram/offset-store.js';
+import { TelegramIngressSupervisor } from '../platform/src/platform/channels/telegram/ingress.js';
+import { TelegramBotApi } from '../platform/src/platform/channels/telegram/api.js';
+import { createTelegramSourceAccountOwner } from '../platform/src/platform/channels/telegram/source-account.js';
 
 const cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
@@ -64,7 +64,7 @@ test('malformed original cursor evidence releases its attempted lease without cl
 
 test('a separate process holds confirmation until its actual death, then the strict lease can be reclaimed', async () => {
   const f = fixture(); new TelegramOffsetStore(f.path, '123').save(500);
-  const module = new URL('../sdk/src/platform/channels/telegram/offset-store.ts', import.meta.url).href;
+  const module = new URL('../platform/src/platform/channels/telegram/offset-store.ts', import.meta.url).href;
   const script = `import { TelegramOffsetStore } from ${JSON.stringify(module)};
 const cursor = new TelegramOffsetStore(${JSON.stringify(f.path)}, '123').retainPolling();
 process.stdout.write('held\\n');

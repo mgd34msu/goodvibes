@@ -1,7 +1,7 @@
 import { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime, type ClientLifetime } from '../lib/client-lifetime';
-import { hasStoredTokenSync, sdk } from '../lib/goodvibes';
+import { hasStoredTokenSync, client as platformClient } from '../lib/goodvibes';
 import { serializeError } from '../lib/errors';
 import { asRecord } from '../lib/object';
 import { queryKeys } from '../lib/queries';
@@ -53,7 +53,7 @@ export async function readSessionList(lifetime: ClientLifetime, signal: AbortSig
   };
   try {
     check();
-    const result = await sdk.operator.sessions.list(abort.signal);
+    const result = await platformClient.operator.sessions.list(abort.signal);
     check();
     const records: unknown = asRecord(result).sessions;
     if (!Array.isArray(records) || records.some((record: unknown) => {
@@ -118,12 +118,12 @@ export function useSessionLifecycle(id: string, onClose: () => void) {
     try {
       check();
       if (action === 'close' || action === 'reopen') {
-        await wait(sdk.operator.sessions[action](id, abort.signal));
+        await wait(platformClient.operator.sessions[action](id, abort.signal));
       } else if (action === 'delete') {
-        try { await wait(sdk.operator.sessions.close(id, abort.signal)); }
+        try { await wait(platformClient.operator.sessions.close(id, abort.signal)); }
         catch (error) { check(); if (!isTargetMissing(error)) throw error; }
         check();
-        try { await wait(sdk.operator.sessions.delete(id, abort.signal)); }
+        try { await wait(platformClient.operator.sessions.delete(id, abort.signal)); }
         catch (error) { check(); if (!isTargetMissing(error)) throw error; }
       }
       check();
@@ -136,7 +136,7 @@ export function useSessionLifecycle(id: string, onClose: () => void) {
       // deletion; only this target's explicit SESSION_NOT_FOUND proves it gone.
       if (!record) {
         try {
-          const detail = await wait(sdk.operator.sessions.get(id, abort.signal));
+          const detail = await wait(platformClient.operator.sessions.get(id, abort.signal));
           if (asRecord(asRecord(detail).session).id !== id) throw new Error('The daemon returned an unreadable session.');
           record = detail.session;
           result = { ...result, sessions: [...result.sessions, record] };

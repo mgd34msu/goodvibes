@@ -29,21 +29,21 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SecretsManager } from '../sdk/src/platform/config/secrets.ts';
+import { SecretsManager } from '../platform/src/platform/config/secrets.ts';
 import {
   daemonSecretKeyFor,
   isDaemonOwnedSecretKey,
-} from '../sdk/src/platform/config/daemon-secret-keys.ts';
+} from '../platform/src/platform/config/daemon-secret-keys.ts';
 import {
   resolveSecretWriteScope,
   secretWriteScopeWasOverridden,
-} from '../sdk/src/platform/config/secrets.ts';
-import { classifyDaemonConfigPath } from '../sdk/src/platform/cluster/config-replication-policy.ts';
-import { CONFIG_SCHEMA } from '../sdk/src/platform/config/schema.ts';
+} from '../platform/src/platform/config/secrets.ts';
+import { classifyDaemonConfigPath } from '../platform/src/platform/cluster/config-replication-policy.ts';
+import { CONFIG_SCHEMA } from '../platform/src/platform/config/schema.ts';
 import {
   isDaemonOwnedConfigKey,
   listDaemonOwnedConfigPaths,
-} from '../sdk/src/platform/config/config-ownership.ts';
+} from '../platform/src/platform/config/config-ownership.ts';
 
 /**
  * Every credential the daemon's own mail and calendar handlers read.

@@ -10,9 +10,9 @@ import {
   readFailure,
   settleCategory,
 } from '@goodvibes-jev/engine/errors';
-import { readErrorResponseBody } from '@goodvibes-jev/engine/daemon-sdk';
-import { ProviderError, isBillingOrCreditError, isRateLimitOrQuotaError } from '../sdk/src/platform/types/errors.ts';
-import { readNormalizedError } from '../sdk/src/platform/utils/error-display.ts';
+import { readErrorResponseBody } from '@goodvibes-jev/engine/daemon-api';
+import { ProviderError, isBillingOrCreditError, isRateLimitOrQuotaError } from '../platform/src/platform/types/errors.ts';
+import { readNormalizedError } from '../platform/src/platform/utils/error-display.ts';
 import { authoredPrivacyAnswer, errorSpan, errorText } from './_helpers/authored-error-readings.ts';
 
 /** A port that answers as if the message were a spent-account 400, and counts requests. */

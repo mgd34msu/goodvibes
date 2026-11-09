@@ -35,12 +35,12 @@ import {
   type TriggerRecord,
   TriggerManager,
   type TriggerRetentionPolicy,
-} from '../sdk/src/platform/triggers/index.ts';
+} from '../platform/src/platform/triggers/index.ts';
 import {
   adaptWatcherTrigger,
   isWatcherTriggerRaw,
-} from '../sdk/src/platform/runtime/fleet/adapters/watcher-trigger.ts';
-import { adaptTrigger } from '../sdk/src/platform/runtime/fleet/adapters/trigger.ts';
+} from '../platform/src/platform/runtime/fleet/adapters/watcher-trigger.ts';
+import { adaptTrigger } from '../platform/src/platform/runtime/fleet/adapters/trigger.ts';
 
 const roots: string[] = [];
 
@@ -445,7 +445,7 @@ describe('the trigger family is an OPTIONAL dependency for a hand-composed host'
   // Absence must mean "this runtime has no triggers", never a crash.
   test('facade lifecycle calls are optional-chained, not bare dereferences', () => {
     const facade = readFileSync(
-      new URL('../sdk/src/platform/daemon/facade.ts', import.meta.url),
+      new URL('../platform/src/platform/daemon/facade.ts', import.meta.url),
       'utf-8',
     );
     expect(facade).toContain('this.triggerManager?.shutdown()');
@@ -456,12 +456,12 @@ describe('the trigger family is an OPTIONAL dependency for a hand-composed host'
 
   test('the RuntimeServices and facade contracts both declare it optional', () => {
     const services = readFileSync(
-      new URL('../sdk/src/platform/runtime/services.ts', import.meta.url),
+      new URL('../platform/src/platform/runtime/services.ts', import.meta.url),
       'utf-8',
     );
     expect(services).toContain('readonly triggerManager?: TriggerManager | undefined;');
     const facadeTypes = readFileSync(
-      new URL('../sdk/src/platform/daemon/facade-types.ts', import.meta.url),
+      new URL('../platform/src/platform/daemon/facade-types.ts', import.meta.url),
       'utf-8',
     );
     expect(facadeTypes).toContain("readonly triggerManager?: RuntimeServices['triggerManager'];");

@@ -12,13 +12,13 @@ import { extractNativeHeadlessOptions } from './native-headless-options.ts';
 import { runNativeHeadlessCommand } from './native-headless-command.ts';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { TuiConfigManager } from '../config/host-settings.ts';
-import { formatProviderModel, getModelIdFromProviderModel, getProviderIdFromModel } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { formatProviderModel, getModelIdFromProviderModel, getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
 import { readOnboardingCheckMarkers } from '../runtime/onboarding/index.ts';
 import { GlobalNetworkTransportInstaller } from '@/runtime/index.ts';
 import { createShellPathService } from '@/runtime/index.ts';
-import { configureActivityLogger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { configureActivityLogger } from '@goodvibes-jev/engine/platform/platform/utils';
 import {
   applyRuntimeCommandEndpointFlagOverrides,
   applyRuntimeConfigOverrides,
@@ -38,14 +38,14 @@ import {
 } from './index.ts';
 import { buildCliServicePosture, getGoodVibesPackageRoot, resolveGoodVibesDaemonExecutable } from './service-posture.ts';
 import { runInstallSelfCheck } from '../runtime/install-self-check.ts';
-import { readPersistedWorkspaceTrust } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import { WorkspaceRegistrationManager } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { readPersistedWorkspaceTrust } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { WorkspaceRegistrationManager } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { CliWorkspaceStatus, CliSandboxStatus, CliRelayStatus } from './status.ts';
-import { detectSandboxAvailability, probeSandboxHost } from '@goodvibes-jev/engine/sdk/platform/tools/exec/sandbox';
+import { detectSandboxAvailability, probeSandboxHost } from '@goodvibes-jev/engine/platform/platform/tools/exec/sandbox';
 import { createFeatureFlagManager, deriveFeatureStates } from '@/runtime/index.ts';
 import { ensureGoodvibesGitignore } from './ensure-goodvibes-gitignore.ts';
 import { runDaemonConfigMigration } from '../config/run-daemon-config-migration.ts';
-import { describeDaemonConfigMigration } from '@goodvibes-jev/engine/sdk/platform/config';
+import { describeDaemonConfigMigration } from '@goodvibes-jev/engine/platform/platform/config';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 
 export type PreparedShellCliRuntime = {

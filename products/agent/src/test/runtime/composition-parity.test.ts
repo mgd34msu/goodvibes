@@ -3,14 +3,14 @@ import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-c
  * composition-parity.test.ts
  *
  * Pins two pieces of fork-parity wiring that createRuntimeServices (this
- * repo's composition root) must mirror from the SDK's own
+ * repo's composition root) must mirror from the platform's own
  * platform/runtime/services.ts composition root:
  *
  *  1. operations.runStartupAppendOnlySweep runs at composition time with the
  *     FULL roots object (workingDirectory, surfaceRoot, homeDirectory,
  *     logDir, telemetryDir), not just workingDirectory + surfaceRoot, which
  *     would silently skip the registered activity-log and telemetry-ledger
- *     stores on every sweep (the exact defect the SDK's own round fixed at
+ *     stores on every sweep (the exact defect the platform's own round fixed at
  *     its call site). Proven behaviorally: seed a real, over-cap activity.md
  *     under this repo's ACTUAL on-disk log location
  *     (workingDirectory/.goodvibes/logs/activity.md, the same directory
@@ -33,7 +33,7 @@ import {
   type ModelDiscoveryMode,
   type RuntimeServices,
 } from '../../runtime/services.ts';
-import { ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 const runtimes: RuntimeServices[] = [];

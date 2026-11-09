@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.js';
-import { prepareAnswerEvidenceRelevanceBatches } from '../sdk/src/platform/knowledge/semantic/evidence-ranking/batch.js';
+import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input.js';
+import { prepareAnswerEvidenceRelevanceBatches } from '../platform/src/platform/knowledge/semantic/evidence-ranking/batch.js';
 import { prepareAnswerEvidenceRelevance, KnowledgeEvidenceRelevanceHeldError,
-  type AnswerEvidenceCandidate, type EvidenceRelevanceHoldReason } from '../sdk/src/platform/knowledge/semantic/evidence-ranking/reader.js';
+  type AnswerEvidenceCandidate, type EvidenceRelevanceHoldReason } from '../platform/src/platform/knowledge/semantic/evidence-ranking/reader.js';
 
 let previous: JudgmentPort | undefined;
 beforeEach(() => { previous = installJudgmentPort(undefined); });

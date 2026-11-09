@@ -16,7 +16,7 @@ import {
   type MemorySemanticSearchResult,
   type ProvenanceLink,
   type ProvenanceLinkKind,
-} from '@goodvibes-jev/engine/sdk/platform/state';
+} from '@goodvibes-jev/engine/platform/platform/state';
 import { assertNoSecretLikeMemoryText } from '../agent/memory-safety.ts';
 import { formatAgentRecordReference, formatAgentRecordReviewState } from '../agent/record-labels.ts';
 import type { CliCommandOutput } from './types.ts';
@@ -212,7 +212,7 @@ function timestamp(value: number): string {
 // The CLI no longer opens a private per-surface agent/memory.sqlite. It opens the
 // ONE canonical cross-surface store (~/.goodvibes/shared/memory.sqlite) so a memory
 // added via `goodvibes-agent memory add` is visible to the runtime, the TUI, and the
-// SDK, and vice-versa. The old CLI-written store is folded into the canonical store
+// platform, and vice-versa. The old CLI-written store is folded into the canonical store
 // (loss-free, idempotent) by the runtime's foldAgentLegacyMemory at boot, since that
 // fold already sources shellPaths.resolveUserPath('agent', 'memory.sqlite'), the exact
 // path this function used to write to.

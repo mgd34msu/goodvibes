@@ -1,18 +1,18 @@
-import type { SessionEvent } from '@goodvibes-jev/engine/sdk/events';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { SessionEvent } from '@goodvibes-jev/engine/platform/events';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   createFeatureFlagManager,
   deriveFeatureStates,
   bindFeatureSettingsBridge,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/feature-flags';
+} from '@goodvibes-jev/engine/platform/platform/runtime/feature-flags';
 import {
   RuntimeEventBus,
   configureRuntimeEventBusDefaults,
   runtimeEventBusOptionsFrom,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/state';
-import { createRuntimeStore, createDomainDispatch, type DomainDispatch } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
-import type { OrchestratorUserInputOptions } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { Notifier } from '@goodvibes-jev/engine/sdk/platform/integrations';
+} from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { createRuntimeStore, createDomainDispatch, type DomainDispatch } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import type { OrchestratorUserInputOptions } from '@goodvibes-jev/engine/platform/platform/core';
+import type { Notifier } from '@goodvibes-jev/engine/platform/platform/integrations';
 import { companionMessageToOrchestratorInputOptions } from './companion-input.js';
 export function createTerminalFeatureFlags(config: ConfigManager) {
   const flags = createFeatureFlagManager();

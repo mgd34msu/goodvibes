@@ -3,16 +3,16 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
-import { createRuntimeStore } from '../sdk/src/platform/runtime/store/index.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
+import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.ts';
 import {
   createClientRuntimeServices,
   type ClientRuntimeServices,
-} from '../sdk/src/platform/runtime/client-services.ts';
-import { createHostedSessionRuntime } from '../sdk/src/platform/hosted-sessions/session-runtime.ts';
-import type { HostedSessionExecPosture } from '../sdk/src/platform/hosted-sessions/exec-posture.ts';
-import type { PermissionPromptDecision } from '../sdk/src/platform/permissions/prompt.ts';
+} from '../platform/src/platform/runtime/client-services.ts';
+import { createHostedSessionRuntime } from '../platform/src/platform/hosted-sessions/session-runtime.ts';
+import type { HostedSessionExecPosture } from '../platform/src/platform/hosted-sessions/exec-posture.ts';
+import type { PermissionPromptDecision } from '../platform/src/platform/permissions/prompt.ts';
 import { installHostedSessionReadings } from './_helpers/hosted-session-readings.ts';
 import { EXEC_GATE_TABLE } from './_helpers/gate-readings.ts';
 

@@ -5,7 +5,7 @@
  * discrete key EVENTS, not held-key state: there is no key-release event to
  * observe, so a genuine hold would have to be faked with a timer that guesses
  * when the user let go. The binding's description says "press to start, press
- * again to stop" for that reason, and the SDK's `captureMaxSeconds` ceiling still
+ * again to stop" for that reason, and the platform's `captureMaxSeconds` ceiling still
  * applies as the backstop for a second press that never arrives (a lost focus, a
  * closed terminal) so the microphone cannot be left open indefinitely.
  *
@@ -24,7 +24,7 @@ import {
   type CapturedUtterance,
   type PushToTalkPhase,
   type WakeRuntimeSettings,
-} from '@goodvibes-jev/engine/sdk/platform/voice';
+} from '@goodvibes-jev/engine/platform/platform/voice';
 import type { VoiceCaptureIndicatorState } from '../core/voice-capture-status.ts';
 import type { VoiceSttGateway } from '../core/voice-stt-gateway.ts';
 import { describeTranscriptionFailure } from '../core/voice-stt-gateway.ts';
@@ -62,7 +62,7 @@ const PHASE_INDICATOR: Partial<Record<PushToTalkPhase, VoiceCaptureIndicatorStat
 };
 
 /**
- * Wire push-to-talk. One session object is reused across presses (the SDK session
+ * Wire push-to-talk. One session object is reused across presses (the platform session
  * is restartable after both a stop and a failure), so a device is opened per
  * press and released on every path out of it, including the failing ones.
  */

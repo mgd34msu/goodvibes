@@ -7,11 +7,11 @@
  * path is unchanged.
  */
 import { describe, expect, test } from 'bun:test';
-import { ApprovalBroker } from '../sdk/src/platform/control-plane/approval-broker.ts';
-import type { SharedApprovalRecord } from '../sdk/src/platform/control-plane/approval-broker.ts';
-import { CiWatchService } from '../sdk/src/platform/ci-watch/service.ts';
-import { CiWatchStore } from '../sdk/src/platform/ci-watch/subscriptions.ts';
-import type { CiJob, CiStatusSource, FixSessionBrief } from '../sdk/src/platform/ci-watch/types.ts';
+import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-broker.ts';
+import type { SharedApprovalRecord } from '../platform/src/platform/control-plane/approval-broker.ts';
+import { CiWatchService } from '../platform/src/platform/ci-watch/service.ts';
+import { CiWatchStore } from '../platform/src/platform/ci-watch/subscriptions.ts';
+import type { CiJob, CiStatusSource, FixSessionBrief } from '../platform/src/platform/ci-watch/types.ts';
 
 function failingSource(): CiStatusSource {
   const job: CiJob = { name: 'build', status: 'completed', conclusion: 'failure' };

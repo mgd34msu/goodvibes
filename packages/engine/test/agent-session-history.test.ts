@@ -2,11 +2,11 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AgentSession } from '../sdk/src/platform/agents/session.js';
-import { readAgentSessionHistory } from '../sdk/src/platform/agents/session-history.js';
-import { AgentManager, createAgentTool } from '../sdk/src/platform/tools/agent/index.js';
-import { AgentMessageBus } from '../sdk/src/platform/agents/message-bus.js';
-import { resolveScopedDirectory } from '../sdk/src/platform/runtime/surface-root.js';
+import { AgentSession } from '../platform/src/platform/agents/session.js';
+import { readAgentSessionHistory } from '../platform/src/platform/agents/session-history.js';
+import { AgentManager, createAgentTool } from '../platform/src/platform/tools/agent/index.js';
+import { AgentMessageBus } from '../platform/src/platform/agents/message-bus.js';
+import { resolveScopedDirectory } from '../platform/src/platform/runtime/surface-root.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

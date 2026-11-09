@@ -2,9 +2,9 @@ import { afterEach, expect, test } from 'bun:test';
 import { decisionModelPolicyState, installJudgmentPort, type DecisionModelPolicy } from '@goodvibes-jev/engine/errors';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
-import { peekChannelStatusContent, prepareChannelStatusContent } from '../sdk/src/platform/channels/status-reading.js';
-import { readTouchesSecrets, forgetReadSecrets } from '../sdk/src/platform/permissions/credential-read-defaults.js';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
+import { peekChannelStatusContent, prepareChannelStatusContent } from '../platform/src/platform/channels/status-reading.js';
+import { readTouchesSecrets, forgetReadSecrets } from '../platform/src/platform/permissions/credential-read-defaults.js';
 
 let previous: JudgmentPort | undefined, installed = false;
 afterEach(() => { if (installed) installJudgmentPort(previous); installed = false; forgetReadSecrets(); });

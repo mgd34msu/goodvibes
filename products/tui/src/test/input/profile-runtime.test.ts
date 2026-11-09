@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
-import { CONFIG_SCHEMA, ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { CONFIG_SCHEMA, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { getOperatorContract } from '@goodvibes-jev/engine/contracts';
 import { buildSettingGroups } from '@/input/settings-modal-data.ts';
 import { CommandRegistry, type CommandContext } from '@/input/command-registry.ts';
@@ -128,7 +128,7 @@ function makeScriptedRegistry(
   const deps: ProfileCommandDeps = {
     resolveRpc: () => ({
       available: true,
-      sdk: {
+      platformClient: {
         operator: {
           invoke: (methodId: string, input: Record<string, unknown>) => {
             calls.push({ methodId, input });
@@ -391,7 +391,7 @@ describe('containment', () => {
 // Authority (§7): every write verb claims owner-direct, none send nothing
 //
 // `authority` is required on all four write verbs. Checked against the
-// installed SDK rather than assumed: `readAuthority` in
+// installed platform rather than assumed: `readAuthority` in
 // platform/control-plane/routes/owner-profile.js now throws
 // INVALID_ARGUMENT when it is absent, and the contract types the field
 // non-optional. An earlier build of the same module defaulted an absent value
@@ -628,8 +628,8 @@ describe('write payloads conform to the declared contract input', () => {
     // the matcher whether or not it normalises and would still hold if the
     // normalisation were reverted.
     //
-    // It is deliberately NOT a pin on the SDK's matching rule, and cannot be:
-    // the SDK's owner-profile module is absent from the package's `exports` map
+    // It is deliberately NOT a pin on the platform's matching rule, and cannot be:
+    // the platform's owner-profile module is absent from the package's `exports` map
     // (144 subpaths, no wildcard), so no test in this surface can import
     // `forgetProseByText` to assert against it.
     const rendered = renderProfileDocument(checkedDocument());
@@ -753,7 +753,7 @@ describe('/profile where', () => {
     });
     await registry.get('profile')!.handler(['where', 'shipping', 'address'], ctx);
     // The label map is built from the live response, never from a local copy of
-    // the SDK's field registry, so the two can never disagree.
+    // the platform's field registry, so the two can never disagree.
     expect(collectFieldLabels(checkedDocument()).get('shipping address')).toEqual(['commerce.shippingAddress']);
     expect(calls.map((call) => call.methodId)).toEqual(['profile.read', 'profile.provenance']);
     expect(calls[1]?.input.fieldId).toBe('commerce.shippingAddress');

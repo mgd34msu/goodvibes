@@ -1,6 +1,6 @@
-import { createOperatorSdk, type OperatorSdk, type OperatorSdkOptions } from '@goodvibes-jev/engine/operator-sdk';
-import { observeImportFile, assertImportFileCurrent, type ConfigManager, type ImportFileObservation } from '@goodvibes-jev/engine/sdk/platform/config';
-import { OwnedSelectionObservation } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+import { createOperatorApiClient, type OperatorApiClient, type OperatorApiClientOptions } from '@goodvibes-jev/engine/operator-client';
+import { observeImportFile, assertImportFileCurrent, type ConfigManager, type ImportFileObservation } from '@goodvibes-jev/engine/platform/platform/config';
+import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { createNativeHostFetch } from './native/native-host-fetch.js';
 
 /** Private selected credential. Never a public picker item, log field or cache key. */
@@ -18,7 +18,7 @@ export interface RetainedOperatorConnectionPolicy {
   readonly files: (selection: SelectedOperatorConnection, home: string) => readonly string[];
   readonly environment?: (() => readonly (string | undefined)[]) | undefined;
   readonly signal: AbortSignal;
-  readonly fetchImpl?: OperatorSdkOptions['fetchImpl'];
+  readonly fetchImpl?: OperatorApiClientOptions['fetchImpl'];
 }
 
 /** A menu owns one host, credential source and configuration incarnation.
@@ -35,7 +35,7 @@ export class RetainedOperatorConnection {
   private selection: SelectedOperatorConnection | undefined;
   private sources: readonly { readonly path: string; readonly observation: ImportFileObservation }[] = [];
   private environment: readonly (string | undefined)[] = [];
-  private operator: OperatorSdk | undefined;
+  private operator: OperatorApiClient | undefined;
   private readonly unsubscribers: (() => void)[] = [];
   private closed = false;
   private pending = 0;
@@ -60,9 +60,9 @@ export class RetainedOperatorConnection {
       this.unsubscribers.push(() => policy.signal.removeEventListener('abort', close));
       this.unsubscribers.push(this.owner.onDidInvalidate(close), this.owner.onDidChangeIncarnation(close));
       const fetchImpl = policy.fetchImpl;
-      this.operator = createOperatorSdk({
+      this.operator = createOperatorApiClient({
         baseUrl: selection.baseUrl,
-        // The SDK retains this accessor, never a second permanent bearer copy.
+        // The platform retains this accessor, never a second permanent bearer copy.
         getAuthToken: () => { this.assertCurrent(); return this.selection?.token; },
         retry: { maxAttempts: 1 },
         fetchImpl: createNativeHostFetch({ current: () => this.current(), ...(fetchImpl === undefined ? {} : { fetchImpl }) }),
@@ -101,9 +101,9 @@ export class RetainedOperatorConnection {
 
   /** Keep the actual accepted operation owned until its promise settles, even
    * if an injected transport ignores cancellation. Every caller supplies the
-   * resulting signal to its SDK requests and checks complete responses here.
+   * resulting signal to its platform requests and checks complete responses here.
    */
-  async run<T>(work: (operator: OperatorSdk, signal: AbortSignal) => Promise<T>): Promise<T> {
+  async run<T>(work: (operator: OperatorApiClient, signal: AbortSignal) => Promise<T>): Promise<T> {
     this.assertCurrent();
     const operator = this.operator;
     if (!operator) throw new Error('The operator connection is closed.');

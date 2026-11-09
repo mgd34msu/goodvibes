@@ -1,11 +1,11 @@
-import { withDecisionModelPolicy, declaredClassicRuntimeMetadata } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { withDecisionModelPolicy, declaredClassicRuntimeMetadata } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort, JudgmentPortMissingError, decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-import { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
-import { SandboxSessionRegistry } from '@goodvibes-jev/engine/sdk/platform/runtime/sandbox';
-import { ToolInputProjectionError, ToolRegistry, ProcessManager, type BackgroundProcess } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { FileUndoManager } from '@goodvibes-jev/engine/sdk/platform/state';
+import { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
+import { SandboxSessionRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/sandbox';
+import { ToolInputProjectionError, ToolRegistry, ProcessManager, type BackgroundProcess } from '@goodvibes-jev/engine/platform/platform/tools';
+import { FileUndoManager } from '@goodvibes-jev/engine/platform/platform/state';
 import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { acquireInteractiveRuntimeSnapshot } from '../../tools/agent-harness-interactive-runtime-records.ts';

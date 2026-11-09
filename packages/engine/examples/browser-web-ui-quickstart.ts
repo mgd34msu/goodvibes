@@ -1,15 +1,15 @@
 /**
  * Create a browser client for GoodVibes web UI integrations.
  */
-import { createBrowserGoodVibesSdk } from '@goodvibes-jev/engine/sdk/browser';
+import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
 
-const sdk = createBrowserGoodVibesSdk({
+const platformClient = createBrowserGoodVibesPlatform({
   baseUrl: 'https://goodvibes.example.com',
 });
 
-await sdk.operator.control.snapshot();
+await platformClient.operator.control.snapshot();
 
-const unsubscribe = sdk.realtime.viaSse().agents.on('AGENT_COMPLETED', (event) => {
+const unsubscribe = platformClient.realtime.viaSse().agents.on('AGENT_COMPLETED', (event) => {
   console.log('agent completed', event);
 });
 

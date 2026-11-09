@@ -4,14 +4,14 @@
 // The two tailscale verbs the pairing surfaces drive, a read-only detection
 // (tailscale.get) and the one-action serve (tailscale.serve.run), over the
 // same generic operator invoke path the fleet acts use (resolveOperatorRpc ->
-// sdk.operator.invoke), reaching the SAME daemon the command layer does.
+// platform.operator.invoke), reaching the SAME daemon the command layer does.
 //
 // Both thunks degrade QUIETLY: when no daemon is reachable, the probe resolves
 // to null (the pairing surface renders no tailscale affordance at all) rather
 // than throwing into a render path. Absence is never a nag.
 // ---------------------------------------------------------------------------
 
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveOperatorRpc } from '../input/commands/operator-rpc.ts';
 import type {
   PairingTailscaleServeReceipt,
@@ -33,7 +33,7 @@ export async function probePairingTailscale(
   const rpc = resolveOperatorRpc(deps);
   if (!rpc.available) return null;
   try {
-    return (await rpc.sdk.operator.invoke('tailscale.get', {})) as PairingTailscaleStatus;
+    return (await rpc.platformClient.operator.invoke('tailscale.get', {})) as PairingTailscaleStatus;
   } catch {
     return null;
   }
@@ -49,7 +49,7 @@ export async function runPairingTailscaleServe(
 ): Promise<PairingTailscaleServeReceipt | null> {
   const rpc = resolveOperatorRpc(deps);
   if (!rpc.available) return null;
-  const result = (await rpc.sdk.operator.invoke('tailscale.serve.run', {})) as {
+  const result = (await rpc.platformClient.operator.invoke('tailscale.serve.run', {})) as {
     readonly receipt: PairingTailscaleServeReceipt;
   };
   return result.receipt;

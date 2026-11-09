@@ -8,7 +8,7 @@
 import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { EvalRegistry } from '@goodvibes-jev/engine/sdk/platform/observe';
+import { EvalRegistry } from '@goodvibes-jev/engine/platform/platform/observe';
 import { EvalRegistry as ViewEvalRegistry } from '../../views/eval-registry.ts';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { evalCommand } from '../../input/commands/eval.ts';
@@ -17,7 +17,7 @@ import type { BootstrapCommandShellServices } from '@/runtime/index.ts';
 import { createShellPathService } from '@/runtime/index.ts';
 
 function makeGateContext(printed: string[], evalRegistry?: EvalRegistry): CommandContext {
-  // process.cwd() as workingDirectory so the SDK resolveBaselinePath check
+  // process.cwd() as workingDirectory so the platform resolveBaselinePath check
   // (which resolves relative to CWD, not projectRoot) passes for relative paths.
   const shellPaths = createShellPathService({
     workingDirectory: process.cwd(),

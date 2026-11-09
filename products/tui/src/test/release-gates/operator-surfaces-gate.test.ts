@@ -13,8 +13,8 @@ import { RuntimeEventBus } from '@/runtime/index.ts';
 import { ForensicsRegistry } from '@/runtime/index.ts';
 import { PolicyRuntimeState } from '@/runtime/index.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
-import { AgentManager } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { AgentManager } from '@goodvibes-jev/engine/platform/platform/tools';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { ConversationManager } from '../../core/conversation';
 import { createOperatorClientServices } from '@/runtime/index.ts';
 import { createRuntimeServices } from '../../runtime/services.ts';
@@ -26,10 +26,10 @@ import { createRuntimeProviderApi } from '@/runtime/index.ts';
 import { createOperatorClient } from '@/runtime/index.ts';
 import { createPeerClient } from '@/runtime/index.ts';
 import type { CommandContext } from '../../input/command-registry.ts';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/sdk/platform/state';
-import { MemorySpineClient, createLocalMemoryAccess } from '@goodvibes-jev/engine/sdk/platform/runtime/memory-spine';
-import { listHookPointContracts } from '@goodvibes-jev/engine/sdk/platform/hooks';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/platform/platform/state';
+import { MemorySpineClient, createLocalMemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
+import { listHookPointContracts } from '@goodvibes-jev/engine/platform/platform/hooks';
 
 type CommandContextOverrides =
   Omit<Partial<CommandContext>, 'session' | 'provider' | 'workspace' | 'platform' | 'ops' | 'extensions'> & {
@@ -42,7 +42,7 @@ type CommandContextOverrides =
     ops?: Partial<CommandContext['ops']>;
     extensions?: Partial<CommandContext['extensions']>;
   };
-import { MemoryEmbeddingProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/state';
+import { MemoryEmbeddingProviderRegistry } from '@goodvibes-jev/engine/platform/platform/state';
 import { trackDisposables } from '../helpers/disposables.ts';
 
 /**

@@ -3,7 +3,7 @@
  *
  * Unit tests for `mapAcpUsage`, the pure mapping from the ACP protocol's
  * (unstable/experimental) `PromptResponse.usage` field, which uses
- * `cachedReadTokens`/`cachedWriteTokens` naming, onto the SDK's `AgentUsage`
+ * `cachedReadTokens`/`cachedWriteTokens` naming, onto the platform's `AgentUsage`
  * shape (`cacheReadTokens`/`cacheWriteTokens`), forwarded into AGENT_COMPLETED.
  *
  * Only the pure mapping function is exercised here, spawning a real ACP
@@ -12,7 +12,7 @@
  * module (no existing acp test harness).
  */
 import { describe, expect, test } from 'bun:test';
-import { mapAcpUsage } from '../sdk/src/platform/acp/connection.js';
+import { mapAcpUsage } from '../platform/src/platform/acp/connection.js';
 
 describe('mapAcpUsage', () => {
   test('returns undefined when the prompt response carries no usage', () => {

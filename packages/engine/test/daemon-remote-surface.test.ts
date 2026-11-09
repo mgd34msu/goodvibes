@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { registerRemoteSurface } from '../sdk/src/platform/runtime/remote/host/surface.ts';
-import { PeerRegistry } from '../sdk/src/platform/runtime/remote/host/peer-registry.ts';
-import type { RemoteSurfaceContext as HandlerContext } from '../sdk/src/platform/runtime/remote/host/surface.ts';
-import type { RemoteHostCredentialStore as DaemonCredentialStore } from '../sdk/src/platform/runtime/remote/host/context.ts';
-import type { RegisterRemoteSurfaceOptions } from '../sdk/src/platform/runtime/remote/host/surface.ts';
+import { registerRemoteSurface } from '../platform/src/platform/runtime/remote/host/surface.ts';
+import { PeerRegistry } from '../platform/src/platform/runtime/remote/host/peer-registry.ts';
+import type { RemoteSurfaceContext as HandlerContext } from '../platform/src/platform/runtime/remote/host/surface.ts';
+import type { RemoteHostCredentialStore as DaemonCredentialStore } from '../platform/src/platform/runtime/remote/host/context.ts';
+import type { RegisterRemoteSurfaceOptions } from '../platform/src/platform/runtime/remote/host/surface.ts';
 
 const stubCredentials: DaemonCredentialStore = {
   resolveRef: async () => null,
@@ -97,7 +97,7 @@ describe('registerRemoteSurface', () => {
     registry.close();
 
     // Manager stub that records enqueued work in its own queue, mirroring the
-    // SDK DistributedRuntimeManager.enqueueWork -> listWork relationship.
+    // platform DistributedRuntimeManager.enqueueWork -> listWork relationship.
     const queued: Array<{ id: string; peerId: string; command: string; queuedBy: string }> = [];
     let nextId = 1;
     const recordingManager = {

@@ -10,9 +10,9 @@
  * stays a thin delegator.
  */
 
-import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
+import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
 import { isSecretConfigKey } from '../config/secret-config.ts';
 import { setSecretBackedSettingValue, type SettingsSecretsManager } from './settings-modal-secrets.ts';
 import { buildMcpEntries } from './settings-modal-data.ts';

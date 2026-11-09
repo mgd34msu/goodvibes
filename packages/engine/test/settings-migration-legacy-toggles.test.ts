@@ -12,9 +12,9 @@ import { describe, expect, test, afterEach } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { migrateLegacyFeatureToggles } from '../sdk/src/platform/config/migrations.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { FeatureAnnouncementStore, featureAnnouncementsPath } from '../sdk/src/platform/runtime/feature-announcements.js';
+import { migrateLegacyFeatureToggles } from '../platform/src/platform/config/migrations.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { FeatureAnnouncementStore, featureAnnouncementsPath } from '../platform/src/platform/runtime/feature-announcements.js';
 
 const tmpRoots: string[] = [];
 afterEach(() => {

@@ -10,7 +10,7 @@ import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireShellPaths, requireVoiceSetup } from './runtime-services.ts';
 import { requireYesFlag } from './confirmation.ts';
 import { handleApprovalOperatorAction } from './operator-actions-runtime.ts';
-import { resolveWakeRuntimeSettings } from '@goodvibes-jev/engine/sdk/platform/voice/wake/runtime';
+import { resolveWakeRuntimeSettings } from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
 import {
   agentWakeCapabilities,
   wakeProvisionReceiptLines,
@@ -131,7 +131,7 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
       const status = requireVoiceSetup(ctx).status();
       // Live install progress: voice.local.status carries an
       // installInProgress section only while an install run is active
-      // (sdk 5357f09e); absent means no run (or an older host build) and
+      // (platform 5357f09e); absent means no run (or an older host build) and
       // nothing renders, never a fabricated progress view.
       const installInProgress: VoiceInstallProgressLike | undefined = status.installInProgress;
       ctx.print(
@@ -161,7 +161,7 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
       ctx.print('Installing managed local-voice runtime...');
       // Poll voice.local.status while the install call is in flight and
       // render live per-component progress from its installInProgress
-      // section (sdk 5357f09e). Honest fallback: a host build whose status
+      // section (platform 5357f09e). Honest fallback: a host build whose status
       // never carries the section (an older daemon) just keeps the busy
       // line above until the final receipt, no fabricated progress.
       let installSettled = false;

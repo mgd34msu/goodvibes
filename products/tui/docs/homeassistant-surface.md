@@ -1,6 +1,6 @@
 # Home Assistant surface
 
-GoodVibes can expose a Home Assistant companion surface through the daemon. The TUI owns onboarding, settings, and auto-start selection; the SDK daemon owns Home Assistant API calls, callback verification, tool/action metadata, and event delivery.
+GoodVibes can expose a Home Assistant companion surface through the daemon. The TUI owns onboarding, settings, and auto-start selection; the platform daemon owns Home Assistant API calls, callback verification, tool/action metadata, and event delivery.
 
 ## Onboarding
 
@@ -49,7 +49,7 @@ POST /api/homeassistant/conversation/cancel
 
 `POST /api/homeassistant/conversation` is the submit-and-wait Assist path for companion clients. `POST /api/homeassistant/conversation/stream` streams the response. `POST /api/homeassistant/conversation/cancel` cancels an active Home Assistant remote conversation. Remote sessions are daemon-owned, isolated from TUI/shared sessions, and close after `surfaces.homeassistant.remoteSessionTtlMs` of inactivity.
 
-Home Assistant conversation responses use the SDK-owned remote-chat contract:
+Home Assistant conversation responses use the platform-owned remote-chat contract:
 
 | Field | Holds |
 | --- | --- |
@@ -60,9 +60,9 @@ Home Assistant conversation responses use the SDK-owned remote-chat contract:
 
 Home Assistant clients should not expect `agentId` for Assist chat; the correlation identifiers above are the way to tie responses together.
 
-The SDK advertises Home Assistant account, setup, capabilities, tools, actions, directory, target-resolution metadata, and direct conversation routes through the channel daemon routes. The TUI should not call Home Assistant APIs directly.
+The platform advertises Home Assistant account, setup, capabilities, tools, actions, directory, target-resolution metadata, and direct conversation routes through the channel daemon routes. The TUI should not call Home Assistant APIs directly.
 
-Home Assistant ingress is handled as isolated remote-chat work by the SDK daemon. The TUI configures the surface and credentials, but Home Assistant messages should not spawn engineer/reviewer/fixer chains and should not attach to the active TUI/shared session.
+Home Assistant ingress is handled as isolated remote-chat work by the platform daemon. The TUI configures the surface and credentials, but Home Assistant messages should not spawn engineer/reviewer/fixer chains and should not attach to the active TUI/shared session.
 
 ## Home Graph
 
@@ -120,20 +120,20 @@ Read routes accept `installationId` or `knowledgeSpaceId`. List and browse route
 
 ### Client rendering rules
 
-TUI and companion clients should render the SDK-returned fields directly:
+TUI and companion clients should render the platform-returned fields directly:
 
 - Ask responses: `answer.text`, `answer.synthesized`, `answer.sources`, `answer.facts`, `answer.gaps`, `answer.linkedObjects`, `answer.refinementTaskIds`, and `answer.refinement`.
-- Map responses: SDK-provided nodes, edges, facets, filters, source/target ids, and source/target titles.
-- Pages responses: generated page metadata and markdown returned by the SDK.
+- Map responses: platform-provided nodes, edges, facets, filters, source/target ids, and source/target titles.
+- Pages responses: generated page metadata and markdown returned by the platform.
 - Refinement task responses: task ids, status, reason, `nextRepairAttemptAt`, traces, linked source/object metadata, and budget/coalescing fields.
 
-Do not locally infer Home Assistant facet names, object identity, source quality, fact quality, or refinement state. Build controls from returned facets and task records, then pass selected filters back to the SDK.
+Do not locally infer Home Assistant facet names, object identity, source quality, fact quality, or refinement state. Build controls from returned facets and task records, then pass selected filters back to the platform.
 
 Home Graph answers are designed to be responsive. If evidence is weak, Ask should return the current best answer plus gaps/refinement task ids instead of blocking indefinitely. Repair and enrichment continue through durable refinement tasks.
 
 ### Refinement and reindex
 
-The TUI daemon composes the SDK Home Graph service with the SDK web-backed semantic gap repairer. Refinement tasks can search for candidate repair sources, ingest accepted sources, promote subject-linked facts, refresh generated pages, and continue the SDK refinement state machine.
+The TUI daemon composes the platform Home Graph service with the platform web-backed semantic gap repairer. Refinement tasks can search for candidate repair sources, ingest accepted sources, promote subject-linked facts, refresh generated pages, and continue the platform refinement state machine.
 
 Operational expectations:
 
@@ -152,7 +152,7 @@ Home Graph artifact ingest accepts the same large-upload bodies as the generic a
 - Additional text fields can include `installationId`, `knowledgeSpaceId`, `title`, `tags`, `target`, and `metadata`.
 - Browser-facing Home Assistant bridges must proxy multipart/raw bodies to `/api/homeassistant/home-graph/ingest/artifact` without exposing the daemon token and without converting file bytes into JSON.
 
-PDF/manual extraction, source scoring, fact promotion, boilerplate filtering, generated-page refresh, and source-backed answer synthesis are SDK-owned. Clients should reindex existing uploads after extractor or semantic-repair upgrades rather than reuploading unless the source content itself changed.
+PDF/manual extraction, source scoring, fact promotion, boilerplate filtering, generated-page refresh, and source-backed answer synthesis are platform-owned. Clients should reindex existing uploads after extractor or semantic-repair upgrades rather than reuploading unless the source content itself changed.
 
 ## Secrets
 
@@ -163,4 +163,4 @@ goodvibes://secrets/goodvibes/GOODVIBES_SURFACES_HOMEASSISTANT_ACCESS_TOKEN
 goodvibes://secrets/goodvibes/GOODVIBES_SURFACES_HOMEASSISTANT_WEBHOOK_SECRET
 ```
 
-The SDK also recognizes environment fallbacks such as `HOMEASSISTANT_ACCESS_TOKEN`, `HOME_ASSISTANT_ACCESS_TOKEN`, `HA_ACCESS_TOKEN`, `HOMEASSISTANT_URL`, `HOME_ASSISTANT_URL`, `HA_URL`, `HOMEASSISTANT_WEBHOOK_SECRET`, `HOME_ASSISTANT_WEBHOOK_SECRET`, and `HA_GOODVIBES_WEBHOOK_SECRET`.
+The platform also recognizes environment fallbacks such as `HOMEASSISTANT_ACCESS_TOKEN`, `HOME_ASSISTANT_ACCESS_TOKEN`, `HA_ACCESS_TOKEN`, `HOMEASSISTANT_URL`, `HOME_ASSISTANT_URL`, `HA_URL`, `HOMEASSISTANT_WEBHOOK_SECRET`, `HOME_ASSISTANT_WEBHOOK_SECRET`, and `HA_GOODVIBES_WEBHOOK_SECRET`.

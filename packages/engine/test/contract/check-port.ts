@@ -5,7 +5,7 @@
  */
 import type { Question } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import type { QualityItem } from '../../sdk/src/platform/contract/types.js';
+import type { QualityItem } from '../../platform/src/platform/contract/types.js';
 
 /** Probabilities that each question fails: `criteria[i]` for criterion i, `goal`, and each quality item. */
 export interface CheckAnswers {

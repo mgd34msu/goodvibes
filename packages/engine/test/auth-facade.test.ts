@@ -10,9 +10,9 @@ import {
   TokenStore,
   createGoodVibesAuthClient,
   createMemoryTokenStore,
-} from '../sdk/src/auth.js';
-import type { ControlPlaneAuthSnapshot } from '../sdk/src/client-auth/control-plane-auth-snapshot.js';
-import type { OperatorSdk } from '../operator-sdk/src/index.js';
+} from '../platform/src/auth.js';
+import type { ControlPlaneAuthSnapshot } from '../platform/src/client-auth/control-plane-auth-snapshot.js';
+import type { OperatorApiClient } from '../operator-client/src/index.js';
 
 function makeRawStore(initial: string | null = null) {
   let current = initial;
@@ -31,7 +31,7 @@ function makeOperator(token = 'facade-token') {
         login: async (_input: unknown) => ({ token, authenticated: true, username: 'alice', expiresAt: Date.now() + 60_000 }),
       },
     },
-  } as unknown as OperatorSdk;
+  } as unknown as OperatorApiClient;
 }
 
 describe('auth facade: GoodVibesAuthClient delegates to client-auth', () => {

@@ -20,22 +20,22 @@ import {
   resolveManagedWakePaths,
   describeWakeModel,
   resolveWakeModelFiles,
-} from '../sdk/src/platform/voice/wake/provisioning.js';
+} from '../platform/src/platform/voice/wake/provisioning.js';
 import {
   provisionWakeWordModelsAtInstall,
   startWakeBootProvisioning,
   WAKE_INSTALL_SKIP_ENV,
   type WakeInstallProvisionOutcome,
-} from '../sdk/src/platform/voice/wake/install-provision.js';
-import { resolveManagedVoiceRoot } from '../sdk/src/platform/voice/provisioning/managed-root.js';
-import { createShellPathService } from '../sdk/src/platform/runtime/shell-paths.js';
+} from '../platform/src/platform/voice/wake/install-provision.js';
+import { resolveManagedVoiceRoot } from '../platform/src/platform/voice/provisioning/managed-root.js';
+import { createShellPathService } from '../platform/src/platform/runtime/shell-paths.js';
 import {
   sweepWakeStorage,
   startWakeRecoverySweeper,
   WAKE_REAP_RECEIPT_FILE,
   type WakeReapSummary,
   retainedClipFileName,
-} from '../sdk/src/platform/voice/wake/recovery.js';
+} from '../platform/src/platform/voice/wake/recovery.js';
 import {
   resolveWakeWordModel,
   WAKE_VAD_MODEL,
@@ -43,7 +43,7 @@ import {
   wakeWordFrontEndProvisionBytes,
   wakeWordProvisionBytes,
   WAKE_WORD_FRONT_END,
-} from '../sdk/src/platform/voice/provisioning/wake-word-manifest.js';
+} from '../platform/src/platform/voice/provisioning/wake-word-manifest.js';
 
 // Resolved eagerly via an IIFE (rather than a bare `const` + throw-guard) so
 // MODEL's static type is non-null everywhere it's read, including inside
@@ -278,7 +278,7 @@ describe('provisioning succeeds and is resumable', () => {
       embedding: fakePin(embeddingBody, 'https://example.invalid/embedding.onnx'),
     };
     const { downloadVerifiedFile } = await import(
-      '../sdk/src/platform/voice/provisioning/download-verified.js'
+      '../platform/src/platform/voice/provisioning/download-verified.js'
     );
     const bodies = {
       [specs.classifier.url]: classifierBody,

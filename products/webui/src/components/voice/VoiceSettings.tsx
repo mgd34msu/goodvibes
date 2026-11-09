@@ -12,7 +12,7 @@
  * presentation-contract tone/glyph so the state reads the same as it does on every other
  * surface.
  *
- * Local voice setup (SDK 1.9.0-dev's memory-relay-voice-hardening work): the 'local'
+ * Local voice setup (platform 1.9.0-dev's memory-relay-voice-hardening work): the 'local'
  * provider only appears in the dropdown above once it has at least one configured
  * capability (provider-registry.ts's `status()` reports `capabilities: []` for a fully
  * unprovisioned install), so on a fresh daemon it is invisible there, with nothing
@@ -27,7 +27,7 @@
 import { useMemo, useState } from 'react';
 import { Settings2 } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { invokeMethod, sdk } from '../../lib/goodvibes';
+import { invokeMethod, client as platformClient } from '../../lib/goodvibes';
 import { formatError, isMethodNotInvokableError, isMethodUnavailableError } from '../../lib/errors';
 import { asRecord, formatBytes } from '../../lib/object';
 import { useSharedVoiceConfig, useVoiceStatus } from '../../lib/voice/useVoice';
@@ -81,7 +81,7 @@ export function VoiceSettings() {
 
   const voicesQuery = useQuery({
     queryKey: ['voice', 'voices', selectedProvider],
-    queryFn: () => sdk.operator.voice.voices(selectedProvider || undefined),
+    queryFn: () => platformClient.operator.voice.voices(selectedProvider || undefined),
     enabled: open && availability.ttsAvailable,
     staleTime: 60_000,
   });
@@ -96,7 +96,7 @@ export function VoiceSettings() {
 
   const localInstall = useVoiceLocalInstall();
   // While the install mutation is in flight the status query polls: the daemon serves
-  // an OPTIONAL installInProgress section during an active install (SDK 5357f09e) and
+  // an OPTIONAL installInProgress section during an active install (platform 5357f09e) and
   // this is the window it exists in. Absent (an older daemon, or the first poll not
   // landed yet) the card keeps its plain busy state.
   const localStatus = useVoiceLocalStatus(open, localInstall.isPending);

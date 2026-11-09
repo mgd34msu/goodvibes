@@ -14,7 +14,7 @@
 
 import { expect, test } from 'bun:test';
 
-import { AutoRefreshCoordinator } from '../sdk/src/client-auth/auto-refresh.ts';
+import { AutoRefreshCoordinator } from '../platform/src/client-auth/auto-refresh.ts';
 
 const EXPIRES_AT = 1_000_000;
 

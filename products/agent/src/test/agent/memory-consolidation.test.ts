@@ -8,8 +8,8 @@ import {
   DEFAULT_MEMORY_CONSOLIDATION_CONFIG,
   runMemoryConsolidation,
   type MemoryConsolidationUsageLookup,
-} from '@goodvibes-jev/engine/sdk/platform/state';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+} from '@goodvibes-jev/engine/platform/platform/state';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createShellPathService } from '@/runtime/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';

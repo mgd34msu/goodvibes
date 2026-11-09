@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime, type ClientLifetime } from '../../lib/client-lifetime';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import { formatError } from '../../lib/errors';
 import { Button } from '../ui/Button';
 import { useConfirm } from '../ui/ConfirmDialog';
@@ -16,7 +16,7 @@ export function TriggerRecoverySettings() {
   const [closedOlder, setClosedOlder] = useState(false), confirm = useConfirm(), queryClient = useQueryClient();
   const retireAcknowledgement = () => { acknowledgement.current = {}; setClosedOlder(false); };
   const status = useQuery({ queryKey: statusKey, queryFn: async () => {
-    const lifetime = getClientLifetime(), result = await sdk.operator.watchers.triggers.status();
+    const lifetime = getClientLifetime(), result = await platformClient.operator.watchers.triggers.status();
     if (!isClientLifetimeCurrent(lifetime)) throw new Error('The selected host or operator changed. Refresh trigger status.');
     return { ...result, lifetime };
   } });
@@ -24,7 +24,7 @@ export function TriggerRecoverySettings() {
   const migrate = useMutation({
     mutationFn: async ({ lifetime, gesture }: { lifetime: ClientLifetime; gesture: object }) => {
       if (acknowledgement.current !== gesture || !isClientLifetimeCurrent(lifetime)) throw new Error('The selected host or operator changed. Refresh trigger status.');
-      const result = await sdk.operator.watchers.triggers.migrate({ olderInstancesClosed: true, confirm: true });
+      const result = await platformClient.operator.watchers.triggers.migrate({ olderInstancesClosed: true, confirm: true });
       if (acknowledgement.current !== gesture || !isClientLifetimeCurrent(lifetime)) throw new Error('The host changed before migration could be confirmed. Refresh trigger status.');
       return { ...result, lifetime, gesture };
     },

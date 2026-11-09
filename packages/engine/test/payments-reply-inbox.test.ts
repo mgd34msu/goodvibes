@@ -11,13 +11,13 @@
  * then.
  */
 import { describe, expect, spyOn, test } from 'bun:test';
-import { PaymentReplyInbox, PaymentReplyWindowError } from '../sdk/src/platform/payments/reply-inbox.js';
-import { tryResolvePaymentReplyFromChannel } from '../sdk/src/platform/daemon/payment-reply.js';
-import { DaemonSurfaceActionHelper } from '../sdk/src/platform/daemon/surface-actions.ts';
-import { channelBackedPaymentNotifier } from '../sdk/src/platform/payments/host/notifier.js';
-import type { ChannelPolicyDecision } from '../sdk/src/platform/channels/index.js';
+import { PaymentReplyInbox, PaymentReplyWindowError } from '../platform/src/platform/payments/reply-inbox.js';
+import { tryResolvePaymentReplyFromChannel } from '../platform/src/platform/daemon/payment-reply.js';
+import { DaemonSurfaceActionHelper } from '../platform/src/platform/daemon/surface-actions.ts';
+import { channelBackedPaymentNotifier } from '../platform/src/platform/payments/host/notifier.js';
+import type { ChannelPolicyDecision } from '../platform/src/platform/channels/index.js';
 import { usePaymentsReadings } from './helpers/payments-readings.ts';
-import { createTelegramSourceAccountOwner } from '../sdk/src/platform/channels/telegram/source-account.js';
+import { createTelegramSourceAccountOwner } from '../platform/src/platform/channels/telegram/source-account.js';
 
 const readings = usePaymentsReadings();
 

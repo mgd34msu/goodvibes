@@ -1,8 +1,8 @@
 /** Original integration assertions, using the real canonical catalog and account owner. */
 import { expect, spyOn, test } from 'bun:test';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.js';
-import { aggregateInbox, normalizeInboxQuery } from '../sdk/src/platform/intake/aggregator.js';
-import { registerTriagedInbox } from '../sdk/src/platform/intake/triage/owned.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
+import { aggregateInbox, normalizeInboxQuery } from '../platform/src/platform/intake/aggregator.js';
+import { registerTriagedInbox } from '../platform/src/platform/intake/triage/owned.js';
 import { makeProjectTempDir } from './_helpers/project-temp.js';
 
 test('triaged registrar binds once, creates no triage IDs and leaves unrelated registration identity intact', async () => {

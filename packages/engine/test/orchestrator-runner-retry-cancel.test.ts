@@ -11,13 +11,13 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { runAgentTask, type AgentOrchestratorRunContext } from '../sdk/src/platform/agents/orchestrator-runner.js';
-import { AgentMessageBus } from '../sdk/src/platform/agents/message-bus.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.js';
-import type { AgentRecord } from '../sdk/src/platform/tools/agent/manager.js';
-import type { ChatResponse, LLMProvider } from '../sdk/src/platform/providers/interface.js';
-import type { ModelDefinition } from '../sdk/src/platform/providers/registry-types.js';
+import { runAgentTask, type AgentOrchestratorRunContext } from '../platform/src/platform/agents/orchestrator-runner.js';
+import { AgentMessageBus } from '../platform/src/platform/agents/message-bus.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.js';
+import type { AgentRecord } from '../platform/src/platform/tools/agent/manager.js';
+import type { ChatResponse, LLMProvider } from '../platform/src/platform/providers/interface.js';
+import type { ModelDefinition } from '../platform/src/platform/providers/registry-types.js';
 import { useFailureReadings } from './_helpers/failure-readings.ts';
 
 const NETWORK_WORDING = 'socket hang up while streaming the reply';

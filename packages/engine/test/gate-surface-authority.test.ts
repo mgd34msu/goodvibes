@@ -7,7 +7,7 @@
  * write to just gained the ability to direct the agent. The one legitimate
  * reason to edit the expectations here is an owner decision to move a
  * surface between the two categories, and that decision belongs in the diff
- * next to the table edit in packages/engine/sdk/src/platform/gate/surface-authority.ts.
+ * next to the table edit in packages/engine/platform/src/platform/gate/surface-authority.ts.
  *
  * The property these tests describe, for other surfaces to adopt:
  *   surfaceAuthority(surfaceId) -> 'command' | 'input-only'
@@ -24,7 +24,7 @@ import {
   surfaceAuthority,
   surfaceCarriesCommandAuthority,
   type AgentEffect,
-} from '../sdk/src/platform/gate/surface-authority.ts';
+} from '../platform/src/platform/gate/surface-authority.ts';
 
 const UNDERSTANDING_EFFECTS: readonly AgentEffect[] = ['read', 'search', 'analyze'];
 const CONSEQUENTIAL_EFFECTS: readonly AgentEffect[] = ['send', 'write', 'exec', 'settings'];

@@ -2,7 +2,7 @@ import { getAgentSettingsSchema, type AgentSettingsCatalog } from '../config/set
 import { catalogRoutingInput } from './agent-harness-catalog-ingress.ts';
 import { isAgentWorkspaceSettingsImportPreview } from './agent-settings-import-admission.ts';
 import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   MAX_SETTING_LIMIT,
   listEffectiveHarnessSettingsPage,

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { GoodVibesSdkError } from '@goodvibes-jev/engine/sdk';
+import { GoodVibesError } from '@goodvibes-jev/engine/platform';
 import {
   classifyMemoryDiagnosticsError,
   createMemoryDiagnosticsGateway,
@@ -7,7 +7,7 @@ import {
   MEMORY_DIAGNOSTICS_UNAVAILABLE,
   type MemoryDiagnosticsGatewayResolution,
 } from '../../core/memory-diagnostics-gateway.ts';
-import type { MemoryGovernorSnapshotResult } from '@goodvibes-jev/engine/sdk/platform/runtime/memory';
+import type { MemoryGovernorSnapshotResult } from '@goodvibes-jev/engine/platform/platform/runtime/memory';
 import { wireMemoryPressureNotice } from '../../runtime/notification-dispatch.ts';
 import { CommandRegistry } from '../../input/command-registry.ts';
 import { registerHealthRuntimeCommands } from '../../input/commands/health-runtime.ts';
@@ -36,12 +36,12 @@ function failingResolution(error: unknown): MemoryDiagnosticsGatewayResolution {
 
 describe('classifyMemoryDiagnosticsError', () => {
   test('501 and 404 are "does not serve memory diagnostics"', () => {
-    const f501 = classifyMemoryDiagnosticsError(new GoodVibesSdkError('x', { status: 501 }));
+    const f501 = classifyMemoryDiagnosticsError(new GoodVibesError('x', { status: 501 }));
     expect(f501).toEqual({ kind: 'unavailable', reason: MEMORY_DIAGNOSTICS_UNAVAILABLE });
-    expect(classifyMemoryDiagnosticsError(new GoodVibesSdkError('x', { status: 404 })).kind).toBe('unavailable');
+    expect(classifyMemoryDiagnosticsError(new GoodVibesError('x', { status: 404 })).kind).toBe('unavailable');
   });
   test('500 / network errors are a generic error', () => {
-    expect(classifyMemoryDiagnosticsError(new GoodVibesSdkError('boom', { status: 500 })).kind).toBe('error');
+    expect(classifyMemoryDiagnosticsError(new GoodVibesError('boom', { status: 500 })).kind).toBe('error');
     expect(classifyMemoryDiagnosticsError(new Error('reset')).kind).toBe('error');
   });
 });
@@ -58,7 +58,7 @@ describe('renderMemoryDiagnostics: mocked daemon (injected resolution)', () => {
     expect(out).toContain('memory diagnostics unavailable: the daemon is disabled');
   });
   test('a 501 renders "daemon does not serve memory diagnostics"', async () => {
-    const out = await renderMemoryDiagnostics(failingResolution(new GoodVibesSdkError('no governor', { status: 501 })));
+    const out = await renderMemoryDiagnostics(failingResolution(new GoodVibesError('no governor', { status: 501 })));
     expect(out).toContain('does not serve memory diagnostics');
   });
   test('a network error renders an honest read failure, not empty state', async () => {

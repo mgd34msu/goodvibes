@@ -16,7 +16,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, expect, test } from 'bun:test';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { appendConversationMessages, type ConversationRenderContext } from '../../core/conversation-rendering.ts';
 import { activeTokens, setActiveThemeMode, setActiveThemeName } from '../../renderer/theme.ts';
 import { primeSemanticSummary } from '../../renderer/lane-graph/semantic-memo.ts';

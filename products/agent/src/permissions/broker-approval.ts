@@ -3,7 +3,7 @@
  * agent-terminal permission card.
  *
  * The shared ApprovalBroker (constructed once in runtime/services.ts,
- * @goodvibes-jev/engine/sdk/platform/control-plane) publishes every ask this
+ * @goodvibes-jev/engine/platform/platform/control-plane) publishes every ask this
  * agent process raises: local tool-call asks (which carry a `localPrompt`,
  * see bootstrap-core.ts's PermissionManager construction, which opens its
  * own card through permissionPromptRef.requestPermission), plus asks with no
@@ -30,7 +30,7 @@
  */
 
 import type { PendingPermissionState } from '../shell/blocking-input.ts';
-import type { PermissionPromptRequest } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import type { PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
 
 /** The broker seam this module answers through, a subset of ApprovalBroker. */
 export interface BrokerApprovalBroker {

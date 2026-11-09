@@ -1,4 +1,4 @@
-import { CONFIG_SCHEMA, DEFAULT_CONFIG, isMalformedGoodVibesSecretReferenceValue } from '@goodvibes-jev/engine/sdk/platform/config';
+import { CONFIG_SCHEMA, DEFAULT_CONFIG, isMalformedGoodVibesSecretReferenceValue } from '@goodvibes-jev/engine/platform/platform/config';
 import { createOnboardingFileHelpers } from './onboarding-file-helpers.js';
 const { isPlainObject } = createOnboardingFileHelpers();
 export function createOnboardingConfigValidator<Operation extends { readonly key: string; readonly value: unknown }>(policy: {

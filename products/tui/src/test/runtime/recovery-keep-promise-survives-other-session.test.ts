@@ -1,5 +1,5 @@
 /**
- * recovery-keep-promise-survives-other-session.test.ts, pins the SDK's
+ * recovery-keep-promise-survives-other-session.test.ts, pins the platform's
  * per-session supersession rule from the TUI consumer side.
  *
  * The recovery modal's "Keep" row promises: "Leave the recovery point on
@@ -11,12 +11,12 @@
  * typed in an unrelated session silently buried a kept snapshot with no UI
  * path left to reach it.
  *
- * The SDK's fix (session-recovery.ts) judges a snapshot only against its OWN
+ * The platform's fix (session-recovery.ts) judges a snapshot only against its OWN
  * session's durable store file. This test runs the TUI's real writer paths,
  * writeRecoveryFile / writeLastSessionPointer via @/runtime/index.ts, the
  * same functions runtime/recovery-prompt.ts and turn-event-wiring.ts call,
  * through the full Keep -> unrelated-session-activity -> next-launch
- * sequence, so a future SDK regression back to pointer-based supersession
+ * sequence, so a future platform regression back to pointer-based supersession
  * would fail this test even though nothing in the TUI's own code changed.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';

@@ -11,7 +11,7 @@
  * authority?", the exact question that gets skipped otherwise.
  *
  * The surface that renders the claim keeps the same guard over its own tree.
- * This is the SDK's half: the mail service now sits between the receiving
+ * This is the platform's half: the mail service now sits between the receiving
  * server's verdict and the sentence a human reads, so the drift could start
  * here just as easily.
  */
@@ -20,7 +20,7 @@ import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-const EMAIL_ROOT = join(import.meta.dir, '..', 'sdk', 'src', 'platform', 'email');
+const EMAIL_ROOT = join(import.meta.dir, '..', 'platform', 'src', 'platform', 'email');
 
 /**
  * Files permitted to read sender confidence, each because it declares or

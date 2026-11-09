@@ -114,7 +114,7 @@ export function runBuildBinaries(options: RunBuildOptions): BuildOutcome[] {
   }
 
   // An optionalDependency that is not installed becomes `--external`, so bun
-  // leaves the specifier for runtime and the SDK's own unavailability report
+  // leaves the specifier for runtime and the engine's own unavailability report
   // governs instead of the bundle failing to resolve. A missing REQUIRED
   // package fails here instead, loudly and by name, see optional-externals.ts
   // for why that asymmetry is the whole point.

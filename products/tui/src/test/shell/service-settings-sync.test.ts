@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ManagedServiceStatus } from '@goodvibes-jev/engine/sdk/platform/daemon';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ManagedServiceStatus } from '@goodvibes-jev/engine/platform/platform/daemon';
 import {
   syncServiceSettingToPlatform,
   type CommandResult,

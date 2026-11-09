@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { parseDaemonInstallationReceipt, resolveDaemonInstallationReaders, nativeReaderCapabilities,
-  type DaemonInstallationReceipt } from '../sdk/src/platform/runtime/self-update.ts';
+  type DaemonInstallationReceipt } from '../platform/src/platform/runtime/self-update.ts';
 import { nativeCohortFixture } from './_helpers/daemon-native-cohort.ts';
 
 function fixture() {

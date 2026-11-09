@@ -15,14 +15,14 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'bun:test';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import type { ConfigKey } from '../sdk/src/platform/config/schema-types.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { createRuntimeServices } from '../sdk/src/platform/runtime/services.js';
-import { createRuntimeStore } from '../sdk/src/platform/runtime/store/index.js';
-import { createFeatureFlagManager } from '../sdk/src/platform/runtime/feature-flags/manager.js';
-import { installPlatformTracer, platformTracer } from '../sdk/src/platform/runtime/metrics.js';
-import { instrumentedLlmCall } from '../sdk/src/platform/runtime/llm-observability.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import type { ConfigKey } from '../platform/src/platform/config/schema-types.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { createRuntimeServices } from '../platform/src/platform/runtime/services.js';
+import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.js';
+import { createFeatureFlagManager } from '../platform/src/platform/runtime/feature-flags/manager.js';
+import { installPlatformTracer, platformTracer } from '../platform/src/platform/runtime/metrics.js';
+import { instrumentedLlmCall } from '../platform/src/platform/runtime/llm-observability.js';
 import { trackDisposables } from './_helpers/disposables.ts';
 
 /**

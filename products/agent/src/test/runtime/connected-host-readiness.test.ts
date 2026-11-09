@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/sdk/contracts';
+import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
 import { ConfigManager } from '../../config/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 import { readConnectedHostOperatorToken } from '../../runtime/connected-host-auth.ts';

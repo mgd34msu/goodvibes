@@ -4,12 +4,12 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { createContractInputAuthority } from '../../sdk/src/platform/contract/input-authority.js';
-import { captureContractInput, contractInputPath, materializeContractInput } from '../../sdk/src/platform/contract/input-snapshot.js';
-import type { Contract } from '../../sdk/src/platform/contract/types.js';
-import { resolveProcessCapturedBunRuntimeExecutable } from '../../sdk/src/platform/runtime/captured-bun-runtime.js';
-import { createCapturedExecBunRuntimeAdmission } from '../../sdk/src/platform/tools/exec/captured-bun-runtime-input.js';
-import { createCapturedReplTool } from '../../sdk/src/platform/tools/repl/captured.js';
+import { createContractInputAuthority } from '../../platform/src/platform/contract/input-authority.js';
+import { captureContractInput, contractInputPath, materializeContractInput } from '../../platform/src/platform/contract/input-snapshot.js';
+import type { Contract } from '../../platform/src/platform/contract/types.js';
+import { resolveProcessCapturedBunRuntimeExecutable } from '../../platform/src/platform/runtime/captured-bun-runtime.js';
+import { createCapturedExecBunRuntimeAdmission } from '../../platform/src/platform/tools/exec/captured-bun-runtime-input.js';
+import { createCapturedReplTool } from '../../platform/src/platform/tools/repl/captured.js';
 
 
 function git(root: string, ...args: string[]): void {

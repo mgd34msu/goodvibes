@@ -17,7 +17,7 @@
  * running for months.
  *
  * The rename is a migration, not a constant edit: it needs a copy-forward pass
- * with a receipt, the same shape the SDK already performs for the unscoped →
+ * with a receipt, the same shape the platform already performs for the unscoped →
  * scoped move, plus the live-install rehearsal that goes with it. Until then
  * this constant carries the reason so nobody "tidies" it.
  */

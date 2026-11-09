@@ -69,16 +69,16 @@ test('package-managed installs retain install-kind gating and never enter suite 
 });
 
 test('the registered native /update command passes its original platform config into shared suite apply and rollback', async () => {
-  // Module mocks are isolated in a child so they cannot replace SDK exports for
+  // Module mocks are isolated in a child so they cannot replace platform exports for
   // another suite. The command, preflight, getter capture and report are real.
   const modulePath = join(import.meta.dir, '..', '..', 'input', 'commands', 'update-runtime.ts');
   const workspacePath = join(import.meta.dir, '..', '..', 'runtime', 'workspace-update-policy.ts');
   const script = `
 import {mock} from 'bun:test';
-const sdkPath='@goodvibes-jev/engine/sdk/platform/runtime/self-update', opsPath='@goodvibes-jev/engine/sdk/platform/runtime/operations';
-const sdk=await import(sdkPath),ops=await import(opsPath);const calls=[],lines=[];let uncertain=false,halts=0;
+const enginePath='@goodvibes-jev/engine/platform/platform/runtime/self-update', opsPath='@goodvibes-jev/engine/platform/platform/runtime/operations';
+const platform=await import(enginePath),ops=await import(opsPath);const calls=[],lines=[];let uncertain=false,halts=0;
 const result={version:'99.0.0',programs:['goodvibes-agent','goodvibes-daemon'],files:[],directoryPaths:['/fixture/webui/3.1.2'],preservedPaths:[]};
-mock.module(sdkPath,()=>({...sdk,applySuiteUpdate:async options=>{calls.push({kind:'apply',directory:options.webuiDirectory});options.assertCurrent?.();if(uncertain)throw new sdk.SuiteUpdateRecoveryError(['/fixture/claim'],[],new Error('Synthetic uncertainty'));return result;},rollbackSuiteUpdate:options=>{calls.push({kind:'rollback',directory:options.webuiDirectory});return {...result,version:'98.0.0'};}}));
+mock.module(enginePath,()=>({...platform,applySuiteUpdate:async options=>{calls.push({kind:'apply',directory:options.webuiDirectory});options.assertCurrent?.();if(uncertain)throw new platform.SuiteUpdateRecoveryError(['/fixture/claim'],[],new Error('Synthetic uncertainty'));return result;},rollbackSuiteUpdate:options=>{calls.push({kind:'rollback',directory:options.webuiDirectory});return {...result,version:'98.0.0'};}}));
 mock.module(opsPath,()=>({...ops,detectInstallKind:()=> 'binary'}));
 mock.module(${JSON.stringify(workspacePath)},()=>({IS_WORKSPACE_DISTRIBUTION:false,WORKSPACE_UPDATE_GUIDANCE:'source only',WORKSPACE_REBUILD_COMMAND:'source only'}));
 globalThis.fetch=async url=>{const response=new Response(null,{status:302,headers:{location:'https://github.com/mgd34msu/goodvibes/releases/tag/v99.0.0'}});Object.defineProperty(response,'url',{value:String(url)});return response;};

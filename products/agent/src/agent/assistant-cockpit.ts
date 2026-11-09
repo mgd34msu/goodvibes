@@ -1,4 +1,4 @@
-import { presetForMode } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { presetForMode } from '@goodvibes-jev/engine/platform/platform/gate';
 import type { AgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace-types.ts';
 
 export type AssistantCockpitLaneState = 'ready' | 'attention' | 'setup';

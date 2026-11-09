@@ -1,5 +1,5 @@
-import type { ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { servingEffortForLevel, toEffortModel } from '@goodvibes-jev/engine/sdk/platform/providers/reasoning-effort-surface';
+import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
+import { servingEffortForLevel, toEffortModel } from '@goodvibes-jev/engine/platform/platform/providers/reasoning-effort-surface';
 export interface RuntimeSettingResetContext {
   readonly session: {
     readonly runtime: {

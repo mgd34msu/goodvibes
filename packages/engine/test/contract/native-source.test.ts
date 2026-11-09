@@ -6,9 +6,9 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import {
   captureNativeContractSource, nativeContractSourceForAdmission, contractPath, readContractSnapshot, serializeContract,
   type Contract, type NativeContractSource,
-} from '../../sdk/src/platform/contract/index.js';
-import { bindNativeContractSource, nativeSourceCriteria, nativeSourcePlan } from '../../sdk/src/platform/contract/native-source.js';
-import { acceptEscalatedPlan, planContract, type ContractPlannerDeps } from '../../sdk/src/platform/contract/planner.js';
+} from '../../platform/src/platform/contract/index.js';
+import { bindNativeContractSource, nativeSourceCriteria, nativeSourcePlan } from '../../platform/src/platform/contract/native-source.js';
+import { acceptEscalatedPlan, planContract, type ContractPlannerDeps } from '../../platform/src/platform/contract/planner.js';
 import { makeContract } from './fixtures.js';
 import { configReader, planningPort, plannerOutput, PLANNER_ROUTE, scriptedRunner, shapeOf, type DraftPlan } from './plan-support.js';
 import { makeHarness, makeRepo, oneUnitPlan, startContract, waitFor, type Harness } from './runner-support.js';

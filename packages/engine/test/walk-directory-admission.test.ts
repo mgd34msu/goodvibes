@@ -8,16 +8,16 @@ import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibe
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { gateReadingsPort, forgetGateReadings, READ_ONLY } from './_helpers/gate-readings.ts';
-import { PermissionManager, type PermissionConfigReader } from '../sdk/src/platform/permissions/manager.ts';
-import { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.ts';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.ts';
-import { executeToolCalls, type ToolExecutionDeps } from '../sdk/src/platform/core/orchestrator-tool-runtime.ts';
-import { createFindTool } from '../sdk/src/platform/tools/find/executor.ts';
-import { createAnalyzeTool } from '../sdk/src/platform/tools/analyze/index.ts';
-import { capturedInputTool, assertCapturedToolInvocationCurrent } from '../sdk/src/platform/tools/shared/captured-input-tools.ts';
-import { captureContractInput, contractInputPath, materializeContractInput } from '../sdk/src/platform/contract/input-snapshot.ts';
-import { createContractInputAuthority } from '../sdk/src/platform/contract/input-authority.ts';
-import type { Contract } from '../sdk/src/platform/contract/types.ts';
+import { PermissionManager, type PermissionConfigReader } from '../platform/src/platform/permissions/manager.ts';
+import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
+import { executeToolCalls, type ToolExecutionDeps } from '../platform/src/platform/core/orchestrator-tool-runtime.ts';
+import { createFindTool } from '../platform/src/platform/tools/find/executor.ts';
+import { createAnalyzeTool } from '../platform/src/platform/tools/analyze/index.ts';
+import { capturedInputTool, assertCapturedToolInvocationCurrent } from '../platform/src/platform/tools/shared/captured-input-tools.ts';
+import { captureContractInput, contractInputPath, materializeContractInput } from '../platform/src/platform/contract/input-snapshot.ts';
+import { createContractInputAuthority } from '../platform/src/platform/contract/input-authority.ts';
+import type { Contract } from '../platform/src/platform/contract/types.ts';
 
 const roots: string[] = [];
 afterEach(() => { forgetGateReadings(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

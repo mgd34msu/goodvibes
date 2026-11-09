@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { OwnedSelectionObservation } from '../sdk/src/platform/runtime/client/selection-observation.js';
+import { OwnedSelectionObservation } from '../platform/src/platform/runtime/client/selection-observation.js';
 
 test('selection observations retain complete values privately and retire previous lifetimes', () => {
   const owner = new OwnedSelectionObservation(), other = new OwnedSelectionObservation();

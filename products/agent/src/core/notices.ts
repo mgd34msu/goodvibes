@@ -4,8 +4,8 @@ import {
   type NoticeParts as PlatformNoticeParts,
   type NoticeOptions,
 } from '@goodvibes-jev/engine/terminal-shell/notice-publication';
-import { runtimeEventOfNotice, runtimeEventKey } from '@goodvibes-jev/engine/sdk/platform/runtime/bootstrap';
-import type { Notification } from '@goodvibes-jev/engine/sdk/platform/runtime/ui';
+import { runtimeEventOfNotice, runtimeEventKey } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+import type { Notification } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
 import { delegatedTaskEventOfNotice } from './delegated-task-notices.ts';
 import { getSharedNotificationFeed, type NotificationFeed } from './notifications-feed.ts';
 export type { NoticeOptions, NoticeSink } from '@goodvibes-jev/engine/terminal-shell/notice-publication';

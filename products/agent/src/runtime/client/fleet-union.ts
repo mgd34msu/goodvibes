@@ -7,7 +7,7 @@
  * scheduled jobs, channel-driven runs, work other surfaces submitted, and none
  * of it appears in a registry this process owns.
  *
- * The policy lives in the SDK's client seam:
+ * The policy lives in the platform's client seam:
  * `createDaemonFleetRowsPoller` (poll cadence, and keeping the last known rows
  * when a poll fails, so one bad request does not make half the fleet blink out)
  * and `mergeFleetNodes` (local-first, deduped by node id). This module is the
@@ -28,9 +28,9 @@ import {
   DEFAULT_FLEET_REFRESH_MS,
   mergeFleetNodes,
   type DaemonVerbCaller,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/client';
-import type { ProcessNode } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
-import type { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+} from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import type { ProcessNode } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+import type { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 
 export { DEFAULT_FLEET_REFRESH_MS, mergeFleetNodes };
 

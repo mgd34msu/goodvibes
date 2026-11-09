@@ -17,7 +17,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, expect, test } from 'bun:test';
-import { createEmptyLine, type Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import { createEmptyLine, type Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { buildShellFooter } from '../../renderer/shell-surface.ts';
 import { UIFactory } from '../../renderer/ui-factory.ts';
 import { withHeaderGap } from '../../renderer/header-line.ts';

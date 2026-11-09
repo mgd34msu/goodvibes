@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { CloudflareControlPlaneManager } from '../sdk/src/platform/cloudflare/manager.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { CloudflareControlPlaneManager } from '../platform/src/platform/cloudflare/manager.js';
 import type {
   CloudflareApiClient,
   CloudflareConsumerLike,
@@ -17,7 +17,7 @@ import type {
   CloudflareTunnelLike,
   CloudflareTokenPolicyParam,
   CloudflareZoneLike,
-} from '../sdk/src/platform/cloudflare/types.js';
+} from '../platform/src/platform/cloudflare/types.js';
 
 function makeConfigManager(): ConfigManager {
   const configDir = join(tmpdir(), `gv-cloudflare-test-${Date.now()}-${crypto.randomUUID()}`);

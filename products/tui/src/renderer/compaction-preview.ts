@@ -2,7 +2,7 @@
  * Compaction preview and after-notice builders.
  *
  * Pre-compact: shows an honest estimate of what compaction will do
- * (message count and token estimate before → after). The SDK has no dry-run
+ * (message count and token estimate before → after). The platform has no dry-run
  * API; we derive the after-estimate from the DEFAULT_COMPACTION_CONFIG
  * totalCeiling (6500 tokens), clearly labelled as an ESTIMATE.
  *
@@ -16,11 +16,11 @@
  *  - Pinned session memories that survive are mentioned by count.
  */
 
-import { estimateConversationTokens } from '@goodvibes-jev/engine/sdk/platform/core';
+import { estimateConversationTokens } from '@goodvibes-jev/engine/platform/platform/core';
 import { computeContextUsage } from '../core/context-usage.ts';
 import { formatQualityScoreLine } from './compaction-quality.ts';
-import type { CompactionEvent } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { ProviderMessage } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { CompactionEvent } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ProviderMessage } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { CompactionQualityScore } from './compaction-quality.ts';
 
 /**
@@ -42,7 +42,7 @@ export interface CompactionPreviewOptions {
 }
 
 export interface CompactionAfterOptions {
-  /** The CompactionEvent returned by the SDK after compaction completes. */
+  /** The CompactionEvent returned by the platform after compaction completes. */
   readonly event: CompactionEvent;
   /** Number of session memories that survived compaction. */
   readonly pinnedMemoryCount: number;
@@ -58,7 +58,7 @@ export interface CompactionAfterOptions {
  * Build the pre-compaction notice string.
  *
  * Returned as a plain string intended for `ctx.print()` or `systemMessageRouter`.
- * Always labelled as an estimate; uses the SDK totalCeiling as the after-estimate.
+ * Always labelled as an estimate; uses the platform totalCeiling as the after-estimate.
  */
 export function buildCompactionPreview(opts: CompactionPreviewOptions): string {
   const { messages, contextWindow, pinnedMemoryCount, trigger } = opts;

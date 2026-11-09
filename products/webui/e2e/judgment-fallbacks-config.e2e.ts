@@ -1,7 +1,7 @@
 /** Strict editable references, with genuine daemon validation and disk persistence. */
 import { expect, test } from "@playwright/test";
-import type { JudgmentFallbackSettings } from "@goodvibes-jev/engine/sdk/platform/config";
-import { parseBrowserJudgmentRequest } from "@goodvibes-jev/engine/daemon-sdk";
+import type { JudgmentFallbackSettings } from "@goodvibes-jev/engine/platform/platform/config";
+import { parseBrowserJudgmentRequest } from "@goodvibes-jev/engine/daemon-api";
 import { expectNoHorizontalScroll, openSettings } from "./support/app";
 import { installTerminalThemeDaemon } from "./support/terminal-theme-fixture";
 

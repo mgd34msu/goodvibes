@@ -10,31 +10,31 @@
 
 import fc from 'fast-check';
 
-import type { AnyRuntimeEvent } from '../../../sdk/src/events/domain-map.js';
-import type { SessionEvent } from '../../../sdk/src/events/session.js';
-import type { TurnEvent } from '../../../sdk/src/events/turn.js';
-import type { AgentEvent } from '../../../sdk/src/events/agents.js';
-import type { TaskEvent } from '../../../sdk/src/events/tasks.js';
-import type { ToolEvent } from '../../../sdk/src/events/tools.js';
-import type { ProviderEvent } from '../../../sdk/src/events/providers.js';
-import type { PluginEvent } from '../../../sdk/src/events/plugins.js';
-import type { McpEvent } from '../../../sdk/src/events/mcp.js';
-import type { TransportEvent } from '../../../sdk/src/events/transport.js';
-import type { CompactionEvent } from '../../../sdk/src/events/compaction.js';
-import type { GoodVibesUIEvent as UIEvent } from '../../../sdk/src/events/ui.js';
-import type { OpsEvent } from '../../../sdk/src/events/ops.js';
-import type { ForensicsEvent } from '../../../sdk/src/events/forensics.js';
-import type { SecurityEvent } from '../../../sdk/src/events/security.js';
-import type { AutomationEvent } from '../../../sdk/src/events/automation.js';
-import type { RouteEvent } from '../../../sdk/src/events/routes.js';
-import type { ControlPlaneEvent } from '../../../sdk/src/events/control-plane.js';
-import type { DeliveryEvent } from '../../../sdk/src/events/deliveries.js';
-import type { WatcherEvent } from '../../../sdk/src/events/watchers.js';
-import type { SurfaceEvent } from '../../../sdk/src/events/surfaces.js';
-import type { KnowledgeEvent } from '../../../sdk/src/events/knowledge.js';
-import type { CommunicationEvent } from '../../../sdk/src/events/communication.js';
-import type { GateEvent } from '../../../sdk/src/events/gate.js';
-import { CONTRACT_EVENT_FIELD_SPECS, CONTRACT_EVENT_TYPES, type ContractEventType } from '../../../sdk/src/events/index.js';
+import type { AnyRuntimeEvent } from '../../../platform/src/events/domain-map.js';
+import type { SessionEvent } from '../../../platform/src/events/session.js';
+import type { TurnEvent } from '../../../platform/src/events/turn.js';
+import type { AgentEvent } from '../../../platform/src/events/agents.js';
+import type { TaskEvent } from '../../../platform/src/events/tasks.js';
+import type { ToolEvent } from '../../../platform/src/events/tools.js';
+import type { ProviderEvent } from '../../../platform/src/events/providers.js';
+import type { PluginEvent } from '../../../platform/src/events/plugins.js';
+import type { McpEvent } from '../../../platform/src/events/mcp.js';
+import type { TransportEvent } from '../../../platform/src/events/transport.js';
+import type { CompactionEvent } from '../../../platform/src/events/compaction.js';
+import type { GoodVibesUIEvent as UIEvent } from '../../../platform/src/events/ui.js';
+import type { OpsEvent } from '../../../platform/src/events/ops.js';
+import type { ForensicsEvent } from '../../../platform/src/events/forensics.js';
+import type { SecurityEvent } from '../../../platform/src/events/security.js';
+import type { AutomationEvent } from '../../../platform/src/events/automation.js';
+import type { RouteEvent } from '../../../platform/src/events/routes.js';
+import type { ControlPlaneEvent } from '../../../platform/src/events/control-plane.js';
+import type { DeliveryEvent } from '../../../platform/src/events/deliveries.js';
+import type { WatcherEvent } from '../../../platform/src/events/watchers.js';
+import type { SurfaceEvent } from '../../../platform/src/events/surfaces.js';
+import type { KnowledgeEvent } from '../../../platform/src/events/knowledge.js';
+import type { CommunicationEvent } from '../../../platform/src/events/communication.js';
+import type { GateEvent } from '../../../platform/src/events/gate.js';
+import { CONTRACT_EVENT_FIELD_SPECS, CONTRACT_EVENT_TYPES, type ContractEventType } from '../../../platform/src/events/index.js';
 import { ALL_CONTRACT_EVENTS } from '../../contract/event-samples.js';
 
 // ---------------------------------------------------------------------------

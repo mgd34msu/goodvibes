@@ -10,7 +10,7 @@ import {
   refreshCommandAutocomplete,
 } from '@goodvibes-jev/engine/terminal-shell/input-feed-adapters';
 import { createFeedInputTokens } from '@goodvibes-jev/engine/terminal-shell/input-feed-pipeline';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';
 import type { CommandContext, CommandRegistry } from './command-registry.ts';
 import type { SurfaceModalHost } from './surface-modal-host.ts';
@@ -46,7 +46,7 @@ import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
 import type { KeybindingsManager } from './keybindings.ts';
 import type { ModelPickerTarget } from './model-picker.ts';
 import type { KillRing } from './kill-ring.ts';
-import type { FocusTracker } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import type { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 
 /**
  * InputFeedContext, The single long-lived context object passed to feedInputTokens
@@ -171,7 +171,7 @@ export interface InputFeedContext {
   readonly handleBlockToggle: () => void;
   readonly findMarkerAtPos: (pos: number) => { start: number; end: number } | null;
   readonly cleanupMarkerRegistry: (text: string) => void;
-  readonly expandPrompt: (text: string) => string | import('@goodvibes-jev/engine/sdk/platform/providers').ContentPart[];
+  readonly expandPrompt: (text: string) => string | import('@goodvibes-jev/engine/platform/platform/providers').ContentPart[];
   readonly openModelPickerWithTarget: (target: ModelPickerTarget, source?: 'settings' | 'onboarding') => boolean;
   readonly openProviderModelPickerWithTarget: (target: ModelPickerTarget, source?: 'settings' | 'onboarding') => boolean;
   readonly onModelPickerCommit: () => boolean;

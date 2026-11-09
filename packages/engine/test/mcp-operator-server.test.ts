@@ -17,7 +17,7 @@ import {
   readLines,
   SESSION_LIFECYCLE_METHOD_IDS,
   type OperatorMcpInvoker,
-} from '../sdk/src/platform/mcp/server/index.ts';
+} from '../platform/src/platform/mcp/server/index.ts';
 
 const contract = getOperatorContract();
 

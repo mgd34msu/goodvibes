@@ -3,12 +3,12 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { IsolatedWorktree } from '../sdk/src/platform/agents/worktree.js';
-import { createOrchestrationEngine, type OrchestrationEngineDeps } from '../sdk/src/platform/orchestration/engine.js';
-import { createAttemptsCoordinator } from '../sdk/src/platform/orchestration/attempts.js';
-import { createWorktreeIsolationManager } from '../sdk/src/platform/orchestration/worktree-isolation.js';
-import type { WorkItem, WorkItemSpec } from '../sdk/src/platform/orchestration/types.js';
-import { emptyWorkItemUsage } from '../sdk/src/platform/orchestration/types.js';
+import { IsolatedWorktree } from '../platform/src/platform/agents/worktree.js';
+import { createOrchestrationEngine, type OrchestrationEngineDeps } from '../platform/src/platform/orchestration/engine.js';
+import { createAttemptsCoordinator } from '../platform/src/platform/orchestration/attempts.js';
+import { createWorktreeIsolationManager } from '../platform/src/platform/orchestration/worktree-isolation.js';
+import type { WorkItem, WorkItemSpec } from '../platform/src/platform/orchestration/types.js';
+import { emptyWorkItemUsage } from '../platform/src/platform/orchestration/types.js';
 import { createOrchestrationHarness, engineerReportOutput, flushMicrotasks, makeFakeConfigManager } from './_helpers/orchestration-harness.js';
 
 function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => void } {

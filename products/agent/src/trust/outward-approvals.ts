@@ -28,12 +28,12 @@
  *    command, the approval appears, and the send goes.
  *
  * The approval that results is bound to the exact message it was shown, single
- * use, and expires in minutes, see the SDK's security/owner-approval.ts for
+ * use, and expires in minutes, see the platform's security/owner-approval.ts for
  * why an approval naming only an action id is a standing permit rather than an
  * approval of the deed.
  */
 
-import { OwnerApprovalStore } from '@goodvibes-jev/engine/sdk/platform/security';
+import { OwnerApprovalStore } from '@goodvibes-jev/engine/platform/platform/security';
 
 /**
  * One store per process, shared by the tool that asks and the command that

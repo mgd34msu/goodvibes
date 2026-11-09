@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { shellSplit } from '../sdk/src/platform/utils/shell-split.js';
+import { shellSplit } from '../platform/src/platform/utils/shell-split.js';
 
 describe('shellSplit', () => {
   it('splits simple space-separated args', () => {

@@ -1,10 +1,10 @@
 import { openTelegramCursorRecovery } from './telegram-cursor.ts';
-import { isSettableGatePresetName, SESSION_GATE_PRESET_NAMES } from '@goodvibes-jev/engine/sdk/platform/gate/presets';
+import { isSettableGatePresetName, SESSION_GATE_PRESET_NAMES } from '@goodvibes-jev/engine/platform/platform/gate/presets';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireIntegrationHelpers } from './runtime-services.ts';
 import { runChannelPairing } from './channel-pairing.ts';
 import { describeOperatorRpcError, getOperatorRpc } from './operator-rpc.ts';
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/sdk';
+import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
 
 type ChannelProfileBinding = OperatorMethodOutput<'channels.profiles.list'>['bindings'][number];
 
@@ -38,7 +38,7 @@ async function handleChannelProfilesSubcommand(args: string[], ctx: CommandConte
       return;
     }
     try {
-      const { bindings } = await rpc.sdk.operator.invoke('channels.profiles.list', {});
+      const { bindings } = await rpc.platformClient.operator.invoke('channels.profiles.list', {});
       if (bindings.length === 0) {
         ctx.print('[channel profiles] no profile bindings configured.');
         return;
@@ -63,7 +63,7 @@ async function handleChannelProfilesSubcommand(args: string[], ctx: CommandConte
       return;
     }
     try {
-      const { binding } = await rpc.sdk.operator.invoke('channels.profiles.get', { surfaceKind, ...(channelId ? { channelId } : {}) });
+      const { binding } = await rpc.platformClient.operator.invoke('channels.profiles.get', { surfaceKind, ...(channelId ? { channelId } : {}) });
       ctx.print(renderProfileBinding(binding));
     } catch (error) {
       ctx.print(`[channel profiles get] ${describeOperatorRpcError(error)}`);
@@ -103,7 +103,7 @@ async function handleChannelProfilesSubcommand(args: string[], ctx: CommandConte
       if (permissionMode !== undefined && !isSettableGatePresetName(permissionMode)) {
         throw new Error(`Permission mode must be one of: ${SESSION_GATE_PRESET_NAMES.join(', ')}`);
       }
-      const { binding } = await rpc.sdk.operator.invoke('channels.profiles.set', {
+      const { binding } = await rpc.platformClient.operator.invoke('channels.profiles.set', {
         surfaceKind,
         ...(channelId ? { channelId } : {}),
         ...(flags.has('model') ? { model: flags.get('model')! } : {}),
@@ -130,7 +130,7 @@ async function handleChannelProfilesSubcommand(args: string[], ctx: CommandConte
       return;
     }
     try {
-      const result = await rpc.sdk.operator.invoke('channels.profiles.delete', { surfaceKind, ...(channelId ? { channelId } : {}) });
+      const result = await rpc.platformClient.operator.invoke('channels.profiles.delete', { surfaceKind, ...(channelId ? { channelId } : {}) });
       ctx.print(result.deleted
         ? `[channel profiles delete] removed binding for ${surfaceKind}${channelId ? `:${channelId}` : ''}.`
         : `[channel profiles delete] no binding found for ${surfaceKind}${channelId ? `:${channelId}` : ''}.`);

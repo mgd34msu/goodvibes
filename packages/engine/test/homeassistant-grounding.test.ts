@@ -14,11 +14,11 @@ import {
   type HomeAssistantChatInput,
   type HomeAssistantChatRuntime,
   type HomeGraphGroundingReader,
-} from '../sdk/src/platform/daemon/homeassistant-chat.js';
-import type { CompanionChatManager } from '../sdk/src/platform/companion/companion-chat-manager.js';
-import type { CompanionChatSession } from '../sdk/src/platform/companion/companion-chat-types.js';
-import type { AutomationRouteBinding } from '../sdk/src/platform/automation/routes.js';
-import type { HomeGraphAskInput, HomeGraphAskResult } from '../sdk/src/platform/knowledge/home-graph/types.js';
+} from '../platform/src/platform/daemon/homeassistant-chat.js';
+import type { CompanionChatManager } from '../platform/src/platform/companion/companion-chat-manager.js';
+import type { CompanionChatSession } from '../platform/src/platform/companion/companion-chat-types.js';
+import type { AutomationRouteBinding } from '../platform/src/platform/automation/routes.js';
+import type { HomeGraphAskInput, HomeGraphAskResult } from '../platform/src/platform/knowledge/home-graph/types.js';
 
 interface Harness {
   runtime: HomeAssistantChatRuntime;

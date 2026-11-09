@@ -4,11 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { SessionManager } from '../sdk/src/platform/sessions/manager.ts';
-import { buildLocalReturnContextSummary, loadedReturnContext } from '../sdk/src/platform/runtime/operations.ts';
-import { createSessionSurface } from '../sdk/src/platform/runtime/session-surface.ts';
-import { checkRecoveryForSession, loadRecoveryConversation, writeRecoveryFile } from '../sdk/src/platform/runtime/session-recovery.ts';
-import { loadLastConversation, persistConversation } from '../sdk/src/platform/runtime/session-persistence.ts';
+import { SessionManager } from '../platform/src/platform/sessions/manager.ts';
+import { buildLocalReturnContextSummary, loadedReturnContext } from '../platform/src/platform/runtime/operations.ts';
+import { createSessionSurface } from '../platform/src/platform/runtime/session-surface.ts';
+import { checkRecoveryForSession, loadRecoveryConversation, writeRecoveryFile } from '../platform/src/platform/runtime/session-recovery.ts';
+import { loadLastConversation, persistConversation } from '../platform/src/platform/runtime/session-persistence.ts';
 
 const directories: string[] = [];
 afterEach(() => { for (const dir of directories.splice(0)) rmSync(dir, { recursive: true, force: true }); });

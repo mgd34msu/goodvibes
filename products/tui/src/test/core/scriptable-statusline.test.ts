@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { createScriptableStatusline, sanitizeStatuslineOutput, type StatuslineCommandRunner } from '@/core/scriptable-statusline.ts';
 import type { StatuslineSettings } from '@/config/tui-extension-settings.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 
 const emptyConfig: Pick<ConfigManager, 'getRaw'> = { getRaw: () => ({} as ReturnType<ConfigManager['getRaw']>) };
 

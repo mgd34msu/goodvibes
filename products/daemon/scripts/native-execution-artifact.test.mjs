@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { nativeReaderCapabilities } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { nativeReaderCapabilities } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { NATIVE_EXECUTION_TARGETS, nativeExecutionMembers, nativeExecutionPayloadMembers, recordNativeExecutionArtifact, verifyNativeExecutionArtifact } from './native-execution-artifact.mjs';
 
 // Inert source admission fixtures. Actual target execution belongs to the

@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { ModelPickerDataProvider } from '@goodvibes-jev/engine/sdk/platform/runtime/ui';
-import { createInitialModelState } from '../sdk/src/platform/runtime/store/domains/model.ts';
-import { createInitialProviderHealthState } from '../sdk/src/platform/runtime/store/domains/provider-health.ts';
-import { getProviderRuntimeSnapshot, listProviderRuntimeSnapshots, type ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { installCatalogModelFacts } from '../sdk/src/platform/providers/model-catalog-facts.ts';
+import { ModelPickerDataProvider } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
+import { createInitialModelState } from '../platform/src/platform/runtime/store/domains/model.ts';
+import { createInitialProviderHealthState } from '../platform/src/platform/runtime/store/domains/provider-health.ts';
+import { getProviderRuntimeSnapshot, listProviderRuntimeSnapshots, type ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
+import { installCatalogModelFacts } from '../platform/src/platform/providers/model-catalog-facts.ts';
 
 let previous: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previous = installJudgmentPort(undefined); installCatalogModelFacts([]); });

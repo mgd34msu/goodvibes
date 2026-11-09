@@ -3,7 +3,7 @@ import type {
   WakeProvisionResult,
   WakeProvisionStatus,
   WakeRuntimeSettings,
-} from '@goodvibes-jev/engine/sdk/platform/voice';
+} from '@goodvibes-jev/engine/platform/platform/voice';
 export const SYNTHETIC_WAKE_RECALL_NOTE =
   '  the published recall figures for this model are measured on synthesised speech only; no human recording of the phrase exists behind them.';
 export function describeWakeBlockers(settings: Pick<WakeRuntimeSettings, 'blockers'>): string[] {

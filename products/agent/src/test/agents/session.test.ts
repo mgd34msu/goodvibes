@@ -2,9 +2,9 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'fs';
 import { join } from 'path';
 
-import { AgentSession } from '@goodvibes-jev/engine/sdk/platform/agents';
-import { ConversationManager } from '@goodvibes-jev/engine/sdk/platform/core';
-import { KVState } from '@goodvibes-jev/engine/sdk/platform/state';
+import { AgentSession } from '@goodvibes-jev/engine/platform/platform/agents';
+import { ConversationManager } from '@goodvibes-jev/engine/platform/platform/core';
+import { KVState } from '@goodvibes-jev/engine/platform/platform/state';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 
 const TEST_TMP_ROOT = join(import.meta.dir, '../../../.tmp-tests');

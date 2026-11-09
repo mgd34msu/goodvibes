@@ -20,10 +20,10 @@
  *
  * ## Why the in-process catalog and not the operator HTTP wire
  *
- * Every `email.*` / `calendar.*` descriptor the SDK catalogs carries
+ * Every `email.*` / `calendar.*` descriptor the platform catalogs carries
  * `invokable: false`. On the generic HTTP/WS dispatch path that flag is checked
  * by `validateGatewayInvocation` BEFORE any handler lookup and answered with a
- * flat 400 `NOT_INVOKABLE`, so `sdk.operator.invoke('email.inbox.list', …)`
+ * flat 400 `NOT_INVOKABLE`, so `platform.operator.invoke('email.inbox.list', …)`
  * cannot reach these verbs no matter what is configured, and a surface built on
  * it would be a dead button.
  *
@@ -40,7 +40,7 @@
  * item and discards it; only presence or absence of a failure reaches the UI.
  */
 
-import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
 
 export type ConnectionSurface = 'mail' | 'calendar';
 
@@ -76,7 +76,7 @@ export const CONNECTION_PROBE_METHOD = {
 /**
  * The setup steps each daemon failure code implies.
  *
- * The `surfaces.*` settings are daemon-owned by prefix (see the SDK's
+ * The `surfaces.*` settings are daemon-owned by prefix (see the platform's
  * `config-ownership`), so `/config set` on them lands in the daemon's own
  * store and keeps working with this client closed, which is the requirement.
  *

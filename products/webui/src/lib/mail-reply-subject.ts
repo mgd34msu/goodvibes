@@ -1,6 +1,6 @@
-import type { BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-sdk';
+import type { BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-api';
 import { readBrowserDecisionPolicy, runBrowserJudgment } from './goodvibes';
-import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/sdk/browser/decision-policy';
+import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/platform/browser/decision-policy';
 import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime } from './client-lifetime';
 import { randomUuid } from './uuid';
 

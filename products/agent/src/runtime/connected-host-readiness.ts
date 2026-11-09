@@ -2,8 +2,8 @@ import { captureNativeReadBindings, captureNativeReadRestrictions } from './read
 import { retainCliConfig } from '@goodvibes-jev/engine/terminal-shell';
 import { canonicalizePairingHost } from './connected-host-pairing-store.ts';
 import { resolveConnectedHostBaseUrl } from '../config/connected-host-dial.ts';
-import { createOperatorSdk } from '@goodvibes-jev/engine/operator-sdk';
-import { resolveConnectedHostDialEnabled } from '@goodvibes-jev/engine/sdk/platform/config';
+import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
+import { resolveConnectedHostDialEnabled } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveConnectedHostConnection, type AgentDaemonVerbCallerOptions } from './client/daemon-verbs.ts';
 import { isNativePairedPrincipal } from './native-paired-principal.ts';
 
@@ -35,7 +35,7 @@ export async function readConnectedHostReadiness(options: AgentDaemonVerbCallerO
   if ('reason' in selected) {
     return { status: 'missing-credential', detail: 'No effective connected-host credential is available for a live auth check.' };
   }
-  let operator: ReturnType<typeof createOperatorSdk> | undefined;
+  let operator: ReturnType<typeof createOperatorApiClient> | undefined;
   let result: ConnectedHostReadiness;
   try {
     const nativeFetch = options.fetchImpl ?? fetch;
@@ -51,7 +51,7 @@ export async function readConnectedHostReadiness(options: AgentDaemonVerbCallerO
       return nativeFetch(...args);
     }, { preconnect: nativeFetch.preconnect });
     assertConnection();
-    operator = createOperatorSdk({ baseUrl: selected.baseUrl, authToken: selected.token, fetchImpl });
+    operator = createOperatorApiClient({ baseUrl: selected.baseUrl, authToken: selected.token, fetchImpl });
     const timeout = AbortSignal.timeout(1500);
     const auth = await operator.invoke('control.auth.current', {}, { signal: originalSignal ? AbortSignal.any([originalSignal, timeout]) : timeout });
     assertConnection();

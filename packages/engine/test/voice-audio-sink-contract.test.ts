@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import type { TurnEvent } from '../sdk/src/events/turn.js';
-import type { VoiceAudioChunk, VoiceSynthesisRequest, VoiceSynthesisStreamResult } from '../sdk/src/platform/voice/types.js';
-import { SpokenTurnController } from '../sdk/src/platform/voice/spoken-turn/controller.js';
-import type { AudioSink } from '../sdk/src/platform/voice/spoken-turn/audio-sink.js';
+import type { TurnEvent } from '../platform/src/events/turn.js';
+import type { VoiceAudioChunk, VoiceSynthesisRequest, VoiceSynthesisStreamResult } from '../platform/src/platform/voice/types.js';
+import { SpokenTurnController } from '../platform/src/platform/voice/spoken-turn/controller.js';
+import type { AudioSink } from '../platform/src/platform/voice/spoken-turn/audio-sink.js';
 
 /**
  * These tests pin the AudioSink BEHAVIORAL CONTRACT (readiness / head survival,

@@ -2,7 +2,7 @@
 import { expect, spyOn, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ProcessManager } from '../sdk/src/platform/tools/shared/process-manager.js';
+import { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { waitFor } from './_helpers/test-timeout.js';
 import { useToolReadings } from './_helpers/tool-readings.ts';

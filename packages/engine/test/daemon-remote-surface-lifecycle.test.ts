@@ -2,10 +2,10 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { registerRemoteSurface, type RemoteSurfaceContext, type RemoteSurfaceRegistration, type RegisterRemoteSurfaceOptions } from '../sdk/src/platform/runtime/remote/host/surface.ts';
-import { PeerRegistry } from '../sdk/src/platform/runtime/remote/host/peer-registry.ts';
-import { DistributedRuntimeManager } from '../sdk/src/platform/runtime/remote/distributed-runtime-manager.ts';
-import { StoreWriteQueue } from '../sdk/src/platform/state/store-write-queue.ts';
+import { registerRemoteSurface, type RemoteSurfaceContext, type RemoteSurfaceRegistration, type RegisterRemoteSurfaceOptions } from '../platform/src/platform/runtime/remote/host/surface.ts';
+import { PeerRegistry } from '../platform/src/platform/runtime/remote/host/peer-registry.ts';
+import { DistributedRuntimeManager } from '../platform/src/platform/runtime/remote/distributed-runtime-manager.ts';
+import { StoreWriteQueue } from '../platform/src/platform/state/store-write-queue.ts';
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;

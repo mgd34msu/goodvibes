@@ -8,8 +8,8 @@ import { describe, expect, test } from 'bun:test';
 describe('retry events', () => {
 
   test('emitTransportRetryScheduled emits on the transport channel', async () => {
-    const { emitTransportRetryScheduled } = await import('../sdk/src/platform/runtime/emitters/transport.js');
-    const { RuntimeEventBus } = await import('../sdk/src/platform/runtime/events/index.js');
+    const { emitTransportRetryScheduled } = await import('../platform/src/platform/runtime/emitters/transport.js');
+    const { RuntimeEventBus } = await import('../platform/src/platform/runtime/events/index.js');
     const bus = new RuntimeEventBus();
     const events: unknown[] = [];
     bus.onDomain('transport', (e: unknown) => events.push(e));
@@ -60,8 +60,8 @@ describe('retry events', () => {
   });
 
   test('emitTransportRetryExecuted emits on the transport channel', async () => {
-    const { emitTransportRetryExecuted } = await import('../sdk/src/platform/runtime/emitters/transport.js');
-    const { RuntimeEventBus } = await import('../sdk/src/platform/runtime/events/index.js');
+    const { emitTransportRetryExecuted } = await import('../platform/src/platform/runtime/emitters/transport.js');
+    const { RuntimeEventBus } = await import('../platform/src/platform/runtime/events/index.js');
     const bus = new RuntimeEventBus();
     const events: unknown[] = [];
     bus.onDomain('transport', (e: unknown) => events.push(e));

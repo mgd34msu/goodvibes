@@ -1,4 +1,4 @@
-import { withDecisionModelPolicy } from '../../sdk/src/platform/runtime/decision-policy.ts';
+import { withDecisionModelPolicy } from '../../platform/src/platform/runtime/decision-policy.ts';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 /**
  * Resume and zombie reaping (docs/design/contract-runner.md section 7.2), with
@@ -14,11 +14,11 @@ import { dirname, join } from 'node:path';
 import { uptime } from 'node:os';
 import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { JudgmentError } from '@goodvibes-jev/judgment';
-import { assertJudgmentInput } from '../../sdk/src/platform/gate/judgment-input.js';
-import { findCardNumberShapes } from '../../sdk/src/platform/security/card-shapes.js';
-import type { Contract, ContractView } from '../../sdk/src/platform/contract/index.js';
-import { contractPath } from '../../sdk/src/platform/contract/index.js';
-import type { DecompositionRunner } from '../../sdk/src/platform/core/plan-decomposition.js';
+import { assertJudgmentInput } from '../../platform/src/platform/gate/judgment-input.js';
+import { findCardNumberShapes } from '../../platform/src/platform/security/card-shapes.js';
+import type { Contract, ContractView } from '../../platform/src/platform/contract/index.js';
+import { contractPath } from '../../platform/src/platform/contract/index.js';
+import type { DecompositionRunner } from '../../platform/src/platform/core/plan-decomposition.js';
 import { plannerOutput, type AnswerContext } from './plan-support.js';
 import { eventsOf, makeHarness, makeRepo, oneUnitPlan, startContract, twoUnitPlan, waitFor, type AgentScript, type Harness, type HarnessOptions,
 } from './runner-support.js';

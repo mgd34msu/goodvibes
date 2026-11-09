@@ -11,7 +11,7 @@ import {
 } from '../../runtime/cloudflare-control-plane.ts';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireShellPaths } from './runtime-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 interface ParsedCloudflareArgs {
   readonly positional: readonly string[];
@@ -22,7 +22,7 @@ export function registerCloudflareRuntimeCommands(registry: CommandRegistry): vo
   registry.register({
     name: 'cloudflare',
     aliases: ['cf'],
-    description: 'Inspect and manage optional Cloudflare batch/control-plane integration through daemon SDK routes',
+    description: 'Inspect and manage optional Cloudflare batch/control-plane integration through daemon routes',
     usage: '[status|setup|requirements|create-token|discover|validate|provision|verify|disable] [flags]',
     async handler(args, ctx) {
       const subcommand = (args[0] ?? 'status').toLowerCase();

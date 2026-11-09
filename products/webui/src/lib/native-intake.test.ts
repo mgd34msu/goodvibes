@@ -11,7 +11,7 @@ import type {
   NativeConversationIntakeResult,
   NativeSelectedDiffSelector,
   NativeSelectedDiffContext,
-} from "@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client";
+} from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client";
 
 const originalFetch = globalThis.fetch;
 const cleanups: (() => void)[] = [];

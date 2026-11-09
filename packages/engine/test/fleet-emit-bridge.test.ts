@@ -8,10 +8,10 @@
  * blocked-on-user / unblocked pair around an attention transition.
  */
 import { describe, expect, test } from 'bun:test';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { attachFleetEmitBridge } from '../sdk/src/platform/runtime/fleet/index.js';
-import type { FleetSnapshot, ProcessNode, ProcessState, ProcessAttentionReason } from '../sdk/src/platform/runtime/fleet/index.js';
-import type { FleetEvent } from '../sdk/src/platform/runtime/events/index.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { attachFleetEmitBridge } from '../platform/src/platform/runtime/fleet/index.js';
+import type { FleetSnapshot, ProcessNode, ProcessState, ProcessAttentionReason } from '../platform/src/platform/runtime/fleet/index.js';
+import type { FleetEvent } from '../platform/src/platform/runtime/events/index.js';
 
 function node(id: string, state: ProcessState, extra: Partial<ProcessNode> = {}): ProcessNode {
   return {

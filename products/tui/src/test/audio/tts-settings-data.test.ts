@@ -1,7 +1,7 @@
 /**
  * tts-settings-data.test.ts
  *
- * The `tts` settings group: `tts.speed` comes from the SDK's CONFIG_SCHEMA like
+ * The `tts` settings group: `tts.speed` comes from the platform's CONFIG_SCHEMA like
  * every other key in it, and the tts.* defaults read back with an accurate
  * modified marker.
  *
@@ -9,15 +9,15 @@
  * default, its own "positive finite number" normalization, and a cast key,
  * because the schema had no entry for it. It has one now (default 1, range
  * 0.25–4.0), so the row the modal renders is the schema's: same key, same type,
- * one definition of the default, and the range the SDK validates against
+ * one definition of the default, and the range the platform validates against
  * instead of a second opinion about it.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { CONFIG_SCHEMA, ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
+import { CONFIG_SCHEMA, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   buildSettingGroups,
   deepEqual,

@@ -9,17 +9,17 @@ import { describe, expect, test, beforeEach } from 'bun:test';
 import { Buffer } from 'node:buffer';
 import { settleEvents } from './_helpers/test-timeout.js';
 import { trackDisposables } from './_helpers/disposables.ts';
-import { CompanionChatManager } from '../sdk/src/platform/companion/companion-chat-manager.js';
-import { dispatchCompanionChatRoutes } from '../sdk/src/platform/companion/companion-chat-routes.js';
+import { CompanionChatManager } from '../platform/src/platform/companion/companion-chat-manager.js';
+import { dispatchCompanionChatRoutes } from '../platform/src/platform/companion/companion-chat-routes.js';
 import type {
   CompanionChatEventPublisher,
   CompanionChatManagerConfig,
   CompanionLLMProvider,
   CompanionProviderChunk,
-} from '../sdk/src/platform/companion/companion-chat-manager.js';
-import type { CompanionChatRouteContext } from '../sdk/src/platform/companion/companion-chat-route-types.js';
-import type { ArtifactDescriptor } from '../sdk/src/platform/artifacts/types.js';
-import type { ProviderMessage } from '../sdk/src/platform/providers/interface.js';
+} from '../platform/src/platform/companion/companion-chat-manager.js';
+import type { CompanionChatRouteContext } from '../platform/src/platform/companion/companion-chat-route-types.js';
+import type { ArtifactDescriptor } from '../platform/src/platform/artifacts/types.js';
+import type { ProviderMessage } from '../platform/src/platform/providers/interface.js';
 
 const disposables = trackDisposables();
 

@@ -1,7 +1,7 @@
 /**
  * The `agent-passive-code-injection` feature flag surfaces in the
  * settings modal flags section. buildFlagEntries maps every flag the FeatureFlagManager
- * knows about, so this pins that the SDK flag reaches the TUI's flags list (default off).
+ * knows about, so this pins that the platform flag reaches the TUI's flags list (default off).
  */
 import { describe, expect, test } from 'bun:test';
 import { buildFlagEntries } from '../../input/settings-modal-data.ts';

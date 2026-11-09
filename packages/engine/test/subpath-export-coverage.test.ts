@@ -12,7 +12,7 @@
  * The failure mode is invisible in the worst possible way. The source compiles,
  * the module's own tests pass, `dist/` contains the built files, api-extractor
  * is happy, and the whole suite is green, while
- * `import … from '@goodvibes-jev/engine/sdk/platform/<name>'` fails resolution for
+ * `import … from '@goodvibes-jev/engine/platform/platform/<name>'` fails resolution for
  * every consumer. The capability is built, tested, shipped, and unreachable.
  *
  * It is also exactly the class the owner's standing rule is about: everything
@@ -31,7 +31,7 @@ import { describe, test, expect } from 'bun:test';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-const PACKAGE_DIR = join(import.meta.dir, '..', 'sdk');
+const PACKAGE_DIR = join(import.meta.dir, '..', 'platform');
 const PLATFORM_DIR = join(PACKAGE_DIR, 'src', 'platform');
 
 /**
@@ -64,8 +64,8 @@ function platformModulesWithIndex(): string[] {
 const ENGINE_DIR = join(import.meta.dir, '..');
 
 /**
- * The sdk's subpaths, keyed as the old sdk package declared them (./platform/x):
- * they are the engine manifest's ./sdk/* exports.
+ * The platform's subpaths, keyed as the old platform package declared them (./platform/x):
+ * they are the engine manifest's ./platform/* exports.
  */
 function exportsMap(): Record<string, unknown> {
   const manifest = JSON.parse(readFileSync(join(ENGINE_DIR, 'package.json'), 'utf8')) as {
@@ -73,8 +73,8 @@ function exportsMap(): Record<string, unknown> {
   };
   return Object.fromEntries(
     Object.entries(manifest.exports ?? {})
-      .filter(([key]) => key.startsWith('./sdk/'))
-      .map(([key, value]) => [`.${key.slice('./sdk'.length)}`, value]),
+      .filter(([key]) => key.startsWith('./platform/'))
+      .map(([key, value]) => [`.${key.slice('./platform'.length)}`, value]),
   );
 }
 

@@ -5,10 +5,10 @@
 //
 // The curl installer needs to put the wake-word model on the machine, and it must
 // not hold the pinned URLs, byte counts or checksums to do it. Those live in ONE
-// place, the SDK's wake-word manifest, and a shell script that copied them
+// place, the platform's wake-word manifest, and a shell script that copied them
 // would be a second copy of a pin, drifting silently the first time the model is
-// retrained. So the installer runs the binary it just installed and lets the SDK
-// do what the SDK owns.
+// retrained. So the installer runs the binary it just installed and lets the platform
+// do what the platform owns.
 //
 // IT EXITS 0 EVEN WHEN THE DOWNLOAD FAILS, ON PURPOSE
 //
@@ -22,14 +22,14 @@
 //
 // It composes NOTHING. No runtime, no config manager, no gateway: this reads a
 // home directory, derives the managed voice root the same way the running daemon
-// does, and calls one SDK function. Composing a runtime here would start a second
+// does, and calls one platform function. Composing a runtime here would start a second
 // set of pollers on a machine whose daemon is probably already running.
 // ---------------------------------------------------------------------------
 
 import {
   provisionWakeWordModelsAtInstall,
   resolveManagedVoiceRoot,
-} from '@goodvibes-jev/engine/sdk/platform/voice';
+} from '@goodvibes-jev/engine/platform/platform/voice';
 
 export interface ProvisionWakeModelResult {
   readonly exitCode: number;
@@ -40,7 +40,7 @@ export interface ProvisionWakeModelDeps {
   /** The home directory whose `.goodvibes/voice` tree receives the artifacts. */
   readonly homeDirectory: string;
   readonly env?: Readonly<Record<string, string | undefined>> | undefined;
-  /** Injected in tests: the SDK policy, so nothing downloads. */
+  /** Injected in tests: the platform policy, so nothing downloads. */
   readonly provisionAtInstall?: typeof provisionWakeWordModelsAtInstall | undefined;
 }
 

@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
 import { generateKeyPairSync, randomUUID, sign } from 'node:crypto';
-import { handleNtfySurfacePayload } from '../sdk/src/platform/adapters/ntfy/index.js';
-import { handleDiscordSurfaceWebhook } from '../sdk/src/platform/adapters/discord/index.js';
-import type { SurfaceAdapterContext } from '../sdk/src/platform/adapters/types.js';
+import { handleNtfySurfacePayload } from '../platform/src/platform/adapters/ntfy/index.js';
+import { handleDiscordSurfaceWebhook } from '../platform/src/platform/adapters/discord/index.js';
+import type { SurfaceAdapterContext } from '../platform/src/platform/adapters/types.js';
 
 test('ntfy releases failed deliveries for retry and retains completed ones', async () => {
   let available = false;

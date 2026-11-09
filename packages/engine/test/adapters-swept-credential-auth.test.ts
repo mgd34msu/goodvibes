@@ -24,20 +24,20 @@
  */
 import { describe, expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
-import { handleSignalSurfaceWebhook } from '../sdk/src/platform/adapters/signal/index.js';
-import { handleIMessageSurfaceWebhook } from '../sdk/src/platform/adapters/imessage/index.js';
-import { handleMatrixSurfaceWebhook } from '../sdk/src/platform/adapters/matrix/index.js';
-import { handleMattermostSurfaceWebhook } from '../sdk/src/platform/adapters/mattermost/index.js';
-import { handleMSTeamsSurfaceWebhook } from '../sdk/src/platform/adapters/msteams/index.js';
-import { handleBlueBubblesSurfaceWebhook } from '../sdk/src/platform/adapters/bluebubbles/index.js';
-import { handleGoogleChatSurfaceWebhook } from '../sdk/src/platform/adapters/google-chat/index.js';
-import { handleNtfySurfaceWebhook } from '../sdk/src/platform/adapters/ntfy/index.js';
-import { handleTelegramSurfaceWebhook } from '../sdk/src/platform/adapters/telegram/index.js';
-import { handleTelephonySurfaceWebhook } from '../sdk/src/platform/adapters/telephony/index.js';
-import { handleWhatsAppSurfaceWebhook } from '../sdk/src/platform/adapters/whatsapp/index.js';
-import { handleGenericWebhookSurface } from '../sdk/src/platform/adapters/webhook/index.js';
-import { secretReferenceFor } from '../sdk/src/platform/config/plaintext-credential-sweep.js';
-import { daemonSecretKeyFor } from '../sdk/src/platform/config/daemon-secret-keys.js';
+import { handleSignalSurfaceWebhook } from '../platform/src/platform/adapters/signal/index.js';
+import { handleIMessageSurfaceWebhook } from '../platform/src/platform/adapters/imessage/index.js';
+import { handleMatrixSurfaceWebhook } from '../platform/src/platform/adapters/matrix/index.js';
+import { handleMattermostSurfaceWebhook } from '../platform/src/platform/adapters/mattermost/index.js';
+import { handleMSTeamsSurfaceWebhook } from '../platform/src/platform/adapters/msteams/index.js';
+import { handleBlueBubblesSurfaceWebhook } from '../platform/src/platform/adapters/bluebubbles/index.js';
+import { handleGoogleChatSurfaceWebhook } from '../platform/src/platform/adapters/google-chat/index.js';
+import { handleNtfySurfaceWebhook } from '../platform/src/platform/adapters/ntfy/index.js';
+import { handleTelegramSurfaceWebhook } from '../platform/src/platform/adapters/telegram/index.js';
+import { handleTelephonySurfaceWebhook } from '../platform/src/platform/adapters/telephony/index.js';
+import { handleWhatsAppSurfaceWebhook } from '../platform/src/platform/adapters/whatsapp/index.js';
+import { handleGenericWebhookSurface } from '../platform/src/platform/adapters/webhook/index.js';
+import { secretReferenceFor } from '../platform/src/platform/config/plaintext-credential-sweep.js';
+import { daemonSecretKeyFor } from '../platform/src/platform/config/daemon-secret-keys.js';
 
 const SECRET = 'the-real-surface-secret';
 

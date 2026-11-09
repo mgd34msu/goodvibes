@@ -10,7 +10,7 @@
  * unavailable rather than discouraged once untrusted content is in the turn,
  * used to be defined here.
  *
- * It is defined in the SDK now (`platform/security/untrusted-content.ts`), and
+ * It is defined in the platform now (`platform/security/untrusted-content.ts`), and
  * this module is the re-export.
  *
  * That was the right move for the same reason the definition was right to live
@@ -26,7 +26,7 @@
  *
  * Every name below keeps its meaning and its signature, so no caller changed.
  * The one thing worth knowing: `getSessionUntrustedContentLedger` now returns
- * the SDK's PROCESS ledger. For this binary that is the same instance it always
+ * the platform's PROCESS ledger. For this binary that is the same instance it always
  * was, one per agent process, shared by the browser tool and the mail surface.
  * For a build that embeds a daemon in this process, it is also the daemon's,
  * which is the correct answer rather than a coincidence: two ledgers in one
@@ -43,7 +43,7 @@ export {
   originOf,
   resetProcessUntrustedContentLedgerForTests as resetSessionUntrustedContentLedgerForTests,
   surfaceHasCommandAuthority,
-} from '@goodvibes-jev/engine/sdk/platform/security';
+} from '@goodvibes-jev/engine/platform/platform/security';
 
 export type {
   AuthoritySurface,
@@ -53,4 +53,4 @@ export type {
   UntrustedContentEnvelope,
   UntrustedIngest,
   UntrustedSurface,
-} from '@goodvibes-jev/engine/sdk/platform/security';
+} from '@goodvibes-jev/engine/platform/platform/security';

@@ -1,42 +1,42 @@
 /**
- * error-codes.ts, the canonical {@link SDKErrorCode} union, its runtime-accessible
- * {@link SDKErrorCodes} mirror, and the two membership/narrowing helpers built on it.
+ * error-codes.ts, the canonical {@link EngineErrorCode} union, its runtime-accessible
+ * {@link EngineErrorCodes} mirror, and the two membership/narrowing helpers built on it.
  *
  * Split out of index.ts to stay under the repo's 800-line file cap (see
  * scripts/check-line-cap.ts), this block is self-contained (no dependency on
- * GoodVibesSdkError or anything else in index.ts) and index.ts re-exports it
+ * GoodVibesError or anything else in index.ts) and index.ts re-exports it
  * unchanged, so this is a pure file-organization move with no API surface change.
  */
 
 /**
  * Exhaustive string-literal union of the canonical error codes produced by the
- * GoodVibes SDK. Use this type when you need to pattern-match on `err.code`
+ * GoodVibes platform. Use this type when you need to pattern-match on `err.code`
  * without losing exhaustiveness checking.
  *
- * The `code` field on {@link GoodVibesSdkError} is typed as
- * `SDKErrorCode | (string & {})` so that:
- * - SDK-produced errors surface as one of the known literals (IDE autocomplete
+ * The `code` field on {@link GoodVibesError} is typed as
+ * `EngineErrorCode | (string & {})` so that:
+ * - platform-produced errors surface as one of the known literals (IDE autocomplete
  *   and exhaustive switches work).
  * - Caller-supplied arbitrary string codes still type-check without casting.
  *
  * ### Consumer pattern
  * ```ts
- * import { isErrorCode, SDKErrorCodes } from '@goodvibes-jev/engine/errors';
+ * import { isErrorCode, EngineErrorCodes } from '@goodvibes-jev/engine/errors';
  *
  * catch (err) {
- *   if (err instanceof GoodVibesSdkError) {
- *     if (isErrorCode(err, SDKErrorCodes.RATE_LIMITED)) {
+ *   if (err instanceof GoodVibesError) {
+ *     if (isErrorCode(err, EngineErrorCodes.RATE_LIMITED)) {
  *       await delay(err.retryAfterMs ?? 1000);
- *     } else if (isErrorCode(err, SDKErrorCodes.AUTH_REQUIRED)) {
+ *     } else if (isErrorCode(err, EngineErrorCodes.AUTH_REQUIRED)) {
  *       await refreshToken();
- *     } else if (isErrorCode(err, SDKErrorCodes.TOKEN_EXPIRED)) {
+ *     } else if (isErrorCode(err, EngineErrorCodes.TOKEN_EXPIRED)) {
  *       await refreshToken();
  *     }
  *   }
  * }
  * ```
  */
-export type SDKErrorCode =
+export type EngineErrorCode =
   // Authentication / authorization
   | 'AUTH_REQUIRED'
   | 'TOKEN_EXPIRED'
@@ -64,28 +64,28 @@ export type SDKErrorCode =
   | 'TOOL_EXEC_FAILED'
   // Service-level
   | 'SERVICE_UNAVAILABLE'
-  // SDK contract / internals
+  // platform contract / internals
   | 'CONTRACT_MISMATCH'
   | 'PROTOCOL_ERROR'
   | 'INTERNAL_ERROR'
-  | 'SDK_CONFIGURATION_ERROR'
-  | 'SDK_CONTRACT_ERROR'
-  | 'SDK_HTTP_STATUS_ERROR'
+  | 'ENGINE_CONFIGURATION_ERROR'
+  | 'ENGINE_CONTRACT_ERROR'
+  | 'ENGINE_HTTP_STATUS_ERROR'
   // Catch-all
   | 'UNKNOWN';
 
 /**
- * Runtime-accessible const object mirroring the {@link SDKErrorCode} union.
+ * Runtime-accessible const object mirroring the {@link EngineErrorCode} union.
  * Prefer referencing these constants over raw string literals for refactor safety.
  *
  * @example
- * import { SDKErrorCodes } from '@goodvibes-jev/engine/errors';
+ * import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
  *
- * if (err.code === SDKErrorCodes.RATE_LIMITED) {
+ * if (err.code === EngineErrorCodes.RATE_LIMITED) {
  *   await delay(err.retryAfterMs ?? 1000);
  * }
  */
-export const SDKErrorCodes = {
+export const EngineErrorCodes = {
   AUTH_REQUIRED: 'AUTH_REQUIRED',
   TOKEN_EXPIRED: 'TOKEN_EXPIRED',
   PERMISSION_DENIED: 'PERMISSION_DENIED',
@@ -107,48 +107,48 @@ export const SDKErrorCodes = {
   CONTRACT_MISMATCH: 'CONTRACT_MISMATCH',
   PROTOCOL_ERROR: 'PROTOCOL_ERROR',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
-  SDK_CONFIGURATION_ERROR: 'SDK_CONFIGURATION_ERROR',
-  SDK_CONTRACT_ERROR: 'SDK_CONTRACT_ERROR',
-  SDK_HTTP_STATUS_ERROR: 'SDK_HTTP_STATUS_ERROR',
+  ENGINE_CONFIGURATION_ERROR: 'ENGINE_CONFIGURATION_ERROR',
+  ENGINE_CONTRACT_ERROR: 'ENGINE_CONTRACT_ERROR',
+  ENGINE_HTTP_STATUS_ERROR: 'ENGINE_HTTP_STATUS_ERROR',
   UNKNOWN: 'UNKNOWN',
-} as const satisfies Record<SDKErrorCode, SDKErrorCode>;
+} as const satisfies Record<EngineErrorCode, EngineErrorCode>;
 
 /**
- * The set of known {@link SDKErrorCode} values for runtime membership tests.
+ * The set of known {@link EngineErrorCode} values for runtime membership tests.
  * @internal
  */
-const SDK_ERROR_CODE_SET = new Set<string>(Object.values(SDKErrorCodes));
+const ENGINE_ERROR_CODE_SET = new Set<string>(Object.values(EngineErrorCodes));
 
 /**
- * Returns `true` when `err.code` equals the given {@link SDKErrorCode},
+ * Returns `true` when `err.code` equals the given {@link EngineErrorCode},
  * narrowing the type of `err.code` to the specific literal.
  *
  * Works with any object that has a `code?: string` field, not limited to
- * {@link GoodVibesSdkError} subclasses.
+ * {@link GoodVibesError} subclasses.
  *
  * @example
- * import { isErrorCode, SDKErrorCodes, GoodVibesSdkError } from '@goodvibes-jev/engine/errors';
+ * import { isErrorCode, EngineErrorCodes, GoodVibesError } from '@goodvibes-jev/engine/errors';
  *
- * if (err instanceof GoodVibesSdkError && isErrorCode(err, SDKErrorCodes.RATE_LIMITED)) {
+ * if (err instanceof GoodVibesError && isErrorCode(err, EngineErrorCodes.RATE_LIMITED)) {
  *   console.log('retry after', err.retryAfterMs);
  * }
  *
  * @param err - Any object with an optional `code` string field.
- * @param code - The {@link SDKErrorCode} literal to match against.
+ * @param code - The {@link EngineErrorCode} literal to match against.
  */
-export function isErrorCode<C extends SDKErrorCode>(
-  err: { readonly code?: SDKErrorCode | (string & {}) | undefined },
+export function isErrorCode<C extends EngineErrorCode>(
+  err: { readonly code?: EngineErrorCode | (string & {}) | undefined },
   code: C,
 ): err is { readonly code: C } {
   return err.code === code;
 }
 
 /**
- * Returns `true` when `value` is a known {@link SDKErrorCode} string.
+ * Returns `true` when `value` is a known {@link EngineErrorCode} string.
  * Useful for discriminating structured errors received over the wire.
  *
  * @param value - The string to test.
  */
-export function isKnownErrorCode(value: string): value is SDKErrorCode {
-  return SDK_ERROR_CODE_SET.has(value);
+export function isKnownErrorCode(value: string): value is EngineErrorCode {
+  return ENGINE_ERROR_CODE_SET.has(value);
 }

@@ -7,8 +7,8 @@
 // ---------------------------------------------------------------------------
 
 import { describe, expect, test } from 'bun:test';
-import type { CreateWorkstreamInput } from '../sdk/src/platform/orchestration/index.ts';
-import { editItemBrief, moveItemInSpec, removeItemFromSpec, resolveItemIndex } from '../sdk/src/platform/orchestration/workstream-draft-edits.ts';
+import type { CreateWorkstreamInput } from '../platform/src/platform/orchestration/index.ts';
+import { editItemBrief, moveItemInSpec, removeItemFromSpec, resolveItemIndex } from '../platform/src/platform/orchestration/workstream-draft-edits.ts';
 
 function specOf(items: CreateWorkstreamInput['items']): CreateWorkstreamInput {
   return {

@@ -1,8 +1,8 @@
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/sdk/platform/security';
+import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '@goodvibes-jev/engine/sdk/platform/google';
+import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '@goodvibes-jev/engine/platform/platform/google';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createAgentGoogleTool } from '../../tools/agent-google-tool.ts';

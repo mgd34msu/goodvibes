@@ -1,11 +1,11 @@
-import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { capturePersonalOpsSnapshot } from './agent-harness-personal-ops-source.ts';
 import { captureModelReadingInput, captureModelReadingSnapshotGuard, modelReadingServicePath } from './agent-harness-model-reading-source.ts';
 import { types as nodeTypes } from 'node:util';
 import { captureCatalogData, captureCatalogMethods, prepareHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { personalOpsLaneMembers, readPersonalOpsSampleField, readPersonalOpsTool, type DiscoveryLane, type PersonalOpsToolContract } from './agent-harness-personal-ops-readings.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { getOperatorContract, OPERATOR_CONTRACT } from '@goodvibes-jev/engine/sdk/contracts';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { getOperatorContract, OPERATOR_CONTRACT } from '@goodvibes-jev/engine/platform/contracts';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { McpSchemaSummary, McpToolRecord, McpToolSchema, OperatorContractMethod, PersonalOpsConnectorSignal, PersonalOpsConnectorTool, PersonalOpsWorkflow, PersonalOpsWorkflowStatus } from './agent-harness-personal-ops-types.ts';
 
@@ -638,7 +638,7 @@ export function taskWorkflows(methodIds: readonly string[]): readonly PersonalOp
       ],
       prerequisites: hostTaskStatus === 'ready'
         ? [`${methodIds.length} task/work-plan daemon method(s) are discoverable.`]
-        : ['Connected-host task methods are not present in the current SDK operator contract.'],
+        : ['Connected-host task methods are not present in the current platform operator contract.'],
       runBoundary: 'Host task cancel/retry/create actions mutate connected-host state and require exact ids, confirmation, and explicit user request.',
     },
   ];
@@ -686,7 +686,7 @@ export function reminderWorkflows(methodIds: readonly string[], deliveryConfigur
       ],
       prerequisites: scheduleStatus === 'ready'
         ? [`${methodIds.length} schedule/reminder daemon method(s) are discoverable.`]
-        : ['Connected-host schedule methods are not present in the current SDK operator contract.'],
+        : ['Connected-host schedule methods are not present in the current platform operator contract.'],
       runBoundary: 'Schedule edit/run/enable/disable/delete actions require exact ids, confirmation, and explicit user request.',
     },
   ];

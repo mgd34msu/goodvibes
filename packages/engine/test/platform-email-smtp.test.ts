@@ -5,8 +5,8 @@
 
 import { afterEach, describe, expect, test } from 'bun:test';
 import { createServer, connect, type Server, type Socket } from 'node:net';
-import { SmtpClient } from '../sdk/src/platform/email/smtp-client.ts';
-import { createSmtpStartTlsSocket } from '../sdk/src/platform/email/node.ts';
+import { SmtpClient } from '../platform/src/platform/email/smtp-client.ts';
+import { createSmtpStartTlsSocket } from '../platform/src/platform/email/node.ts';
 
 // ---------------------------------------------------------------------------
 // Fake server helpers
@@ -101,7 +101,7 @@ function happyPathScript(socket: Socket, collectedData: string[]): void {
 // Tests
 // ---------------------------------------------------------------------------
 
-import { validateSmtpAddress, validateSmtpSubject } from '../sdk/src/platform/email/smtp-client.ts';
+import { validateSmtpAddress, validateSmtpSubject } from '../platform/src/platform/email/smtp-client.ts';
 
 // ---------------------------------------------------------------------------
 // SMTP header/command injection prevention

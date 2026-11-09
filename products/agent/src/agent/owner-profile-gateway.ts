@@ -18,14 +18,14 @@
  * gets an honest unavailable result naming which route was missing.
  */
 
-import { captureOccasionsGatewayTarget, type GatewayMethodCatalog, type GatewayMethodInvocation } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { assertCurrentProfileDelegation, bindProfileMutationOptionsToInvocation, type ProfileMutationOptions } from '@goodvibes-jev/engine/sdk/platform/owner-profile';
+import { captureOccasionsGatewayTarget, type GatewayMethodCatalog, type GatewayMethodInvocation } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { assertCurrentProfileDelegation, bindProfileMutationOptionsToInvocation, type ProfileMutationOptions } from '@goodvibes-jev/engine/platform/platform/owner-profile';
 import { dirname } from 'node:path';
-import { assertProjectionCurrent } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { assertProjectionCurrent } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogMethods, captureCatalogSnapshot } from '../tools/agent-harness-catalog-ranking.ts';
 import { captureOperatorConnection } from './operator-connection-owner.ts';
-import type { OperatorMethodId, OperatorMethodInput } from '@goodvibes-jev/engine/sdk/contracts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { OperatorMethodId, OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { PROFILE_METHOD_IDS, type ProfileMethodId } from '../tools/agent-profile-types.ts';
 import {
   formatOperatorGatewayFailure,
@@ -78,7 +78,7 @@ export interface ProfileGatewayOptions {
 const _profileIdsAreOperatorIds: readonly OperatorMethodId[] = Object.values(PROFILE_METHOD_IDS);
 void _profileIdsAreOperatorIds;
 
-/** Informational labels only; the SDK resolves the real binding from the contract. */
+/** Informational labels only; the platform resolves the real binding from the contract. */
 const PROFILE_ROUTES: Readonly<Record<ProfileMethodId, string>> = {
   'profile.read': 'GET /api/profile',
   'profile.get': 'GET /api/profile/fields/{fieldId}',

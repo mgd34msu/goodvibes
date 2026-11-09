@@ -4,7 +4,7 @@ import {
   deriveCredentialAvailability,
   readClientCredentialStatus,
   type CredentialAvailability,
-} from '../sdk/src/platform/config/credential-availability.ts';
+} from '../platform/src/platform/config/credential-availability.ts';
 
 // Prove the client-side credential-status read degrades HONESTLY and never
 // fabricates a confident "configured" or leaks a secret value. Fully hermetic, no

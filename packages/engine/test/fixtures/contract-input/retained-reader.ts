@@ -3,10 +3,10 @@ import { spyOn } from 'bun:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '../../../sdk/src/platform/config/index.js';
-import { createClientRuntimeServices } from '../../../sdk/src/platform/runtime/bootstrap.js';
-import { createRuntimeStore, RuntimeEventBus } from '../../../sdk/src/platform/runtime/state.js';
-import { createLaunchTolerantProviderRegistry } from '../../../sdk/src/platform/providers/index.js';
+import { ConfigManager } from '../../../platform/src/platform/config/index.js';
+import { createClientRuntimeServices } from '../../../platform/src/platform/runtime/bootstrap.js';
+import { createRuntimeStore, RuntimeEventBus } from '../../../platform/src/platform/runtime/state.js';
+import { createLaunchTolerantProviderRegistry } from '../../../platform/src/platform/providers/index.js';
 import { installJudgmentPort } from '../../../errors/src/index.js';
 import { fakePort, noulAnswer, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 

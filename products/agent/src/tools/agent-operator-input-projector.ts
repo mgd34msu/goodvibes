@@ -1,7 +1,7 @@
-import { getOperatorContract } from '@goodvibes-jev/engine/sdk/contracts';
-import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
+import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
+import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
+import { assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { isDeepStrictEqual } from 'node:util';
 import type { ShellPathService } from '@/runtime/index.ts';
 import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';

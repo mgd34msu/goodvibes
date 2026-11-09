@@ -1,9 +1,9 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
-import { McpClient } from '../sdk/src/platform/mcp/client.js';
-import { McpRegistry } from '../sdk/src/platform/mcp/registry.js';
-import { createMcpApi } from '../sdk/src/platform/mcp/mcp-api.js';
-import { SandboxSessionRegistry } from '../sdk/src/platform/runtime/sandbox/session-registry.js';
-import { MCP_STATELESS_REVISION } from '../sdk/src/platform/mcp/protocol.js';
+import { McpClient } from '../platform/src/platform/mcp/client.js';
+import { McpRegistry } from '../platform/src/platform/mcp/registry.js';
+import { createMcpApi } from '../platform/src/platform/mcp/mcp-api.js';
+import { SandboxSessionRegistry } from '../platform/src/platform/runtime/sandbox/session-registry.js';
+import { MCP_STATELESS_REVISION } from '../platform/src/platform/mcp/protocol.js';
 import { useGateReadings, READ_ONLY } from './_helpers/gate-readings.ts';
 
 useGateReadings([['synthetic', READ_ONLY]]);

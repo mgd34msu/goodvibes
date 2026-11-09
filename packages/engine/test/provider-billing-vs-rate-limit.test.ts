@@ -30,8 +30,8 @@ import {
   ProviderError,
   isBillingOrCreditError,
   isRateLimitOrQuotaError,
-} from '../sdk/src/platform/types/errors.ts';
-import { readNormalizedError } from '../sdk/src/platform/utils/error-display.ts';
+} from '../platform/src/platform/types/errors.ts';
+import { readNormalizedError } from '../platform/src/platform/utils/error-display.ts';
 import { forgetFailureReadings, installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { authoredErrorReadingsPort, errorSpan, errorText, type AuthoredFailure } from './_helpers/authored-error-readings.ts';
 

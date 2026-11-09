@@ -35,8 +35,8 @@
  * session never touches MCP now does none of that work either.
  */
 
-import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 /** The config roots `connectAll` reads `mcp.json` from. */
 export type McpConfigRoots = Parameters<McpRegistry['connectAll']>[0];

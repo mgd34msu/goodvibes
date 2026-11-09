@@ -1,6 +1,6 @@
 import { buildAgentConfigRouting } from '../config/daemon-config-routing.ts';
 import { randomUUID } from 'node:crypto';
-import { ToolRegistry, registerAllTools } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolRegistry, registerAllTools } from '@goodvibes-jev/engine/platform/platform/tools';
 import { installAgentToolPolicyGuard } from '../tools/agent-tool-policy-guard.ts';
 import { installAgentPlatformBoundaryGuard } from '../tools/agent-platform-boundary-policy.ts';
 import { registerAgentChannelSendTool } from '../tools/agent-channel-send-tool.ts';
@@ -10,10 +10,10 @@ import { agentBrowserProfileRoot, agentBrowserScreenshotRoot } from './agent-bro
 import { registerAgentBrowserTool } from '../tools/agent-browser-tool.ts';
 import { registerAgentDocumentsTool } from '../tools/agent-documents-tool.ts';
 import { registerAgentAccountsTool } from '../tools/agent-accounts-tool.ts';
-import { AgentAccountRegistry, ACCOUNT_REGISTRY_PATH_SEGMENTS, ensureGoogleConfigDefaults } from '@goodvibes-jev/engine/sdk/platform/google';
+import { AgentAccountRegistry, ACCOUNT_REGISTRY_PATH_SEGMENTS, ensureGoogleConfigDefaults } from '@goodvibes-jev/engine/platform/platform/google';
 import { containsSecretLikeText } from '../agent/memory-safety.ts';
 import { wireAgentGoogleTool, type GoogleToolWiringDeps } from './bootstrap-google-tool.ts';
-import { ensureCalendarConfigDefaults } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ensureCalendarConfigDefaults } from '@goodvibes-jev/engine/platform/platform/config';
 import { registerAgentKnowledgeIngestTool } from '../tools/agent-knowledge-ingest-tool.ts';
 import { registerAgentKnowledgeTool } from '../tools/agent-knowledge-tool.ts';
 import { registerAgentLearningConsolidationTool } from '../tools/agent-learning-consolidation-tool.ts';
@@ -37,9 +37,9 @@ import { compactRegisteredToolDefinitions } from '../tools/tool-definition-compa
 import { installToolExecutionSafetyGuard } from '../tools/tool-execution-safety.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { AGENT_OWNER_TERMINAL_GUARD } from './agent-exec-posture.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { RuntimeServices } from './services.ts';
-import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/sdk/platform/security';
+import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
 
 /**
  * The main conversation's tool registry, composed exactly once, in one place:
@@ -144,7 +144,7 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     profileRoot: agentBrowserProfileRoot(services.shellPaths.homeDirectory),
     homeDirectory: services.shellPaths.homeDirectory,
   });
-  // google.* and calendar.* are app-layer sections absent from the SDK schema;
+  // google.* and calendar.* are app-layer sections absent from the platform schema;
   // resolvePath throws on a section that is not there.
   ensureGoogleConfigDefaults(configManager);
   ensureCalendarConfigDefaults(configManager);

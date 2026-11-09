@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { ScheduleManager } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ScheduleManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import { getTestScheduleManager, resetTestRuntimeServices } from '../helpers/runtime-services.ts';
 
 let scheduleManager: ScheduleManager;

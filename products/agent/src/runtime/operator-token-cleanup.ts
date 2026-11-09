@@ -16,7 +16,7 @@ import { join } from 'node:path';
  * Return the list of absolute operator-tokens.json paths the TUI may have written
  * at legacy (pre-0.21.28) workspace-scoped locations under `workingDirectory`.
  *
- * The canonical, current-SDK location is `<connectedHostTokenDir>/operator-tokens.json`;
+ * The canonical, current-platform location is `<connectedHostTokenDir>/operator-tokens.json`;
  * this helper is strictly for legacy-cleanup candidates.
  */
 export function workspaceOperatorTokenCandidates(workingDirectory: string): readonly string[] {

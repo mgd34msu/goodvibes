@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { ProtectedSourceOwner, SourceScreeningHold } from '@goodvibes-jev/engine/sdk/platform/security';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ProtectedSourceOwner, SourceScreeningHold } from '@goodvibes-jev/engine/platform/platform/security';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { rankHarnessCatalog } from '../../tools/agent-harness-catalog-ranking.ts';
 import { cleanupResearchScreeningFixtures, researchScreeningFixture } from '../helpers/research-screening.ts';

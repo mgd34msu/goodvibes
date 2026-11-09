@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { VoiceProviderRegistry, VoiceService } from '@goodvibes-jev/engine/sdk/platform/voice';
+import { VoiceProviderRegistry, VoiceService } from '@goodvibes-jev/engine/platform/platform/voice';
 
 describe('VoiceProviderRegistry and VoiceService', () => {
   test('registers TS-only TTS providers and routes synthesis', async () => {

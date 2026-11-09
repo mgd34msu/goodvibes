@@ -3,7 +3,7 @@ import { existsSync, linkSync, mkdirSync, readFileSync, rmSync, symlinkSync, unl
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DurableContractAdmissions, durableKeyHash, durablePayloadRevision, freezeDurableRequest,
-  type DurableContractAdmission, type DurableContractKey } from '../../sdk/src/platform/contract/durable-admission.js';
+  type DurableContractAdmission, type DurableContractKey } from '../../platform/src/platform/contract/durable-admission.js';
 import { makeProjectTempDir } from '../_helpers/project-temp.ts';
 
 const roots: string[] = [];
@@ -123,7 +123,7 @@ describe('durable admission reverse identity', () => {
   for (const preparedParents of [true, false]) test(`independent processes racing different keys publish exactly one contract-ID owner (prepared parents=${preparedParents})`, async () => {
     const f = fixture(), admissions = [f.make('race-a'), f.make('race-b')];
     if (preparedParents) mkdirSync(join(f.directory, '.by-contract'), { recursive: true });
-    const module = fileURLToPath(new URL('../../sdk/src/platform/contract/durable-admission.ts', import.meta.url));
+    const module = fileURLToPath(new URL('../../platform/src/platform/contract/durable-admission.ts', import.meta.url));
     const children = admissions.map(admission => {
       const code = `import { DurableContractAdmissions, DurableContractAdmissionError } from ${JSON.stringify(module)};
         const start = new Promise(resolve => process.stdin.once('data', resolve));

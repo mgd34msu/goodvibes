@@ -1,7 +1,7 @@
 import {
   isGoodVibesSecretReferenceValue as isGoodVibesSecretRefInput,
   isMalformedGoodVibesSecretReferenceValue as isMalformedGoodVibesSecretRefInput,
-} from '@goodvibes-jev/engine/sdk/platform/config';
+} from '@goodvibes-jev/engine/platform/platform/config';
 export { isGoodVibesSecretRefInput, isMalformedGoodVibesSecretRefInput };
 import {
   BUILTIN_SECRET_PROVIDER_SOURCES,
@@ -9,8 +9,8 @@ import {
   resolveSecretRef,
   type LiteralSecretsManager,
   type SecretScope,
-} from '@goodvibes-jev/engine/sdk/platform/config';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+} from '@goodvibes-jev/engine/platform/platform/config';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ConcealedInputRequest } from './concealed-input.js';
 import type { TerminalSlashCommand } from './command-registry.js';
 import { requireYesFlag, stripYesFlag } from './command-confirmation.js';

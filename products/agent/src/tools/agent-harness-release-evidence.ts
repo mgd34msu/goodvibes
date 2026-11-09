@@ -1,4 +1,4 @@
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogData, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { withNativeCatalog, rankResearchRecords } from './agent-harness-research-catalog-source.ts';
 import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';

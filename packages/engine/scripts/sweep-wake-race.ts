@@ -49,7 +49,7 @@ import {
 } from './test-run-tmp.ts';
 import { withWorkspaceLock } from './workspace-lock.ts';
 
-const SDK_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const ENGINE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 /** Long enough to open the window reliably on a loaded 2-vCPU runner. */
 const DEFAULT_DELAY_MS = 50;
@@ -59,12 +59,12 @@ const DEFAULT_DELAY_MS = 50;
  * hand-maintained list is how the last sweep missed a file that arrived from
  * another branch after the list was written.
  */
-export async function runWakeRaceSweep(sdkRoot: string, delayMs: number): Promise<number> {
+export async function runWakeRaceSweep(engineCheckoutRoot: string, delayMs: number): Promise<number> {
   if (!Number.isFinite(delayMs) || delayMs <= 0) {
     console.error('sweep-wake-race: --delay needs a positive number of milliseconds');
     return 1;
   }
-  const testDir = join(sdkRoot, 'test');
+  const testDir = join(engineCheckoutRoot, 'test');
   const suites = readdirSync(testDir)
     .filter((name) => name.endsWith('.test.ts'))
     .filter((name) => readFileSync(join(testDir, name), 'utf8').includes('fake-imap-mailbox'))
@@ -119,7 +119,7 @@ export async function runWakeRaceSweep(sdkRoot: string, delayMs: number): Promis
         // Keep the original per-test ceiling. Ownership/isolation must not
         // make an existing failure green merely by granting it more time.
         argv: ['--timeout=5000', `test/${name}`],
-        cwd: sdkRoot,
+        cwd: engineCheckoutRoot,
         env: { ...process.env, ...testTmpEnv(runTmpDir), [RUNNER_ENV_FLAG]: '1' },
         // The isolation allowlist deliberately drops this inherited variable.
         // Declare it as fixture input so the sweep cannot become a silent no-op.
@@ -161,5 +161,5 @@ export async function runWakeRaceSweep(sdkRoot: string, delayMs: number): Promis
 if (import.meta.main) {
   const delayArg = process.argv.indexOf('--delay');
   const delayMs = delayArg === -1 ? DEFAULT_DELAY_MS : Number(process.argv[delayArg + 1]);
-  process.exitCode = await withWorkspaceLock('sweep-wake-race', () => runWakeRaceSweep(SDK_ROOT, delayMs));
+  process.exitCode = await withWorkspaceLock('sweep-wake-race', () => runWakeRaceSweep(ENGINE_ROOT, delayMs));
 }

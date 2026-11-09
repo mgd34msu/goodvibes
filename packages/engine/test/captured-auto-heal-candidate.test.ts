@@ -3,15 +3,15 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createContractInputAuthority, revokeContractInputAuthority } from '../sdk/src/platform/contract/input-authority.js';
-import { captureContractInput, contractInputPath, materializeContractInput } from '../sdk/src/platform/contract/input-snapshot.js';
-import type { Contract } from '../sdk/src/platform/contract/types.js';
+import { createContractInputAuthority, revokeContractInputAuthority } from '../platform/src/platform/contract/input-authority.js';
+import { captureContractInput, contractInputPath, materializeContractInput } from '../platform/src/platform/contract/input-snapshot.js';
+import type { Contract } from '../platform/src/platform/contract/types.js';
 import {
   probeCapturedExecAvailability, runCapturedCommand,
   type CapturedExecAuthority, type CapturedExecutionLease, type CapturedExecutionObserver,
-} from '../sdk/src/platform/tools/exec/captured-exec.js';
-import type { ExecCommandResult } from '../sdk/src/platform/tools/exec/schema.js';
-import { withCapturedPublication, type CapturedPublicationLease } from '../sdk/src/platform/tools/shared/captured-publication.js';
+} from '../platform/src/platform/tools/exec/captured-exec.js';
+import type { ExecCommandResult } from '../platform/src/platform/tools/exec/schema.js';
+import { withCapturedPublication, type CapturedPublicationLease } from '../platform/src/platform/tools/shared/captured-publication.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

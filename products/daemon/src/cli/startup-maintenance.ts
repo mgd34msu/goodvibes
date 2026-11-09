@@ -2,9 +2,9 @@
 import { accessSync, constants, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
-import { ConfigManager, daemonConfigPathForHome } from '@goodvibes-jev/engine/sdk/platform/config';
-import { ensurePublicBaseUrl, pruneStaleOperatorTokens } from '@goodvibes-jev/engine/sdk/platform/pairing';
-import { workspaceOperatorTokenCandidates } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { ConfigManager, daemonConfigPathForHome } from '@goodvibes-jev/engine/platform/platform/config';
+import { ensurePublicBaseUrl, pruneStaleOperatorTokens } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { workspaceOperatorTokenCandidates } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import { reconcileRedundantLegacyUnit } from '../runtime/legacy-daemon-reconcile.js';

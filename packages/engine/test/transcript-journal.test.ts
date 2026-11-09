@@ -31,7 +31,7 @@ import {
   openTranscriptJournal,
   replayJournal,
   type JournalRecord,
-} from '../sdk/src/platform/runtime/transcript-journal.ts';
+} from '../platform/src/platform/runtime/transcript-journal.ts';
 import { TEST_SURFACE_ROOT, makeTestSurface } from './_helpers/session-surface.ts';
 
 // Minimal ConversationMessageSnapshot stub.

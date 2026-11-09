@@ -3,7 +3,7 @@ import {
   defaultSystemMessageTarget,
   type SystemMessageKind,
   type SystemMessageTarget,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
+} from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import type { NoiseGateDeps } from './system-message-noise.ts';
 import type { ConversationManager } from './conversation.ts';
 export type {

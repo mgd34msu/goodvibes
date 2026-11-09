@@ -2,12 +2,12 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { CONFIG_SCHEMA, DEFAULT_CONFIG } from '../sdk/src/platform/config/schema.ts';
-import { configKeyScope } from '../sdk/src/platform/config/config-ownership.ts';
-import { ingestSettingsFile, screenSettingsForIngestion, SettingsIngestionRefusal } from '../sdk/src/platform/config/settings-ingestion.ts';
-import { DEFAULT_THEME_NAME, SYSTEM_THEME_NAME, listBundledThemes } from '../sdk/src/platform/presentation/theme/index.ts';
-import type { HookEvent } from '../sdk/src/platform/hooks/types.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { CONFIG_SCHEMA, DEFAULT_CONFIG } from '../platform/src/platform/config/schema.ts';
+import { configKeyScope } from '../platform/src/platform/config/config-ownership.ts';
+import { ingestSettingsFile, screenSettingsForIngestion, SettingsIngestionRefusal } from '../platform/src/platform/config/settings-ingestion.ts';
+import { DEFAULT_THEME_NAME, SYSTEM_THEME_NAME, listBundledThemes } from '../platform/src/platform/presentation/theme/index.ts';
+import type { HookEvent } from '../platform/src/platform/hooks/types.ts';
 
 const THEMES = [
   'goodvibes', 'goodvibes-neon', 'catppuccin', 'tokyonight', 'dracula', 'nord', 'gruvbox',

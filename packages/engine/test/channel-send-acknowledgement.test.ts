@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import { ChannelDeliveryRouter } from '../sdk/src/platform/channels/delivery-router.js';
-import type { ChannelDeliveryRequest } from '../sdk/src/platform/channels/delivery/types.js';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import type { ServiceRegistry } from '../sdk/src/platform/config/service-registry.js';
-import type { ArtifactStore } from '../sdk/src/platform/artifacts/index.js';
-import { SlackIntegration } from '../sdk/src/platform/integrations/slack.js';
+import { ChannelDeliveryRouter } from '../platform/src/platform/channels/delivery-router.js';
+import type { ChannelDeliveryRequest } from '../platform/src/platform/channels/delivery/types.js';
+import type { ConfigManager } from '../platform/src/platform/config/manager.js';
+import type { ServiceRegistry } from '../platform/src/platform/config/service-registry.js';
+import type { ArtifactStore } from '../platform/src/platform/artifacts/index.js';
+import { SlackIntegration } from '../platform/src/platform/integrations/slack.js';
 
 const restores: Array<() => void> = [];
 afterEach(() => { for (const restore of restores.splice(0)) restore(); });

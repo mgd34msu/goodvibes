@@ -27,7 +27,7 @@ import {
   applyRecoverySnapshot,
   confirmRecoveryRestore,
   writeLivenessMarker,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+} from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { ageRecoverySnapshot, makeTestSurface } from '../helpers/session-surface.ts';
 import { recoveryDecisionsPathFor } from '../../runtime/recovery-decisions.ts';
@@ -298,7 +298,7 @@ describe('fact formatting states only what is known', () => {
 });
 
 describe('every recovery call is keyed to the snapshot session, never a bulk form', () => {
-  // Why this matters beyond tidiness: the SDK's no-sessionId forms
+  // Why this matters beyond tidiness: the platform's no-sessionId forms
   // deliberately do NOT reach the legacy shared recovery directory (a bulk
   // clear there could delete an unrelated project's snapshot). Only a
   // session-id-keyed call does. A modal that answered "removed" while calling

@@ -7,7 +7,7 @@
  * credential that means one home, the daemon tier, because the daemon reads
  * only its own tier and a surface silo is a place the daemon never looks.
  *
- * The SDK already answers this for every credential whose name DERIVES from a
+ * The platform already answers this for every credential whose name DERIVES from a
  * daemon-owned config path (`isDaemonOwnedSecretKey`, built from
  * `listDaemonOwnedConfigPaths`). `GOODVIBES_EMAIL_PASSWORD_REF`,
  * `GOODVIBES_CALENDAR_GOOGLE_CLIENT_SECRET_REF` and the `surfaces.*` tokens all
@@ -26,25 +26,25 @@
  *
  *   - the calendar OAuth token set, the account record and the
  *     reconnect-needed marker (`GOODVIBES_CALENDAR_<PROVIDER>_TOKENS` /
- *     `_ACCOUNT` / `_STATUS`, written by the SDK's `CalendarTokenStore`). The
+ *     `_ACCOUNT` / `_STATUS`, written by the platform's `CalendarTokenStore`). The
  *     token set holds the refresh token. A refresh token filed in a surface
  *     silo means the daemon reports "no calendar account connected" the moment
  *     that surface exits, having watched the operator connect one.
  *
  * Both are stated here as NAMES rather than as config paths because neither has
  * a config path: they are secret-store keys built by this product and by the
- * SDK's token store, not references parked in settings.json.
+ * platform's token store, not references parked in settings.json.
  *
- * FORWARD PLAN. The SDK is growing a `platform/config/credential-scope-registry`
+ * FORWARD PLAN. The platform is growing a `platform/config/credential-scope-registry`
  * that answers this question for every product in one place, keyed on the same
- * "does the daemon read it" test. When it ships and this package's SDK
+ * "does the daemon read it" test. When it ships and this package's platform
  * dependency carries it, this module collapses to a re-export of
  * `isDaemonNeededSecretKey` from there and the two name families below move
  * into the registry. Until then the answer has to exist somewhere, and being
  * wrong here means a calendar that stops working when the terminal closes.
  */
 
-import { isDaemonOwnedSecretKey, resolveSecretWriteScope } from '@goodvibes-jev/engine/sdk/platform/config';
+import { isDaemonOwnedSecretKey, resolveSecretWriteScope } from '@goodvibes-jev/engine/platform/platform/config';
 import type { SecretScope } from './secrets.ts';
 
 /**
@@ -55,9 +55,9 @@ import type { SecretScope } from './secrets.ts';
 const CALENDAR_SUBSCRIPTION_SECRET_PREFIX = 'GOODVIBES_CALENDAR_SUB_';
 
 /**
- * The three keys the SDK's CalendarTokenStore writes per provider. Spelled out
+ * The three keys the platform's CalendarTokenStore writes per provider. Spelled out
  * rather than matched by pattern: a pattern over `GOODVIBES_CALENDAR_*` would
- * also swallow `GOODVIBES_CALENDAR_GOOGLE_CLIENT_SECRET_REF`, which the SDK
+ * also swallow `GOODVIBES_CALENDAR_GOOGLE_CLIENT_SECRET_REF`, which the platform
  * already owns, and any future calendar key nobody has thought about yet.
  */
 const CALENDAR_OAUTH_TOKEN_SECRET_KEYS: readonly string[] = [
@@ -80,7 +80,7 @@ export { CALENDAR_SUBSCRIPTION_SECRET_PREFIX };
 
 /**
  * True when the daemon is a reader of this credential, so the daemon tier is
- * its home, whether the SDK's derivation already knew that or this product
+ * its home, whether the platform's derivation already knew that or this product
  * had to say so.
  */
 export function isDaemonNeededSecretKey(key: string): boolean {
@@ -92,7 +92,7 @@ export function isDaemonNeededSecretKey(key: string): boolean {
 /**
  * Where a write to `key` will actually land, given what the caller asked for.
  *
- * Daemon need beats an explicit scope, the same way it does inside the SDK, and
+ * Daemon need beats an explicit scope, the same way it does inside the platform, and
  * for the same reason: the ordinary way a person stores a credential passes a
  * scope on every call (`/secrets set` defaults one, the settings modal used to
  * hardcode one), so honouring the request would mean the flag an operator never

@@ -1,4 +1,4 @@
-import { FLEET_ATTEMPTS_LIST_OUTPUT_SCHEMA, FLEET_ATTEMPTS_PICK_OUTPUT_SCHEMA } from '../sdk/src/platform/control-plane/operator-contract-schemas-fleet.js';
+import { FLEET_ATTEMPTS_LIST_OUTPUT_SCHEMA, FLEET_ATTEMPTS_PICK_OUTPUT_SCHEMA } from '../platform/src/platform/control-plane/operator-contract-schemas-fleet.js';
 import { firstJsonSchemaFailure } from '../transport-http/src/client-plumbing.js';
 /**
  * Best-of-N sibling attempts (platform/orchestration/attempts.ts).
@@ -13,7 +13,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { Question } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { createSelectAttemptJudge } from '../sdk/src/platform/contract/best-of-n.js';
+import { createSelectAttemptJudge } from '../platform/src/platform/contract/best-of-n.js';
 import {
   createAttemptsCoordinator,
   AttemptError,
@@ -22,9 +22,9 @@ import {
   type WorkItem,
   type WorkItemSpec,
   type Workstream,
-} from '../sdk/src/platform/orchestration/index.js';
-import { checkBudget } from '../sdk/src/platform/orchestration/budget.js';
-import { copyContractFields } from '../sdk/src/platform/orchestration/contract-binding.js';
+} from '../platform/src/platform/orchestration/index.js';
+import { checkBudget } from '../platform/src/platform/orchestration/budget.js';
+import { copyContractFields } from '../platform/src/platform/orchestration/contract-binding.js';
 
 function makeItem(spec: WorkItemSpec): WorkItem {
   return {

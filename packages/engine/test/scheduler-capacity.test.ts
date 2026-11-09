@@ -9,10 +9,10 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { createDaemonRuntimeAutomationRouteHandlers } from '../daemon-sdk/src/runtime-automation-routes.js';
-import { dispatchOperatorRoutes } from '../daemon-sdk/src/operator.js';
-import type { DaemonRuntimeRouteContext } from '../daemon-sdk/src/runtime-route-types.js';
-import type { DaemonApiRouteHandlers } from '../daemon-sdk/src/context.js';
+import { createDaemonRuntimeAutomationRouteHandlers } from '../daemon-api/src/runtime-automation-routes.js';
+import { dispatchOperatorRoutes } from '../daemon-api/src/operator.js';
+import type { DaemonRuntimeRouteContext } from '../daemon-api/src/runtime-route-types.js';
+import type { DaemonApiRouteHandlers } from '../daemon-api/src/context.js';
 
 // ---------------------------------------------------------------------------
 // Stubs

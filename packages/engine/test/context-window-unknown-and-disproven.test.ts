@@ -21,20 +21,20 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ProviderRegistry } from '../sdk/src/platform/providers/registry.js';
-import { loadCustomProviders } from '../sdk/src/platform/providers/custom-loader.js';
-import { ContextWindowOverrideStore, getContextWindowOverridesPath } from '../sdk/src/platform/providers/context-window-overrides.js';
-import { ModelLimitsService } from '../sdk/src/platform/providers/model-limits.js';
-import type { DiscoveredServer } from '../sdk/src/platform/discovery/scanner.js';
+import { ProviderRegistry } from '../platform/src/platform/providers/registry.js';
+import { loadCustomProviders } from '../platform/src/platform/providers/custom-loader.js';
+import { ContextWindowOverrideStore, getContextWindowOverridesPath } from '../platform/src/platform/providers/context-window-overrides.js';
+import { ModelLimitsService } from '../platform/src/platform/providers/model-limits.js';
+import type { DiscoveredServer } from '../platform/src/platform/discovery/scanner.js';
 import {
   checkContextWindowPreflight,
   handlePostTurnContextMaintenance,
   type PreflightDeps,
   type PostTurnContextDeps,
-} from '../sdk/src/platform/core/orchestrator-context-runtime.js';
-import type { ModelDefinition } from '../sdk/src/platform/providers/registry-types.js';
-import type { ConversationManager } from '../sdk/src/platform/core/conversation.js';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.js';
+} from '../platform/src/platform/core/orchestrator-context-runtime.js';
+import type { ModelDefinition } from '../platform/src/platform/providers/registry-types.js';
+import type { ConversationManager } from '../platform/src/platform/core/conversation.js';
+import type { ConfigManager } from '../platform/src/platform/config/manager.js';
 
 type RegistryOptions = ConstructorParameters<typeof ProviderRegistry>[0];
 

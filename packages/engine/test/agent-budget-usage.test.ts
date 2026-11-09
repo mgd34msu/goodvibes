@@ -3,8 +3,8 @@
  * per-tool-call estimate (the old 200 input + 300 output tokens per call).
  */
 import { describe, expect, test } from 'bun:test';
-import { createAgentTool } from '../sdk/src/platform/tools/agent/index.ts';
-import type { AgentManager, AgentRecord } from '../sdk/src/platform/tools/agent/manager.ts';
+import { createAgentTool } from '../platform/src/platform/tools/agent/index.ts';
+import type { AgentManager, AgentRecord } from '../platform/src/platform/tools/agent/manager.ts';
 
 function toolFor(record: Partial<AgentRecord>) {
   const manager = { getStatus: (id: string) => (id === 'agent-1' ? ({ id: 'agent-1', toolCallCount: 4, ...record } as AgentRecord) : null) } as unknown as AgentManager;

@@ -1,9 +1,9 @@
 /**
  * Ambient typing for `sql.js`, which ships no types of its own.
  *
- * This file stays local rather than coming from the SDK: an ambient module
+ * This file stays local rather than coming from the platform: an ambient module
  * declaration only takes effect for a compilation that INCLUDES the file, and
- * the SDK's copy lives in its sources, not in its published package. A
+ * the platform's copy lives in its sources, not in its published package. A
  * declaration that never reaches this compilation is not a replacement for one
  * that does.
  */

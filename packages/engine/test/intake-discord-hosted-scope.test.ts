@@ -1,9 +1,9 @@
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { acquireDiscordInboxIdentity } from '../sdk/src/platform/intake/providers/discord-identity.ts';
+import { acquireDiscordInboxIdentity } from '../platform/src/platform/intake/providers/discord-identity.ts';
 import { afterEach, expect, test } from 'bun:test';
 import { Client } from 'undici/index.js';
-import { createDiscordInboxOwner } from '../sdk/src/platform/intake/providers/discord-owner.ts';
-import type { ProtectedSourceOwnerOptions } from '../sdk/src/platform/security/source-screening/types.ts';
+import { createDiscordInboxOwner } from '../platform/src/platform/intake/providers/discord-owner.ts';
+import type { ProtectedSourceOwnerOptions } from '../platform/src/platform/security/source-screening/types.ts';
 
 let identityDirectory: string | undefined;
 const cleanups: Array<() => void | Promise<void>> = [];

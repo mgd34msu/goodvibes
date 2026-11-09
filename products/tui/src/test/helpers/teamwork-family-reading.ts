@@ -1,5 +1,5 @@
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
-import type { ArchetypeFamily } from '@goodvibes-jev/engine/sdk/platform/agents';
+import type { ArchetypeFamily } from '@goodvibes-jev/engine/platform/platform/agents';
 
 export interface RecordedArchetype {
   readonly name: string;

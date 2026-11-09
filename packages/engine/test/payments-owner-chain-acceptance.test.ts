@@ -13,7 +13,7 @@
  * complete and had no caller, so `runCheckout` was unreachable and the daemon
  * had no way to begin a purchase at all.
  *
- * This file exercises the primitive SDK route handlers over the real service.
+ * This file exercises the primitive platform route handlers over the real service.
  * Native detached admission, paired authority and status/restart handling are
  * covered separately by payments-host-gateway-verbs and payments-detached-*.
  * The primitive handlers are resolved from the live catalog by id.
@@ -38,25 +38,25 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
 import {
   createPaymentsCheckoutBeginHandler,
   registerPaymentsGatewayMethods,
   type PaymentsGatewayService,
-} from '../sdk/src/platform/control-plane/routes/payments.js';
-import { PaymentsGatewayServiceImpl } from '../sdk/src/platform/payments/payments-gateway-service.js';
-import { BudgetLedger } from '../sdk/src/platform/payments/budget.js';
-import { MemoryCheckoutJournal } from '../sdk/src/platform/payments/checkout-registry.js';
-import { createChannelPaymentNotifier } from '../sdk/src/platform/payments/notice-delivery.js';
+} from '../platform/src/platform/control-plane/routes/payments.js';
+import { PaymentsGatewayServiceImpl } from '../platform/src/platform/payments/payments-gateway-service.js';
+import { BudgetLedger } from '../platform/src/platform/payments/budget.js';
+import { MemoryCheckoutJournal } from '../platform/src/platform/payments/checkout-registry.js';
+import { createChannelPaymentNotifier } from '../platform/src/platform/payments/notice-delivery.js';
 import {
   correlatePurchaseMail,
   extractConfirmationFacts,
-} from '../sdk/src/platform/payments/order-correlation.js';
-import { renderConfirmationReport } from '../sdk/src/platform/payments/message.js';
-import { UntrustedContentLedger } from '../sdk/src/platform/security/untrusted-content.js';
-import { unsafeOwnerSuppliedTextForTests } from '../sdk/src/platform/payments/types.js';
-import type { CurrencyCode, PostalAddress } from '../sdk/src/platform/payments/types.js';
-import type { PurchaseRecord } from '../sdk/src/platform/payments/checkout-flow.js';
+} from '../platform/src/platform/payments/order-correlation.js';
+import { renderConfirmationReport } from '../platform/src/platform/payments/message.js';
+import { UntrustedContentLedger } from '../platform/src/platform/security/untrusted-content.js';
+import { unsafeOwnerSuppliedTextForTests } from '../platform/src/platform/payments/types.js';
+import type { CurrencyCode, PostalAddress } from '../platform/src/platform/payments/types.js';
+import type { PurchaseRecord } from '../platform/src/platform/payments/checkout-flow.js';
 
 import { startFixtureMerchant, type FixtureMerchant } from './helpers/fixture-merchant.js';
 import { FixtureCheckoutDriver, readFixtureCheckout } from './helpers/fixture-checkout-driver.js';

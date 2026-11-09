@@ -168,7 +168,7 @@ and the daemon stays LAN-only.
 Run your own relay with the bundled server:
 
 ```
-GOODVIBES_RELAY_PORT=8787 bun run --bun @goodvibes-jev/engine/daemon-sdk/relay-server-entry
+GOODVIBES_RELAY_PORT=8787 bun run --bun @goodvibes-jev/engine/daemon-api/relay-server-entry
 ```
 
 Put it behind TLS (`wss://`) at the edge, point `relay.url` at it, pair a surface

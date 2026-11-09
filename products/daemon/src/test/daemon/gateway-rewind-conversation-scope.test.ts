@@ -2,7 +2,7 @@
  * Reconstructed after executor replacement; see the bounded source-proof audit.
  */
 import { afterAll, describe, expect, test } from 'bun:test';
-import { recordTurnAnchor, clearTurnAnchors } from '@goodvibes-jev/engine/sdk/platform/rewind';
+import { recordTurnAnchor, clearTurnAnchors } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { registerSessionConversation, unregisterSessionConversation, type RewindableConversation } from '../../runtime/conversation-rewind-port.ts';
 import { useGatewayFixture } from '../helpers/gateway-fixture.js';
 

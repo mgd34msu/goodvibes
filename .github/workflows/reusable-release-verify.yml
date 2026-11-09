@@ -13,14 +13,14 @@ name: Reusable release verification
 #   Call it:
 #     jobs:
 #       release-verify:
-#         uses: mgd34msu/goodvibes-sdk/.github/workflows/reusable-release-verify.yml@<commit-sha>
+#         uses: mgd34msu/goodvibes/.github/workflows/reusable-release-verify.yml@<commit-sha>
 #         with:
 #           sha: ${{ github.sha }}
 #         secrets:
 #           token: ${{ secrets.GITHUB_TOKEN }}
 #
 #   Pin `<commit-sha>` to a full commit SHA, never `@main`; note alongside the
-#   pin which goodvibes-sdk version it corresponds to. Bumping the pin is a
+#   pin which GoodVibes version it corresponds to. Bumping the pin is a
 #   deliberate, reviewed change (its own commit/PR), not an automatic float
 #   onto whatever main has become.
 #
@@ -37,10 +37,10 @@ name: Reusable release verification
 #
 #   toolchain-source:
 #   - `registry` (default, consumer repos): bunx the PUBLISHED
-#     @goodvibes-jev/engine from npm. Correct once the SDK has published
+#     @goodvibes-jev/engine from npm. Correct once the engine has published
 #     the package.
-#   - `workspace` (the SDK repo itself): check out the verified commit, install,
-#     build the workspace toolchain, and invoke its local dist bin. The SDK
+#   - `workspace` (the engine repo itself): check out the verified commit, install,
+#     build the workspace toolchain, and invoke its local dist bin. The engine
 #     cannot bunx-from-registry: its own release is what publishes the
 #     toolchain (first release: the package does not exist yet; later releases:
 #     bunx would verify with the PREVIOUS version, not the commit under
@@ -76,7 +76,7 @@ on:
       toolchain-source:
         description: Where per-job-green comes from, `registry` (bunx the
           published package; consumer repos) or `workspace` (build + run the
-          checked-out workspace toolchain; the SDK repo itself).
+          checked-out workspace toolchain; the engine repo itself).
         required: false
         type: string
         default: registry
@@ -123,7 +123,7 @@ jobs:
         run: |
           echo "toolchain-source must be 'registry' or 'workspace' (got '$TOOLCHAIN_SOURCE')." >&2
           exit 1
-      # ── workspace mode: the SDK verifies itself with the toolchain at the
+      # ── workspace mode: the engine verifies itself with the toolchain at the
       #    verified commit (self-hosting; no registry dependency). ────────────
       - name: Checkout verified commit (workspace toolchain)
         if: inputs.toolchain-source == 'workspace'
@@ -187,7 +187,7 @@ jobs:
       # resolving an Actions run id. An empty run id fed to download-artifact
       # stops targeting the verified run and silently downloads from the caller's
       # own run instead, so every consumer of this workflow gets the same
-      # fail-fast the SDK's release.yml already had.
+      # fail-fast the engine's release.yml already had.
       - name: Require a resolved run id
         env:
           RUN_ID: ${{ steps.pjg-workspace.outputs.run_id || steps.pjg-registry.outputs.run_id }}

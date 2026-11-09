@@ -1,4 +1,4 @@
-import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { types as nodeTypes } from 'node:util';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { memoryExternalProviderLiveCertification, memoryExternalProviderReceiptCertification } from './agent-harness-memory-provider-certification.ts';
@@ -8,8 +8,8 @@ import { captureModelArtifactClockSource, modelReadingServicePath } from './agen
 import { capturePersonalOpsSnapshot, protectPersonalOpsData } from './agent-harness-personal-ops-source.ts';
 import { readPersonalOpsBoolean, readPersonalOpsReceiptStatus } from './agent-harness-personal-ops-readings.ts';
 import { assertMemoryCurrent, retainMemoryReadingOptions, readMemoryCredentialState, readMemoryLiveStatus, readMemoryPublicText, readMemoryReceiptMember, readMemoryRouteRole, selectMemoryProvider } from './agent-harness-memory-provider-readings.ts';
-import { findCredentialCandidates } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { findCredentialCandidates } from '@goodvibes-jev/engine/platform/platform/utils';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { PersonalOpsNativeSchema } from './agent-personal-ops-native-fields.ts';
 
 export type MemoryExternalProviderStatus = 'not-published' | 'receipt-evidence-found' | 'available' | 'needs-setup' | 'blocked' | 'error' | 'disabled' | 'unknown';
@@ -64,7 +64,7 @@ export interface MemoryExternalProviderContractCheck {
   readonly label: string;
   readonly status: MemoryExternalProviderContractStatus;
   readonly requiredFor: string;
-  readonly owner: 'goodvibes-sdk-or-daemon';
+  readonly owner: 'goodvibes-platform-or-daemon';
   readonly inspectRoute: string;
 }
 

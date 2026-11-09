@@ -1,7 +1,7 @@
-import { normalizePermissionMode } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { normalizePermissionMode } from '@goodvibes-jev/engine/platform/platform/gate';
 import type { OnboardingAcknowledgementTarget, OnboardingApplyOperation, OnboardingApplyRequest } from '../../runtime/onboarding/index.ts';
-import { formatProviderModel } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { getServerSurfaceFeatureFlags } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { formatProviderModel } from '@goodvibes-jev/engine/platform/platform/providers';
+import { getServerSurfaceFeatureFlags } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { featureEnablementWrite } from '@goodvibes-jev/engine/terminal-shell';
 import {
   buildCloudflareApiTokenRef,
@@ -106,12 +106,12 @@ export function buildOnboardingApplyRequest(controller: OnboardingWizardControll
     setConfig('service.enabled', hasServers);
     setConfig('service.autostart', hasServers);
     setConfig('service.restartOnFailure', true);
-    // One-Platform daemon-by-default (SDK docs/decisions/2026-07-05-daemon-by-default.md):
+    // One-Platform daemon-by-default (platform docs/decisions/2026-07-05-daemon-by-default.md):
     // the loopback-only cross-surface session daemon is safe-by-design
     // (loopback bind, auth-gated, rate-limited) and runs regardless of whether
     // browser/LAN/webhook/external-app capabilities are selected here, it is no
     // longer bundled with those network-exposing surfaces, so onboarding leaves
-    // daemon.enabled untouched and lets the SDK's own default-true (or an existing
+    // daemon.enabled untouched and lets the platform's own default-true (or an existing
     // explicit user override) govern. (The deprecated danger.daemon alias this
     // comment used to also name was later removed.)
     setConfig('controlPlane.enabled', hasServers);

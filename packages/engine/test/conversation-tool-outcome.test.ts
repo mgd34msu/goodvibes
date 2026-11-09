@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { ConversationManager, type ConversationMessageSnapshot } from '../sdk/src/platform/core/conversation.ts';
-import { buildSyntheticResult } from '../sdk/src/platform/core/tool-reconciliation.ts';
-import type { ToolResult } from '../sdk/src/platform/types/tools.ts';
+import { ConversationManager, type ConversationMessageSnapshot } from '../platform/src/platform/core/conversation.ts';
+import { buildSyntheticResult } from '../platform/src/platform/core/tool-reconciliation.ts';
+import type { ToolResult } from '../platform/src/platform/types/tools.ts';
 
 function tools(cm: ConversationManager) {
   return cm.getMessageSnapshot().filter((message) => message.role === 'tool');

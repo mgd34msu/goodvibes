@@ -4,8 +4,8 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, st
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { useToolReadings } from './_helpers/tool-readings.js';
-import { createWriteTool } from '../sdk/src/platform/tools/write/index.js';
-import { FileUndoManager } from '../sdk/src/platform/state/file-undo.js';
+import { createWriteTool } from '../platform/src/platform/tools/write/index.js';
+import { FileUndoManager } from '../platform/src/platform/state/file-undo.js';
 
 useToolReadings();
 const roots: string[] = [];

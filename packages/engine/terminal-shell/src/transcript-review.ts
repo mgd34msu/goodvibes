@@ -1,4 +1,4 @@
-import type { TranscriptEventKind } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { TranscriptEventKind } from '@goodvibes-jev/engine/platform/platform/core';
 import {
   captureTranscriptSource,
   readTranscriptIndex,

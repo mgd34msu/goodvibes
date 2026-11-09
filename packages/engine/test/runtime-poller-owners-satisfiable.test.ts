@@ -3,7 +3,7 @@
  *
  * The contract is all-required by design, and goodvibes-tui and goodvibes-agent
  * each compose their own runtime graph and hand it to registerRuntimePollers.
- * So a required member is a demand on those forks, and the SDK has to publish
+ * So a required member is a demand on those forks, and the platform has to publish
  * whatever is needed to meet it.
  *
  * `cancelHostedAgentRuns` shipped as required in 1.17.1 while the shared
@@ -14,9 +14,9 @@
  * exported, not whether a required member can be met.
  */
 import { describe, expect, test } from 'bun:test';
-import { cancelAllAgentRuns, type CancellableAgentRuns } from '../sdk/src/platform/tools/index.js';
-import { registerRuntimePollers } from '../sdk/src/platform/runtime/disposal.js';
-import { createAsyncDisposalScope } from '../sdk/src/platform/runtime/async-disposal.js';
+import { cancelAllAgentRuns, type CancellableAgentRuns } from '../platform/src/platform/tools/index.js';
+import { registerRuntimePollers } from '../platform/src/platform/runtime/disposal.js';
+import { createAsyncDisposalScope } from '../platform/src/platform/runtime/async-disposal.js';
 
 describe('RuntimePollerOwners is satisfiable from the published surface', () => {
   test('fleet polling stops before trigger shutdown and its asynchronous native drain', async () => {

@@ -37,7 +37,7 @@ import {
   sha256,
   type RelayKeyPair,
 } from './crypto.js';
-import { GoodVibesSdkError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes-jev/engine/errors';
 
 const HANDSHAKE_LABEL = encodeUtf8('gv-relay-e2e/v1');
 const CONFIRM_PLAINTEXT = encodeUtf8('gv-relay-confirm');
@@ -113,7 +113,7 @@ export async function finishInitiatorHandshake(
   message2: Uint8Array<ArrayBuffer>,
 ): Promise<RelayHandshakeKeys> {
   if (message2.length !== RELAY_PUBLIC_KEY_BYTES + CONFIRM_TAG_BYTES) {
-    throw new GoodVibesSdkError('Malformed relay handshake response.', { category: 'protocol', source: 'transport', recoverable: false });
+    throw new GoodVibesError('Malformed relay handshake response.', { category: 'protocol', source: 'transport', recoverable: false });
   }
   const responderPub = message2.subarray(0, RELAY_PUBLIC_KEY_BYTES);
   const confirmTag = message2.subarray(RELAY_PUBLIC_KEY_BYTES);
@@ -127,7 +127,7 @@ export async function finishInitiatorHandshake(
   // the pinned static private key could have derived confirmKey.
   const opened = await aeadOpen(confirmKey, ZERO_NONCE, confirmTag, transcriptHash);
   if (opened.length !== CONFIRM_PLAINTEXT.length) {
-    throw new GoodVibesSdkError('Relay handshake confirmation mismatch.', { category: 'protocol', source: 'transport', recoverable: false });
+    throw new GoodVibesError('Relay handshake confirmation mismatch.', { category: 'protocol', source: 'transport', recoverable: false });
   }
   return keys;
 }
@@ -146,7 +146,7 @@ export async function respondToHandshake(
   message1: Uint8Array<ArrayBuffer>,
 ): Promise<{ keys: RelayHandshakeKeys; message2: Uint8Array<ArrayBuffer> }> {
   if (message1.length !== RELAY_PUBLIC_KEY_BYTES) {
-    throw new GoodVibesSdkError('Malformed relay handshake initiation.', { category: 'protocol', source: 'transport', recoverable: false });
+    throw new GoodVibesError('Malformed relay handshake initiation.', { category: 'protocol', source: 'transport', recoverable: false });
   }
   const initiatorKey = await importRawPublicKey(message1);
   const ephemeral = await generateEcdhKeyPair();

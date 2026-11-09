@@ -6,7 +6,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { fakePort, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { recordedBuiltinArchetypes, recordedFamilyPort } from '../helpers/teamwork-family-reading.ts';
 import { ScheduleReadingLifetime } from '../../input/commands/schedule-reading-lifetime.ts';
-import { createTaskManager } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { createTaskManager } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { SurfaceModalHost } from '../../input/surface-modal-host.ts';
 import { ConversationManager } from '../../core/conversation.ts';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -18,24 +18,24 @@ import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createOperatorClientServices } from '@/runtime/index.ts';
 import { IntegrationHelperService } from '@/runtime/index.ts';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
 import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
 import { ForensicsRegistry } from '@/runtime/index.ts';
-import type { MemoryAddOptions, MemoryRecord, MemoryScope, MemoryVectorStats } from '@goodvibes-jev/engine/sdk/platform/state';
-import { MemorySpineClient, type MemoryAccess } from '@goodvibes-jev/engine/sdk/platform/runtime/memory-spine';
-import { UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
+import type { MemoryAddOptions, MemoryRecord, MemoryScope, MemoryVectorStats } from '@goodvibes-jev/engine/platform/platform/state';
+import { MemorySpineClient, type MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
+import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
 import { RemoteRunnerRegistry } from '@/runtime/index.ts';
 import { RemoteSupervisor } from '@/runtime/index.ts';
 import { createUiReadModels } from '../../runtime/ui-read-models.ts';
 import { createUiRuntimeServices } from '../../runtime/ui-services.ts';
-import { listHookPointContracts } from '@goodvibes-jev/engine/sdk/platform/hooks';
+import { listHookPointContracts } from '@goodvibes-jev/engine/platform/platform/hooks';
 import { createRuntimeOpsApi } from '@/runtime/index.ts';
 import { createOperatorClient } from '@/runtime/index.ts';
 import { createPeerClient } from '@/runtime/index.ts';
 import { createRuntimeHookApi } from '@/runtime/index.ts';
 import { createRuntimeKnowledgeApi } from '@/runtime/index.ts';
-import { createMemoryApi } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import { createMemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { createRuntimeMcpApi } from '@/runtime/index.ts';
 import { createRuntimeProviderApi } from '@/runtime/index.ts';
 import { wireShellUiOpeners } from '../../shell/ui-openers.ts';
@@ -542,7 +542,7 @@ describe('product breadth commands', () => {
         forensicsRegistry,
         policyRegistry: runtimeServices.policyRuntimeState.getRegistry(),
         policyRuntimeState: runtimeServices.policyRuntimeState,
-        // extensions.memoryRegistry expects the SDK's real MemoryRegistry class
+        // extensions.memoryRegistry expects the platform's real MemoryRegistry class
         // (private fields, no structural fake possible). None of the commands
         // exercised in this file read it directly, memory access here goes
         // through knowledgeApi.memory and memorySpineLocal below, both backed
@@ -1964,8 +1964,8 @@ describe('product breadth commands', () => {
     expect(out.join('\n')).toContain('active subscriptions: 0');
 
     seedBenchmarkCacheFixture({ homeDirectory: root, workingDirectory: root, surfaceRoot: 'goodvibes' });
-    const { DaemonServer } = await import('@goodvibes-jev/engine/sdk/platform/daemon');
-    const { UserAuthManager } = await import('@goodvibes-jev/engine/sdk/platform/security');
+    const { DaemonServer } = await import('@goodvibes-jev/engine/platform/platform/daemon');
+    const { UserAuthManager } = await import('@goodvibes-jev/engine/platform/platform/security');
     const daemon = new DaemonServer({
       port: 39451,
       host: '127.0.0.1',
@@ -2064,7 +2064,7 @@ describe('product breadth commands', () => {
     expect(out.join('\n')).toContain('Sandbox session run');
     expect(out.join('\n')).toContain('session-run-ok');
 
-    // VM provisioning was retired with the local-only SDK backend.
+    // VM provisioning was retired with the local-only platform backend.
     out.length = 0;
     await sandbox!.handler(['qemu', 'setup'], ctx);
     expect(out.join('\n')).toContain('QEMU sandbox commands have been retired');

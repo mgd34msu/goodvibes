@@ -2,11 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import {
   getAutoCompactDecision,
   shouldAutoCompact,
-} from '../sdk/src/platform/core/context-compaction.ts';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
-import { emitOpsContextWarning } from '../sdk/src/platform/runtime/emitters/ops.ts';
-import { registerBootstrapHookBridge } from '../sdk/src/platform/runtime/bootstrap-hook-bridge.ts';
-import type { HookEvent } from '../sdk/src/platform/hooks/types.ts';
+} from '../platform/src/platform/core/context-compaction.ts';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
+import { emitOpsContextWarning } from '../platform/src/platform/runtime/emitters/ops.ts';
+import { registerBootstrapHookBridge } from '../platform/src/platform/runtime/bootstrap-hook-bridge.ts';
+import type { HookEvent } from '../platform/src/platform/hooks/types.ts';
 
 describe('context auto-compaction threshold', () => {
   test('uses configured percentage threshold instead of only remaining-token buffer', () => {

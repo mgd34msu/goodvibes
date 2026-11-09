@@ -3,7 +3,7 @@ import { setImmediate } from 'node:timers/promises';
 import {
   createEmptyWorkLedgerState, type WorkLedgerActor, type WorkLedgerDecision,
   type WorkLedgerState, type WorkLedgerStorage,
-} from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger';
+} from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 import { createNativeWorkLedgerOwner } from '../../runtime/work-ledger-composition.js';
 import { createRuntimeAcquisitionScope } from '../../runtime/acquisition.js';
 

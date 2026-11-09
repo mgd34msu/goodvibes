@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { ConversationManager } from '../sdk/src/platform/core/conversation.js';
+import { ConversationManager } from '../platform/src/platform/core/conversation.js';
 
 function conversation(callId: string) {
   const cm = new ConversationManager();

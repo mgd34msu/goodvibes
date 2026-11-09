@@ -38,20 +38,20 @@ import {
   REASONING_EFFORT_SEVERITY,
   type ReasoningEffortBudgetSpec,
   type ReasoningEffortSpec,
-} from '../sdk/src/platform/providers/reasoning-effort.ts';
-import { getDiscoveredTraits } from '../sdk/src/platform/providers/discovered-traits.ts';
-import { readAutomationReasoningEffort } from '../sdk/src/platform/daemon/helpers.ts';
+} from '../platform/src/platform/providers/reasoning-effort.ts';
+import { getDiscoveredTraits } from '../platform/src/platform/providers/discovered-traits.ts';
+import { readAutomationReasoningEffort } from '../platform/src/platform/daemon/helpers.ts';
 import {
   dispatchBatchRoutes,
   type DaemonBatchRouteContext,
-} from '../sdk/src/platform/daemon/http/batch-routes.ts';
-import type { CreateDaemonBatchJobInput } from '../sdk/src/platform/batch/types.ts';
+} from '../platform/src/platform/daemon/http/batch-routes.ts';
+import type { CreateDaemonBatchJobInput } from '../platform/src/platform/batch/types.ts';
 import {
   findFamilyReasoningEffortSpec,
   resolveEffortForRequest,
   resolveReasoningEffortSpec,
-} from '../sdk/src/platform/providers/reasoning-effort-families.ts';
-import { forgetProviderReadings, readReasoningFamily } from '../sdk/src/platform/routing/provider-readings.ts';
+} from '../platform/src/platform/providers/reasoning-effort-families.ts';
+import { forgetProviderReadings, readReasoningFamily } from '../platform/src/platform/routing/provider-readings.ts';
 import type { EntryType, Question } from '@goodvibes-jev/judgment';
 import { choiceAnswer } from '@goodvibes-jev/judgment/testing';
 
@@ -93,13 +93,13 @@ afterEach(() => {
   installJudgmentPort(previousPort);
   forgetProviderReadings();
 });
-import { applyAnthropicReasoning } from '../sdk/src/platform/providers/anthropic-stream.ts';
-import { AnthropicSdkProvider } from '../sdk/src/platform/providers/anthropic-sdk-provider.ts';
-import { GeminiProvider } from '../sdk/src/platform/providers/gemini.ts';
-import { getCatalogModelDefinitionsFrom } from '../sdk/src/platform/providers/model-catalog.ts';
-import type { CatalogModel } from '../sdk/src/platform/providers/model-catalog.ts';
-import { BUILTIN_COMPAT_PROVIDERS } from '../sdk/src/platform/providers/builtin-catalog.ts';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
+import { applyAnthropicReasoning } from '../platform/src/platform/providers/anthropic-stream.ts';
+import { AnthropicMessagesProvider } from '../platform/src/platform/providers/anthropic-messages-provider.ts';
+import { GeminiProvider } from '../platform/src/platform/providers/gemini.ts';
+import { getCatalogModelDefinitionsFrom } from '../platform/src/platform/providers/model-catalog.ts';
+import type { CatalogModel } from '../platform/src/platform/providers/model-catalog.ts';
+import { BUILTIN_COMPAT_PROVIDERS } from '../platform/src/platform/providers/builtin-catalog.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 
 // ---------------------------------------------------------------------------
 // 1. models.dev reasoning_options parser, all four published shapes
@@ -424,9 +424,9 @@ describe('Anthropic reasoning wire shape', () => {
     expect(body['thinking']).toBeUndefined();
   });
 
-  test('the shared AnthropicSdkProvider path puts the same shape on the wire', async () => {
+  test('the shared AnthropicMessagesProvider path puts the same shape on the wire', async () => {
     const captured: Record<string, unknown>[] = [];
-    const provider = new AnthropicSdkProvider({
+    const provider = new AnthropicMessagesProvider({
       name: 'test-anthropic-sdk',
       label: 'Test',
       defaultModel: 'claude-opus-4-7',

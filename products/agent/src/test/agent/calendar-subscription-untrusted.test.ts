@@ -18,7 +18,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { FeedFetcher, FeedFetchResult } from '@goodvibes-jev/engine/sdk/platform/calendar';
+import type { FeedFetcher, FeedFetchResult } from '@goodvibes-jev/engine/platform/platform/calendar';
 import { CalendarSubscriptionRegistry, type SubscriptionSecretStore } from '../../agent/calendar-subscription-registry.ts';
 
 /** The real shape of a Google/Outlook "secret address" feed URL: the path IS the credential. */
@@ -160,7 +160,7 @@ describe('subscribed calendar feed content is untrusted content', () => {
   /**
    * An event with no readable text records nothing.
    *
-   * This case CANNOT be built from a feed: the SDK's .ics parser substitutes the
+   * This case CANNOT be built from a feed: the platform's .ics parser substitutes the
    * literal '(no title)' for a missing SUMMARY, so every event that arrives
    * through `subscribe`/`refresh` carries text by the time it is cached. The
    * store file is the reachable path, `coerceMeta` does not require a non-empty

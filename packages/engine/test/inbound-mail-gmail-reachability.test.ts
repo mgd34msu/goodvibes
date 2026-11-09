@@ -54,18 +54,18 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { composeInboundMail } from '../sdk/src/platform/daemon/facade-inbound-mail.ts';
-import { createDaemonGmailInboundReader } from '../sdk/src/platform/daemon/facade-gmail-reader.ts';
-import { MIN_VERIFICATION_WINDOW_MS } from '../sdk/src/platform/google/verification-expectations.ts';
+import { composeInboundMail } from '../platform/src/platform/daemon/facade-inbound-mail.ts';
+import { createDaemonGmailInboundReader } from '../platform/src/platform/daemon/facade-gmail-reader.ts';
+import { MIN_VERIFICATION_WINDOW_MS } from '../platform/src/platform/google/verification-expectations.ts';
 import {
   GOOGLE_CONFIG_KEYS,
   GOOGLE_SECRET_KEYS,
-} from '../sdk/src/platform/google/setup-plan.ts';
-import { logger } from '../sdk/src/platform/utils/logger.ts';
-import type { ExpectationExpiryReport } from '../sdk/src/platform/email/inbound/expectation-registry.ts';
-import type { InboundMailSupervisor } from '../sdk/src/platform/email/inbound/index.ts';
-import type { GatewayMethodHandler } from '../sdk/src/platform/control-plane/index.ts';
-import type { StructuredNotice } from '../sdk/src/platform/email/inbound-notice.ts';
+} from '../platform/src/platform/google/setup-plan.ts';
+import { logger } from '../platform/src/platform/utils/logger.ts';
+import type { ExpectationExpiryReport } from '../platform/src/platform/email/inbound/expectation-registry.ts';
+import type { InboundMailSupervisor } from '../platform/src/platform/email/inbound/index.ts';
+import type { GatewayMethodHandler } from '../platform/src/platform/control-plane/index.ts';
+import type { StructuredNotice } from '../platform/src/platform/email/inbound-notice.ts';
 
 const WATCHED_ADDRESS = 'owner@gmail.test';
 const MAILBOX = 'INBOX';

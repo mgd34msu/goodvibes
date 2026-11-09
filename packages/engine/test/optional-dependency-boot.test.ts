@@ -5,16 +5,16 @@ import { withHtmlExtractionReadings } from './_helpers/html-extraction-readings.
  *
  * ── What this measures ────────────────────────────────────────────────────
  *
- * `sdk/package.json` declares thirty packages under
+ * `platform/package.json` declares thirty packages under
  * `optionalDependencies`. That is a promise that an install without them still
- * produces a working SDK. `knowledge/html-readability.ts` broke the promise for
+ * produces a working platform. `knowledge/html-readability.ts` broke the promise for
  * every graph that reaches knowledge extraction, the daemon's included,
  * because it imported `jsdom` and `@mozilla/readability` statically.
  *
- * Measured in this repository with `sdk/node_modules/jsdom` moved
+ * Measured in this repository with `platform/node_modules/jsdom` moved
  * aside, before the fix:
  *
- *   bun build packages/sdk/src/platform/daemon/cli.ts --compile
+ *   bun build packages/platform/src/platform/daemon/cli.ts --compile
  *     → error: Could not resolve: "jsdom"   (no daemon binary at all)
  *
  *   the same graph run from source
@@ -161,7 +161,7 @@ describe('an absent optional dependency does not take the process down', () => {
 
   test('extraction still answers, by the lightweight path, carrying the reason', () => {
     const run = runWhereOptionalsAreAbsent(lazy.binary, emptyCwd);
-    // The declaration promised the SDK works without the package. A result
+    // The declaration promised the platform works without the package. A result
     // that never arrives would not honour it, and a result that arrives with
     // no explanation for being the lesser one would be the silent-degradation
     // failure this platform treats as a defect in its own right.
@@ -275,7 +275,7 @@ describe('an absent optional client package does not take the process down', () 
 describe('the same code path with the packages installed', () => {
   test('extracts by readability and reports itself available', async () => withHtmlExtractionReadings({}, async () => {
     const { describeHtmlReadabilityAvailability, extractReadableHtml } =
-      await import('../sdk/src/platform/knowledge/html-readability.ts');
+      await import('../platform/src/platform/knowledge/html-readability.ts');
     const availability = await describeHtmlReadabilityAvailability();
     expect(availability.available).toBe(true);
     expect(availability.reason).toBeUndefined();
@@ -291,19 +291,19 @@ describe('the same code path with the packages installed', () => {
 
   test('graphql: the lazily-built schema is the same schema, printed once', async () => {
     const { KnowledgeGraphqlService, inspectKnowledgeGraphqlAccess } =
-      await import('../sdk/src/platform/knowledge/graphql.ts');
+      await import('../platform/src/platform/knowledge/graphql.ts');
     const sdl = KnowledgeGraphqlService.schemaSdl;
     expect(sdl).toContain('type KnowledgeStatus');
     expect(sdl).toContain('scalar JSON');
     // Cached, not rebuilt: the class statics this replaced were computed once.
     expect(KnowledgeGraphqlService.schemaSdl).toBe(sdl);
-    // The synchronous access check the daemon-sdk route contract requires.
+    // The synchronous access check the daemon-api route contract requires.
     expect(inspectKnowledgeGraphqlAccess('query Q { status { ready } }').operation).toBe('query');
     expect(inspectKnowledgeGraphqlAccess('mutation M { lint { code } }').adminRequired).toBe(true);
   });
 
   test('simple-git: the lazily-built client is built once and still runs git', async () => {
-    const { GitService } = await import('../sdk/src/platform/git/service.ts');
+    const { GitService } = await import('../platform/src/platform/git/service.ts');
     const service = new GitService(REPO_ROOT);
     const status = await service.status();
     expect(typeof status.isClean()).toBe('boolean');
@@ -313,9 +313,9 @@ describe('the same code path with the packages installed', () => {
   });
 
   test('openai: the provider constructs, reports itself, and resolves its client', async () => {
-    const { OpenAIProvider } = await import('../sdk/src/platform/providers/openai.ts');
+    const { OpenAIProvider } = await import('../platform/src/platform/providers/openai.ts');
     const { describeOpenAIAvailability } =
-      await import('../sdk/src/platform/providers/optional-openai.ts');
+      await import('../platform/src/platform/providers/optional-openai.ts');
     expect((await describeOpenAIAvailability()).available).toBe(true);
     const provider = new OpenAIProvider('');
     expect(provider.isConfigured()).toBe(false);
@@ -324,7 +324,7 @@ describe('the same code path with the packages installed', () => {
 
   test('the knowledge extractor picks the readability path and adds no warning', async () => withHtmlExtractionReadings({}, async () => {
     const { extractKnowledgeArtifact } =
-      await import('../sdk/src/platform/knowledge/extractors.ts');
+      await import('../platform/src/platform/knowledge/extractors.ts');
     const result = await extractKnowledgeArtifact(
       { id: 'present', mimeType: 'text/html', filename: 'present.html' },
       Buffer.from('<html><head><title>Present</title></head><body><h1>Heading</h1>'

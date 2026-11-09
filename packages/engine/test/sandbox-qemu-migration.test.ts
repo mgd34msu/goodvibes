@@ -12,18 +12,18 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { CONFIG_SCHEMA } from '../sdk/src/platform/config/schema.ts';
-import { ingestSettingsFile } from '../sdk/src/platform/config/settings-ingestion.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { CONFIG_SCHEMA } from '../platform/src/platform/config/schema.ts';
+import { ingestSettingsFile } from '../platform/src/platform/config/settings-ingestion.ts';
 import {
   migrateSandboxQemuRemoval,
   RETIRED_SANDBOX_QEMU_KEYS,
-} from '../sdk/src/platform/config/sandbox-qemu-migration.ts';
+} from '../platform/src/platform/config/sandbox-qemu-migration.ts';
 import {
   applySandboxQemuMigrationPass,
   runLoadMigrationPasses,
-} from '../sdk/src/platform/config/manager-migration-passes.ts';
-import { FeatureAnnouncementStore, featureAnnouncementsPath } from '../sdk/src/platform/runtime/feature-announcements.ts';
+} from '../platform/src/platform/config/manager-migration-passes.ts';
+import { FeatureAnnouncementStore, featureAnnouncementsPath } from '../platform/src/platform/runtime/feature-announcements.ts';
 
 /** A sandbox section as an install configured for QEMU wrote it. */
 function qemuSandboxFile(): Record<string, unknown> {

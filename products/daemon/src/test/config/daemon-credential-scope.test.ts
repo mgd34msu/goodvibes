@@ -28,9 +28,9 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager, daemonConfigPath } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager, daemonConfigPath } from '@goodvibes-jev/engine/platform/platform/config';
 import { SecretsManager } from '../../config/secrets.ts';
-import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   SECRET_CONFIG_KEYS,
   buildGoodVibesSecretKey,
@@ -38,7 +38,7 @@ import {
   isSecretConfigKey,
   persistSecretBackedConfigValue,
 } from '../../config/secret-config.ts';
-import { createDaemonCredentialStore } from '@goodvibes-jev/engine/sdk/platform/config';
+import { createDaemonCredentialStore } from '@goodvibes-jev/engine/platform/platform/config';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../../config/surface.ts';
 import { makeOwnedTempDir as makeProjectTempDir } from '../helpers/owned-temp.ts';
 

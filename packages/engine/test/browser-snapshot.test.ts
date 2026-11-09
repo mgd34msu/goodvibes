@@ -4,12 +4,12 @@ import { isDeepStrictEqual } from 'node:util';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { readingsOf, SqliteDecisionLog, toJson, withDecisionLog } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { browserControlIdentity } from '../sdk/src/platform/browser/browser-control-identity.js';
-import { resolveRef, SnapshotStore, StaleElementError } from '../sdk/src/platform/browser/browser-snapshot.js';
-import type { BrowserSnapshot } from '../sdk/src/platform/browser/browser-types.js';
+import { browserControlIdentity } from '../platform/src/platform/browser/browser-control-identity.js';
+import { resolveRef, SnapshotStore, StaleElementError } from '../platform/src/platform/browser/browser-snapshot.js';
+import type { BrowserSnapshot } from '../platform/src/platform/browser/browser-types.js';
 
 /**
- * `playwright-core` is only hoisted under packages/sdk/node_modules, not the
+ * `playwright-core` is only hoisted under packages/platform/node_modules, not the
  * repo root, so test/ (which sits at the root) cannot resolve it directly.
  * Derive the Page/Locator shapes from resolveRef's own signature instead of
  * importing the module a second time from a location that can't see it.

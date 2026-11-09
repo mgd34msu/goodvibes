@@ -8,7 +8,7 @@
  * with the agent's owner-terminal posture, the agent's own tools, then its
  * policy guard, platform-boundary guard and execution-safety wrapper, in that
  * order), the graph's permission manager with the agent's permission safety
- * guard installed on it, and the SDK's executeToolCalls, the
+ * guard installed on it, and the platform's executeToolCalls, the
  * function the live Orchestrator calls for every tool call of a
  * main-conversation turn (permission check, then registry execute, with the
  * per-call cancel signal).
@@ -28,17 +28,17 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { executeToolCalls, type ToolExecutionDeps } from '@goodvibes-jev/engine/sdk/platform/core';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { Tool, ToolCall, ToolResult } from '@goodvibes-jev/engine/sdk/platform/types';
+import { executeToolCalls, type ToolExecutionDeps } from '@goodvibes-jev/engine/platform/platform/core';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool, ToolCall, ToolResult } from '@goodvibes-jev/engine/platform/platform/types';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { composeAgentToolRegistry } from '../../runtime/agent-tool-registry.ts';
 import { composeAgentPermissionManager } from '../../runtime/bootstrap-core.ts';
-import type { McpApi, McpToolSchema } from '@goodvibes-jev/engine/sdk/platform/mcp';
+import type { McpApi, McpToolSchema } from '@goodvibes-jev/engine/platform/platform/mcp';
 import { installAgentMcpCallRoute } from '../../tools/agent-mcp-call-route.ts';
 import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';

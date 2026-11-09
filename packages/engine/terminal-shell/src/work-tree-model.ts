@@ -19,10 +19,10 @@
  *
  * Pure: every live fact comes in through WorkTreeSources.
  */
-import type { ContractView, ContractUnitView } from '@goodvibes-jev/engine/sdk/platform/contract';
+import type { ContractView, ContractUnitView } from '@goodvibes-jev/engine/platform/platform/contract';
 import { contractIsActive, contractCommitNote, contractStatusSummary, projectContractTree } from './work-tree-contract.js';
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { ToolCall } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
 import { beadArgument, beadBody, beadName, beadStatus, beadSummary, cellText, formatBeadTime, formatCost, inferResultToolName, isBackgroundCall, needsAttention, toolFamily, type BeadBody, type BeadStatus, type BeadSummary, } from './renderer/bead.js';
 import { SPINE, type LaneId } from './renderer/lane-graph-layout.js';
 import { userMessageFingerprint, type AgentLaneInfo, type TurnOutcome, type TurnTiming, type WorkTreeSources } from './work-tree-sources.js';

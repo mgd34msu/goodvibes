@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import { WorkPlanStore } from '@goodvibes-jev/engine/sdk/platform/workflow';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { WorkPlanStore } from '@goodvibes-jev/engine/platform/platform/workflow';
 import {
   createAgentWorkPlanTool,
   registerAgentWorkPlanTool,

@@ -3,7 +3,7 @@ import {
   instrumentedFetch,
   fetchWithTimeout,
   sanitizeUrlForLog,
-} from '../sdk/src/platform/utils/fetch-with-timeout.js';
+} from '../platform/src/platform/utils/fetch-with-timeout.js';
 
 /**
  * HTTP access log, verifies that instrumentedFetch records request/response

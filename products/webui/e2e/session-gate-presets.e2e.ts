@@ -1,4 +1,4 @@
-/** Production session picker and SDK over the shared synthetic daemon, phone and desktop. */
+/** Production session picker and platform over the shared synthetic daemon, phone and desktop. */
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { expectBottomSheet, expectNoHorizontalScroll, nextFrames, openRow } from './support/app';
 import { installMockDaemon, type MockDaemon } from './support/mock-daemon';
@@ -194,7 +194,7 @@ test('a pending write disables repeated selections and cannot be dismissed befor
     for (const choice of await choices.getByRole('button').all()) await expect(choice).toBeDisabled();
     const footerClose = sheet.locator('.gv-dialog__footer').getByRole('button', { name: 'Close', exact: true });
     await expect(footerClose).toBeDisabled();
-    // Native disabled controls must ignore repeated activation while the real SDK write is pending.
+    // Native disabled controls must ignore repeated activation while the real platform write is pending.
     await choices.getByRole('button').evaluateAll(buttons => {
       for (const button of buttons) (button as HTMLButtonElement).click();
     });

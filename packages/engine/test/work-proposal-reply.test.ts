@@ -15,9 +15,9 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import {
   findProposalForReply,
   tryResolveWorkProposalReplyFromChannel,
-} from '../sdk/src/platform/daemon/work-proposal-reply.ts';
-import { WorkProposalStore, type WorkProposalRecord } from '../sdk/src/platform/agents/work-proposal-store.ts';
-import type { ChannelIngressPolicyInput } from '../sdk/src/platform/channels/index.ts';
+} from '../platform/src/platform/daemon/work-proposal-reply.ts';
+import { WorkProposalStore, type WorkProposalRecord } from '../platform/src/platform/agents/work-proposal-store.ts';
+import type { ChannelIngressPolicyInput } from '../platform/src/platform/channels/index.ts';
 
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, choiceAnswer } from '@goodvibes-jev/judgment/testing';

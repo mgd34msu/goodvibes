@@ -19,13 +19,13 @@
  */
 
 import { describe, expect, test, mock } from 'bun:test';
-import { createHostModeRestartWatcher } from '../sdk/src/platform/daemon/host-mode-watcher.js';
+import { createHostModeRestartWatcher } from '../platform/src/platform/daemon/host-mode-watcher.js';
 import { mkdtempSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { HttpListener } from '../sdk/src/platform/daemon/http-listener.js';
-import { UserAuthManager } from '../sdk/src/platform/security/user-auth.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { HttpListener } from '../platform/src/platform/daemon/http-listener.js';
+import { UserAuthManager } from '../platform/src/platform/security/user-auth.js';
 import { trackDisposables } from './_helpers/disposables.ts';
 import { disposeListener } from './_helpers/listener-teardown.ts';
 

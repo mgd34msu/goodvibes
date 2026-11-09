@@ -12,7 +12,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   compareSpreadRank,
   compareVersions,
-} from '../sdk/src/platform/cluster/ranking.js';
+} from '../platform/src/platform/cluster/ranking.js';
 import {
   addNode,
   advance,

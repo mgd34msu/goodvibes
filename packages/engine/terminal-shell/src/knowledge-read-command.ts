@@ -1,4 +1,4 @@
-import type { KnowledgeApi } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import type { KnowledgeApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { readFlag, positionalArgs, readKnowledgeTaskArguments } from './command-arguments.js';
 export interface KnowledgeReadPorts {
   readonly status: () => ReturnType<KnowledgeApi['status']['get']>;

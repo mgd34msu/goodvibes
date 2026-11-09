@@ -20,9 +20,9 @@ import {
   readNotifyChannels,
   readPaymentsServiceConfig,
   type PaymentsConfigReader,
-} from '../sdk/src/platform/payments/payments-config.js';
-import { createJevMerchantJudge } from '../sdk/src/platform/payments/merchant-judge-model.js';
-import { MERCHANT_RECOURSE_CRITERION } from '../sdk/src/platform/payments/merchant-recourse.js';
+} from '../platform/src/platform/payments/payments-config.js';
+import { createJevMerchantJudge } from '../platform/src/platform/payments/merchant-judge-model.js';
+import { MERCHANT_RECOURSE_CRITERION } from '../platform/src/platform/payments/merchant-recourse.js';
 import { usePaymentsReadings, withPaymentsReadings } from './helpers/payments-readings.ts';
 
 /** A config manager standing on a plain map, so a test can set one key. */

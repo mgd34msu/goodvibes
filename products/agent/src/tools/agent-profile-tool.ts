@@ -38,9 +38,9 @@
  * such read is disclosed.
  */
 
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { PROFILE_FIELDS, PROSE_ONLY_SECTIONS, captureProfileDelegation } from '@goodvibes-jev/engine/sdk/platform/owner-profile';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { PROFILE_FIELDS, PROSE_ONLY_SECTIONS, captureProfileDelegation } from '@goodvibes-jev/engine/platform/platform/owner-profile';
 import { captureProfileGatewayCurrent, captureProfileGatewayLocalState, type ProfileGatewayInvoke } from '../agent/owner-profile-gateway.ts';
 import { captureCatalogMethods, captureCatalogSnapshot } from './agent-harness-catalog-ranking.ts';
 import { agentLocalStateWrite, assertAgentLocalStateCurrent, createAgentLocalStateInputProjector } from './agent-local-state-admission.ts';
@@ -70,7 +70,7 @@ import {
 const PEOPLE_SECTION = 'people';
 
 /**
- * The declared `fieldId` values, taken from the SDK's field registry at module
+ * The declared `fieldId` values, taken from the platform's field registry at module
  * load rather than written out here.
  *
  * `fieldId` used to be a free-form string with two ids as examples, and the
@@ -82,7 +82,7 @@ const PEOPLE_SECTION = 'people';
  * it fills the argument in.
  *
  * Sourced from {@link PROFILE_FIELDS}, never copied: a hand-written list is one
- * SDK release away from declaring a field that no longer exists or omitting one
+ * platform release away from declaring a field that no longer exists or omitting one
  * that does, and either way the declaration would be a claim about the daemon
  * that the daemon does not honour. A test pins this to the registry.
  */

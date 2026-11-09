@@ -27,7 +27,7 @@ import {
 } from '../../renderer/theme-mode-config.ts';
 import { installBackgroundThemeProbe } from '../../renderer/terminal-bg-probe.ts';
 import { FULLSCREEN_PALETTE } from '../../renderer/fullscreen-primitives.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 
 /** Minimal ConfigManager-shaped stub whose get() returns a fixed value. */
 function fakeConfig(value: unknown): Pick<ConfigManager, 'get'> {

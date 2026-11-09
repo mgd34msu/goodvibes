@@ -1,14 +1,14 @@
 /** Owned synthetic credentials exercise the production router and wire boundary. */
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import type { ArtifactStore } from '../sdk/src/platform/artifacts/index.js';
-import { ChannelDeliveryRouter } from '../sdk/src/platform/channels/delivery-router.js';
-import type { ChannelDeliveryRequest, ChannelDeliverySurfaceKind } from '../sdk/src/platform/channels/delivery/types.js';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import type { ConfigKey } from '../sdk/src/platform/config/schema-types.js';
-import type { SecretsManager } from '../sdk/src/platform/config/secrets.js';
-import type { ServiceRegistry, ServiceSecretField } from '../sdk/src/platform/config/service-registry.js';
-import { isDeclaredSecretBearingConfigKey } from '../sdk/src/platform/config/secret-bearing-config-keys.js';
-import { logger } from '../sdk/src/platform/utils/logger.js';
+import type { ArtifactStore } from '../platform/src/platform/artifacts/index.js';
+import { ChannelDeliveryRouter } from '../platform/src/platform/channels/delivery-router.js';
+import type { ChannelDeliveryRequest, ChannelDeliverySurfaceKind } from '../platform/src/platform/channels/delivery/types.js';
+import type { ConfigManager } from '../platform/src/platform/config/manager.js';
+import type { ConfigKey } from '../platform/src/platform/config/schema-types.js';
+import type { SecretsManager } from '../platform/src/platform/config/secrets.js';
+import type { ServiceRegistry, ServiceSecretField } from '../platform/src/platform/config/service-registry.js';
+import { isDeclaredSecretBearingConfigKey } from '../platform/src/platform/config/secret-bearing-config-keys.js';
+import { logger } from '../platform/src/platform/utils/logger.js';
 
 const SECRET_KEY = 'owned-delivery-fixture-secret';
 const SECRET_REF = `goodvibes://secrets/goodvibes/${SECRET_KEY}`;

@@ -10,7 +10,7 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { readFileSync } from 'fs';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import {
   parseSystemdMajorVersion,
   PlatformServiceManager,
@@ -18,14 +18,14 @@ import {
   systemdSupportsRestartSteps,
   type ManagedServiceActionResult,
   type ManagedServiceDefinition,
-} from '../sdk/src/platform/daemon/service-manager.js';
+} from '../platform/src/platform/daemon/service-manager.js';
 import {
   recordDaemonCleanShutdown,
   recordDaemonStart,
   type LifecycleMarkerIo,
-} from '../sdk/src/platform/daemon/lifecycle-marker.js';
-import { DaemonReceiptStore, formatReceiptTime } from '../sdk/src/platform/daemon/receipts.js';
-import { createDaemonControlRouteHandlers } from '../daemon-sdk/dist/index.js';
+} from '../platform/src/platform/daemon/lifecycle-marker.js';
+import { DaemonReceiptStore, formatReceiptTime } from '../platform/src/platform/daemon/receipts.js';
+import { createDaemonControlRouteHandlers } from '../daemon-api/dist/index.js';
 
 const definition: ManagedServiceDefinition = {
   name: 'goodvibes',

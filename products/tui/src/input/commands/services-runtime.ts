@@ -1,10 +1,10 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { atomicWriteFileSync } from '@goodvibes-jev/engine/sdk/platform/config';
+import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/config';
 import type { CommandRegistry } from '../command-registry.ts';
 import type { SelectionAction, SelectionItem } from '../selection-modal.ts';
 import { requireServiceRegistry, requireShellPaths } from './runtime-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 export function registerServicesRuntimeCommands(registry: CommandRegistry): void {
   registry.register({

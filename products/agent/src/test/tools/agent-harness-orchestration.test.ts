@@ -8,12 +8,12 @@ import { ordinaryResearchOwner, cleanupResearchScreeningFixtures } from '../help
 import { afterAll, afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { installJudgmentPort, judgmentPort } from '@goodvibes-jev/engine/errors';
 import { resetAgentMcpCallRouteForTests } from '../../tools/agent-mcp-call-route.ts';
-import { judgmentInputCardProblem } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { judgmentInputCardProblem } from '@goodvibes-jev/engine/platform/platform/gate';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { join } from 'node:path';
-import { ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { createHarnessArtifactStore, makeFixture, registerStubTool, executeHarnessJson, PROVIDER_AUTH_ENV_KEYS, withClearedEnv, withPairedHost, writeConnectedHostOperatorToken, createHarnessFixtureReadings } from "./agent-harness-tool-fixture.ts";
 
 

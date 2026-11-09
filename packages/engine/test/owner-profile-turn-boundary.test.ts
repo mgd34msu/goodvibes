@@ -28,12 +28,12 @@ import {
   UntrustedContentLedger,
   getProcessUntrustedContentLedger,
   resetProcessUntrustedContentLedgerForTests,
-} from '../sdk/src/platform/security/untrusted-content.ts';
-import { startTurnForOwnerRequest } from '../sdk/src/platform/security/turn-boundary.ts';
+} from '../platform/src/platform/security/untrusted-content.ts';
+import { startTurnForOwnerRequest } from '../platform/src/platform/security/turn-boundary.ts';
 import {
   evaluateProfileRemoval,
   evaluateProfileWrite,
-} from '../sdk/src/platform/owner-profile/trust.ts';
+} from '../platform/src/platform/owner-profile/trust.ts';
 import { useSecurityReadings } from './helpers/security-readings.ts';
 
 // This file reads into the process ledger; leave it empty for the next file.

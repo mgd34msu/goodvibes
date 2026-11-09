@@ -4,16 +4,16 @@
  *
  * (1) Plain amount parsing/formatting for the config schema's `unit: 'money'`
  *     keys (`payments.budget.dailyItem`, `dailyOverage`, `perPurchaseCeiling`,
- *     `overageToleranceDailyAllowance`, SDK 2.0.5's money-value.ts). These
+ *     `overageToleranceDailyAllowance`, platform 2.0.5's money-value.ts). These
  *     keys now hold the number a person would say out loud: typing "100"
  *     stores `100` and reads back `100`; typing "19.99" stores `19.99`. There
  *     is no minor-unit representation left to convert to or from, a schema
  *     key is a money field because the SCHEMA marks it `unit === 'money'`,
  *     never because its name ends in some suffix (the old scheme, which tied
- *     every consumer to a naming convention and broke them all when the SDK
+ *     every consumer to a naming convention and broke them all when the platform
  *     renamed the keys). `isMoneyField` / `parseMoneyAmountInput` /
  *     `formatMoneyAmountValue` below are this half; they are currency-NEUTRAL
- *     by design (mirroring the SDK's own parseMoneyAmount), matching
+ *     by design (mirroring the platform's own parseMoneyAmount), matching
  *     `payments.currency` only for display, never for arithmetic.
  *
  * (2) Currency-aware major-unit <-> minor-unit conversion, kept ONLY for the
@@ -34,7 +34,7 @@
  * arithmetic here is on integers parsed directly out of the decimal string.
  *
  * The minor-unit half is currency-exponent-aware: NOT every currency has 2
- * decimal digits. Mirrors the SDK's `platform/payments/message.ts` exponent
+ * decimal digits. Mirrors the platform's `platform/payments/message.ts` exponent
  * table exactly (its ZERO_DECIMAL / THREE_DECIMAL sets), not imported
  * directly, because that module's `exponentFor` is a private helper (only the
  * DISPLAY formatter `formatMinorUnits`, which returns a currency-prefixed,
@@ -47,7 +47,7 @@
 
 export class InvalidMoneyInputError extends Error {}
 
-/** Minor units per major unit, by ISO-4217 code, mirrors the SDK's table exactly. */
+/** Minor units per major unit, by ISO-4217 code, mirrors the platform's table exactly. */
 const THREE_DECIMAL_CURRENCIES: ReadonlySet<string> = new Set(['BHD', 'IQD', 'JOD', 'KWD', 'LYD', 'OMR', 'TND']);
 const ZERO_DECIMAL_CURRENCIES: ReadonlySet<string> = new Set(['JPY', 'KRW', 'VND', 'CLP', 'ISK', 'XAF', 'XOF', 'XPF']);
 
@@ -64,7 +64,7 @@ function majorUnitPattern(exponent: number): RegExp {
 }
 
 /**
- * The largest amount a `unit: 'money'` schema key accepts. Mirrors the SDK's
+ * The largest amount a `unit: 'money'` schema key accepts. Mirrors the platform's
  * money-value.ts MAX_MONEY_AMOUNT exactly (not imported: money-value.ts is
  * reachable only through the full `platform/config` barrel, which pulls
  * SecretsManager / OAuth / google-auth into the browser bundle, see
@@ -81,7 +81,7 @@ const PLAIN_MONEY_AMOUNT = /^\d+(?:\.\d{1,2})?$/;
 /**
  * True when a schema entry is a `unit: 'money'` field, the ONLY thing that
  * marks a config key as holding a plain amount of `payments.currency`. Never
- * pattern-match the key's name: that is exactly the scheme SDK 2.0.5 removed
+ * pattern-match the key's name: that is exactly the scheme platform 2.0.5 removed
  * (the old keys were detected by a `Cents` suffix, which tied every consumer
  * to a naming convention and broke them all when the names changed).
  */

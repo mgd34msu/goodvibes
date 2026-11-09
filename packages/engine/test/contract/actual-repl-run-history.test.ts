@@ -6,17 +6,17 @@ import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '../../errors/src/index.js';
-import { TURN_BUDGET_EXHAUSTED } from '../../sdk/src/platform/agents/turn-budget.js';
-import { ConfigManager } from '../../sdk/src/platform/config/index.js';
-import { createContractInputAuthority, getContractInputAuthority } from '../../sdk/src/platform/contract/input-authority.js';
-import { captureContractInput, contractInputPath, materializeContractInput } from '../../sdk/src/platform/contract/input-snapshot.js';
-import type { Contract } from '../../sdk/src/platform/contract/types.js';
-import { createLaunchTolerantProviderRegistry } from '../../sdk/src/platform/providers/index.js';
-import type { LLMProvider, ProviderMessage } from '../../sdk/src/platform/providers/interface.js';
-import { createClientRuntimeServices } from '../../sdk/src/platform/runtime/bootstrap.js';
-import { resumeContracts } from '../../sdk/src/platform/runtime/contract-composition.js';
-import { RuntimeEventBus, createRuntimeStore } from '../../sdk/src/platform/runtime/state.js';
-import { probeCapturedExecAvailability } from '../../sdk/src/platform/tools/exec/captured-exec.js';
+import { TURN_BUDGET_EXHAUSTED } from '../../platform/src/platform/agents/turn-budget.js';
+import { ConfigManager } from '../../platform/src/platform/config/index.js';
+import { createContractInputAuthority, getContractInputAuthority } from '../../platform/src/platform/contract/input-authority.js';
+import { captureContractInput, contractInputPath, materializeContractInput } from '../../platform/src/platform/contract/input-snapshot.js';
+import type { Contract } from '../../platform/src/platform/contract/types.js';
+import { createLaunchTolerantProviderRegistry } from '../../platform/src/platform/providers/index.js';
+import type { LLMProvider, ProviderMessage } from '../../platform/src/platform/providers/interface.js';
+import { createClientRuntimeServices } from '../../platform/src/platform/runtime/bootstrap.js';
+import { resumeContracts } from '../../platform/src/platform/runtime/contract-composition.js';
+import { RuntimeEventBus, createRuntimeStore } from '../../platform/src/platform/runtime/state.js';
+import { probeCapturedExecAvailability } from '../../platform/src/platform/tools/exec/captured-exec.js';
 import { makeRepo, runnerPort, waitFor } from './runner-support.js';
 
 const availability = await probeCapturedExecAvailability();
@@ -88,7 +88,7 @@ test.skipIf(!availability.available)('actual wakeWithSteer reuses captured autho
       executionProtocol: 'direct', reviewMode: 'none', model: 'repl-wake-fixture:fixture',
     }, { inputReadAuthority: authority });
     agentId = record.id;
-    // Contained Bun/SDK cold startup exceeded 60s on hosted CI. This only
+    // Contained Bun/platform cold startup exceeded 60s on hosted CI. This only
     // bounds reaching the history assertions; run/owner semantics stay exact.
     await waitFor(() => record.status === 'failed' || record.status === 'completed', 'first captured REPL run settlement', 90_000);
     await runtime.agentManager.join(record.id);

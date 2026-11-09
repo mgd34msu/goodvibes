@@ -1,10 +1,10 @@
 import { afterEach, expect, test } from 'bun:test';
-import { PaymentReplyInbox, PaymentReplyWindowError } from '../sdk/src/platform/payments/reply-inbox.js';
-import { parseCommandAuthorityChannel } from '../sdk/src/platform/payments/types.js';
-import { readPaymentWindowStatus, readPaymentWindowAnswer } from '../sdk/src/platform/payments/browser.js';
-import { purchaseWindowAnswerHandler, purchaseWindowStatusHandler } from '../sdk/src/platform/payments/host/window-handlers.js';
-import type { HandlerContextEnvelope } from '../sdk/src/platform/payments/host/handler-plumbing.js';
-import type { NativeExecutionAuthority, NativePairedSnapshot } from '../sdk/src/platform/security/http-auth.js';
+import { PaymentReplyInbox, PaymentReplyWindowError } from '../platform/src/platform/payments/reply-inbox.js';
+import { parseCommandAuthorityChannel } from '../platform/src/platform/payments/types.js';
+import { readPaymentWindowStatus, readPaymentWindowAnswer } from '../platform/src/platform/payments/browser.js';
+import { purchaseWindowAnswerHandler, purchaseWindowStatusHandler } from '../platform/src/platform/payments/host/window-handlers.js';
+import type { HandlerContextEnvelope } from '../platform/src/platform/payments/host/handler-plumbing.js';
+import type { NativeExecutionAuthority, NativePairedSnapshot } from '../platform/src/platform/security/http-auth.js';
 import { usePaymentsReadings } from './helpers/payments-readings.ts';
 
 const readings = usePaymentsReadings();

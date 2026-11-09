@@ -8,7 +8,7 @@ import {
   loadMcpEffectiveConfig,
   removeMcpServerConfig,
   upsertMcpServerConfig,
-} from '@goodvibes-jev/engine/sdk/platform/mcp';
+} from '@goodvibes-jev/engine/platform/platform/mcp';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 function makeShellPaths(root: string) {

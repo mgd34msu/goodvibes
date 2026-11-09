@@ -1,7 +1,7 @@
 /**
  * sse-connector-resumes-across-streams.test.ts
  *
- * The SDK-side client the SDK composes for daemon-routed sessions is
+ * The platform-side client the platform composes for daemon-routed sessions is
  * `createEventSourceConnector`. It already resumed a stream across that
  * stream's OWN reconnects; what it did not do is resume across stream
  * LIFETIMES, close one stream, open the next for the following turn, and the

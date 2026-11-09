@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import type { ArtifactDescriptor } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { CONFIG_SCHEMA, SubscriptionManager, type ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
+import { CONFIG_SCHEMA, SubscriptionManager, type ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { AgentWorkspace, buildAgentWorkspaceRuntimeSnapshot, handleAgentWorkspaceToken } from '../../input/agent-workspace.ts';
 import { readLiveAgentMemoryCounters } from '../../input/agent-workspace-snapshot.ts';
@@ -30,9 +30,9 @@ import { THEME_MODE_CONFIG_KEY } from '../../renderer/theme-mode-config.ts';
 import { getActiveThemeMode, getActiveThemeName, listThemeChoices, normalizeThemeName, setActiveThemeMode, setActiveThemeName } from '../../renderer/theme.ts';
 import { isAgentHiddenSettingKey } from '../../config/agent-settings-policy.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
-import type { MemoryApi } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import type { MemoryRecord } from '@goodvibes-jev/engine/sdk/platform/state';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import type { MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 /** The workspace modal's text (a kit layer), or plain lines' text. */

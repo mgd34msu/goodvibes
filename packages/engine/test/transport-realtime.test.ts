@@ -11,7 +11,7 @@ import {
   forSession,
   getStreamReconnectDelay,
   normalizeStreamReconnectPolicy,
-} from '../sdk/dist/index.js';
+} from '../platform/dist/index.js';
 import { settleEvents, waitFor } from './_helpers/test-timeout.js';
 
 function createFetchStub(factory: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>): typeof fetch {

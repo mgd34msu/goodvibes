@@ -1,6 +1,6 @@
 import { handleSettingsModalToken } from '../../input/handler-modal-routes.ts';
 import { bindActiveExecutionMode } from '../../permissions/execution-mode.ts';
-import type { GatePresetName } from '@goodvibes-jev/engine/sdk/platform/gate';
+import type { GatePresetName } from '@goodvibes-jev/engine/platform/platform/gate';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { installAgentDaemonCredentialsClient } from '../../config/daemon-credential-routing.ts';
 import { installAgentDaemonConfigClient } from '../../config/daemon-config-routing.ts';
@@ -12,17 +12,17 @@ import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { isAgentHiddenSettingKey, SettingsModal, SETTINGS_CATEGORIES, SETTINGS_CATEGORY_GROUPS } from '../../input/settings-modal.ts';
 import { CROSS_LISTED_SETTING_ROOTS } from '../../input/settings-modal-types.ts';
-import { ConfigManager, type ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager, type ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { modelPickerLaunchForKey } from '../../input/settings-modal-behavior.ts';
 import { isSecretConfigKey } from '../../config/secret-config.ts';
-import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/sdk/platform/config';
+import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
 import { SecretsManager } from '../../config/secrets.ts';
 import { buildGoodVibesSecretKey, buildGoodVibesSecretRef } from '../../config/secret-config.ts';
-import { ServiceRegistry } from '@goodvibes-jev/engine/sdk/platform/config';
-import { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
+import { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
-import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
+import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 /**

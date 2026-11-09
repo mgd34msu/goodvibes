@@ -9,12 +9,12 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { captureContractInput, contractInputPath, materializeContractInput } from '../sdk/src/platform/contract/input-snapshot.js';
-import { createContractInputAuthority, revokeContractInputAuthority, registerContractInputCleanup } from '../sdk/src/platform/contract/input-authority.js';
-import { RetainedFileBytes } from '../sdk/src/platform/utils/retained-file-bytes.js';
-import type { Contract } from '../sdk/src/platform/contract/types.js';
-import { createCapturedExecBunRuntimeAdmission, projectCapturedExecBunRuntime } from '../sdk/src/platform/tools/exec/captured-bun-runtime-input.js';
-import { runCapturedCommand, type CapturedExecAuthority } from '../sdk/src/platform/tools/exec/captured-exec.js';
+import { captureContractInput, contractInputPath, materializeContractInput } from '../platform/src/platform/contract/input-snapshot.js';
+import { createContractInputAuthority, revokeContractInputAuthority, registerContractInputCleanup } from '../platform/src/platform/contract/input-authority.js';
+import { RetainedFileBytes } from '../platform/src/platform/utils/retained-file-bytes.js';
+import type { Contract } from '../platform/src/platform/contract/types.js';
+import { createCapturedExecBunRuntimeAdmission, projectCapturedExecBunRuntime } from '../platform/src/platform/tools/exec/captured-bun-runtime-input.js';
+import { runCapturedCommand, type CapturedExecAuthority } from '../platform/src/platform/tools/exec/captured-exec.js';
 
 const hostExistsSync = syncFs.existsSync;
 const roots: string[] = [];

@@ -1,8 +1,8 @@
 /**
- * ops-control-plane.test.ts, SDK-owned behavioral coverage for
+ * ops-control-plane.test.ts, platform-owned behavioral coverage for
  * OpsControlPlane (runtime/ops/control-plane.ts).
  *
- * This class ships from the SDK but had ZERO SDK-side tests (its only living
+ * This class ships from the platform but had ZERO platform-side tests (its only living
  * coverage was a consumer fork suite, now deleted). Covers, against the REAL
  * UnifiedTaskManager + RuntimeStore + RuntimeEventBus:
  *   - task cancel/pause/resume/retry legality per the lifecycle state machine
@@ -16,12 +16,12 @@ import {
   OpsControlPlane,
   OpsIllegalActionError,
   OpsTargetNotFoundError,
-} from '../sdk/src/platform/runtime/ops/control-plane.ts';
-import { UnifiedTaskManager } from '../sdk/src/platform/runtime/tasks/manager.ts';
-import { createRuntimeStore } from '../sdk/src/platform/runtime/store/index.ts';
-import type { RuntimeStore } from '../sdk/src/platform/runtime/store/index.ts';
-import type { RuntimeAgent, AgentLifecycleState } from '../sdk/src/platform/runtime/store/domains/agents.ts';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
+} from '../platform/src/platform/runtime/ops/control-plane.ts';
+import { UnifiedTaskManager } from '../platform/src/platform/runtime/tasks/manager.ts';
+import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.ts';
+import type { RuntimeStore } from '../platform/src/platform/runtime/store/index.ts';
+import type { RuntimeAgent, AgentLifecycleState } from '../platform/src/platform/runtime/store/domains/agents.ts';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
 
 interface OpsEventCapture {
   readonly type: string;

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { ProviderAuthRouteDescriptor } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ProviderAuthRouteDescriptor } from '@goodvibes-jev/engine/platform/platform/providers';
 import { formatProviderAuthRoute, summarizeProviderAuthRoutes } from '../../cli/provider-auth-routes.ts';
 
 describe('provider auth route formatting', () => {

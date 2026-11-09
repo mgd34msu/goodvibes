@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager, type ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
-import { setManagedSettingLock } from '@goodvibes-jev/engine/sdk/platform/runtime/settings';
+import { ConfigManager, type ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import { setManagedSettingLock } from '@goodvibes-jev/engine/platform/platform/runtime/settings';
 import { runWebuiCommand } from '../../daemon/webui-command.js';
 import { runPairCommand } from '../../daemon/pair-command.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';

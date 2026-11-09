@@ -1,12 +1,12 @@
 import { createRecallQueryCommands } from '@goodvibes-jev/engine/terminal-shell/recall-query';
 import type { CommandContext } from '../command-registry.ts';
-import type { MemoryApi } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import type { MemorySpineClient } from '@goodvibes-jev/engine/sdk/platform/runtime/memory-spine';
+import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import type { MemorySpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 
 /**
  * The local, host-only `MemoryApi`, kept for `/recall explain` and `/recall
  * vector` only. Both are ruled explicitly out of the wire catalog in
- * docs/decisions/2026-07-06-memory-wire-full-detach.md (SDK repo): `explain`
+ * docs/decisions/2026-07-06-memory-wire-full-detach.md (platform repo): `explain`
  * is a client-side projection over whatever read surface is active, not a
  * store operation, and vector-index rebuild is host/admin maintenance a wire
  * client does not own. Every other `/recall` subcommand reads/writes through

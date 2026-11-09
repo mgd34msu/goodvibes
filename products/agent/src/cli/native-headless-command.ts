@@ -1,5 +1,5 @@
-import { OwnedSelectionObservation } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
-import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { runHeadlessCommand, type HeadlessCommandRuntime } from '@goodvibes-jev/engine/terminal-shell/headless-command';
 import { createShellPathService } from '@/runtime/index.ts';
 import { bootstrapRuntime } from '../runtime/bootstrap.ts';

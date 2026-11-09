@@ -5,7 +5,7 @@ import {
   type InboxSurfaceContext, type RegisterInboxSurfaceOptions, type OwnedInboxSource,
   type InboxSurfaceRegistration, type InboxAggregatorSources, type EmailInboxOwner,
   type EmailInboxReadLease,
-} from '@goodvibes-jev/engine/sdk/platform/intake';
+} from '@goodvibes-jev/engine/platform/platform/intake';
 import type { OperatorMethodOutputMap } from '@goodvibes-jev/engine/contracts';
 
 declare const context: InboxSurfaceContext;

@@ -7,7 +7,7 @@
  */
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { RotateCcw, XCircle } from 'lucide-react';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import type { RuntimeTaskSummary } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { formatError, isSessionClosedError } from '../../lib/errors';
@@ -31,7 +31,7 @@ export function TaskDetail({ task, onClose }: { task: RuntimeTaskSummary; onClos
   const confirm = useConfirm();
 
   const cancel = useMutation({
-    mutationFn: (taskId: string) => sdk.operator.tasks.cancel(taskId),
+    mutationFn: (taskId: string) => platformClient.operator.tasks.cancel(taskId),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
       toast({ title: 'Task cancelled', tone: 'info' });
@@ -39,7 +39,7 @@ export function TaskDetail({ task, onClose }: { task: RuntimeTaskSummary; onClos
     onError: (error: unknown) => toast({ title: 'Cancel failed', description: friendlyError(error), tone: 'danger' }),
   });
   const retry = useMutation({
-    mutationFn: (taskId: string) => sdk.operator.tasks.retry(taskId),
+    mutationFn: (taskId: string) => platformClient.operator.tasks.retry(taskId),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
       toast({ title: 'Task retried', tone: 'success' });

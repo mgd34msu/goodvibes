@@ -20,8 +20,8 @@ import {
   runAppendOnlyRetentionSweep,
   runStartupAppendOnlySweep,
   type AppendOnlyStoreId,
-} from '../sdk/src/platform/runtime/retention/append-only-registry.ts';
-import { resolveScopedDirectory } from '../sdk/src/platform/runtime/surface-root.ts';
+} from '../platform/src/platform/runtime/retention/append-only-registry.ts';
+import { resolveScopedDirectory } from '../platform/src/platform/runtime/surface-root.ts';
 
 // The append-only stores the platform writes. A new append-only writer must be
 // added here AND registered in APPEND_ONLY_STORES, this list is the honest

@@ -17,7 +17,7 @@ import {
 import { clearModalStack, handleEscape, modalOpened } from './handler-modal-stack.ts';
 import { openOnboardingWizardState, type OpenOnboardingWizardOptions } from './handler-ui-state.ts';
 import type { InputHandlerLike as InputHandler } from './handler-types.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 export function openOnboardingWizardForHandler(
   handler: InputHandler,

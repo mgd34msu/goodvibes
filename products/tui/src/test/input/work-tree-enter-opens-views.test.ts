@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import type { BlockMeta } from '../../core/conversation-types.ts';
 import type { ConversationManager } from '../../core/conversation.ts';
 import { WorkTreeController } from '../../core/work-tree-focus.ts';

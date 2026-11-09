@@ -2,7 +2,7 @@
 
 Public GoodVibes HTTP transport package for JSON requests, auth headers, retry/backoff, SSE streams, and contract route invocation.
 
-Most applications should install `@goodvibes-jev/engine` and import `@goodvibes-jev/engine/sdk/transport-http`. These modules are subpath exports of the engine package.
+Most applications should install `@goodvibes-jev/engine` and import `@goodvibes-jev/engine/platform/transport-http`. These modules are subpath exports of the engine package.
 
 Key exports:
 - Contract routes: `invokeContractRoute`, `openContractRouteStream`, `requireContractRoute`.
@@ -19,7 +19,7 @@ Key exports:
 Use this surface when you need lower-level HTTP/SSE control or when you are building a custom GoodVibes client on top of the synced contracts.
 
 ```ts
-import { createJsonRequestInit, requestJsonRaw } from '@goodvibes-jev/engine/sdk/transport-http';
+import { createJsonRequestInit, requestJsonRaw } from '@goodvibes-jev/engine/platform/transport-http';
 
 const body = await requestJsonRaw(
   fetch,

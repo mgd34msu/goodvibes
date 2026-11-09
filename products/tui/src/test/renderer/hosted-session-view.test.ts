@@ -19,9 +19,9 @@ import {
   resetSharedHostedSessionFeed,
 } from '../../views/hosted-session-feed.ts';
 import { hostedBody, hostedHeaderTexts } from '../../input/agents-modal-text.ts';
-import type { HostedSessionRecord } from '@goodvibes-jev/engine/sdk/platform/hosted-sessions';
+import type { HostedSessionRecord } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
 import type { HostedSessionStreamEvent } from '../../runtime/client/hosted-session-stream.ts';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 
 function makeRecord(overrides: Partial<HostedSessionRecord> = {}): HostedSessionRecord {
   return {

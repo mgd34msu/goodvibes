@@ -1,8 +1,8 @@
-import { TriggerManager } from '@goodvibes-jev/engine/sdk/platform/triggers';
-import { createBunStreamHost, createProcessManagerTriggerHost, createTriggerActionExecutor } from '@goodvibes-jev/engine/sdk/platform/triggers';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { AgentManager, ProcessManager } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { SharedSessionBroker } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import { TriggerManager } from '@goodvibes-jev/engine/platform/platform/triggers';
+import { createBunStreamHost, createProcessManagerTriggerHost, createTriggerActionExecutor } from '@goodvibes-jev/engine/platform/platform/triggers';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { AgentManager, ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { SharedSessionBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { ShellPathService } from './index.js';
 
 /**

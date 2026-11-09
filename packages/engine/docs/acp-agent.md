@@ -17,16 +17,16 @@ bun packages/engine/scripts/acp-agent.ts
 Environment: `GOODVIBES_HOME` sets the embedded daemon's home directory
 (default `$HOME`).
 
-Programmatic use (exported from `@goodvibes-jev/engine/sdk/platform/acp`):
+Programmatic use (exported from `@goodvibes-jev/engine/platform/platform/acp`):
 
 ```ts
-import { serveAcpAgent, GoodVibesAcpAgent } from '@goodvibes-jev/engine/sdk/platform/acp';
+import { serveAcpAgent, GoodVibesAcpAgent } from '@goodvibes-jev/engine/platform/platform/acp';
 const { connection, dispose } = serveAcpAgent({ homeDirectory: process.env.HOME! });
 ```
 
 ## What it maps
 
-The base is the SDK Embedding API (`@goodvibes-jev/engine/sdk/embed`). Each
+The base is the platform embedding API (`@goodvibes-jev/engine/platform/embed`). Each
 ACP `session/new` boots an embedded GoodVibes session against the request's
 `cwd`, and the adapter is a protocol mapping over that surface:
 

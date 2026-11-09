@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
-import { captureNativeSnapshotControls, restoreControlSnapshot, takeSnapshot } from '../sdk/src/platform/browser/browser-snapshot.js';
-import { captureBrowserControlSnapshot } from '../sdk/src/platform/browser/browser-control-snapshot-data.js';
-import type { BrowserSnapshot } from '../sdk/src/platform/browser/browser-types.js';
+import { captureNativeSnapshotControls, restoreControlSnapshot, takeSnapshot } from '../platform/src/platform/browser/browser-snapshot.js';
+import { captureBrowserControlSnapshot } from '../platform/src/platform/browser/browser-control-snapshot-data.js';
+import type { BrowserSnapshot } from '../platform/src/platform/browser/browser-types.js';
 import { withSecurityReadings } from './helpers/security-readings.ts';
 
 function barrier() { let release!: () => void; const wait = new Promise<void>(resolve => { release = resolve; }); return { wait, release }; }

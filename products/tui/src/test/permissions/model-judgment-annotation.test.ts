@@ -1,11 +1,11 @@
 /**
  * Model-judgment annotation rendering (sandbox-model-judgment tier).
  *
- * The SDK's sandbox-judgment tier annotates an escalation ask by pushing one
+ * The platform's sandbox-judgment tier annotates an escalation ask by pushing one
  * string, verbatim "model judgment: looks safe because…" / "model judgment:
  * flags risk because…", onto `analysis.reasons`, after the sandbox-boundary
  * line and any policy reasons (see sandbox-escalation.ts /
- * sandbox-judgment.ts in the SDK). The card's generic Review rows only show
+ * sandbox-judgment.ts in the platform). The card's generic Review rows only show
  * the first 2 reasons, so without special handling the annotation is
  * silently cut whenever at least one policy reason precedes it. These tests
  * pin that it always gets its own row, clearly labeled, never truncated away.

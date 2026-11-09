@@ -1,5 +1,5 @@
 import { scoreInboxTriage, runInboxTriage, readTriageMetadataBatch, enrichItemsWithTriage, SqliteTriageStore, labelToTag,
-  type TriageInput, type TriageReceipt, type TriageStore } from '@goodvibes-jev/engine/sdk/platform/intake';
+  type TriageInput, type TriageReceipt, type TriageStore } from '@goodvibes-jev/engine/platform/platform/intake';
 declare const items: readonly TriageInput[];
 declare const store: TriageStore;
 const receipt: Promise<readonly TriageReceipt[]> = scoreInboxTriage(items);

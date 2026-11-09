@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { parseBrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-sdk';
+import { parseBrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-api';
 import { readCommandRankResponse } from '../../src/lib/command-judgment';
 import { readDaemonRefusalResponse } from '../../src/lib/daemon-refusal';
 import { correlateRuntimeReading, loadBrowserJudgmentRuntimeCapture } from './browser-judgment-runtime-fixture';

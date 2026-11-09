@@ -27,7 +27,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 
 const roots: string[] = [];
 

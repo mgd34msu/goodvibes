@@ -16,7 +16,7 @@
  *     would live somewhere the user never asked for. It moves AFTER the apply
  *     rather than before, so a refusal (nothing on disk, a damaged file) leaves
  *     this boot on its own session instead of adopting one it never loaded.
- *   - The conversation is rebuilt through the SDK's `applyRecoverySnapshot`,
+ *   - The conversation is rebuilt through the platform's `applyRecoverySnapshot`,
  *     which reads and retires the snapshot in one operation and runs the same
  *     reset/fromJSON/rebuild + journal-replay sequence a normal resume runs.
  *     This module supplies the live conversation, the persist callback and the
@@ -26,12 +26,12 @@
  *   - Footer token counters are rehydrated from the restored history, so the
  *     numbers on screen describe the conversation actually in memory.
  */
-import { applyRecoverySnapshot, confirmRecoveryRestore } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { applyRecoverySnapshot, confirmRecoveryRestore } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { RecoveryPromptDeps, RecoveryTypeaheadHooks } from './recovery-prompt.ts';
 import type { ConversationManager, ConversationMessageSnapshot } from '../core/conversation.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
-import type { SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
+import type { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 
 export interface RecoveryOfferWiringInput {
   readonly surface: SessionSurface;

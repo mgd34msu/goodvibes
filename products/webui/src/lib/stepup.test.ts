@@ -3,7 +3,7 @@
  *
  * The ceremony calls themselves (navigator.credentials.create/get) need a real authenticator,
  * so they belong to the live/e2e proof. These cases lock the pure, testable parts: the
- * base64url codec, the assertion header encoding (asserted to match the SDK's exact format
+ * base64url codec, the assertion header encoding (asserted to match the platform's exact format
  * AND its exact header name), and the COSE-public-key slice out of an attestation's
  * authenticatorData.
  */

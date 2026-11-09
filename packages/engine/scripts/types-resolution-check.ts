@@ -3,13 +3,13 @@
  * CI distributes the same exhaustive plan over independent runners.
  */
 import { execFileSync } from 'node:child_process';
-import { cleanupStage, collectTarballs, createSdkTempDir, packStage, stagePackages } from './release-shared.ts';
+import { cleanupStage, collectTarballs, createPlatformTempDir, packStage, stagePackages } from './release-shared.ts';
 import { packedExports, parseShard, planChecks } from './types-resolution-plan.ts';
 import { checkChunk } from './types-resolution-runner.ts';
 
 const shard = parseShard(process.argv.slice(2));
 const { tempRoot, publicStages } = await stagePackages();
-const packDestination = createSdkTempDir('goodvibes-sdk-attw-');
+const packDestination = createPlatformTempDir('goodvibes-attw-');
 try {
   const tarballs = collectTarballs(publicStages.map((stage) => packStage(stage.stageDir, packDestination)), packDestination);
   // Inspect the actual shipped manifest, not the source-condition workspace one.

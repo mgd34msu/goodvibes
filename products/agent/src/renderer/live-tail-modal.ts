@@ -6,7 +6,7 @@
  * goes back to the process monitor; the process keeps running (k stops it).
  */
 
-import type { ProcessManager } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { ProcessEntry } from './process-modal.ts';
 import { activeTokens } from './theme.ts';
 import { beginModal, finishModal, scrollCountText, wrapLines, type KitHint, type SurfaceLayer } from './surface-kit.ts';

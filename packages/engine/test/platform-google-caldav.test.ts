@@ -19,15 +19,15 @@ import {
   parseCalendarDataEvents,
   parseMultistatus,
   unfoldIcsLines,
-} from '../sdk/src/platform/google/caldav-parse.ts';
+} from '../platform/src/platform/google/caldav-parse.ts';
 import {
   CalDavClient,
   type CalDavAuth,
   type CalDavHttpPort,
   type CalDavHttpRequest,
   type CalDavHttpResponse,
-} from '../sdk/src/platform/google/caldav-client.ts';
-import { createFetchCalDavHttpPort } from '../sdk/src/platform/google/node.ts';
+} from '../platform/src/platform/google/caldav-client.ts';
+import { createFetchCalDavHttpPort } from '../platform/src/platform/google/node.ts';
 
 // ---------------------------------------------------------------------------
 // Parser: WebDAV multistatus

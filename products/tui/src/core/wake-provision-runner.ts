@@ -5,7 +5,7 @@
 // way, and the result was that installing goodvibes produced a wake-word feature
 // that could not start until the user went and found a command nobody had told
 // them about. The installer and the npm postinstall provision the model now, and
-// a daemon retries at boot whatever the install could not fetch (the SDK's
+// a daemon retries at boot whatever the install could not fetch (the platform's
 // voice/wake/install-provision.ts owns that policy).
 //
 // So what this command is FOR, on a normal machine, is recovery and
@@ -20,7 +20,7 @@
 // `setup`. Turning `voice.wake.enabled` on never fetches anything either, see
 // audio/wake-runtime.ts, which reports what is missing and names this command.
 //
-// Both SDK calls are injectable so a wire test drives the whole flow, a fresh
+// Both platform calls are injectable so a wire test drives the whole flow, a fresh
 // host, a corrupt artifact, a failed component, with no network and no files.
 // ---------------------------------------------------------------------------
 
@@ -31,7 +31,7 @@ import {
   type WakeProvisionResult,
   type WakeProvisionStatus,
   type WakeRuntimeSettings,
-} from '@goodvibes-jev/engine/sdk/platform/voice';
+} from '@goodvibes-jev/engine/platform/platform/voice';
 import {
   WAKE_SETUP_ANNOUNCEMENT,
   wakeProvisionReceiptLines,
@@ -44,9 +44,9 @@ export interface WakeProvisionRunnerDeps {
   /** Already-resolved `voice.wake.*` rows, so the status block reports the live posture. */
   readonly settings: WakeRuntimeSettings;
   readonly print: (block: string) => void;
-  /** Injected in tests; defaults to the SDK's content-verifying read. */
+  /** Injected in tests; defaults to the platform's content-verifying read. */
   readonly readStatus?: (managedRoot: string) => WakeProvisionStatus;
-  /** Injected in tests; defaults to the SDK's checksum-pinned download. */
+  /** Injected in tests; defaults to the platform's checksum-pinned download. */
   readonly provision?: (
     managedRoot: string,
     onProgress: (progress: WakeProvisionProgress) => void,

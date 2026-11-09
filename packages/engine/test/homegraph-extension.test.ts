@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { HOME_GRAPH_KNOWLEDGE_EXTENSION } from '../sdk/src/platform/knowledge/home-graph/extension.js';
+import { HOME_GRAPH_KNOWLEDGE_EXTENSION } from '../platform/src/platform/knowledge/home-graph/extension.js';
 
 describe('Home Graph knowledge extension', () => {
   test('registers concrete Home Assistant object profiles on the base knowledge seam', () => {

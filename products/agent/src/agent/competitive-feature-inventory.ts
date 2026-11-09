@@ -153,7 +153,7 @@ export const COMPETITIVE_FEATURE_INVENTORY: readonly CompetitiveFeatureInventory
     goodVibesNow: 'Agent has a strong operator workspace with assistant-first lanes (setup, chat/model, project work, Personal Ops, research/docs, background work, safety/recovery), a route planner that accepts plain user tasks and returns preferred routes without exposing package-ownership language, and first-class adapters for host/daemon health, settings, models, Personal Ops, schedules, execution, memory, research, channels, security, support, sessions, and audit that all share one assistant surface. All three tracked competitors also present a unified assistant model to the user.',
     nextMoves: [
       'Keep adding plain-language route fixtures for any user task that still surfaces technical ownership language in the planner output.',
-      'Promote new daemon and SDK contracts into first-class Agent routes only after they have visible status, confirmation, and recovery semantics.',
+      'Promote new daemon and platform contracts into first-class Agent routes only after they have visible status, confirmation, and recovery semantics.',
       'Audit new workspace lanes at each release to ensure no lane requires the user to understand GoodVibes package topology.',
     ],
     competitorSignals: [
@@ -171,7 +171,7 @@ export const COMPETITIVE_FEATURE_INVENTORY: readonly CompetitiveFeatureInventory
     owners: ['agent', 'connected-host', 'release'],
     goodVibesNow: 'Agent ships a setup wizard that orders connected-host readiness, auth, provider/model access, install smoke, local model readiness, Agent Knowledge, behavior, channels, Browser/PWA readiness, automation review, browser/desktop control, delegation, and finish state, with progress, current-step route hints, backtracking, and saved checkpoints that resume across restarts. Setup receipt artifacts auto-advance matching rows. All three tracked competitors also ship guided first-run flows that handle runtime dependencies and assistant configuration.',
     nextMoves: [
-      'Keep per-step setup receipt schemas aligned with any new SDK/daemon first-run receipt versions before release evidence accepts them.',
+      'Keep per-step setup receipt schemas aligned with any new platform/daemon first-run receipt versions before release evidence accepts them.',
       'Add real connected-host CI fixtures for ordered setup receipt event streams once the daemon publishes stable stream snapshots outside unit tests.',
       'Verify that the setup wizard correctly handles every new channel adapter as it ships to prevent silent channel-pairing gaps at first run.',
     ],
@@ -191,7 +191,7 @@ export const COMPETITIVE_FEATURE_INVENTORY: readonly CompetitiveFeatureInventory
     goodVibesNow: 'Agent has a first-class `schedule` adapter for list/create/remind/edit/run/pause/resume/delete, confirmed schedule creation, routine promotion, connected schedule editing with before/after diffs, and allowlisted lifecycle controls. The read-only autonomy queue maps visible owners, status, inspect routes, live research runs, connected-host task records, approval records, automation run records, schedule records, and delegated subagent orchestration routes with exact confirmed controls. All three tracked competitors also offer background task scheduling and autonomous background work.',
     nextMoves: [
       'Add live connected-host verification artifacts from real daemon watcher source streams as soon as CI can publish a stable GoodVibes daemon fixture.',
-      'Broaden provider-specific watcher source fixtures beyond Gmail/email as the SDK and daemon publish additional source-owned watcher families.',
+      'Broaden provider-specific watcher source fixtures beyond Gmail/email as the platform and daemon publish additional source-owned watcher families.',
       'Surface active and completed schedule run history in the Home cockpit so users can see what the assistant did while they were away without drilling into the queue.',
     ],
     competitorSignals: [
@@ -207,9 +207,9 @@ export const COMPETITIVE_FEATURE_INVENTORY: readonly CompetitiveFeatureInventory
     bestInClassRequirement: 'Computer use includes browser control, shell, files, code edits, desktop/device actions, sandboxing, undo, and live tool cards.',
     goodVibesStatus: 'parity',
     owners: ['agent', 'connected-host', 'companion'],
-    goodVibesNow: 'Agent exposes local-first execution posture for read/search/analyze, file edit/write, bounded foreground shell commands, Work workspace process supervision with stdin/PTY/sudo parity, visible process monitor/live tail/tool inspector supervision routes, first-class `execution`, `computer`, `terminal`, and `process` adapters, certified SDK/daemon interactive runtime read models, and confirmed file recovery. All three tracked competitors also ship browser control, shell access, and file tools.',
+    goodVibesNow: 'Agent exposes local-first execution posture for read/search/analyze, file edit/write, bounded foreground shell commands, Work workspace process supervision with stdin/PTY/sudo parity, visible process monitor/live tail/tool inspector supervision routes, first-class `execution`, `computer`, `terminal`, and `process` adapters, certified platform/daemon interactive runtime read models, and confirmed file recovery. All three tracked competitors also ship browser control, shell access, and file tools.',
     nextMoves: [
-      'Keep certified interactive runtime schema fixtures current as SDK/daemon process, PTY, sudo, and browser-control contracts add fields.',
+      'Keep certified interactive runtime schema fixtures current as platform/daemon process, PTY, sudo, and browser-control contracts add fields.',
       'Add connected-host CI coverage for real daemon interactive runtime streams and browser/desktop command receipts when stable fixtures are available.',
       'Keep delegation for isolation, parallelism, or remote execution positioned as a tool choice, not the default answer to any computer-use ask.',
     ],
@@ -228,7 +228,7 @@ export const COMPETITIVE_FEATURE_INVENTORY: readonly CompetitiveFeatureInventory
     owners: ['agent', 'connected-host'],
     goodVibesNow: 'Agent has a Research workspace with browser-runner readiness, a project-local visible run ledger with checkpoint/pause/resume/cancel, bounded public source-candidate search, confirmed source collection with queue records, a reviewed-source bundle handoff, sourced report artifacts with citation coverage repair hints, and visual report packets with evidence matrix, findings board, and dated source/comparison views. Odysseus ships a comparable Deep Research workflow, and all three competitors have web tools, session search, and research-ready batch capabilities.',
     nextMoves: [
-      'Keep live research runner and visual report renderer certification fixtures current as SDK/daemon read models add fields.',
+      'Keep live research runner and visual report renderer certification fixtures current as platform/daemon read models add fields.',
       'Add connected-host CI coverage for real browser-backed research runs, page/source receipts, rendered report routes, and failure states when stable daemon fixtures publish them.',
       'Add a research source credibility scoring display to the source review queue so users can see provenance quality before adding a source to a report.',
     ],
@@ -291,7 +291,7 @@ export const COMPETITIVE_FEATURE_INVENTORY: readonly CompetitiveFeatureInventory
     nextMoves: [
       'Ship skill-standard import/export (agentskills.io-compatible) so review-first skills can still be shared and discovered across agents, see skill-standard-interop item.',
       'Add a fast-path confirmation mode for low-risk skill additions that have already been reviewed in a prior session to reduce ceremony without removing review.',
-      'Keep Honcho, Mem0, Supermemory, and similar provider schema fixtures current as SDK/daemon contracts add provider-owned receipt fields.',
+      'Keep Honcho, Mem0, Supermemory, and similar provider schema fixtures current as platform/daemon contracts add provider-owned receipt fields.',
     ],
     competitorSignals: [
       { competitor: 'openclaw', evidence: 'OpenClaw ships a community skills marketplace and agents can write their own skills; skill creation does not require a staged user review boundary.' },
@@ -308,7 +308,7 @@ export const COMPETITIVE_FEATURE_INVENTORY: readonly CompetitiveFeatureInventory
     owners: ['agent', 'connected-host'],
     goodVibesNow: 'GoodVibes ships `agent_orchestration` and `agent_orchestration_agent` for visible subagent records, serial-by-default policy, managed milestones, per-agent plan cards with cancel/message/wait routes, remote-runner contract/artifact evidence, and durable remote closeout receipt evidence. Execution backends are local and connected-host only. Hermes ships six terminal backends (local, Docker, SSH, Daytona, Singularity, Modal) plus isolated subagents with own conversation and terminal; GoodVibes currently has no Docker/SSH/cloud terminal backend.',
     nextMoves: [
-      'Keep remote-runtime outcome and workspace certification fixtures current as SDK/daemon read models add fields.',
+      'Keep remote-runtime outcome and workspace certification fixtures current as platform/daemon read models add fields.',
       'Add connected-host CI coverage for real remote capture/export/closeout streams and workspace lifecycle controls when stable daemon fixtures publish them.',
       'Design the remote execution backend contract so Docker and SSH backends can be added through the connected-host operator method surface.',
     ],
@@ -329,7 +329,7 @@ export const COMPETITIVE_FEATURE_INVENTORY: readonly CompetitiveFeatureInventory
     nextMoves: [
       'Extend wake-word capture to a companion platform (macOS or Android), the host surfaces listen, a phone in the user\'s pocket does not.',
       'Design a continuous Talk Mode that integrates TTS output with push-to-talk input into a single conversation loop with latency-aware turn detection.',
-      'Keep companion device capability certification fixtures current as SDK/daemon records add camera, screen, location, notification, wake, and device-command fields.',
+      'Keep companion device capability certification fixtures current as platform/daemon records add camera, screen, location, notification, wake, and device-command fields.',
     ],
     competitorSignals: [
       { competitor: 'openclaw', evidence: 'OpenClaw ships wake words on macOS/iOS and a continuous Talk Mode on Android with ElevenLabs and system TTS integration.' },
@@ -344,9 +344,9 @@ export const COMPETITIVE_FEATURE_INVENTORY: readonly CompetitiveFeatureInventory
     bestInClassRequirement: 'The browser surface is not a secondary admin panel; it is a full user-grade assistant cockpit.',
     goodVibesStatus: 'partial',
     owners: ['connected-host', 'agent'],
-    goodVibesNow: 'GoodVibes ships a TUI as the primary interface and a browser cockpit/PWA route accessible through `computer action:"browser|open_browser"` once connected-host publishes certified browser-native category routes and first-run receipts. Agent reports workspace-category coverage and mobile/PWA controls when the SDK/daemon certifies the route. The PWA surface is partial: Odysseus primary experience is a self-hosted responsive web workspace; OpenClaw serves a Control UI, WebChat, and companion apps from the Gateway. GoodVibes does not yet have a standalone desktop or web app shell.',
+    goodVibesNow: 'GoodVibes ships a TUI as the primary interface and a browser cockpit/PWA route accessible through `computer action:"browser|open_browser"` once connected-host publishes certified browser-native category routes and first-run receipts. Agent reports workspace-category coverage and mobile/PWA controls when the platform/daemon certifies the route. The PWA surface is partial: Odysseus primary experience is a self-hosted responsive web workspace; OpenClaw serves a Control UI, WebChat, and companion apps from the Gateway. GoodVibes does not yet have a standalone desktop or web app shell.',
     nextMoves: [
-      'Keep certified browser/PWA category-route and first-run receipt schemas in lockstep with SDK/daemon contract versions.',
+      'Keep certified browser/PWA category-route and first-run receipt schemas in lockstep with platform/daemon contract versions.',
       'Add live connected-host browser/PWA acceptance artifacts to every stable-release verification run.',
       'Clarify the roadmap for a standalone desktop app so users who cannot use the TUI have a documented path to first-class access.',
     ],

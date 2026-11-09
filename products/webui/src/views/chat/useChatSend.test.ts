@@ -2,8 +2,8 @@
  * Tests for useChatSend lineage and selection lifetime.
  *
  * Tests use a lightweight React DOM harness (createRoot + flushSync) with
- * a real QueryClientProvider. The sdk module is mocked to prevent HTTP calls.
- * Finite synthetic SDK replies include deferred success and failure. The real
+ * a real QueryClientProvider. The platform module is mocked to prevent HTTP calls.
+ * Finite synthetic platform replies include deferred success and failure. The real
  * hook and QueryClient own each mutation and its completion callbacks.
  */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
@@ -19,7 +19,7 @@ import { createChatSelectionTracker } from '../../lib/chat-selection';
 import { invalidateClientLifetime } from '../../lib/client-lifetime';
 
 // ---------------------------------------------------------------------------
-// Mock sdk, prevents real HTTP calls from the mutation function
+// Mock platform, prevents real HTTP calls from the mutation function
 // ---------------------------------------------------------------------------
 // `createMessageImpl` is reassignable per-test (e.g. to reject with a 401) since
 // mock.module locks in the module shape once, but not what the inner fn does.
@@ -39,7 +39,7 @@ const retryCalls: { sessionId: string; input?: { messageId?: string } }[] = [];
 const editCalls: { sessionId: string; messageId: string; input: { content: string } }[] = [];
 
 mock.module('../../lib/goodvibes', () => ({
-  sdk: {
+  client: {
     chat: {
       sessions: { create: async () => { createSessionCalls.push('create'); return createSessionImpl(); } },
       messages: {

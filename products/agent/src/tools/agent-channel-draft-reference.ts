@@ -1,10 +1,10 @@
 import { isDeepStrictEqual } from 'node:util';
-import { readFileObservation, type FileObservation } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { readFileObservation, type FileObservation } from '@goodvibes-jev/engine/platform/platform/utils';
 import { dirname } from 'node:path';
-import { assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector, type ToolNativeReferencesCapture } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { channelDraftWireReference, historicalChannelDraftWireReference, matchesHistoricalDraftWireReference } from '@goodvibes-jev/engine/sdk/platform/channels';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
+import { assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector, type ToolNativeReferencesCapture } from '@goodvibes-jev/engine/platform/platform/tools';
+import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
+import { channelDraftWireReference, historicalChannelDraftWireReference, matchesHistoricalDraftWireReference } from '@goodvibes-jev/engine/platform/platform/channels';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { CommandContext } from '../input/command-registry.ts';
 import { channelDraftFilePath, getDraft, readChannelDrafts } from '../agent/channel-draft.ts';
 import { captureAgentExportPath } from './agent-artifact-effect.ts';

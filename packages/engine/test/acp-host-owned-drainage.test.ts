@@ -1,7 +1,7 @@
 /** Fault injection retains ownership; the child and ACP handshake remain real. */
 import { expect, spyOn, test } from 'bun:test';
 import { join } from 'node:path';
-import { AcpHostService } from '../sdk/src/platform/acp/host.ts';
+import { AcpHostService } from '../platform/src/platform/acp/host.ts';
 
 test('ACP failed child drainage remains owned and repeat stop reports the original failure', async () => {
   let child: ReturnType<typeof Bun.spawn> | undefined;

@@ -2,11 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { WorkspaceCheckpointManager } from '../sdk/src/platform/workspace/checkpoint/manager.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { emitTurnCompleted, emitTurnError, emitTurnCancel } from '../sdk/src/platform/runtime/emitters/turn.js';
-import { emitAgentCompleted } from '../sdk/src/platform/runtime/emitters/agents.js';
-import type { EmitterContext } from '../sdk/src/platform/runtime/emitters/index.js';
+import { WorkspaceCheckpointManager } from '../platform/src/platform/workspace/checkpoint/manager.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { emitTurnCompleted, emitTurnError, emitTurnCancel } from '../platform/src/platform/runtime/emitters/turn.js';
+import { emitAgentCompleted } from '../platform/src/platform/runtime/emitters/agents.js';
+import type { EmitterContext } from '../platform/src/platform/runtime/emitters/index.js';
 
 function tempWorkspace(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));

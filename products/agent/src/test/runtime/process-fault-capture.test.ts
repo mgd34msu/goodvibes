@@ -14,7 +14,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { createProcessFaultHandlers } from '../../runtime/process-fault-capture.ts';
-// The record builder, reader and bounded appender are the SDK's now, the agent
+// The record builder, reader and bounded appender are the platform's now, the agent
 // carried a copy only until the export was published. These assertions are
 // unchanged: they still describe what the agent's crash log must contain, and
 // they now run against the implementation that actually writes it.
@@ -24,7 +24,7 @@ import {
   CRASH_LOG_FILENAME,
   CRASH_LOG_MAX_RECORDS,
   readCrashRecords,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+} from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 
 function tempHome(): string {
   // The repo's own helper: scratch directories live under the project, not

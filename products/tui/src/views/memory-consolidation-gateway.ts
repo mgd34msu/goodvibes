@@ -3,13 +3,13 @@
  * builtin-modals resolves this lazily for every refresh, using the same daemon
  * connection as commands. The engine owns the verb and unavailable classifier.
  */
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   createMemoryConsolidationGateway as createEngineMemoryConsolidationGateway,
   classifyConsolidationFetchError as classifyEngineConsolidationFetchError,
   type MemoryConsolidationFetchFailure,
   type MemoryConsolidationGatewayResolution,
-} from '@goodvibes-jev/engine/sdk/platform/knowledge';
+} from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { resolveOperatorRpc, describeOperatorRpcError } from '../input/commands/operator-rpc.ts';
 
 export type {
@@ -18,7 +18,7 @@ export type {
   MemoryConsolidationGateway,
   MemoryConsolidationGatewayResolution,
   MemoryConsolidationFetchFailure,
-} from '@goodvibes-jev/engine/sdk/platform/knowledge';
+} from '@goodvibes-jev/engine/platform/platform/knowledge';
 
 export interface MemoryConsolidationGatewayDeps {
   readonly configManager: ConfigManager;

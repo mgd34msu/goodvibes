@@ -1,9 +1,9 @@
 import { afterEach, expect, test } from 'bun:test';
-import { createSchema } from '../sdk/src/platform/knowledge/store-schema.js';
-import { validateCurrentKnowledgeSchema } from '../sdk/src/platform/knowledge/store-current-schema-validation.js';
-import { createEmptyWorkLedgerState } from '../sdk/src/platform/workflow/work-ledger/service.js';
-import { validateNativeKnowledgeReadSchema } from '../sdk/src/platform/state/knowledge-schema-read-plan.js';
-import { loadSqlJsEngine, type SqlDatabase } from '../sdk/src/platform/state/sqlite-store.js';
+import { createSchema } from '../platform/src/platform/knowledge/store-schema.js';
+import { validateCurrentKnowledgeSchema } from '../platform/src/platform/knowledge/store-current-schema-validation.js';
+import { createEmptyWorkLedgerState } from '../platform/src/platform/workflow/work-ledger/service.js';
+import { validateNativeKnowledgeReadSchema } from '../platform/src/platform/state/knowledge-schema-read-plan.js';
+import { loadSqlJsEngine, type SqlDatabase } from '../platform/src/platform/state/sqlite-store.js';
 
 const databases: SqlDatabase[] = [];
 afterEach(() => { for (const database of databases.splice(0)) database.close(); });

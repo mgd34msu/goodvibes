@@ -1,4 +1,4 @@
-import { homeGraphSourceIdentityIndexes } from '../sdk/src/platform/knowledge/store-homegraph-source-selector.js';
+import { homeGraphSourceIdentityIndexes } from '../platform/src/platform/knowledge/store-homegraph-source-selector.js';
 /** Source regressions for actual persisted scope/target publication. UNRUN until
  * coding is complete; these drive native stores/services, not formatter mocks. */
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
@@ -6,16 +6,16 @@ import { Database } from 'bun:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ArtifactStore } from '../sdk/src/platform/artifacts/index.js';
-import { materializeGeneratedKnowledgeProjection } from '../sdk/src/platform/knowledge/generated-projections.js';
-import { listGeneratedKnowledgePages } from '../sdk/src/platform/knowledge/generated-pages.js';
-import { KnowledgeProjectionService } from '../sdk/src/platform/knowledge/projections.js';
-import { prepareKnowledgeScopeSelection } from '../sdk/src/platform/knowledge/scope-selection.js';
-import { knowledgeSourceMatchesScope } from '../sdk/src/platform/knowledge/scope-records.js';
-import { ALL_SPACES_PROJECTION_NAMESPACE, generatedProjectionIdentity, KnowledgeProjectionIdentityHeldError } from '../sdk/src/platform/knowledge/store-generated-projection-selector.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { retainStoredGeneratedProjectionReferences } from '../sdk/src/platform/knowledge/generated-projection-legacy-references.js';
-import { configureKnowledgeArtifactReferences } from '../sdk/src/platform/knowledge/artifact-reference-ensemble.js';
+import { ArtifactStore } from '../platform/src/platform/artifacts/index.js';
+import { materializeGeneratedKnowledgeProjection } from '../platform/src/platform/knowledge/generated-projections.js';
+import { listGeneratedKnowledgePages } from '../platform/src/platform/knowledge/generated-pages.js';
+import { KnowledgeProjectionService } from '../platform/src/platform/knowledge/projections.js';
+import { prepareKnowledgeScopeSelection } from '../platform/src/platform/knowledge/scope-selection.js';
+import { knowledgeSourceMatchesScope } from '../platform/src/platform/knowledge/scope-records.js';
+import { ALL_SPACES_PROJECTION_NAMESPACE, generatedProjectionIdentity, KnowledgeProjectionIdentityHeldError } from '../platform/src/platform/knowledge/store-generated-projection-selector.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { retainStoredGeneratedProjectionReferences } from '../platform/src/platform/knowledge/generated-projection-legacy-references.js';
+import { configureKnowledgeArtifactReferences } from '../platform/src/platform/knowledge/artifact-reference-ensemble.js';
 import { useKnowledgeAnswerReadings } from './_helpers/knowledge-answer-readings.js';
 
 useKnowledgeAnswerReadings();

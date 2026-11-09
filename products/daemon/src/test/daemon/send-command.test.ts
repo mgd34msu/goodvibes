@@ -1,5 +1,5 @@
 import { describe, expect, spyOn, test } from 'bun:test';
-import type { ChannelDeliveryRequest } from '@goodvibes-jev/engine/sdk/platform/channels';
+import type { ChannelDeliveryRequest } from '@goodvibes-jev/engine/platform/platform/channels';
 import { SecretsManager } from '../../config/secrets.js';
 import { runDaemonCli } from '../../cli/run.js';
 import * as configuration from '../../cli/configuration.js';

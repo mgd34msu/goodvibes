@@ -16,10 +16,10 @@
 import { randomBytes } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type { SessionMeta, SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
-import { clearTurnAnchors, getTurnAnchors, persistTurnAnchors, recordTurnAnchor } from '@goodvibes-jev/engine/sdk/platform/rewind';
+import type { SessionMeta, SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
+import { clearTurnAnchors, getTurnAnchors, persistTurnAnchors, recordTurnAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
 import type { TerminalConversationManager } from './terminal-conversation.js';
-import type { SessionSurface } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import type { SessionSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 export interface FreshConversationContext {
   readonly session: {
     readonly conversationManager: TerminalConversationManager;
@@ -32,7 +32,7 @@ export interface FreshConversationContext {
 }
 
 import { saveWorkTreeFolds } from './work-tree-fold-store.js';
-import { journalPathFor, openTranscriptJournal, removeRecoveryPoint } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { journalPathFor, openTranscriptJournal, removeRecoveryPoint } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 
 export interface FreshConversationResult {
   /** Session id the previous conversation was saved under, or null when there was nothing to keep. */
@@ -93,7 +93,7 @@ export function startFreshConversation(ctx: FreshConversationContext, surface?: 
   clearTurnAnchors(liveId);
   if (surface) {
     // persistTurnAnchors writes nothing for an empty list, so the old sidecar
-    // (`<sessionId>.anchors.json`, the SDK's rewind/turn-anchors.ts name) is
+    // (`<sessionId>.anchors.json`, the platform's rewind/turn-anchors.ts name) is
     // removed here, or a later resume would bring the old anchors back.
     try {
       if (!/[\\/]/.test(liveId)) rmSync(join(surface.sessionsDir, `${liveId}.anchors.json`), { force: true });

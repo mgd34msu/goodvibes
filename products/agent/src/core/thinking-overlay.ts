@@ -2,10 +2,10 @@
  * thinking-overlay.ts, what main is doing for the throbber (the row above the
  * input area) and its honest stall clock, extracted from main.ts's render loop.
  *
- * The SDK orchestrator surfaces no lastDeltaAtMs / reconnect signal directly, so
+ * The platform orchestrator surfaces no lastDeltaAtMs / reconnect signal directly, so
  * ThinkingStallClock derives a per-turn last-delta clock from streaming
  * output-token advances, a real, honest proxy that degrades gracefully with
- * zero new SDK events. buildThrobberState turns that, the running tool call,
+ * zero new platform events. buildThrobberState turns that, the running tool call,
  * a pending approval and a running compaction into the throbber's state
  * (renderer/throbber.ts); buildThinkingOverlay keeps only the opt-in partial
  * tool preview as a faint row under the transcript.
@@ -14,9 +14,9 @@
 import { UIFactory, type ThinkingStallInfo } from '../renderer/ui-factory.ts';
 import { resolveThrobberActivity, type ThrobberState, type ThrobberToolCall } from '../renderer/throbber.ts';
 import { trackActiveTool, type ActiveToolCall } from './active-tool-tracker.ts';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { Orchestrator } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
+import type { Orchestrator } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 
 /**
  * Per-turn last-delta clock. tick() seeds at turn start, then pushes the clock

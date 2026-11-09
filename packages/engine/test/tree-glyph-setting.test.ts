@@ -2,9 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { CONFIG_SCHEMA } from '../sdk/src/platform/config/schema.ts';
-import { TREE_GLYPHS_CONFIG_KEY, readTreeGlyphSet } from '../sdk/src/platform/runtime/operations.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { CONFIG_SCHEMA } from '../platform/src/platform/config/schema.ts';
+import { TREE_GLYPHS_CONFIG_KEY, readTreeGlyphSet } from '../platform/src/platform/runtime/operations.ts';
 import { laneGlyphs, resolveTreeGlyphSet } from './fixtures/upstream-tui-tree-glyphs.ts';
 import { withTestTimeout } from './_helpers/test-timeout.ts';
 
@@ -93,7 +93,7 @@ describe('read-only tree-glyph presentation', () => {
   });
 
   test('malformed async readers cannot select a style or leak a private rejection', async () => {
-    const readerPath = resolve(import.meta.dir, '../sdk/src/platform/runtime/tree-glyph-setting.ts');
+    const readerPath = resolve(import.meta.dir, '../platform/src/platform/runtime/tree-glyph-setting.ts');
     const source = `
       import { readTreeGlyphSet } from ${JSON.stringify(readerPath)};
       const failure = () => new Error('synthetic-private-glyph-setting');

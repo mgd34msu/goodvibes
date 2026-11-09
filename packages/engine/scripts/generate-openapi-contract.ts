@@ -11,12 +11,12 @@
  *     REST bindings, auth scheme, transports)
  *   - contracts/src/generated/foundation-client-types.ts +
  *     operator-method-ids.ts (the typed-client-IO ratchet inputs), used to mark
- *     the untyped methods HONESTLY: every method whose SDK client IO resolves to
+ *     the untyped methods HONESTLY: every method whose engine client IO resolves to
  *     `unknown` carries `x-typed-client-io: false`. They are never omitted.
  *
  * Outputs (both committed, kept in lockstep by this one generator):
  *   - contracts/artifacts/operator-openapi.json  (package-exported,
- *     prepare-sdk-package copies the artifacts dir into the SDK dist)
+ *     prepare-engine-package copies the artifacts dir into the engine dist)
  *   - docs/operator-openapi.json                          (docs-fetchable copy)
  *
  * Usage:
@@ -31,14 +31,14 @@ import { parseMapKeys, parseMethodIds, untypedMethodIds } from './foundation-io-
 import type { OperatorContractManifest, OperatorMethodContract, JsonSchema } from '../contracts/src/types.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SDK_ROOT = resolve(__dirname, '..');
+const ENGINE_ROOT = resolve(__dirname, '..');
 const CHECK_ONLY = process.argv.includes('--check');
 
-const CONTRACT_PATH = resolve(SDK_ROOT, 'contracts/artifacts/operator-contract.json');
-const FOUNDATION_TYPES_PATH = resolve(SDK_ROOT, 'contracts/src/generated/foundation-client-types.ts');
-const METHOD_IDS_PATH = resolve(SDK_ROOT, 'contracts/src/generated/operator-method-ids.ts');
-const ARTIFACT_OUT = resolve(SDK_ROOT, 'contracts/artifacts/operator-openapi.json');
-const DOCS_OUT = resolve(SDK_ROOT, 'docs/operator-openapi.json');
+const CONTRACT_PATH = resolve(ENGINE_ROOT, 'contracts/artifacts/operator-contract.json');
+const FOUNDATION_TYPES_PATH = resolve(ENGINE_ROOT, 'contracts/src/generated/foundation-client-types.ts');
+const METHOD_IDS_PATH = resolve(ENGINE_ROOT, 'contracts/src/generated/operator-method-ids.ts');
+const ARTIFACT_OUT = resolve(ENGINE_ROOT, 'contracts/artifacts/operator-openapi.json');
+const DOCS_OUT = resolve(ENGINE_ROOT, 'docs/operator-openapi.json');
 
 const INVOKE_PATH = '/api/control/gateway-methods/{methodId}/invoke';
 
@@ -108,7 +108,7 @@ function buildOperation(method: OperatorMethodContract, untyped: Set<string>): O
   const notes: string[] = [method.description];
   if (isUntyped) {
     notes.push(
-      'NOTE: this method has no typed SDK client IO. Request/response resolve to `unknown` in the typed client (see `x-typed-client-io`).',
+      'NOTE: this method has no typed engine client IO. Request/response resolve to `unknown` in the typed client (see `x-typed-client-io`).',
     );
   }
   const op: OpenApiOperation = {
@@ -141,7 +141,7 @@ function buildOperation(method: OperatorMethodContract, untyped: Set<string>): O
   const parameters = buildParameters(method);
   if (parameters.length > 0) op.parameters = parameters;
   if (http.method === 'POST' || http.method === 'PATCH') {
-    // The expected-turn route's URL is canonical, and its typed SDK removes
+    // The expected-turn route's URL is canonical, and its typed engine removes
     // path keys from the wire body. Keep this new route's REST schema honest
     // without migrating the legacy body contracts of unrelated endpoints.
     const inputProperties = (method.inputSchema?.properties ?? {}) as Record<string, unknown>;
@@ -229,11 +229,11 @@ function buildDocument(contract: OperatorContractManifest, untyped: Set<string>)
       title: 'GoodVibes Operator API',
       version: contract.product.version,
       description:
-        // The committed artifact names the contract by its goodvibes-sdk path; kept so the artifact is unchanged.
+        // The committed artifact names the contract by its goodvibes path; kept so the artifact is unchanged.
         'Generated from the operator contract (packages/contracts/artifacts/operator-contract.json). ' +
         `${methods.length} cataloged methods: ${withHttp.length} with dedicated REST bindings, ` +
         `${invokeOnly.length} reachable only through the generic invoke endpoint. ` +
-        `${untyped.size} methods lack typed SDK client IO and are marked with ` +
+        `${untyped.size} methods lack typed engine client IO and are marked with ` +
         '`x-typed-client-io: false`. They are represented honestly, never omitted. ' +
         'Regenerate with `bun run openapi:generate`; drift fails `contracts:check`.',
     },

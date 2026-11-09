@@ -1,4 +1,4 @@
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { SurfaceLayer } from '../renderer/surface-kit.ts';
 
 /** Hit-test the last painted frame, with the top modal owning the pointer. */

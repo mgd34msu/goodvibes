@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'bun:test';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { forgetProviderReadings } from '../sdk/src/platform/routing/provider-readings.js';
-import type { ChatStopReason } from '../sdk/src/platform/providers/interface.js';
+import { forgetProviderReadings } from '../platform/src/platform/routing/provider-readings.js';
+import type { ChatStopReason } from '../platform/src/platform/providers/interface.js';
 import {
   mapAnthropicStopReason,
   mapOpenAIStopReason,
@@ -12,7 +12,7 @@ import {
   mapCodexStopReason,
   mapLmStudioStopReason,
   isContextOverflowSignal,
-} from '../sdk/src/platform/providers/stop-reason-maps.js';
+} from '../platform/src/platform/providers/stop-reason-maps.js';
 
 // ---------------------------------------------------------------------------
 // Tests, Anthropic

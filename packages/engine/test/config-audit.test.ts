@@ -5,25 +5,25 @@ import { describe, expect, test } from 'bun:test';
  * (SERVICE_NAME, limits) is correctly exposed for audit.
  */
 describe('config audit', () => {
-  test('SERVICE_NAME is goodvibes-sdk', async () => {
-    const { SERVICE_NAME } = await import('../sdk/src/platform/runtime/telemetry/api-helpers.js');
-    expect(SERVICE_NAME).toBe('goodvibes-sdk');
+  test('SERVICE_NAME is goodvibes-platform', async () => {
+    const { SERVICE_NAME } = await import('../platform/src/platform/runtime/telemetry/api-helpers.js');
+    expect(SERVICE_NAME).toBe('goodvibes-platform');
   });
 
   test('DEFAULT_EVENT_LIMIT is a positive integer', async () => {
-    const { DEFAULT_EVENT_LIMIT } = await import('../sdk/src/platform/runtime/telemetry/api-helpers.js');
+    const { DEFAULT_EVENT_LIMIT } = await import('../platform/src/platform/runtime/telemetry/api-helpers.js');
     expect(Number.isInteger(DEFAULT_EVENT_LIMIT)).toBe(true);
     expect(DEFAULT_EVENT_LIMIT).toBe(500);
   });
 
   test('DEFAULT_ERROR_LIMIT is a positive integer', async () => {
-    const { DEFAULT_ERROR_LIMIT } = await import('../sdk/src/platform/runtime/telemetry/api-helpers.js');
+    const { DEFAULT_ERROR_LIMIT } = await import('../platform/src/platform/runtime/telemetry/api-helpers.js');
     expect(Number.isInteger(DEFAULT_ERROR_LIMIT)).toBe(true);
     expect(DEFAULT_ERROR_LIMIT).toBe(250);
   });
 
   test('ALL_DOMAINS array includes transport and turn', async () => {
-    const { ALL_DOMAINS } = await import('../sdk/src/platform/runtime/telemetry/api-helpers.js');
+    const { ALL_DOMAINS } = await import('../platform/src/platform/runtime/telemetry/api-helpers.js');
     expect(ALL_DOMAINS).toContain('transport');
     expect(ALL_DOMAINS).toContain('turn');
   });

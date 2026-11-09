@@ -14,13 +14,13 @@
 import { describe, expect, test } from 'bun:test';
 
 // Leaf event files with no package-alias imports: resolved directly by bun.
-import type { AgentEvent } from '../sdk/src/events/agents.js';
-import type { SessionEvent } from '../sdk/src/events/session.js';
+import type { AgentEvent } from '../platform/src/events/agents.js';
+import type { SessionEvent } from '../platform/src/events/session.js';
 
 // TurnEvent imports PartialToolCall from providers/interface, both relative, bun handles it.
-import type { TurnEvent } from '../sdk/src/events/turn.js';
+import type { TurnEvent } from '../platform/src/events/turn.js';
 
-import type { ContractEvent } from '../sdk/src/events/contract.js';
+import type { ContractEvent } from '../platform/src/events/contract.js';
 import { ALL_CONTRACT_EVENTS } from './contract/event-samples.js';
 
 // ---------------------------------------------------------------------------

@@ -14,12 +14,12 @@ import {
   generateSystemTheme,
   getBundledTheme,
   resolveTheme as resolveThemeFile,
-} from '@goodvibes-jev/engine/sdk/platform/presentation';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+} from '@goodvibes-jev/engine/platform/platform/presentation';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import {
   activeTokens,
   activeUiTones,

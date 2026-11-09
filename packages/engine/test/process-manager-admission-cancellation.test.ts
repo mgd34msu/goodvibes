@@ -1,6 +1,6 @@
 import { expect, mock, spyOn, test } from 'bun:test';
-import { ProcessManager, type SpawnOptions } from '../sdk/src/platform/tools/shared/process-manager.ts';
-import * as credentialEnv from '../sdk/src/platform/tools/exec/credential-env.ts';
+import { ProcessManager, type SpawnOptions } from '../platform/src/platform/tools/shared/process-manager.ts';
+import * as credentialEnv from '../platform/src/platform/tools/exec/credential-env.ts';
 
 const bounded = <T>(promise: Promise<T>): Promise<T> => Promise.race([
   promise, Bun.sleep(500).then(() => { throw new Error('Admission fixture wait timed out'); }),

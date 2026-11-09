@@ -8,8 +8,8 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ProjectIndex } from '../sdk/src/platform/state/project-index.js';
-import { ReadTool } from '../sdk/src/platform/tools/read/index.js';
+import { ProjectIndex } from '../platform/src/platform/state/project-index.js';
+import { ReadTool } from '../platform/src/platform/tools/read/index.js';
 
 let root: string;
 let index: ProjectIndex;

@@ -7,8 +7,8 @@
  *   an escape sequence, or its printable remnant, on screen.
  */
 import { describe, expect, test } from 'bun:test';
-import type { Line, ToolCall } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { Line, ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
+import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
 import { appendConversationMessages, type ConversationRenderContext } from '../../core/conversation-rendering.ts';
 import { lineToString } from '../setup.ts';
 

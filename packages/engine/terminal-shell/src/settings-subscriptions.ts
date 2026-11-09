@@ -1,7 +1,7 @@
-import type { ProviderAuthFreshness, ProviderAuthRoute } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
-import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ServiceInspectionQuery } from '@goodvibes-jev/engine/sdk/platform/runtime/ui';
+import type { ProviderAuthFreshness, ProviderAuthRoute } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/platform/platform/config';
+import type { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ServiceInspectionQuery } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
 export interface SubscriptionEntry {
     provider: string;
     state: 'active' | 'pending' | 'available';

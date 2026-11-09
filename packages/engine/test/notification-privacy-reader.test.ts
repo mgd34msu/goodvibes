@@ -2,13 +2,13 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { CONFIG_SCHEMA } from '../sdk/src/platform/config/schema.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { CONFIG_SCHEMA } from '../platform/src/platform/config/schema.ts';
 import { withTestTimeout } from './_helpers/test-timeout.ts';
 import {
   NOTIFICATIONS_METADATA_ONLY_KEY,
   readNotificationsMetadataOnly,
-} from '../sdk/src/platform/runtime/operations.ts';
+} from '../platform/src/platform/runtime/operations.ts';
 
 describe('the live, fail-closed notification privacy reader', () => {
   test('only literal false allows content-bearing notifications', () => {
@@ -38,7 +38,7 @@ describe('the live, fail-closed notification privacy reader', () => {
   });
 
   test('async and thenable results cannot authorize or leak rejected private errors in a real process', async () => {
-    const readerPath = resolve(import.meta.dir, '../sdk/src/platform/runtime/notification-privacy.ts');
+    const readerPath = resolve(import.meta.dir, '../platform/src/platform/runtime/notification-privacy.ts');
     const source = `
       import { readNotificationsMetadataOnly } from ${JSON.stringify(readerPath)};
       const privateError = () => new Error('synthetic-private-config-failure');

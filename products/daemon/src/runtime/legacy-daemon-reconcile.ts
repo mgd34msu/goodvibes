@@ -8,7 +8,7 @@
  * rationale.
  */
 import { existsSync, readFileSync, rmSync } from 'node:fs';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import {
   defaultActionRunner,
   defaultPortProbe,

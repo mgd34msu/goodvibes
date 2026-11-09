@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { BookmarkManager } from '@goodvibes-jev/engine/sdk/platform/bookmarks';
+import { BookmarkManager } from '@goodvibes-jev/engine/platform/platform/bookmarks';
 import { BookmarkModal } from '@goodvibes-jev/engine/terminal-shell';
 
 let baseDir: string;

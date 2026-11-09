@@ -7,12 +7,12 @@
  * and the runner fails the contract with it wherever a route is asked for.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { RoutePlanRequest } from '../../sdk/src/platform/routing/route-planner.js';
-import { NoRouteError } from '../../sdk/src/platform/routing/route-planner.js';
-import { createRoutePlannerContractSelector, type ContractPlannedRoute, type ContractRoutePlanner, type ContractRouteSelector } from '../../sdk/src/platform/contract/index.js';
+import type { RoutePlanRequest } from '../../platform/src/platform/routing/route-planner.js';
+import { NoRouteError } from '../../platform/src/platform/routing/route-planner.js';
+import { createRoutePlannerContractSelector, type ContractPlannedRoute, type ContractRoutePlanner, type ContractRouteSelector } from '../../platform/src/platform/contract/index.js';
 import { makeContract, makeUnit } from './fixtures.js';
-import { routeProviderHealth } from '../../sdk/src/platform/runtime/contract-composition.js';
-import type { RuntimeStore } from '../../sdk/src/platform/runtime/store/index.js';
+import { routeProviderHealth } from '../../platform/src/platform/runtime/contract-composition.js';
+import type { RuntimeStore } from '../../platform/src/platform/runtime/store/index.js';
 import { eventsOf, makeHarness, oneUnitPlan, startContract, waitFor, type Harness } from './runner-support.js';
 import { amendmentOutput, answers, contractOf, keepsFailing, replyAnswers, routeAnswer, stepPlanner, terminal } from './steps-support.js';
 

@@ -22,12 +22,12 @@ import {
   JOURNAL_SCHEMA_VERSION,
   journalPathFor,
   openTranscriptJournal,
-} from '../sdk/src/platform/runtime/transcript-journal.ts';
+} from '../platform/src/platform/runtime/transcript-journal.ts';
 import {
   replayJournalForSession,
   replayJournalIntoConversation,
-} from '../sdk/src/platform/runtime/transcript-journal-replay.ts';
-import { ConversationManager } from '../sdk/src/platform/core/conversation.ts';
+} from '../platform/src/platform/runtime/transcript-journal-replay.ts';
+import { ConversationManager } from '../platform/src/platform/core/conversation.ts';
 import { makeTestSurface } from './_helpers/session-surface.ts';
 
 type MsgStub = { role: string; content: string };

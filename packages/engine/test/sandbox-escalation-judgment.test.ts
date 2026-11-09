@@ -18,18 +18,18 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import {
   createSandboxEscalationApprovalHandler,
   type EscalationApprovalRequester,
-} from '../sdk/src/platform/runtime/permissions/sandbox-escalation.js';
+} from '../platform/src/platform/runtime/permissions/sandbox-escalation.js';
 import {
   applySandboxJudgment,
   runSandboxJudgment,
   type SandboxJudgmentResult,
   type SandboxJudgmentReceipt,
-} from '../sdk/src/platform/runtime/permissions/sandbox-judgment.js';
-import type { PermissionPromptRequest } from '../sdk/src/platform/permissions/prompt.js';
-import { createExecTool } from '../sdk/src/platform/tools/exec/runtime.js';
-import { detectSandboxAvailability, type ExecSandboxRuntime } from '../sdk/src/platform/tools/exec/sandbox.js';
-import { ProcessManager } from '../sdk/src/platform/tools/shared/process-manager.js';
-import { OverflowHandler } from '../sdk/src/platform/tools/shared/overflow.js';
+} from '../platform/src/platform/runtime/permissions/sandbox-judgment.js';
+import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.js';
+import { createExecTool } from '../platform/src/platform/tools/exec/runtime.js';
+import { detectSandboxAvailability, type ExecSandboxRuntime } from '../platform/src/platform/tools/exec/sandbox.js';
+import { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.js';
+import { OverflowHandler } from '../platform/src/platform/tools/shared/overflow.js';
 
 // A requestApproval spy that records the request and returns a fixed decision.
 function spyApproval(approved: boolean) {

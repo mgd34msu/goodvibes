@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
 // memory-governance-services.ts, the daemon-composition tail that constructs
-// and starts the SDK's MemoryGovernor with the TUI fork's REAL cache adapters.
+// and starts the platform's MemoryGovernor with the TUI fork's REAL cache adapters.
 //
-// Mirrors the SDK's own createRuntimeServices: the CacheRegistry, PauseController
+// Mirrors the platform's own createRuntimeServices: the CacheRegistry, PauseController
 // and the admission-gate holder are built EARLY in services.ts (so the
 // scheduler gates and the knowledge background jobs can consult the pause
 // controller before the governor exists); this helper is the TAIL step that
@@ -21,8 +21,8 @@ import {
   type CacheRegistry,
   type PauseController,
   type MemoryGovernor,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/memory';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+} from '@goodvibes-jev/engine/platform/platform/runtime/memory';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { RuntimeEventBus } from '@/runtime/index.ts';
 
 export interface MemoryGovernanceServicesDeps {

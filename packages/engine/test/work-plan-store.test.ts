@@ -1,4 +1,4 @@
-import { quarantineCorruptFile } from '../sdk/src/platform/utils/atomic-json-store.ts';
+import { quarantineCorruptFile } from '../platform/src/platform/utils/atomic-json-store.ts';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { describe, expect, test } from 'bun:test';
@@ -7,7 +7,7 @@ import {
   WORK_PLAN_TERMINAL_ITEM_CAP,
   WorkPlanStore,
   type WorkPlanItemStatus,
-} from '../sdk/src/platform/workflow/work-plan-store.ts';
+} from '../platform/src/platform/workflow/work-plan-store.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 /** The scope a caller supplies; any non-empty segment exercises the same paths. */
@@ -115,7 +115,7 @@ describe('WorkPlanStore', () => {
 
   test('renders markdown summary with statuses and metadata', () => {
     const store = makeStore();
-    const item = store.addItem('Write handoff', { owner: 'sdk', source: 'coordination' });
+    const item = store.addItem('Write handoff', { owner: 'platform', source: 'coordination' });
     store.setItemStatus(item.id, 'blocked');
 
     const markdown = store.toMarkdown();

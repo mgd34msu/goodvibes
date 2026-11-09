@@ -15,8 +15,8 @@
  * in (shell/ui-openers.ts) before any of them can be used.
  */
 
-import type { UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import { UsageTracker } from '../runtime/usage-tracker.ts';
 import type { FleetActionCallbacks } from '../input/agents-modal.ts';

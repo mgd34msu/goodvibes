@@ -3,14 +3,14 @@
 // legibly, so the observability layer shows the dependency graph's shape,
 // states, and pool posture WITHOUT opening any transcript.
 //
-// The SDK serves a WorkstreamGraphSnapshot: nodes (id/title/state, plus
+// The platform serves a WorkstreamGraphSnapshot: nodes (id/title/state, plus
 // blockedReason, orphaned, stalled, agentId), edges (from → to dependency
 // links), and the elastic-pool state (ready/running/atCap/maxSize). This module
 // is a pure string renderer; every line is fit to the given width (no clipping,
 // no horizontal overflow), so the same output drives a view or a command.
 // ---------------------------------------------------------------------------
 
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/sdk';
+import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
 import { truncateDisplay, getDisplayWidth } from '../utils/terminal-width.ts';
 
 export type WorkstreamGraphSnapshot = OperatorMethodOutput<'fleet.graph.get'>;

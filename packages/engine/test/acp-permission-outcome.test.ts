@@ -4,7 +4,7 @@
  * option the agent happened to list first.
  */
 import { describe, expect, test } from 'bun:test';
-import { permissionOutcomeFor } from '../sdk/src/platform/acp/protocol.ts';
+import { permissionOutcomeFor } from '../platform/src/platform/acp/protocol.ts';
 
 const rejectFirst = [
   { optionId: 'no', name: 'Reject', kind: 'reject_once' as const },

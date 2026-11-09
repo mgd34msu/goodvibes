@@ -1,6 +1,6 @@
 /**
  * hosted-sessions.ts, display helpers + honesty-bar tolerant readers for
- * sessions.hosted.* (daemon-hosted sessions, already shipped in the SDK): a
+ * sessions.hosted.* (daemon-hosted sessions, already shipped in the platform): a
  * conversation whose loop runs INSIDE the daemon rather than inside this
  * browser tab, so it does not end when the tab that started it goes away.
  *

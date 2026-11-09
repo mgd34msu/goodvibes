@@ -1,6 +1,6 @@
 ---
 name: Feature Request
-about: Propose an SDK capability or contract change
+about: Propose an platform capability or contract change
 title: ''
 labels: enhancement
 assignees: ''

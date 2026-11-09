@@ -53,7 +53,7 @@ afterEach(() => {
  * any test module is imported, and the whole sandbox is removed in a top-level
  * `afterAll`. `os.tmpdir()` re-reads process.env.TMPDIR on every call
  * (verified), so this captures every later `tmpdir()` call, including calls
- * made inside the SDK and other installed packages.
+ * made inside the platform and other installed packages.
  *
  * ACCEPTED COST, recorded so the next person meets it here rather than
  * discovering it: the sandbox is emptied at the end of the run, not kept empty
@@ -66,7 +66,7 @@ afterEach(() => {
  * this one: test files that were migrated onto `makeProjectTempDir` get their
  * directory removed after each individual test by the `afterEach` above. The
  * two are complementary and the sandbox stays the base, because it is the only
- * one that also captures `tmpdir()` calls made inside the SDK and other
+ * one that also captures `tmpdir()` calls made inside the platform and other
  * installed packages, which no in-repo helper can see. If the residual ever
  * starts to matter, an inode ceiling on a busy host, a run that cannot
  * finish, measure it with a before/after count (see

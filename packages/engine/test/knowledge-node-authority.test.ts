@@ -2,23 +2,23 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import { KnowledgeNodeActivationHeldError } from '../sdk/src/platform/knowledge/activation/types.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { reviewKnowledgeNodeRecord } from '../sdk/src/platform/knowledge/service-node-admin.js';
-import { reviewKnowledgeIssue } from '../sdk/src/platform/knowledge/review.js';
-import { reviewHomeGraphFact } from '../sdk/src/platform/knowledge/home-graph/review.js';
-import { HomeGraphRoutes } from '../sdk/src/platform/daemon/http/home-graph-routes.js';
-import { HomeGraphService } from '../sdk/src/platform/knowledge/home-graph/service.js';
-import { ArtifactStore } from '../sdk/src/platform/artifacts/store.js';
+import { KnowledgeNodeActivationHeldError } from '../platform/src/platform/knowledge/activation/types.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { reviewKnowledgeNodeRecord } from '../platform/src/platform/knowledge/service-node-admin.js';
+import { reviewKnowledgeIssue } from '../platform/src/platform/knowledge/review.js';
+import { reviewHomeGraphFact } from '../platform/src/platform/knowledge/home-graph/review.js';
+import { HomeGraphRoutes } from '../platform/src/platform/daemon/http/home-graph-routes.js';
+import { HomeGraphService } from '../platform/src/platform/knowledge/home-graph/service.js';
+import { ArtifactStore } from '../platform/src/platform/artifacts/store.js';
 import {
   createKnowledgeNodeOperatorMutation,
   KnowledgeNodeMutationHeldError,
   type KnowledgeNodeMutationContext,
-} from '../sdk/src/platform/knowledge/store-node-authority.js';
-import type { KnowledgeNodeRecord, KnowledgeNodeUpsertInput } from '../sdk/src/platform/knowledge/types.js';
-import { SQLiteStore } from '../sdk/src/platform/state/sqlite-store.js';
-import { createSchema } from '../sdk/src/platform/knowledge/store-schema.js';
-import { writeKnowledgeNodeRow } from '../sdk/src/platform/knowledge/store-node-history.js';
+} from '../platform/src/platform/knowledge/store-node-authority.js';
+import type { KnowledgeNodeRecord, KnowledgeNodeUpsertInput } from '../platform/src/platform/knowledge/types.js';
+import { SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
+import { createSchema } from '../platform/src/platform/knowledge/store-schema.js';
+import { writeKnowledgeNodeRow } from '../platform/src/platform/knowledge/store-node-history.js';
 import { useFailureReadings } from './_helpers/failure-readings.js';
 
 useFailureReadings([]);

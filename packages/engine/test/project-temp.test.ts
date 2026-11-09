@@ -20,7 +20,7 @@ test('raw helper invocation refuses before creating cwd temp data', () => {
   const root = mkdtempSync(join(tmpdir(), 'raw-helper-proof-'));
   try {
     const helper = resolve(import.meta.dir, '_helpers/project-temp.ts');
-    const env = { ...process.env }; delete env.GOODVIBES_TEST_OWNED_TMP_ROOT; delete env.GOODVIBES_SDK_TEST_RUNNER;
+    const env = { ...process.env }; delete env.GOODVIBES_TEST_OWNED_TMP_ROOT; delete env.GOODVIBES_ENGINE_TEST_RUNNER;
     const result = Bun.spawnSync([process.execPath, '-e', `import {makeProjectTempDir} from ${JSON.stringify(helper)};makeProjectTempDir('raw');`], { cwd: root, env, stdout: 'pipe', stderr: 'pipe' });
     expect(result.exitCode).not.toBe(0); expect(new TextDecoder().decode(result.stderr)).toContain('official test runner');
     expect(existsSync(join(root, '.test-tmp'))).toBe(false);

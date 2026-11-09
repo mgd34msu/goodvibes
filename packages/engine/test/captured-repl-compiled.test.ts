@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { provideCapturedBunRuntime } from '../toolchain/src/lib/captured-bun-runtime.js';
-import { probeCapturedExecAvailability } from '../sdk/src/platform/tools/exec/captured-exec.js';
+import { probeCapturedExecAvailability } from '../platform/src/platform/tools/exec/captured-exec.js';
 
 const availability = await probeCapturedExecAvailability();
 if (process.env.GOODVIBES_TEST_REQUIRE_EXEC_CONTAINMENT === '1' && !availability.available)

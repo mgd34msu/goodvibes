@@ -2,7 +2,7 @@
  * useRealtimeInvalidation, the connection-budget regression test.
  *
  * The bug this pins: the hook used to open ONE SSE connection PER domain (five of them)
- * via sdk.realtime.viaSse(). Together with useSessionRealtime's own stream that reached
+ * via platform.realtime.viaSse(). Together with useSessionRealtime's own stream that reached
  * six long-lived connections and saturated the browser's per-origin socket pool, so the
  * next fetch (SessionsView's sessions.list) hung forever and the Sessions view rendered
  * zero rows. The fix opens a SINGLE multiplexed raw stream (?domains=a,b,c) and routes by
@@ -25,7 +25,7 @@ mock.module('../lib/goodvibes', () => ({
   DEFAULT_SSE_RECONNECT: { enabled: true, baseDelayMs: 1, maxDelayMs: 2, backoffFactor: 2, maxAttempts: 3 },
   getCurrentAuth: () => Promise.resolve({}),
   invokeMethod: () => Promise.resolve({}),
-  sdk: {
+  client: {
     streams: {
       open: (pathOrUrl: string, handlers: ServerSentEventHandlers) => {
         openCalls.push(pathOrUrl);

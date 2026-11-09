@@ -11,12 +11,12 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { EntryType, JudgmentPort, Question } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { forgetFailureReadings, installJudgmentPort, readFailure, type ConnectionFailure } from '@goodvibes-jev/engine/errors';
-import { ProviderError } from '../sdk/src/platform/types/errors.ts';
-import { normalizeError, readFormattedError, readNormalizedError } from '../sdk/src/platform/utils/error-display.ts';
-import { payloadSpans } from '../sdk/src/platform/utils/batteries/display-payload.ts';
-import type { RedactionPart } from '../sdk/src/platform/utils/batteries/redaction.ts';
+import { ProviderError } from '../platform/src/platform/types/errors.ts';
+import { normalizeError, readFormattedError, readNormalizedError } from '../platform/src/platform/utils/error-display.ts';
+import { payloadSpans } from '../platform/src/platform/utils/batteries/display-payload.ts';
+import type { RedactionPart } from '../platform/src/platform/utils/batteries/redaction.ts';
 import { authoredPrivacyAnswer, errorText as text, errorSpan as span } from './_helpers/authored-error-readings.ts';
-import { registerAccountIdentityRedaction } from '../sdk/src/platform/utils/redaction.ts';
+import { registerAccountIdentityRedaction } from '../platform/src/platform/utils/redaction.ts';
 
 const publicLines = [
   '[1,2,3]', 'plain words only', 'connect ECONNREFUSED 127.0.0.1:11434',

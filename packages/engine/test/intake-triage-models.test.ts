@@ -3,11 +3,11 @@ import { expect, test } from 'bun:test';
 import { createSystemOnePort, DECISION_MODEL_PROFILES, observeJudgmentModel, reuseObservedJudgmentResult,
   SqliteDecisionLog, withDecisionLog, type JudgmentConfig, type JudgmentEndpoint, type Questions } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { captureTriageJudgment } from '../sdk/src/platform/intake/triage/model-result.js';
-import { scoreInboxTriage } from '../sdk/src/platform/intake/triage/scorer.js';
-import { checkTriageReceipt } from '../sdk/src/platform/intake/triage/evidence.js';
-import { prepareJudgmentResult } from '../sdk/src/platform/gate/judgment-result.js';
-import { readCustomTagMeaning } from '../sdk/src/platform/intake/triage/tagger/meaning.js';
+import { captureTriageJudgment } from '../platform/src/platform/intake/triage/model-result.js';
+import { scoreInboxTriage } from '../platform/src/platform/intake/triage/scorer.js';
+import { checkTriageReceipt } from '../platform/src/platform/intake/triage/evidence.js';
+import { prepareJudgmentResult } from '../platform/src/platform/gate/judgment-result.js';
+import { readCustomTagMeaning } from '../platform/src/platform/intake/triage/tagger/meaning.js';
 
 const item = { id: 'synthetic-one', surface: 'synthetic', subject: 'A routine synthetic update' };
 const signal = () => new AbortController().signal;

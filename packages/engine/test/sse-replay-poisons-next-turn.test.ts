@@ -27,9 +27,9 @@
  *      rendering. A consumer that passes no options gets this by default.
  */
 import { describe, expect, test } from 'bun:test';
-import { ControlPlaneGateway } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { replayRecentTraffic, resolveReplayResume } from '../sdk/src/platform/control-plane/gateway-utils.ts';
-import type { ScopedControlPlaneRecentEvent } from '../sdk/src/platform/control-plane/gateway-utils.ts';
+import { ControlPlaneGateway } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { replayRecentTraffic, resolveReplayResume } from '../platform/src/platform/control-plane/gateway-utils.ts';
+import type { ScopedControlPlaneRecentEvent } from '../platform/src/platform/control-plane/gateway-utils.ts';
 import { createTurnLifecycleGate, readTurnLifecycleFrame } from '../transport-realtime/src/turn-lifecycle-gate.ts';
 import { openRawServerSentEventStream } from '../transport-http/src/sse-stream.ts';
 import { RuntimeEventBus } from './_helpers/runtime-seam.ts';

@@ -9,26 +9,26 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { installJudgmentPort, structuredTransience } from '@goodvibes-jev/engine/errors';
-import { ChannelDeliveryRouter } from '../sdk/src/platform/channels/delivery-router.js';
+import { ChannelDeliveryRouter } from '../platform/src/platform/channels/delivery-router.js';
 import {
   createDiscordDeliveryStrategy,
   createSlackDeliveryStrategy,
   createTelegramDeliveryStrategy,
   createWebhookDeliveryStrategy,
-} from '../sdk/src/platform/channels/delivery/strategies-core.js';
-import { createBlueBubblesDeliveryStrategy } from '../sdk/src/platform/channels/delivery/strategies-bridge.js';
+} from '../platform/src/platform/channels/delivery/strategies-core.js';
+import { createBlueBubblesDeliveryStrategy } from '../platform/src/platform/channels/delivery/strategies-bridge.js';
 import type {
   ChannelDeliveryRequest,
   ChannelDeliveryRouteBinding,
   ChannelDeliveryStrategy,
-} from '../sdk/src/platform/channels/delivery/types.js';
-import type { ArtifactStore } from '../sdk/src/platform/artifacts/index.js';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import type { ServiceRegistry } from '../sdk/src/platform/config/service-registry.js';
-import { DiscordIntegration } from '../sdk/src/platform/integrations/discord.js';
-import { describeStructuralDeliveryError } from '../sdk/src/platform/integrations/delivery-diagnostics.js';
-import { instrumentedFetch, sanitizeUrlForLog } from '../sdk/src/platform/utils/fetch-with-timeout.js';
-import { ActivityLogger, logger } from '../sdk/src/platform/utils/logger.js';
+} from '../platform/src/platform/channels/delivery/types.js';
+import type { ArtifactStore } from '../platform/src/platform/artifacts/index.js';
+import type { ConfigManager } from '../platform/src/platform/config/manager.js';
+import type { ServiceRegistry } from '../platform/src/platform/config/service-registry.js';
+import { DiscordIntegration } from '../platform/src/platform/integrations/discord.js';
+import { describeStructuralDeliveryError } from '../platform/src/platform/integrations/delivery-diagnostics.js';
+import { instrumentedFetch, sanitizeUrlForLog } from '../platform/src/platform/utils/fetch-with-timeout.js';
+import { ActivityLogger, logger } from '../platform/src/platform/utils/logger.js';
 
 const BODY = 'synthetic private message body: velvet apricot lantern';
 const QUERY = 'synthetic-private-query-value';

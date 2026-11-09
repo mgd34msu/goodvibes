@@ -1,24 +1,24 @@
 /**
- * The auto-update loop never assumes the SDK package is the shipped artifact.
+ * The auto-update loop never assumes the platform package is the shipped artifact.
  *
  * - Embedded default (no artifact identity): even with update.auto=true and a
  *   releases URL configured, NO auto-update loop starts, the host manages
- *   updates, and the SDK package version is never compared against the host's
+ *   updates, and the platform package version is never compared against the host's
  *   release tags.
  * - With a host-provided artifact identity, the loop compares the HOST's
- *   version (and swaps the host-named executable), not the SDK's VERSION.
+ *   version (and swaps the host-named executable), not the platform's VERSION.
  */
 import { afterEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DaemonServer } from '../sdk/src/platform/daemon/facade.ts';
-import { WorkProposalStore } from '../sdk/src/platform/agents/work-proposal-store.ts';
-import { DaemonLifecycleRuntime, type DaemonLifecycleRuntimeOptions } from '../sdk/src/platform/daemon/facade-lifecycle.ts';
-import { logger } from '../sdk/src/platform/utils/logger.ts';
-import type { ServiceCommandRunner } from '../sdk/src/platform/daemon/service-handover.ts';
-import { updateConfigDefaults } from '../sdk/src/platform/config/schema-domain-update.js';
-import { VERSION } from '../sdk/src/platform/version.ts';
+import { DaemonServer } from '../platform/src/platform/daemon/facade.ts';
+import { WorkProposalStore } from '../platform/src/platform/agents/work-proposal-store.ts';
+import { DaemonLifecycleRuntime, type DaemonLifecycleRuntimeOptions } from '../platform/src/platform/daemon/facade-lifecycle.ts';
+import { logger } from '../platform/src/platform/utils/logger.ts';
+import type { ServiceCommandRunner } from '../platform/src/platform/daemon/service-handover.ts';
+import { updateConfigDefaults } from '../platform/src/platform/config/schema-domain-update.js';
+import { VERSION } from '../platform/src/platform/version.ts';
 
 const scratchDirs: string[] = [];
 
@@ -46,6 +46,7 @@ function lifecycleWith(
     readonly isIdle?: (() => boolean) | undefined;
     readonly promotionRetryMs?: number | undefined;
     readonly isCompiledBinary?: (() => boolean) | undefined;
+    readonly stopGracefully?: DaemonLifecycleRuntimeOptions['stopGracefully'];
   } = {},
 ): LifecycleHarness {
   const scratch = mkdtempSync(join(tmpdir(), 'update-artifact-'));
@@ -81,6 +82,7 @@ function lifecycleWith(
     // itself a source run, so default the seam to compiled and let a dev-gate
     // test flip it to false.
     isCompiledBinary: overrides.isCompiledBinary ?? (() => true),
+    ...(overrides.stopGracefully ? { stopGracefully: overrides.stopGracefully } : {}),
     ...(overrides.promotionRetryMs !== undefined ? { promotionRetryMs: overrides.promotionRetryMs } : {}),
     ...(updateArtifact !== undefined ? { updateArtifact } : {}),
   });
@@ -92,52 +94,52 @@ function updaterOf(runtime: DaemonLifecycleRuntime): { readonly options: { curre
 }
 
 describe('daemon update artifact identity', () => {
-  test('embedded default: update.auto=true but no artifact identity: no loop starts', () => {
+  test('embedded default: update.auto=true but no artifact identity: no loop starts', async () => {
     const { runtime } = lifecycleWith(undefined);
     runtime.onStarted();
     try {
       expect(updaterOf(runtime)).toBeNull();
     } finally {
-      runtime.onStopping(false);
+      await runtime.onStopping(false);
     }
   });
 
-  test('a host artifact identity drives the comparison: never the SDK package version', () => {
+  test('a host artifact identity drives the comparison: never the platform package version', async () => {
     const { runtime } = lifecycleWith({ version: '999.0.0-host-artifact', execPath: '/opt/host/bin/host-app' });
     runtime.onStarted();
     try {
       const updater = updaterOf(runtime);
       expect(updater).not.toBeNull();
       expect(updater!.options.currentVersion).toBe('999.0.0-host-artifact');
-      // The embedder's identity is what gets compared and swapped, the SDK
+      // The embedder's identity is what gets compared and swapped, the platform
       // package version must play no part when a host names its artifact.
       expect(updater!.options.currentVersion).not.toBe(VERSION);
       expect(updater!.options.execPath).toBe('/opt/host/bin/host-app');
     } finally {
-      runtime.onStopping(false);
+      await runtime.onStopping(false);
     }
   });
 
-  test('an artifact identity without execPath swaps the running executable by default', () => {
+  test('an artifact identity without execPath swaps the running executable by default', async () => {
     const { runtime } = lifecycleWith({ version: '999.0.0-host-artifact' });
     runtime.onStarted();
     try {
       expect(updaterOf(runtime)!.options.execPath).toBe(process.execPath);
     } finally {
-      runtime.onStopping(false);
+      await runtime.onStopping(false);
     }
   });
 });
 
 describe('no silent gates: every reason the update loop stays off is logged', () => {
-  function infoLinesFor(overrides: Parameters<typeof lifecycleWith>[1], artifact?: DaemonLifecycleRuntimeOptions['updateArtifact']): string[] {
+  async function infoLinesFor(overrides: Parameters<typeof lifecycleWith>[1], artifact?: DaemonLifecycleRuntimeOptions['updateArtifact']): string[] {
     const spy = spyOn(logger, 'info') as Mock<typeof logger.info>;
     const { runtime } = lifecycleWith(artifact, overrides);
     try {
       runtime.onStarted();
       return spy.mock.calls.map((call) => String(call[0]));
     } finally {
-      runtime.onStopping(false);
+      await runtime.onStopping(false);
       spy.mockRestore();
     }
   }
@@ -170,59 +172,59 @@ describe('boot-edge service promotion (independent of updates)', () => {
     const { runtime, installs, exits } = lifecycleWith(artifact);
     runtime.onStarted();
     try {
+      await runtime.drainHandovers();
       expect(installs).toHaveLength(1);
-      await Bun.sleep(10);
       expect(exits).toEqual([0]);
     } finally {
-      runtime.onStopping(false);
+      await runtime.onStopping(false);
     }
   });
 
-  test('an embedded daemon (no artifact identity) never self-promotes: exiting would kill the host', () => {
+  test('an embedded daemon (no artifact identity) never self-promotes: exiting would kill the host', async () => {
     const { runtime, installs, exits } = lifecycleWith(undefined);
     runtime.onStarted();
     try {
       expect(installs).toHaveLength(0);
       expect(exits).toHaveLength(0);
     } finally {
-      runtime.onStopping(false);
+      await runtime.onStopping(false);
     }
   });
 
-  test('an already-supervised daemon is left alone', () => {
+  test('an already-supervised daemon is left alone', async () => {
     const { runtime, installs, exits } = lifecycleWith(artifact, { status: () => ({ installed: true, running: true }) });
     runtime.onStarted();
     try {
       expect(installs).toHaveLength(0);
       expect(exits).toHaveLength(0);
     } finally {
-      runtime.onStopping(false);
+      await runtime.onStopping(false);
     }
   });
 
-  test('service.enabled=false keeps the daemon session-only (opt-out honored)', () => {
+  test('service.enabled=false keeps the daemon session-only (opt-out honored)', async () => {
     const { runtime, installs, exits } = lifecycleWith(artifact, { configOverrides: { 'service.enabled': false } });
     runtime.onStarted();
     try {
       expect(installs).toHaveLength(0);
       expect(exits).toHaveLength(0);
     } finally {
-      runtime.onStopping(false);
+      await runtime.onStopping(false);
     }
   });
 
-  test('a platform without a service manager is left alone', () => {
+  test('a platform without a service manager is left alone', async () => {
     const { runtime, installs, exits } = lifecycleWith(artifact, { status: () => { throw new Error('unsupported'); } });
     runtime.onStarted();
     try {
       expect(installs).toHaveLength(0);
       expect(exits).toHaveLength(0);
     } finally {
-      runtime.onStopping(false);
+      await runtime.onStopping(false);
     }
   });
 
-  test('a source/dev run never self-promotes (no unit written, no handover)', () => {
+  test('a source/dev run never self-promotes (no unit written, no handover)', async () => {
     // Everything else says "promote" (artifact identity, idle, not installed),
     // only the compiled-binary gate stops it, because a dev unit would fail on
     // the next boot.
@@ -232,7 +234,7 @@ describe('boot-edge service promotion (independent of updates)', () => {
       expect(installs).toHaveLength(0);
       expect(exits).toHaveLength(0);
     } finally {
-      runtime.onStopping(false);
+      await runtime.onStopping(false);
     }
   });
 
@@ -251,11 +253,68 @@ describe('boot-edge service promotion (independent of updates)', () => {
       await Bun.sleep(10);
       expect(exits).toEqual([0]);
     } finally {
-      runtime.onStopping(false);
+      await runtime.onStopping(false);
     }
   });
 });
 
+
+test('host-deferred native activation starts neither updater nor promotion until ready, then drains its original stop without self-wait', async () => {
+  const entered = Promise.withResolvers<void>(), released = Promise.withResolvers<void>(); const sequence: string[] = [];
+  const h = lifecycleWith({ version: '999.0.0-host-artifact' }, {
+    stopGracefully: async () => { sequence.push('stop'); entered.resolve(); await released.promise; await h.runtime.onStopping(false, true); sequence.push('drained'); },
+    runner: async () => { sequence.push('service'); return { status: 'accepted' }; },
+  });
+  h.runtime.onStarted(true);
+  expect(updaterOf(h.runtime)).toBeNull(); expect(h.runtime.updateStatus().armed).toBe(false); expect(h.installs).toEqual([]);
+  const outcome = h.runtime.activateNativeLifecycle(); expect(outcome && outcome.state).toBe('handover');
+  if (!outcome) throw new Error('Expected one actual native activation owner');
+  expect(h.runtime.activateNativeLifecycle()).toBe(outcome);
+  try {
+    await entered.promise; expect(h.installs).toEqual([]); expect(h.exits).toEqual([]);
+    released.resolve(); await outcome.drain;
+    expect(sequence).toEqual(['stop', 'drained', 'service', 'service']); expect(h.installs).toHaveLength(1); expect(h.exits).toEqual([0]);
+    expect(h.runtime.activateNativeLifecycle()).toBe(outcome); expect(updaterOf(h.runtime)).toBeNull();
+  } finally { released.resolve(); await h.runtime.onStopping(false); }
+});
+
+test('boot promotion never installs, starts or exits after failed original cleanup, and preserves a value-free failure receipt', async () => {
+  let inspections = 0; const commands: string[][] = [];
+  const failure = { get message() { inspections++; return 'private promotion owner'; }, toString() { inspections++; return 'private promotion owner'; } };
+  const h = lifecycleWith({ version: '999.0.0-host-artifact' }, { configOverrides: { 'update.auto': false },
+    stopGracefully: async () => { throw failure; }, runner: async argv => { commands.push([...argv]); return { status: 'accepted' }; },
+  });
+  h.runtime.onStarted(true); const outcome = h.runtime.activateNativeLifecycle(); if (!outcome) throw new Error('Expected actual promotion attempt');
+  try {
+    await outcome.drain;
+    expect(h.installs).toEqual([]); expect(commands).toEqual([]); expect(h.exits).toEqual([]); expect(inspections).toBe(0);
+    const receipt = h.runtime.receiptStore().list().map(row => row.text).join('');
+    expect(receipt).toContain('boot promotion handover incomplete (failed)'); expect(receipt).toContain('owned runtime cleanup did not complete; no service handover was requested');
+    expect(receipt).not.toContain('private promotion'); expect(h.runtime.activateNativeLifecycle()).toBe(outcome);
+  } finally { await h.runtime.onStopping(false, false, false); }
+});
+
+for (const cancellation of ['stop', 'handle'] as const) test(`external ${cancellation} cancels and drains promotion while its original cleanup is still pending`, async () => {
+  const entered = Promise.withResolvers<void>(), released = Promise.withResolvers<void>(); const commands: string[][] = [];
+  const h = lifecycleWith({ version: '999.0.0-host-artifact' }, { configOverrides: { 'update.auto': false },
+    stopGracefully: async () => { entered.resolve(); await released.promise; },
+    runner: async argv => { commands.push([...argv]); return { status: 'accepted' }; },
+  });
+  h.runtime.onStarted(true); const outcome = h.runtime.activateNativeLifecycle(); if (!outcome) throw new Error('Expected actual promotion attempt');
+  await entered.promise; if (cancellation === 'handle') outcome.cancel();
+  let completed = false; const closed = h.runtime.onStopping(false).then(() => { completed = true; });
+  try {
+    await Promise.resolve(); expect(completed).toBe(false); expect(h.installs).toEqual([]);
+    released.resolve(); await closed; await outcome.drain;
+    expect(commands).toEqual([]); expect(h.installs).toEqual([]); expect(h.exits).toEqual([]);
+    expect(h.runtime.receiptStore().list().some(row => row.text.includes('boot promotion handover incomplete (unknown)'))).toBe(true);
+  } finally { released.resolve(); await closed; }
+});
+
+test('an externally stopped deferred host cannot later activate updater or promotion', async () => {
+  const h = lifecycleWith({ version: '999.0.0-host-artifact' }); h.runtime.onStarted(true); await h.runtime.onStopping(false);
+  expect(h.runtime.activateNativeLifecycle()).toBeUndefined(); expect(updaterOf(h.runtime)).toBeNull(); expect(h.installs).toEqual([]); expect(h.exits).toEqual([]);
+});
 
 describe('observed service handover', () => {
   const artifact = { version: '999.0.0-host-artifact' };

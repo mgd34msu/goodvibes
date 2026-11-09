@@ -17,11 +17,11 @@
  * snapshot from an earlier `review` call.
  *
  * Routes through `getMemorySpine` (not the host-only `knowledgeApi.memory`)
- * per the SDK's memory-wire-full-detach decision, same as every other
+ * per the platform's memory-wire-full-detach decision, same as every other
  * mutating `/recall` subcommand, so this fully detaches from the local store
  * file when a daemon has been adopted.
  *
- * The memory spine's wire `MemoryUpdatePatch` (SDK platform/runtime/memory-spine)
+ * The memory spine's wire `MemoryUpdatePatch` (platform platform/runtime/memory-spine)
  * now carries validFrom/validUntil alongside scope/summary/detail/tags, a
  * number sets the bound, `null` clears it, and an omitted field leaves it
  * unchanged, so a proposal whose `desired` changes ONLY the temporal window
@@ -34,8 +34,8 @@ import {
   projectMemoryToFiles,
   readProjectedMemoryFiles,
   type MemoryProjectionProposal,
-} from '@goodvibes-jev/engine/sdk/platform/state';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+} from '@goodvibes-jev/engine/platform/platform/state';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { requireShellPaths } from './runtime-services.ts';
 import { getMemorySpine } from './recall-query.ts';
 import { readMemoryProjectionDir } from './recall-files-config.ts';
@@ -60,7 +60,7 @@ export async function handleRecallFilesSync(args: string[], context: CommandCont
   const records = await memory.list({ limit: PROJECTION_LIST_LIMIT });
 
   try {
-    // The SDK's ownership gate commits only to a repository whose toplevel IS
+    // The platform's ownership gate commits only to a repository whose toplevel IS
     // the projection directory (initializing one there when needed), never
     // to a checkout the directory merely sits inside.
     const report = projectMemoryToFiles(records, dir, { git: createSyncGitSeam() });

@@ -25,7 +25,7 @@
 import { SyntheticEvent, useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, CalendarDays, ChevronLeft, ChevronRight, MoreHorizontal, Plus, RefreshCw } from 'lucide-react';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import type { CalendarEventCreateInput, CalendarIcsImportInput } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import {
@@ -208,7 +208,7 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
 
   const events = useQuery({
     queryKey: queryKeys.calendarEvents(rangeFrom, rangeTo, calendarId),
-    queryFn: () => sdk.operator.calendar.events.list({
+    queryFn: () => platformClient.operator.calendar.events.list({
       from: rangeFrom || undefined,
       to: rangeTo || undefined,
       ...(calendarFilter ? { calendarId: calendarFilter } : {}),
@@ -230,7 +230,7 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
         ...(splitAttendees(attendees) ? { attendees: splitAttendees(attendees) } : {}),
         ...(calendarFilter ? { calendarId: calendarFilter } : {}),
       };
-      return sdk.operator.calendar.events.create(input);
+      return platformClient.operator.calendar.events.create(input);
     },
     onSuccess: async (result) => {
       setTitle('');
@@ -246,7 +246,7 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
   });
 
   const exportIcs = useMutation({
-    mutationFn: () => sdk.operator.calendar.ics.export({
+    mutationFn: () => platformClient.operator.calendar.ics.export({
       from: rangeFrom || undefined,
       to: rangeTo || undefined,
       ...(calendarFilter ? { calendarId: calendarFilter } : {}),
@@ -268,7 +268,7 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
         confirm: true,
         ...(calendarFilter ? { calendarId: calendarFilter } : {}),
       };
-      return sdk.operator.calendar.ics.import(input);
+      return platformClient.operator.calendar.ics.import(input);
     },
     onSuccess: async (result) => {
       setIcsContent('');

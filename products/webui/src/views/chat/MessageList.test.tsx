@@ -23,13 +23,13 @@ import type { LineageNode } from './lineage';
 import type { ChatMessage } from './types';
 import type { ActiveToolCall } from './useChatStream';
 
-// Assistant-tone messages with text mount SpeakButton (useTts -> sdk.operator.voice.status /
+// Assistant-tone messages with text mount SpeakButton (useTts -> platform.operator.voice.status /
 // config.get, both routed through react-query). Mocked here, never a real network call,
 // and MessageList is imported dynamically AFTER this mock so the module graph never loads
 // the real goodvibes.ts first (mock.module only wins if it runs before the first import).
 mock.module('../../lib/goodvibes', () => ({
   runBrowserJudgment: () => Promise.reject(new Error('No semantic reading in this display fixture.')),
-  sdk: {
+  client: {
     operator: {
       voice: { status: () => Promise.resolve({ ttsAvailable: false, sttAvailable: false }) },
       config: { get: () => Promise.resolve({}) },
@@ -269,7 +269,7 @@ describe('MessageList: aria attributes', () => {
 
 describe('MessageList: search jump-to-message highlight', () => {
   // Both nodes use tone 'user': an assistant node with text would also mount
-  // SpeakButton (useTts -> real sdk.operator.voice.status() network call,
+  // SpeakButton (useTts -> real platform.operator.voice.status() network call,
   // unrelated to what this suite covers), so 'user' keeps the fixture
   // focused on the highlight/data-message-id wiring under test.
   const nodes: LineageNode[] = [
@@ -288,7 +288,7 @@ describe('MessageList: search jump-to-message highlight', () => {
 
 });
 
-describe('MessageList: running tool calls + cancel (SDK 1.8.0 interaction-wins round)', () => {
+describe('MessageList: running tool calls + cancel (platform 1.8.0 interaction-wins round)', () => {
   test('no active-tool-calls list renders when activeToolCalls is empty', () => {
     const { container, unmount } = renderMessageList({ isStreaming: true, liveText: 'typing...' });
     expect(container.querySelector('.active-tool-calls')).toBeNull();

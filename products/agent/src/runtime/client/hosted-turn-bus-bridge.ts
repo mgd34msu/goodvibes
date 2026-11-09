@@ -14,8 +14,8 @@
  * turn the daemon ran instead, with nothing in either path to say why.
  *
  * This does not invent new information: it reads the same frame the renderer
- * already reads and republishes it through the SDK's typed turn emitters
- * (platform/runtime/emitters, the SDK's own doc comment on RuntimeEventBus.emit
+ * already reads and republishes it through the platform's typed turn emitters
+ * (platform/runtime/emitters, the platform's own doc comment on RuntimeEventBus.emit
  * says these, not a raw emit, are how a caller is supposed to put a turn event
  * on the bus). So anything already listening to the local turn domain, spoken
  * output today, anything else tomorrow, sees a hosted turn exactly as it
@@ -36,7 +36,7 @@ import {
   emitTurnCompleted,
   emitTurnError,
   emitTurnSubmitted,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/emitters';
+} from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
 import type { HostedSessionFrame } from './hosted-frame-render.ts';
 
 /** The turn-domain stop reasons emitTurnError accepts, mirrored here for the fallback below. */

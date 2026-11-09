@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { forgetFailureReadings, installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { DeliveryError, DeliveryQueue } from '../sdk/src/platform/integrations/delivery.ts';
+import { DeliveryError, DeliveryQueue } from '../platform/src/platform/integrations/delivery.ts';
 
 function deferred() {
   let resolve!: () => void; let reject!: (error: unknown) => void;

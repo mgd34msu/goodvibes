@@ -3,9 +3,9 @@ import { bindAgentResearchSourceOwner } from '../../agent/protected-research-rep
 import { effectAdmissionFixture } from '../helpers/effect-admission.ts';
 import { afterAll, describe, expect, test } from 'bun:test';
 import { inflateRawSync } from 'node:zlib';
-import type { ArtifactCreateInput, ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import type { ChatRequest, ChatResponse, LLMProvider } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { ArtifactCreateInput, ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { ChatRequest, ChatResponse, LLMProvider } from '@goodvibes-jev/engine/platform/platform/providers';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import {
   createAgentModelCompareTool as rawModelCompareTool,
   registerAgentModelCompareTool,

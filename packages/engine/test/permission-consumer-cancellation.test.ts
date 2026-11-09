@@ -4,10 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { ApprovalBroker } from '../sdk/src/platform/control-plane/approval-broker.ts';
-import { PermissionManager, type PermissionConfigReader } from '../sdk/src/platform/permissions/manager.ts';
-import { UserPermissionRuleStore } from '../sdk/src/platform/permissions/user-rule-store.ts';
-import type { PermissionPromptDecision, PermissionPromptRequest, PermissionRequestHandler } from '../sdk/src/platform/permissions/prompt.ts';
+import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-broker.ts';
+import { PermissionManager, type PermissionConfigReader } from '../platform/src/platform/permissions/manager.ts';
+import { UserPermissionRuleStore } from '../platform/src/platform/permissions/user-rule-store.ts';
+import type { PermissionPromptDecision, PermissionPromptRequest, PermissionRequestHandler } from '../platform/src/platform/permissions/prompt.ts';
 
 const PRIVATE_REASON = 'synthetic private consumer reason';
 const args = { files: [{ path: 'synthetic.txt', content: 'synthetic content' }] };
@@ -141,8 +141,8 @@ test('the explicit broker drains late prompt rejection after its consumer cancel
 });
 
 for (const cancelAll of [false, true]) test(`cancellation during initial persistence preserves ${cancelAll ? 'no abandoned prompt' : 'the other prompt owner'}`, async () => {
-  const { PersistentStore } = await import('../sdk/src/platform/state/persistent-store.ts');
-  type Snapshot = { approvals: readonly import('../sdk/src/platform/control-plane/approval-broker.ts').SharedApprovalRecord[] };
+  const { PersistentStore } = await import('../platform/src/platform/state/persistent-store.ts');
+  type Snapshot = { approvals: readonly import('../platform/src/platform/control-plane/approval-broker.ts').SharedApprovalRecord[] };
   const entered = deferred<void>(); const release = deferred<void>(); const answer = deferred<PermissionPromptDecision>();
   class DelayedStore extends PersistentStore<Snapshot> {
     count = 0;

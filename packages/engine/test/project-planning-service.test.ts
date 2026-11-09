@@ -1,4 +1,4 @@
-import { KNOWLEDGE_SCHEMA_VERSION } from '../sdk/src/platform/knowledge/store-schema.js';
+import { KNOWLEDGE_SCHEMA_VERSION } from '../platform/src/platform/knowledge/store-schema.js';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
@@ -10,11 +10,11 @@ import {
   ProjectPlanningService,
   type ProjectWorkPlanSnapshot,
   projectKnowledgeSpaceId,
-} from '../sdk/src/platform/knowledge/index.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { SQLiteStore } from '../sdk/src/platform/state/sqlite-store.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import type { PlannerEvent } from '../sdk/src/events/planner.js';
+} from '../platform/src/platform/knowledge/index.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import type { PlannerEvent } from '../platform/src/events/planner.js';
 
 let previousPort: JudgmentPort | undefined;
 beforeEach(() => { previousPort = installJudgmentPort(fakePort(() => noulAnswer(0.99)).port); });
@@ -35,7 +35,7 @@ describe('project planning service', () => {
       projectId: 'alpha',
       state: {
         goal: 'Add conversational planning support',
-        scope: 'SDK contracts only',
+        scope: 'platform contracts only',
         tasks: [{
           id: 'contracts',
           title: 'Add passive planning contracts',
@@ -127,7 +127,7 @@ describe('project planning service', () => {
       projectId: 'alpha',
       task: {
         title: 'Build shared work-plan primitive',
-        owner: 'sdk',
+        owner: 'platform',
         priority: 10,
         source: 'contract',
         contractId: 'ctr-1',

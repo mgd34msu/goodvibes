@@ -8,7 +8,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { RefreshCw, Trash2 } from 'lucide-react';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import type { PermissionRuleRecord } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { formatError } from '../../lib/errors';
@@ -31,10 +31,10 @@ export function PermissionRules() {
   const { toast } = useToast();
   const rules = useQuery({
     queryKey: queryKeys.permissionRules,
-    queryFn: () => sdk.operator.permissions.rules.list(),
+    queryFn: () => platformClient.operator.permissions.rules.list(),
   });
   const remove = useMutation({
-    mutationFn: (ruleId: string) => sdk.operator.permissions.rules.delete(ruleId),
+    mutationFn: (ruleId: string) => platformClient.operator.permissions.rules.delete(ruleId),
     onSuccess: async (result) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.permissionRules });
       toast(result.deleted

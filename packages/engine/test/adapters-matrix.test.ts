@@ -2,7 +2,7 @@
  * Adapter behavioral coverage, Matrix adapter.
  */
 import { describe, expect, test } from 'bun:test';
-import { handleMatrixSurfaceWebhook } from '../sdk/src/platform/adapters/matrix/index.js';
+import { handleMatrixSurfaceWebhook } from '../platform/src/platform/adapters/matrix/index.js';
 
 function makeMatrixContext(overrides: Partial<Record<string, unknown>> = {}) {
   const calls: Array<{ kind: string; input: unknown }> = [];

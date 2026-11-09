@@ -1,6 +1,6 @@
 # Providers
 
-Provider integrations are runtime capabilities. The SDK keeps provider support
+Provider integrations are runtime capabilities. The platform keeps provider support
 available while avoiding provider-heavy imports from client-safe entrypoints:
 provider-specific SDKs and native/runtime-only dependencies live behind
 runtime-heavy entrypoints or dynamic imports.
@@ -13,10 +13,10 @@ inspect or select provider state.
 ## Surfaces
 
 - **Registry and catalog metadata.** Built-in providers, their brand labels, and
-  the environment variables that configure them are declared in the SDK provider
+  the environment variables that configure them are declared in the platform provider
   registry and catalog. `inferFallbackContextWindow` and
   `FALLBACK_CONTEXT_WINDOW` (a family-aware, pre-catalog context-window
-  fallback) are exported from `@goodvibes-jev/engine/sdk/platform/providers`.
+  fallback) are exported from `@goodvibes-jev/engine/platform/platform/providers`.
 - **Model and selection API.** `GET /api/models`, `GET` or `PATCH`
   `/api/models/current`, and the `providers`-domain SSE events. See
   [Provider and model API reference](./provider-model-api.md).

@@ -11,22 +11,22 @@ import { readTuiNotificationsMetadataOnly } from '../config/host-settings.ts';
  * nothing, polls no mailbox, and supervises no remote runner. It builds what
  * a TURN needs in this process and reaches the daemon for the rest.
  *
- * ── The floor comes from the SDK ───────────────────────────────────────────
+ * ── The floor comes from the platform ───────────────────────────────────────────
  *
  * The loop essentials, the agent graph, the model stack, config/secrets/
  * services, hooks, plugins, MCP, the file-tool caches, permissions as a client,
- * the spine clients, are composed by `createClientRuntimeServices`, the SDK's
+ * the spine clients, are composed by `createClientRuntimeServices`, the platform's
  * one implementation of that shape. Not a fork of it and not a copy of it: the
  * agent product composes the same function, so a wiring step added there
  * cannot silently miss this product.
  *
- * The SDK's own note on that shape applies here literally: it is a FLOOR, not a
+ * The platform's own note on that shape applies here literally: it is a FLOOR, not a
  * ceiling. Everything below the `createClientRuntimeServices` call is what THIS
  * surface adds on top, views, keybindings, the WRFC controller wired over the
  * client's own `agentManager`, the workstream engine, the fleet read model, the
  * voice stack with its local playback sink, the knowledge stack the recall
  * surfaces read. None of those need daemon furniture; they are simply not
- * required for a turn to run, which is why they are here and not in the SDK's
+ * required for a turn to run, which is why they are here and not in the platform's
  * client floor.
  *
  * ── The two things that look like daemon furniture and are not ─────────────
@@ -40,32 +40,32 @@ import { readTuiNotificationsMetadataOnly } from '../config/host-settings.ts';
  * two disagree the daemon's record is the truth, and the client seams in
  * runtime/client/ are what keep them in step.
  */
-import { FocusTracker } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import { AutomationDeliveryManager, AutomationManager } from '@goodvibes-jev/engine/sdk/platform/automation';
-import { ChannelPolicyManager } from '@goodvibes-jev/engine/sdk/platform/channels';
-import { ApprovalBroker, GatewayMethodCatalog, SharedSessionBroker } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { createClientRuntimeServices } from '@goodvibes-jev/engine/sdk/platform/runtime/client-services';
-import { wireIdlePowerAndLiveTurn } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import { createAsyncDisposalScope } from '@goodvibes-jev/engine/sdk/platform/runtime/disposal';
+import { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { AutomationDeliveryManager, AutomationManager } from '@goodvibes-jev/engine/platform/platform/automation';
+import { ChannelPolicyManager } from '@goodvibes-jev/engine/platform/platform/channels';
+import { ApprovalBroker, GatewayMethodCatalog, SharedSessionBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { createClientRuntimeServices } from '@goodvibes-jev/engine/platform/platform/runtime/client-services';
+import { wireIdlePowerAndLiveTurn } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { createAsyncDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
 import { registerSurfaceRuntimePollers } from './disposal-wiring.ts';
 import { composeCredentialServices } from './credential-composition.ts';
-import { WatcherRegistry } from '@goodvibes-jev/engine/sdk/platform/watchers';
-import { createWebKnowledgeGapRepairer } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import { WatcherRegistry } from '@goodvibes-jev/engine/platform/platform/watchers';
+import { createWebKnowledgeGapRepairer } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { createKnowledgeServices } from './knowledge-services.ts';
-import { cancelAllAgentRuns } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { MediaProviderRegistry, ensureBuiltinMediaProviders } from '@goodvibes-jev/engine/sdk/platform/media';
-import { MultimodalService } from '@goodvibes-jev/engine/sdk/platform/multimodal';
+import { cancelAllAgentRuns } from '@goodvibes-jev/engine/platform/platform/tools';
+import { MediaProviderRegistry, ensureBuiltinMediaProviders } from '@goodvibes-jev/engine/platform/platform/media';
+import { MultimodalService } from '@goodvibes-jev/engine/platform/platform/multimodal';
 import {
   MemoryEmbeddingProviderRegistry,
   MemoryRegistry,
   MemoryStore,
   resolveCanonicalMemoryDbPath,
-} from '@goodvibes-jev/engine/sdk/platform/state';
-import { createApprovalDerivedHandlers } from '@goodvibes-jev/engine/sdk/platform/runtime/bootstrap';
-import { FeatureAnnouncementStore, featureAnnouncementsPath } from '@goodvibes-jev/engine/sdk/platform/runtime/feature-announcements';
+} from '@goodvibes-jev/engine/platform/platform/state';
+import { createApprovalDerivedHandlers } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+import { FeatureAnnouncementStore, featureAnnouncementsPath } from '@goodvibes-jev/engine/platform/platform/runtime/feature-announcements';
 import { createNotificationDispatcher, wireRuntimeNotificationBridge, wireMemoryPressureNotice } from './notification-dispatch.ts';
-import { createDurabilityServices } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import { MemorySpineClient, createLocalMemoryAccess } from '@goodvibes-jev/engine/sdk/platform/runtime/memory-spine';
+import { createDurabilityServices } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { MemorySpineClient, createLocalMemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import { createWorkspaceCheckpointing } from './workspace-checkpointing.ts';
 import { createDomainDispatch } from './store/index.ts';
 import {
@@ -77,19 +77,19 @@ import {
   createFeatureFlagManager,
   createShellPathService,
 } from '@/runtime/index.ts';
-import { createSessionStorageServices } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import { VoiceProviderRegistry, VoiceService, ensureBuiltinVoiceProviders } from '@goodvibes-jev/engine/sdk/platform/voice';
-import '@goodvibes-jev/engine/sdk/platform/runtime/memory';
+import { createSessionStorageServices } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { VoiceProviderRegistry, VoiceService, ensureBuiltinVoiceProviders } from '@goodvibes-jev/engine/platform/platform/voice';
+import '@goodvibes-jev/engine/platform/platform/runtime/memory';
 import { wireMemoryGovernance } from './memory-governance-services.ts';
-import { wireVoiceSetup } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { wireVoiceSetup } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { createViewPanelAdapter } from '../views/view-panel-adapter.ts';
-import { BookmarkManager } from '@goodvibes-jev/engine/sdk/platform/bookmarks';
-import { ProfileManager } from '@goodvibes-jev/engine/sdk/platform/profiles';
-import { SessionChangeTracker } from '@goodvibes-jev/engine/sdk/platform/sessions';
-import { ApiTokenAuditor, UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
-import { WebhookNotifier } from '@goodvibes-jev/engine/sdk/platform/integrations';
-import { createRemoteExecutionServices } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import { createContractIntake, createContractOperatorService } from '@goodvibes-jev/engine/sdk/platform/contract';
+import { BookmarkManager } from '@goodvibes-jev/engine/platform/platform/bookmarks';
+import { ProfileManager } from '@goodvibes-jev/engine/platform/platform/profiles';
+import { SessionChangeTracker } from '@goodvibes-jev/engine/platform/platform/sessions';
+import { ApiTokenAuditor, UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
+import { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
+import { createRemoteExecutionServices } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { createContractIntake, createContractOperatorService } from '@goodvibes-jev/engine/platform/platform/contract';
 import { KeybindingsManager } from '../input/keybindings.ts';
 import {
   AdaptivePlanner,
@@ -97,19 +97,19 @@ import {
   ExecutionPlanManager,
   SessionLineageTracker,
   SessionMemoryStore,
-} from '@goodvibes-jev/engine/sdk/platform/core';
-import { deriveFeatureStates, bindFeatureSettingsBridge } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
-import { createChannelComposition } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import { applyProviderOptimizerConfigMode, bindProviderOptimizerFeatureFlag } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+} from '@goodvibes-jev/engine/platform/platform/core';
+import { deriveFeatureStates, bindFeatureSettingsBridge } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { createChannelComposition } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { applyProviderOptimizerConfigMode, bindProviderOptimizerFeatureFlag } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { createFleetServices } from '@goodvibes-jev/engine/terminal-shell';
 import {
   codeIndexDbPath,
   createCodeIndexServices,
   createStoreRerooter,
   isCodeInjectionSettingEnabled,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import { WorkspaceTrustManager } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import { ensureConfiguredModelIsRoutable } from '@goodvibes-jev/engine/sdk/platform/providers';
+} from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { WorkspaceTrustManager } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { ensureConfiguredModelIsRoutable } from '@goodvibes-jev/engine/platform/platform/providers';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import { createDaemonVerbCaller } from './client/operator-endpoint.ts';
 import { createTerminalApprovalUpdateSubscriber } from './client/approval-updates.ts';
@@ -123,14 +123,14 @@ import {
   createDevicesClient,
   createWireSessionDispatch,
   readSurfaceAgentOutcome,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+} from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { ClientBuildGuard } from './client/build-floors.ts';
 import { createFleetUnionReadModel } from './client/fleet-union.ts';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { VERSION } from '../version.ts';
 import { createSessionConversationRewindPort, hasSessionConversation } from './conversation-rewind-port.ts';
 import { createFleetReadModel } from '../views/fleet-read-model.ts';
-import type { PermissionPromptDecision, PermissionPromptRequest } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import type { PermissionPromptDecision, PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
 import type { RuntimeServicesOptions, RuntimeServices } from './runtime-services-types.ts';
 export type { RuntimeServicesOptions, RuntimeServices } from './runtime-services-types.ts';
 
@@ -151,7 +151,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   const featureFlags = options.featureFlags ?? createFeatureFlagManager();
   if (options.featureFlags === undefined) {
     // Owned manager: gate states derive from domain settings keys + live
-    // bridge (mirrors the SDK composition root; a passed manager is the caller's to wire).
+    // bridge (mirrors the platform composition root; a passed manager is the caller's to wire).
     featureFlags.loadFromConfig({ flags: deriveFeatureStates(configManager) });
     bindFeatureSettingsBridge(configManager, featureFlags);
   }
@@ -172,7 +172,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   const shellPaths = createShellPathService({ workingDirectory, homeDirectory });
   // The surface's own record of the asks it raised, what the approval card and
   // the modal read. The AUTHORITATIVE record is the daemon's; the raiser below
-  // keeps the two in step (see the SDK's client/approval-raiser.ts).
+  // keeps the two in step (see the platform's client/approval-raiser.ts).
   const approvalBroker = new ApprovalBroker({
     storePath: shellPaths.resolveProjectPath('tui', 'control-plane', 'approvals.json'),
   });
@@ -184,7 +184,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   const liveSessionIdRef: { value: string | null } = { value: null };
   const requestApproval = createClientApprovalRaiser({
     verbs,
-    // The SDK's raiser cannot honestly default this: it names how THIS surface
+    // The platform's raiser cannot honestly default this: it names how THIS surface
     // reports its own decision back to the daemon (`actorSurface`), so every
     // other surface can see where the answer came from. Reproduces the
     // previous hard-coded `actor: 'tui', actorSurface: 'tui'` write-back exactly.
@@ -206,7 +206,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     subscribeApprovalUpdates: createTerminalApprovalUpdateSubscriber({ configManager, homeDirectory }),
   });
 
-  // ── The SDK's client floor: everything a turn needs in this process.
+  // ── The platform's client floor: everything a turn needs in this process.
   const workspaceTrustManager = new WorkspaceTrustManager({ shellPaths, surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT });
   const client = createClientRuntimeServices({
     workspaceTrust: workspaceTrustManager,
@@ -303,7 +303,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     featureFlags,
   });
   // An EMPTY catalog. This product answers no verbs; the field exists only
-  // because the SDK's startExternalServices takes a daemon-grade graph even in
+  // because the platform's startExternalServices takes a daemon-grade graph even in
   // the adopt-only mode this surface runs in, and because plugin loading is
   // handed one. With adoptOnly no DaemonServer is constructed, so nothing is
   // ever served off it.
@@ -345,7 +345,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // Work that arrives for a session THIS surface hosts reaches the loop through
   // the same runner whether it came from the local broker or from the daemon's
   // queue. The wire half is inert until bootstrap.ts adopts a daemon (see
-  // the SDK's client/session-dispatch.ts); binding one runner to both is what stops a
+  // the platform's client/session-dispatch.ts); binding one runner to both is what stops a
   // continuation delivered over the wire from taking a different path, and a
   // different set of routing options, than one raised locally.
   const wireSessionDispatch = createWireSessionDispatch({
@@ -534,7 +534,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // from the same four arguments AutomationDeliveryManager builds its own from,
   // and expose that second one, so the router on the service surface and the
   // router replies actually leave through were different objects, and a delivery
-  // strategy registered on the exposed one reached nothing. The SDK's
+  // strategy registered on the exposed one reached nothing. The platform's
   // RuntimeServices contract requires the field; it now names the real router.
   const channelDeliveryRouter = deliveryManager.getDeliveryRouter();
   // Repo source-tree code index, sharing memoryEmbeddingRegistry with MemoryStore.

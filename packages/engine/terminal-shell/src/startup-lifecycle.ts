@@ -1,4 +1,4 @@
-import { readLastSessionPointer, writeLastSessionPointer } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { readLastSessionPointer, writeLastSessionPointer } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { resumeSessionCore, type SessionResumeDeps } from './session-resume.js';
 
 /** Fatal diagnostics are independent: failure of one sink cannot suppress another or the exit. */

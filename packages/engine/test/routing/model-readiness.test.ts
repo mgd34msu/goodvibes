@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { fakePort, noulAnswer, scoreAnswer } from '@goodvibes-jev/judgment/testing';
-import { localRecipeFit, routeReadiness } from '../../sdk/src/platform/routing/batteries/model-readiness.js';
-import { registry } from '../../sdk/src/platform/routing/judgment-registry.js';
-import { localRecipeFitFrom, modelReadinessFlagFrom, routeReadinessFrom, type ModelReadinessHeldOutcome } from '../../sdk/src/platform/routing/model-readiness.js';
+import { localRecipeFit, routeReadiness } from '../../platform/src/platform/routing/batteries/model-readiness.js';
+import { registry } from '../../platform/src/platform/routing/judgment-registry.js';
+import { localRecipeFitFrom, modelReadinessFlagFrom, routeReadinessFrom, type ModelReadinessHeldOutcome } from '../../platform/src/platform/routing/model-readiness.js';
 
 type RouteScoreName = typeof routeReadiness.composite.dimensions[number]['reading'];
 async function routeRun(levels: Partial<Record<RouteScoreName, number>> = {}) {

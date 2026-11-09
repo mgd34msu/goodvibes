@@ -1,6 +1,6 @@
 /**
  * PairingTokensSettings, the settings/security surface for per-device pairing
- * tokens (SDK 1.8.0's pairing.tokens.* family), replacing the old single
+ * tokens (platform 1.8.0's pairing.tokens.* family), replacing the old single
  * shared token model. Lists every paired device (pairing.tokens.list: name,
  * created, last-seen), the token secret itself is NEVER served here; it is
  * only ever handed back once, at mint time (create/migrate/handoff.create),
@@ -21,7 +21,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Pencil, RefreshCw, Smartphone, Trash2 } from 'lucide-react';
-import { sdk, setExplicitAuthToken } from '../../lib/goodvibes';
+import { client as platformClient, setExplicitAuthToken } from '../../lib/goodvibes';
 import type { PublicPairingToken } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { formatError } from '../../lib/errors';
@@ -47,7 +47,7 @@ export function PairingTokensSettings() {
 
   const tokens = useQuery({
     queryKey: queryKeys.pairingTokens,
-    queryFn: () => sdk.operator.pairing.tokens.list(),
+    queryFn: () => platformClient.operator.pairing.tokens.list(),
   });
 
   async function invalidateTokens(): Promise<void> {
@@ -55,7 +55,7 @@ export function PairingTokensSettings() {
   }
 
   const rename = useMutation({
-    mutationFn: ({ id, name }: { id: string; name: string }) => sdk.operator.pairing.tokens.rename(id, name),
+    mutationFn: ({ id, name }: { id: string; name: string }) => platformClient.operator.pairing.tokens.rename(id, name),
     onSuccess: async (result) => {
       setEditingId(null);
       if (!result.renamed) {
@@ -67,7 +67,7 @@ export function PairingTokensSettings() {
   });
 
   const revoke = useMutation({
-    mutationFn: (id: string) => sdk.operator.pairing.tokens.delete(id),
+    mutationFn: (id: string) => platformClient.operator.pairing.tokens.delete(id),
     onSuccess: async (result) => {
       toast(
         result.revoked
@@ -80,7 +80,7 @@ export function PairingTokensSettings() {
   });
 
   const migrate = useMutation({
-    mutationFn: (name: string) => sdk.operator.pairing.tokens.migrate(name),
+    mutationFn: (name: string) => platformClient.operator.pairing.tokens.migrate(name),
     onSuccess: async (result) => {
       // Swap THIS browser over to its own new token immediately, the daemon just
       // minted it for the same principal, so the swap never signs this tab out.
@@ -97,7 +97,7 @@ export function PairingTokensSettings() {
   });
 
   const revokeShared = useMutation({
-    mutationFn: () => sdk.operator.pairing.tokens.revokeShared(),
+    mutationFn: () => platformClient.operator.pairing.tokens.revokeShared(),
     onSuccess: async () => {
       toast({ title: 'Shared token revoked', description: 'Any device still using it is now signed out.', tone: 'success' });
       await invalidateTokens();

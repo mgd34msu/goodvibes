@@ -8,7 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, expect, test } from 'bun:test';
-import type { PowerState } from '@goodvibes-jev/engine/sdk/platform/power';
+import type { PowerState } from '@goodvibes-jev/engine/platform/platform/power';
 import { createPowerChipSource } from '../../core/power-chip-source.ts';
 import type { PowerStateChangedPayload } from '../../core/power-status.ts';
 

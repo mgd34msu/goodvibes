@@ -13,8 +13,8 @@
 //     real channel exists; where steer.kind is 'none' the detail states why.
 // ---------------------------------------------------------------------------
 
-import type { ProcessNode, ProcessObserved, ObservedAgentKind } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { ProcessNode, ProcessObserved, ObservedAgentKind } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { buildViewLine, buildSearchInputLine, DEFAULT_VIEW_PALETTE, type ViewPalette } from './polish.ts';
 import { truncateDisplay, wrapText } from '../utils/terminal-width.ts';
 

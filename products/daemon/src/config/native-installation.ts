@@ -5,13 +5,13 @@
  */
 import { isAbsolute, join, dirname, resolve } from 'node:path';
 import { statSync } from 'node:fs';
-import type { GoodVibesHomeOwnership } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { DaemonUpdateArtifact } from '@goodvibes-jev/engine/sdk/platform/daemon';
+import type { GoodVibesHomeOwnership } from '@goodvibes-jev/engine/platform/platform/config';
+import type { DaemonUpdateArtifact } from '@goodvibes-jev/engine/platform/platform/daemon';
 import { captureUpdateFileIo, isCompiledBunModuleUrl, DAEMON_NATIVE_TARGETS, inspectDaemonNativeInstallation, nativeReaderCapabilities, realUpdateFileIo,
   createNativeDataWriteOwner, createInstalledReaderCohort, type NativeDataWriteOwner, type DarwinDaemonInstallation,
   inspectDarwinDaemonInstallation,
-  resolveDaemonNativePayloads, resolveDaemonNativeTargets, retainDaemonNativeFiles } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
-import { detectInstallKind } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+  resolveDaemonNativePayloads, resolveDaemonNativeTargets, retainDaemonNativeFiles } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import { detectInstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { COMPILED_VERSION, VERSION } from '../version.js';
 
 export { captureOriginalDarwinDaemonInstallation, initializeOriginalDarwinDaemonInstallation } from './original-darwin-installation.js';

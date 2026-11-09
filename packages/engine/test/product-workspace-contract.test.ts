@@ -17,7 +17,7 @@ function write(root: string, path: string, value: string | object): void {
 }
 function fixture(present = true): string {
   const root = mkdtempSync(join(tmpdir(), 'product-contract-')); roots.push(root);
-  write(root, 'packages/engine/package.json', { exports: { './sdk/platform/config': {} } });
+  write(root, 'packages/engine/package.json', { exports: { './platform/platform/config': {} } });
   if (!present) return root;
   write(root, 'products/daemon/package.json', {
     name: definition.packageName, main: 'src/main.ts', private: true, dependencies: { '@goodvibes-jev/engine': 'workspace:*' },
@@ -96,8 +96,8 @@ test('empty shells, empty-success scripts and missing script files cannot green 
 
 test('legacy dependencies, private engine imports and cross-workspace relative imports fail', () => {
   const root = fixture();
-  mutate(root, 'products/daemon/package.json', (value) => { value.dependencies = { '@legacy/goodvibes-sdk': '2.0.23' }; });
-  write(root, 'products/daemon/src/main.ts', "import x from '@legacy/goodvibes-sdk'; import y from '@goodvibes-jev/engine/sdk/private'; import z from '../../../packages/engine/sdk/src/index.ts'; export { x, y, z };");
+  mutate(root, 'products/daemon/package.json', (value) => { value.dependencies = { '@legacy/goodvibes-platform': '2.0.23' }; });
+  write(root, 'products/daemon/src/main.ts', "import x from '@legacy/goodvibes-platform'; import y from '@goodvibes-jev/engine/platform/private'; import z from '../../../packages/engine/platform/src/index.ts'; export { x, y, z };");
   const findings = inspectProductWorkspaces(root, [definition]).findings.join('\n');
   expect(findings).toContain('engine must be a workspace:* dependency');
   expect(findings).toContain('legacy dependency');

@@ -1,5 +1,5 @@
 import { createWelcomeCommand } from '@goodvibes-jev/engine/terminal-shell/entry-workspace-commands';
-import { estimateConversationTokens } from '@goodvibes-jev/engine/sdk/platform/core';
+import { estimateConversationTokens } from '@goodvibes-jev/engine/platform/platform/core';
 import { evaluateSessionMaintenance, formatSessionMaintenanceLines, getGuidanceMode } from '@/runtime/index.ts';
 import { dismissGuidance, evaluateContextualGuidance, formatGuidanceItems, resetGuidance } from '@/runtime/index.ts';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';

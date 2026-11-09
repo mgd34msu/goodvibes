@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { createRuntimeServices } from '../../runtime/services.ts';
@@ -17,7 +17,7 @@ import { createAgentOperatorMethodTool } from '../../tools/agent-operator-method
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { recordedEffectFixture } from '../helpers/recorded-effect-admission.ts';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { createOperatorInputProjector } from '../../tools/agent-operator-input-projector.ts';
 import { createShellPathService } from '@/runtime/index.ts';
 import type { ShellPathService } from '@/runtime/index.ts';

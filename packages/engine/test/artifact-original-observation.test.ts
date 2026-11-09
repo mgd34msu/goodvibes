@@ -4,8 +4,8 @@ import * as fs from 'node:fs';
 import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ArtifactStore, artifactOriginalId, removeOriginalArtifact } from '../sdk/src/platform/artifacts/store.ts';
-import type { ArtifactOriginalObservation, ArtifactRecord } from '../sdk/src/platform/artifacts/types.ts';
+import { ArtifactStore, artifactOriginalId, removeOriginalArtifact } from '../platform/src/platform/artifacts/store.ts';
+import type { ArtifactOriginalObservation, ArtifactRecord } from '../platform/src/platform/artifacts/types.ts';
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 async function fixture() { const root = mkdtempSync(join(tmpdir(), 'artifact-original-')); roots.push(root); const store = new ArtifactStore({ rootDir: root }), artifact = await store.create({ kind: 'document', text: 'original content', filename: 'document.txt' }); const record = store.getRecord(artifact.id); if (!record) throw Error('Missing actual stored artifact'); return { root, store, artifact, record }; }

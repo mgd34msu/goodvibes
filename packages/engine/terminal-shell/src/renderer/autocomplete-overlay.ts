@@ -8,7 +8,7 @@
  * longer than the popup, its last row carries a muted "12 more ↓" count.
  */
 
-import { createEmptyLine, type Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import { createEmptyLine, type Line } from '@goodvibes-jev/engine/platform/platform/types';
 import type { AutocompleteEngine } from '../autocomplete.js';
 import { renderPopup } from './surface-kit-parts.js';
 import type { KitRow } from './surface-kit-list.js';

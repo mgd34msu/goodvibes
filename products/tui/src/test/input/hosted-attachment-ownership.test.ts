@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
-import type { HostedSessionRecord } from '@goodvibes-jev/engine/sdk/platform/hosted-sessions';
+import type { HostedSessionRecord } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
 import type { DaemonVerbCaller } from '../../runtime/client/operator-endpoint.ts';
 import * as endpoint from '../../runtime/client/operator-endpoint.ts';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';

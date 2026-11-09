@@ -5,14 +5,14 @@
  * current model in pricing.modelPrices.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { ResolvedModelPricing } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ResolvedModelPricing } from '@goodvibes-jev/engine/platform/platform/providers';
 import {
   setModelPricingResolver,
   setPricingSource,
   MODEL_PRICES_CONFIG_KEY,
   BUDGET_ALERT_USD_CONFIG_KEY,
-} from '@goodvibes-jev/engine/sdk/platform/providers';
+} from '@goodvibes-jev/engine/platform/platform/providers';
 import { RuntimeEventBus, createEventEnvelope, createUiRuntimeEvents } from '@/runtime/index.ts';
 import { UsageTracker } from '../../runtime/usage-tracker.ts';
 import { UsageModal } from '../../input/usage-modal.ts';

@@ -2,8 +2,8 @@ import { describe, test, expect, beforeEach } from 'bun:test';
 import { handleSearchModeToken } from '../../input/handler-ui-state.ts';
 import { SearchManager } from '../../input/search.ts';
 import { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';
-import type { Cell } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { Cell } from '@goodvibes-jev/engine/platform/platform/types';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 
 // ---------------------------------------------------------------------------
 // Helpers

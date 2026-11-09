@@ -9,7 +9,7 @@ import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync 
 import { basename, dirname } from 'node:path';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { TEST_SURFACE_ROOT, makeTestSurface } from './_helpers/session-surface.ts';
-import type { SessionSurface } from '../sdk/src/platform/runtime/session-surface.ts';
+import type { SessionSurface } from '../platform/src/platform/runtime/session-surface.ts';
 import {
   checkSessionLiveness,
   isPidAlive,
@@ -17,7 +17,7 @@ import {
   livenessMarkerPathFor,
   removeLivenessMarker,
   writeLivenessMarker,
-} from '../sdk/src/platform/runtime/session-liveness-marker.ts';
+} from '../platform/src/platform/runtime/session-liveness-marker.ts';
 
 let tmpHome: string;
 let surface: SessionSurface;

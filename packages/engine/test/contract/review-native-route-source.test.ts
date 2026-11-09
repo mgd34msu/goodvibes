@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test';
-import { nativeContractRoute } from '../../sdk/src/platform/contract/native-decisions.js';
-import { nativeSourceCriteria } from '../../sdk/src/platform/contract/native-source.js';
-import { createRoutePlannerContractSelector } from '../../sdk/src/platform/contract/route.js';
+import { nativeContractRoute } from '../../platform/src/platform/contract/native-decisions.js';
+import { nativeSourceCriteria } from '../../platform/src/platform/contract/native-source.js';
+import { createRoutePlannerContractSelector } from '../../platform/src/platform/contract/route.js';
 import { makeContract } from './fixtures.js';
-import type { NativeContractSource } from '../../sdk/src/platform/contract/types.js';
+import type { NativeContractSource } from '../../platform/src/platform/contract/types.js';
 
 test('review: native production route selector receives full original source rather than just display ask', async () => {
   const source: NativeContractSource = { sourceId: 'work', sourceRevision: '1', inputRevision: '1', criteriaId: 'criteria', criteriaRevision: '1', goal: 'Exact original parser goal', criteria: ['Preserve the first exact requirement', 'Preserve the second exact requirement'] };

@@ -2,7 +2,7 @@ import { test, expect, spyOn } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AgentConfigManager, AGENT_NOTIFICATIONS_METADATA_ONLY_KEY as KEY } from '../../config/host-settings.ts';
-import { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createFeatureFlagManager } from '../../runtime/index.ts';
 import { SettingsModal } from '../../input/settings-modal.ts';
 import { settingContextLines } from '../../renderer/settings-modal-context.ts';

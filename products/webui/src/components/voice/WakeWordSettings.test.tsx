@@ -84,7 +84,7 @@ mock.module('../../lib/voice/useWake', () => ({
 const configWrites: { key: string; value: unknown }[] = [];
 
 mock.module('../../lib/goodvibes', () => ({
-  sdk: {
+  client: {
     operator: {
       config: {
         set: (key: string, value: unknown) => {
@@ -223,7 +223,7 @@ describe('the resolver\'s own reasons, verbatim', () => {
     cleanup = view.unmount;
     const list = view.el.querySelector('[data-testid="wake-blockers"]');
     expect(list?.textContent).toContain('voice.wake.vadThreshold');
-    // The exact sentence the SDK wrote, not a paraphrase of it.
+    // The exact sentence the platform wrote, not a paraphrase of it.
     expect(list?.textContent).toContain(mockSettings.blockers[0].detail);
   });
 

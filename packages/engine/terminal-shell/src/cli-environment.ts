@@ -1,7 +1,7 @@
 import { accessSync, constants } from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { spawn } from 'node:child_process';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 export function getLocalNetworkIp(): string {
   try {
     const nets = networkInterfaces();

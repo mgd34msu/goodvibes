@@ -8,7 +8,7 @@
  * and offline, with no port coordination and zero risk of touching a live process.
  *
  * CONTRACT-BOUND: sessionRecord()/messagesResponse()/unionListResponse()
- * shapes are asserted, in e2e/support/assert-contract-shape.test.ts, against the SDK's
+ * shapes are asserted, in e2e/support/assert-contract-shape.test.ts, against the platform's
  * generated operator-contract.json (sessions.list / sessions.get /
  * sessions.messages.list all share this session-record shape). A field rename or a
  * new required field on that contract fails that assertion instead of the mock
@@ -21,7 +21,7 @@ import type { OperatorMethodOutput } from '../../src/lib/goodvibes';
 
 /**
  * The fleet node fixtures below are annotated with the app's own FleetProcessNode
- * (= FleetSnapshotResult['nodes'][number], generated from the SDK's operator
+ * (= FleetSnapshotResult['nodes'][number], generated from the platform's operator
  * contract) rather than left to inference. Left inferred, the array in
  * FLEET_SNAPSHOT.nodes collapsed to the handful of properties every node shares,
  * so `needsAttention`, `observed`, `sessionRef`, `usage`, `provider`/`model` were
@@ -224,7 +224,7 @@ export function messagesResponse(sessionId: string) {
 
 /**
  * Provider pills fixture, the REAL providers.list wire shape (verified against the
- * SDK's operator-contract.json): each provider carries `providerId`/`active`/
+ * platform's operator-contract.json): each provider carries `providerId`/`active`/
  * `modelCount`/`models` at top level and its auth health nested at
  * `runtime.auth.routes[].freshness` (with `runtime.auth.mode`/`configured`). There is
  * NO top-level `authenticated`/`freshnessSeconds` on the wire, the old fixture invented
@@ -264,9 +264,9 @@ export function providersResponse() {
     modelIds: string[],
     // Real, optional per-model tier/pricing, additive only (existing callers that
     // omit this keep the exact prior shape). Mirrors what providers.list genuinely
-    // populates today (packages/sdk/src/platform/providers/runtime-snapshot.ts's
+    // populates today (packages/engine/platform/src/platform/providers/runtime-snapshot.ts's
     // toModelSnapshot) for the ModelWorkspaceModal price-filter/group proofs.
-    // pricing.source is contract-required now (the SDK's runtime snapshot stamps
+    // pricing.source is contract-required now (the platform's runtime snapshot stamps
     // every priced model with its provenance); asOf is the optional dated stamp.
     pricing: Record<
       string,
@@ -408,7 +408,7 @@ export function accountsSnapshotResponse() {
 }
 
 /**
- * Memory records fixture (memory.records.* / memory.review-queue, SDK 1.1.0). Shapes
+ * Memory records fixture (memory.records.* / memory.review-queue, platform 1.1.0). Shapes
  * are cross-checked against the daemon's own MEMORY_RECORD_SCHEMA
  * (operator-contract-schemas-runtime.js) the same way the session/provider fixtures
  * above are checked against their contracts, id/scope/cls/summary/tags/provenance/
@@ -559,7 +559,7 @@ export function knowledgeCandidateDecideResponse(id: string, decision: string) {
 }
 
 /**
- * knowledge.packet fixture, KNOWLEDGE_PACKET_SCHEMA shape, now the final SDK's real
+ * knowledge.packet fixture, KNOWLEDGE_PACKET_SCHEMA shape, now the final platform's real
  * (required, not optional) truncation fields: truncated/totalCandidates/droppedCount/
  * droppedForBudget/budgetExhausted (packet.ts). `truncated: false` (default) is the
  * every-candidate-fit case, no disclosure should render. `truncated: true` answers a
@@ -665,7 +665,7 @@ export function calendarEventDetailResponse(eventId: string) {
 }
 
 /**
- * Email fixtures (email.inbox.list / email.inbox.read). Field-for-field the SDK's
+ * Email fixtures (email.inbox.list / email.inbox.read). Field-for-field the platform's
  * EMAIL_INBOX_MESSAGE_SCHEMA and EMAIL_MESSAGE_DETAIL_SCHEMA, every required key
  * present, and the optional ones (bodyHtml, attachments) present on exactly one
  * message so the peek can be proven to list attachments AND to refuse to render an
@@ -731,7 +731,7 @@ export const CALENDAR_NOT_CONFIGURED_BODY = { error: 'CalDAV is not configured. 
 
 /**
  * Occasions/plans fixtures (occasions.list / occasions.plans.list / occasions.pending
- * / occasions.state), the dates panel (docs/occasions.md). Field-for-field the SDK's
+ * / occasions.state), the dates panel (docs/occasions.md). Field-for-field the platform's
  * generated shapes: one occasion with a real next-occurrence date (occasions.list is
  * the explicit-ask read that carries one, docs/occasions.md §4.3), one plan, one
  * outstanding nudge whose subjects carry a proximity WORD and never a date, and one
@@ -895,7 +895,7 @@ export function knowledgeMapResponse() {
 
 // ─── Fleet / approvals / watchers (WEBUI-FLEET-DEPTH) ─────────────────────────
 //
-// fleet.snapshot's node ids/kinds mirror the SDK's real fleet.snapshot shape
+// fleet.snapshot's node ids/kinds mirror the platform's real fleet.snapshot shape
 // (see src/lib/goodvibes.ts's FleetProcessNode). FLEET_AGENT_NODE.sessionRef.sessionId
 // deliberately equals STEERABLE_SESSION.id so the steer/detach/"approve from the tree"
 // proofs exercise the SAME seeded session the hero journey
@@ -971,7 +971,7 @@ export const FLEET_EVENT_NODE: FleetProcessNode = {
   capabilities: { interruptible: true, killable: true, pausable: false, resumable: false, steerable: false },
 };
 
-// 'pick' and 'conflict' (SDK 1.8.0), the SAME waiting-on-human class as 'input' above,
+// 'pick' and 'conflict' (platform 1.8.0), the SAME waiting-on-human class as 'input' above,
 // with their own reason-specific label. A ready best-of-N group and a merge-conflicted
 // work item, respectively. Both started BEFORE FLEET_BLOCKED_NODE (startedAt 50) so the
 // existing "blocked node floats to the top" proof still holds: among attention-tied
@@ -1018,9 +1018,9 @@ export const FLEET_GRAPH_WORKSTREAM_NODE: FleetProcessNode = {
   usage: { inputTokens: 200, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0, llmCallCount: 3, turnCount: 3, toolCallCount: 4 },
 };
 
-// Observed foreign agents (SDK 1.8.0's read-only externally-launched coding-agent
+// Observed foreign agents (platform 1.8.0's read-only externally-launched coding-agent
 // visibility), an `observed-external` node goodvibes did not spawn or host. Two
-// shapes, matching the SDK's own adaptObservedAgent: a steerable one (a genuine tmux
+// shapes, matching the platform's own adaptObservedAgent: a steerable one (a genuine tmux
 // channel) and a no-channel one (the daemon's own honest reason, never a dead button).
 // Never killable/interruptible/pausable/resumable, and excluded from the toolbar's
 // own-agent counts (lib/fleet.ts's activeCount/ownNodeCount/observedNodeCount).
@@ -1093,7 +1093,7 @@ export const PENDING_APPROVAL = {
       summary: 'Run the full test suite before merging',
       reasons: ['Modifies test fixtures'],
     },
-    // The SDK's buildRememberOptions output for one exec command, labels and
+    // The platform's buildRememberOptions output for one exec command, labels and
     // details render VERBATIM in the card's remember picker.
     rememberOptions: [
       { tier: 'session', label: 'for the rest of this session', detail: 'in-memory only; forgotten on restart' },
@@ -1176,7 +1176,7 @@ export const EXEC_PROMPT_APPROVAL = {
 // A pending CI "fix this?" offer, the red-run fix-session ask the ci-watch
 // service raises through the approval broker (tool 'ci:fix-session'). Accepting
 // it spawns a fix session whose id the broker stamps onto the resolved APPROVED
-// record (SDK 1d6a85e2), the mock daemon mirrors that stamp on approve.
+// record (platform 1d6a85e2), the mock daemon mirrors that stamp on approve.
 export const CI_FIX_OFFER_APPROVAL = {
   id: 'appr-ci-fix-1',
   callId: 'ci-fix-e2e1',

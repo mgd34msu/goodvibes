@@ -8,18 +8,18 @@ import {
   MAX_NOTICE_FAILURE_REASON_CHARS,
   validateInboundMailRecord,
   type InboundMailRecordInput,
-} from '../sdk/src/platform/email/inbound/record-store.ts';
+} from '../platform/src/platform/email/inbound/record-store.ts';
 import {
   DEFAULT_DISCLOSURE_RETENTION_MS,
   InboundMailHousekeeper,
-} from '../sdk/src/platform/email/inbound/housekeeping.ts';
-import { MailboxCursorStore } from '../sdk/src/platform/email/inbound/cursor-store.ts';
-import { PersistedExpectationStore } from '../sdk/src/platform/email/inbound/expectation-store.ts';
+} from '../platform/src/platform/email/inbound/housekeeping.ts';
+import { MailboxCursorStore } from '../platform/src/platform/email/inbound/cursor-store.ts';
+import { PersistedExpectationStore } from '../platform/src/platform/email/inbound/expectation-store.ts';
 import {
   PersistentStore,
   resetPersistentStoreTempSweepThrottle,
-} from '../sdk/src/platform/state/persistent-store.ts';
-import type { VerificationExpectation } from '../sdk/src/platform/google/verification-expectations.ts';
+} from '../platform/src/platform/state/persistent-store.ts';
+import type { VerificationExpectation } from '../platform/src/platform/google/verification-expectations.ts';
 import { useSecurityReadings } from './helpers/security-readings.ts';
 
 useSecurityReadings();

@@ -14,8 +14,8 @@ import { judgmentProcessSignal } from '../../judgment/scripts/process-owner.ts';
  */
 import { createSystemOnePort, judgmentConfigFromEnv } from '@goodvibes-jev/judgment';
 import { HttpStatusError, installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { DeliveryQueue, readFailureTransience, type DeliveryFailureClass } from '../sdk/src/platform/integrations/delivery.ts';
-import { readAutomationRunTransience } from '../sdk/src/platform/automation/manager-runtime-delivery.ts';
+import { DeliveryQueue, readFailureTransience, type DeliveryFailureClass } from '../platform/src/platform/integrations/delivery.ts';
+import { readAutomationRunTransience } from '../platform/src/platform/automation/manager-runtime-delivery.ts';
 
 interface ProofCase {
   readonly label: string;

@@ -3,12 +3,12 @@ import { mkdtempSync, mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync 
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { bindJudgmentPortAuthority, installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { captureArchetypeListing, readArchetypeFamilies, type AgentArchetype } from '@goodvibes-jev/engine/sdk/platform/agents';
-import { createTaskManager } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import { createRuntimeStore } from '@goodvibes-jev/engine/sdk/platform/runtime/store';
-import { RuntimeEventBus } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
-import { createFeatureFlagManager } from '@goodvibes-jev/engine/sdk/platform/runtime/feature-flags';
-import { createRuntimeOpsApi } from '@goodvibes-jev/engine/sdk/platform/runtime/bootstrap';
+import { captureArchetypeListing, readArchetypeFamilies, type AgentArchetype } from '@goodvibes-jev/engine/platform/platform/agents';
+import { createTaskManager } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
+import { RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { createFeatureFlagManager } from '@goodvibes-jev/engine/platform/platform/runtime/feature-flags';
+import { createRuntimeOpsApi } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerTeamworkRuntimeCommands } from '../../input/commands/teamwork-runtime.ts';
 import { ScheduleReadingLifetime } from '../../input/commands/schedule-reading-lifetime.ts';

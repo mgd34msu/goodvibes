@@ -1,11 +1,11 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, linkSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import * as fs from 'node:fs';
-import { writeFileAtomic } from '../sdk/src/platform/utils/atomic-json-store.js';
-import { logger } from '../sdk/src/platform/utils/logger.js';
+import { writeFileAtomic } from '../platform/src/platform/utils/atomic-json-store.js';
+import { logger } from '../platform/src/platform/utils/logger.js';
 import { join } from 'node:path';
-import { writeWorkstreamSnapshot, loadWorkstreamSnapshot, listSnapshotWorkstreamIds, reapOrchestrationSnapshots } from '../sdk/src/platform/orchestration/persistence.js';
-import type { Workstream } from '../sdk/src/platform/orchestration/types.js';
+import { writeWorkstreamSnapshot, loadWorkstreamSnapshot, listSnapshotWorkstreamIds, reapOrchestrationSnapshots } from '../platform/src/platform/orchestration/persistence.js';
+import type { Workstream } from '../platform/src/platform/orchestration/types.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

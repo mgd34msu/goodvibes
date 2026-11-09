@@ -5,14 +5,14 @@ import {
   BrowserJudgmentError,
   browserJudgmentRefusal,
   type BrowserJudgmentErrorCode,
-} from '../daemon-sdk/src/browser-judgment-contract.js';
+} from '../daemon-api/src/browser-judgment-contract.js';
 import {
   createBrowserJudgmentHttpHandler,
   dispatchBrowserJudgmentRoutes,
   type BrowserJudgmentCapability,
   type BrowserJudgmentHttpContext,
-} from '../daemon-sdk/src/browser-judgment-routes.js';
-import type { AuthenticatedPrincipal } from '../daemon-sdk/src/http-policy.js';
+} from '../daemon-api/src/browser-judgment-routes.js';
+import type { AuthenticatedPrincipal } from '../daemon-api/src/http-policy.js';
 
 // In-process Request/Response fixtures only. No server, provider, or real auth token.
 const ORIGIN = 'https://daemon.fixture.invalid';

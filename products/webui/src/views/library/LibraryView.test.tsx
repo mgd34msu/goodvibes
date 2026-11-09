@@ -20,7 +20,7 @@ mock.module('../../lib/goodvibes', () => ({
       ? { candidates: [{ id: 'c1', candidateType: 'promotion', status: 'pending', title: 'Candidate', score: 0.5 }] }
       : { sources: [], nodes: [], issues: [], targets: [], tasks: [] },
   ),
-  sdk: {
+  client: {
     knowledge: { status: () => Promise.resolve({}), map: () => Promise.resolve({}) },
     operator: {
       memory: {

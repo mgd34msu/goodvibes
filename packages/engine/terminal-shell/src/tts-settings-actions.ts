@@ -1,6 +1,6 @@
-import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import type { SelectionItem } from './selection-modal.js';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { OpenSelection } from './selection-modal.js';
 export interface TtsPickerContext {
   readonly platform: {

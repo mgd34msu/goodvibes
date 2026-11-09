@@ -4,7 +4,7 @@
  *
  * GROUNDED: for most secret-shaped config keys (surfaces.slack.botToken,
  * surfaces.telegram.botToken, ...), the daemon's own read path
- * (`resolveSecretInput` in the SDK's secret-refs.ts) accepts EITHER a
+ * (`resolveSecretInput` in the platform's secret-refs.ts) accepts EITHER a
  * `goodvibes://…`/`env:…`/etc. secret reference OR a literal string, a
  * literal token pasted through `config.set` is read back and used as-is. For
  * those keys, config.set is a real, working write path (SettingsField.tsx's
@@ -14,13 +14,13 @@
  * resolvers deliberately never read a literal from config at all:
  *
  *   - `surfaces.email.password` / `.imapPassword` / `.imap.password` /
- *     `.smtp.password`, packages/sdk/src/platform/email/surface-config.ts:
+ *     `.smtp.password`, packages/engine/platform/src/platform/email/surface-config.ts:
  *     "Every password is fetched from the secret store under the name the
  *     config key derives (`daemonSecretKeyFor`), never read out of a settings
  *     file." `readSurfaceEmailSettings` does not even attempt to read these
  *     keys as config strings, only host/port/user/from are read that way.
  *   - `surfaces.calendar.caldavPassword`,
- *     packages/sdk/src/platform/calendar/caldav-gateway-config.ts:
+ *     packages/engine/platform/src/platform/calendar/caldav-gateway-config.ts:
  *     "A raw password pasted into config resolves to nothing rather than
  *     being used, which is deliberate: a credential in a settings file is a
  *     credential in every backup of it." A literal value stored there is
@@ -38,7 +38,7 @@
  * that write is a lie by omission.
  *
  * There is no operator-exposed RPC that can write into the daemon's secret
- * store instead (searched the SDK's control-plane method catalog,
+ * store instead (searched the platform's control-plane method catalog,
  * `method-catalog-admin.ts` exposes `credentials.get`, read-only, and no
  * `secrets.set`/`secrets.write` method at all). So the honest behavior for a
  * REMOTE browser client, which can only ever reach the daemon over this
@@ -66,9 +66,9 @@ export function isSecretStoreOnlyConfigKey(key: string): boolean {
 
 /**
  * The secret-store name this config key implies, ported verbatim from the
- * SDK's `daemonSecretKeyFor` (packages/sdk/src/platform/config/daemon-secret-keys.ts)
+ * platform's `daemonSecretKeyFor` (packages/engine/platform/src/platform/config/daemon-secret-keys.ts)
  * for the same reason config-ownership.ts and config-redaction.ts already port
- * SDK data rather than importing the config barrel: the barrel drags
+ * platform data rather than importing the config barrel: the barrel drags
  * SecretsManager / OAuth / node-only code into the browser bundle. This
  * function itself is pure string manipulation with no dependency of its own,
  * so the port is exact and has nothing to drift out of sync with beyond the

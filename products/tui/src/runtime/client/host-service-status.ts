@@ -15,7 +15,7 @@ export {
  */
 
 import type { HostServiceStatus } from '@/runtime/index.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 
 /** Which of the two background services a question is about. */
 import type { HostServiceName } from '@goodvibes-jev/engine/terminal-shell/host-service-status';
@@ -40,7 +40,7 @@ export function createPendingServiceStatus(configManager: Pick<ConfigManager, 'g
 
 /**
  * A service this terminal can actually use. Called for both the daemon and the
- * HTTP listener (see bootstrap.ts), so the 'embedded' arm stays live: the SDK
+ * HTTP listener (see bootstrap.ts), so the 'embedded' arm stays live: the platform
  * always reports its in-process HTTP listener as 'embedded', even though this
  * product's daemon status can never carry that mode (adoptOnly is hardcoded on
  * every host-services call this app makes).

@@ -1,7 +1,7 @@
-import { createOAuthLocalListener, resolveDaemonEnabled } from '@goodvibes-jev/engine/sdk/platform/config';
-import { beginOpenAICodexLogin, exchangeOpenAICodexCode } from '@goodvibes-jev/engine/sdk/platform/config';
-import { summarizeError, openExternalUrl } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { createOAuthLocalListener, resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
+import { beginOpenAICodexLogin, exchangeOpenAICodexCode } from '@goodvibes-jev/engine/platform/platform/config';
+import { summarizeError, openExternalUrl } from '@goodvibes-jev/engine/platform/platform/utils';
+import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
 import { buildProviderAccountSnapshot } from '@/runtime/index.ts';
 import { enrichProviderAccountsSnapshot } from '../runtime/onboarding/provider-key-capture.ts';
 import { handleConnectExistingDaemonForHandler, handleMigrateLegacyDaemonServiceForHandler } from './handler-onboarding-daemon-adopt.ts';

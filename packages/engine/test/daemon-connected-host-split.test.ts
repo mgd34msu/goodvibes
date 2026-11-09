@@ -17,8 +17,8 @@
  * file gets the second answer written down where its owner can see it.
  */
 import { describe, expect, test } from 'bun:test';
-import { resolveConnectedHostDialEnabled, resolveDaemonEnabled } from '@goodvibes-jev/engine/sdk/platform/config';
-import { migrateDaemonConnectedHostSplit } from '../sdk/src/platform/config/migrations.ts';
+import { resolveConnectedHostDialEnabled, resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
+import { migrateDaemonConnectedHostSplit } from '../platform/src/platform/config/migrations.ts';
 
 /** A config reader over a flat key→value map, like ConfigManager.get. */
 function readerFor(values: Record<string, unknown>): {

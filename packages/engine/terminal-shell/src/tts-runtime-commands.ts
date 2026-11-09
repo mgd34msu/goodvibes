@@ -1,4 +1,4 @@
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { TerminalCommandRegistry } from './command-registry.js';
 interface TtsContext {
   readonly platform: { readonly configManager: Pick<ConfigManager, 'get' | 'setDynamic' | 'save'>; readonly voiceService?: unknown };

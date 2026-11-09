@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { contractPath } from '../../sdk/src/platform/contract/store.js';
+import { contractPath } from '../../platform/src/platform/contract/store.js';
 import { makeHarness, makeRepo, oneUnitPlan, startContract, waitFor, type Harness } from './runner-support.js';
 
 function deferred() {

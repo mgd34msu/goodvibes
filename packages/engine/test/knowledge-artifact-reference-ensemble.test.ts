@@ -4,11 +4,11 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import * as persistedImages from '../sdk/src/platform/state/sqlite-store-persistence.ts';
-import { ArtifactStore } from '../sdk/src/platform/artifacts/store.ts';
-import { KnowledgeStore, captureKnowledgeArtifactReferenceOwner } from '../sdk/src/platform/knowledge/store.ts';
-import { configureKnowledgeArtifactReferences } from '../sdk/src/platform/knowledge/artifact-reference-ensemble.ts';
-import { createInactiveArtifactReferenceOwner } from '../sdk/src/platform/knowledge/inactive-artifact-reference-owner.ts';
+import * as persistedImages from '../platform/src/platform/state/sqlite-store-persistence.ts';
+import { ArtifactStore } from '../platform/src/platform/artifacts/store.ts';
+import { KnowledgeStore, captureKnowledgeArtifactReferenceOwner } from '../platform/src/platform/knowledge/store.ts';
+import { configureKnowledgeArtifactReferences } from '../platform/src/platform/knowledge/artifact-reference-ensemble.ts';
+import { createInactiveArtifactReferenceOwner } from '../platform/src/platform/knowledge/inactive-artifact-reference-owner.ts';
 const roots: string[] = [], stores: KnowledgeStore[] = [];
 afterEach(async () => { for (const store of stores.splice(0)) await store.close(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 async function fixture() {
@@ -66,7 +66,7 @@ test('malformed or future inactive source is preserved and cannot establish no r
 
 test('future inactive schema is not repaired, migrated, overwritten or interpreted as empty', async () => {
   const f = await fixture(), path = join(f.root, 'knowledge-wiki.sqlite');
-  const { loadSqlJsEngine } = await import('../sdk/src/platform/state/sqlite-store.ts'), engine = await loadSqlJsEngine(), raw = new engine.Database(readFileSync(f.store.storagePath));
+  const { loadSqlJsEngine } = await import('../platform/src/platform/state/sqlite-store.ts'), engine = await loadSqlJsEngine(), raw = new engine.Database(readFileSync(f.store.storagePath));
   let bytes: Uint8Array; try { raw.run('PRAGMA user_version = 2147483647'); bytes = raw.export(); } finally { raw.close(); }
   writeFileSync(path, bytes!, { mode: 0o600 });
   expect(await f.store.cleanupUnreferencedArtifact(f.artifacts.captureOriginal(f.artifact.id))).toBe('held'); expect(readFileSync(path)).toEqual(Buffer.from(bytes!));

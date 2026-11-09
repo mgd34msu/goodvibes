@@ -39,7 +39,7 @@ const relayClient: RelayClient = {
   },
 };
 mock.module('@goodvibes-jev/engine/transport-realtime', () => ({ createRelayClient: () => relayClient }));
-mock.module('../../lib/goodvibes', () => ({ sdk: { operator: { stepup: {
+mock.module('../../lib/goodvibes', () => ({ client: { operator: { stepup: {
   mintChallenge: (_input: unknown, signal?: AbortSignal) => {
     mintSignals.push(signal);
     const reply = mintReplies.shift();

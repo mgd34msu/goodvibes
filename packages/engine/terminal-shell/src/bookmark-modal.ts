@@ -5,7 +5,7 @@
  * selected index, scroll offset, and pending action.
  */
 
-import { isSavedFileForLabel, type BookmarkEntry, type BookmarkManager } from '@goodvibes-jev/engine/sdk/platform/bookmarks';
+import { isSavedFileForLabel, type BookmarkEntry, type BookmarkManager } from '@goodvibes-jev/engine/platform/platform/bookmarks';
 
 // ---------------------------------------------------------------------------
 // BookmarkModal

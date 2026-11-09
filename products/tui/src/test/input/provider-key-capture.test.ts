@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { LLMProvider } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { LLMProvider } from '@goodvibes-jev/engine/platform/platform/providers';
 import {
   deriveProviderKeyCaptureTargets,
   deriveSubscriptionStatusTargets,

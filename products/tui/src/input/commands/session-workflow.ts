@@ -3,7 +3,7 @@ import { createSessionWorkflowCommands } from '@goodvibes-jev/engine/terminal-sh
 import '@goodvibes-jev/engine/terminal-shell/transcript-review';
 
 import '@goodvibes-jev/engine/terminal-shell/transcript-kinds';
-import { findSessionCandidates } from '@goodvibes-jev/engine/sdk/platform/sessions';
+import { findSessionCandidates } from '@goodvibes-jev/engine/platform/platform/sessions';
 import './transcript-reading.ts';
 import 'node:crypto';
 import { rmSync } from 'node:fs';
@@ -21,9 +21,9 @@ import {
 } from '@/runtime/index.ts';
 import { requireProviderApi, requireSessionManager, requireSurface } from './runtime-services.ts';
 import { resumeSessionCore } from '../../core/session-resume-core.ts';
-import { checkSessionLiveness } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { clearTurnAnchors, getTurnAnchors, persistTurnAnchors, recordTurnAnchor } from '@goodvibes-jev/engine/sdk/platform/rewind';
+import { checkSessionLiveness } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { clearTurnAnchors, getTurnAnchors, persistTurnAnchors, recordTurnAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { saveWorkTreeFolds } from '../../core/work-tree-fold-store.ts';
 
 function copySessionSidecars(ctx: CommandContext, destination: string): void {
@@ -110,22 +110,6 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
     'Session saved: ' + name + (sanitized !== name ? ' (saved as "' + sanitized + '")' : '') + '\n  → ' + path,
   forked: (id, name, source, title, count) =>
     'Session forked:\n  New ID: ' + id + '\n  Name:   ' + name + '\n  From:   ' + (title || source) + '\n  Messages: ' + count,
-  prepareRename(ctx, sm) {
-    const existingMeta = sm.getMeta(ctx.session.runtime.sessionId);
-    if (!existingMeta) {
-      const exportData = ctx.session.conversationManager.toJSON() as { messages: object[]; timestamp?: number };
-      sm.save(ctx.session.runtime.sessionId, exportData.messages ?? [], {
-        title: ctx.session.conversationManager.title || '',
-        model: ctx.session.runtime.model,
-        provider: ctx.session.runtime.provider,
-        timestamp: Date.now(),
-        // Naming a session is an act of curation, so the file this
-        // materializes for rename to act on is a user save, not machinery,
-        // the retention sweep must not expire something the user named.
-        saveSource: 'user',
-      });
-    }
-  },
   async productCommand(args, ctx, sm, sub) {
     if (sub === 'resume') {
       // '--force' bypasses the multi-instance liveness confirm below, never a
@@ -197,7 +181,7 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
         }
         const returnContextMode = getReturnContextMode(ctx.platform.configManager);
         if (returnContextMode !== 'off' && meta.returnContext) {
-          // The SDK's session loader already dropped any legacy open-view list from a
+          // The platform's session loader already dropped any legacy open-view list from a
           // session saved by an older TUI, so the loaded return context is shown as-is.
           for (const line of formatReturnContextForDisplay(meta.returnContext)) {
             ctx.print(`  ${line}`);

@@ -5,8 +5,8 @@ import type { SelectionItem } from '../selection-modal.ts';
 import { publishActiveEffortOptions } from '../../providers/reasoning-effort-surface.ts';
 import { compactConversation, requireKeybindingsManager, requireProviderApi } from './runtime-services.ts';
 import { startFreshConversation } from './fresh-conversation.ts';
-import '@goodvibes-jev/engine/sdk/platform/utils';
-import '@goodvibes-jev/engine/sdk/platform/utils';
+import '@goodvibes-jev/engine/platform/platform/utils';
+import '@goodvibes-jev/engine/platform/platform/utils';
 
 function commandCategory(commandName: string): string {
   if (

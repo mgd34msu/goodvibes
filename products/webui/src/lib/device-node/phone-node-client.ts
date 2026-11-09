@@ -1,7 +1,7 @@
 /**
  * phone-node-client.ts, this web app acting as a paired device node.
  *
- * The loop is the SDK peer contract verbatim: request pairing, wait for the
+ * The loop is the platform peer contract verbatim: request pairing, wait for the
  * operator to approve, verify with the challenge to receive a peer token, then
  * heartbeat and pull `device.capability` work, run it against the browser
  * bindings, and complete it. Nothing in this file is web-specific except the

@@ -1,10 +1,10 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { CommandRegistry } from '../command-registry.ts';
-import { profileDataToConfigSnapshot } from '@goodvibes-jev/engine/sdk/platform/profiles';
-import { CONFIG_SCHEMA, type ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { CONFIG_KEYS } from '@goodvibes-jev/engine/sdk/platform/config';
+import { profileDataToConfigSnapshot } from '@goodvibes-jev/engine/platform/platform/profiles';
+import { CONFIG_SCHEMA, type ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
+import { CONFIG_KEYS } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ManagedSettingsBundle } from '@/runtime/index.ts';
 import {
   applyStagedManagedBundle,
@@ -19,7 +19,7 @@ import {
   stageManagedSettingsBundle,
 } from '@/runtime/index.ts';
 import { requireProfileManager, requireShellPaths } from './runtime-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 function buildConfigSnapshot(
   manager: { get: (key: ConfigKey) => unknown },

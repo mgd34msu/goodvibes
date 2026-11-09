@@ -21,7 +21,7 @@ import {
   parseOccasionDate,
   renderOccasionDate,
   todayInZone,
-} from '../sdk/src/platform/occasions/dates.ts';
+} from '../platform/src/platform/occasions/dates.ts';
 import {
   occasionIdFor,
   parseOccasionLine,
@@ -29,7 +29,7 @@ import {
   renderOccasionLine,
   renderPlanLine,
   splitSegments,
-} from '../sdk/src/platform/occasions/grammar.ts';
+} from '../platform/src/platform/occasions/grammar.ts';
 
 describe('occasion dates', () => {
   test('parses MM-DD as recurring and YYYY-MM-DD as dated', () => {

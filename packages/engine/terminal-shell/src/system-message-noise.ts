@@ -1,7 +1,7 @@
 /**
  * System-message noise policy, decides whether an operational status message
  * should reach the transcript unchanged, be dropped, or be folded. Every noisy
- * source these rules catch is emitted (from the SDK) through
+ * source these rules catch is emitted (from the platform) through
  * SystemMessageRouter, so this one funnel is where first-run plumbing is kept
  * out of the user's stream while the information stays reachable elsewhere
  * (Agents modal, /health, /model, activity log). (item 1.)
@@ -30,9 +30,9 @@ export type NoiseVerdict =
 const EMIT: NoiseVerdict = { action: 'emit' };
 const DROP: NoiseVerdict = { action: 'drop' };
 const FOLD: NoiseVerdict = { action: 'foldProviderReplay' };
-/** Matches the SDK's per-provider persisted-replay line (1b). */
+/** Matches the platform's per-provider persisted-replay line (1b). */
 const PROVIDER_REPLAY_RE = / — from last session$/;
-/** Matches the SDK's 30s periodic running-agents snapshot (1d). */
+/** Matches the platform's 30s periodic running-agents snapshot (1d). */
 const AGENTS_RUNNING_SNAPSHOT_RE = /^\[Agents\] \d+ running:/;
 /** Extracts the chain id from a "[Replay]… WRFC chain <id> transitioned …" line (1c). */
 const REPLAY_CHAIN_RE = /WRFC chain (\S+) transitioned .* waiting for action/;

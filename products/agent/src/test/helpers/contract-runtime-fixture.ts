@@ -2,7 +2,7 @@ import type { EntryType, Question } from '@goodvibes-jev/judgment';
 /** Offline I/O for the Agent's real composed contract runner. No runner/engine is replaced. */
 import { choiceAnswer, fakePort, noulAnswer, scoreAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import type { AgentRecord } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { AgentRecord } from '@goodvibes-jev/engine/platform/platform/tools';
 import { getTestRuntimeServices, resetTestRuntimeServices } from './runtime-services.ts';
 
 export const CONTRACT_ASK = 'Cap the delay in src/isolation-fixture.ts';

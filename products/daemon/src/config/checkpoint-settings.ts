@@ -1,34 +1,34 @@
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 
 /**
  * Checkpoint guard settings (`checkpoints.*` namespace).
  *
- * The SDK's WorkspaceCheckpointManager exposes root/retention guard options that
+ * The platform's WorkspaceCheckpointManager exposes root/retention guard options that
  * decide which directory it is safe to snapshot and how the first sweep and
  * retention behave:
  *
- *   - `checkpoints.preferGitRoot` (boolean, SDK default true), prefer the
+ *   - `checkpoints.preferGitRoot` (boolean, platform default true), prefer the
  *     enclosing git repository's top level over the raw working directory.
- *   - `checkpoints.allowBroadRoot` (boolean, SDK default false), opt in to
+ *   - `checkpoints.allowBroadRoot` (boolean, platform default false), opt in to
  *     snapshotting a broad root (filesystem root, home directory, ~/.goodvibes).
- *   - `checkpoints.allowLargeFirstSnapshot` (boolean, SDK default false), opt
+ *   - `checkpoints.allowLargeFirstSnapshot` (boolean, platform default false), opt
  *     in to a first snapshot whose full sweep exceeds `maxFirstSnapshotFiles`.
- *   - `checkpoints.maxFirstSnapshotFiles` (number, SDK default), ceiling for
+ *   - `checkpoints.maxFirstSnapshotFiles` (number, platform default), ceiling for
  *     the first-ever snapshot's file sweep.
- *   - `checkpoints.autoRetention` (boolean, SDK default true), run a retention
+ *   - `checkpoints.autoRetention` (boolean, platform default true), run a retention
  *     sweep automatically after each successful create and once at init.
  *
  * A sixth key, `checkpoints.unregisteredWorkspaces`, is read separately by
  * `readCheckpointRegistrationSetting` below (kept out of `CheckpointGuardSettings`
- * because it is a daemon-owned enforcement switch, not an SDK manager
+ * because it is a daemon-owned enforcement switch, not a platform manager
  * constructor option, and must never be spread into the manager's options).
  *
- * The shared SDK config schema (GoodVibesConfig) has no `checkpoints` category,
+ * The shared platform config schema (GoodVibesConfig) has no `checkpoints` category,
  * so these are read directly from a user-supplied `checkpoints` block in
- * settings.json. The SDK ConfigManager deep-merges loaded settings onto the
+ * settings.json. The platform ConfigManager deep-merges loaded settings onto the
  * default config and preserves unknown top-level blocks, so a hand-added
  * `checkpoints` object survives to `getRaw()`. Only these five passthrough keys
- * are read here; each absent key falls back to the SDK manager's own default.
+ * are read here; each absent key falls back to the platform manager's own default.
  *
  * settings.json example:
  *
@@ -52,7 +52,7 @@ export interface CheckpointGuardSettings {
 /**
  * Read the `checkpoints.*` guard passthrough keys from the loaded config. Only
  * keys present with the right primitive type are returned; everything else is
- * omitted so the SDK manager applies its own default. `maxFirstSnapshotFiles`
+ * omitted so the platform manager applies its own default. `maxFirstSnapshotFiles`
  * must be a finite positive number to be accepted.
  */
 export function readCheckpointGuardSettings(
@@ -94,10 +94,10 @@ export function readCheckpointGuardSettings(
  *     checkpoints, and explicit checkpoint creation through the ws-only
  *     `checkpoints.create` gateway verb, both refuse when the resolved
  *     workspace root is not covered by the shared registration store
- *     (the SDK's workspace registration, platform/workspace).
+ *     (the platform's workspace registration, platform/workspace).
  *     `'guarded'` opts back into the pre-ruling behavior for an unregistered
  *     workspace: automatic snapshots subscribe and explicit create proceeds,
- *     subject only to the SDK's own root/size guards above, never a silent
+ *     subject only to the platform's own root/size guards above, never a silent
  *     re-enable, an explicit per-workspace opt-out of the registration gate.
  *
  * Any other value (including absence) reads as `'off'`.

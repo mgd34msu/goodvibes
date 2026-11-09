@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { YesNoReading } from '@goodvibes-jev/judgment';
-import { exportBreakVerdict, runBreaking } from '../sdk/src/platform/tools/analyze/git-modes.ts';
+import { exportBreakVerdict, runBreaking } from '../platform/src/platform/tools/analyze/git-modes.ts';
 import { useToolReadings } from './_helpers/tool-readings.ts';
 
 const readings = useToolReadings([

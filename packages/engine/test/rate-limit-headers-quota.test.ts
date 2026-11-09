@@ -10,11 +10,11 @@ import {
   parseRateLimitHeaders,
   parseOpenAiResetDurationMs,
   parseRetryAfterMs,
-} from '../sdk/src/platform/providers/rate-limit-headers.ts';
-import { QuotaWindowTracker } from '../sdk/src/platform/runtime/cost/quota-window.ts';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { registerCostGatewayMethods } from '../sdk/src/platform/control-plane/routes/cost.ts';
-import { CostAttributionService } from '../sdk/src/platform/runtime/cost/attribution.ts';
+} from '../platform/src/platform/providers/rate-limit-headers.ts';
+import { QuotaWindowTracker } from '../platform/src/platform/runtime/cost/quota-window.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { registerCostGatewayMethods } from '../platform/src/platform/control-plane/routes/cost.ts';
+import { CostAttributionService } from '../platform/src/platform/runtime/cost/attribution.ts';
 
 const NOW = 1_000_000;
 

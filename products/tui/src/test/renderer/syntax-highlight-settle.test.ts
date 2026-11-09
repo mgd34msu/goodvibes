@@ -11,7 +11,7 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { ConversationManager } from '../../core/conversation.ts';
 import { renderCodeBlock, settleSyntaxHighlighting, syntaxHighlightGeneration, syntaxHighlightMisses } from '../../renderer/code-block.ts';
 import { SyntaxHighlighter } from '../../renderer/syntax-highlighter.ts';

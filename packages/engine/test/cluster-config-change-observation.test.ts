@@ -1,7 +1,7 @@
 /** UNRUN: exact operation origin and original queue ownership. */
 import { expect, test } from 'bun:test';
-import { GroupConfigChanges } from '../sdk/src/platform/cluster/group-config-changes.ts';
-import { listReplicatedConfigPaths, replicatedSecretKeyFor } from '../sdk/src/platform/cluster/config-replication-policy.ts';
+import { GroupConfigChanges } from '../platform/src/platform/cluster/group-config-changes.ts';
+import { listReplicatedConfigPaths, replicatedSecretKeyFor } from '../platform/src/platform/cluster/config-replication-policy.ts';
 const logger = { debug() {}, info() {}, warn() {}, error() {} };
 function pathAt(index: number) { const value = listReplicatedConfigPaths()[index]; if (!value) throw Error('Missing actual policy fixture'); return value; }
 async function turns() { for (let i = 0; i < 20; i++) await Promise.resolve(); }

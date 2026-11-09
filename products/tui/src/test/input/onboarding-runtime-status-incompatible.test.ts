@@ -1,7 +1,7 @@
 /**
  * onboarding-runtime-status-incompatible.test.ts
  *
- * The SDK adopt-or-start path now reports a distinct `incompatible` host-service
+ * The platform adopt-or-start path now reports a distinct `incompatible` host-service
  * mode: a GoodVibes daemon holds the configured port but speaks a wire version
  * this surface cannot adopt, so the TUI neither adopted it nor started a
  * competing daemon. These tests pin the TUI's honest surfacing of that mode,

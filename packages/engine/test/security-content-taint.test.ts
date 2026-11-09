@@ -19,12 +19,12 @@ import {
   findContentTaint,
   findExactContainment,
   type TaintSource,
-} from '../sdk/src/platform/security/content-taint.ts';
+} from '../platform/src/platform/security/content-taint.ts';
 import {
   UntrustedContentLedger,
   createUntrustedContentPort,
   evaluateOutwardEffect,
-} from '../sdk/src/platform/security/untrusted-content.ts';
+} from '../platform/src/platform/security/untrusted-content.ts';
 import { useSecurityReadings, withSecurityReadings } from './helpers/security-readings.ts';
 
 function source(text: string, origin = 'email:evil.example (claimed)'): TaintSource {

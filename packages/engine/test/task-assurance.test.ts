@@ -7,10 +7,10 @@ import { fakePort as baseFakePort, noulAnswer } from '@goodvibes-jev/judgment/te
 function fakePort(answer: Parameters<typeof baseFakePort>[0]) {
   return baseFakePort((name, question, state) => name === 'completion_required' ? noulAnswer(.99) : answer(name, question, state));
 }
-import { assertAgentBriefFidelity } from '../sdk/src/platform/agents/brief-fidelity.js';
-import { ConversationManager } from '../sdk/src/platform/core/conversation.js';
-import { collectResponseDelegates, ResponseCompletionGuard } from '../sdk/src/platform/core/response-completion.js';
-import { createAgentTool } from '../sdk/src/platform/tools/agent/index.js';
+import { assertAgentBriefFidelity } from '../platform/src/platform/agents/brief-fidelity.js';
+import { ConversationManager } from '../platform/src/platform/core/conversation.js';
+import { collectResponseDelegates, ResponseCompletionGuard } from '../platform/src/platform/core/response-completion.js';
+import { createAgentTool } from '../platform/src/platform/tools/agent/index.js';
 
 let previous: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previous = installJudgmentPort(undefined); });

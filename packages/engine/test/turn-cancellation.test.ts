@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
-import { TurnCancellationFence } from '../sdk/src/platform/core/turn-cancellation.ts';
-import { createSessionTurnCancelHandler, registerSessionRuntimeGatewayMethods, type SessionRuntimeControls } from '../sdk/src/platform/control-plane/routes/session-runtime.ts';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../sdk/src/platform/daemon/control-plane.ts';
+import { TurnCancellationFence } from '../platform/src/platform/core/turn-cancellation.ts';
+import { createSessionTurnCancelHandler, registerSessionRuntimeGatewayMethods, type SessionRuntimeControls } from '../platform/src/platform/control-plane/routes/session-runtime.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../platform/src/platform/daemon/control-plane.ts';
 
 function fixture() {
   let aborts = 0;
@@ -54,16 +54,16 @@ test('real gateway policy denies read-only actors and allows session writers bef
 });
 
 test('public typed operator client sends expected identity through the native REST contract', async () => {
-  const { createOperatorSdk } = await import('../operator-sdk/src/index.ts');
+  const { createOperatorApiClient } = await import('../operator-client/src/index.ts');
   let captured: { url: string; body: unknown } | undefined;
-  const sdk = createOperatorSdk({
+  const platformClient = createOperatorApiClient({
     baseUrl: 'http://localhost:3210', authToken: 'fixture',
     fetch: Object.assign(async (input: string | URL | Request, init?: RequestInit) => {
       captured = { url: String(input), body: JSON.parse(String(init?.body)) as unknown };
       return Response.json({ sessionId: 'hosted-1', expectedTurnId: 'turn-1', status: 'cancellation-requested', activeTurnId: 'turn-1' });
     }, { preconnect: () => {} }),
   });
-  const result = await sdk.sessions.turns.cancel({ sessionId: 'hosted-1', expectedTurnId: 'turn-1' });
+  const result = await platformClient.sessions.turns.cancel({ sessionId: 'hosted-1', expectedTurnId: 'turn-1' });
   expect(result.status).toBe('cancellation-requested');
   expect(captured).toEqual({ url: 'http://localhost:3210/api/sessions/hosted-1/turns/cancel', body: { expectedTurnId: 'turn-1' } });
 });

@@ -7,13 +7,13 @@
  * memory-provenance ids, the honest-absence idiom this codebase uses
  * everywhere else (never a dead chip, never a fabricated "0 used" state).
  *
- * The drill-in fetches each record's real detail (sdk.operator.memory.get)
+ * The drill-in fetches each record's real detail (platform.operator.memory.get)
  * lazily, only once expanded, the chip itself never blocks on a fetch.
  */
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronDown, ChevronUp, Database } from 'lucide-react';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import { formatError } from '../../lib/errors';
 import { Chip } from '../../components/ui/Chip';
 import '../../styles/components/memory-provenance.css';
@@ -28,7 +28,7 @@ export function MemoryProvenanceChip({ recordIds }: MemoryProvenanceChipProps) {
   const details = useQuery({
     queryKey: ['memory', 'provenance', ...recordIds],
     queryFn: async () => {
-      const results = await Promise.allSettled(recordIds.map((id) => sdk.operator.memory.get(id)));
+      const results = await Promise.allSettled(recordIds.map((id) => platformClient.operator.memory.get(id)));
       return results.map((result, index) => ({
         id: recordIds[index],
         ok: result.status === 'fulfilled',

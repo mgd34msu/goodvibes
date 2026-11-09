@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { isDeepStrictEqual } from 'node:util';
 import { captureJudgmentPort, installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { captureStrictJudgmentJson, prepareJudgmentResult, JudgmentResultAdmissionError } from '../sdk/src/platform/gate/judgment-result.ts';
-import { JudgmentInputError, judgmentInputProblem } from '../sdk/src/platform/gate/judgment-input.ts';
+import { captureStrictJudgmentJson, prepareJudgmentResult, JudgmentResultAdmissionError } from '../platform/src/platform/gate/judgment-result.ts';
+import { JudgmentInputError, judgmentInputProblem } from '../platform/src/platform/gate/judgment-input.ts';
 import { choice, createSystemOnePort, noul, SqliteDecisionLog, withDecisionLog, type JudgmentResult, type Questions } from '@goodvibes-jev/judgment';
 
 const questions = () => ({ flag: noul('Does the synthetic statement hold?'), pick: choice('Pick the matching synthetic option.', { a: 'A', b: 'B' }) });

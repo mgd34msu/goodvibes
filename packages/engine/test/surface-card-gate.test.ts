@@ -21,10 +21,10 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, w
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import ts from 'typescript';
-import { DaemonSurfaceActionHelper } from '../sdk/src/platform/daemon/surface-actions.ts';
-import { handleNtfySurfacePayload } from '../sdk/src/platform/adapters/ntfy/index.ts';
-import { WorkProposalStore, type WorkProposalRecord } from '../sdk/src/platform/agents/work-proposal-store.ts';
-import { logger } from '../sdk/src/platform/utils/logger.ts';
+import { DaemonSurfaceActionHelper } from '../platform/src/platform/daemon/surface-actions.ts';
+import { handleNtfySurfacePayload } from '../platform/src/platform/adapters/ntfy/index.ts';
+import { WorkProposalStore, type WorkProposalRecord } from '../platform/src/platform/agents/work-proposal-store.ts';
+import { logger } from '../platform/src/platform/utils/logger.ts';
 import { trackDisposables } from './_helpers/disposables.ts';
 import { useApprovalReadings } from './helpers/approval-readings.ts';
 
@@ -642,7 +642,7 @@ describe('credential-shaped replies stop before card-talk and downstream storage
 });
 
 describe('every remote adapter call site is covered by the shared hook', () => {
-  const ADAPTERS_DIR = join(import.meta.dir, '..', 'sdk', 'src', 'platform', 'adapters');
+  const ADAPTERS_DIR = join(import.meta.dir, '..', 'platform', 'src', 'platform', 'adapters');
 
   /**
    * `github` is NOT a remote messaging channel and is deliberately not gated:
@@ -868,7 +868,7 @@ describe('every remote adapter call site is covered by the shared hook', () => {
 
   test('the card gate is installed on the shared hook, not per adapter', () => {
     const source = readFileSync(
-      join(import.meta.dir, '..', 'sdk', 'src', 'platform', 'daemon', 'surface-actions.ts'),
+      join(import.meta.dir, '..', 'platform', 'src', 'platform', 'daemon', 'surface-actions.ts'),
       'utf8',
     );
     expect(source).toContain('refuseCardShapedIngress');

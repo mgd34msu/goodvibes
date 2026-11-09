@@ -4,7 +4,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { recordAgentCiArtifact, verifyAgentCiArtifact } from '../../../scripts/ci-artifact.ts';
-import { nativeReaderCapabilities } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { nativeReaderCapabilities } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 
 const revision = 'a'.repeat(40);
 const metadata = { sourceTree: 'b'.repeat(40), headCommit: revision };

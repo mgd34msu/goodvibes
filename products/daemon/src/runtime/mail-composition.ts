@@ -23,8 +23,8 @@ import {
   EmailReplySubjectSourceOwner,
   type EmailServiceDeps,
   type SurfaceEmailConfigProblem,
-} from '@goodvibes-jev/engine/sdk/platform/email';
-import { nodeEmailTransport } from '@goodvibes-jev/engine/sdk/platform/email/node';
+} from '@goodvibes-jev/engine/platform/platform/email';
+import { nodeEmailTransport } from '@goodvibes-jev/engine/platform/platform/email/node';
 
 /** The narrow slices this composition needs; the real managers satisfy them. */
 interface MailCompositionInput {

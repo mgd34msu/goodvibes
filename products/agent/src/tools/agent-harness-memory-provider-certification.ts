@@ -162,7 +162,7 @@ export async function memoryExternalProviderLiveCertification(input: {
     ...certification,
     ...(input.receiptRoute && !certification.receiptRoute ? { receiptRoute: redactedPreview(input.receiptRoute, 180) } : {}),
     missingSignals,
-    policy: 'External memory provider records certify release readiness only when the host or SDK publishes schema, durable provider id, publication guarantee, publisher/provenance, bounded read, confirmed write/sync, forget or explicit not-supported, and receipt stream evidence without raw secrets or memory bodies.',
+    policy: 'External memory provider records certify release readiness only when the host or platform publishes schema, durable provider id, publication guarantee, publisher/provenance, bounded read, confirmed write/sync, forget or explicit not-supported, and receipt stream evidence without raw secrets or memory bodies.',
   };
 }
 

@@ -44,39 +44,39 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { SecretsManager } from '../sdk/src/platform/config/secrets.ts';
-import { secretWriteTarget } from '../sdk/src/platform/config/secrets-store-paths.ts';
-import { ensureConnectorConfigSections } from '../sdk/src/platform/config/connector-config-sections.ts';
-import { migrateDaemonNeededCredentials } from '../sdk/src/platform/config/daemon-credential-migration.ts';
-import { migrateDaemonOwnedConfig } from '../sdk/src/platform/config/daemon-config-migration.ts';
-import { daemonSecretKeyFor } from '../sdk/src/platform/config/daemon-secret-keys.ts';
-import { CONFIG_KEYS } from '../sdk/src/platform/config/schema.ts';
-import { CARD_MATERIAL_FIELDS, cardSecretKey } from '../sdk/src/platform/payments/host/card-store.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { SecretsManager } from '../platform/src/platform/config/secrets.ts';
+import { secretWriteTarget } from '../platform/src/platform/config/secrets-store-paths.ts';
+import { ensureConnectorConfigSections } from '../platform/src/platform/config/connector-config-sections.ts';
+import { migrateDaemonNeededCredentials } from '../platform/src/platform/config/daemon-credential-migration.ts';
+import { migrateDaemonOwnedConfig } from '../platform/src/platform/config/daemon-config-migration.ts';
+import { daemonSecretKeyFor } from '../platform/src/platform/config/daemon-secret-keys.ts';
+import { CONFIG_KEYS } from '../platform/src/platform/config/schema.ts';
+import { CARD_MATERIAL_FIELDS, cardSecretKey } from '../platform/src/platform/payments/host/card-store.ts';
 import {
   isDaemonNeededSecretKey,
-} from '../sdk/src/platform/config/credential-scope-registry.ts';
+} from '../platform/src/platform/config/credential-scope-registry.ts';
 import {
   isSecretBearingConfigKey,
   isSecretReferenceValue,
-} from '../sdk/src/platform/config/secret-bearing-config-keys.ts';
+} from '../platform/src/platform/config/secret-bearing-config-keys.ts';
 import {
   credentialMigrationReceiptPath,
   migrateDaemonOwnedConfigOnBoot,
   runDaemonBootGuarantees,
-} from '../sdk/src/platform/daemon/facade-boot-guarantees.ts';
+} from '../platform/src/platform/daemon/facade-boot-guarantees.ts';
 import {
   readSettingsReaderFloor,
   SWEPT_CREDENTIAL_READER_FLOOR,
-} from '../sdk/src/platform/config/settings-reader-floor.ts';
+} from '../platform/src/platform/config/settings-reader-floor.ts';
 import {
   adoptExistingGoogleCredentials,
   detectGoogleSetupState,
   GOOGLE_CONFIG_KEYS,
   GOOGLE_SECRET_KEYS,
-} from '../sdk/src/platform/google/index.ts';
-import { nodeGoogleFilePort } from '../sdk/src/platform/google/node.ts';
-import type { GoogleConfigPort, GoogleSecretPort } from '../sdk/src/platform/google/types.ts';
+} from '../platform/src/platform/google/index.ts';
+import { nodeGoogleFilePort } from '../platform/src/platform/google/node.ts';
+import type { GoogleConfigPort, GoogleSecretPort } from '../platform/src/platform/google/types.ts';
 
 // ---------------------------------------------------------------------------
 // Fixtures. Structurally valid, obviously fake, and never a real credential.

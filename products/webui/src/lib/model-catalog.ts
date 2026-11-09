@@ -1,12 +1,12 @@
 /**
  * model-catalog.ts, multi-target model routing over the real wire shapes.
  *
- * GROUNDED (verified against goodvibes-sdk source, not guessed):
+ * GROUNDED (verified against goodvibes-platform source, not guessed):
  *   - The "current model" concept (models.current.get/models.current.set, PATCH
  *     /api/models/current) is a SINGLE global slot, there is no multi-target
  *     verb on the wire. Multi-target routing (main/helper/tool/tts/embeddings)
  *     is implemented via separate shared config keys, read/written through
- *     config.get/config.set (packages/sdk/src/platform/config/schema-domain-core.ts):
+ *     config.get/config.set (packages/engine/platform/src/platform/config/schema-domain-core.ts):
  *       main       -> models.current.set (PATCH /api/models/current), NOT config.set;
  *                     this is the only target with a dedicated wire verb, and it
  *                     validates the provider is configured server-side. Routing
@@ -28,10 +28,10 @@
  *   - Model catalog pricing: GET /api/providers (providers.list/providers.get)
  *     genuinely populates `tier` and `pricing` {inputPerMillionTokens,
  *     outputPerMillionTokens, currency} per model when the provider registry's
- *     pricing catalog has the data (packages/sdk/src/platform/providers/
+ *     pricing catalog has the data (packages/engine/platform/src/platform/providers/
  *     runtime-snapshot.ts toModelSnapshot()), this is real, live wire data.
  *     GET /api/models (models.list) does NOT carry tier/pricing at all
- *     (packages/sdk/src/platform/daemon/http/model-routes.ts's
+ *     (packages/engine/platform/src/platform/daemon/http/model-routes.ts's
  *     ProviderModelEntry projects only id/registryKey/provider/label/
  *     contextWindow), so this module reads models from the providers.list/get
  *     response, not the models.list catalog, specifically to get honest price

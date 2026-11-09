@@ -39,9 +39,9 @@ import {
 } from './foundation-io-coverage-rule.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SDK_ROOT = resolve(__dirname, '..');
-const FOUNDATION_TYPES_PATH = resolve(SDK_ROOT, 'contracts/src/generated/foundation-client-types.ts');
-const METHOD_IDS_PATH = resolve(SDK_ROOT, 'contracts/src/generated/operator-method-ids.ts');
+const ENGINE_ROOT = resolve(__dirname, '..');
+const FOUNDATION_TYPES_PATH = resolve(ENGINE_ROOT, 'contracts/src/generated/foundation-client-types.ts');
+const METHOD_IDS_PATH = resolve(ENGINE_ROOT, 'contracts/src/generated/operator-method-ids.ts');
 
 const foundationText = readFileSync(FOUNDATION_TYPES_PATH, 'utf8');
 const idsText = readFileSync(METHOD_IDS_PATH, 'utf8');

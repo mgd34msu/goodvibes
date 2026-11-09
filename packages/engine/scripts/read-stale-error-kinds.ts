@@ -2,7 +2,7 @@
 import { judgmentProcessSignal } from '../../judgment/scripts/process-owner.ts';
 // read-stale-error-kinds.ts: reads, through Jev (`errors.stale-server-kind`),
 // whether each consumer-facing error doc and worker test error-contract-check.ts
-// guards still presents 'server' as an SDK error kind, and stores the readings
+// guards still presents 'server' as an engine error kind, and stores the readings
 // in etc/stale-server-kind-readings.json for the offline check. Only files
 // whose text has no stored reading are read; a long file is read in fixed
 // windows, all in flight together, and reads yes when any window does.

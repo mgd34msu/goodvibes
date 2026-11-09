@@ -1,7 +1,7 @@
-import { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/sdk/platform/workspace';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/platform/platform/workspace';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { RuntimeEventBus, SessionSurface } from './index.js';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { readCheckpointGuardSettings, readCheckpointRegistrationSetting } from '../config/checkpoint-settings.js';
 import { createWorkspaceRegistrationLiveChecker, type StoreShellPaths } from './trust/checkpoint-eligibility.js';
 
@@ -44,8 +44,8 @@ export function createWorkspaceCheckpointing(opts: {
   /**
    * The declare-once storage handle. Passing it resolves the checkpoint git
    * store to `surface.checkpointsDir` instead of the unscoped
-   * `<workspaceRoot>/.goodvibes/checkpoints` every product using this SDK would
-   * otherwise share. The SDK migrates an existing legacy store into the scoped
+   * `<workspaceRoot>/.goodvibes/checkpoints` every product using this platform would
+   * otherwise share. The platform migrates an existing legacy store into the scoped
    * location on first use.
    */
   readonly surface: SessionSurface;

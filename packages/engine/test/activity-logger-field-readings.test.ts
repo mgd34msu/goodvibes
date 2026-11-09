@@ -3,8 +3,8 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { ActivityLogger } from '../sdk/src/platform/utils/logger.js';
-import { FieldKindReader } from '../sdk/src/platform/utils/field-kind-reading.js';
+import { ActivityLogger } from '../platform/src/platform/utils/logger.js';
+import { FieldKindReader } from '../platform/src/platform/utils/field-kind-reading.js';
 
 const roots: string[] = [], loggers: ActivityLogger[] = [];
 afterEach(() => { for (const logger of loggers.splice(0)) logger.dispose(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

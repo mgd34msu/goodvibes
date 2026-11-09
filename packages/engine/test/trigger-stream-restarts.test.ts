@@ -3,7 +3,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { TriggerManager, loadTriggerSnapshot, type TriggerStreamHost } from '../sdk/src/platform/triggers/index.ts';
+import { TriggerManager, loadTriggerSnapshot, type TriggerStreamHost } from '../platform/src/platform/triggers/index.ts';
 
 const roots: string[] = [], managers: TriggerManager[] = [];
 afterEach(async () => {

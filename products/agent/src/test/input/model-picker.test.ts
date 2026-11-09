@@ -1,5 +1,5 @@
-import { installCatalogModelFacts } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { modelFamilyReadings } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { installCatalogModelFacts } from '@goodvibes-jev/engine/platform/platform/providers';
+import { modelFamilyReadings } from '@goodvibes-jev/engine/platform/platform/providers';
 /**
  * Tests for ModelPickerModal state class.
  */
@@ -8,18 +8,18 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ModelPickerModal, detectFamily, tierToCategoryFilter, POPULAR_PROVIDERS } from '../../input/model-picker.ts';
 import type { CategoryFilter, PickerMode } from '../../input/model-picker.ts';
-import type { ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { createLaunchTolerantProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
+import { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { createLaunchTolerantProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { SecretsManager } from '../../config/secrets.ts';
-import { ServiceRegistry } from '@goodvibes-jev/engine/sdk/platform/config';
-import { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { CacheHitTracker } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { ProviderCapabilityRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { FavoritesStore } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { BenchmarkStore, type BenchmarkEntry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { reasoningEffortSpecFromLevels } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
+import { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { CacheHitTracker } from '@goodvibes-jev/engine/platform/platform/providers';
+import { ProviderCapabilityRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { FavoritesStore } from '@goodvibes-jev/engine/platform/platform/providers';
+import { BenchmarkStore, type BenchmarkEntry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { reasoningEffortSpecFromLevels } from '@goodvibes-jev/engine/platform/platform/providers';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 // ---------------------------------------------------------------------------

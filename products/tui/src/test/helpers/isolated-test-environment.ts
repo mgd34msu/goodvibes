@@ -1,7 +1,7 @@
 // Derived unchanged from main b6cd286 engine test support; product-local fixture, no production behavior.
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-const RUNNER_ENV_FLAG = 'GOODVIBES_SDK_TEST_RUNNER';
+const RUNNER_ENV_FLAG = 'GOODVIBES_ENGINE_TEST_RUNNER';
 
 export const NETWORK_VIOLATIONS_ENV = 'GOODVIBES_TEST_NETWORK_VIOLATIONS';
 
@@ -12,7 +12,7 @@ const INHERITED = new Set([
   'SHELL', 'TERM', 'COLORTERM', 'LANG', 'LANGUAGE', 'LC_ALL', 'LC_CTYPE', 'TZ',
   'CI', 'GITHUB_ACTIONS', 'NO_COLOR', 'FORCE_COLOR', 'TMPDIR', 'TMP', 'TEMP',
   RUNNER_ENV_FLAG,
-  'GOODVIBES_SDK_DEV_ROUNDTRIP_TEST',
+  'GOODVIBES_ENGINE_DEV_ROUNDTRIP_TEST',
 ]);
 
 /** Isolate persisted user state while allowing tests to declare fixture env explicitly. */

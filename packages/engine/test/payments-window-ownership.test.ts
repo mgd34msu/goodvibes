@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { createChannelPaymentNotifier } from '../sdk/src/platform/payments/notice-delivery.js';
-import { PaymentReplyInbox, PaymentReplyInboxClosedError, PaymentReplyWindowError } from '../sdk/src/platform/payments/reply-inbox.js';
-import type { CommandAuthorityChannel } from '../sdk/src/platform/payments/types.js';
+import { createChannelPaymentNotifier } from '../platform/src/platform/payments/notice-delivery.js';
+import { PaymentReplyInbox, PaymentReplyInboxClosedError, PaymentReplyWindowError } from '../platform/src/platform/payments/reply-inbox.js';
+import type { CommandAuthorityChannel } from '../platform/src/platform/payments/types.js';
 import { paymentsPort, usePaymentsReadings } from './helpers/payments-readings.ts';
 
 const readings = usePaymentsReadings();

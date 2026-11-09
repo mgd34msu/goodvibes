@@ -1,5 +1,5 @@
 import { expect, spyOn, test } from 'bun:test';
-import { TreeSitterService } from '@goodvibes-jev/engine/sdk/platform/intelligence';
+import { TreeSitterService } from '@goodvibes-jev/engine/platform/platform/intelligence';
 import { SyntaxHighlighter } from '../../renderer/syntax-highlighter.ts';
 import { syntaxStyles } from '../../renderer/syntax-theme.ts';
 

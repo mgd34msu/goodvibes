@@ -9,10 +9,10 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { buildCodeIndexEnabledSyntheticEntry, buildSettingGroups } from '../../input/settings-modal-data.ts';
-import { CODE_INDEX_ENABLED_CONFIG_KEY, isCodeIndexAutoStartEnabled } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { CODE_INDEX_ENABLED_CONFIG_KEY, isCodeIndexAutoStartEnabled } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 
 describe('storage.codeIndexEnabled synthetic setting', () => {
   const originalCwd = process.cwd();
@@ -38,7 +38,7 @@ describe('storage.codeIndexEnabled synthetic setting', () => {
   test('defaults OFF: boolean, default false, currentValue false', () => {
     const entry = buildCodeIndexEnabledSyntheticEntry(cm);
     // storage.codeIndexEnabled is a TUI-local synthetic key, not yet part of the
-    // SDK's ConfigKey union, compare as plain strings (see settings-modal-data.ts).
+    // platform's ConfigKey union, compare as plain strings (see settings-modal-data.ts).
     expect(entry.setting.key as string).toBe(CODE_INDEX_ENABLED_CONFIG_KEY as string);
     expect(entry.setting.type).toBe('boolean');
     expect(entry.setting.default).toBe(false);

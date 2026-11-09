@@ -14,6 +14,6 @@
   },
   "include": [
     "*.ts",
-    "../packages/engine/sdk/src/platform/types/*.d.ts"
+    "../packages/engine/platform/src/platform/types/*.d.ts"
   ]
 }

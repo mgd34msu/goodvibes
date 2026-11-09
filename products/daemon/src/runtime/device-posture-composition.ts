@@ -3,7 +3,7 @@
  *
  * A phone pairs with whichever daemon the person runs. Until this module
  * existed this daemon had no device posture at all: `device.nodes.maxPaired`
- * was enforced at the pairing path (SDK-side) and `device.capabilities.mode`
+ * was enforced at the pairing path (platform-side) and `device.capabilities.mode`
  * was an onboarding toggle, while the other eleven `device.*` keys were
  * recorded, read back, and governed nothing, the capability service they
  * describe was never built here, so there was nothing for them to govern.
@@ -29,17 +29,17 @@
  */
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { nativeDeviceRecoveryObserver } from './startup-observation.js';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { createDevicePostureRuntime, registerDevicePhoneTool } from '@goodvibes-jev/engine/sdk/platform/devices';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { createDevicePostureRuntime, registerDevicePhoneTool } from '@goodvibes-jev/engine/platform/platform/devices';
 import type {
   DeviceApprovalBridge,
   DevicePeerTransport,
   DevicePhoneToolRegistry,
   DevicePostureRuntime,
-} from '@goodvibes-jev/engine/sdk/platform/devices';
-import { registerDevicesGatewayMethods } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+} from '@goodvibes-jev/engine/platform/platform/devices';
+import { registerDevicesGatewayMethods } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 
 /** Who this surface records in the device audit trail. */
 export const DAEMON_DEVICE_ACTOR = 'daemon:phone-tool';

@@ -16,8 +16,8 @@
  * enforces, and the seam is a natural one either way, matching
  * settings-modal-secrets.ts next door for the credential half.
  */
-import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import {
   agentDaemonConfigClientInstalled,
   isDaemonOwnedConfigKey,

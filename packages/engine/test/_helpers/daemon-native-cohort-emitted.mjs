@@ -6,12 +6,12 @@ import { homedir, tmpdir } from 'node:os';
 import { createServer } from 'node:http';
 import { applyVerifiedUpdate, assertDaemonNativePayloadBytes, inspectDaemonNativeInstallation, parseDaemonCiArtifact,
   realUpdateFileIo, resolveDaemonNativeTargets, rollbackKeptPrevious, sha256, UpdateTransactionError,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+} from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 
 const fixturePath = process.env.JEV_NATIVE_EMITTED_FIXTURE;
 assert.ok(fixturePath, 'The owning test must provide its inert fixture data');
 const input = JSON.parse(readFileSync(fixturePath, 'utf8'));
-const emittedUpdateUrl = import.meta.resolve('@goodvibes-jev/engine/sdk/platform/runtime/self-update');
+const emittedUpdateUrl = import.meta.resolve('@goodvibes-jev/engine/platform/platform/runtime/self-update');
 const { performDaemonHandover } = await import(new URL('client/daemon-handover.js', emittedUpdateUrl));
 const arch = process.arch;
 const roots = [];
@@ -47,9 +47,9 @@ function assertNoTransient(targets) {
   }
 }
 
-test('ordinary Node selects the emitted SDK and observes the actual stable inode owner', () => {
+test('ordinary Node selects the emitted platform and observes the actual stable inode owner', () => {
   assert.equal(typeof globalThis.Bun, 'undefined');
-  assert.match(import.meta.resolve('@goodvibes-jev/engine/sdk/platform/runtime/self-update'), /\/sdk\/dist\/platform\/runtime\/self-update\.js$/);
+  assert.match(import.meta.resolve('@goodvibes-jev/engine/platform/platform/runtime/self-update'), /\/sdk\/dist\/platform\/runtime\/self-update\.js$/);
   const f = fixture(); const observed = realUpdateFileIo.observe(f.execPath), stat = lstatSync(f.execPath, { bigint: true });
   assert.ok(observed); assert.equal(observed.ownerIdentity, `${stat.dev}:${stat.ino}`);
   assert.ok(observed.identity.includes(observed.ownerIdentity));

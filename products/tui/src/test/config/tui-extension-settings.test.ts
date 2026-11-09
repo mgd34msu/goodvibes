@@ -1,9 +1,9 @@
 import { describe, expect, test, afterEach } from 'bun:test';
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/sdk/platform/workspace';
+import { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/platform/platform/workspace';
 import { readCheckpointGuardSettings, readUpdateSettings, withCheckpointGuardSettings } from '@/config/tui-extension-settings.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 // A minimal stand-in for the ConfigManager surface the reader depends on.
@@ -41,7 +41,7 @@ describe('readCheckpointGuardSettings', () => {
     });
   });
 
-  test('drops keys with the wrong type so the SDK default applies', () => {
+  test('drops keys with the wrong type so the platform default applies', () => {
     const settings = readCheckpointGuardSettings(fakeConfig({
       checkpoints: {
         preferGitRoot: 'true', // wrong type -> dropped
@@ -69,13 +69,13 @@ describe('readCheckpointGuardSettings', () => {
 
 // End-to-end wiring, that the user's checkpoints.* values flow through
 // withCheckpointGuardSettings into WorkspaceCheckpointManager and actually
-// change its root-guard behavior. @goodvibes-jev/engine/sdk 1.6.1's
+// change its root-guard behavior. @goodvibes-jev/engine/platform 1.6.1's
 // WorkspaceCheckpointManagerOptions now declares these guard keys
 // (preferGitRoot/allowBroadRoot/allowLargeFirstSnapshot/maxFirstSnapshotFiles/
 // autoRetention), so the previously-inert options are live and observable via
 // create()'s refusals. Each case runs the REAL manager against a scratch
 // workspace, merging the guard settings exactly as services.ts does.
-describe('checkpoint root-guard wiring (SDK 1.6.1 options are live)', () => {
+describe('checkpoint root-guard wiring (platform 1.6.1 options are live)', () => {
   const tempDirs: string[] = [];
   afterEach(() => {
     while (tempDirs.length > 0) rmSync(tempDirs.pop()!, { recursive: true, force: true });

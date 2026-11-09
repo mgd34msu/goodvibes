@@ -20,12 +20,12 @@
  * unchanged; only the moment it is observable moved.
  */
 import { describe, expect, test, spyOn } from 'bun:test';
-import { logger } from '../sdk/src/platform/utils/logger.ts';
+import { logger } from '../platform/src/platform/utils/logger.ts';
 import { useFailureReadings, failureReadingsPort } from './_helpers/failure-readings.ts';
 const readings = useFailureReadings([]);
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
-import { HostedSessionSpineIntake, type HostedSessionSpine } from '../sdk/src/platform/hosted-sessions/spine-intake.ts';
-import type { HostedSessionRecord } from '../sdk/src/platform/hosted-sessions/types.ts';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
+import { HostedSessionSpineIntake, type HostedSessionSpine } from '../platform/src/platform/hosted-sessions/spine-intake.ts';
+import type { HostedSessionRecord } from '../platform/src/platform/hosted-sessions/types.ts';
 
 function record(id = 'hosted-1'): HostedSessionRecord {
   return {

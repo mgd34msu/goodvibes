@@ -17,8 +17,8 @@
  * it renders, and the diagnostics it writes.
  */
 import { describe, expect, test } from 'bun:test';
-import type { AudioCaptureHandlers, AudioCaptureRequest } from '@goodvibes-jev/engine/sdk/platform/voice/capture';
-import { readVoiceDiagnostics } from '@goodvibes-jev/engine/sdk/platform/voice';
+import type { AudioCaptureHandlers, AudioCaptureRequest } from '@goodvibes-jev/engine/platform/platform/voice/capture';
+import { readVoiceDiagnostics } from '@goodvibes-jev/engine/platform/platform/voice';
 
 import { wireWakeRuntime, type WakeRuntimeDeps } from '../../audio/wake-runtime.ts';
 import { createInputDeviceEnumerator } from '../../audio/input-devices.ts';
@@ -62,7 +62,7 @@ function harness(options: HarnessOptions = {}) {
     readConfig: (key) => config[key],
     subscribeConfig: () => () => {},
     openCapture: async (request: AudioCaptureRequest, handlers: AudioCaptureHandlers) => {
-      // Mimic the SDK opener's `auto` resolution: first candidate not excluded.
+      // Mimic the platform opener's `auto` resolution: first candidate not excluded.
       const excluded = new Set(request.excludeBackends ?? []);
       const backend = order.find((candidate) => !excluded.has(candidate as never)) ?? 'pw-record';
       opened.push({ device: request.device, exclude: request.excludeBackends, backend });

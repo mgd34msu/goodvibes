@@ -4,16 +4,16 @@ import { join, resolve } from 'node:path';
 import { describe, expect, test } from 'bun:test';
 import { withTestTimeout } from './_helpers/test-timeout.ts';
 import {
-  createBrowserHomeAssistantSdk,
-} from '../sdk/dist/browser-homeassistant.js';
+  createBrowserHomeAssistantPlatform,
+} from '../platform/dist/browser-homeassistant.js';
 import {
-  createBrowserAgentSdk,
-} from '../sdk/dist/browser-agent.js';
+  createBrowserAgentPlatform,
+} from '../platform/dist/browser-agent.js';
 import {
-  createBrowserKnowledgeSdk,
-} from '../sdk/dist/browser-knowledge.js';
-// The old sdk package's exports are the engine manifest's ./sdk subpaths.
-import sdkPackage from '../package.json' with { type: 'json' };
+  createBrowserKnowledgePlatform,
+} from '../platform/dist/browser-knowledge.js';
+// The old platform package's exports are the engine manifest's ./platform subpaths.
+import enginePackage from '../package.json' with { type: 'json' };
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -36,7 +36,7 @@ function createRecordingFetch(body: unknown = { ok: true }): {
   };
 }
 
-const SDK_ROOT = resolve(import.meta.dir, '..');
+const ENGINE_ROOT = resolve(import.meta.dir, '..');
 
 /**
  * How long one entrypoint bundle may take before this test stops waiting and
@@ -69,13 +69,13 @@ async function bundleEntrypoint(entrypoint: string): Promise<string> {
     [
       process.execPath,
       'build',
-      resolve(SDK_ROOT, entrypoint),
+      resolve(ENGINE_ROOT, entrypoint),
       '--target=browser',
       '--format=esm',
       '--packages=external',
       `--outdir=${outDir}`,
     ],
-    { cwd: SDK_ROOT, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' },
+    { cwd: ENGINE_ROOT, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' },
   );
   // Drained from the start. An undrained pipe is its own way to hang: a child
   // that fills the buffer blocks on write and never reaches exit. `.catch`
@@ -113,11 +113,11 @@ async function bundleEntrypoint(entrypoint: string): Promise<string> {
   }
 }
 
-describe('scoped browser SDK entrypoints', () => {
+describe('scoped browser platform entrypoints', () => {
   test('package exports expose knowledge, agent, and home assistant browser seams', () => {
-    expect(sdkPackage.exports['./sdk/browser/knowledge']).toEqual({ bun: './sdk/src/browser-knowledge.ts', types: './sdk/dist/browser-knowledge.d.ts', import: './sdk/dist/browser-knowledge.js' });
-    expect(sdkPackage.exports['./sdk/browser/agent']).toEqual({ bun: './sdk/src/browser-agent.ts', types: './sdk/dist/browser-agent.d.ts', import: './sdk/dist/browser-agent.js' });
-    expect(sdkPackage.exports['./sdk/browser/homeassistant']).toEqual({ bun: './sdk/src/browser-homeassistant.ts', types: './sdk/dist/browser-homeassistant.d.ts', import: './sdk/dist/browser-homeassistant.js' });
+    expect(enginePackage.exports['./platform/browser/knowledge']).toEqual({ bun: './platform/src/browser-knowledge.ts', types: './platform/dist/browser-knowledge.d.ts', import: './platform/dist/browser-knowledge.js' });
+    expect(enginePackage.exports['./platform/browser/agent']).toEqual({ bun: './platform/src/browser-agent.ts', types: './platform/dist/browser-agent.d.ts', import: './platform/dist/browser-agent.js' });
+    expect(enginePackage.exports['./platform/browser/homeassistant']).toEqual({ bun: './platform/src/browser-homeassistant.ts', types: './platform/dist/browser-homeassistant.d.ts', import: './platform/dist/browser-homeassistant.js' });
   });
 
   test('knowledge browser sdk routes only regular knowledge methods', async () => {
@@ -135,27 +135,27 @@ describe('scoped browser SDK entrypoints', () => {
       reportCount: 0,
       scheduleCount: 0,
     });
-    const sdk = createBrowserKnowledgeSdk({
+    const platformClient = createBrowserKnowledgePlatform({
       baseUrl: 'https://daemon.example.test',
       fetch: transport.fetch,
     });
 
-    await sdk.knowledge.status();
+    await platformClient.knowledge.status();
     expect(transport.calls).toEqual(['https://daemon.example.test/api/knowledge/status']);
-    await sdk.operator.invoke('companion.chat.sessions.create', {
+    await platformClient.operator.invoke('companion.chat.sessions.create', {
       title: 'WebUI chat',
       provider: 'openai',
       model: 'openai:gpt-5.5',
     });
     expect(transport.calls.at(-1)).toBe('https://daemon.example.test/api/companion/chat/sessions');
     await expect(
-      (sdk.operator as { invoke(methodId: string, input?: unknown): Promise<unknown> })
+      (platformClient.operator as { invoke(methodId: string, input?: unknown): Promise<unknown> })
         .invoke('homeassistant.homeGraph.status', {}),
-    ).rejects.toThrow('is not available from this scoped browser SDK entrypoint');
+    ).rejects.toThrow('is not available from this scoped browser platform entrypoint');
     await expect(
-      (sdk.operator as { invoke(methodId: string, input?: unknown): Promise<unknown> })
+      (platformClient.operator as { invoke(methodId: string, input?: unknown): Promise<unknown> })
         .invoke('companion.chat.events.stream', { sessionId: 'chat-1' }),
-    ).rejects.toThrow('is not available from this scoped browser SDK entrypoint');
+    ).rejects.toThrow('is not available from this scoped browser platform entrypoint');
   });
 
   test('knowledge browser sdk exposes companion chat helpers and session event stream', async () => {
@@ -194,37 +194,37 @@ describe('scoped browser SDK entrypoints', () => {
       }
       return jsonResponse({ ok: true });
     }) as typeof fetch;
-    const sdk = createBrowserKnowledgeSdk({
+    const platformClient = createBrowserKnowledgePlatform({
       baseUrl: 'https://daemon.example.test',
       fetch: fetchImpl,
     });
 
-    await sdk.chat.sessions.create({
+    await platformClient.chat.sessions.create({
       title: 'WebUI chat',
       provider: 'openai',
       model: 'openai:gpt-5.5',
     });
     expect(calls[0]).toBe('https://daemon.example.test/api/companion/chat/sessions');
-    await sdk.chat.sessions.list({ limit: 10 });
+    await platformClient.chat.sessions.list({ limit: 10 });
     expect(calls.at(-1)).toBe('https://daemon.example.test/api/companion/chat/sessions?limit=10');
-    await sdk.chat.sessions.update('chat-1', {
+    await platformClient.chat.sessions.update('chat-1', {
       provider: 'openai',
       model: 'openai:gpt-5.5',
     });
     expect(calls.at(-1)).toBe('https://daemon.example.test/api/companion/chat/sessions/chat-1');
-    await sdk.artifacts.create({
+    await platformClient.artifacts.create({
       filename: 'note.txt',
       mimeType: 'text/plain',
       dataBase64: 'aGVsbG8=',
     });
     expect(calls.at(-1)).toBe('https://daemon.example.test/api/artifacts');
-    await sdk.chat.messages.create('chat-1', {
+    await platformClient.chat.messages.create('chat-1', {
       body: 'See attached',
       attachments: [{ artifactId: 'artifact-1', label: 'note.txt' }],
     });
     expect(calls.at(-1)).toBe('https://daemon.example.test/api/companion/chat/sessions/chat-1/messages');
     const events: unknown[] = [];
-    const close = await sdk.chat.events.stream('chat-1', {
+    const close = await platformClient.chat.events.stream('chat-1', {
       onEvent: (_eventName, payload) => {
         events.push(payload);
       },
@@ -237,17 +237,17 @@ describe('scoped browser SDK entrypoints', () => {
 
   test('home assistant browser sdk routes only home graph methods', async () => {
     const transport = createRecordingFetch({ ok: true });
-    const sdk = createBrowserHomeAssistantSdk({
+    const platformClient = createBrowserHomeAssistantPlatform({
       baseUrl: 'https://daemon.example.test',
       fetch: transport.fetch,
     });
 
-    await sdk.homeGraph.status();
+    await platformClient.homeGraph.status();
     expect(transport.calls).toEqual(['https://daemon.example.test/api/homeassistant/home-graph/status']);
     await expect(
-      (sdk.operator as { invoke(methodId: string, input?: unknown): Promise<unknown> })
+      (platformClient.operator as { invoke(methodId: string, input?: unknown): Promise<unknown> })
         .invoke('knowledge.status', {}),
-    ).rejects.toThrow('is not available from this scoped browser SDK entrypoint');
+    ).rejects.toThrow('is not available from this scoped browser platform entrypoint');
   });
 
   test('agent browser sdk routes knowledge methods to the isolated agent knowledge wiki', async () => {
@@ -265,21 +265,21 @@ describe('scoped browser SDK entrypoints', () => {
       reportCount: 0,
       scheduleCount: 0,
     });
-    const sdk = createBrowserAgentSdk({
+    const platformClient = createBrowserAgentPlatform({
       baseUrl: 'https://daemon.example.test',
       fetch: transport.fetch,
     });
 
-    await sdk.knowledge.status();
+    await platformClient.knowledge.status();
     expect(transport.calls).toEqual(['https://daemon.example.test/api/goodvibes-agent/knowledge/status']);
-    await sdk.knowledge.ask({ query: 'What is GoodVibes Agent?' });
+    await platformClient.knowledge.ask({ query: 'What is GoodVibes Agent?' });
     expect(transport.calls.at(-1)).toBe('https://daemon.example.test/api/goodvibes-agent/knowledge/ask');
-    await sdk.chat.sessions.create({ title: 'Agent chat' });
+    await platformClient.chat.sessions.create({ title: 'Agent chat' });
     expect(transport.calls.at(-1)).toBe('https://daemon.example.test/api/companion/chat/sessions');
     await expect(
-      (sdk.operator as { invoke(methodId: string, input?: unknown): Promise<unknown> })
+      (platformClient.operator as { invoke(methodId: string, input?: unknown): Promise<unknown> })
         .invoke('homeassistant.homeGraph.status', {}),
-    ).rejects.toThrow('is not available from this scoped browser SDK entrypoint');
+    ).rejects.toThrow('is not available from this scoped browser platform entrypoint');
   });
 
   test('bundled knowledge entrypoint does not include Home Graph contract metadata', async () => {

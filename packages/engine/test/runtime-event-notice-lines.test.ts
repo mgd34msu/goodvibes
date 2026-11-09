@@ -1,12 +1,12 @@
 /** Drive the real producers: recognize their lines without inventing occurrence identity. */
 import { describe, expect, test } from 'bun:test';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { createEventEnvelope } from '../sdk/src/platform/runtime/event-envelope.js';
-import { emitContractEvent } from '../sdk/src/platform/contract/events.js';
-import { registerHostRuntimeEvents, runtimeEventKey, runtimeEventOfNotice } from '../sdk/src/platform/runtime/bootstrap-runtime-events.js';
-import type { ContractEvent } from '../sdk/src/events/contract.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { createEventEnvelope } from '../platform/src/platform/runtime/event-envelope.js';
+import { emitContractEvent } from '../platform/src/platform/contract/events.js';
+import { registerHostRuntimeEvents, runtimeEventKey, runtimeEventOfNotice } from '../platform/src/platform/runtime/bootstrap-runtime-events.js';
+import type { ContractEvent } from '../platform/src/events/contract.js';
 import { SAMPLES, ALL_CONTRACT_EVENTS } from './contract/event-samples.js';
-import { declaredNoticePresentation } from '../sdk/src/platform/runtime/runtime-event-notices.js';
+import { declaredNoticePresentation } from '../platform/src/platform/runtime/runtime-event-notices.js';
 
 test('native cancellation presentation requires its typed producer and exact line', () => {
   expect(declaredNoticePresentation('[Response cancelled]', { type: 'TURN_CANCEL' }))

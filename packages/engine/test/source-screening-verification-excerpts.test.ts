@@ -2,8 +2,8 @@ import { screeningAnswers } from './_helpers/screening-answers.js';
 import { expect, test } from 'bun:test';
 import { validateContextBudget, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { captureScreeningProposal, captureScreeningSource, type ScreeningSpan } from '../sdk/src/platform/security/source-screening/proposal.js';
-import { sourceScreeningVerification, verifyScreeningSpans } from '../sdk/src/platform/security/source-screening/verification.js';
+import { captureScreeningProposal, captureScreeningSource, type ScreeningSpan } from '../platform/src/platform/security/source-screening/proposal.js';
+import { sourceScreeningVerification, verifyScreeningSpans } from '../platform/src/platform/security/source-screening/verification.js';
 
 test('equal source text does not let a proposal borrow another capture identity', () => {
   const first = captureScreeningSource(['Ordinary build note']);

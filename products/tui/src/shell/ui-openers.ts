@@ -7,21 +7,21 @@ import {
   buildConfiguredViaMap,
   resolveSecretProviderIds as readSecretProviders,
 } from '@goodvibes-jev/engine/terminal-shell/model-picker-auth-facts';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { type ModelPickerOpenDeps } from '../input/model-picker-open.ts';
-import '@goodvibes-jev/engine/sdk/platform/providers';
+import '@goodvibes-jev/engine/platform/platform/providers';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { InputHandler } from '../input/handler.ts';
 import type { ShellViews } from '../views/builtin-views.ts';
 import type { ViewPanelAdapter } from '../views/view-panel-adapter.ts';
 import { wireViewOpeners } from './view-openers.ts';
-import type { ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { MutableRuntimeState } from '@/runtime/index.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
-import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
-import type { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { SecretsManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { MemoryEmbeddingProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/state';
+import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
+import type { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { MemoryEmbeddingProviderRegistry } from '@goodvibes-jev/engine/platform/platform/state';
 import type { ServiceInspectionQuery } from '@/runtime/index.ts';
 import type { EmbeddingProviderPickerEntry, ModelPickerTargetInfo } from '../input/model-picker.ts';
 import { CommandPalette, buildPaletteEntries } from '../input/command-palette.ts';
@@ -32,11 +32,11 @@ import { categorizeBuiltinCommands } from '../input/commands.ts';
 import { syncServiceSettingToPlatform } from './service-settings-sync.ts';
 import { setActiveThemeMode, setActiveThemeName } from '../renderer/theme.ts';
 import { THEME_MODE_CONFIG_KEY, THEME_NAME_CONFIG_KEY, coerceThemeModeSetting } from '../renderer/theme-mode-config.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { buildFirstOpenItems, decodeFirstOpenChoice, selfRecordWorkspaceRegistration } from '../cli/tui-startup.ts';
 import type { SettingsDaemonCredentialWriter } from '../input/settings-modal-secrets.ts';
 import type { DaemonOwnedConfigWriter } from '../input/settings-modal-mutations.ts';
-import type { WorkspaceTrustLevel } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import type { WorkspaceTrustLevel } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 
 type WireShellUiOpenersOptions = {
   commandContext: CommandContext;
@@ -93,7 +93,7 @@ function getCommandCategoryMap(): Map<string, string> {
 
 /**
  * Derive the configuredVia tier for a provider.
- * Tier order mirrors SDK provider-routes.ts: env → secrets → subscription → undefined.
+ * Tier order mirrors platform provider-routes.ts: env → secrets → subscription → undefined.
  * The preResolvedSecretKeys set is pre-fetched async before the sync picker render cycle.
  */
 
@@ -147,7 +147,7 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     });
 
   /**
-   * Pre-resolve which provider IDs have secrets-manager keys (async batch, SDK tier pattern).
+   * Pre-resolve which provider IDs have secrets-manager keys (async batch, platform tier pattern).
    * Returns a set of provider IDs (not env var names) that are secrets-backed.
    * Falls back to empty set if secretsManager is not provided.
    */

@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { InboxCursorStore } from '../sdk/src/platform/intake/cursor-store.ts';
-import type { InboundChannelItem } from '../sdk/src/platform/intake/provider-adapter.ts';
-import { HandlerSqliteStore } from '../sdk/src/platform/state/daemon-handler-sqlite-store.ts';
+import { InboxCursorStore } from '../platform/src/platform/intake/cursor-store.ts';
+import type { InboundChannelItem } from '../platform/src/platform/intake/provider-adapter.ts';
+import { HandlerSqliteStore } from '../platform/src/platform/state/daemon-handler-sqlite-store.ts';
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;

@@ -20,16 +20,16 @@ import {
   createSurfaceEmailSecretReader,
   describeSurfaceEmailConfigProblem,
   readSurfaceEmailSettings,
-} from '../sdk/src/platform/email/surface-config.ts';
-import { daemonSecretKeyFor } from '../sdk/src/platform/config/daemon-secret-keys.ts';
-import { readEmailConfig, smtpPasswordRefFor } from '../sdk/src/platform/email/email-service.ts';
-import { createDaemonEmailGatewayService } from '../sdk/src/platform/control-plane/routes/email-composition.ts';
-import { createEmailSendHandler } from '../sdk/src/platform/control-plane/routes/email.ts';
-import { resetProcessUntrustedContentLedgerForTests } from '../sdk/src/platform/security/untrusted-content.ts';
-import { createCalendarEventsCreateHandler } from '../sdk/src/platform/control-plane/routes/calendar.ts';
-import { GatewayVerbError } from '../sdk/src/platform/control-plane/routes/gateway-verb-error.ts';
-import type { EmailGatewayService } from '../sdk/src/platform/control-plane/routes/email.ts';
-import type { CalendarGatewayService } from '../sdk/src/platform/control-plane/routes/calendar.ts';
+} from '../platform/src/platform/email/surface-config.ts';
+import { daemonSecretKeyFor } from '../platform/src/platform/config/daemon-secret-keys.ts';
+import { readEmailConfig, smtpPasswordRefFor } from '../platform/src/platform/email/email-service.ts';
+import { createDaemonEmailGatewayService } from '../platform/src/platform/control-plane/routes/email-composition.ts';
+import { createEmailSendHandler } from '../platform/src/platform/control-plane/routes/email.ts';
+import { resetProcessUntrustedContentLedgerForTests } from '../platform/src/platform/security/untrusted-content.ts';
+import { createCalendarEventsCreateHandler } from '../platform/src/platform/control-plane/routes/calendar.ts';
+import { GatewayVerbError } from '../platform/src/platform/control-plane/routes/gateway-verb-error.ts';
+import type { EmailGatewayService } from '../platform/src/platform/control-plane/routes/email.ts';
+import type { CalendarGatewayService } from '../platform/src/platform/control-plane/routes/calendar.ts';
 
 function reader(values: Record<string, unknown>): (key: string) => unknown {
   return (key: string): unknown => {

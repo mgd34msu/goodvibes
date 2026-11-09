@@ -21,7 +21,7 @@
  * while they are open.
  */
 
-import { mixHex } from '@goodvibes-jev/engine/sdk/platform/presentation';
+import { mixHex } from '@goodvibes-jev/engine/platform/platform/presentation';
 import { activeTokens } from './theme.ts';
 import { beginModal, finishModal, clipText, scrollCountText, type KitHint, type ModalFrame, type SurfaceLayer } from './surface-kit.ts';
 import { drawList, type KitRow } from './surface-kit-list.ts';

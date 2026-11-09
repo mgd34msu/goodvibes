@@ -1,7 +1,7 @@
 import type {
   NativeWorkExecutionRevision,
   NativeWorkExecutionSnapshot,
-} from "@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client";
+} from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client";
 import type { NativeExecutionObservation } from "../../lib/native-execution";
 import { Button } from "../../components/ui/Button";
 import { DetailSection, Facts } from "../../components/data-view/DataView";

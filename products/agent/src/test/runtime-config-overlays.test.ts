@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { applyRuntimeConfigOverrides as agentOverrides, applyRuntimeConfigValue as agentValue, applyRuntimeFeatureOverrides, applyRuntimeUrlOverride, applyRuntimeCommandEndpointFlagOverrides as agentEndpoint } from '../cli/config-overrides.ts';
 import { applyRuntimeConfigValue, applyTerminalRuntimeConfigDefaults } from '@goodvibes-jev/engine/terminal-shell';
 import { AgentConfigManager, AGENT_NOTIFICATIONS_METADATA_ONLY_KEY } from '../config/host-settings.ts';

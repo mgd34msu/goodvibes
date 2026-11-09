@@ -1,5 +1,5 @@
-import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 import { captureCatalogSnapshot, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureCatalogProducerSources, withModelReadingSource } from './agent-harness-model-reading-source.ts';
@@ -34,7 +34,7 @@ export interface DeviceLiveCapabilityRecord {
   readonly modelRoute: string;
   readonly controlRoutes: Readonly<Record<string, string>>;
   readonly sourcePath: string;
-  readonly source: 'daemon-read-model' | 'sdk-read-model';
+  readonly source: 'daemon-read-model' | 'platform-read-model';
   readonly certification: DeviceLiveRecordCertification;
 }
 
@@ -61,12 +61,12 @@ const snapshotSources = new WeakMap<DeviceLiveReadModelSnapshot, {
 interface SourceCandidate {
   readonly path: string;
   readonly source: unknown;
-  readonly kind: 'daemon-read-model' | 'sdk-read-model';
+  readonly kind: 'daemon-read-model' | 'platform-read-model';
 }
 
 interface CollectedRecord {
   readonly path: string;
-  readonly kind: 'daemon-read-model' | 'sdk-read-model';
+  readonly kind: 'daemon-read-model' | 'platform-read-model';
   readonly record: Record<string, unknown>;
 }
 
@@ -213,7 +213,7 @@ function certification(input: {
     ...(receiptId ? { receiptId: safePreview(receiptId, 96) } : {}),
     ...(cursor ? { cursor: safePreview(cursor, 96) } : {}),
     missingSignals,
-    policy: 'Device capability read models certify release readiness only when the SDK or daemon publishes schema, durable capability ids, permission scope, publication guarantee, publisher/provenance, freshness cursor, exact inspect/control routes, and redacted receipt evidence.',
+    policy: 'Device capability read models certify release readiness only when the platform or daemon publishes schema, durable capability ids, permission scope, publication guarantee, publisher/provenance, freshness cursor, exact inspect/control routes, and redacted receipt evidence.',
   };
 }
 
@@ -230,7 +230,7 @@ function callMethod(source: Record<string, unknown>, method: string): unknown {
 function collectFromSource(
   source: unknown,
   path: string,
-  kind: 'daemon-read-model' | 'sdk-read-model',
+  kind: 'daemon-read-model' | 'platform-read-model',
   visited = new WeakSet<object>(),
 ): readonly CollectedRecord[] {
   if (!source) return [];
@@ -332,9 +332,9 @@ function sources(native: ReturnType<typeof captureCatalogProducerSources>): read
     { path: 'context.platform.readModels.voice.workflows', source: native.source('context.platform.readModels.voice.workflows'), kind: 'daemon-read-model' },
     { path: 'context.platform.readModels.deviceCapabilities', source: native.source('context.platform.readModels.deviceCapabilities'), kind: 'daemon-read-model' },
     { path: 'context.platform.readModels.companionCapabilities', source: native.source('context.platform.readModels.companionCapabilities'), kind: 'daemon-read-model' },
-    { path: 'context.ops.device.capabilities', source: native.source('context.ops.device.capabilities'), kind: 'sdk-read-model' },
-    { path: 'context.clients.operator.device.capabilities', source: native.source('context.clients.operator.device.capabilities'), kind: 'sdk-read-model' },
-    { path: 'context.clients.operatorSdk.device.capabilities', source: native.source('context.clients.operatorSdk.device.capabilities'), kind: 'sdk-read-model' },
+    { path: 'context.ops.device.capabilities', source: native.source('context.ops.device.capabilities'), kind: 'platform-read-model' },
+    { path: 'context.clients.operator.device.capabilities', source: native.source('context.clients.operator.device.capabilities'), kind: 'platform-read-model' },
+    { path: 'context.clients.operatorApiClient.device.capabilities', source: native.source('context.clients.operatorApiClient.device.capabilities'), kind: 'platform-read-model' },
   ];
 }
 
@@ -384,7 +384,7 @@ export async function deviceLiveReadModelSnapshot(context: CommandContext,
 
 async function ownedDeviceLiveReadModelSnapshot(context: CommandContext, options: CatalogRankingOptions): Promise<DeviceLiveReadModelSnapshot> {
   options.signal?.throwIfAborted(); options.assertCurrent?.();
-  const native = captureCatalogProducerSources(context, ["context.platform.readModels.device.capabilities", "context.platform.readModels.device.sensors", "context.platform.readModels.companion.capabilities", "context.platform.readModels.voice.workflows", "context.platform.readModels.deviceCapabilities", "context.platform.readModels.companionCapabilities", "context.ops.device.capabilities", "context.clients.operator.device.capabilities", "context.clients.operatorSdk.device.capabilities"], ["getSnapshot", "snapshot", "toJSON", "listCapabilities", "listDeviceCapabilities", "listSensors", "listVoiceWorkflows", "list"]);
+  const native = captureCatalogProducerSources(context, ["context.platform.readModels.device.capabilities", "context.platform.readModels.device.sensors", "context.platform.readModels.companion.capabilities", "context.platform.readModels.voice.workflows", "context.platform.readModels.deviceCapabilities", "context.platform.readModels.companionCapabilities", "context.ops.device.capabilities", "context.clients.operator.device.capabilities", "context.clients.operatorApiClient.device.capabilities"], ["getSnapshot", "snapshot", "toJSON", "listCapabilities", "listDeviceCapabilities", "listSensors", "listVoiceWorkflows", "list"]);
   const entries = sources(native).flatMap((candidate) => collectFromSource(candidate.source, candidate.path, candidate.kind));
   const caller = captureAsyncHarnessInput({ entries, producerSource: native.evidence() }, options, true);
   caller.options.retainCurrent(native.assertCurrent, 'agent.device.native-source');

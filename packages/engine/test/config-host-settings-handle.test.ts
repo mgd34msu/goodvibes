@@ -2,10 +2,10 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { ConfigManager, type HostBooleanSetting } from '../sdk/src/platform/config/index.ts';
-import { defaultStore, getSettingsControlPlaneSnapshot, readStore } from '../sdk/src/platform/runtime/settings.ts';
-import * as atomicJson from '../sdk/src/platform/utils/atomic-json-store.ts';
-import * as hostSettingsIo from '../sdk/src/platform/config/manager-host-settings.ts';
+import { ConfigManager, type HostBooleanSetting } from '../platform/src/platform/config/index.ts';
+import { defaultStore, getSettingsControlPlaneSnapshot, readStore } from '../platform/src/platform/runtime/settings.ts';
+import * as atomicJson from '../platform/src/platform/utils/atomic-json-store.ts';
+import * as hostSettingsIo from '../platform/src/platform/config/manager-host-settings.ts';
 
 const FIRST = 'behavior.hostHandleFirst';
 const SECOND = 'behavior.hostHandleSecond';

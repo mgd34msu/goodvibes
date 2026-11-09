@@ -1,7 +1,7 @@
 /**
  * The `payments.*` handlers, over a real GatewayMethodCatalog and real stores.
  *
- * The catalog here is the SDK's own, constructed empty, so every descriptor
+ * The catalog here is the platform's own, constructed empty, so every descriptor
  * these handlers attach to is the shipped one. Nothing below authors a
  * descriptor, which is the property `registerCatalogHandler` exists to keep.
  *
@@ -13,32 +13,32 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.js';
-import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../sdk/src/platform/daemon/control-plane.js';
-import { PairingTokenManager } from '../sdk/src/platform/pairing/pairing-token-store.js';
-import type { BrowserCheckoutSeam } from '../sdk/src/platform/control-plane/routes/browser-composition.js';
-import { BudgetLedger } from '../sdk/src/platform/payments/budget.js';
-import { CardMaterialRedactor } from '../sdk/src/platform/payments/card-redaction.js';
-import { MemoryCheckoutJournal } from '../sdk/src/platform/payments/checkout-registry.js';
-import type { AddressStore } from '../sdk/src/platform/payments/address.js';
-import type { CheckoutPageDriver } from '../sdk/src/platform/payments/checkout-page.js';
-import type { MerchantJudgePort } from '../sdk/src/platform/payments/merchant-recourse.js';
-import type { PaymentNotifier } from '../sdk/src/platform/payments/payment-ports.js';
-import type { PaymentsConfigReader } from '../sdk/src/platform/payments/payments-config.js';
-import type { PurchaseRecord } from '../sdk/src/platform/payments/purchase-record.js';
-import { getProcessUntrustedContentLedger } from '../sdk/src/platform/security/untrusted-content.js';
-import { DaemonApprovalStore } from '../sdk/src/platform/payments/host/approval-store.js';
-import { DaemonCardStore, type PaymentsSecretStore } from '../sdk/src/platform/payments/host/card-store.js';
-import { DaemonPurchaseLedger } from '../sdk/src/platform/payments/host/purchase-ledger.js';
-import { DurablePaymentOperations } from '../sdk/src/platform/payments/host/operation-store.js';
-import { ProtectedPaymentRequests } from '../sdk/src/platform/payments/host/protected-requests.js';
-import type { PaymentOperationView } from '../sdk/src/platform/payments/operation-view.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
+import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../platform/src/platform/daemon/control-plane.js';
+import { PairingTokenManager } from '../platform/src/platform/pairing/pairing-token-store.js';
+import type { BrowserCheckoutSeam } from '../platform/src/platform/control-plane/routes/browser-composition.js';
+import { BudgetLedger } from '../platform/src/platform/payments/budget.js';
+import { CardMaterialRedactor } from '../platform/src/platform/payments/card-redaction.js';
+import { MemoryCheckoutJournal } from '../platform/src/platform/payments/checkout-registry.js';
+import type { AddressStore } from '../platform/src/platform/payments/address.js';
+import type { CheckoutPageDriver } from '../platform/src/platform/payments/checkout-page.js';
+import type { MerchantJudgePort } from '../platform/src/platform/payments/merchant-recourse.js';
+import type { PaymentNotifier } from '../platform/src/platform/payments/payment-ports.js';
+import type { PaymentsConfigReader } from '../platform/src/platform/payments/payments-config.js';
+import type { PurchaseRecord } from '../platform/src/platform/payments/purchase-record.js';
+import { getProcessUntrustedContentLedger } from '../platform/src/platform/security/untrusted-content.js';
+import { DaemonApprovalStore } from '../platform/src/platform/payments/host/approval-store.js';
+import { DaemonCardStore, type PaymentsSecretStore } from '../platform/src/platform/payments/host/card-store.js';
+import { DaemonPurchaseLedger } from '../platform/src/platform/payments/host/purchase-ledger.js';
+import { DurablePaymentOperations } from '../platform/src/platform/payments/host/operation-store.js';
+import { ProtectedPaymentRequests } from '../platform/src/platform/payments/host/protected-requests.js';
+import type { PaymentOperationView } from '../platform/src/platform/payments/operation-view.js';
 import {
   ATTACHED_PAYMENTS_METHOD_IDS,
   UNATTACHED_PAYMENTS_METHOD_IDS,
   registerPaymentsMethods,
   type CheckoutComposition,
-} from '../sdk/src/platform/payments/host/register.js';
+} from '../platform/src/platform/payments/host/register.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { usePaymentsReadings } from './helpers/payments-readings.ts';
 
@@ -96,7 +96,7 @@ function fakeCheckout(overrides: Partial<CheckoutComposition> = {}): CheckoutCom
 /**
  * A working seam.
  *
- * `armSubmitApproval` is part of the sdk's `BrowserCheckoutSeam` shape and has
+ * `armSubmitApproval` is part of the platform's `BrowserCheckoutSeam` shape and has
  * to exist to satisfy it, but nothing in this daemon calls it any more (see
  * checkout-handlers.ts's header on `checkoutBeginHandler`: the mechanism it
  * used to arm was deleted, it never actually cleared anything), so this is a
@@ -270,7 +270,7 @@ describe('registerPaymentsMethods: what it attaches', () => {
     }
   });
 
-  test('the descriptors are the SDK\'s own, untouched', () => {
+  test('the descriptors are the platform\'s own, untouched', () => {
     const descriptor = catalog.get('payments.cards.create');
     expect(descriptor).toBeTruthy();
     expect(descriptor!.access).toBe('admin');
@@ -302,10 +302,10 @@ describe('registerPaymentsMethods: what it attaches', () => {
   });
 
   test('teardown before ready settles leaves no handler attached once it does', async () => {
-    // The race the torn flag closes: the SDK's own attach lands inside its
+    // The race the torn flag closes: the platform's own attach lands inside its
     // promise and cannot be cancelled, so a teardown that runs before `ready`
     // settles must have the chain restore the descriptors handler-less AFTER
-    // the SDK's attach, or the catalog is left serving payment verbs nobody
+    // the platform's attach, or the catalog is left serving payment verbs nobody
     // holds a teardown for.
     unregister();
     const second = registerPaymentsMethods(catalog, {

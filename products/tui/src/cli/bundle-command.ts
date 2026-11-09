@@ -5,7 +5,7 @@ import { createShellPathService } from '@/runtime/index.ts';
 import type { RuntimeServices } from '../runtime/services.ts';
 import { withRuntimeServices } from './management-utils.ts';
 import { getOnboardingCheckMarkerPath } from '../runtime/onboarding/index.ts';
-import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/sdk/platform/config';
+import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
 import { SecretsManager } from '../config/secrets.ts';
 import type { CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';
 

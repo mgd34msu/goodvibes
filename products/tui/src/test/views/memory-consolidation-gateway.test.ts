@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createMemoryConsolidationGateway, type MemoryConsolidationReceiptsResult } from '../../views/memory-consolidation-gateway.ts';
 import { createMemoryModalSurface } from '../../views/modals/memory-modal.ts';
 import { tabText } from './modals/modal-surface-test-helpers.ts';

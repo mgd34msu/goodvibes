@@ -14,13 +14,13 @@ import { writeVoiceDraft } from '@goodvibes-jev/engine/terminal-shell/audio/voic
  * shell UI.
  */
 
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { VoiceProviderRegistry, VoiceService } from '@goodvibes-jev/engine/sdk/platform/voice';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { VoiceProviderRegistry, VoiceService } from '@goodvibes-jev/engine/platform/platform/voice';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { VoiceCaptureIndicatorState } from '../core/voice-capture-status.ts';
 import { wireVoiceCapture } from '../audio/voice-capture-wiring.ts';
-import type { DaemonVerbCaller } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 
 export interface VoiceCaptureShellDeps {
   readonly configManager: ConfigManager;
@@ -39,7 +39,7 @@ export interface VoiceCaptureShellDeps {
    */
   readonly ensureWakeProvisioned?: (() => Promise<{ readonly ready: boolean; readonly message: string }>) | undefined;
   readonly shellPaths: Pick<ShellPathService, 'resolveUserPath'>;
-  /** Names retained wake clips so the SDK's sweeper reaps them when this session ends. */
+  /** Names retained wake clips so the platform's sweeper reaps them when this session ends. */
   readonly sessionId: string;
   /** The shell's teardown registry; the device release is appended to it. */
   readonly unsubs: Array<() => void>;

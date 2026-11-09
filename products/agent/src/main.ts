@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import './runtime/native-data-writer.ts';
-import { installedReaderCommand } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { installedReaderCommand } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { COMPILED_VERSION } from './version.ts';
 import { metadataCliResult } from './cli/metadata.ts';
 import { writeExitingStdoutLine, writeFatalLine } from './utils/fatal-boot-write.ts';

@@ -7,14 +7,14 @@ import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import {
   buildFixPlannerPrompt, contractPath, readContractSnapshot, CURRENT_CONTRACT_SCHEMA_VERSION,
   type Contract, type DurableContractRequest, type NativeContractSource,
-} from '../../sdk/src/platform/contract/index.js';
-import { DurableContractAdmissions } from '../../sdk/src/platform/contract/durable-admission.js';
+} from '../../platform/src/platform/contract/index.js';
+import { DurableContractAdmissions } from '../../platform/src/platform/contract/durable-admission.js';
 import {
   assertContractInputAuthority, authorizeContractInputPath, contractInputAuthoritySourceRoot,
   getContractInputAuthority,
-} from '../../sdk/src/platform/contract/input-authority.js';
-import type { NativeContractDecisionHost } from '../../sdk/src/platform/contract/native-decisions.js';
-import { nativeSourcePlan } from '../../sdk/src/platform/contract/native-source.js';
+} from '../../platform/src/platform/contract/input-authority.js';
+import type { NativeContractDecisionHost } from '../../platform/src/platform/contract/native-decisions.js';
+import { nativeSourcePlan } from '../../platform/src/platform/contract/native-source.js';
 import { plannerOutput, type AnswerContext, type DraftPlan } from './plan-support.js';
 import { makeHarness, makeRepo, oneUnitPlan, waitFor, type Harness, type HarnessOptions } from './runner-support.js';
 import { finishes, fixPlan, judgeOf, scriptsWith, stepPlanner, terminal } from './steps-support.js';

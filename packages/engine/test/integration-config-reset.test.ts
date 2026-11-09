@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { rmSync } from 'fs';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 // Use a fresh ConfigManager instance for each test to avoid pollution from

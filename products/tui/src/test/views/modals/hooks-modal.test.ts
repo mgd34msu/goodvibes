@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { createHooksModalSurface, type HooksModalActivityTracker, type HooksModalDispatcher, type HooksModalWorkbench } from '../../../views/modals/hooks-modal.ts';
-import { listHookPointContracts } from '@goodvibes-jev/engine/sdk/platform/hooks';
-import type { HookActivityRecord, HookAuthoringAction, HookChain, HookDefinition } from '@goodvibes-jev/engine/sdk/platform/hooks';
+import { listHookPointContracts } from '@goodvibes-jev/engine/platform/platform/hooks';
+import type { HookActivityRecord, HookAuthoringAction, HookChain, HookDefinition } from '@goodvibes-jev/engine/platform/platform/hooks';
 import { actionCtx, captureCommands, open, tabText } from './modal-surface-test-helpers.ts';
 
 type HookEntry = { pattern: string; hook: HookDefinition };

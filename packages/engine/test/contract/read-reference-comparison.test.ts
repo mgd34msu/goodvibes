@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { compareReadReferences } from '../../sdk/src/platform/contract/read-reference-comparison.js';
+import { compareReadReferences } from '../../platform/src/platform/contract/read-reference-comparison.js';
 
 test('extra dependency context does not change the exact referenced intersection', () => {
   const rows = compareReadReferences([{ field: 'criterion o1', text: 'Read packages/App.tsx:1-119,375-379.' }], [

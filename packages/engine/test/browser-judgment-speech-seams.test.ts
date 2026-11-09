@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { type AuthenticatedPrincipal, type BrowserJudgmentRequest } from '../daemon-sdk/src/index.ts';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { createWebuiBrowserJudgment } from '../sdk/src/platform/judgment-browser/webui-runtime.ts';
-import { canonicalSpeechSeams } from '../sdk/src/platform/judgment-browser/speech-source.ts';
-import { speechSeamsBattery } from '../sdk/src/platform/judgment-browser/batteries/speech-seams.ts';
+import { type AuthenticatedPrincipal, type BrowserJudgmentRequest } from '../daemon-api/src/index.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { createWebuiBrowserJudgment } from '../platform/src/platform/judgment-browser/webui-runtime.ts';
+import { canonicalSpeechSeams } from '../platform/src/platform/judgment-browser/speech-source.ts';
+import { speechSeamsBattery } from '../platform/src/platform/judgment-browser/batteries/speech-seams.ts';
 
 const content = 'Dr. Rivera paused… then said “Go.” Next came silence.';
 const owner: AuthenticatedPrincipal = { principalId: 'speech-fixture-owner', principalKind: 'user', admin: false, scopes: ['write:judgment', 'read:sessions'] };

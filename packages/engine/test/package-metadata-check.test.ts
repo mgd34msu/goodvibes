@@ -7,7 +7,7 @@ import { packageReadme } from '../scripts/ci-readings/package-readme.ts';
 import { readmeState } from '../scripts/ci-readings/package-readmes.ts';
 import { decisionId, readingModel, stateHash, type StoredAnswer } from '../scripts/ci-readings/stored-readings.ts';
 
-const SDK_ROOT = resolve(import.meta.dir, '..');
+const ENGINE_ROOT = resolve(import.meta.dir, '..');
 const YES: StoredAnswer = { verdict: 'yes', outcome: 'act', probability: 0.95 };
 const NO: StoredAnswer = { verdict: 'no', outcome: 'act', probability: 0.05 };
 const UNSETTLED: StoredAnswer = { verdict: 'uncertain', outcome: 'escalate', probability: 0.51 };
@@ -77,7 +77,7 @@ beforeEach(() => {
     write(`packages/${name}/README.md`, `# @acme/${name}\n\nA fixture package with installation and usage documentation.\n`);
   }
   write('packages/engine/examples/package.json', JSON.stringify({ devDependencies: { '@types/bun': '^1.3.14' } }));
-  write('packages/engine/sdk/src/platform/node/capabilities.ts', 'export {};\n');
+  write('packages/engine/platform/src/platform/node/capabilities.ts', 'export {};\n');
   write('packages/engine/contracts/src/generated/foundation-client-types.ts', 'export interface FixtureRequest {}\n');
   write('packages/engine/contracts/src/index.ts', "export type { FixtureRequest } from './generated/foundation-client-types.js';\n");
   write('.github/workflows/fixture.yml', 'bun-version: "1.3.14"\n');
@@ -85,11 +85,11 @@ beforeEach(() => {
   for (const script of SCRIPTS) {
     const destination = join(root, 'packages/engine/scripts', script);
     mkdirSync(dirname(destination), { recursive: true });
-    copyFileSync(join(SDK_ROOT, 'scripts', script), destination);
+    copyFileSync(join(ENGINE_ROOT, 'scripts', script), destination);
   }
-  write('packages/judgment/scripts/process-owner.ts', readFileSync(resolve(SDK_ROOT, '../judgment/scripts/process-owner.ts'), 'utf8'));
-  symlinkSync(resolve(SDK_ROOT, '../../node_modules'), join(root, 'node_modules'), 'junction');
-  symlinkSync(resolve(SDK_ROOT, 'node_modules'), join(root, 'packages/engine/node_modules'), 'junction');
+  write('packages/judgment/scripts/process-owner.ts', readFileSync(resolve(ENGINE_ROOT, '../judgment/scripts/process-owner.ts'), 'utf8'));
+  symlinkSync(resolve(ENGINE_ROOT, '../../node_modules'), join(root, 'node_modules'), 'junction');
+  symlinkSync(resolve(ENGINE_ROOT, 'node_modules'), join(root, 'packages/engine/node_modules'), 'junction');
 });
 
 afterEach(() => rmSync(root, { recursive: true, force: true }));
@@ -179,14 +179,14 @@ describe('required metadata checks and advisory editorial readings', () => {
   test('a missing required document still fails the separate documentation gate', () => {
     const result = run('docs-completeness-check.ts');
     expect(result.exitCode).not.toBe(0);
-    expect(result.output).toContain('Missing required SDK doc/example: ../../SECURITY.md');
+    expect(result.output).toContain('Missing required platform doc/example: ../../SECURITY.md');
   });
 
   test('an empty required document still fails the separate documentation gate', () => {
     write('SECURITY.md', ' \n\t');
     const result = run('docs-completeness-check.ts');
     expect(result.exitCode).not.toBe(0);
-    expect(result.output).toContain('Empty required SDK doc/example: ../../SECURITY.md');
+    expect(result.output).toContain('Empty required platform doc/example: ../../SECURITY.md');
   });
 
   test('an omitted generated type re-export still fails after README validation', () => {

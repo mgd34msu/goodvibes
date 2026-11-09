@@ -1,7 +1,7 @@
 import { readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
 import { classifyConnectedHostError, type ConnectedHostFailure } from './connected-host-failure.ts';
-import { createBrowserGoodVibesSdk } from '@goodvibes-jev/engine/sdk/browser';
-import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/sdk/contracts';
+import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
+import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
 import { connectedHostBaseUrl } from '../config/connected-host-dial.ts';
 import { formatAgentRecordReviewState } from './record-labels.ts';
 import type { AgentRoutineRecord } from './routine-registry.ts';
@@ -326,8 +326,8 @@ export async function promoteRoutineToConnectedSchedule(
     };
   }
   try {
-    const sdk = createBrowserGoodVibesSdk({ baseUrl: connection.baseUrl, authToken: connection.token });
-    const schedule = await sdk.operator.invoke(ROUTINE_SCHEDULE_METHOD, preview.payload);
+    const platformClient = createBrowserGoodVibesPlatform({ baseUrl: connection.baseUrl, authToken: connection.token });
+    const schedule = await platformClient.operator.invoke(ROUTINE_SCHEDULE_METHOD, preview.payload);
     return {
       ok: true,
       kind: ROUTINE_SCHEDULE_METHOD,

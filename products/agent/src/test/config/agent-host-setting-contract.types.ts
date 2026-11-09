@@ -1,4 +1,4 @@
-import type { ConfigKey, HostBooleanSettingResolved } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigKey, HostBooleanSettingResolved } from '@goodvibes-jev/engine/platform/platform/config';
 import { AgentConfigManager, AGENT_NOTIFICATIONS_METADATA_ONLY_KEY as KEY, type AgentHostSettingKey } from '../../config/host-settings.ts';
 import { getAgentSettingsSchema } from '../../config/settings-catalog.ts';
 

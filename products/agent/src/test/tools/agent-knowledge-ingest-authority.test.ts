@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { PermissionMode } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { PermissionMode } from '@goodvibes-jev/engine/platform/platform/config';
 import { ConfigManager } from '../../config/index.ts';
 import { createShellPathService } from '@/runtime/index.ts';
 import { createAgentKnowledgeIngestTool, registerAgentKnowledgeIngestTool } from '../../tools/agent-knowledge-ingest-tool.ts';

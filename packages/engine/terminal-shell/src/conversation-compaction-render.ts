@@ -10,8 +10,8 @@
 import { activeTheme, activeTokens } from './renderer/theme.js';
 import { renderMarkdownTracked } from './renderer/markdown.js';
 import { renderConversationEventLine, renderConversationFoldedRow } from './renderer/conversation-surface.js';
-import { GLYPHS } from '@goodvibes-jev/engine/sdk/platform/presentation';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import { GLYPHS } from '@goodvibes-jev/engine/platform/platform/presentation';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import type { BlockMeta } from './work-tree-types.js';
 
 /**

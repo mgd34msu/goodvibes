@@ -18,7 +18,7 @@
  * checkpoint list missing the daemon's.
  *
  * Two families need a different shape of guard: `occasions.*` and
- * `profile.*`. The SDK publishes no dedicated entry point for those two
+ * `profile.*`. The platform publishes no dedicated entry point for those two
  * alone, only the combined entry point that covers all fifteen daemon-served
  * families together, so both tools probe `catalog.hasHandler(methodId)`
  * first and fall back to the connected host, which they always take because

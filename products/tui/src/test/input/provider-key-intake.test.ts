@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { LLMProvider, ProviderAuthState } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { LLMProvider, ProviderAuthState } from '@goodvibes-jev/engine/platform/platform/providers';
 import {
   decideProviderKeyIntake,
   runProviderKeyIntake,

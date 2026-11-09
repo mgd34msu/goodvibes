@@ -1,4 +1,4 @@
-import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { normalizeThemeName, setActiveThemeMode, setActiveThemeName } from './theme.js';
 import type { ThemeModeSetting } from './theme.js';
 export const THEME_MODE_CONFIG_KEY: ConfigKey = 'display.themeMode';

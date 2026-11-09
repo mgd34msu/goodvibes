@@ -1,5 +1,5 @@
-import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { isDeepStrictEqual } from 'node:util';
 import { createDaemonOperatorInvoke } from './daemon-operator-client.ts';
 import { findOperatorContractMethod } from './operator-contract-routes.ts';

@@ -32,7 +32,7 @@ import {
   IMAP_BODY_PROBE_BYTES,
   type InboundWatcherSettings,
   type MailboxCursor,
-} from '../sdk/src/platform/email/inbound/index.ts';
+} from '../platform/src/platform/email/inbound/index.ts';
 import {
   makeFakeMailbox,
   openMailboxSocket,

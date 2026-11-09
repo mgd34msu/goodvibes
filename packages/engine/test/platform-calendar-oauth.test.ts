@@ -27,9 +27,9 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { createSystemOnePort, DEFAULT_MODEL, type EntryType, type Question, type JudgmentConfig } from '@goodvibes-jev/judgment';
-import { missingPermission } from '../sdk/src/platform/calendar/batteries/missing-permission.ts';
+import { missingPermission } from '../platform/src/platform/calendar/batteries/missing-permission.ts';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { createSha256Hash } from '../sdk/src/platform/runtime/auth/crypto-adapter.ts';
+import { createSha256Hash } from '../platform/src/platform/runtime/auth/crypto-adapter.ts';
 import {
   CalendarApiError,
   errorFromResponse,
@@ -47,7 +47,7 @@ import {
   type LoopbackListenerFactory,
   type ResolvedClientConfig,
   type SecretStoreSlice,
-} from '../sdk/src/platform/calendar/index.ts';
+} from '../platform/src/platform/calendar/index.ts';
 
 // ---------------------------------------------------------------------------
 // Test doubles

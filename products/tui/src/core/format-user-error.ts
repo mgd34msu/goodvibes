@@ -2,11 +2,11 @@
  * Error meaning and wording belong to the public routing reader. The product
  * owns only delivery: a bounded ordered queue that cannot outlive its caller.
  */
-import { readUserFacingError, type UserFacingError } from '@goodvibes-jev/engine/sdk/platform/routing';
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { readUserFacingError, type UserFacingError } from '@goodvibes-jev/engine/platform/platform/routing';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
-export { readUserFacingError, readUserFacingErrorLine } from '@goodvibes-jev/engine/sdk/platform/routing';
-export type { ErrorClass, UserFacingError } from '@goodvibes-jev/engine/sdk/platform/routing';
+export { readUserFacingError, readUserFacingErrorLine } from '@goodvibes-jev/engine/platform/platform/routing';
+export type { ErrorClass, UserFacingError } from '@goodvibes-jev/engine/platform/platform/routing';
 
 /** A deadline limits narration latency, never decides what an error means. */
 export const ERROR_NOTICE_TIMEOUT_MS = 1500;

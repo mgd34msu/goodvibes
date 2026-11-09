@@ -15,11 +15,11 @@ import {
   type PerformDaemonHandoverOptions,
   type RunCommandLike,
   type RunDaemonHandoverOptions,
-} from '../sdk/src/platform/runtime/client/daemon-handover.ts';
+} from '../platform/src/platform/runtime/client/daemon-handover.ts';
 import type {
   UpdateFetchLike,
   UpdateFileIo,
-} from '../sdk/src/platform/runtime/self-update.ts';
+} from '../platform/src/platform/runtime/self-update.ts';
 import { nativeCohortFixture, nativeMemoryIo } from './_helpers/daemon-native-cohort.ts';
 
 // The legacy banner and filesystem are retained while the complete native

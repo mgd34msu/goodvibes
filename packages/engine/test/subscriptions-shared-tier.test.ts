@@ -26,13 +26,13 @@ import {
   SubscriptionManager,
   sharedSubscriptionsPath,
   type ProviderSubscription,
-} from '../sdk/src/platform/config/subscriptions.ts';
-import { createShellPathService } from '../sdk/src/platform/runtime/shell-paths.ts';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
-import { createRuntimeStore } from '../sdk/src/platform/runtime/store/index.ts';
-import { createRuntimeServices } from '../sdk/src/platform/runtime/services.ts';
-import { createClientRuntimeServices } from '../sdk/src/platform/runtime/client-services.ts';
+} from '../platform/src/platform/config/subscriptions.ts';
+import { createShellPathService } from '../platform/src/platform/runtime/shell-paths.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
+import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.ts';
+import { createRuntimeServices } from '../platform/src/platform/runtime/services.ts';
+import { createClientRuntimeServices } from '../platform/src/platform/runtime/client-services.ts';
 
 const roots: string[] = [];
 function makeHome(prefix: string): string {

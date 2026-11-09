@@ -6,14 +6,14 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { reportFatalBootFailure, writeExitingStdoutLine, writeFatalLine } from '../sdk/src/platform/daemon/index.js';
+import { reportFatalBootFailure, writeExitingStdoutLine, writeFatalLine } from '../platform/src/platform/daemon/index.js';
 const dirs: string[] = [];
 afterAll(() => { for (const dir of dirs) rmSync(dir, { recursive: true, force: true }); });
 
 function runInlineWriter(body: string) {
   const dir = mkdtempSync(join(tmpdir(), 'gv-fatal-inline-'));
   dirs.push(dir);
-  const modulePath = new URL('../sdk/src/platform/daemon/fatal-boot-report.ts', import.meta.url).pathname;
+  const modulePath = new URL('../platform/src/platform/daemon/fatal-boot-report.ts', import.meta.url).pathname;
   const script = join(dir, 'inline.ts');
   writeFileSync(script,
     `import { reportFatalBootFailure, writeExitingStdoutLine, writeFatalLine } from ${JSON.stringify(modulePath)};\n${body}\n`);
@@ -65,7 +65,7 @@ describe('fatal diagnostics reach actual descriptors', () => {
     expect(run.stdout).toContain('SURVIVED');
     expect(run.status).toBe(0);
   });
-  test('canonical SDK exports all three writer functions', () => {
+  test('canonical platform exports all three writer functions', () => {
     expect(typeof writeFatalLine).toBe('function');
     expect(typeof writeExitingStdoutLine).toBe('function');
     expect(typeof reportFatalBootFailure).toBe('function');
@@ -105,7 +105,7 @@ describe('fatal diagnostics reach actual descriptors', () => {
   });
 
   test('prints the complete ordinary own stack after its current canonical reading settles', () => {
-    const redaction = new URL('../sdk/src/platform/utils/redaction.ts', import.meta.url).pathname;
+    const redaction = new URL('../platform/src/platform/utils/redaction.ts', import.meta.url).pathname;
     const errors = new URL('../errors/src/index.ts', import.meta.url).pathname;
     const testing = new URL('../../judgment/src/testing/index.ts', import.meta.url).pathname;
     const stack = 'ordinary fixture failure\n    at fixtureBootstrap';

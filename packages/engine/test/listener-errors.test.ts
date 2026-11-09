@@ -10,10 +10,10 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { RuntimeEventBus, createEventEnvelope } from '../sdk/src/platform/runtime/events/index.ts';
-import type { SessionEvent } from '../sdk/src/events/session.js';
-import type { OpsEvent } from '../sdk/src/events/ops.js';
-import type { RuntimeEventEnvelope } from '../sdk/src/platform/runtime/events/index.ts';
+import { RuntimeEventBus, createEventEnvelope } from '../platform/src/platform/runtime/events/index.ts';
+import type { SessionEvent } from '../platform/src/events/session.js';
+import type { OpsEvent } from '../platform/src/events/ops.js';
+import type { RuntimeEventEnvelope } from '../platform/src/platform/runtime/events/index.ts';
 
 function makeSessionEnvelope() {
   const payload: SessionEvent = { type: 'SESSION_STARTED', sessionId: 'sess-listener-errors', profileId: 'default', workingDir: '/tmp/listener-errors-test' };
@@ -31,7 +31,7 @@ async function drainMicrotasks(n = 5): Promise<void> {
 
 describe('listener_errors_total counter', () => {
   test('throwing listener increments listener_errors_total', async () => {
-    const { listenerErrorsTotal } = await import('../sdk/src/platform/runtime/metrics.js');
+    const { listenerErrorsTotal } = await import('../platform/src/platform/runtime/metrics.js');
     const bus = new RuntimeEventBus();
 
     const before = listenerErrorsTotal.value({ event_type: 'SESSION_STARTED' });
@@ -47,7 +47,7 @@ describe('listener_errors_total counter', () => {
   });
 
   test('non-throwing listener does not increment listener_errors_total', async () => {
-    const { listenerErrorsTotal } = await import('../sdk/src/platform/runtime/metrics.js');
+    const { listenerErrorsTotal } = await import('../platform/src/platform/runtime/metrics.js');
     const bus = new RuntimeEventBus();
 
     const before = listenerErrorsTotal.value({ event_type: 'SESSION_STARTED' });
@@ -61,7 +61,7 @@ describe('listener_errors_total counter', () => {
   });
 
   test('counter increments once per throw, even for same listener throwing multiple times', async () => {
-    const { listenerErrorsTotal } = await import('../sdk/src/platform/runtime/metrics.js');
+    const { listenerErrorsTotal } = await import('../platform/src/platform/runtime/metrics.js');
     const bus = new RuntimeEventBus();
 
     const before = listenerErrorsTotal.value({ event_type: 'SESSION_STARTED' });

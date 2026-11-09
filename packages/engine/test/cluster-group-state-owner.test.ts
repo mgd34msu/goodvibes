@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { GroupStateOwner } from '../sdk/src/platform/cluster/group-state-owner.ts';
+import { GroupStateOwner } from '../platform/src/platform/cluster/group-state-owner.ts';
 test('own atomic publications advance only their original source and preserve private mode', () => {
   const root = mkdtempSync(join(tmpdir(), 'cluster-owned-state-'));
   try {

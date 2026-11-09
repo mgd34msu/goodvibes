@@ -19,7 +19,7 @@ import {
   splitPathEntries,
   versionLineIdentifiesCommand,
   type ShadowScanInput,
-} from '../sdk/src/platform/runtime/path-shadow.js';
+} from '../platform/src/platform/runtime/path-shadow.js';
 
 const HOME = '/home/owner';
 const INSTALL_DIR = `${HOME}/.local/bin`;

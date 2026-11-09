@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { EvalRunner } from '../sdk/src/platform/runtime/eval/runner.js';
+import { EvalRunner } from '../platform/src/platform/runtime/eval/runner.js';
 
 describe('platform/runtime/eval: eval runner behavior', () => {
 

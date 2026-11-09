@@ -13,8 +13,8 @@ import {
   KNOWLEDGE_SCORE_SCALE,
   selectKnowledgeForTask,
   selectKnowledgeForTaskScored,
-} from '../sdk/src/platform/state/knowledge-injection.js';
-import type { MemoryRecord, MemorySemanticSearchResult } from '../sdk/src/platform/state/memory-store.js';
+} from '../platform/src/platform/state/knowledge-injection.js';
+import type { MemoryRecord, MemorySemanticSearchResult } from '../platform/src/platform/state/memory-store.js';
 import { useMemoryReadings } from './_helpers/memory-readings.ts';
 
 function makeRecord(overrides: Partial<MemoryRecord> & { id: string }): MemoryRecord {

@@ -1,9 +1,9 @@
-import { ArtifactStore, type ArtifactCreateInput, type ArtifactDescriptor } from '@goodvibes-jev/engine/sdk/platform/artifacts';
+import { ArtifactStore, type ArtifactCreateInput, type ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import { lstatSync } from 'node:fs';
-import { judgmentInputCardProblem, snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { assertCurrentToolEffect, assertCurrentToolExecution, assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector, type ToolNativeReferencesCapture, type ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import { containsIssuerCredential } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { judgmentInputCardProblem, snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
+import { assertCurrentToolEffect, assertCurrentToolExecution, assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector, type ToolNativeReferencesCapture, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { containsIssuerCredential } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { CommandContext } from '../input/command-registry.ts';
 import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 import { captureAgentExportPath } from './agent-artifact-effect.ts';
@@ -72,7 +72,7 @@ export function createSetupSmokeReferenceCapture(context?: CommandContext,
     const store = (platform as { readonly artifactStore?: SetupSmokeArtifactStore }).artifactStore;
     const assertStore = store ? captureCatalogMethods(store, ['create']) : () => {};
     const create = store?.create;
-    // Only the SDK's captured native getter is invoked. Custom fixture stores
+    // Only the platform's captured native getter is invoked. Custom fixture stores
     // retain their opaque identity without acquiring an invented filesystem.
     const nativeStore = store && Object.getPrototypeOf(store) === ArtifactStore.prototype ? store : undefined;
     const storeRoot = nativeStore ? nativeStoragePath?.get?.call(nativeStore) as string : undefined;

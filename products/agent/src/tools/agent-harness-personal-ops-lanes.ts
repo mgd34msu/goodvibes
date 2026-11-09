@@ -1,8 +1,8 @@
-import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { captureCatalogMethods, captureCatalogSnapshot, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext } from '../input/command-registry.ts';
 import { buildAgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace-snapshot.ts';
 import { calendarWorkflows, connectorSignalsMatching, inboxWorkflows, contractMethodsForLane, contractMethodsForLanes, retainPersonalOpsContractSource, reminderWorkflows, taskWorkflows } from './agent-harness-personal-ops-discovery.ts';
@@ -40,7 +40,7 @@ function remindersLane(scheduleMethods: readonly string[], reminderProviderRecor
     status: reminderProviderRecords.length > 0 || scheduleMethods.length > 0 || reminderEffectReceiptRecords.length > 0 ? 'ready' : 'partial',
     outcome: 'Turn a user request into a visible reminder or autonomous schedule with delivery target and cancellation path.',
     current: reminderProviderRecords.length > 0
-      ? `Fresh provider-backed reminder records are published by the connected daemon or SDK read model; Agent can review ${reminderProviderRecords.length} current reminder record(s) before any edit, snooze, complete, or delete route.`
+      ? `Fresh provider-backed reminder records are published by the connected daemon or platform read model; Agent can review ${reminderProviderRecords.length} current reminder record(s) before any edit, snooze, complete, or delete route.`
       : reminderEffectReceiptRecords.length > 0
         ? 'Saved reminder provider-effect receipts are available for audit and follow-up; no fresh reminder provider record is currently ready.'
       : `Reminder and autonomous schedule creation are available through Agent tools; ${scheduleMethods.length} schedule/reminder daemon method(s) are discoverable.`,
@@ -87,7 +87,7 @@ function inboxLane({ snapshot, emailMethods, unavailableEmailMethods, emailConne
       : emailMethods.length > 0 || emailConnectors.length > 0 || inboxArtifactRecords.length > 0 || inboxEffectReceiptRecords.length > 0 ? 'partial' : 'gap',
     outcome: 'Triage inbound email or message inboxes, summarize threads, draft replies, and send only after confirmation.',
     current: inboxProviderRecords.length > 0
-      ? 'Fresh provider-backed inbox thread records are published by the connected daemon or SDK read model; Personal Ops can triage current queue state without inventing sends, labels, or archive effects.'
+      ? 'Fresh provider-backed inbox thread records are published by the connected daemon or platform read model; Personal Ops can triage current queue state without inventing sends, labels, or archive effects.'
       : emailMethods.length > 0 && emailConnectors.length === 0 && inboxArtifactRecords.length === 0 && inboxEffectReceiptRecords.length === 0
       ? 'The daemon contract exposes email-like methods; Personal Ops workflow cards now guide inbox triage and draft boundaries around exact methods.'
       : emailConnectors.length > 0
@@ -98,7 +98,7 @@ function inboxLane({ snapshot, emailMethods, unavailableEmailMethods, emailConne
             ? 'Saved inbox provider-effect receipts are available for audit and follow-up; no fresh email connector is currently ready.'
       : unavailableEmailMethods.length > 0
         ? `The operator contract advertises ${unavailableEmailMethods.length} email method(s), but they are unavailable (route not served by this daemon) and cannot be dispatched.`
-      : 'No email/IMAP/SMTP methods are present in the current GoodVibes SDK operator contract.',
+      : 'No email/IMAP/SMTP methods are present in the current GoodVibes platform operator contract.',
     next: inboxProviderRecords.length > 0
       ? 'Inspect one fresh thread record, summarize or draft locally, and use only the published confirmed follow-up routes for replies, sends, labels, or archive.'
       : emailMethods.length > 0 && emailConnectors.length === 0 && inboxArtifactRecords.length === 0 && inboxEffectReceiptRecords.length === 0
@@ -254,7 +254,7 @@ async function ownedBuildLanes(
         : calendarMethods.length > 0 || calendarConnectors.length > 0 || calendarArtifactRecords.length > 0 || calendarEffectReceiptRecords.length > 0 ? 'partial' : 'gap',
       outcome: 'Read agenda context, identify conflicts, prepare briefings, and create reminders for calendar-driven work.',
       current: calendarProviderRecords.length > 0
-        ? 'Fresh provider-backed calendar event records are published by the connected daemon or SDK read model; Personal Ops can brief current agenda and conflict state without inventing event edits or RSVP effects.'
+        ? 'Fresh provider-backed calendar event records are published by the connected daemon or platform read model; Personal Ops can brief current agenda and conflict state without inventing event edits or RSVP effects.'
         : calendarMethods.length > 0 && calendarConnectors.length === 0 && calendarArtifactRecords.length === 0 && calendarEffectReceiptRecords.length === 0
         ? 'The daemon contract exposes calendar-like methods; Personal Ops workflow cards now guide agenda briefing and conflict-scan boundaries.'
         : calendarConnectors.length > 0
@@ -265,7 +265,7 @@ async function ownedBuildLanes(
               ? 'Saved calendar provider-effect receipts are available for audit and follow-up; no fresh calendar connector is currently ready.'
         : unavailableCalendarMethods.length > 0
           ? `The operator contract advertises ${unavailableCalendarMethods.length} calendar method(s), but they are unavailable (route not served by this daemon) and cannot be dispatched. The local Agent calendar (/calendar) remains available.`
-        : 'No calendar/CalDAV/agenda methods are present in the current GoodVibes SDK operator contract.',
+        : 'No calendar/CalDAV/agenda methods are present in the current GoodVibes platform operator contract.',
       next: calendarProviderRecords.length > 0
         ? 'Inspect one fresh event record, brief the agenda or conflicts locally, and use only the published confirmed follow-up routes for edits, RSVP, reschedule, or delete.'
         : calendarMethods.length > 0 && calendarConnectors.length === 0 && calendarArtifactRecords.length === 0 && calendarEffectReceiptRecords.length === 0
@@ -308,10 +308,10 @@ async function ownedBuildLanes(
       status: taskProviderRecords.length > 0 || taskMethods.length > 0 || taskEffectReceiptRecords.length > 0 ? 'ready' : 'partial',
       outcome: 'Track user-visible work items, inspect host task state, and update work plan status without hidden jobs.',
       current: taskProviderRecords.length > 0
-        ? `Fresh provider-backed task records are published by the connected daemon or SDK read model; Agent can review ${taskProviderRecords.length} current external task record(s) before any provider update, completion, defer, or delete route.`
+        ? `Fresh provider-backed task records are published by the connected daemon or platform read model; Agent can review ${taskProviderRecords.length} current external task record(s) before any provider update, completion, defer, or delete route.`
         : taskEffectReceiptRecords.length > 0
           ? 'Saved task provider-effect receipts are available for audit and follow-up; no fresh task provider record is currently ready.'
-        : `Agent has work-plan actions and ${taskMethods.length} task/work-plan daemon method(s) in the SDK contract.`,
+        : `Agent has work-plan actions and ${taskMethods.length} task/work-plan daemon method(s) in the platform contract.`,
       next: taskProviderRecords.length > 0
         ? 'Inspect one provider task record, then use only a published confirmed follow-up route for updates, completion, defer, archive, or delete.'
         : taskEffectReceiptRecords.length > 0

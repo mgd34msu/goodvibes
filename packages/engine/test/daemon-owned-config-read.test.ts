@@ -15,13 +15,13 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { DaemonConfigUnreachableError } from '../sdk/src/platform/config/daemon-config-route.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { DaemonConfigUnreachableError } from '../platform/src/platform/config/daemon-config-route.js';
 import {
   readConfigValue,
   readEffectiveConfig,
   resolveConfigReadRoute,
-} from '../sdk/src/platform/config/daemon-config-read.js';
+} from '../platform/src/platform/config/daemon-config-read.js';
 
 const roots: string[] = [];
 function home(): string {

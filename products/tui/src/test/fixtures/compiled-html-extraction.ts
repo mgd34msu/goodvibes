@@ -1,4 +1,4 @@
-import { extractKnowledgeArtifact } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import { extractKnowledgeArtifact } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 

@@ -8,7 +8,7 @@
  * process and how a ghost session was left marked "active" by a writer that no
  * longer existed. Nothing refused, because nothing was asking.
  *
- * The SDK owns the rule (`claimSurfaceHome`) and proves the rule itself. What
+ * The platform owns the rule (`claimSurfaceHome`) and proves the rule itself. What
  * this proves is that the AGENT'S OWN composition asks for it: the agent is the
  * singleton surface, one per machine, holding one home, so it passes
  * `homeSingleWriter: 'claim'` where the terminal deliberately does not.
@@ -17,8 +17,8 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { bootstrap as runtimeComposition } from '@goodvibes-jev/engine/sdk/platform/runtime';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { bootstrap as runtimeComposition } from '@goodvibes-jev/engine/platform/platform/runtime';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';

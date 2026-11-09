@@ -1,7 +1,7 @@
 import type {
   ProjectPlanningState,
   ProjectPlanningDecision, ProjectPlanningLanguageArtifact,
-} from '@goodvibes-jev/engine/sdk/platform/knowledge';
+} from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { ConfigModalSurface } from '../../input/config-modal-types.ts';
 import { createPlanningModalSurface, type PlanningModalService } from '../../views/modals/planning-modal.ts';
 

@@ -76,7 +76,7 @@ export function describeCliCommandPolicy(commandName: string): CommandExecutionP
       boundary: root === 'workspaces'
         ? 'The registered-workspace list that gates automatic checkpoints (owner ruling, 2026-07-10) is Agent-local, user-scoped state. There is no dedicated model tool yet; registration/unregistration is a mutating action and requires explicit user intent (the CLI itself requires --yes).'
         : root === 'fleet'
-          ? 'Best-of-N held-merge attempt groups (SDK 1.6.1) are this Agent\'s own orchestration engine state, not a connected-host call, fleet.attempts.* is ws-only with no HTTP binding, so agent_operator_method cannot reach it either. There is no dedicated model tool yet; picking a winner is a mutating, worktree-cleaning action and requires explicit user intent (the CLI itself requires --yes).'
+          ? 'Best-of-N held-merge attempt groups (platform 1.6.1) are this Agent\'s own orchestration engine state, not a connected-host call, fleet.attempts.* is ws-only with no HTTP binding, so agent_operator_method cannot reach it either. There is no dedicated model tool yet; picking a winner is a mutating, worktree-cleaning action and requires explicit user intent (the CLI itself requires --yes).'
           : 'Local library/profile/session/bundle/import CLI commands operate on Agent-local data. Mutations require explicit user intent and should use first-class Agent-local tools where available.',
     };
   }
@@ -137,7 +137,7 @@ export function describeCliCommandPolicy(commandName: string): CommandExecutionP
       effect: 'read-only',
       confirmation,
       preferredModelTool: `${settingsActions('list', 'get')} (category "relay") or ${agentHarnessModes('tools')}`,
-      boundary: 'relay status reports the connected host\'s imported relay.* configuration and the relay-connect feature flag only, it is not a live check (Agent hosts no daemon and the SDK has no remote relay-status route). relay pair always honestly refuses: minting a pairing payload needs the relay identity private key, which only the daemon actually holding the relay identity has.',
+      boundary: 'relay status reports the connected host\'s imported relay.* configuration and the relay-connect feature flag only, it is not a live check (Agent hosts no daemon and the platform has no remote relay-status route). relay pair always honestly refuses: minting a pairing payload needs the relay identity private key, which only the daemon actually holding the relay identity has.',
     };
   }
   if (root === 'subscription' || root === 'secrets' || root === 'pair') {

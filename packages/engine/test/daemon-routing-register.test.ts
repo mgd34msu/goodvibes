@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { registerRoutingMethods } from '../sdk/src/platform/channels/host-routing/registration.js';
-import { HandlerError, REQUIRE_CONFIRM } from '../sdk/src/platform/control-plane/host-handlers.js';
-import type { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/index.js';
-import type { RoutingHostContext as HandlerContext } from '../sdk/src/platform/channels/host-routing/registration-types.js';
+import { registerRoutingMethods } from '../platform/src/platform/channels/host-routing/registration.js';
+import { HandlerError, REQUIRE_CONFIRM } from '../platform/src/platform/control-plane/host-handlers.js';
+import type { GatewayMethodCatalog } from '../platform/src/platform/control-plane/index.js';
+import type { RoutingHostContext as HandlerContext } from '../platform/src/platform/channels/host-routing/registration-types.js';
 import { makeHandlerContext, makeInvocation, makeTmpWorkingDir, type RecordingLogger } from './_helpers/routing-registration.js';
 
 const LIST = 'channels.routing.list';
@@ -35,15 +35,15 @@ describe('registerRoutingMethods: catalog attachment', () => {
     tmp.cleanup();
   });
 
-  test('attaches handlers to the SDK-registered descriptors without re-declaring them', () => {
+  test('attaches handlers to the platform-registered descriptors without re-declaring them', () => {
     for (const id of [LIST, ASSIGN, DELETE]) {
-      // The descriptor pre-exists (SDK auto-registered it); we only add a handler.
+      // The descriptor pre-exists (platform auto-registered it); we only add a handler.
       expect(catalog.get(id)).not.toBeNull();
       expect(catalog.hasHandler(id)).toBe(true);
     }
   });
 
-  test('preserves the canonical SDK descriptor metadata (id/access/dangerous/scopes)', () => {
+  test('preserves the canonical platform descriptor metadata (id/access/dangerous/scopes)', () => {
     const assign = catalog.get(ASSIGN)!;
     expect(assign.id).toBe(ASSIGN);
     expect(assign.access).toBe('admin');
@@ -64,7 +64,7 @@ describe('registerRoutingMethods: catalog attachment', () => {
     expect(catalog.hasHandler(DELETE)).toBe(false);
   });
 
-  test('list returns the SDK output shape { routes, total }', async () => {
+  test('list returns the platform output shape { routes, total }', async () => {
     await catalog.invoke(ASSIGN, confirmed({ surfaceKind: 'slack', routeId: 'C1', profileId: 'work' }));
     const result = (await catalog.invoke(LIST, makeInvocation({}))) as {
       routes: Array<Record<string, unknown>>;
@@ -77,7 +77,7 @@ describe('registerRoutingMethods: catalog attachment', () => {
     expect(item.surfaceKind).toBe('slack');
     expect(item.profileId).toBe('work');
     expect(item.routeId).toBe('C1');
-    // SDK CHANNEL_ROUTING_RULE_SCHEMA: route items expose `id` (the assignment
+    // platform CHANNEL_ROUTING_RULE_SCHEMA: route items expose `id` (the assignment
     // id) and forbid the daemon-internal `channelId`/`assignmentId` keys
     // (additionalProperties:false). Verify the projected shape exactly.
     expect(typeof item.id).toBe('string');
@@ -107,7 +107,7 @@ describe('registerRoutingMethods: catalog attachment', () => {
     expect(limited.total).toBe(1);
   });
 
-  test('assign returns the SDK output shape and supports channelId or surfaceKind+routeId', async () => {
+  test('assign returns the platform output shape and supports channelId or surfaceKind+routeId', async () => {
     const viaParts = (await catalog.invoke(
       ASSIGN,
       confirmed({ surfaceKind: 'slack', routeId: 'C1', profileId: 'work', label: 'team' }),
@@ -139,7 +139,7 @@ describe('registerRoutingMethods: catalog attachment', () => {
     ).rejects.toThrow();
   });
 
-  test('delete returns the SDK output shape { deleted, assignmentId }', async () => {
+  test('delete returns the platform output shape { deleted, assignmentId }', async () => {
     const assigned = (await catalog.invoke(
       ASSIGN,
       confirmed({ surfaceKind: 'slack', profileId: 'work' }),

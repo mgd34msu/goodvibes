@@ -1,6 +1,6 @@
 import { expect, spyOn, test } from 'bun:test';
-import { ProcessManager, type BgCommandResult } from '../sdk/src/platform/tools/shared/process-manager.ts';
-import * as policyCheck from '../sdk/src/platform/gate/execute-policy-check.ts';
+import { ProcessManager, type BgCommandResult } from '../platform/src/platform/tools/shared/process-manager.ts';
+import * as policyCheck from '../platform/src/platform/gate/execute-policy-check.ts';
 
 async function startEcho(manager: ProcessManager): Promise<string> {
   const result = await manager.spawnArgv('/bin/cat', [], undefined, undefined, {

@@ -4,16 +4,16 @@
  */
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { forgetProviderReadings, readReasoningFamily } from '../sdk/src/platform/routing/provider-readings.ts';
-import { forgetModelLimitReadings } from '../sdk/src/platform/routing/model-limit-readings.ts';
-import { FALLBACK_CONTEXT_WINDOW, readFallbackContextWindow } from '../sdk/src/platform/providers/context-window-fallback.ts';
+import { forgetProviderReadings, readReasoningFamily } from '../platform/src/platform/routing/provider-readings.ts';
+import { forgetModelLimitReadings } from '../platform/src/platform/routing/model-limit-readings.ts';
+import { FALLBACK_CONTEXT_WINDOW, readFallbackContextWindow } from '../platform/src/platform/providers/context-window-fallback.ts';
 import { describe, expect, test } from 'bun:test';
 import {
   buildFallbackModelDefinition,
   ensureConfiguredModelIsRoutable,
-} from '../sdk/src/platform/providers/fallback-model.ts';
-import { ProviderRegistry } from '../sdk/src/platform/providers/registry.ts';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.ts';
+} from '../platform/src/platform/providers/fallback-model.ts';
+import { ProviderRegistry } from '../platform/src/platform/providers/registry.ts';
+import type { ConfigManager } from '../platform/src/platform/config/manager.ts';
 
 type RegistryOptions = ConstructorParameters<typeof ProviderRegistry>[0];
 

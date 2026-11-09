@@ -1,5 +1,5 @@
 import { TerminalConversationManager } from '@goodvibes-jev/engine/terminal-shell/terminal-conversation';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import * as renderer from './conversation-rendering.ts';
 export * from '@goodvibes-jev/engine/terminal-shell/terminal-conversation';
 export class ConversationManager extends TerminalConversationManager {

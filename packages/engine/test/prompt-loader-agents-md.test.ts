@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import {
   findNearestAgentsFile,
   loadSystemPromptWithSources,
-} from '../sdk/src/platform/utils/prompt-loader.js';
+} from '../platform/src/platform/utils/prompt-loader.js';
 
 const tempRoots: string[] = [];
 

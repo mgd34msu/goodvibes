@@ -36,16 +36,16 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Glob } from 'bun';
-import { CONFIG_SCHEMA, DEFAULT_CONFIG } from '../sdk/src/platform/config/schema.ts';
-import type { ConfigKey } from '../sdk/src/platform/config/schema-types.ts';
-import { isDaemonOwnedConfigKey } from '../sdk/src/platform/config/config-ownership.ts';
+import { CONFIG_SCHEMA, DEFAULT_CONFIG } from '../platform/src/platform/config/schema.ts';
+import type { ConfigKey } from '../platform/src/platform/config/schema-types.ts';
+import { isDaemonOwnedConfigKey } from '../platform/src/platform/config/config-ownership.ts';
 import {
   daemonSecretKeyFor,
   isDaemonOwnedSecretKey,
-} from '../sdk/src/platform/config/daemon-secret-keys.ts';
-import { daemonMailboxConfigSettings } from '../sdk/src/platform/config/schema-domain-daemon-mailbox.ts';
+} from '../platform/src/platform/config/daemon-secret-keys.ts';
+import { daemonMailboxConfigSettings } from '../platform/src/platform/config/schema-domain-daemon-mailbox.ts';
 
-const PLATFORM_ROOT = join(import.meta.dir, '..', 'sdk', 'src', 'platform');
+const PLATFORM_ROOT = join(import.meta.dir, '..', 'platform', 'src', 'platform');
 
 /** Trailing `.` catches `surfaces.email.` used as a prefix rather than a key. */
 const KEY_LITERAL = /surfaces\.(?:email|calendar)\.[A-Za-z][A-Za-z0-9.]*/g;
@@ -140,7 +140,7 @@ describe('the credentials derive daemon-owned secret names', () => {
 describe('declaring them as schema keys replaced the non-scalar listing rather than doubling it', () => {
   test('no mailbox key is counted twice in the daemon-owned path walk', async () => {
     const { listDaemonOwnedConfigPaths } = await import(
-      '../sdk/src/platform/config/config-ownership.ts'
+      '../platform/src/platform/config/config-ownership.ts'
     );
     const paths = listDaemonOwnedConfigPaths().filter(
       (path) => path.startsWith('surfaces.email.') || path.startsWith('surfaces.calendar.'),

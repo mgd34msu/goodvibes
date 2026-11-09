@@ -1,9 +1,9 @@
 import { projectOrchestratorCoreServices } from '@goodvibes-jev/engine/terminal-shell/bootstrap-orchestrator';
-import type { OrchestratorCoreServices } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { OrchestratorCoreServices } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { RuntimeServices } from './services.ts';
-import { isCodeInjectionSettingEnabled } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { isCodeInjectionSettingEnabled } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 
 /** The slice of the runtime services bag the shared orchestrator payload draws from. */
 export type OrchestratorCoreServicesSource = Pick<
@@ -27,17 +27,17 @@ export type OrchestratorCoreServicesSource = Pick<
  *
  * BLOCKER regression guard: `memoryRegistry` here is what turns
  * on per-turn passive knowledge injection for the MAIN interactive session,
- * the SDK turn loop hard-gates on `coreServices.memoryRegistry` (undefined is
+ * the platform turn loop hard-gates on `coreServices.memoryRegistry` (undefined is
  * a silent no-op: Orchestrator.getTurnInjections() stays empty forever and
  * `/recall injections` renders a misleading empty state). Both call sites once
  * omitted it independently; routing them through this one function (with
  * src/test/runtime/orchestrator-core-services.test.ts pinning the field) is
  * what keeps that from regressing.
  *
- * SDK 1.2.0 FULL DETACH: the SDK's turn loop reads `memoryRegistry.getAll()`
+ * platform 1.2.0 FULL DETACH: the platform's turn loop reads `memoryRegistry.getAll()`
  * SYNCHRONOUSLY (`TurnKnowledgeRegistrySource`), but the memory spine's wire
  * reads are asynchronous, a sync function cannot await the wire. Per
- * docs/decisions/2026-07-06-memory-wire-full-detach.md (SDK repo) this is
+ * docs/decisions/2026-07-06-memory-wire-full-detach.md (platform repo) this is
  * satisfied by the spine's freshness-stamped recall snapshot instead of the
  * raw local `memoryRegistry`: `getAll()` reads `memorySpine.recallSnapshot()`,
  * which returns whatever the last `refreshRecallSnapshot()` (an async
@@ -57,7 +57,7 @@ export function buildSharedOrchestratorCoreServices(input: {
     memoryRegistry: { getAll: () => services.memorySpine.recallSnapshot().records },
     // Main-session code auto-injection + tool-site reindex. Injection is
     // additionally gated by the default-off `agent-passive-code-injection` flag inside the
-    // SDK; here we supply the source, the live storage.codeIndexEnabled predicate, and the
+    // platform; here we supply the source, the live storage.codeIndexEnabled predicate, and the
     // reindex scheduler.
     codeIndex: services.codeIndexStore,
     isCodeInjectionSettingEnabled: () => isCodeInjectionSettingEnabled(configManager),

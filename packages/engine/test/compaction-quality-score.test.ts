@@ -9,12 +9,12 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { computeQualityScore } from '../sdk/src/platform/runtime/compaction/quality-score.ts';
-import { compactionViews } from '../sdk/src/platform/runtime/compaction/judged-views.ts';
-import { CompactionManager } from '../sdk/src/platform/runtime/compaction/manager.ts';
-import type { StrategyInput, StrategyOutput } from '../sdk/src/platform/runtime/compaction/types.ts';
-import type { ProviderMessage } from '../sdk/src/platform/providers/interface.ts';
-import type { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
+import { computeQualityScore } from '../platform/src/platform/runtime/compaction/quality-score.ts';
+import { compactionViews } from '../platform/src/platform/runtime/compaction/judged-views.ts';
+import { CompactionManager } from '../platform/src/platform/runtime/compaction/manager.ts';
+import type { StrategyInput, StrategyOutput } from '../platform/src/platform/runtime/compaction/types.ts';
+import type { ProviderMessage } from '../platform/src/platform/providers/interface.ts';
+import type { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
 import { compactionQualityPort } from './_helpers/compaction-quality.ts';
 
 const TASK: ProviderMessage = { role: 'user', content: 'Fix the CSV export dropping its last row.' };

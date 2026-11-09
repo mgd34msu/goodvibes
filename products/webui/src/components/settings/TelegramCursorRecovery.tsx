@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import type { TelegramCursorPreview } from '@goodvibes-jev/engine/sdk/platform/channels/telegram-cursor';
-import { sdk } from '../../lib/goodvibes';
+import type { TelegramCursorPreview } from '@goodvibes-jev/engine/platform/platform/channels/telegram-cursor';
+import { client as platformClient } from '../../lib/goodvibes';
 import { subscribeClientLifetime } from '../../lib/client-lifetime';
 import { formatError } from '../../lib/errors';
 import { Button } from '../ui/Button';
@@ -24,7 +24,7 @@ export function TelegramCursorRecovery() {
     const controller = new AbortController(); active.current = controller;
     setPending(true); setPreview(null); setConfirmed(false); setMessage('');
     try {
-      const result = await sdk.operator.channels.telegramCursor.preview(controller.signal);
+      const result = await platformClient.operator.channels.telegramCursor.preview(controller.signal);
       if (!controller.signal.aborted) setPreview(result);
     } catch (error) { if (!controller.signal.aborted) setMessage(formatError(error)); }
     finally { if (active.current === controller) active.current = null; if (!controller.signal.aborted) setPending(false); }
@@ -34,7 +34,7 @@ export function TelegramCursorRecovery() {
     const selected = preview, controller = new AbortController(); active.current = controller;
     setPending(true); setPreview(null); setConfirmed(false); setMessage('');
     try {
-      const result = await sdk.operator.channels.telegramCursor.commit(selected, controller.signal);
+      const result = await platformClient.operator.channels.telegramCursor.commit(selected, controller.signal);
       if (!controller.signal.aborted) setMessage(result.message);
     } catch (error) {
       if (!controller.signal.aborted) setMessage(`${formatError(error)} Review the cursor and channel status before trying again.`);

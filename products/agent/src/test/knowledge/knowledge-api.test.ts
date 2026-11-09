@@ -4,7 +4,7 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { nativeMemoryWorkPrivacy } from '../helpers/native-memory-work-readings.ts';
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { createKnowledgeApi } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import { createKnowledgeApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { resetTestRuntimeServices, getTestRuntimeServices } from '../helpers/runtime-services.ts';
 
 describe('KnowledgeApi', () => {
@@ -73,7 +73,7 @@ describe('KnowledgeApi', () => {
     const ingest = await api.ingest.artifact({
       artifactId: artifact.id,
       title: 'Knowledge API Artifact',
-      tags: ['sdk-ready'],
+      tags: ['platform-ready'],
       fetchMode: 'public-only',
     });
     expect(ingest.source.id.length).toBeGreaterThan(0);
@@ -88,7 +88,7 @@ describe('KnowledgeApi', () => {
       if (state === null || typeof state !== 'object' || Array.isArray(state)) throw new Error('Invalid authored Knowledge API evidence state');
       if (name === 'included' && 'candidate' in state && state.candidate && typeof state.candidate === 'object' && 'content' in state.candidate
         && state.candidate.content && typeof state.candidate.content === 'object' && 'title' in state.candidate.content
-        && ['Knowledge API Artifact', 'GoodVibes knowledge api artifact body', 'sdk-ready'].includes(String(state.candidate.content.title))) return noulAnswer(0.999);
+        && ['Knowledge API Artifact', 'GoodVibes knowledge api artifact body', 'platform-ready'].includes(String(state.candidate.content.title))) return noulAnswer(0.999);
       if (name === 'useful' && 'candidate' in state && state.candidate && typeof state.candidate === 'object' && 'title' in state.candidate) return noulAnswer(state.candidate.title === 'Knowledge API Artifact' ? 0.999 : 0.001);
       if (name === 'excerptUseful' && 'candidate' in state && state.candidate && typeof state.candidate === 'object' && 'text' in state.candidate) return noulAnswer(state.candidate.text === 'GoodVibes knowledge api artifact body' ? 0.999 : 0.001);
       throw new Error(`Unscripted authored Knowledge API evidence question ${name}`);

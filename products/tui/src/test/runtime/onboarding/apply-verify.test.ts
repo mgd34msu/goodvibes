@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createShellPathService } from '@/runtime/index.ts';
-import { UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
+import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
 import { SecretsManager } from '../../../config/secrets.ts';
 import {
   applyOnboardingRequest,
@@ -286,7 +286,7 @@ describe('onboarding apply and verify helpers', () => {
     expect(await secrets.get('GOODVIBES_OUTER_SECRET')).toBe('inner-value');
   });
 
-  test('replaces SDK bootstrap credentials with wizard-created auth before server exposure', async () => {
+  test('replaces platform bootstrap credentials with wizard-created auth before server exposure', async () => {
     const auth = new UserAuthManager({
       bootstrapFilePath: join(root, 'home', 'auth-bootstrap.json'),
       bootstrapCredentialPath: join(root, 'home', 'auth-bootstrap-password.txt'),
@@ -324,7 +324,7 @@ describe('onboarding apply and verify helpers', () => {
     expect(snapshot.sessionCount).toBe(1);
   });
 
-  test('replaces SDK bootstrap credentials while reusing an existing admin username', async () => {
+  test('replaces platform bootstrap credentials while reusing an existing admin username', async () => {
     const auth = new UserAuthManager({
       bootstrapFilePath: join(root, 'home', 'auth-bootstrap.json'),
       bootstrapCredentialPath: join(root, 'home', 'auth-bootstrap-password.txt'),
@@ -365,7 +365,7 @@ describe('onboarding apply and verify helpers', () => {
     expect(snapshot.bootstrapCredentialPresent).toBe(false);
     expect(snapshot.users.map((user) => user.username)).toEqual(['admin']);
     expect(snapshot.sessionCount).toBe(1);
-    // As of goodvibes-sdk 0.33.38, authenticate() returns a discriminated
+    // As of goodvibes-platform 0.33.38, authenticate() returns a discriminated
     // AuthenticateResult ({ ok }) instead of a nullable user, a failed login is
     // now { ok: false }, not null.
     expect(auth.authenticate('admin', 'wizard-pass').ok).toBe(true);

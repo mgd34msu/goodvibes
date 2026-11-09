@@ -1,12 +1,12 @@
 import { expect, test } from 'bun:test';
 import { JEV_DECISION_BINDING_KEYS, JEV_DECISION_SCHEMA, type JevDecision, type JevDecisionBinding } from '@goodvibes-jev/judgment/decisions';
 import { firstJsonSchemaFailure } from '../../transport-http/src/client-plumbing.js';
-import type { CompletionReport } from '../../sdk/src/platform/agents/completion-report.js';
-import type { DurableContractAdmission } from '../../sdk/src/platform/contract/durable-admission.js';
-import type { ContractInputSnapshot } from '../../sdk/src/platform/contract/input-snapshot.js';
-import type { NativeContractDecisionRecord, NativeContractDecisionState, NativeContractProgress, NativeContractTransportProgress } from '../../sdk/src/platform/contract/native-decisions.js';
-import type { NativeContractSource } from '../../sdk/src/platform/contract/types.js';
-import { captureNativeContractSource } from '../../sdk/src/platform/contract/native-source.js';
+import type { CompletionReport } from '../../platform/src/platform/agents/completion-report.js';
+import type { DurableContractAdmission } from '../../platform/src/platform/contract/durable-admission.js';
+import type { ContractInputSnapshot } from '../../platform/src/platform/contract/input-snapshot.js';
+import type { NativeContractDecisionRecord, NativeContractDecisionState, NativeContractProgress, NativeContractTransportProgress } from '../../platform/src/platform/contract/native-decisions.js';
+import type { NativeContractSource } from '../../platform/src/platform/contract/types.js';
+import { captureNativeContractSource } from '../../platform/src/platform/contract/native-source.js';
 import {
   CONTRACT_COMPLETION_REPORT_SCHEMA,
   CONTRACT_DURABLE_ADMISSION_SCHEMA,
@@ -16,7 +16,7 @@ import {
   CONTRACT_NATIVE_PROGRESS_SCHEMA,
   CONTRACT_NATIVE_SOURCE_SCHEMA,
   CONTRACT_NATIVE_WAITING_SCHEMA,
-} from '../../sdk/src/platform/control-plane/operator-contract-schemas-contract-inspection.js';
+} from '../../platform/src/platform/control-plane/operator-contract-schemas-contract-inspection.js';
 
 const binding: JevDecisionBinding = { sourceId: 'source', inputRevision: 'input-1', actionId: 'action', actionRevision: '1', authorityId: 'host', authorityRevision: '1', scopeId: 'project', scopeRevision: '1' };
 const source: NativeContractSource = { sourceId: binding.sourceId, sourceRevision: '1', inputRevision: binding.inputRevision, criteriaId: 'criteria', criteriaRevision: '1', goal: 'Preserve the complete original goal', criteria: ['Keep the first criterion', 'Keep the second criterion'] };

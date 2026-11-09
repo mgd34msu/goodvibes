@@ -15,15 +15,15 @@
 
 import { describe, expect, test } from 'bun:test';
 import { settleEvents } from './_helpers/test-timeout.js';
-import { CompanionChatManager } from '../sdk/src/platform/companion/companion-chat-manager.js';
+import { CompanionChatManager } from '../platform/src/platform/companion/companion-chat-manager.js';
 import type {
   CompanionLLMProvider,
   CompanionChatEventPublisher,
   CompanionProviderChunk,
-} from '../sdk/src/platform/companion/companion-chat-manager.js';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.js';
-import type { ToolResult } from '../sdk/src/platform/types/tools.js';
-import type { ProviderMessage } from '../sdk/src/platform/providers/interface.js';
+} from '../platform/src/platform/companion/companion-chat-manager.js';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.js';
+import type { ToolResult } from '../platform/src/platform/types/tools.js';
+import type { ProviderMessage } from '../platform/src/platform/providers/interface.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

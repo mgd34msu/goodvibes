@@ -1,5 +1,5 @@
 import { screeningAnswers } from './screening-answers.js';
-import { createProtectedSourceOwner } from '@goodvibes-jev/engine/sdk/platform/security';
+import { createProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
 
 interface Proposal { readonly revision: string; readonly parts: readonly string[]; }
 interface Span { readonly part: number; readonly start: number; readonly end: number; }

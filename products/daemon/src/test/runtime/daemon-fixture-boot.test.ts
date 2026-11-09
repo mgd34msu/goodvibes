@@ -1,15 +1,15 @@
 import { expect, spyOn, test } from 'bun:test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { registerInboxSurface, type InboundProviderAdapter } from '@goodvibes-jev/engine/sdk/platform/intake';
+import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { registerInboxSurface, type InboundProviderAdapter } from '@goodvibes-jev/engine/platform/platform/intake';
 import { startDaemonFixture, type DaemonFixture } from '../../testing/daemon-fixture.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 import { trackIntervals } from '../helpers/intervals.js';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../../config/surface.js';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
-import { contractPath } from '@goodvibes-jev/engine/sdk/platform/contract';
+import { contractPath } from '@goodvibes-jev/engine/platform/platform/contract';
 
 function rootWithBenchmarks(label: string): string {
   const root = makeOwnedTempDir(label);

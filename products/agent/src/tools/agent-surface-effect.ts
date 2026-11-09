@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
-import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 
 /** Retain actual method descriptors without invoking replacement accessors. */
 export function retainSurfaceMethods(owner: object, keys: readonly string[]): () => void {

@@ -1,15 +1,15 @@
 /** Owned synthetic transports only: a revoked check-in must not send after preparation settles. */
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import type { ArtifactAttachment, ArtifactStore } from '../sdk/src/platform/artifacts/index.js';
-import { ChannelDeliveryRouter } from '../sdk/src/platform/channels/delivery-router.js';
-import { createWebhookDeliveryStrategy } from '../sdk/src/platform/channels/delivery/strategies-core.js';
-import type { ChannelDeliveryRequest, ChannelDeliverySurfaceKind, ChannelDeliveryStrategy } from '../sdk/src/platform/channels/delivery/types.js';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import type { ServiceRegistry } from '../sdk/src/platform/config/service-registry.js';
-import type { ControlPlaneGateway } from '../sdk/src/platform/control-plane/gateway.js';
-import { pinnedFetch } from '../sdk/src/platform/tools/fetch/pinned-request.js';
-import { assertDeliveryCurrent } from '../sdk/src/platform/utils/delivery-lifetime.js';
-import { logger } from '../sdk/src/platform/utils/logger.js';
+import type { ArtifactAttachment, ArtifactStore } from '../platform/src/platform/artifacts/index.js';
+import { ChannelDeliveryRouter } from '../platform/src/platform/channels/delivery-router.js';
+import { createWebhookDeliveryStrategy } from '../platform/src/platform/channels/delivery/strategies-core.js';
+import type { ChannelDeliveryRequest, ChannelDeliverySurfaceKind, ChannelDeliveryStrategy } from '../platform/src/platform/channels/delivery/types.js';
+import type { ConfigManager } from '../platform/src/platform/config/manager.js';
+import type { ServiceRegistry } from '../platform/src/platform/config/service-registry.js';
+import type { ControlPlaneGateway } from '../platform/src/platform/control-plane/gateway.js';
+import { pinnedFetch } from '../platform/src/platform/tools/fetch/pinned-request.js';
+import { assertDeliveryCurrent } from '../platform/src/platform/utils/delivery-lifetime.js';
+import { logger } from '../platform/src/platform/utils/logger.js';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -163,7 +163,7 @@ describe('built-in guarded delivery', () => {
     { name: 'Discord explicit webhook', surface: 'discord', address: 'https://discord.example.invalid/hook' },
     { name: 'Discord original response', surface: 'discord', metadata: { applicationId: '123456789012345678', interactionToken: 'owned-interaction' } },
   ] satisfies Provider[]) {
-    test(`${provider.name}: attachment wait is guarded before SDK transport`, async () => {
+    test(`${provider.name}: attachment wait is guarded before platform transport`, async () => {
       const entered = deferred<void>();
       const attachments = deferred<ArtifactAttachment>();
       const owner = lifetime();
@@ -177,7 +177,7 @@ describe('built-in guarded delivery', () => {
     });
   }
 
-  test('revocation during nested local-secret resolution prevents Slack SDK send', async () => {
+  test('revocation during nested local-secret resolution prevents Slack platform send', async () => {
     const entered = deferred<void>();
     const secret = deferred<string>();
     const owner = lifetime();
@@ -476,7 +476,7 @@ for (const change of ['remove', 'replace', 'remove-readd'] as const) {
     const entered = deferred<void>(), ready = deferred<void>(); let delivered = 0;
     const router = new ChannelDeliveryRouter({ strategies: [] });
     const sender = { id: 'captured-sender', supportsGuardedDelivery: true,
-      async send(_message: unknown, lifetime?: import('../sdk/src/platform/utils/delivery-lifetime.js').DeliveryLifetime) {
+      async send(_message: unknown, lifetime?: import('../platform/src/platform/utils/delivery-lifetime.js').DeliveryLifetime) {
         entered.resolve(); await ready.promise; assertDeliveryCurrent(lifetime!); delivered++; return 'sent';
       } };
     const unregister = router.agentDelivery.register(sender);

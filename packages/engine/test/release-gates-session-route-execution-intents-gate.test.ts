@@ -2,11 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import {
   SHARED_SESSION_INPUT_RECORD_SCHEMA,
   SHARED_SESSION_ROUTING_INTENT_SCHEMA,
-} from '@goodvibes-jev/engine/sdk/platform/control-plane';
+} from '@goodvibes-jev/engine/platform/platform/control-plane';
 import {
   AUTOMATION_RUN_SCHEMA,
   ROUTE_BINDING_SCHEMA,
-} from '@goodvibes-jev/engine/sdk/platform/control-plane';
+} from '@goodvibes-jev/engine/platform/platform/control-plane';
 
 function objectProperties(schema: Record<string, unknown>): Record<string, unknown> {
   return (schema.properties ?? {}) as Record<string, unknown>;

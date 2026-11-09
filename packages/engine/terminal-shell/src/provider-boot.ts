@@ -1,7 +1,7 @@
 /** Platform-owned boot readiness and recovery for saved custom-provider selections. */
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { ensureConfiguredModelIsRoutable, type ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { ensureConfiguredModelIsRoutable, type ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 
 /**
  * Boot-time custom-provider readiness. Custom providers register

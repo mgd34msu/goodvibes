@@ -1,9 +1,9 @@
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ProviderRegistry, BenchmarkStore } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { RouteBindingManager, SurfaceRegistry } from '@goodvibes-jev/engine/sdk/platform/channels';
-import type { WatcherRegistry } from '@goodvibes-jev/engine/sdk/platform/watchers';
-import type { AutomationManager, AutomationDeliveryManager } from '@goodvibes-jev/engine/sdk/platform/automation';
-import type { DomainDispatch, RuntimeEventBus, RuntimeStore } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ProviderRegistry, BenchmarkStore } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { RouteBindingManager, SurfaceRegistry } from '@goodvibes-jev/engine/platform/platform/channels';
+import type { WatcherRegistry } from '@goodvibes-jev/engine/platform/platform/watchers';
+import type { AutomationManager, AutomationDeliveryManager } from '@goodvibes-jev/engine/platform/platform/automation';
+import type { DomainDispatch, RuntimeEventBus, RuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 export function initializeTerminalCatalog(
   provider: ProviderRegistry,
   benchmarks: BenchmarkStore,

@@ -15,7 +15,7 @@
  * valid one can reach the daemon through the relay, so it is stored locally, not
  * transmitted anywhere else, and can be cleared like a token.
  *
- * Once stored, the SDK client construction (lib/goodvibes.ts / lib/relay-connection.ts)
+ * Once stored, the platform client construction (lib/goodvibes.ts / lib/relay-connection.ts)
  * picks it up and uses it to build a relay-backed `fetch` for whenever the direct
  * connection is unreachable, see relay-connection.ts's routedFetch.
  *
@@ -70,7 +70,7 @@ export function stripRelayPairingFragment(): void {
 
 /**
  * Decode a scanned/pasted relay pairing string (the `gvrelay1.…` code) into a
- * payload. Throws the SDK's own GoodVibesSdkError on malformed input, callers
+ * payload. Throws the platform's own GoodVibesError on malformed input, callers
  * render that with formatError, same as any other honest rejection.
  */
 export function decodeRelayPairingCode(code: string): RelayPairingPayload {

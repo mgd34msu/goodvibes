@@ -4,9 +4,9 @@ import {
   buildHomeStateReadResult,
   homeStateProvenance,
   listHomeAssistantTools,
-} from '../sdk/src/platform/channels/builtin/homeassistant.js';
-import type { HomeAssistantStateRecord } from '../sdk/src/platform/integrations/homeassistant.js';
-import { buildHomeAssistantSystemPrompt } from '../sdk/src/platform/daemon/homeassistant-chat.js';
+} from '../platform/src/platform/channels/builtin/homeassistant.js';
+import type { HomeAssistantStateRecord } from '../platform/src/platform/integrations/homeassistant.js';
+import { buildHomeAssistantSystemPrompt } from '../platform/src/platform/daemon/homeassistant-chat.js';
 
 const OBSERVED_AT = '2026-07-09T12:00:00.000Z';
 

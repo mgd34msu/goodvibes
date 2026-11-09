@@ -1,7 +1,7 @@
 /** Actual historical fixture recipe only; production adopts full saved rows. */
 import { createHash } from 'node:crypto';
-import { normalizeKnowledgeSpaceId } from '../../sdk/src/platform/knowledge/spaces.js';
-import { normalizeWhitespace, uniqueStrings } from '../../sdk/src/platform/knowledge/semantic/utils.js';
+import { normalizeKnowledgeSpaceId } from '../../platform/src/platform/knowledge/spaces.js';
+import { normalizeWhitespace, uniqueStrings } from '../../platform/src/platform/knowledge/semantic/utils.js';
 function semanticHash(...parts: readonly unknown[]): string { const hash = createHash('sha256'); for (const part of parts) { hash.update(String(part ?? '')); hash.update('\0'); } return hash.digest('hex').slice(0, 16); }
 export function historicalSemanticFactId(input: {
   readonly spaceId: string;

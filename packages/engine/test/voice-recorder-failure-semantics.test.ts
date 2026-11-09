@@ -2,9 +2,9 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
-import { createRecorderCaptureOpener } from '../sdk/src/platform/voice/capture/recorder-source.js';
-import { PushToTalkSession } from '../sdk/src/platform/voice/capture/push-to-talk.js';
-import type { AudioCaptureError, AudioCaptureHandlers, AudioCaptureRequest, CaptureChildProcess } from '../sdk/src/platform/voice/capture/index.js';
+import { createRecorderCaptureOpener } from '../platform/src/platform/voice/capture/recorder-source.js';
+import { PushToTalkSession } from '../platform/src/platform/voice/capture/push-to-talk.js';
+import type { AudioCaptureError, AudioCaptureHandlers, AudioCaptureRequest, CaptureChildProcess } from '../platform/src/platform/voice/capture/index.js';
 
 const previous: Array<JudgmentPort | undefined> = [];
 afterEach(() => { while (previous.length) installJudgmentPort(previous.pop()); });
@@ -34,7 +34,7 @@ function processFixture() {
     error: (error: Error) => onError(error), data: () => onData(new Uint8Array(8)) };
 }
 const request: AudioCaptureRequest = { backend: 'parecord', device: 'microphone', noiseSuppression: 'none', frameSamples: 4 };
-const surfaces = { sdk: createRecorderCaptureOpener };
+const surfaces = { platformClient: createRecorderCaptureOpener };
 
 describe('recorder semantic reading at actual capture consumers', () => {
   for (const [surface, create] of Object.entries(surfaces)) {

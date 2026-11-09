@@ -18,11 +18,11 @@ import {
   describeDeliveryEvidence,
   NO_ALIAS_MAILBOXES,
   normalizeDeliveryAddress,
-} from '../sdk/src/platform/google/delivery-evidence.ts';
+} from '../platform/src/platform/google/delivery-evidence.ts';
 import {
   VerificationExpectationBook,
   type CandidateEmail,
-} from '../sdk/src/platform/google/verification-expectations.ts';
+} from '../platform/src/platform/google/verification-expectations.ts';
 
 const T0 = new Date('2026-07-26T12:00:00.000Z');
 const ALIAS = 'owner+gv-github-com-k3n9x2p4@example.com';

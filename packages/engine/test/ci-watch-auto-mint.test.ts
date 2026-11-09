@@ -14,11 +14,11 @@ import {
   execCommandsFromArgs,
   parseGitHubSlug,
   DEFAULT_AUTO_WATCH_CHANNEL,
-} from '../sdk/src/platform/ci-watch/auto-watch.ts';
-import { CiWatchService } from '../sdk/src/platform/ci-watch/service.ts';
-import { runCiWatchPollPass } from '../sdk/src/platform/ci-watch/poller.ts';
-import type { CiWatchServiceDeps } from '../sdk/src/platform/ci-watch/service.ts';
-import type { CiJob, CiWatchSubscription, FixSessionBrief } from '../sdk/src/platform/ci-watch/types.ts';
+} from '../platform/src/platform/ci-watch/auto-watch.ts';
+import { CiWatchService } from '../platform/src/platform/ci-watch/service.ts';
+import { runCiWatchPollPass } from '../platform/src/platform/ci-watch/poller.ts';
+import type { CiWatchServiceDeps } from '../platform/src/platform/ci-watch/service.ts';
+import type { CiJob, CiWatchSubscription, FixSessionBrief } from '../platform/src/platform/ci-watch/types.ts';
 
 /**
  * In-memory watch store (the subscriptions seam).

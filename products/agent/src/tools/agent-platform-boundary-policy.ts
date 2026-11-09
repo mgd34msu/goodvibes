@@ -1,14 +1,14 @@
-import { readRequestedPlatformWork } from '@goodvibes-jev/engine/sdk/platform/agents';
+import { readRequestedPlatformWork } from '@goodvibes-jev/engine/platform/platform/agents';
 /** Source-location helpers retained for presentation; tool access follows owner configuration. */
 
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { assertAdmittedAgentRead, AGENT_READ_ADMISSION_DENIAL_MESSAGE } from '@goodvibes-jev/engine/sdk/platform/gate/policy';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { assertAdmittedAgentRead, AGENT_READ_ADMISSION_DENIAL_MESSAGE } from '@goodvibes-jev/engine/platform/platform/gate/policy';
 
 /**
  * A path segment naming a GoodVibes platform repository.
  *
- * Matches the repo names and their worktrees (`goodvibes-sdk`,
+ * Matches the repo names and their worktrees (`goodvibes-platform`,
  * `goodvibes-agent-wt-capture`) without matching `.goodvibes`, which is the
  * owner's own state directory and is read constantly for entirely ordinary
  * reasons. The leading dot is what separates them, and it is load-bearing.

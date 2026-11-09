@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { SqliteDecisionLog, withDecisionLog, noul, readYesNo, STAKES_BANDS, type JudgmentPort, type YesNoReading } from '@goodvibes-jev/judgment';
-import { BROWSER_JUDGMENT_PATH, createBrowserJudgmentHttpHandler, type AuthenticatedPrincipal } from '../daemon-sdk/src/index.ts';
-import { BrowserJudgmentRegistry, BrowserJudgmentReferences, BrowserJudgmentService } from '../sdk/src/platform/judgment-browser/index.ts';
+import { BROWSER_JUDGMENT_PATH, createBrowserJudgmentHttpHandler, type AuthenticatedPrincipal } from '../daemon-api/src/index.ts';
+import { BrowserJudgmentRegistry, BrowserJudgmentReferences, BrowserJudgmentService } from '../platform/src/platform/judgment-browser/index.ts';
 
 const ID = 'webui.palette.command-rank' as const;
 const questions = { match: noul('Does the command match the query?') };

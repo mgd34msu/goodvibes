@@ -18,8 +18,8 @@
  */
 import type { CommandContext } from './command-registry.ts';
 import { isAffirmative } from './agent-workspace-editors.ts';
-import { EmailService, ensureEmailConfigDefaults, type EmailConnectionTestResult } from '@goodvibes-jev/engine/sdk/platform/email';
-import { nodeEmailTransport } from '@goodvibes-jev/engine/sdk/platform/email/node';
+import { EmailService, ensureEmailConfigDefaults, type EmailConnectionTestResult } from '@goodvibes-jev/engine/platform/platform/email';
+import { nodeEmailTransport } from '@goodvibes-jev/engine/platform/platform/email/node';
 import { describeSenderClaim } from '../agent/untrusted-content.ts';
 import { requireSecretsManager } from './commands/runtime-services.ts';
 import { persistEmailConfigField } from './commands/email-runtime.ts';

@@ -9,7 +9,7 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { Server } from 'bun';
-import { OpenAICompatProvider } from '../sdk/src/platform/providers/openai-compat.js';
+import { OpenAICompatProvider } from '../platform/src/platform/providers/openai-compat.js';
 
 /**
  * Serve `pieces` as one OpenAI-compatible SSE completion stream.

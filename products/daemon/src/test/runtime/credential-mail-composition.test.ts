@@ -1,7 +1,7 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { nodeEmailTransport } from '@goodvibes-jev/engine/sdk/platform/email/node';
+import { nodeEmailTransport } from '@goodvibes-jev/engine/platform/platform/email/node';
 import { composeCredentialServices } from '../../runtime/credential-composition.ts';
 import { composeMailDeps } from '../../runtime/mail-composition.ts';
 import { makeOwnedTempDir } from '../helpers/owned-temp.ts';

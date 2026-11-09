@@ -2,9 +2,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach } from 'bun:test';
-import { ArtifactStore } from '../../sdk/src/platform/artifacts/index.js';
-import type { KnowledgeSemanticLlm } from '../../sdk/src/platform/knowledge/index.js';
-import { KnowledgeStore } from '../../sdk/src/platform/knowledge/store.js';
+import { ArtifactStore } from '../../platform/src/platform/artifacts/index.js';
+import type { KnowledgeSemanticLlm } from '../../platform/src/platform/knowledge/index.js';
+import { KnowledgeStore } from '../../platform/src/platform/knowledge/store.js';
 import { waitFor as _canonicalWaitFor } from './test-timeout.js';
 
 const tmpRoots: string[] = [];

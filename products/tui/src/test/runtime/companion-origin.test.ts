@@ -3,7 +3,7 @@ import { companionMessageToOrchestratorInputOptions } from '../../runtime/bootst
 import type { CompanionMessagePayload } from '../../runtime/bootstrap-core.ts';
 
 describe('companion message origin routing', () => {
-  test('preserves ntfy chat metadata for SDK reply correlation', () => {
+  test('preserves ntfy chat metadata for platform reply correlation', () => {
     const payload: CompanionMessagePayload = {
       type: 'COMPANION_MESSAGE_RECEIVED',
       sessionId: 'session-1',

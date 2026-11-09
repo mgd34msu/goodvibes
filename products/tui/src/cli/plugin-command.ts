@@ -1,20 +1,20 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { discoverPlugins } from '@goodvibes-jev/engine/sdk/platform/plugins';
+import { discoverPlugins } from '@goodvibes-jev/engine/platform/platform/plugins';
 import { validateManifestV2 } from '@/runtime/index.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { CliCommandOutput, CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';
 import { handlePluginBundlesCommand } from './plugin-bundles-command.ts';
 
 // ---------------------------------------------------------------------------
 // `goodvibes plugin init` / `plugin validate`, scaffold and check plugins
 // against the SAME classic loader the running TUI uses (PluginManager wraps
-// discoverPlugins from @goodvibes-jev/engine/sdk/platform/plugins). The pass/fail
+// discoverPlugins from @goodvibes-jev/engine/platform/platform/plugins). The pass/fail
 // verdict is the real loader's acceptance: we run discoverPlugins against the
 // target directory (isolated from the operator's own plugin folders) and check
 // whether it accepts the directory. Reasons for a rejected manifest are sourced
-// from the SDK's validateManifestV2 (string|null) plus observable file facts,
+// from the platform's validateManifestV2 (string|null) plus observable file facts,
 // no second manifest schema is defined here.
 // ---------------------------------------------------------------------------
 
@@ -57,7 +57,7 @@ function validatePluginDirectory(dirPath: string): PluginValidation {
     };
   }
 
-  // Rejected, explain why, delegating field checks to the SDK validator.
+  // Rejected, explain why, delegating field checks to the platform validator.
   const reasons: string[] = [];
   if (!existsSync(manifestPath)) {
     reasons.push('manifest.json not found in the plugin directory.');

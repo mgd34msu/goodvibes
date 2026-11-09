@@ -10,7 +10,7 @@ import { installDaemonNative, rollbackDaemonNative } from '../../../scripts/inst
 import { verifiedDaemonNativePath } from '../../cli/native-launch.ts';
 import { makeOwnedTempDir } from '../helpers/owned-temp.ts';
 import { nativeRuntimeProvenance, writeV1NativeArtifactFixture } from '../helpers/native-runtime-provenance.ts';
-import { assertDaemonNativePayloadBytes } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { assertDaemonNativePayloadBytes } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 
 // These are inert fixture bytes. Nothing here claims execution of an ARM64 binary.
 async function fixture(target: DaemonNativeTarget) {

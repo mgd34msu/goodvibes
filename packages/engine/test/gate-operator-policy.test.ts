@@ -3,7 +3,7 @@
 // boundary in products/agent/src/test/runtime/agent-settings-admission.test.ts.
 // Prompt wording can evolve without reviving obsolete permission behavior.
 import { describe, expect, test } from 'bun:test';
-import { buildAgentOperatorPolicy, GOODVIBES_AGENT_OPERATOR_POLICY_LINES } from '../sdk/src/platform/gate/policy/operator-policy.ts';
+import { buildAgentOperatorPolicy, GOODVIBES_AGENT_OPERATOR_POLICY_LINES } from '../platform/src/platform/gate/policy/operator-policy.ts';
 
 describe('the Agent operator policy', () => {
   test.each([

@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
+import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { createSessionSurface } from '@/runtime/index.ts';
 import { inputAreaVisible, isolatedEnv, makeHome, startStubModel, waitFor } from '../e2e/harness.ts';
 import { TerminalFrame } from '../helpers/terminal-frame.ts';

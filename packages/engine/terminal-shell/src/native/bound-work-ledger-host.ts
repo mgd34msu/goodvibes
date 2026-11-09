@@ -1,4 +1,4 @@
-import type { GatePresetName } from '@goodvibes-jev/engine/sdk/platform/gate/presets';
+import type { GatePresetName } from '@goodvibes-jev/engine/platform/platform/gate/presets';
 import { createNativeHostFetch } from './native-host-fetch.js';
 import { NativeConversationIntakePreflight } from './native-conversation-intake-preflight.js';
 import { NativeConversationIntakeControls, type NativeConversationIntakeState } from './native-conversation-intake.js';
@@ -14,9 +14,9 @@ import {
 } from './native-work-submission.js';
 import { createNativeWorkSubmissionBinding, createNativeSubmissionIdentity, type NativeSubmissionHost } from './native-work-submission-host.js';
 import { NativeWorkSourceError, readNativeWorkSourceFile } from './native-work-submission-source.js';
-import { createOperatorSdk, type OperatorRemoteClient } from '@goodvibes-jev/engine/operator-sdk';
+import { createOperatorApiClient, type OperatorRemoteClient } from '@goodvibes-jev/engine/operator-client';
 
-import { getOperatorWorkLedgerProject } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
+import { getOperatorWorkLedgerProject } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
 import { BoundWorkLedgerModel as NativeWorkLedgerModel } from './bound-work-ledger.js';
 import type { NativeWorkLedgerView } from './work-ledger-view.js';
 import type { NativeWorkLedgerBinding } from './work-ledger-projection.js';
@@ -32,7 +32,7 @@ export type NativeLedgerBindingFactory = (
   current?: () => boolean,
 ) => NativeWorkLedgerBinding;
 export const createNativeLedgerBinding: NativeLedgerBindingFactory = (host, project, onUnavailable, current = () => true) => {
-  const operator = createOperatorSdk({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: createNativeHostFetch({ current }) });
+  const operator = createOperatorApiClient({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: createNativeHostFetch({ current }) });
   const invoke = (async (...args: Parameters<OperatorRemoteClient['invoke']>) => {
     if (!current()) throw new Error('Native execution host selection changed');
     if (host.expectedPrincipalId !== undefined) {
@@ -68,7 +68,7 @@ export async function discoverNativeLedgerProject(
   signal: AbortSignal,
 ): Promise<string> {
   const current = () => !signal.aborted;
-  const operator = createOperatorSdk({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: createNativeHostFetch({ current }) });
+  const operator = createOperatorApiClient({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: createNativeHostFetch({ current }) });
   try {
     return await getOperatorWorkLedgerProject(operator, { signal });
   } finally {

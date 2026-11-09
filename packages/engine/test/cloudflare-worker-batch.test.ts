@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   createGoodVibesCloudflareWorker,
   type GoodVibesCloudflareQueuePayload,
-} from '../sdk/src/workers.js';
+} from '../platform/src/workers.js';
 
 describe('Cloudflare Worker batch bridge', () => {
   test('proxies batch job creation directly to the daemon by default', async () => {

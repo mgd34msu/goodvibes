@@ -1,5 +1,5 @@
 /**
- * Fleet observed foreign agents (SDK 1.8.0), externally-launched coding-agent
+ * Fleet observed foreign agents (platform 1.8.0), externally-launched coding-agent
  * sessions goodvibes did not spawn, proven end to end against the hermetic mock
  * daemon on both viewports. Visibility only: honest external kind + liveness,
  * excluded from own-agent counts, no stop ever, steer only in the drill-in and

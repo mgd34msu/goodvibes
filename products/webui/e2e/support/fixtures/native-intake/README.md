@@ -53,7 +53,7 @@ The Playwright helper overlays only auth, project and native intake. Unrelated
 Work state remains the existing synthetic mock. Held, disconnected, malformed,
 server-error and authority-loss responses are clearly injected browser failures.
 The helper seeds request and input IDs through `crypto.randomUUID` so exact
-source-bound bytes can be replayed through the real browser SDK. DOM/controller
+source-bound bytes can be replayed through the real browser platform. DOM/controller
 tests can instead inject their ID factory.
 
 ## Reproduce

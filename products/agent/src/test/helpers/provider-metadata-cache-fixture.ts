@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { getProviderModelsCachePath } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { getProviderModelsCachePath } from '@goodvibes-jev/engine/platform/platform/providers';
 import { seedBenchmarkCacheFixture } from './benchmark-cache-fixture.ts';
 
 /** Current on-disk envelopes for metadata-independent command fixtures; no network interception. */

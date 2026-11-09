@@ -1,10 +1,10 @@
 import { afterEach, expect, test } from 'bun:test';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { fakePort, choiceAnswer } from '@goodvibes-jev/judgment/testing';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { PermissionManager, createPermissionConfigReader } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import { PolicyRuntimeState } from '@goodvibes-jev/engine/sdk/platform/runtime/security';
-import type { OwnedInboxSource, OwnedInboxTagging } from '@goodvibes-jev/engine/sdk/platform/intake';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { PermissionManager, createPermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { PolicyRuntimeState } from '@goodvibes-jev/engine/platform/platform/runtime/security';
+import type { OwnedInboxSource, OwnedInboxTagging } from '@goodvibes-jev/engine/platform/platform/intake';
 import { attachDaemonInboxTagging, type DaemonTriagePermissionHost } from '../../runtime/tagged-inbox-composition.js';
 import { registerOwnedMailInbox } from '../../runtime/owned-inbox-mail.js';
 import type { HandlerContext } from '../../daemon/handlers/context.js';

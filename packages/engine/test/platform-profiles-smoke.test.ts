@@ -6,13 +6,13 @@ import { describe, expect, test } from 'bun:test';
 
 describe('platform/profiles: smoke', () => {
   test('configSnapshotToProfileData returns an object for empty snapshot', async () => {
-    const { configSnapshotToProfileData } = await import('../sdk/src/platform/profiles/index.js');
+    const { configSnapshotToProfileData } = await import('../platform/src/platform/profiles/index.js');
     const result = configSnapshotToProfileData({});
     expect(result).not.toBeNull(); // presence-only: configSnapshotToProfileData returns object
   });
 
   test('profileDataToConfigSnapshot round-trips through configSnapshotToProfileData', async () => {
-    const { configSnapshotToProfileData, profileDataToConfigSnapshot } = await import('../sdk/src/platform/profiles/index.js');
+    const { configSnapshotToProfileData, profileDataToConfigSnapshot } = await import('../platform/src/platform/profiles/index.js');
     const snapshot = {};
     const profileData = configSnapshotToProfileData(snapshot);
     const backToSnapshot = profileDataToConfigSnapshot(profileData);

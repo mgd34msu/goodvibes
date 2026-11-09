@@ -1,9 +1,9 @@
 import { afterEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { AppError as NativeAppError } from '../sdk/src/platform/types/error-values.js';
-import { AppError, ProviderError } from '../sdk/src/platform/types/errors.js';
-import { normalizeError, summarizeError } from '../sdk/src/platform/utils/error-display.js';
-import { summarizeError as nativeSummary } from '../sdk/src/platform/utils/native-error-summary.js';
+import { AppError as NativeAppError } from '../platform/src/platform/types/error-values.js';
+import { AppError, ProviderError } from '../platform/src/platform/types/errors.js';
+import { normalizeError, summarizeError } from '../platform/src/platform/utils/error-display.js';
+import { summarizeError as nativeSummary } from '../platform/src/platform/utils/native-error-summary.js';
 
 let restore: (() => void) | undefined;
 afterEach(() => { restore?.(); restore = undefined; });

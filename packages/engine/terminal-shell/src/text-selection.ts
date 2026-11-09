@@ -1,5 +1,5 @@
 import type { InfiniteBuffer } from './conversation-history.js';
-import type { Cell } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Cell } from '@goodvibes-jev/engine/platform/platform/types';
 
 export interface SelectionPoint {
   col: number;

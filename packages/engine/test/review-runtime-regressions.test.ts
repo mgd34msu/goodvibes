@@ -2,10 +2,10 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { RateLimiter } from '../sdk/src/platform/daemon/http/rate-limiter.ts';
-import { serveWebuiBundle, type WebuiServingPosture } from '../sdk/src/platform/daemon/http/webui-serving.ts';
-import { evaluatePathScopeRule, extractPathArgs } from '../sdk/src/platform/runtime/permissions/rules/path-scope.ts';
-import { findSessionCandidates } from '../sdk/src/platform/sessions/manager.ts';
+import { RateLimiter } from '../platform/src/platform/daemon/http/rate-limiter.ts';
+import { serveWebuiBundle, type WebuiServingPosture } from '../platform/src/platform/daemon/http/webui-serving.ts';
+import { evaluatePathScopeRule, extractPathArgs } from '../platform/src/platform/runtime/permissions/rules/path-scope.ts';
+import { findSessionCandidates } from '../platform/src/platform/sessions/manager.ts';
 
 test('rejected traffic does not accumulate timestamps inside the rate limiter', () => {
   const limiter = new RateLimiter(2);
@@ -50,16 +50,16 @@ test('session exact ids win and ambiguous prefixes remain explicit candidates', 
 });
 
 test('path approval keys distinguish file batches from delimiter-containing filenames', async () => {
-  const { PermissionManager } = await import('../sdk/src/platform/permissions/manager.ts');
+  const { PermissionManager } = await import('../platform/src/platform/permissions/manager.ts');
   const key = (PermissionManager.prototype as unknown as { getApprovalKey(name: string, args: Record<string, unknown>): string }).getApprovalKey;
   expect(key('write', { files: [{ path: 'a|b' }] })).not.toBe(key('write', { files: [{ path: 'a' }, { path: 'b' }] }));
   expect(key('write', { files: [{ path: 'a' }] })).not.toBe(key('write', { files: [{ path: 'b' }] }));
 });
 
 test('HTTP listener takes rate-limit identity from the socket and cannot spoof a Cloudflare peer', async () => {
-  const { HttpListener } = await import('../sdk/src/platform/daemon/http-listener.ts');
-  const { ConfigManager } = await import('../sdk/src/platform/config/manager.ts');
-  const { UserAuthManager } = await import('../sdk/src/platform/security/user-auth.ts');
+  const { HttpListener } = await import('../platform/src/platform/daemon/http-listener.ts');
+  const { ConfigManager } = await import('../platform/src/platform/config/manager.ts');
+  const { UserAuthManager } = await import('../platform/src/platform/security/user-auth.ts');
   const root = mkdtempSync(join(tmpdir(), 'listener-peer-'));
   try {
     for (const trustProxy of [false, true]) {

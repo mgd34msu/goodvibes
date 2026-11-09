@@ -19,9 +19,9 @@
 // against a mocked daemon in tests; the live builder is createAcpSpawnGateway.
 // ---------------------------------------------------------------------------
 
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/sdk';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { resolveOperatorRpc } from '../input/commands/operator-rpc.ts';
 
 /** One discovered third-party ACP agent (acp.agents.list). */
@@ -68,11 +68,11 @@ export interface AcpSpawnGatewayDeps {
 export function createAcpSpawnGateway(deps: AcpSpawnGatewayDeps): AcpSpawnGatewayResolution {
   const rpc = resolveOperatorRpc(deps);
   if (!rpc.available) return { available: false, reason: rpc.reason };
-  const { sdk } = rpc;
+  const { platformClient } = rpc;
   const gateway: AcpSpawnGateway = {
-    listAgents: async () => (await sdk.operator.invoke('acp.agents.list', {})).agents,
-    listWorkspaces: async () => (await sdk.operator.invoke('workspaces.registrations.list', {})).workspaces,
-    createSession: (input) => sdk.operator.invoke('acp.sessions.create', input),
+    listAgents: async () => (await platformClient.operator.invoke('acp.agents.list', {})).agents,
+    listWorkspaces: async () => (await platformClient.operator.invoke('workspaces.registrations.list', {})).workspaces,
+    createSession: (input) => platformClient.operator.invoke('acp.sessions.create', input),
   };
   return { available: true, gateway };
 }

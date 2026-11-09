@@ -1,4 +1,4 @@
-import type { ArtifactDescriptor } from '@goodvibes-jev/engine/sdk/platform/artifacts';
+import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { AgentDocumentRegistry, type AgentDocumentRecord } from '../agent/document-registry.ts';
 import type { ReviewerReadinessCheck, ReviewerReadinessChecklist, ReviewerReadinessStatus } from './agent-harness-document-ops-types.ts';

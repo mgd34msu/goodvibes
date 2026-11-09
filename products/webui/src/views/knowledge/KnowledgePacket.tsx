@@ -21,8 +21,8 @@ import { ErrorState } from '../../components/feedback/ErrorState';
 type PacketDetail = NonNullable<OperatorMethodInput<'knowledge.packet'>['detail']>;
 
 /**
- * Hand-authored: the installed `@goodvibes-jev/engine/sdk` contracts package (1.1.0) predates
- * these fields, the SDK added them post-1.2.0 (packet.ts's `truncated` / `totalCandidates` /
+ * Hand-authored: the installed `@goodvibes-jev/engine/platform` contracts package (1.1.0) predates
+ * these fields, the platform added them post-1.2.0 (packet.ts's `truncated` / `totalCandidates` /
  * `droppedCount`, "a partial packet must never read as complete"). All three are OPTIONAL
  * here because they are additive on the wire: an older daemon simply omits them, and this
  * view must keep rendering that daemon's response exactly as it always has, no fabricated

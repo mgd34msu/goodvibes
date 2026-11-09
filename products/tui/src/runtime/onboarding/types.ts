@@ -67,9 +67,9 @@ export type {
   OnboardingCheckMarkersState,
   WriteOnboardingCheckMarkerOptions,
 } from '@goodvibes-jev/engine/terminal-shell/onboarding-state-types';
-import type { ConfigManager, ConfigKey, GoodVibesConfig } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager, ConfigKey, GoodVibesConfig } from '@goodvibes-jev/engine/platform/platform/config';
 import type { SecretsManager } from '../../config/secrets.ts';
-import type { UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
+import type { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
 import type { ShellPathService } from '@/runtime/index.ts';
 import type { LocalAuthInspectionQuery, ServiceInspectionQuery, SubscriptionAccessQuery } from '@/runtime/index.ts';
 

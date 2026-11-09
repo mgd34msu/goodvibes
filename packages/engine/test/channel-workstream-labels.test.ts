@@ -14,9 +14,9 @@
  *   3. two workstreams running at once are still told apart, in words.
  */
 import { describe, expect, test, beforeEach, spyOn } from 'bun:test';
-import { ChannelReplyPipeline } from '../sdk/src/platform/channels/reply-pipeline.js';
-import { WebhookNotifier } from '../sdk/src/platform/integrations/webhooks.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
+import { ChannelReplyPipeline } from '../platform/src/platform/channels/reply-pipeline.js';
+import { WebhookNotifier } from '../platform/src/platform/integrations/webhooks.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
 
 /**
  * The envelope type `emit` accepts for the `contracts` domain specifically.
@@ -29,8 +29,8 @@ import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
  * grows instead of silently widening again.
  */
 type ContractsEnvelope = Parameters<typeof RuntimeEventBus.prototype.emit<'contracts'>>[1];
-import { eventLine, normalizeChannelRenderEventFromRuntime } from '../sdk/src/platform/channels/reply-render.js';
-import { DEFAULT_POLICY } from '../sdk/src/platform/channels/reply-policy.js';
+import { eventLine, normalizeChannelRenderEventFromRuntime } from '../platform/src/platform/channels/reply-render.js';
+import { DEFAULT_POLICY } from '../platform/src/platform/channels/reply-policy.js';
 import {
   describeContractStatus,
   describeUnitStatus,
@@ -39,9 +39,9 @@ import {
   resetWorkstreamLabelsForTests,
   workstreamLabel,
   workstreamLabelInline,
-} from '../sdk/src/platform/channels/workstream-labels.js';
-import { CONTRACT_STATUSES, CONTRACT_UNIT_STATUSES } from '../sdk/src/events/contract.js';
-import type { ChannelSurface } from '../sdk/src/platform/channels/types.js';
+} from '../platform/src/platform/channels/workstream-labels.js';
+import { CONTRACT_STATUSES, CONTRACT_UNIT_STATUSES } from '../platform/src/events/contract.js';
+import type { ChannelSurface } from '../platform/src/platform/channels/types.js';
 import { settleEvents, waitFor } from './_helpers/test-timeout.js';
 
 /**

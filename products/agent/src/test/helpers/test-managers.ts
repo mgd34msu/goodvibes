@@ -1,19 +1,19 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { join } from 'node:path';
-import { BookmarkManager } from '@goodvibes-jev/engine/sdk/platform/bookmarks';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { ServiceRegistry } from '@goodvibes-jev/engine/sdk/platform/config';
+import { BookmarkManager } from '@goodvibes-jev/engine/platform/platform/bookmarks';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
 import { SecretsManager } from '../../config/secrets.ts';
-import { FavoritesStore } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { BenchmarkStore } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { ToolLLM } from '@goodvibes-jev/engine/sdk/platform/config';
-import { ProviderCapabilityRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { CacheHitTracker } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { LLMProvider, ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { createLaunchTolerantProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { FavoritesStore } from '@goodvibes-jev/engine/platform/platform/providers';
+import { BenchmarkStore } from '@goodvibes-jev/engine/platform/platform/providers';
+import { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { ToolLLM } from '@goodvibes-jev/engine/platform/platform/config';
+import { ProviderCapabilityRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { CacheHitTracker } from '@goodvibes-jev/engine/platform/platform/providers';
+import { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { LLMProvider, ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
+import { createLaunchTolerantProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import { makeProjectTempDir } from './project-temp.ts';
 
 export interface TestManagers {
@@ -81,7 +81,7 @@ export function createTestManagers(): TestManagers {
   const benchmarkStore = new BenchmarkStore({ dir: providerDataDir });
   mkdirSync(dirname(benchmarkStore.getCachePath()), { recursive: true });
   writeFileSync(benchmarkStore.getCachePath(), JSON.stringify({ version: 1, fetchedAt: Date.now(), ttlMs: 86_400_000, entries: [] }));
-  // Construct through the same launch-tolerant path production uses: the SDK's
+  // Construct through the same launch-tolerant path production uses: the platform's
   // ProviderRegistry eagerly instantiates each builtin provider's OpenAI client
   // at construction, and that client throws on an empty apiKey. The tolerant
   // wrapper injects placeholder keys for unconfigured providers so a

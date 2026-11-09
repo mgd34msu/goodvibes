@@ -5,9 +5,9 @@
  * the kept plan to a pass.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { DecompositionRunner, DecompositionRunnerRequest } from '../../sdk/src/platform/core/plan-decomposition.js';
-import { buildContractPlannerRequest } from '../../sdk/src/platform/contract/planner.js';
-import { checkDraftFidelity, numberDraft, type DraftedPlan } from '../../sdk/src/platform/contract/index.js';
+import type { DecompositionRunner, DecompositionRunnerRequest } from '../../platform/src/platform/core/plan-decomposition.js';
+import { buildContractPlannerRequest } from '../../platform/src/platform/contract/planner.js';
+import { checkDraftFidelity, numberDraft, type DraftedPlan } from '../../platform/src/platform/contract/index.js';
 import { asPlan, draftUnit, plannerOutput, shapeOf, type DraftPlan } from './plan-support.js';
 import { ASK, makeHarness, twoUnitPlan, waitFor, type Harness } from './runner-support.js';
 

@@ -2,7 +2,7 @@
  * Adapter behavioral coverage, WhatsApp adapter.
  */
 import { describe, expect, test } from 'bun:test';
-import { handleWhatsAppSurfaceWebhook } from '../sdk/src/platform/adapters/whatsapp/index.js';
+import { handleWhatsAppSurfaceWebhook } from '../platform/src/platform/adapters/whatsapp/index.js';
 
 function makeWhatsAppContext(overrides: Partial<Record<string, unknown>> = {}) {
   const calls: Array<{ kind: string; input: unknown }> = [];

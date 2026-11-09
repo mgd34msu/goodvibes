@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { CONFIG_SCHEMA, DEFAULT_CONFIG, ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { defaultStore } from '@goodvibes-jev/engine/sdk/platform/runtime/settings';
-import { readNotificationsMetadataOnly } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { CONFIG_SCHEMA, DEFAULT_CONFIG, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { defaultStore } from '@goodvibes-jev/engine/platform/platform/runtime/settings';
+import { readNotificationsMetadataOnly } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { AgentConfigManager, AGENT_NOTIFICATIONS_METADATA_ONLY_KEY as KEY, readAgentHostSetting } from '../../config/host-settings.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
@@ -34,7 +34,7 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 }
 
 describe('Agent host-owned notification privacy settings', () => {
-  test('one local descriptor, restrictive absent read, no startup write or SDK mutation', () => {
+  test('one local descriptor, restrictive absent read, no startup write or platform mutation', () => {
     const { configDir, path } = fixture();
     const beforeSchema = [...CONFIG_SCHEMA];
     const beforeDefaults = JSON.stringify(DEFAULT_CONFIG);
@@ -205,7 +205,7 @@ describe('Agent host-owned notification privacy settings', () => {
     } finally { stop(); }
   });
 
-  test('category mutations cannot bypass host scalar guards; ordinary keys retain their SDK behavior', () => {
+  test('category mutations cannot bypass host scalar guards; ordinary keys retain their platform behavior', () => {
     const { configDir } = fixture();
     const config = new AgentConfigManager({ configDir });
     expect(() => config.mergeCategory('behavior', { notificationsMetadataOnly: false } as never)).toThrow('guarded scalar set');

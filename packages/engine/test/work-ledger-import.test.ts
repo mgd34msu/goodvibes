@@ -3,12 +3,12 @@ import * as fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { createWorkLedger } from '../sdk/src/platform/workflow/work-ledger/service.js';
-import { prepareLegacyWorkLedgerMigration } from '../sdk/src/platform/workflow/work-ledger/legacy-import.js';
-import { acquireCrossProcessLock } from '../sdk/src/platform/workspace/checkpoint/cross-process-lock.js';
-import type { SQLitePublicationIO } from '../sdk/src/platform/state/sqlite-store-persistence.js';
-import type { NativeDataWriteOwner } from '../sdk/src/platform/runtime/native-reader-compatibility.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { createWorkLedger } from '../platform/src/platform/workflow/work-ledger/service.js';
+import { prepareLegacyWorkLedgerMigration } from '../platform/src/platform/workflow/work-ledger/legacy-import.js';
+import { acquireCrossProcessLock } from '../platform/src/platform/workspace/checkpoint/cross-process-lock.js';
+import type { SQLitePublicationIO } from '../platform/src/platform/state/sqlite-store-persistence.js';
+import type { NativeDataWriteOwner } from '../platform/src/platform/runtime/native-reader-compatibility.js';
 const roots: string[] = []; const stores: KnowledgeStore[] = [];
 afterEach(async () => { await Promise.all(stores.splice(0).map(store => store.close())); for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
 async function fixture(file?: string, hostId = 'host', nativeDataWriter?: NativeDataWriteOwner) {
@@ -226,7 +226,7 @@ for (const shadowAbortAccessor of [false, true]) {
 
 test('local read capability preserves import cursor but protects provenance unless host explicitly grants knowledge access', async () => {
   const host = await fixture(); const request = await seed(host); await host.service.execute(request, host.actor);
-  const { createLocalWorkLedgerReadBinding } = await import('../sdk/src/platform/workflow/work-ledger/read-client.js');
+  const { createLocalWorkLedgerReadBinding } = await import('../platform/src/platform/workflow/work-ledger/read-client.js');
   const limited = createLocalWorkLedgerReadBinding({ available: true, projectId: 'project', actorId: 'limited-reader', service: host.service, authority: host.authority });
   const full = createLocalWorkLedgerReadBinding({ available: true, projectId: 'project', actorId: 'knowledge-reader', allowLegacyProvenance: true, service: host.service, authority: host.authority });
   if (!limited.available || !full.available) throw new Error('Expected bindings');
@@ -252,7 +252,7 @@ test('full serialized envelope bound includes escaping in otherwise-valid reques
   if (manifest?.kind !== 'prepared') throw new Error('Expected bounded manifest');
   const normal = { type: 'import_legacy', requestId: 'bounded', expectedRevision: 0, manifest: manifest.manifest };
   const oversized = { ...normal, requestId: '\u0000'.repeat(200) };
-  const { workLedgerCommandSchema } = await import('../sdk/src/platform/workflow/work-ledger/types.js');
+  const { workLedgerCommandSchema } = await import('../platform/src/platform/workflow/work-ledger/types.js');
   expect(workLedgerCommandSchema.safeParse(normal).success).toBe(true);
   expect(Buffer.byteLength(JSON.stringify(oversized))).toBeGreaterThan(262144);
   const bytes = fs.readFileSync(host.file);

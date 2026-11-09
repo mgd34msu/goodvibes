@@ -24,18 +24,18 @@
  * name (see `callDaemonWsVerb`), never a stack trace.
  *
  * The remote form's mint call carries no `--name` flag of its own: the token
- * is named with the SDK's `defaultPairingTokenName()`, the same date-stamped
+ * is named with the platform's `defaultPairingTokenName()`, the same date-stamped
  * default every other pairing producer uses when the operator did not supply
  * one. The name is user-visible and editable later in device management.
  */
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   availablePairingOffers,
   defaultPairingTokenName,
   formatPairingOffers,
   resolvePairingWebOrigin,
   type PairingHandoffOfferKind,
-} from '@goodvibes-jev/engine/sdk/platform/pairing';
+} from '@goodvibes-jev/engine/platform/platform/pairing';
 import { renderPairingBanner } from '../core/pairing-banner.js';
 import {
   extractOperatorToken,
@@ -86,7 +86,7 @@ function failure(error: string, fix: string, json: boolean): DaemonCommandResult
 
 /**
  * The web origin a remote handoff's deep link opens, recovered from the link
- * itself. `buildPairingHandoffLink` in the SDK builds the link as exactly
+ * itself. `buildPairingHandoffLink` in the platform builds the link as exactly
  * `<webOrigin, trailing slashes stripped>/#<params>`, so slicing at the
  * first `/#` is the precise inverse, and feeding the result back into
  * `renderPairingBanner` (which rebuilds the SAME link from origin + token +

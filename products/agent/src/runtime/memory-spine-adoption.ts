@@ -13,7 +13,7 @@
  * disappear after boot) run through exactly ONE code path, not two copies that
  * could drift apart.
  */
-import type { MemorySpineClient, MemoryTransport } from '@goodvibes-jev/engine/sdk/platform/runtime/memory-spine';
+import type { MemorySpineClient, MemoryTransport } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 
 export interface MemorySpineAdoptionOptions {
   /** Only the three methods this policy needs, narrow on purpose so a test double is trivial to write. */

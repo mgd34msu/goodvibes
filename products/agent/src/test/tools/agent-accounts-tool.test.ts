@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { createAgentAccountsTool, registerAgentAccountsTool } from '../../tools/agent-accounts-tool.ts';
-import { AgentAccountRegistry } from '@goodvibes-jev/engine/sdk/platform/google';
+import { AgentAccountRegistry } from '@goodvibes-jev/engine/platform/platform/google';
 import { containsSecretLikeText } from '../../agent/memory-safety.ts';
 import {
   getSessionUntrustedContentLedger,
@@ -10,7 +10,7 @@ import {
 } from '../../trust/untrusted-content.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { recordedEffectFixture } from '../helpers/recorded-effect-admission.ts';
-import { withExecutionModeOwner } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { withExecutionModeOwner } from '@goodvibes-jev/engine/platform/platform/gate';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';

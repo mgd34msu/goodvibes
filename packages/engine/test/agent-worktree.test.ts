@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AgentWorktree } from '../sdk/src/platform/agents/worktree.js';
-import { GitService } from '../sdk/src/platform/git/service.js';
+import { AgentWorktree } from '../platform/src/platform/agents/worktree.js';
+import { GitService } from '../platform/src/platform/git/service.js';
 
 function runGit(cwd: string, args: string[]): string {
   const result = Bun.spawnSync(['git', ...args], { cwd });

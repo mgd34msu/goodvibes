@@ -2,7 +2,7 @@
  * workspace-register-shared-tier.test.ts
  *
  * The workspace register is shared by three products: this agent reads and
- * writes it directly, the SDK's gateway verb group writes it, and the daemon
+ * writes it directly, the platform's gateway verb group writes it, and the daemon
  * reads it to decide checkpoint eligibility. It used to sit at
  * `~/.goodvibes/control-plane/`, the unscoped pre-split orphan, which was the
  * wrong address but at least one all three agreed on.

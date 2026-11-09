@@ -1,5 +1,5 @@
 import { ModelPickerModal as PlatformModelPicker } from '@goodvibes-jev/engine/terminal-shell/model-picker';
-import type { FavoritesStore, BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { FavoritesStore, BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { PickerMode, ModelPickerTarget, ModelPickerTargetInfo, ModelPickerFocusPane } from './model-picker-types.ts';
 export * from './model-picker-types.ts';
 /** Agent keeps its existing focus and effort presentation over platform-owned picker state. */

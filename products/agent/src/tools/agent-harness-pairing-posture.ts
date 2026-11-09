@@ -1,6 +1,6 @@
-import { isClassicOperation } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { isClassicOperation } from '@goodvibes-jev/engine/platform/platform/runtime';
 import * as nativeOs from 'node:os';
-import { assertProjectionCurrent } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { assertProjectionCurrent } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogMethods, captureCatalogSnapshot } from './agent-harness-catalog-ranking.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { GOODVIBES_AGENT_PAIRING_SURFACE } from '../config/surface.ts';
@@ -185,7 +185,7 @@ function pairingRoutes(): readonly PairingRoute[] {
     {
       id: 'connected-host-token-provisioning',
       label: 'Connected-host token provisioning',
-      detail: 'Confirmed SDK-backed route that creates or repairs the local canonical connected-host token file without printing the raw token.',
+      detail: 'Confirmed platform-backed route that creates or repairs the local canonical connected-host token file without printing the raw token.',
       effect: 'confirmed-local-auth-provisioning',
       harnessRoute: 'setup action:"token" setupItemId:"connected-host-auth" confirm:true explicitUserRequest:"..."',
       capabilityIds: ['connected-host-status', 'companion-pairing'],
@@ -579,10 +579,10 @@ async function buildDeviceCapabilityMap(context: CommandContext, browserPosture:
       status: sensorReady ? 'ready' : isClassicOperation() && liveDevice.capabilities.length > 0 ? 'attention' : 'not-published',
       userOutcome: 'Use phone camera, screen, location, or local device commands only after the daemon/companion publishes permission-scoped records.',
       summary: sensorReady
-        ? 'The SDK/daemon published certified permission-scoped camera, screen, location, or device-command capability records.'
+        ? 'The platform/daemon published certified permission-scoped camera, screen, location, or device-command capability records.'
         : isClassicOperation() && liveDevice.capabilities.length > 0
           ? 'Device records are published, but Classic operation did not interpret their descriptions. No exact ready sensor capability declaration matched; inspect the actual records.'
-          : 'Camera, screen, location, and device-command adapters are not published by the current Agent-visible SDK/daemon contract.',
+          : 'Camera, screen, location, and device-command adapters are not published by the current Agent-visible platform/daemon contract.',
       nextStep: sensorReady
         ? 'Inspect the certified device record and use only its returned confirmed permission/control routes.'
         : 'Inspect operator methods for newly published camera/location/screen contracts before claiming device access.',
@@ -605,7 +605,7 @@ async function buildDeviceCapabilityMap(context: CommandContext, browserPosture:
         liveDeviceRecords: liveDevice.capabilities.length,
         ...liveDeviceEvidence(sensorRecords),
       },
-      policy: 'Agent reports unpublished device sensor APIs honestly and counts device access only when certified SDK/daemon permission-scoped records publish exact routes without raw payloads.',
+      policy: 'Agent reports unpublished device sensor APIs honestly and counts device access only when certified platform/daemon permission-scoped records publish exact routes without raw payloads.',
     },
   ];
   capabilities.sort((left, right) => deviceStatusRank(left.status) - deviceStatusRank(right.status) || left.label.localeCompare(right.label));

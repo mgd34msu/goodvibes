@@ -14,7 +14,7 @@
 import { describe, expect, test } from 'bun:test';
 import { createFleetUnionReadModel } from '../../runtime/client/fleet-union.ts';
 import { createStaticFleetReadModel, buildFleetSnapshot } from '../../views/fleet-read-model.ts';
-import type { ProcessNode } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
+import type { ProcessNode } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 
 // 'thinking' is one of the states the read model counts as actively working
 // (RUNNING_STATES in fleet-read-model.ts); 'running' is not one of them.
@@ -42,7 +42,7 @@ function verbs(answer: (() => unknown) | { unavailable: string }) {
   }
   return {
     calls,
-    probe: () => ({ available: true as const, sdk: {} as never }),
+    probe: () => ({ available: true as const, platformClient: {} as never }),
     invoke: async (methodId: string) => { calls.push(methodId); return (answer as () => unknown)(); },
   };
 }
@@ -90,7 +90,7 @@ describe('the Agents modal reads local rows union the daemon\'s', () => {
     const union = createFleetUnionReadModel({
       local: localModel([node('a1', 'local agent')]),
       verbs: {
-        probe: () => ({ available: true as const, sdk: {} as never }),
+        probe: () => ({ available: true as const, platformClient: {} as never }),
         invoke: async () => {
           if (fail) throw new Error('connection reset');
           return { capturedAt: 2_000, nodes: [node('d1', 'scheduled job')] };

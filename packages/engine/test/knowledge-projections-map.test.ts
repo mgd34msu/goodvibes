@@ -2,22 +2,22 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, test } from 'bun:test';
-import { ArtifactStore } from '../sdk/src/platform/artifacts/index.js';
-import { configureKnowledgeArtifactReferences } from '../sdk/src/platform/knowledge/artifact-reference-ensemble.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { listGeneratedKnowledgePages } from '../sdk/src/platform/knowledge/generated-pages.js';
-import { materializeGeneratedKnowledgeProjection } from '../sdk/src/platform/knowledge/generated-projections.js';
-import { createHomeGraphPageFactReader } from '../sdk/src/platform/knowledge/home-graph/page-quality.js';
-import { renderDevicePassportPage } from '../sdk/src/platform/knowledge/home-graph/rendering.js';
-import { buildKnowledgePacket } from '../sdk/src/platform/knowledge/packet.js';
-import { KnowledgeProjectionService } from '../sdk/src/platform/knowledge/projections.js';
-import { renderKnowledgeMap } from '../sdk/src/platform/knowledge/map.js';
-import { prepareKnowledgeScopeSelection } from '../sdk/src/platform/knowledge/scope-selection.js';
-import { KnowledgeService } from '../sdk/src/platform/knowledge/service.js';
-import { knowledgeSpaceMetadata } from '../sdk/src/platform/knowledge/spaces.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { createSemanticFactIdentityPlanner } from '../sdk/src/platform/knowledge/semantic/identity-plan.js';
-import { MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore } from '../sdk/src/platform/state/index.js';
+import { ArtifactStore } from '../platform/src/platform/artifacts/index.js';
+import { configureKnowledgeArtifactReferences } from '../platform/src/platform/knowledge/artifact-reference-ensemble.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { listGeneratedKnowledgePages } from '../platform/src/platform/knowledge/generated-pages.js';
+import { materializeGeneratedKnowledgeProjection } from '../platform/src/platform/knowledge/generated-projections.js';
+import { createHomeGraphPageFactReader } from '../platform/src/platform/knowledge/home-graph/page-quality.js';
+import { renderDevicePassportPage } from '../platform/src/platform/knowledge/home-graph/rendering.js';
+import { buildKnowledgePacket } from '../platform/src/platform/knowledge/packet.js';
+import { KnowledgeProjectionService } from '../platform/src/platform/knowledge/projections.js';
+import { renderKnowledgeMap } from '../platform/src/platform/knowledge/map.js';
+import { prepareKnowledgeScopeSelection } from '../platform/src/platform/knowledge/scope-selection.js';
+import { KnowledgeService } from '../platform/src/platform/knowledge/service.js';
+import { knowledgeSpaceMetadata } from '../platform/src/platform/knowledge/spaces.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { createSemanticFactIdentityPlanner } from '../platform/src/platform/knowledge/semantic/identity-plan.js';
+import { MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore } from '../platform/src/platform/state/index.js';
 import { trackDisposables } from './_helpers/disposables.ts';
 import { useKnowledgeAnswerReadings } from './_helpers/knowledge-answer-readings.js';
 
@@ -32,7 +32,7 @@ afterEach(() => {
 });
 
 // KnowledgeService's constructor builds a KnowledgeScheduleService that owns a
-// setTimeout chain (packages/sdk/src/platform/knowledge/scheduling.ts); dispose()
+// setTimeout chain (packages/platform/src/platform/knowledge/scheduling.ts); dispose()
 // is declared private (compile-time only), so the disposer casts to reach it.
 const disposables = trackDisposables();
 function disposeKnowledgeService(service: KnowledgeService): void {

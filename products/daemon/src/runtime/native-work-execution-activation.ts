@@ -1,9 +1,9 @@
 /** Lazy daemon-owned native graph; ordinary conversations keep their own runner. */
-import { createAgentExecutionGraph } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import { ProcessManager, cancelAllAgentRuns, type AgentFleetOwnership } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { AgentOrchestrator } from '@goodvibes-jev/engine/sdk/platform/agents';
-import type { PermissionManager } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import { NativeWorkExecutionError, type NativeWorkExecutionHost } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution';
+import { createAgentExecutionGraph } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { ProcessManager, cancelAllAgentRuns, type AgentFleetOwnership } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { AgentOrchestrator } from '@goodvibes-jev/engine/platform/platform/agents';
+import type { PermissionManager } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { NativeWorkExecutionError, type NativeWorkExecutionHost } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution';
 import { createDaemonNativeWorkExecutionServices } from './native-work-execution-composition.js';
 import { createNativeWorkSessionDriver, type NativeSessionDriverOptions } from './native-work-session-driver.js';
 

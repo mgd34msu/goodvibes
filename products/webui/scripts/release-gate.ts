@@ -2,7 +2,7 @@
 /** Validate the real workspace dependency and its declared public subpaths. */
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
-import { loadToolchainConfig, realFsReader, runSdkPinGate, type FsReader } from '@goodvibes-jev/engine/toolchain';
+import { loadToolchainConfig, realFsReader, runEnginePinGate, type FsReader } from '@goodvibes-jev/engine/toolchain';
 
 const root = resolve(import.meta.dir, '..');
 const require = createRequire(import.meta.url);
@@ -23,6 +23,6 @@ const fs: FsReader = {
   isDirectory: (path) => { const at = installedPath(path); return at === null ? local.isDirectory(path) : engine.isDirectory(at); },
 };
 
-const results = runSdkPinGate(fs, loadToolchainConfig(root).sdkPin);
+const results = runEnginePinGate(fs, loadToolchainConfig(root).enginePin);
 for (const result of results) console.log(`${result.ok ? 'PASS' : 'FAIL'} ${result.id}: ${result.detail}`);
 if (results.some((result) => !result.ok)) process.exit(1);

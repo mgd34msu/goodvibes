@@ -36,7 +36,7 @@ import {
   CHANNEL_ROUTING_ASSIGN_METHOD,
 } from '../../agent/channel-profile-routing.ts';
 import { readChannelRoutingSyncReceipts } from '../../agent/channel-routing-sync-receipts.ts';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import type { DaemonInvokeResult, DaemonOperatorInvoke } from '../../agent/daemon-operator-client.ts';
 
 let root: string;

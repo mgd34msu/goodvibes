@@ -1,6 +1,6 @@
-import type { ProtectedSourceOwner, ResearchReferenceOperation } from '@goodvibes-jev/engine/sdk/platform/security';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import { captureOwnedJson } from '@goodvibes-jev/engine/sdk/platform/gate';
+import type { ProtectedSourceOwner, ResearchReferenceOperation } from '@goodvibes-jev/engine/platform/platform/security';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { captureOwnedJson } from '@goodvibes-jev/engine/platform/platform/gate';
 import { isDeepStrictEqual } from 'node:util';
 import type { CommandContext } from '../input/command-registry.ts';
 import { AgentResearchRunRegistry, type AgentResearchRunRecord } from '../agent/research-run-registry.ts';

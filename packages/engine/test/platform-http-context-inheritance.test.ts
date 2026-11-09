@@ -7,7 +7,7 @@
  *
  * The key property tested:
  *   When a new method is added to automationManager (or any other field) in the
- *   canonical daemon-sdk DaemonRuntimeRouteContext, the platform-HTTP type
+ *   canonical daemon-api DaemonRuntimeRouteContext, the platform-HTTP type
  *   automatically requires it, because the platform-HTTP interface extends the
  *   canonical via Omit<CanonicalDaemonRuntimeRouteContext, 'trySpawnAgent'>.
  *
@@ -16,12 +16,12 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import type { DaemonRuntimeRouteContext as CanonicalContext } from '../daemon-sdk/src/runtime-route-types.js';
-import type { DaemonRuntimeRouteContext as PlatformHttpContext } from '../sdk/src/platform/daemon/http/runtime-route-types.js';
+import type { DaemonRuntimeRouteContext as CanonicalContext } from '../daemon-api/src/runtime-route-types.js';
+import type { DaemonRuntimeRouteContext as PlatformHttpContext } from '../platform/src/platform/daemon/http/runtime-route-types.js';
 import type {
   CreateAutomationJobInput,
   UpdateAutomationJobInput,
-} from '../sdk/src/platform/automation/manager-runtime-helpers.js';
+} from '../platform/src/platform/automation/manager-runtime-helpers.js';
 
 // ---------------------------------------------------------------------------
 // Type-level assertions
@@ -35,7 +35,7 @@ import type {
  * the canonical defines on automationManager.
  *
  * `createJob` and `updateJob` are excluded because they diverge ON PURPOSE:
- * the canonical types them `Record<string, unknown>` since daemon-sdk's
+ * the canonical types them `Record<string, unknown>` since daemon-api's
  * handlers call them with a parsed JSON body, and the platform layer types them
  * with the validated CreateAutomationJobInput / UpdateAutomationJobInput it
  * actually implements. `createDaemonRuntimeRouteHandlers` in
@@ -156,7 +156,7 @@ describe('platform-HTTP DaemonRuntimeRouteContext inherits canonical shapes', ()
     // If DaemonRuntimeRouteHandlerMap were re-declared as a local Pick<>,
     // a new handler added to the canonical would not be required here.
     // By importing from the canonical file, this is enforced automatically.
-    const mod = await import('../sdk/src/platform/daemon/http/runtime-route-types.js');
+    const mod = await import('../platform/src/platform/daemon/http/runtime-route-types.js');
     // The module should export JsonBody and DaemonRuntimeRouteHandlerMap (type-only)
     // At runtime we can only verify the module loaded without error.
     expect(mod).not.toBeNull(); // presence-only: module loaded check

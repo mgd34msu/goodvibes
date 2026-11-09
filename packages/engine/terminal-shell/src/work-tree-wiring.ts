@@ -8,11 +8,11 @@
  * One call from main.ts; everything the work tree reads at render time goes
  * through the WorkTreeSources this installs.
  */
-import type { AgentManager } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { ContractView } from '@goodvibes-jev/engine/sdk/platform/contract';
-import type { ProcessNode } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { UiRuntimeEvents } from '@goodvibes-jev/engine/sdk/platform/runtime/ui';
+import type { AgentManager } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
+import type { ProcessNode } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
+import type { UiRuntimeEvents } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
 import type { WorkTreeController } from './work-tree-focus.js';
 import type { WorkTreeSources } from './work-tree-sources.js';
 export interface WorkTreeConversation {

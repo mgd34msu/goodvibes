@@ -5,7 +5,7 @@
  */
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { sdk, DEFAULT_SSE_RECONNECT } from '../lib/goodvibes';
+import { client as platformClient, DEFAULT_SSE_RECONNECT } from '../lib/goodvibes';
 import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime } from '../lib/client-lifetime';
 import { getActiveRoute, subscribeActiveRoute } from '../lib/relay-connection';
 import { queryKeys } from '../lib/queries';
@@ -15,7 +15,7 @@ import { readHostedStreamFrame, type HostedStreamFrame } from '../lib/hosted-ses
 import { RELAY_OVERFLOW_EVENT, noteRelayOverflow, readDroppedCount } from '../lib/relay-stream-overflow';
 
 /** `?domains=` narrowing for this stream: `session` tags hosted-session-update
- * (EVENT_DOMAIN in the SDK's gateway-scope-enforcement.ts), `turn`/`tools` carry
+ * (EVENT_DOMAIN in the platform's gateway-scope-enforcement.ts), `turn`/`tools` carry
  * the ordinary orchestrator's live output the hosted loop emits. */
 const HOSTED_SESSION_EVENTS_PATH = '/api/control-plane/events?domains=session,turn,tools';
 
@@ -65,7 +65,7 @@ export function useHostedSessionRealtime(options: UseHostedSessionRealtimeOption
       void queryClient.invalidateQueries({ queryKey: queryKeys.hostedSessionsAll });
     };
 
-    sdk.streams
+    platformClient.streams
       .open(
         HOSTED_SESSION_EVENTS_PATH,
         {

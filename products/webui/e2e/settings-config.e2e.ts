@@ -213,7 +213,7 @@ test.describe('phone: the dialog is a full-screen sheet', () => {
   });
 });
 
-test('voice.local.* and fleet.maxSize (SDK 1.8.0) render in their real sections, not misfiled', async ({ page }) => {
+test('voice.local.* and fleet.maxSize (platform 1.8.0) render in their real sections, not misfiled', async ({ page }) => {
   let dialog = await openSection(page, 'voice', 'Voice');
   const voiceKeys = ['voice.local.sttEngine', 'voice.local.sttBinary', 'voice.local.sttModelPath', 'voice.local.ttsEngine', 'voice.local.ttsBinary', 'voice.local.ttsModelPath'];
   for (const key of voiceKeys) {

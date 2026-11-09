@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 
-import { fillCard, type FillCardDeps } from '../sdk/src/platform/payments/fill-card.js';
-import { CardMaterialRedactor } from '../sdk/src/platform/payments/card-redaction.js';
-import { CheckoutRegistry, MemoryCheckoutJournal, type InFlightCheckout } from '../sdk/src/platform/payments/checkout-registry.js';
-import type { CardMaterial, CardMaterialStore } from '../sdk/src/platform/payments/card-material.js';
-import type { CheckoutPageDriver, PageIdentity } from '../sdk/src/platform/payments/checkout-page.js';
+import { fillCard, type FillCardDeps } from '../platform/src/platform/payments/fill-card.js';
+import { CardMaterialRedactor } from '../platform/src/platform/payments/card-redaction.js';
+import { CheckoutRegistry, MemoryCheckoutJournal, type InFlightCheckout } from '../platform/src/platform/payments/checkout-registry.js';
+import type { CardMaterial, CardMaterialStore } from '../platform/src/platform/payments/card-material.js';
+import type { CheckoutPageDriver, PageIdentity } from '../platform/src/platform/payments/checkout-page.js';
 import { usePaymentsReadings } from './helpers/payments-readings.ts';
 
 usePaymentsReadings();

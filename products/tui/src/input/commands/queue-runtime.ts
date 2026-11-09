@@ -5,7 +5,7 @@ import type { CommandRegistry } from '../command-registry.ts';
 //
 // Messages typed while a turn is streaming are QUEUED (they deliver after the
 // turn). Until a message is delivered it stays editable and deletable via the
-// SDK's editQueuedMessage / deleteQueuedMessage verbs; a delivered message has
+// platform's editQueuedMessage / deleteQueuedMessage verbs; a delivered message has
 // left the queue and is no longer listed, delivery is immutability. This
 // command is the editable interface over the same list the composer renders.
 // ---------------------------------------------------------------------------

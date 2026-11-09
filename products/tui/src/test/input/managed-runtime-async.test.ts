@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { writeFileSync } from 'node:fs';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { createShellPathService } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
-import { getSettingsControlPlaneSnapshot } from '@goodvibes-jev/engine/sdk/platform/runtime/settings';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { getSettingsControlPlaneSnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/settings';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';

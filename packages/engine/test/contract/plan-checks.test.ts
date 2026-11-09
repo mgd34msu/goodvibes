@@ -8,9 +8,9 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { Question } from '@goodvibes-jev/judgment';
 import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { quoteLayout } from '../../sdk/src/platform/contract/batteries/plan-coverage.js';
-import { EXCLUDED_TOPOLOGY_REASON, readCriterionDispositions, runPlanChecks, runUnitShapeChecks, SESSION_MODE_REASON, unitShapeState } from '../../sdk/src/platform/contract/plan-checks.js';
-import type { PlanProblemCode } from '../../sdk/src/platform/contract/plan-schema.js';
+import { quoteLayout } from '../../platform/src/platform/contract/batteries/plan-coverage.js';
+import { EXCLUDED_TOPOLOGY_REASON, readCriterionDispositions, runPlanChecks, runUnitShapeChecks, SESSION_MODE_REASON, unitShapeState } from '../../platform/src/platform/contract/plan-checks.js';
+import type { PlanProblemCode } from '../../platform/src/platform/contract/plan-schema.js';
 import { ASK, asPlan, planningPort, shapeOf, unitTitleOf, validPlan, type AnswerContext } from './plan-support.js';
 
 let previous: ReturnType<typeof installJudgmentPort>;

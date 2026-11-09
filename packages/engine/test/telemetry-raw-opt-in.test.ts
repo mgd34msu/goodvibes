@@ -1,17 +1,17 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
-import { createDaemonTelemetryRouteHandlers } from '../daemon-sdk/src/telemetry-routes.js';
-import type { AuthenticatedPrincipal } from '../daemon-sdk/src/http-policy.js';
+import { createDaemonTelemetryRouteHandlers } from '../daemon-api/src/telemetry-routes.js';
+import type { AuthenticatedPrincipal } from '../daemon-api/src/http-policy.js';
 import { DaemonErrorCategory } from '../errors/src/daemon-error-contract.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { emitTurnError, emitTurnSubmitted } from '../sdk/src/platform/runtime/emitters/turn.js';
-import { createRuntimeStore } from '../sdk/src/platform/runtime/store/index.js';
-import { TelemetryApiService, TelemetryRawViewDisabledError } from '../sdk/src/platform/runtime/telemetry/api.js';
-import { sanitizeRecord, sanitizeSpan } from '../sdk/src/platform/runtime/telemetry/api-helpers.js';
-import { setTelemetryIncludeRawPrompts } from '../sdk/src/platform/runtime/telemetry/redaction-config.js';
-import { fieldKind, type FieldKind } from '../sdk/src/platform/utils/batteries/field-kind.js';
-import { isSensitiveTelemetryKey } from '../sdk/src/platform/utils/redaction.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { emitTurnError, emitTurnSubmitted } from '../platform/src/platform/runtime/emitters/turn.js';
+import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.js';
+import { TelemetryApiService, TelemetryRawViewDisabledError } from '../platform/src/platform/runtime/telemetry/api.js';
+import { sanitizeRecord, sanitizeSpan } from '../platform/src/platform/runtime/telemetry/api-helpers.js';
+import { setTelemetryIncludeRawPrompts } from '../platform/src/platform/runtime/telemetry/redaction-config.js';
+import { fieldKind, type FieldKind } from '../platform/src/platform/utils/batteries/field-kind.js';
+import { isSensitiveTelemetryKey } from '../platform/src/platform/utils/redaction.js';
 
 const prompt = 'PRIVATE_PROMPT_OPT_IN_SENTINEL';
 const failure = 'PRIVATE_FAILURE_OPT_IN_SENTINEL';

@@ -6,14 +6,14 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { createSystemOnePort, DEFAULT_MODEL, SqliteDecisionLog, withDecisionLog,
   type JudgmentPort, type JudgmentRequest, type Questions } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { ArtifactStore } from '../sdk/src/platform/artifacts/index.js';
-import { HomeGraphService } from '../sdk/src/platform/knowledge/home-graph/service.js';
-import { answerHomeGraphQuery } from '../sdk/src/platform/knowledge/home-graph/ask.js';
-import { readHomeGraphSearchState } from '../sdk/src/platform/knowledge/home-graph/search.js';
-import { KnowledgeSemanticService } from '../sdk/src/platform/knowledge/semantic/service.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import type { KnowledgeNodeRecord, KnowledgeSourceRecord } from '../sdk/src/platform/knowledge/types.js';
-import type { KnowledgeSemanticAnswerInput } from '../sdk/src/platform/knowledge/semantic/types.js';
+import { ArtifactStore } from '../platform/src/platform/artifacts/index.js';
+import { HomeGraphService } from '../platform/src/platform/knowledge/home-graph/service.js';
+import { answerHomeGraphQuery } from '../platform/src/platform/knowledge/home-graph/ask.js';
+import { readHomeGraphSearchState } from '../platform/src/platform/knowledge/home-graph/search.js';
+import { KnowledgeSemanticService } from '../platform/src/platform/knowledge/semantic/service.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import type { KnowledgeNodeRecord, KnowledgeSourceRecord } from '../platform/src/platform/knowledge/types.js';
+import type { KnowledgeSemanticAnswerInput } from '../platform/src/platform/knowledge/semantic/types.js';
 import { seedHomeAssistantObservation } from './_helpers/homegraph-observation-fixtures.js';
 
 const spaceId = 'homeassistant:judgment-fixture';

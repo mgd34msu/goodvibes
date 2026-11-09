@@ -7,13 +7,13 @@
  * which drove a catalog a test helper rebuilt because that package serves no
  * gateway verb. The contract is the platform's; the owner is this process.
  *
- * The SDK registers these three groups unconditionally (unlike checkin.*, which
+ * The platform registers these three groups unconditionally (unlike checkin.*, which
  * needs four optional deps), so what is proved here is that the stores behind
  * them are real and round-trip, a write is visible to the next read, and a
  * delete removes it, rather than that a descriptor exists.
  *
  * ci.status and ci.watches.run shell out to the `gh` CLI (createGhCliCiSource in
- * the SDK's ci-watch/gh-source.ts) to read real GitHub check-run data. Driving
+ * the platform's ci-watch/gh-source.ts) to read real GitHub check-run data. Driving
  * them here would make the result depend on the host's gh install, its auth
  * and the network, so those two are covered only by the handler-attachment
  * case below.

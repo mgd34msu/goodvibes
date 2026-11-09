@@ -12,7 +12,7 @@ import { prepareDaemonCliServe } from '../../cli/serve.js';
 import * as shell from '@goodvibes-jev/engine/terminal-shell';
 import * as serviceCommands from '../../daemon/service-commands.js';
 import * as wakeCommand from '../../daemon/provision-wake-model.js';
-import { NATIVE_READER_REQUIREMENT_FILE, nativeReaderCapabilities } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { NATIVE_READER_REQUIREMENT_FILE, nativeReaderCapabilities } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 
 const entrypoint = fileURLToPath(new URL('../../../dist/cli/entrypoint.js', import.meta.url));
 const packageVersion = (JSON.parse(readFileSync(new URL('../../../package.json', import.meta.url), 'utf8')) as { version: string }).version;

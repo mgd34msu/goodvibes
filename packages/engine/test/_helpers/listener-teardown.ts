@@ -2,7 +2,7 @@
  * Quiesce an `HttpListener` without going through its async `stop()`.
  *
  * `HttpListener`'s constructor builds two `RateLimiter`s, and each one starts a
- * sweep `setInterval` immediately (packages/sdk/src/platform/daemon/http/rate-limiter.ts:29),
+ * sweep `setInterval` immediately (packages/platform/src/platform/daemon/http/rate-limiter.ts:29),
  * so a listener that was constructed for a constructor-behaviour assertion and
  * never started still has two sweeps running.
  *

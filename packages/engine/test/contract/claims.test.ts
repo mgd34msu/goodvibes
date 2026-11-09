@@ -8,8 +8,8 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { CompletionReport, EngineerReport } from '../../sdk/src/platform/agents/completion-report.js';
-import { parseUnitCompletionReport, verifyUnitClaims, type ClaimCheckInput } from '../../sdk/src/platform/contract/claims.js';
+import type { CompletionReport, EngineerReport } from '../../platform/src/platform/agents/completion-report.js';
+import { parseUnitCompletionReport, verifyUnitClaims, type ClaimCheckInput } from '../../platform/src/platform/contract/claims.js';
 
 function engineerReport(overrides: { filesCreated?: string[]; filesModified?: string[] }): EngineerReport {
   return {

@@ -26,8 +26,8 @@ import {
   WAKE_MEL_FMIN,
   WAKE_MEL_FMAX,
   WAKE_MEL_FFT_BINS,
-} from '../sdk/src/platform/voice/wake/melspectrogram.js';
-import { WAKE_WORD_FRONT_END } from '../sdk/src/platform/voice/provisioning/wake-word-manifest.js';
+} from '../platform/src/platform/voice/wake/melspectrogram.js';
+import { WAKE_WORD_FRONT_END } from '../platform/src/platform/voice/provisioning/wake-word-manifest.js';
 
 /**
  * Regenerates the deterministic synthetic input the fixture's reference frames

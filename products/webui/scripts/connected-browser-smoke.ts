@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { chromium, expect, type Page, type Request } from '@playwright/test';
 import { WEBUI_METHOD_ROUTES } from '@goodvibes-jev/engine/contracts/generated/webui-facade';
-import { isJsonRecord } from '@goodvibes-jev/engine/daemon-sdk';
+import { isJsonRecord } from '@goodvibes-jev/engine/daemon-api';
 
 const url = process.env.GOODVIBES_WEBUI_CONNECTED_URL;
 const token = process.env.GOODVIBES_WEBUI_CONNECTED_TOKEN;

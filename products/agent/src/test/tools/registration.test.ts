@@ -2,19 +2,19 @@ import { getTestRuntimeServices } from '../helpers/runtime-services.ts';
 import { describe, test, expect } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { registerAllTools } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { registerAllTools } from '@goodvibes-jev/engine/platform/platform/tools';
 import { createTestManagers } from '../helpers/test-managers.ts';
-import { CrossSessionTaskRegistry } from '@goodvibes-jev/engine/sdk/platform/sessions';
+import { CrossSessionTaskRegistry } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { SandboxSessionRegistry } from '@/runtime/index.ts';
 import { RemoteRunnerRegistry } from '@/runtime/index.ts';
-import { AgentMessageBus } from '@goodvibes-jev/engine/sdk/platform/agents';
-import { AgentManager } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { OverflowHandler } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { FileUndoManager } from '@goodvibes-jev/engine/sdk/platform/state';
-import { ModeManager } from '@goodvibes-jev/engine/sdk/platform/state';
-import { ProcessManager } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { createWorkflowServices } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { AgentMessageBus } from '@goodvibes-jev/engine/platform/platform/agents';
+import { AgentManager } from '@goodvibes-jev/engine/platform/platform/tools';
+import { OverflowHandler } from '@goodvibes-jev/engine/platform/platform/tools';
+import { FileUndoManager } from '@goodvibes-jev/engine/platform/platform/state';
+import { ModeManager } from '@goodvibes-jev/engine/platform/platform/state';
+import { ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
+import { createWorkflowServices } from '@goodvibes-jev/engine/platform/platform/tools';
 import { compactRegisteredToolDefinitions } from '../../tools/tool-definition-compaction.ts';
 import { installAgentToolPolicyGuard } from '../../tools/agent-tool-policy-guard.ts';
 import { installToolExecutionSafetyGuard } from '../../tools/tool-execution-safety.ts';
@@ -117,7 +117,7 @@ describe('registerAllTools', () => {
     }
   });
 
-  test('post-edit diagnostics (SDK 1.6.1 diagnostics.postEdit) reach the write tool result untouched', async () => {
+  test('post-edit diagnostics (platform 1.6.1 diagnostics.postEdit) reach the write tool result untouched', async () => {
     const registry = new ToolRegistry();
     const workingDirectory = registerTools(registry);
     // Install the SAME guard layers production bootstrap installs

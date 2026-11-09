@@ -6,11 +6,11 @@ import {
   AutomationRouteStore,
   AutomationRunStore,
   AutomationSourceStore,
-} from '@goodvibes-jev/engine/sdk/platform/automation';
-import type { AutomationJob } from '@goodvibes-jev/engine/sdk/platform/automation';
-import type { AutomationRouteBinding } from '@goodvibes-jev/engine/sdk/platform/automation';
-import type { AutomationRun } from '@goodvibes-jev/engine/sdk/platform/automation';
-import type { AutomationSourceRecord } from '@goodvibes-jev/engine/sdk/platform/automation';
+} from '@goodvibes-jev/engine/platform/platform/automation';
+import type { AutomationJob } from '@goodvibes-jev/engine/platform/platform/automation';
+import type { AutomationRouteBinding } from '@goodvibes-jev/engine/platform/platform/automation';
+import type { AutomationRun } from '@goodvibes-jev/engine/platform/platform/automation';
+import type { AutomationSourceRecord } from '@goodvibes-jev/engine/platform/platform/automation';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 describe('automation persistent stores', () => {

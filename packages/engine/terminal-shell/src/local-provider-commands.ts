@@ -1,11 +1,11 @@
 import { join } from 'node:path';
 import { existsSync, mkdirSync } from 'node:fs';
 import { unlink, writeFile } from 'node:fs/promises';
-import { fetchModelContextWindows } from '@goodvibes-jev/engine/sdk/platform/discovery';
-import type { CustomProviderConfig, ProviderApi } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { LiteralSecretsManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ShellPathService } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { fetchModelContextWindows } from '@goodvibes-jev/engine/platform/platform/discovery';
+import type { CustomProviderConfig, ProviderApi } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { LiteralSecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import type { ConcealedInputRequest } from './concealed-input.js';
 import { requireYesFlag, stripYesFlag } from './command-confirmation.js';

@@ -6,16 +6,16 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { inferKnowledgeInjectionTrustTier } from '../sdk/src/platform/knowledge/shared.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { inferKnowledgeInjectionTrustTier } from '../platform/src/platform/knowledge/shared.js';
 import {
   decideKnowledgeConsolidationCandidate as decide,
   refreshKnowledgeConsolidationCandidates as refresh,
   runKnowledgeConsolidation as run,
   type KnowledgeConsolidationContext,
-} from '../sdk/src/platform/knowledge/consolidation.js';
-import { MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore } from '../sdk/src/platform/state/index.js';
+} from '../platform/src/platform/knowledge/consolidation.js';
+import { MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore } from '../platform/src/platform/state/index.js';
 import { authoredPrivacyAnswer, type AuthoredPrivacy } from './_helpers/authored-error-readings.js';
 
 const roots: string[] = [];

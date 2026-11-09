@@ -38,7 +38,7 @@ initial spawned receipt back to queued by input id. This test documents the
 existing engine behavior; it does not change the engine's response construction.
 
 The browser loader validates every body against the canonical output schema. The
-phone and desktop proofs replay these exact bodies through the production SDK
+phone and desktop proofs replay these exact bodies through the production platform
 and composer. Unrelated Work lists remain the ordinary synthetic browser seed.
 Read errors and connection loss are explicitly injected failure cases. Polling
 uses the real React Query timer, advanced by Playwright's browser clock, without

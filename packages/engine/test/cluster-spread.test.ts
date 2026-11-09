@@ -15,8 +15,8 @@
  * nothing moves at all.
  */
 import { describe, expect, test } from 'bun:test';
-import { ClusterHoldingsLedger } from '../sdk/src/platform/cluster/holdings.js';
-import { shouldYieldSurface, SURFACE_YIELD_GAP } from '../sdk/src/platform/cluster/ranking.js';
+import { ClusterHoldingsLedger } from '../platform/src/platform/cluster/holdings.js';
+import { shouldYieldSurface, SURFACE_YIELD_GAP } from '../platform/src/platform/cluster/ranking.js';
 import {
   addNode,
   advance,

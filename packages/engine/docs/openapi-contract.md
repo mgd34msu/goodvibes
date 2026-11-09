@@ -6,7 +6,7 @@ from the committed contract artifact and kept honest by a drift gate.
 ## Where to fetch it
 
 - **Package export:** `@goodvibes-jev/engine/contracts/operator-openapi.json` and
-  `@goodvibes-jev/engine/sdk/contracts/operator-openapi.json`
+  `@goodvibes-jev/engine/platform/contracts/operator-openapi.json`
 - **Repo copy:** `docs/operator-openapi.json` (byte-identical to the package
   artifact; the generator writes both)
 
@@ -25,7 +25,7 @@ from the committed contract artifact and kept honest by a drift gate.
   A method whose contract schema is absent or a bare object with no declared
   properties is marked `x-schema-coverage: schema-less` instead of being given
   an invented schema.
-- **Honest typed-IO marking.** A method lacks typed SDK client IO when its id
+- **Honest typed-IO marking.** A method lacks typed platform client IO when its id
   has no entry in the generated `OperatorMethodInputMap`/`OperatorMethodOutputMap`.
   That untyped set is currently empty: every cataloged method carries a
   rendered map entry, so every operation carries `x-typed-client-io: true` and

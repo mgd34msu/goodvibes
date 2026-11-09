@@ -19,9 +19,9 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { createDaemonTelemetryRouteHandlers } from '../daemon-sdk/src/telemetry-routes.js';
-import { dispatchOperatorRoutes } from '../daemon-sdk/src/operator.js';
-import type { AuthenticatedPrincipal } from '../daemon-sdk/src/http-policy.js';
+import { createDaemonTelemetryRouteHandlers } from '../daemon-api/src/telemetry-routes.js';
+import { dispatchOperatorRoutes } from '../daemon-api/src/operator.js';
+import type { AuthenticatedPrincipal } from '../daemon-api/src/http-policy.js';
 
 // ---------------------------------------------------------------------------
 // Stubs

@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
 import { bindJudgmentPortAuthority, installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { readPlanningGoal } from '@goodvibes-jev/engine/sdk/platform/agents';
+import { readPlanningGoal } from '@goodvibes-jev/engine/platform/platform/agents';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerPlanningRuntimeCommands } from '../../input/commands/planning-runtime.ts';
 import { ScheduleReadingLifetime } from '../../input/commands/schedule-reading-lifetime.ts';

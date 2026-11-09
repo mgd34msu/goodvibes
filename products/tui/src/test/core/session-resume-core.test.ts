@@ -18,11 +18,11 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
-import { SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
+import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { ConversationManager } from '../../core/conversation.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { resumeSessionCore } from '../../core/session-resume-core.ts';
-import { clearTurnAnchors, getTurnAnchors, persistTurnAnchors, recordTurnAnchor } from '@goodvibes-jev/engine/sdk/platform/rewind';
+import { clearTurnAnchors, getTurnAnchors, persistTurnAnchors, recordTurnAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { makeTestSurface } from '../helpers/session-surface.ts';
 import { rewriteAsLegacyPaneSession } from '../helpers/legacy-pane-session.ts';
 

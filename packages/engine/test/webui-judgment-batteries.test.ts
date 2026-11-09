@@ -4,10 +4,10 @@ import {
   type DecisionNote, type JudgmentPort, type NewDecisionEntry,
 } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { validateWebuiAnswers, withWebuiAnswerBoundary } from '../sdk/src/platform/judgment-browser/batteries/webui-answers.ts';
-import { commandRankBattery, daemonRefusalBattery, statusToneBattery, mailReplySubjectBattery, WEBUI_BATTERY_QUESTIONS } from '../sdk/src/platform/judgment-browser/batteries/webui-specs.ts';
-import { readCommandRank, readDaemonRefusal, readStatusTone, readStructuredDaemonRefusal } from '../sdk/src/platform/judgment-browser/batteries/webui-readers.ts';
-import { REFUSAL_ITEMS, type ResolvedCommandRank, type ResolvedDaemonRefusal, type ResolvedStatus } from '../sdk/src/platform/judgment-browser/batteries/webui-types.ts';
+import { validateWebuiAnswers, withWebuiAnswerBoundary } from '../platform/src/platform/judgment-browser/batteries/webui-answers.ts';
+import { commandRankBattery, daemonRefusalBattery, statusToneBattery, mailReplySubjectBattery, WEBUI_BATTERY_QUESTIONS } from '../platform/src/platform/judgment-browser/batteries/webui-specs.ts';
+import { readCommandRank, readDaemonRefusal, readStatusTone, readStructuredDaemonRefusal } from '../platform/src/platform/judgment-browser/batteries/webui-readers.ts';
+import { REFUSAL_ITEMS, type ResolvedCommandRank, type ResolvedDaemonRefusal, type ResolvedStatus } from '../platform/src/platform/judgment-browser/batteries/webui-types.ts';
 
 const refusal = (message: string, status = 404): ResolvedDaemonRefusal => ({ methodId: 'sessions.delete', message, status });
 const rank = (count = 3): ResolvedCommandRank => ({ query: 'start over', registryVersion: 'catalog-1', candidates: Array.from({ length: count }, (_, index) => ({ title: index === 0 ? 'New Chat' : `Command ${index}`, group: 'Commands' })) });

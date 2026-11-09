@@ -16,10 +16,10 @@ import {
   beginGoogleConsent,
   clientIdTail,
   registerGoogleClient,
-} from '../sdk/src/platform/google/consent-session.ts';
-import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS, OAUTH_SCOPES } from '../sdk/src/platform/google/setup-plan.ts';
-import type { GoogleConfigPort, GoogleSecretPort } from '../sdk/src/platform/google/types.ts';
-import type { LoopbackListener } from '../sdk/src/platform/google/oauth-loopback.ts';
+} from '../platform/src/platform/google/consent-session.ts';
+import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS, OAUTH_SCOPES } from '../platform/src/platform/google/setup-plan.ts';
+import type { GoogleConfigPort, GoogleSecretPort } from '../platform/src/platform/google/types.ts';
+import type { LoopbackListener } from '../platform/src/platform/google/oauth-loopback.ts';
 
 const CLIENT_ID = '918273645500-abcdefghijklmnop.apps.googleusercontent.com';
 const CLIENT_SECRET = 'GOCSPX-thisIsTheSecretValue';

@@ -1,9 +1,9 @@
 import { screeningAnswers } from './_helpers/screening-answers.js';
 import { afterEach, expect, test } from 'bun:test';
 import { Client } from 'undici/index.js';
-import { createSlackInboxOwner, type SlackInboxAccount, type SlackInboxOwner, type SlackInboxOwnerOptions } from '../sdk/src/platform/intake/providers/slack-owner.ts';
-import { digestSender } from '../sdk/src/platform/intake/text-normalization.ts';
-import { acquireAccountInboxIdentity } from '../sdk/src/platform/intake/providers/account-identity.js';
+import { createSlackInboxOwner, type SlackInboxAccount, type SlackInboxOwner, type SlackInboxOwnerOptions } from '../platform/src/platform/intake/providers/slack-owner.ts';
+import { digestSender } from '../platform/src/platform/intake/text-normalization.ts';
+import { acquireAccountInboxIdentity } from '../platform/src/platform/intake/providers/account-identity.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const cleanups: (() => unknown | Promise<unknown>)[] = [];

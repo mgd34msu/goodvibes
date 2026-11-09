@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { rmSync } from 'node:fs';
-import { ProfileManager } from '@goodvibes-jev/engine/sdk/platform/profiles';
+import { ProfileManager } from '@goodvibes-jev/engine/platform/platform/profiles';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 describe('ProfileManager', () => {

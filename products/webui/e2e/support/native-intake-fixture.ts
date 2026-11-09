@@ -1,4 +1,4 @@
-/** Exact authenticated daemon captures through the production browser intake SDK. */
+/** Exact authenticated daemon captures through the production browser intake platform. */
 import { readFileSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 import type { Page, Route } from '@playwright/test';
@@ -8,7 +8,7 @@ import {
   nativeConversationIntakeCaptureRequestSchema, nativeConversationIntakeLookupResultSchema,
   nativeConversationIntakeTransitionRequestSchema,
   type NativeConversationIntakeCaptureRequest, type NativeConversationIntakeTransitionRequest,
-} from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
+} from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 import { installMockDaemon } from './mock-daemon';
 
 export type NativeIntakeCaptureName = 'work' | 'turn' | 'blocked' | 'refused' | 'cancelled' | 'recovery';

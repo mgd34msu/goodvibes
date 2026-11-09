@@ -1,11 +1,11 @@
 /** Pinned built-in membership with explicit account/authority admission. */
-import type { OwnedInboxSource, ProviderStatus } from '@goodvibes-jev/engine/sdk/platform/intake';
+import type { OwnedInboxSource, ProviderStatus } from '@goodvibes-jev/engine/platform/platform/intake';
 import { createMultiOwnerDaemonInboxFactory, type DaemonInboxSourceFactory } from './multiowner-inbox-composition.js';
 import { createSlackDaemonInboxSourceFactory, type SlackDaemonInboxOptions, type SlackDaemonInboxSourceFactories } from './slack-inbox-composition.js';
 import { createEmailDaemonInboxSourceFactory, type EmailDaemonInboxOptions, type EmailDaemonInboxSourceFactories } from './email-inbox-composition.js';
 import { createConfiguredDiscordDaemonInboxSourceFactory, createDiscordDaemonInboxSourceFactory, type DiscordDaemonInboxOptions, type DiscordDaemonInboxSourceFactories } from './discord-inbox-composition.js';
 import type { DaemonInboxFactory } from './daemon-handler-composition.js';
-import { createSurfaceEmailInboxConfigReader } from '@goodvibes-jev/engine/sdk/platform/email';
+import { createSurfaceEmailInboxConfigReader } from '@goodvibes-jev/engine/platform/platform/email';
 import { createConfiguredHostedInboxSourceFactory, createReacquiringDaemonInboxSourceFactory } from './configured-inbox-accounts.js';
 
 /** Original254699bf inbox/index.ts registers precisely these three providers. */

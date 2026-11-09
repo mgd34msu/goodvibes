@@ -5,13 +5,13 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { createWorkLedger } from '../sdk/src/platform/workflow/work-ledger/service.js';
-import { ArtifactStore } from '../sdk/src/platform/artifacts/index.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { buildHomeGraphMetadata } from '../sdk/src/platform/knowledge/home-graph/helpers.js';
-import { renderDevicePassportPage } from '../sdk/src/platform/knowledge/home-graph/rendering.js';
-import { refreshDevicePagesForHomeGraphAsk } from '../sdk/src/platform/knowledge/home-graph/ask-page-refresh.js';
-import { generateHomeGraphRoomPage, refreshHomeGraphDevicePassport } from '../sdk/src/platform/knowledge/home-graph/generated-pages.js';
+import { createWorkLedger } from '../platform/src/platform/workflow/work-ledger/service.js';
+import { ArtifactStore } from '../platform/src/platform/artifacts/index.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { buildHomeGraphMetadata } from '../platform/src/platform/knowledge/home-graph/helpers.js';
+import { renderDevicePassportPage } from '../platform/src/platform/knowledge/home-graph/rendering.js';
+import { refreshDevicePagesForHomeGraphAsk } from '../platform/src/platform/knowledge/home-graph/ask-page-refresh.js';
+import { generateHomeGraphRoomPage, refreshHomeGraphDevicePassport } from '../platform/src/platform/knowledge/home-graph/generated-pages.js';
 import { seedHomeAssistantObservation } from './_helpers/homegraph-observation-fixtures.js';
 import { withTestTimeout } from './_helpers/test-timeout.js';
 
@@ -165,8 +165,8 @@ describe('Home Graph complete-fact quality propagation', () => {
 
 test('prepared page rendering preserves qualifiers, numeric values, units and opposite signs', async () => {
   const context = await fixture();
-  const { createHomeGraphPageFactReader } = await import('../sdk/src/platform/knowledge/home-graph/page-quality.js');
-  const { renderDevicePassportPage } = await import('../sdk/src/platform/knowledge/home-graph/rendering.js');
+  const { createHomeGraphPageFactReader } = await import('../platform/src/platform/knowledge/home-graph/page-quality.js');
+  const { renderDevicePassportPage } = await import('../platform/src/platform/knowledge/home-graph/rendering.js');
   const claims = [
     { title: 'Bluetooth', value: 'Supported', summary: 'Bluetooth is supported only with adapter X.' },
     { title: 'Offset', value: '+5 V', summary: 'Positive offset is +5 V.' },
@@ -256,7 +256,7 @@ for (const change of ['fact', 'twice', 'source', 'subject', 'port', 'cancel'] as
 
 test('different device and space queue keys progress independently', async () => {
   const context = await fixture();
-  const { withDevicePageRefresh } = await import('../sdk/src/platform/knowledge/home-graph/page-refresh-queue.js');
+  const { withDevicePageRefresh } = await import('../platform/src/platform/knowledge/home-graph/page-refresh-queue.js');
   let release!: () => void; const paused = new Promise<void>((resolve) => { release = resolve; });
   const first = withDevicePageRefresh(context.store, JSON.stringify(['space-a', 'device-a']), undefined, () => 'request', () => paused);
   try {
@@ -267,8 +267,8 @@ test('different device and space queue keys progress independently', async () =>
 
 test('unrelated fact churn cannot turn generic stale into Ask retry permission', async () => {
   const context = await fixture();
-  const { createAskPageRecovery } = await import('../sdk/src/platform/knowledge/home-graph/ask-page-recovery.js');
-  const { KnowledgeRepairFactUsefulnessHeldError } = await import('../sdk/src/platform/knowledge/semantic/repair-usefulness/types.js');
+  const { createAskPageRecovery } = await import('../platform/src/platform/knowledge/home-graph/ask-page-recovery.js');
+  const { KnowledgeRepairFactUsefulnessHeldError } = await import('../platform/src/platform/knowledge/semantic/repair-usefulness/types.js');
   const recovery = createAskPageRecovery(context.store, spaceId, () => {}); let calls = 0;
   await expect(recovery.run(async () => {
     calls += 1; await context.store.replaceNodeRecord({ ...context.fact, summary: 'Changed unrelated fact.' });

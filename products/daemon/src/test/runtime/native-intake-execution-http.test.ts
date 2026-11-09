@@ -1,16 +1,16 @@
 /** Real DaemonServer source2 admission -> native graph HTTP proof and unchanged browser replay captures. */
 import { operationJudgmentRequests } from '../helpers/field-name-privacy-requests.js';
 import { expect, spyOn, test } from 'bun:test';
-import * as ledger from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger';
+import * as ledger from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import type { MintedPairingToken } from '@goodvibes-jev/engine/sdk/platform/pairing';
+import type { MintedPairingToken } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { firstJsonSchemaFailure } from '@goodvibes-jev/engine/transport-http';
 import operatorContract from '@goodvibes-jev/engine/contracts/operator-contract.json' with { type: 'json' };
-import { nativeConversationIntakeLookupResultSchema, type NativeConversationIntakeCaptureRequest } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
-import { nativeWorkExecutionSnapshotSchema, NATIVE_WORK_EXECUTION_MAX_RESPONSE_BYTES, type NativeWorkExecutionRequest, type NativeWorkExecutionSnapshot } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
+import { nativeConversationIntakeLookupResultSchema, type NativeConversationIntakeCaptureRequest } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
+import { nativeWorkExecutionSnapshotSchema, NATIVE_WORK_EXECUTION_MAX_RESPONSE_BYTES, type NativeWorkExecutionRequest, type NativeWorkExecutionSnapshot } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
 import { createNativeIntakeExecutionHttpFixture, type NativeIntakeExecutionHttpWire } from '../helpers/native-intake-execution-http-fixture.js';
 import { intakeBarrier, intakeProposalResponse } from '../helpers/native-intake-http-fixture.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';

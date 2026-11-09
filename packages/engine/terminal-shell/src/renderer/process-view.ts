@@ -15,8 +15,8 @@
  * leaves follow mode and jumps between matching lines.
  */
 
-import { createEmptyLine, type Line } from '@goodvibes-jev/engine/sdk/platform/types';
-import { getDisplayWidth, truncateDisplay, wrapText } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { createEmptyLine, type Line } from '@goodvibes-jev/engine/platform/platform/types';
+import { getDisplayWidth, truncateDisplay, wrapText } from '@goodvibes-jev/engine/platform/platform/utils';
 import { activeTokens } from './theme.js';
 import { keycapHintsWidth, paintKeycapHints } from './surface-kit-parts.js';
 import type { ProcessLine } from '../process-output-log.js';

@@ -40,7 +40,7 @@ export function registerAcpRuntimeCommands(registry: CommandRegistry): void {
 
       if (sub === 'list') {
         try {
-          const { agents } = await rpc.sdk.operator.invoke('acp.agents.list', {});
+          const { agents } = await rpc.platformClient.operator.invoke('acp.agents.list', {});
           if (agents.length === 0) {
             ctx.print('[agents] No third-party ACP agents discovered. Install Claude Code, Codex, or opencode on PATH to host one.');
             return;
@@ -63,7 +63,7 @@ export function registerAcpRuntimeCommands(registry: CommandRegistry): void {
         }
         const cwd = rest[2] ?? requireShellPaths(ctx).workingDirectory;
         try {
-          const { hosted, started } = await rpc.sdk.operator.invoke('acp.sessions.create', { agentId, cwd });
+          const { hosted, started } = await rpc.platformClient.operator.invoke('acp.sessions.create', { agentId, cwd });
           if (hosted.error) {
             // Structured failure, verbatim, never a hung row.
             ctx.print(`[agents host] Could not host ${hosted.title || agentId}: ${hosted.error.stage} stage failed for ${hosted.error.binary}; ${hosted.error.message}`);

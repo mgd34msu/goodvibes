@@ -8,12 +8,12 @@
  * native module acquisition is replaced with an in-memory mock. Tests verify:
  *   - getToken/setToken/clearToken round-trip
  *   - expiresAt preserved via setTokenEntry/getTokenEntry
- *   - Graceful SDKError when native module is missing
+ *   - Graceful GoodVibesError when native module is missing
  *   - Options (service, accessible, accessGroup) passed through correctly
  */
 
 import { describe, it, expect, mock, beforeEach } from 'bun:test';
-import { createIOSKeychainTokenStore } from '../sdk/src/client-auth/ios-keychain-token-store.js';
+import { createIOSKeychainTokenStore } from '../platform/src/client-auth/ios-keychain-token-store.js';
 
 // ---------------------------------------------------------------------------
 // Mock react-native-keychain (in-memory)
@@ -186,7 +186,7 @@ describe('createIOSKeychainTokenStore (real factory + mock module)', () => {
     keychainStore.set('com.test.gv', { username: 'goodvibes', password: '{not-json' });
 
     await expect(ts.getToken()).rejects.toMatchObject({
-      code: 'SDK_TOKEN_STORE_CORRUPT',
+      code: 'ENGINE_TOKEN_STORE_CORRUPT',
       recoverable: true,
     });
     expect(keychainStore.has('com.test.gv')).toBe(false);
@@ -198,7 +198,7 @@ describe('createIOSKeychainTokenStore (real factory + mock module)', () => {
 // ---------------------------------------------------------------------------
 
 describe('createIOSKeychainTokenStore: missing peer dep', () => {
-  it('throws SDKError with kind=config and install hint when module absent', async () => {
+  it('throws GoodVibesError with kind=config and install hint when module absent', async () => {
     // No __loadModule provided, factory will try real dynamic import('react-native-keychain')
     // which fails because react-native-keychain is not installed in this test environment
     const ts = createIOSKeychainTokenStore({ service: 'com.test.absent' });

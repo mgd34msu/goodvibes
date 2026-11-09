@@ -1,14 +1,14 @@
 /** Owned configured daemon host; native lifecycle requires an installed caller. */
-import { DaemonServer, HttpListener, createSafeHostServeFactory, type DaemonUpdateArtifact } from '@goodvibes-jev/engine/sdk/platform/daemon';
-import { loadPersistedProviders } from '@goodvibes-jev/engine/sdk/platform/discovery';
-import { createAsyncDisposalScope } from '@goodvibes-jev/engine/sdk/platform/runtime/disposal';
+import { DaemonServer, HttpListener, createSafeHostServeFactory, type DaemonUpdateArtifact } from '@goodvibes-jev/engine/platform/platform/daemon';
+import { loadPersistedProviders } from '@goodvibes-jev/engine/platform/platform/discovery';
+import { createAsyncDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
 import { createDaemonProviderDiscovery, type DaemonProviderDiscoveryDependencies } from './provider-discovery.js';
 import { createDaemonBootOperations } from './boot-composition.js';
 import type { DaemonBootSnapshot } from './boot-tasks.js';
 import { createHostedSessionOptions } from './hosted-session-composition.js';
 import { createRuntimeServices, type RuntimeServices, type RuntimeServicesOptions } from './services.js';
 import { observeNativeStartupPhase } from './startup-observation.js';
-import { createNativeDataWriteOwner, createInstalledReaderCohort } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { createNativeDataWriteOwner, createInstalledReaderCohort } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { drainOwned } from '@goodvibes-jev/judgment';
 
 export interface DaemonHostBinding {
@@ -30,7 +30,7 @@ export interface DaemonHostOptions {
   readonly httpListener?: DaemonHostBinding;
 }
 
-export type DaemonHostServer = Pick<DaemonServer, 'enable' | 'start' | 'stop' | 'fenceRestartAdmission' | 'waitForRestart' | 'isRunning' | 'boundHost' | 'boundPort' | 'boundScheme'>;
+export type DaemonHostServer = Pick<DaemonServer, 'enable' | 'start' | 'completeHostStartup' | 'stop' | 'fenceRestartAdmission' | 'waitForRestart' | 'isRunning' | 'boundHost' | 'boundPort' | 'boundScheme'>;
 export type DaemonHostListener = Pick<HttpListener, 'enable' | 'start' | 'stop' | 'fenceRestartAdmission' | 'waitForRestart' | 'isRunning'>;
 
 /** Narrow construction seams also permit held-acquisition lifecycle tests. */
@@ -147,7 +147,9 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
         ...options.runtime, nativeDataWriter, createBootOperations: createDaemonBootOperations,
       });
       const runtime = services;
-      scope.registry.add('runtime graph', () => bounded('runtime graph close', () => runtime.close()));
+      let graphClosing: Promise<void> | undefined;
+      const closeRuntimeGraph = () => graphClosing ??= Promise.resolve().then(() => bounded('runtime graph close', () => runtime.close()));
+      scope.registry.add('runtime graph', closeRuntimeGraph);
       if (closed) { closeBoot(); fence(); }
       if (!runtime.bootTasks) throw new Error('Daemon boot owner missing');
 
@@ -172,12 +174,31 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
       observeNativeStartupPhase('listener-construction');
       const binding = options.daemon;
       assertInstallationCurrent();
+      let handoverClosing: Promise<void> | undefined;
+      const drainForNativeHandover = () => handoverClosing ??= Promise.resolve().then(async () => {
+        const failures: Error[] = [];
+        const drain = async (label: string, action: () => void | Promise<void>) => {
+          try { await bounded(label, action); } catch { failures.push(new Error(`Daemon native handover ${label} failed`)); }
+        };
+        await drain('discovery close', async () => { await discovery?.close(); });
+        const secondary = listener;
+        if (secondary) {
+          await drain('HTTP listener restart fence', () => secondary.fenceRestartAdmission());
+          await drain('HTTP listener restart drain', () => secondary.waitForRestart());
+          await drain('HTTP listener stop', () => secondary.stop());
+        }
+        await drain('boot close', async () => { await closeBoot(); });
+        await drain('runtime graph close', closeRuntimeGraph);
+        if (failures.length) throw new AggregateError(failures, 'Daemon native handover did not complete');
+      });
       daemon = (factories.createServer ?? ((config) => new DaemonServer(config)))({
         host: binding?.host, port: binding?.port,
         workingDir: runtime.workingDirectory, homeDirectory: runtime.homeDirectory,
         daemonHomeDir: options.runtime.daemonHomeDirectory,
         configManager: runtime.configManager, userAuth: runtime.localUserAuthManager,
         runtimeBus: runtime.runtimeBus, runtimeServices: runtime,
+        drainForNativeHandover,
+        deferNativeActivationUntilHostReady: true,
         serveFactory: createSafeHostServeFactory('Configured daemon', binding?.serveFactory),
         clusterCoordinator: runtime.clusterCoordinator, clusterGroupVerbs: runtime.clusterGroup.verbs,
         paymentReplies: runtime.daemonHandlers.paymentReplies,
@@ -242,6 +263,23 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
       observeNativeStartupPhase('boot-tasks');
       const boot = await runtime.bootTasks.start();
       fence();
+      phase = 'native lifecycle activation';
+      // A configuration change admitted during boot may still own the socket.
+      // Native activation cannot retire this graph until that rebind drains.
+      await daemon.waitForRestart();
+      fence();
+      assertInstallationCurrent();
+      if (!daemon.isRunning) throw new Error('Daemon server stopped before native lifecycle activation');
+      const activated = daemon.completeHostStartup();
+      if (activated && activated.state === 'handover') {
+        startupHandover = activated;
+        if (closed) activated.cancel();
+        await activated.drain;
+        fence();
+        state = 'handover';
+        return;
+      }
+      fence();
       state = boot.state === 'ready' ? 'ready' : 'degraded';
       observeNativeStartupPhase('foreground-ready');
     } catch (error) {
@@ -255,14 +293,15 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
     if (closing) return closing;
     closed = true;
     state = 'closing';
-    // Cancellation fences the exact native handover before waiting for its drain.
-    try { startupHandover?.cancel(); }
-    catch { cleanupFailures.push(new Error('Daemon native startup handover cancellation failed')); }
-    void discovery?.close();
     let resolve!: () => void;
     let reject!: (error: Error) => void;
     closing = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
     void closing.catch(() => {});
+    // Reserve the one close before abort listeners can reenter this owner.
+    try { startupHandover?.cancel(); }
+    catch { cleanupFailures.push(new Error('Daemon native startup handover cancellation failed')); }
+    try { const pending = discovery?.close(); if (pending) void pending.catch(() => {}); }
+    catch { cleanupFailures.push(new Error('Daemon host discovery close failed')); }
     // Fence restart admission before a held boot drain can yield to config writes.
     if (daemon) fenceRestarts('daemon server', daemon);
     if (listener) fenceRestarts('HTTP listener', listener);
@@ -271,7 +310,8 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
     closeBoot();
     void (async () => {
       try { await work; } catch { /* Report startup separately, after cleanup. */ }
-      await discovery?.close();
+      try { await bounded('discovery close', async () => { await discovery?.close(); }); }
+      catch { /* Retained above; independent owners must still drain. */ }
       try { await closeBoot(); } catch { /* The bounded owner failure is retained. */ }
       // Late runtime/server acquisitions have registered by this point. Their
       // dependencies survive until boot and accepted server startup drain.

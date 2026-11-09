@@ -10,7 +10,7 @@ import { syncFeedContextFromHost } from '@goodvibes-jev/engine/terminal-shell/in
 import '@goodvibes-jev/engine/terminal-shell/composer-controller';
 import 'node:fs';
 import 'node:path';
-import { InputTokenizer, type InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import { InputTokenizer, type InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import {
   clearModalStackForHandler,
   cleanupMarkerRegistryForHandler,

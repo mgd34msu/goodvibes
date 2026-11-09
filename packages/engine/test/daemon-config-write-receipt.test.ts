@@ -8,12 +8,12 @@
  * writes over the control plane into the DAEMON's settings and then reads the
  * key back out of its OWN settings file.
  *
- * Imported from packages/daemon-sdk/dist deliberately: `@goodvibes-jev/engine/daemon-sdk`
+ * Imported from packages/daemon-api/dist deliberately: `@goodvibes-jev/engine/daemon-api`
  * resolves to dist, so this also proves the change is in the artifact the
  * running daemon loads, not only in the source.
  */
 import { describe, expect, test } from 'bun:test';
-import { createDaemonSystemRouteHandlers } from '../daemon-sdk/dist/index.js';
+import { createDaemonSystemRouteHandlers } from '../daemon-api/dist/index.js';
 
 interface ConfigStub {
   readonly get: (key: string) => unknown;

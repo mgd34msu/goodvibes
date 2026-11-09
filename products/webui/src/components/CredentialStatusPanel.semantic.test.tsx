@@ -4,7 +4,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { BrowserJudgmentRequest } from "@goodvibes-jev/engine/daemon-sdk";
+import type { BrowserJudgmentRequest } from "@goodvibes-jev/engine/daemon-api";
 import { invalidateClientLifetime } from "../lib/client-lifetime";
 
 type Request = BrowserJudgmentRequest<"webui.credentials.provider-key">;
@@ -22,7 +22,7 @@ const wire = (names: readonly string[]) => ({
   })),
 });
 mock.module("../lib/goodvibes", () => ({
-  sdk: { operator: { credentials: { get: async () => wire([]) } } },
+  client: { operator: { credentials: { get: async () => wire([]) } } },
   runBrowserJudgment: (request: Request, signal: AbortSignal) =>
     new Promise<unknown>((finish) => pending.push({ request, signal, finish })),
 }));

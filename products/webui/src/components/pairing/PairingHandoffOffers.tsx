@@ -1,6 +1,6 @@
 /**
  * PairingHandoffOffers, completes a pairing hand-off bundle
- * (SDK 1.8.0's pairing.handoff.create/complete): renders each offer this link
+ * (platform 1.8.0's pairing.handoff.create/complete): renders each offer this link
  * carried (notifications, relay, passkey), each independently declinable, then
  * drives pairing.handoff.complete and renders the honest per-offer outcome,
  * completed / declined / unavailable / failed, never silently half-applied.
@@ -13,7 +13,7 @@
  *   - passkey: the real WebAuthn registration ceremony (registerPasskey)
  *     produces the credentialId/publicKeyCose the daemon needs to verify.
  *   - relay: no client-side gathering, accepting sends `relay: true`, an
- *     acknowledgement only (see the SDK's pairing-handoff.ts route comment).
+ *     acknowledgement only (see the platform's pairing-handoff.ts route comment).
  *
  * A ceremony that fails locally (permission denied, no authenticator, browser
  * unsupported, user cancel) is NEVER silently downgraded to "declined", that
@@ -29,7 +29,7 @@ import { Button } from '../ui/Button';
 import { Checkbox } from '../ui/Checkbox';
 import { Dialog } from '../ui/Dialog';
 import { StatusDot, type StatusTone } from '../ui/StatusDot';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import type {
   PairingHandoffCompleteNotificationsAccept,
   PairingHandoffCompletePasskeyAccept,
@@ -137,7 +137,7 @@ export function PairingHandoffOffers({ offers, onDone, postureNotice }: PairingH
     let serverResults: readonly PairingHandoffOutcome[] | null = null;
     let requestErrorMessage: string | null = null;
     try {
-      const response = await sdk.operator.pairing.handoff.complete({ accept });
+      const response = await platformClient.operator.pairing.handoff.complete({ accept });
       serverResults = response.results;
     } catch (error) {
       requestErrorMessage = formatError(error);

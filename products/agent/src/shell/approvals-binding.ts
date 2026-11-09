@@ -20,8 +20,8 @@
  * Binding only the first is what made the list read "nothing pending" while
  * the owner had three asks waiting on the daemon.
  */
-import type { SharedApprovalRecord } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import type { ApprovalBroker } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import type { SharedApprovalRecord } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import type { ApprovalBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { handleBrokerApprovalChange } from '../permissions/broker-approval.ts';
 import type { PendingPermissionState } from './blocking-input.ts';
 import { describeApprovalsUnavailable, type ApprovalsView } from '../runtime/client/approvals-view.ts';

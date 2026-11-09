@@ -1,6 +1,6 @@
-import type { GatePresetName } from '@goodvibes-jev/engine/sdk/platform/gate/presets';
-import type { OperatorRemoteClient } from '@goodvibes-jev/engine/operator-sdk';
-import { nativeHostedTurnLookupSchema, nativeHostedTurnRequestSchema, nativeHostedTurnStartRequestSchema, type NativeHostedTurnLookup, type NativeHostedTurnRequest, type NativeHostedTurnStartRequest, } from '@goodvibes-jev/engine/sdk/platform/hosted-sessions/native-turn-client';
+import type { GatePresetName } from '@goodvibes-jev/engine/platform/platform/gate/presets';
+import type { OperatorRemoteClient } from '@goodvibes-jev/engine/operator-client';
+import { nativeHostedTurnLookupSchema, nativeHostedTurnRequestSchema, nativeHostedTurnStartRequestSchema, type NativeHostedTurnLookup, type NativeHostedTurnRequest, type NativeHostedTurnStartRequest, } from '@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client';
 export type { NativeHostedTurnLookup, NativeHostedTurnRequest, NativeHostedTurnStartRequest };
 export interface NativeHostedTurnClient {
     status(target: NativeHostedTurnRequest, options?: {

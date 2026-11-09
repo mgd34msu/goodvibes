@@ -2,8 +2,8 @@
 export {
   buildProjectPlanningAnswerActions as buildAnswerActions,
   readProjectPlanningAnswerActions,
-} from '@goodvibes-jev/engine/sdk/platform/knowledge';
+} from '@goodvibes-jev/engine/platform/platform/knowledge';
 export type {
   ProjectPlanningAnswerAction as PlanningAnswerAction,
   ProjectPlanningAnswerActionsReading,
-} from '@goodvibes-jev/engine/sdk/platform/knowledge';
+} from '@goodvibes-jev/engine/platform/platform/knowledge';

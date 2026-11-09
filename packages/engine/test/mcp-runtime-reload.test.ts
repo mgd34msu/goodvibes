@@ -18,7 +18,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { McpConfigRoots, McpRegistry, McpReloadResult } from '@goodvibes-jev/engine/sdk/platform/mcp';
+import type { McpConfigRoots, McpRegistry, McpReloadResult } from '@goodvibes-jev/engine/platform/platform/mcp';
 import { startMcpConfigAutoReload } from '@goodvibes-jev/engine/terminal-shell';
 
 const EMPTY_RELOAD: McpReloadResult = {

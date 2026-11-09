@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
-import { AgentManager, OwnedAgentExecutionUnavailableError, type AgentRecord } from '../sdk/src/platform/tools/agent/manager.js';
-import { run } from '../sdk/src/platform/hooks/runners/agent.js';
-import { HookActivityTracker } from '../sdk/src/platform/hooks/activity.js';
-import { HookDispatcher } from '../sdk/src/platform/hooks/dispatcher.js';
-import { TurnHookOwner } from '../sdk/src/platform/hooks/turn-ownership.js';
-import { run as runHook } from '../sdk/src/platform/hooks/runner.js';
-import type { HookDefinition, HookEvent } from '../sdk/src/platform/hooks/types.js';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
+import { AgentManager, OwnedAgentExecutionUnavailableError, type AgentRecord } from '../platform/src/platform/tools/agent/manager.js';
+import { run } from '../platform/src/platform/hooks/runners/agent.js';
+import { HookActivityTracker } from '../platform/src/platform/hooks/activity.js';
+import { HookDispatcher } from '../platform/src/platform/hooks/dispatcher.js';
+import { TurnHookOwner } from '../platform/src/platform/hooks/turn-ownership.js';
+import { run as runHook } from '../platform/src/platform/hooks/runner.js';
+import type { HookDefinition, HookEvent } from '../platform/src/platform/hooks/types.js';
 
 let previousPort: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previousPort = installJudgmentPort(undefined); });

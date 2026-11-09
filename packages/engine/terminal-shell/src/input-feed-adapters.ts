@@ -5,7 +5,7 @@ function captureFields<Source, Key extends keyof Source, Extra extends object = 
   for (const key of keys) fields[key] = source[key];
   return result;
 }
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import { getViewportBottomLine } from './renderer/conversation-layout.js';
 import type { WorkTreeConversation, WorkTreeRouteState } from './work-tree-input.js';
 import type { InfiniteBuffer } from './conversation-history.js';

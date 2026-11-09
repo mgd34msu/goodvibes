@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { withTestTimeout } from './test-timeout.ts';
 
-const SDK_ROOT = resolve(import.meta.dir, '../..');
+const ENGINE_ROOT = resolve(import.meta.dir, '../..');
 const BUNDLE_CEILING_MS = 30_000;
 
 /** Keep each browser bundle out of the shared test runtime and own its cleanup. */
@@ -18,7 +18,7 @@ export async function bundleBrowserEntrypoint(
     const child = Bun.spawn([
       process.execPath, 'build', entrypoint, '--target=browser', '--format=esm', `--outfile=${output}`,
       ...(options.conditions ?? []).map((condition) => `--conditions=${condition}`),
-    ], { cwd: SDK_ROOT, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
+    ], { cwd: ENGINE_ROOT, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
     // Drain both pipes immediately so a full pipe cannot stall the child.
     const stdout = new Response(child.stdout).text().catch(() => '');
     const stderr = new Response(child.stderr).text().catch(() => '');

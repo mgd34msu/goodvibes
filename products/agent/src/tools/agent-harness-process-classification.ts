@@ -1,8 +1,8 @@
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { decisionOrClassic } from '@goodvibes-jev/engine/sdk/platform/runtime';
-import { gateJudgmentRegistry, snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { SOURCE_SCREENING_LIMITS, type ProtectedSourceOwner, type SourceScreeningReceipt } from '@goodvibes-jev/engine/sdk/platform/security';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { decisionOrClassic } from '@goodvibes-jev/engine/platform/platform/runtime';
+import { gateJudgmentRegistry, snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
+import { SOURCE_SCREENING_LIMITS, type ProtectedSourceOwner, type SourceScreeningReceipt } from '@goodvibes-jev/engine/platform/platform/security';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Battery, YesNoItem } from '@goodvibes-jev/judgment';
 
 export interface ProcessClassificationOptions {

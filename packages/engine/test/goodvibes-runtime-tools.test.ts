@@ -2,13 +2,13 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.js';
 import {
   appendGoodVibesRuntimeAwarenessPrompt,
   createGoodVibesContextTool,
   createGoodVibesSettingsTool,
-} from '../sdk/src/platform/tools/goodvibes-runtime/index.js';
+} from '../platform/src/platform/tools/goodvibes-runtime/index.js';
 import { useConfigReadings } from './_helpers/config-readings.ts';
 
 function makeConfigManager(): ConfigManager {

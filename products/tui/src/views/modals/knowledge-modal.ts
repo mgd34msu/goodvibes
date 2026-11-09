@@ -8,8 +8,8 @@ import type {
   ConfigModalView,
 } from '../../input/config-modal-types.ts';
 import { JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
-import type { KnowledgeService } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { KnowledgeService } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 // ---------------------------------------------------------------------------
 // Knowledge (graph) → config-modal surface (group-B port). Two tabs:
@@ -18,7 +18,7 @@ import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
 // mutations (accept/reject/resolve/reopen) route to the `/knowledge
 // review-issue` command. 'm' cross-opens the memory surface. Selection-blind
 // port: the earlier view's selected-row id/detail is folded into each row label.
-// refresh() is the only place this module touches the SDK.
+// refresh() is the only place this module touches the platform.
 // ---------------------------------------------------------------------------
 
 type KnowledgeReadOptions = Parameters<KnowledgeService['listNodes']>[1];
@@ -193,7 +193,7 @@ export function createKnowledgeModalSurface(deps: KnowledgeModalDeps): Knowledge
 
 /**
  * Deterministic golden fixture: fixed node/source/issue/schedule records,
- * no live SDK calls, no random ids, no wall-clock reads.
+ * no live platform calls, no random ids, no wall-clock reads.
  */
 export function knowledgeModalGoldenSurface(): ConfigModalSurface {
   const nodes: readonly KnowledgeNodeLike[] = [{ id: 'node-1', kind: 'topic', title: 'Release cadence', summary: 'Batched internal releases, no per-change tags.' }];

@@ -11,7 +11,7 @@
 // offer. Platforms with no pinned managed build say so honestly.
 // ---------------------------------------------------------------------------
 
-import { currentVoicePlatform, piperProvisionBytes } from '@goodvibes-jev/engine/sdk/platform/voice';
+import { currentVoicePlatform, piperProvisionBytes } from '@goodvibes-jev/engine/platform/platform/voice';
 import { formatVoiceBytes } from '../core/voice-provision-status.ts';
 
 export interface LocalVoiceSetupOffer {

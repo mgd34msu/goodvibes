@@ -22,13 +22,13 @@
  * Steps, in dependency order:
  *   1. package.json version (unless --no-bump)
  *   2. relock: `bun install`, so bun.lock and node_modules resolve the pinned
- *      SDK, daemon and toolchain versions from package.json
- *   3. project surfaces, in a fresh process so they import the SDK the relock
+ *      engine, daemon and toolchain versions from package.json
+ *   3. project surfaces, in a fresh process so they import the engine the relock
  *      just installed (scripts/prebuild.ts): the src/version.ts fallback, the
  *      README badge, docs/foundation-artifacts, docs/commands-reference.md
- *   4. workflow pins: every `mgd34msu/goodvibes-sdk/.github/workflows/*.yml@<sha>`
- *      reference moves to the commit the pinned SDK version's tag points at,
- *      and every `@goodvibes-jev/engine/toolchain@<version>` moves to the
+ *   4. workflow pins: every `mgd34msu/goodvibes/.github/workflows/*.yml@<sha>`
+ *      reference moves to the commit the pinned engine version's tag points at,
+ *      and every `@goodvibes-jev/engine@<version>` moves to the
  *      devDependencies pin
  *   5. a `## [X.Y.Z] - YYYY-MM-DD` CHANGELOG section scaffold at the first
  *      `---` separator, when none exists for the version (unless --no-changelog)
@@ -41,7 +41,7 @@ import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const ROOT = join(import.meta.dir, '..');
-const SDK_REPO_URL = 'https://github.com/mgd34msu/goodvibes-sdk';
+const WORKSPACE_REPO_URL = 'https://github.com/mgd34msu/goodvibes';
 
 export type BumpKind = 'patch' | 'minor' | 'major';
 
@@ -87,23 +87,23 @@ export function scaffoldChangelogText(changelog: string, version: string, date: 
 }
 
 /**
- * A workflow file with every SDK reusable-workflow reference pointed at
- * `sha` (the commit the SDK's `v<sdkVersion>` tag points at, with its trailing
- * `# sdk <version> release` note kept in step), and every pinned toolchain spec
+ * A workflow file with every engine reusable-workflow reference pointed at
+ * `sha` (the commit the engine's `v<engineVersion>` tag points at, with its trailing
+ * `# engine <version> release` note kept in step), and every pinned toolchain spec
  * set to `toolchainVersion`.
  */
 export function rewriteWorkflowPins(
   text: string,
-  pins: { readonly sdkVersion: string; readonly sdkSha: string | null; readonly toolchainVersion: string },
+  pins: { readonly engineVersion: string; readonly engineSha: string | null; readonly toolchainVersion: string },
 ): string {
   let next = text.replace(
-    /(@goodvibes-jev\/engine\/toolchain@)\d+\.\d+\.\d+/g,
+    /(@goodvibes-jev\/engine@)\d+\.\d+\.\d+/g,
     `$1${pins.toolchainVersion}`,
   );
-  if (pins.sdkSha !== null) {
+  if (pins.engineSha !== null) {
     next = next.replace(
-      /(mgd34msu\/goodvibes-sdk\/\.github\/workflows\/[\w.-]+\.ya?ml@)[0-9a-f]{40}( # sdk )\d+\.\d+\.\d+( release)?/g,
-      `$1${pins.sdkSha}$2${pins.sdkVersion} release`,
+      /(mgd34msu\/goodvibes\/\.github\/workflows\/[\w.-]+\.ya?ml@)[0-9a-f]{40}( # engine )\d+\.\d+\.\d+( release)?/g,
+      `$1${pins.engineSha}$2${pins.engineVersion} release`,
     );
   }
   return next;
@@ -151,15 +151,15 @@ function run(label: string, command: string, args: readonly string[]): void {
   if (result.status !== 0) throw new Error(`${label} failed (exit ${result.status ?? 'signal'})`);
 }
 
-function resolveSdkTagSha(sdkVersion: string): string {
-  const tag = `v${sdkVersion}`;
-  const result = spawnSync('git', ['ls-remote', SDK_REPO_URL, `refs/tags/${tag}`, `refs/tags/${tag}^{}`], {
+function resolveEngineTagSha(engineVersion: string): string {
+  const tag = `v${engineVersion}`;
+  const result = spawnSync('git', ['ls-remote', WORKSPACE_REPO_URL, `refs/tags/${tag}`, `refs/tags/${tag}^{}`], {
     encoding: 'utf8',
     timeout: 60_000,
   });
   const sha = result.status === 0 ? peeledTagSha(result.stdout, tag) : null;
   if (!sha) {
-    throw new Error(`could not resolve ${SDK_REPO_URL} tag ${tag}; rerun with network, or pass --no-pins and update the SHAs by hand`);
+    throw new Error(`could not resolve ${WORKSPACE_REPO_URL} tag ${tag}; rerun with network, or pass --no-pins and update the SHAs by hand`);
   }
   return sha;
 }
@@ -192,19 +192,18 @@ function main(argv: readonly string[]): void {
       dependencies?: Record<string, string>;
       devDependencies?: Record<string, string>;
     };
-    const sdkVersion = pkg.dependencies?.['@goodvibes-jev/engine/sdk'];
-    const toolchainVersion = pkg.devDependencies?.['@goodvibes-jev/engine/toolchain'];
-    if (!sdkVersion || !/^\d+\.\d+\.\d+$/.test(sdkVersion)) throw new Error(`@goodvibes-jev/engine/sdk is not pinned to an exact version: ${String(sdkVersion)}`);
-    if (!toolchainVersion || !/^\d+\.\d+\.\d+$/.test(toolchainVersion)) throw new Error(`@goodvibes-jev/engine/toolchain is not pinned to an exact version: ${String(toolchainVersion)}`);
-    const sdkSha = resolveSdkTagSha(sdkVersion);
+    const engineVersion = pkg.dependencies?.['@goodvibes-jev/engine'] ?? pkg.devDependencies?.['@goodvibes-jev/engine'];
+    const toolchainVersion = engineVersion;
+    if (!engineVersion || !/^\d+\.\d+\.\d+$/.test(engineVersion)) throw new Error(`@goodvibes-jev/engine is not pinned to an exact version: ${String(engineVersion)}`);
+    const engineSha = resolveEngineTagSha(engineVersion);
     const workflowsDir = join(ROOT, '.github', 'workflows');
     for (const name of readdirSync(workflowsDir).filter((f) => /\.ya?ml$/.test(f))) {
       const path = join(workflowsDir, name);
       const before = readFileSync(path, 'utf8');
-      const after = rewriteWorkflowPins(before, { sdkVersion, sdkSha, toolchainVersion });
+      const after = rewriteWorkflowPins(before, { engineVersion, engineSha, toolchainVersion });
       if (after !== before) {
         writeFileSync(path, after);
-        console.log(`[release:prepare] .github/workflows/${name}: sdk ${sdkVersion} (${sdkSha.slice(0, 12)}), toolchain ${toolchainVersion}`);
+        console.log(`[release:prepare] .github/workflows/${name}: engine ${engineVersion} (${engineSha.slice(0, 12)}), toolchain ${toolchainVersion}`);
       }
     }
   }

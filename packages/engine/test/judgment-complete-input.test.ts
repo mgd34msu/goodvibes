@@ -1,13 +1,13 @@
-import { booleanValueView } from '../sdk/src/platform/tools/batteries/boolean-value.js';
+import { booleanValueView } from '../platform/src/platform/tools/batteries/boolean-value.js';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { detectRecurringCharge } from '../sdk/src/platform/payments/cart.ts';
-import { MAX_SUMMARY_CHARS, orderSummaryView } from '../sdk/src/platform/payments/batteries/recurring-charge.ts';
-import { findContentTaint } from '../sdk/src/platform/security/content-taint.ts';
-import { MAX_DERIVATION_CHARS, derivationView } from '../sdk/src/platform/security/batteries/content-derivation.ts';
-import { readRequest, requestState } from '../sdk/src/platform/routing/request-reading.ts';
+import { detectRecurringCharge } from '../platform/src/platform/payments/cart.ts';
+import { MAX_SUMMARY_CHARS, orderSummaryView } from '../platform/src/platform/payments/batteries/recurring-charge.ts';
+import { findContentTaint } from '../platform/src/platform/security/content-taint.ts';
+import { MAX_DERIVATION_CHARS, derivationView } from '../platform/src/platform/security/batteries/content-derivation.ts';
+import { readRequest, requestState } from '../platform/src/platform/routing/request-reading.ts';
 
 let previous: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previous = installJudgmentPort(undefined); });

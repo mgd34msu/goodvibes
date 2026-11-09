@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { ConfigManager } from '../../config/index.ts';
 import { SecretsManager } from '../../config/secrets.ts';

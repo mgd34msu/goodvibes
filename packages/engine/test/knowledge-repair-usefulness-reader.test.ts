@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort, bindJudgmentPortAuthority } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.js';
+import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input.js';
 import { createRepairFactUsefulnessReader, prepareRepairFactUsefulness, KnowledgeRepairFactUsefulnessHeldError,
-  REPAIR_FACT_USEFULNESS_LIMITS as LIMITS, type RepairFactUsefulnessInput, type RepairFactUsefulnessHoldReason } from '../sdk/src/platform/knowledge/semantic/repair-usefulness/reader.js';
-import { repairFactUsefulness } from '../sdk/src/platform/knowledge/semantic/repair-usefulness/battery.js';
-import { registry } from '../sdk/src/platform/knowledge/semantic/repair-usefulness/judgment-registry.js';
+  REPAIR_FACT_USEFULNESS_LIMITS as LIMITS, type RepairFactUsefulnessInput, type RepairFactUsefulnessHoldReason } from '../platform/src/platform/knowledge/semantic/repair-usefulness/reader.js';
+import { repairFactUsefulness } from '../platform/src/platform/knowledge/semantic/repair-usefulness/battery.js';
+import { registry } from '../platform/src/platform/knowledge/semantic/repair-usefulness/judgment-registry.js';
 
 let previous: JudgmentPort | undefined;
 beforeEach(() => { previous = installJudgmentPort(undefined); });

@@ -1,4 +1,4 @@
-import type { ShellPathService } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 export type OnboardingShellPaths = Pick<ShellPathService, 'workingDirectory' | 'resolveProjectPath' | 'resolveUserPath'>;
 export type OnboardingMode = 'new' | 'edit' | 'reopen';
 export type OnboardingAcknowledgementTarget = 'providers' | 'subscriptions' | 'auth';

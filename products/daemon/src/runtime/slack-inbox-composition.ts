@@ -1,16 +1,16 @@
 import { attachDaemonInboxTagging, type DaemonTriageTaggingActivation } from './tagged-inbox-composition.js';
 import { createMultiOwnerDaemonInboxFactory } from './multiowner-inbox-composition.js';
-import { createInboxRouteResolver } from '@goodvibes-jev/engine/sdk/platform/channels';
-import type { ClusterClock } from '@goodvibes-jev/engine/sdk/platform/cluster';
+import { createInboxRouteResolver } from '@goodvibes-jev/engine/platform/platform/channels';
+import type { ClusterClock } from '@goodvibes-jev/engine/platform/platform/cluster';
 import { ownInboxEligibility } from './inbox-eligibility.js';
 import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
-import { acquireCrossProcessLock } from '@goodvibes-jev/engine/sdk/platform/state/durable-file-io';
+import { acquireCrossProcessLock } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
 import {
   createSlackInboxOwner, acquireAccountInboxIdentity, registerInboxSurface, createOwnedInboxSource, createOwnedTriagedInboxSource,
   type SlackInboxAccount, type SlackInboxOwner, type InboxSurfaceRegistration, type InboxTriageAuthority,
-} from '@goodvibes-jev/engine/sdk/platform/intake';
-import type { ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/sdk/platform/security';
+} from '@goodvibes-jev/engine/platform/platform/intake';
+import type { ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/platform/platform/security';
 import type { DaemonInboxSourceFactory } from './multiowner-inbox-composition.js';
 import type { DaemonInboxFactory } from './daemon-handler-composition.js';
 

@@ -3,10 +3,10 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { DaemonAutoUpdater } from '../sdk/src/platform/daemon/auto-updater.ts';
-import { DaemonReceiptStore } from '../sdk/src/platform/daemon/receipts.ts';
-import { inspectDaemonUpdateInstallation, resolveDaemonUpdateTargets } from '../sdk/src/platform/runtime/daemon-update-installation.ts';
-import { realUpdateFileIo, rollbackSuiteUpdate } from '../sdk/src/platform/runtime/self-update.ts';
+import { DaemonAutoUpdater } from '../platform/src/platform/daemon/auto-updater.ts';
+import { DaemonReceiptStore } from '../platform/src/platform/daemon/receipts.ts';
+import { inspectDaemonUpdateInstallation, resolveDaemonUpdateTargets } from '../platform/src/platform/runtime/daemon-update-installation.ts';
+import { realUpdateFileIo, rollbackSuiteUpdate } from '../platform/src/platform/runtime/self-update.ts';
 import { suiteReleaseFixture } from './_helpers/suite-release-fixture.ts';
 
 for (const initiallyBusy of [false, true]) test(`Darwin daemon maintains the complete installed suite and previous cohort (initially busy=${initiallyBusy})`, async () => {

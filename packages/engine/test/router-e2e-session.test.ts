@@ -17,8 +17,8 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { dispatchSessionRoutes } from '../daemon-sdk/src/sessions.js';
-import type { DaemonApiRouteHandlers } from '../daemon-sdk/src/context.js';
+import { dispatchSessionRoutes } from '../daemon-api/src/sessions.js';
+import type { DaemonApiRouteHandlers } from '../daemon-api/src/context.js';
 import { makeRequest } from './_helpers/router-requests.js';
 
 function makeSession(id = 'sess-1') {

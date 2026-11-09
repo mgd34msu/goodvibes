@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import type { AtRestCipher } from '../sdk/src/platform/config/daemon-credential-store.js';
-import { DraftSyncStore } from '../sdk/src/platform/channels/host-drafts/draft-store.js';
+import type { AtRestCipher } from '../platform/src/platform/config/daemon-credential-store.js';
+import { DraftSyncStore } from '../platform/src/platform/channels/host-drafts/draft-store.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 function deferred() {

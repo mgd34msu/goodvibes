@@ -1,15 +1,15 @@
 import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { existsSync, rmSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { AgentOrchestrator } from '@goodvibes-jev/engine/sdk/platform/agents';
-import type { AgentRecord } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { LLMProvider, ChatRequest, ChatResponse } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { FileStateCache } from '@goodvibes-jev/engine/sdk/platform/state';
-import { MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/sdk/platform/state';
-import { ProjectIndex } from '@goodvibes-jev/engine/sdk/platform/state';
+import { AgentOrchestrator } from '@goodvibes-jev/engine/platform/platform/agents';
+import type { AgentRecord } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { LLMProvider, ChatRequest, ChatResponse } from '@goodvibes-jev/engine/platform/platform/providers';
+import { FileStateCache } from '@goodvibes-jev/engine/platform/platform/state';
+import { MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/platform/platform/state';
+import { ProjectIndex } from '@goodvibes-jev/engine/platform/platform/state';
 import { randomUUID } from 'node:crypto';
-import { PermissionManager, createPermissionConfigReader } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import type { PermissionRequestHandler } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import { PermissionManager, createPermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
+import type { PermissionRequestHandler } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { PolicyRuntimeState } from '@/runtime/index.ts';
 import { getTestRuntimeServices, resetTestRuntimeServices } from '../helpers/runtime-services.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
@@ -748,7 +748,7 @@ describe('AgentOrchestrator', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Background-agent permission gating (SDK 1.6.1: permissions.backgroundAgents)
+  // Background-agent permission gating (platform 1.6.1: permissions.backgroundAgents)
   // -------------------------------------------------------------------------
 
   describe('background agent permission gating', () => {
@@ -769,7 +769,7 @@ describe('AgentOrchestrator', () => {
 
       // Re-issue setDependencies with the SAME deps beforeEach already wired,
       // adding permissionManager, proves the agent's own composition (not
-      // just the SDK in isolation) brokers the ask when one is present.
+      // just the platform in isolation) brokers the ask when one is present.
       orchestrator.setDependencies({
         surfaceRoot: 'tui',
         fileCache,

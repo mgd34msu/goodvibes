@@ -3,8 +3,8 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { ChannelDeliveryRequest } from '@goodvibes-jev/engine/sdk/platform/channels';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { ChannelDeliveryRequest } from '@goodvibes-jev/engine/platform/platform/channels';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { createShellPathService } from '@/runtime/index.ts';
 import { readAgentChannelDeliveryReceipts } from '../../agent/channel-delivery-receipts.ts';
 import {

@@ -1,8 +1,8 @@
 /** Standalone explicit send, adapted from goodvibes-daemon 254699bf. */
 import { randomUUID } from 'node:crypto';
-import { isDeclaredSecretBearingConfigKey, type ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ChannelDeliveryRequest } from '@goodvibes-jev/engine/sdk/platform/channels';
-import { operations } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { isDeclaredSecretBearingConfigKey, type ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ChannelDeliveryRequest } from '@goodvibes-jev/engine/platform/platform/channels';
+import { operations } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { findSendChannel, readChannelReadiness, resolveDefaultChannel, SEND_CHANNELS } from './channels.js';
 import { describeSendFailure } from './failure-text.js';
 import { inertBodyFor } from './inert-text.js';

@@ -4,9 +4,9 @@ import { JEV_DECISION_SCHEMA } from '@goodvibes-jev/judgment/decisions';
 import { renderType } from '../scripts/foundation-io-render.js';
 import { sampleFromSchema } from '../contracts/src/testing/mock-daemon.js';
 import { firstJsonSchemaFailure } from '../transport-http/src/client-plumbing.js';
-import { CONTRACT_VIEW_SCHEMA } from '../sdk/src/platform/control-plane/operator-contract-schemas-contracts.js';
-import { nativeSelectedDiffContextSchema } from '../sdk/src/platform/workflow/work-ledger/native-diff-context.js';
-import { CONTRACT_DURABLE_ADMISSION_SCHEMA } from '../sdk/src/platform/control-plane/operator-contract-schemas-contract-inspection.js';
+import { CONTRACT_VIEW_SCHEMA } from '../platform/src/platform/control-plane/operator-contract-schemas-contracts.js';
+import { nativeSelectedDiffContextSchema } from '../platform/src/platform/workflow/work-ledger/native-diff-context.js';
+import { CONTRACT_DURABLE_ADMISSION_SCHEMA } from '../platform/src/platform/control-plane/operator-contract-schemas-contract-inspection.js';
 
 test('literal JSON Schema const values retain their exact generated TypeScript type', () => {
   for (const [value, expected] of [[1, '1'], ['act', '"act"'], [true, 'true'], [false, 'false'], [null, 'null'], ['a"b', '"a\\"b"']] as const) {

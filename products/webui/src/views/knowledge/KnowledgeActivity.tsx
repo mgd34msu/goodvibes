@@ -4,7 +4,7 @@
  * '766 jobs ran / 0 nodes' reading is explained here).
  */
 import { useQuery } from '@tanstack/react-query';
-import { invokeMethod, sdk } from '../../lib/goodvibes';
+import { invokeMethod, client as platformClient } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { asRecord, bestId, bestStatus, bestTitle, compactJson, firstArray } from '../../lib/object';
 import { CodeFrame, DetailSection, Disclosure, Facts, SkeletonRows } from '../../components/data-view/DataView';
@@ -23,7 +23,7 @@ export function scalarFacts(value: unknown, limit = 12): { label: string; value:
 }
 
 export function KnowledgeActivity() {
-  const status = useQuery({ queryKey: queryKeys.knowledgeStatus, queryFn: () => sdk.knowledge.status() });
+  const status = useQuery({ queryKey: queryKeys.knowledgeStatus, queryFn: () => platformClient.knowledge.status() });
   const refinement = useQuery({
     queryKey: queryKeys.knowledgeRefinement,
     queryFn: () => invokeMethod('knowledge.refinement.tasks.list', { limit: 100 }),

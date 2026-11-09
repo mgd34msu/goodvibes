@@ -1,6 +1,6 @@
 /**
  * MemoryDiagnostics, the admin/ops surface for the daemon's own memory-pressure
- * governance state (ops.memory.get, SDK 1.9.0-dev's memory-relay-voice-hardening
+ * governance state (ops.memory.get, platform 1.9.0-dev's memory-relay-voice-hardening
  * work). Same non-schema-driven pattern as PowerSettings/TailscaleSettings: this verb
  * carries no CONFIG_SCHEMA entry, so it gets its own panel rather than a
  * SettingsModal row.

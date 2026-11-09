@@ -28,10 +28,10 @@ import {
   InboundExpectationRegistry,
   InboundMailStore,
   PersistedExpectationStore,
-} from '../sdk/src/platform/email/inbound/index.ts';
-import type { ImapInboundMessage } from '../sdk/src/platform/email/inbound/ports.ts';
-import type { SurfaceNoticeDelivery } from '../sdk/src/platform/daemon/types.ts';
-import type { InboundMailMessageKey, InboundMailRecordInput } from '../sdk/src/platform/email/inbound/record-store.ts';
+} from '../platform/src/platform/email/inbound/index.ts';
+import type { ImapInboundMessage } from '../platform/src/platform/email/inbound/ports.ts';
+import type { SurfaceNoticeDelivery } from '../platform/src/platform/daemon/types.ts';
+import type { InboundMailMessageKey, InboundMailRecordInput } from '../platform/src/platform/email/inbound/record-store.ts';
 
 const NOW = new Date('2026-07-28T09:00:00.000Z');
 const ALIAS = 'signup-9f31@his-catchall.test';

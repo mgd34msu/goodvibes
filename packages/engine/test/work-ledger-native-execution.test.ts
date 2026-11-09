@@ -1,36 +1,36 @@
-import { KNOWLEDGE_SCHEMA_VERSION } from '../sdk/src/platform/knowledge/store-schema.js';
+import { KNOWLEDGE_SCHEMA_VERSION } from '../platform/src/platform/knowledge/store-schema.js';
 import { createHash } from 'node:crypto';
-import { createNativeConversationIntakeHost } from '../sdk/src/platform/workflow/work-ledger/native-intake.js';
-import { canonicalNativeConversationContinuation } from '../sdk/src/platform/workflow/work-ledger/native-continuation-context.js';
-import { createNativeWorkSubmissionHost } from '../sdk/src/platform/workflow/work-ledger/native-submission.js';
-import { registerNativeWorkSubmissionGatewayMethods } from '../sdk/src/platform/control-plane/routes/native-work-submission.js';
+import { createNativeConversationIntakeHost } from '../platform/src/platform/workflow/work-ledger/native-intake.js';
+import { canonicalNativeConversationContinuation } from '../platform/src/platform/workflow/work-ledger/native-continuation-context.js';
+import { createNativeWorkSubmissionHost } from '../platform/src/platform/workflow/work-ledger/native-submission.js';
+import { registerNativeWorkSubmissionGatewayMethods } from '../platform/src/platform/control-plane/routes/native-work-submission.js';
 import * as nativeFs from 'node:fs';
-import * as atomicStore from '../sdk/src/platform/utils/atomic-json-store.js';
+import * as atomicStore from '../platform/src/platform/utils/atomic-json-store.js';
 /** Real paired authority, workspace scope and KnowledgeStore bridge into the real durable runner. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { SQLiteStore } from '../sdk/src/platform/state/sqlite-store.js';
+import { SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
 import { SqliteDecisionLog, withDecisionLog, createSystemOnePort, DEFAULT_MODEL, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { createWorkLedger } from '../sdk/src/platform/workflow/work-ledger/service.js';
-import { createNativeWorkExecutionHost } from '../sdk/src/platform/workflow/work-ledger/native-execution.js';
-import { criteriaSetIdForWork } from '../sdk/src/platform/contract/durable-admission.js';
-import { getContractInputAuthority, authorizeContractInputPath } from '../sdk/src/platform/contract/input-authority.js';
-import { PairingTokenManager } from '../sdk/src/platform/pairing/pairing-token-store.js';
-import { WorkspaceRegistrationStore } from '../sdk/src/platform/workspace/registration/store.js';
-import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../sdk/src/platform/daemon/control-plane.js';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.js';
-import { registerNativeWorkExecutionGatewayMethods } from '../sdk/src/platform/control-plane/routes/native-work-execution.js';
-import { registerWorkLedgerGatewayMethods } from '../sdk/src/platform/control-plane/routes/work-ledger.js';
-import { createLocalWorkLedgerReadBinding } from '../sdk/src/platform/workflow/work-ledger/read-client.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { createWorkLedger } from '../platform/src/platform/workflow/work-ledger/service.js';
+import { createNativeWorkExecutionHost } from '../platform/src/platform/workflow/work-ledger/native-execution.js';
+import { criteriaSetIdForWork } from '../platform/src/platform/contract/durable-admission.js';
+import { getContractInputAuthority, authorizeContractInputPath } from '../platform/src/platform/contract/input-authority.js';
+import { PairingTokenManager } from '../platform/src/platform/pairing/pairing-token-store.js';
+import { WorkspaceRegistrationStore } from '../platform/src/platform/workspace/registration/store.js';
+import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../platform/src/platform/daemon/control-plane.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
+import { registerNativeWorkExecutionGatewayMethods } from '../platform/src/platform/control-plane/routes/native-work-execution.js';
+import { registerWorkLedgerGatewayMethods } from '../platform/src/platform/control-plane/routes/work-ledger.js';
+import { createLocalWorkLedgerReadBinding } from '../platform/src/platform/workflow/work-ledger/read-client.js';
 import { createOperatorNativeWorkExecutionClient, getOperatorWorkLedgerProject,
-} from '../sdk/src/platform/workflow/work-ledger/native-execution-client.js';
-import { createOperatorSdk } from '../operator-sdk/src/client.js';
-import { dispatchGatewayRestRoutes } from '../daemon-sdk/src/gateway-rest-routes.js';
+} from '../platform/src/platform/workflow/work-ledger/native-execution-client.js';
+import { createOperatorApiClient } from '../operator-client/src/client.js';
+import { dispatchGatewayRestRoutes } from '../daemon-api/src/gateway-rest-routes.js';
 import { makeRepo, makeHarness, oneUnitPlan, waitFor, type Harness, type HarnessOptions } from './contract/runner-support.js';
 import { finishes } from './contract/steps-support.js';
 import { plannerOutput } from './contract/plan-support.js';
@@ -503,15 +503,15 @@ function transport(f: Awaited<ReturnType<typeof fixture>>, acquire = async () =>
       })) ?? Response.json({ error: 'Not found' }, { status: 404 })
     );
   };
-  const sdk = (token = f.paired.token) =>
-    createOperatorSdk({ baseUrl: 'http://127.0.0.1:1', authToken: token, fetch, retry: { maxAttempts: 1 } });
+  const platformClient = (token = f.paired.token) =>
+    createOperatorApiClient({ baseUrl: 'http://127.0.0.1:1', authToken: token, fetch, retry: { maxAttempts: 1 } });
   const identity = {
     workId: f.target.workId,
     attemptId: f.target.attemptId,
     expectedRevision: { work: f.target.workRevision, criteria: f.target.criteriaRevision, attempt: f.target.attemptRevision },
   };
   return {
-    sdk,
+    platformClient,
     identity,
     requests,
     get acquisitions() {
@@ -533,16 +533,16 @@ test('production REST route discovers native project and performs paired start/s
     },
   });
   const wire = transport(f);
-  const sdk = wire.sdk();
-  expect(await getOperatorWorkLedgerProject(sdk)).toBe('project');
+  const platformClient = wire.platformClient();
+  expect(await getOperatorWorkLedgerProject(platformClient)).toBe('project');
   expect(wire.acquisitions).toBe(0);
-  const client = createOperatorNativeWorkExecutionClient(sdk, 'project');
+  const client = createOperatorNativeWorkExecutionClient(platformClient, 'project');
   const started = await client.start(wire.identity);
   if (started.kind !== 'execution') throw new Error('Expected real execution');
   expect(started.receipt?.contractId).toBeTruthy();
   expect(started.expectedRevision).toEqual(wire.identity.expectedRevision);
   await waitFor(() => unitEntered, 'wire native unit entered its cancellable effect');
-  const replay = await createOperatorNativeWorkExecutionClient(wire.sdk(), 'project').start(wire.identity);
+  const replay = await createOperatorNativeWorkExecutionClient(wire.platformClient(), 'project').start(wire.identity);
   if (replay.kind !== 'execution') throw new Error('Expected real replay');
   expect(replay.receipt).toEqual(started.receipt);
   expect(f.log.query({ site: 'work-ledger.native-start' })).toHaveLength(1);
@@ -575,15 +575,15 @@ test('native wire rejects shared/user authority, scope loss, identity injection 
   const f = await fixture();
   const wire = transport(f);
   for (const token of ['synthetic-shared', 'synthetic-user-session']) {
-    await expect(createOperatorNativeWorkExecutionClient(wire.sdk(token), 'project').start(wire.identity)).rejects.toMatchObject({
+    await expect(createOperatorNativeWorkExecutionClient(wire.platformClient(token), 'project').start(wire.identity)).rejects.toMatchObject({
       status: 403,
     });
   }
-  await expect(createOperatorNativeWorkExecutionClient(wire.sdk(), 'wrong-project').start(wire.identity)).rejects.toMatchObject({
+  await expect(createOperatorNativeWorkExecutionClient(wire.platformClient(), 'wrong-project').start(wire.identity)).rejects.toMatchObject({
     status: 403,
   });
   await expect(
-    wire.sdk().invoke('workLedger.execution.start', { projectId: 'project', ...wire.identity, source: { goal: 'injected' } }),
+    wire.platformClient().invoke('workLedger.execution.start', { projectId: 'project', ...wire.identity, source: { goal: 'injected' } }),
   ).rejects.toMatchObject({ status: 400 });
   const principal = f.helper.describeAuthenticatedPrincipal(f.paired.token)!;
   for (const scopes of [['read:work-ledger'], ['write:fleet'], ['read:events', 'read:fleet']]) {
@@ -603,7 +603,7 @@ test('native wire rejects shared/user authority, scope loss, identity injection 
 test('native status and cancel resolve admitted attempt after authoritative work and criteria revisions change', async () => {
   const f = await fixture({ harness: { contract: { maxActiveContracts: 0 } } });
   const wire = transport(f);
-  const client = createOperatorNativeWorkExecutionClient(wire.sdk(), 'project');
+  const client = createOperatorNativeWorkExecutionClient(wire.platformClient(), 'project');
   const started = await client.start(wire.identity);
   if (started.kind !== 'execution') throw new Error('Expected real execution');
   const revised = await f.ledger.service.execute(
@@ -657,7 +657,7 @@ test('native wire rechecks pairing after asynchronous graph acquisition and does
     await gate;
     return f.host;
   });
-  const pending = createOperatorNativeWorkExecutionClient(wire.sdk(), 'project').start(wire.identity);
+  const pending = createOperatorNativeWorkExecutionClient(wire.platformClient(), 'project').start(wire.identity);
   await ready;
   f.tokens.revoke(f.paired.id);
   release();
@@ -669,7 +669,7 @@ test('native wire rechecks pairing after asynchronous graph acquisition and does
 test('native wire replacement host reports recovery required without executing another unit', async () => {
   const f = await fixture({ harness: { scripts: { u1: () => [{ text: 'waiting', stop: { kind: 'hang' } }] } } });
   const wire = transport(f);
-  const client = createOperatorNativeWorkExecutionClient(wire.sdk(), 'project');
+  const client = createOperatorNativeWorkExecutionClient(wire.platformClient(), 'project');
   await client.start(wire.identity);
   await waitFor(() => f.harness.agentsOf('u1').length === 1, 'wire claimed unit');
   const replacement = createNativeWorkExecutionHost(f.hostOptions);
@@ -686,7 +686,7 @@ for (const cancelAssociation of [false, true])
   test(`native wire refuses terminal execution restart${cancelAssociation ? ' when cancelled association retains a passed checkpoint' : ''}`, async () => {
     const f = await fixture({ harness: cancelAssociation ? {} : { scripts: { u1: () => [{ text: 'waiting', stop: { kind: 'hang' } }] } } });
     const wire = transport(f);
-    const client = createOperatorNativeWorkExecutionClient(wire.sdk(), 'project');
+    const client = createOperatorNativeWorkExecutionClient(wire.platformClient(), 'project');
     const started = await client.start(wire.identity);
     if (started.kind !== 'execution' || !started.receipt) throw new Error('Expected native execution');
     if (cancelAssociation) {
@@ -772,7 +772,7 @@ test('wire explicit resume after real prepared-process restart keeps admission I
   expect(child.status, child.stderr).toBe(0);
   const before = JSON.parse(child.stdout) as { contractId: string; ownerAgentId: string };
   const wire = transport(f);
-  const client = createOperatorNativeWorkExecutionClient(wire.sdk(), 'project');
+  const client = createOperatorNativeWorkExecutionClient(wire.platformClient(), 'project');
   expect((await client.status(wire.identity)).state).toBe('prepared');
   expect(f.harness.agentsOf('u1')).toHaveLength(0);
   const resumed = await client.resume(wire.identity);
@@ -822,7 +822,7 @@ test('wire missing execution is a typed 404 inspection result, never an implicit
 test('target-aware cancellation wins before the first start without inventing an admission', async () => {
   const f = await fixture();
   const wire = transport(f);
-  const client = createOperatorNativeWorkExecutionClient(wire.sdk(), 'project');
+  const client = createOperatorNativeWorkExecutionClient(wire.platformClient(), 'project');
   const cancelled = await client.cancel(wire.identity);
   expect(cancelled).toMatchObject({ kind: 'prevented-before-admission', state: 'cancelled', recovery: 'cancelled' });
   expect('receipt' in cancelled).toBe(false);
@@ -847,7 +847,7 @@ test('fresh native execution persists opaque refs and the exact private paired/s
   expect(execution.request.key.criteriaId).toBe(`criteria-v2:${execution.target.workId}`);
   for (const value of [identity.principalId, identity.authorityRevision, scope.scopeId, scope.scopeRevision]) expect(JSON.stringify(execution.request.binding)).not.toContain(value);
   expect(execution.request.binding.authorityRevision).toMatch(/^[a-f0-9]{64}$/);
-  const wire = transport(f), client = createOperatorNativeWorkExecutionClient(wire.sdk(), 'project');
+  const wire = transport(f), client = createOperatorNativeWorkExecutionClient(wire.platformClient(), 'project');
   try {
     const projected = await client.status(wire.identity);
     expect(JSON.stringify(projected)).not.toContain(identity.principalId);
@@ -914,7 +914,7 @@ test('REST cancellation publishes its tombstone while Jev is held, then joins an
     }),
   });
   const wire = transport(f);
-  const client = createOperatorNativeWorkExecutionClient(wire.sdk(), 'project');
+  const client = createOperatorNativeWorkExecutionClient(wire.platformClient(), 'project');
   const start = client.start(wire.identity);
   await ready;
   expect(await client.status(wire.identity)).toMatchObject({ kind: 'pending-intent', state: 'admitting', recovery: 'pending' });
@@ -1036,7 +1036,7 @@ test('a refused intent stays visibly refused until explicit same-target resume',
     }),
   });
   const wire = transport(f);
-  const client = createOperatorNativeWorkExecutionClient(wire.sdk(), 'project');
+  const client = createOperatorNativeWorkExecutionClient(wire.platformClient(), 'project');
   await expect(client.start(wire.identity)).rejects.toMatchObject({ status: 422 });
   expect(await client.status(wire.identity)).toMatchObject({ kind: 'pending-intent', state: 'refused', recovery: 'required' });
   await expect(client.start(wire.identity)).rejects.toMatchObject({ status: 422 });
@@ -1161,7 +1161,7 @@ test('actual process exit with only a pending intent stays held until explicit f
   expect(child.status, child.stderr).toBe(0);
   expect(JSON.parse(child.stdout)).toEqual({ generation: 1, state: 'admitting' });
   const wire = transport(f);
-  const client = createOperatorNativeWorkExecutionClient(wire.sdk(), 'project');
+  const client = createOperatorNativeWorkExecutionClient(wire.platformClient(), 'project');
   expect(await client.status(wire.identity)).toMatchObject({ kind: 'pending-intent', recovery: 'required' });
   expect(await client.start(wire.identity)).toMatchObject({ kind: 'pending-intent', recovery: 'required' });
   expect(f.harness.runner.list({ includeTerminal: true })).toHaveLength(0);
@@ -1175,7 +1175,7 @@ test('actual process exit with only a pending intent stays held until explicit f
 test('cancel after native association but before receipt retention is execution cancellation, never a fake prevention receipt', async () => {
   const f = await fixture();
   const wire = transport(f);
-  const client = createOperatorNativeWorkExecutionClient(wire.sdk(), 'project');
+  const client = createOperatorNativeWorkExecutionClient(wire.platformClient(), 'project');
   let entered!: () => void;
   const ready = new Promise<void>((resolve) => {
     entered = resolve;

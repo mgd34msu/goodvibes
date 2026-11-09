@@ -2,7 +2,7 @@
 /**
  * generate-config-ownership.ts
  *
- * Snapshots the SDK's config-ownership data, which config keys/prefixes the
+ * Snapshots the engine's config-ownership data, which config keys/prefixes the
  * daemon owns, into one checked-in, browser-safe TS module:
  *
  *   src/lib/generated/config-ownership.ts
@@ -10,12 +10,12 @@
  * Why a generator (mirrors scripts/generate-config-schema.ts and
  * scripts/generate-presentation-tokens.ts): before this script existed,
  * src/lib/config-ownership.ts hand-copied DAEMON_OWNED_CONFIG_PREFIXES and
- * DAEMON_OWNED_CONFIG_KEYS from the SDK's
- * packages/sdk/src/platform/config/config-ownership.ts as a comment-enforced
+ * DAEMON_OWNED_CONFIG_KEYS from the engine's
+ * packages/engine/src/platform/config/config-ownership.ts as a comment-enforced
  * "keep in sync by hand" mirror. It drifted: it was missing the
  * `conversationGate.` and `cluster.` prefixes, and it never carried
  * DAEMON_OWNED_NON_SCHEMA_CONFIG_PATHS at all (so keys like
- * `email.passwordRef` and `calendar.google.icsUrl`, daemon-owned per the SDK
+ * `email.passwordRef` and `calendar.google.icsUrl`, daemon-owned per the engine
  * because they hold mail/calendar credentials, read as NOT daemon-owned in
  * this UI's badge, even though the daemon is in fact the only writer). Because
  * routing happens server-side (daemon-config-route.ts), the drift never broke
@@ -24,10 +24,10 @@
  *
  * A hand-maintained mirror with a comment asking people to remember is not a
  * mechanism; this script is: it imports the real data tables from the
- * installed SDK at BUILD TIME (this script runs under bun/node, never inside
+ * installed engine at BUILD TIME (this script runs under bun/node, never inside
  * the Vite bundle) and snapshots them as plain literals. The browser only
  * ever imports the emitted literal, so importing
- * `@goodvibes-jev/engine/sdk/platform/config` here does not pull SecretsManager /
+ * `@goodvibes-jev/engine/platform/platform/config` here does not pull SecretsManager /
  * OAuth / google-auth into the bundle, same reasoning generate-config-schema.ts
  * already relies on for CONFIG_SCHEMA and FEATURE_SETTINGS.
  *
@@ -44,7 +44,7 @@ import {
   DAEMON_OWNED_CONFIG_KEYS,
   DAEMON_OWNED_CONFIG_PREFIXES,
   DAEMON_OWNED_NON_SCHEMA_CONFIG_PATHS,
-} from '@goodvibes-jev/engine/sdk/platform/config';
+} from '@goodvibes-jev/engine/platform/platform/config';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
@@ -61,7 +61,7 @@ export interface ConfigOwnershipSnapshot {
   readonly nonSchemaPaths: readonly string[];
 }
 
-/** Read the real ownership tables from the installed SDK. */
+/** Read the real ownership tables from the installed engine. */
 export function loadOwnershipSnapshot(): ConfigOwnershipSnapshot {
   return {
     prefixes: [...DAEMON_OWNED_CONFIG_PREFIXES],
@@ -80,7 +80,7 @@ const GENERATED_BANNER = [
   '@goodvibes-jev/engine: DAEMON_OWNED_CONFIG_PREFIXES, DAEMON_OWNED_CONFIG_KEYS',
   'and DAEMON_OWNED_NON_SCHEMA_CONFIG_PATHS (platform/config).',
   '',
-  'This is a build-time snapshot so the browser bundle never imports the SDK',
+  'This is a build-time snapshot so the browser bundle never imports the engine',
   'config barrel (which drags SecretsManager / OAuth / google-auth, node-only).',
   '',
   'Regenerate: `bun run config-ownership:generate`.',

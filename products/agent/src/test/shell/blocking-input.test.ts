@@ -127,7 +127,7 @@ describe('shell/blocking-input', () => {
       conversation: conversation as never,
       systemMessageRouter: router as never,
       render: () => { rendered++; },
-      // consumeRecovery (SDK primitive) loads AND retires the snapshot in one
+      // consumeRecovery (platform primitive) loads AND retires the snapshot in one
       // operation, there is no separate delete callback for this branch.
       consumeRecovery: () => {
         consumed++;
@@ -204,13 +204,13 @@ describe('shell/blocking-input', () => {
 
 });
 
-// ── Real-SDK regression: recovery targets exactly the OFFERED snapshot ──────
+// ── Real-platform regression: recovery targets exactly the OFFERED snapshot ──────
 //
 // Reproduces the actual production wiring (see main.ts's stdin 'data' handler):
 // checkRecoveryFile picks the newest snapshot to offer, and the
 // consumeRecovery/removeRecoveryPoint closures must be keyed to THAT
 // sessionId, never a keyless call that would touch every snapshot in the
-// scoped recovery directory. Uses the real SDK session-persistence primitives
+// scoped recovery directory. Uses the real platform session-persistence primitives
 // against real files on disk (no mocks) so the raw filesystem state is the
 // proof.
 describe('shell/blocking-input: recovery targets exactly the offered snapshot', () => {
@@ -287,14 +287,14 @@ describe('shell/blocking-input: recovery targets exactly the offered snapshot', 
   });
 });
 
-// ── Real-SDK regression: exit retires only the exiting session's snapshot ──
+// ── Real-platform regression: exit retires only the exiting session's snapshot ──
 //
 // main.ts's exitApp calls removeRecoveryPoint(ctx.services.surface,
 // runtime.sessionId), scoped to the session that is actually exiting. A
 // keyless call (removeRecoveryPoint(surface) with no sessionId) clears every
 // snapshot in the scoped recovery directory, including offers the user never
 // answered and, in a dual-session workdir, the OTHER session's still-live
-// snapshot. This exercises the exact same real SDK primitive main.ts's exit
+// snapshot. This exercises the exact same real platform primitive main.ts's exit
 // path calls, keyed the same way, against real files on disk.
 describe('shell/blocking-input: exit removes only the exiting session snapshot', () => {
   test('removeRecoveryPoint(surface, sessionId) retires only that session, leaving a second session snapshot intact', () => {

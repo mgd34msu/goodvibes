@@ -7,4 +7,4 @@ export {
   wrapRegistryToolForAgentPolicy,
   validateAnalyzeToolInvocationForAgentPolicy,
   validateRegistryToolInvocationForAgentPolicy
-} from '@goodvibes-jev/engine/sdk/platform/gate/policy';
+} from '@goodvibes-jev/engine/platform/platform/gate/policy';

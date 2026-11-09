@@ -18,9 +18,9 @@ import type { CallOptions } from '@goodvibes-jev/judgment';
 // the URL can view it).
 // ---------------------------------------------------------------------------
 
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { readCredentialHeader } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
+import { readCredentialHeader } from '@goodvibes-jev/engine/platform/platform/tools';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 export type UploadResult =
   | { ok: true; url: string }

@@ -14,12 +14,12 @@ import {
   CONVERSATIONAL_REGENERATION_REQUEST,
   completeOrRegenerate,
   recoverEmptyConversationalReply,
-} from '../sdk/src/platform/agents/conversational-reply-recovery.js';
-import { ChannelReplyPipeline } from '../sdk/src/platform/channels/reply-pipeline.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { emitAgentCompleted } from '../sdk/src/platform/runtime/emitters/agents.js';
-import type { AgentRecord } from '../sdk/src/platform/tools/agent/manager.js';
-import { verificationMessages, verificationObservationText } from '../sdk/src/platform/core/verification/archive.js';
+} from '../platform/src/platform/agents/conversational-reply-recovery.js';
+import { ChannelReplyPipeline } from '../platform/src/platform/channels/reply-pipeline.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { emitAgentCompleted } from '../platform/src/platform/runtime/emitters/agents.js';
+import type { AgentRecord } from '../platform/src/platform/tools/agent/manager.js';
+import { verificationMessages, verificationObservationText } from '../platform/src/platform/core/verification/archive.js';
 
 function record(replyStyle?: 'conversational'): AgentRecord {
   return {

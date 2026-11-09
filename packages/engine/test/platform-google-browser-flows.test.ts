@@ -19,23 +19,23 @@ import { googleSetupFixturePort } from './_helpers/google-setup-readings.ts';
 let previousGooglePort: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previousGooglePort = installJudgmentPort(googleSetupFixturePort().port); });
 afterEach(() => { installJudgmentPort(previousGooglePort); });
-import type { BrowserEngine } from '../sdk/src/platform/browser/browser-engine.ts';
+import type { BrowserEngine } from '../platform/src/platform/browser/browser-engine.ts';
 import {
   describeElements,
   findElement,
   looksLikeGoogleSignIn,
   requireElement,
-} from '../sdk/src/platform/google/browser-elements.ts';
-import { createGoogleBrowserPort } from '../sdk/src/platform/google/browser-port.ts';
-import type { GoogleElementLookup } from '../sdk/src/platform/google/browser-elements.ts';
-import { createAppPassword } from '../sdk/src/platform/google/app-password-flow.ts';
-import { captureIcsAddress } from '../sdk/src/platform/google/calendar-ics-flow.ts';
+} from '../platform/src/platform/google/browser-elements.ts';
+import { createGoogleBrowserPort } from '../platform/src/platform/google/browser-port.ts';
+import type { GoogleElementLookup } from '../platform/src/platform/google/browser-elements.ts';
+import { createAppPassword } from '../platform/src/platform/google/app-password-flow.ts';
+import { captureIcsAddress } from '../platform/src/platform/google/calendar-ics-flow.ts';
 import {
   createDesktopOAuthClient,
   publishApp,
   readPublishingStatus,
-} from '../sdk/src/platform/google/console-flow.ts';
-import type { GoogleBrowserElement, GoogleBrowserPort } from '../sdk/src/platform/google/types.ts';
+} from '../platform/src/platform/google/console-flow.ts';
+import type { GoogleBrowserElement, GoogleBrowserPort } from '../platform/src/platform/google/types.ts';
 
 // ---------------------------------------------------------------------------
 // Layer 1 test double
@@ -809,7 +809,7 @@ describe('GoogleElementLookup shape', () => {
  * a browser-availability gate, so on any machine without a provisioned
  * browser it silently ran nothing. A test that reports success by not
  * executing is worse than no test: it occupies the space where the coverage
- * would go. The SDK's no-skipped-tests gate is what surfaced it.
+ * would go. The platform's no-skipped-tests gate is what surfaced it.
  *
  * The engine's own behaviour against a real browser is covered by the browser
  * module's suite. What is unique to THIS adapter is the mapping, snapshot rows

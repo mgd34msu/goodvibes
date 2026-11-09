@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import type { SandboxAvailability } from '@goodvibes-jev/engine/sdk/platform/tools/exec/sandbox';
-import type { PermissionExecutionOptions, PermissionPromptRequest, PermissionPromptDecision } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import type { SandboxAvailability } from '@goodvibes-jev/engine/platform/platform/tools/exec/sandbox';
+import type { PermissionExecutionOptions, PermissionPromptRequest, PermissionPromptDecision } from '@goodvibes-jev/engine/platform/platform/permissions';
 import {
   createSandboxExecAsk,
   extractExecCommands,

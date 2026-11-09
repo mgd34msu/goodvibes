@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { frameFromLayer } from '../helpers/surface-frame.ts';
-import type { ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
 import { ModelPickerModal } from '../../input/model-picker.ts';
 import { renderModelWorkspace } from '../../renderer/model-workspace.ts';
 import { lineToString, linesToText } from '../setup.ts';

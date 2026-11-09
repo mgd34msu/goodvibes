@@ -4,7 +4,7 @@ import {
   buildMissingScopeBody,
   resolveAuthenticatedPrincipal,
   resolvePrivateHostFetchOptions,
-} from '../sdk/src/platform/daemon/http-policy.js';
+} from '../platform/src/platform/daemon/http-policy.js';
 
 describe('daemon http policy helpers', () => {
   test('resolveAuthenticatedPrincipal resolves principals from request auth', () => {

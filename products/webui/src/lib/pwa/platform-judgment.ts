@@ -1,4 +1,4 @@
-import type { BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-sdk';
+import type { BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-api';
 import { captureChoiceAnswer } from '@goodvibes-jev/judgment/decisions';
 
 type Request = BrowserJudgmentRequest<'webui.pwa.install-platform'>;

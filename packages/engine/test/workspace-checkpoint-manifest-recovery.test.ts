@@ -15,8 +15,8 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { WorkspaceCheckpointManager } from '../sdk/src/platform/workspace/checkpoint/manager.js';
-import { JsonFileStore } from '../sdk/src/platform/state/json-file-store.js';
+import { WorkspaceCheckpointManager } from '../platform/src/platform/workspace/checkpoint/manager.js';
+import { JsonFileStore } from '../platform/src/platform/state/json-file-store.js';
 
 function tempWorkspace(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));

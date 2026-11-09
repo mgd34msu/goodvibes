@@ -20,7 +20,7 @@ import { CommandRegistry, type CommandContext } from '../../input/command-regist
 import { registerLocalRuntimeCommands } from '../../input/commands/local-runtime.ts';
 import { wireNotificationSurfaces } from '../../shell/notification-surfaces.ts';
 import type { InputHandler } from '../../input/handler.ts';
-import { createEmptyLine, type Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import { createEmptyLine, type Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { frameFromLayer } from '../helpers/surface-frame.ts';
 
 const FAILED = '[Agents] ✗ engineer b6834750: "Spawn one reviewer agent to review and verify the backoff…" — failed in 51s: planned-fix execution is not wired in this composition (setFixWorkstreamRunner was never called)';

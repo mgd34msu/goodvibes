@@ -1,5 +1,5 @@
 /**
- * Consolidation proposals and run receipts (memory.consolidation.receipts, SDK 1.8.0's
+ * Consolidation proposals and run receipts (memory.consolidation.receipts, platform 1.8.0's
  * consolidation-reaches-the-review-queue work). Idle/scheduled consolidation performs
  * only REVERSIBLE operations on its own (merge exact duplicates into a survivor, decay
  * never-referenced aged records); anything that needs a human call (a contradiction, a

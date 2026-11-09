@@ -1,6 +1,6 @@
 /**
- * Dependency ranges this repository shares with the SDK must agree, so the
- * lockfile resolves one copy the SDK was built against.
+ * Dependency ranges this repository shares with the platform must agree, so the
+ * lockfile resolves one copy the platform was built against.
  */
 import { describe, test, expect } from 'bun:test';
 import { join } from 'node:path';
@@ -14,13 +14,13 @@ const repoRoot = join(import.meta.dir, '..', '..', '..');
 describe('dependency ranges agree with the platform that declares them', () => {
   /**
    * bun.lock resolves exactly ONE copy of a package both this repository and
-   * the SDK depend on. When the two declare different ranges the older one can
-   * win, and the SDK is then compiled and run against a version older than the
+   * the platform depend on. When the two declare different ranges the older one can
+   * win, and the platform is then compiled and run against a version older than the
    * one it is written for, which is how an ACP pin five minors behind the
-   * SDK's went unnoticed. Nothing observes that at runtime, so it is asserted
+   * platform's went unnoticed. Nothing observes that at runtime, so it is asserted
    * here on the declarations themselves.
    */
-  test('every shared dependency states the same range the SDK declares', async () => {
+  test('every shared dependency states the same range the platform declares', async () => {
     const ours = (await import(join(repoRoot, 'package.json'))).default as {
       dependencies?: Record<string, string>;
     };

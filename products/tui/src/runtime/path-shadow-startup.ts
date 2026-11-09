@@ -9,7 +9,7 @@
  * current", and where the lines are printed.
  */
 
-import { announceReachability, boundedLatestRelease } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { announceReachability, boundedLatestRelease } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { UpdateFetchLike } from './update-check.ts';
 import { checkForUpdate } from '../input/commands/update-runtime.ts';
 import { VERSION } from '../version.ts';

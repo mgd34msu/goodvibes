@@ -8,12 +8,12 @@
  * isolation with an in-memory identity store and a live Bun relay.
  */
 import { afterAll, describe, expect, test } from 'bun:test';
-import { createBunRelayServer } from '../daemon-sdk/src/index.js';
+import { createBunRelayServer } from '../daemon-api/src/index.js';
 import {
   createRelayReachability,
   isRelayReachabilityEnabled,
   type RelayIdentityStore,
-} from '../sdk/src/platform/relay/reachability.js';
+} from '../platform/src/platform/relay/reachability.js';
 import { createRelayClient, type RelayClient } from '../transport-realtime/src/relay-transport.js';
 import type { SerializedRelayIdentity } from '../transport-core/src/relay/index.js';
 

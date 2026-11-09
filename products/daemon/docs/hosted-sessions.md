@@ -11,7 +11,7 @@ and cannot fall back to uncontained host execution or control the owner's
 terminal. Jev admission and current permission constraints still govern tool
 actions. An attachment or a `survive` policy grants no additional tool authority.
 See the [daemon composition](../src/runtime/hosted-session-composition.ts) and
-[execution posture](../../../packages/engine/sdk/src/platform/hosted-sessions/exec-posture.ts).
+[execution posture](../../../packages/engine/platform/src/platform/hosted-sessions/exec-posture.ts).
 
 ## Inspect or end a session
 
@@ -36,7 +36,7 @@ See the [CLI implementation](../src/daemon/sessions-command.ts).
 
 ## Create, attach, and detach through the control plane
 
-The [hosted method catalog](../../../packages/engine/sdk/src/platform/control-plane/method-catalog-hosted-sessions.ts)
+The [hosted method catalog](../../../packages/engine/platform/src/platform/control-plane/method-catalog-hosted-sessions.ts)
 declares these WebSocket verbs. They require authenticated access; listing declares
 `read:sessions`, and the other verbs declare `write:sessions`.
 
@@ -60,9 +60,9 @@ accepts them through its generic authenticated
 `POST /api/control-plane/methods/<method>/invoke` endpoint, with method parameters
 inside the JSON envelope's `body` property. HTTP requests require an operator
 credential or an authenticated user session, with the method's required access.
-See the [HTTP dispatcher](../../../packages/engine/daemon-sdk/src/operator.ts),
-[invocation handler](../../../packages/engine/daemon-sdk/src/control-routes.ts),
-and [hosted handlers](../../../packages/engine/sdk/src/platform/control-plane/routes/hosted-sessions.ts).
+See the [HTTP dispatcher](../../../packages/engine/daemon-api/src/operator.ts),
+[invocation handler](../../../packages/engine/daemon-api/src/control-routes.ts),
+and [hosted handlers](../../../packages/engine/platform/src/platform/control-plane/routes/hosted-sessions.ts).
 
 `POST /api/sessions` creates a shared session record through the session broker.
 It is a separate contract from `sessions.hosted.create` and does not take that
@@ -85,13 +85,13 @@ curl --no-buffer \
 The stream filters events carrying another session's identifier. Events with no
 session identifier can still be delivered. Closing the HTTP stream releases its
 subscription. Stream closure is not an explicit `sessions.hosted.detach` call.
-See [session event streaming](../../../packages/engine/sdk/src/platform/daemon/http/session-event-stream.ts).
+See [session event streaming](../../../packages/engine/platform/src/platform/daemon/http/session-event-stream.ts).
 
 Ordinary session message, steer, and follow-up HTTP contracts are defined in
-[runtime session routes](../../../packages/engine/daemon-sdk/src/runtime-session-routes.ts).
+[runtime session routes](../../../packages/engine/daemon-api/src/runtime-session-routes.ts).
 A `202` conversation-message response means the input was persisted and routed;
 it does not mean the turn completed. Native Agent and WebUI delivery uses the
-separate [native hosted-turn protocol](../../../packages/engine/sdk/src/platform/control-plane/method-catalog-native-hosted-turn.ts),
+separate [native hosted-turn protocol](../../../packages/engine/platform/src/platform/control-plane/method-catalog-native-hosted-turn.ts),
 which binds admitted source identity to its paired owner and requires fresh
 operator authentication. A status read never grants delivery or retries an
 ambiguous dispatch.
@@ -110,7 +110,7 @@ control-plane connection has that same client identifier. An unrelated SSE
 subscription does not renew an arbitrary attachment. When the last lease lapses,
 the sweep applies the session's detach policy.
 
-The [configuration schema](../../../packages/engine/sdk/src/platform/config/schema-domain-hosted-sessions.ts)
+The [configuration schema](../../../packages/engine/platform/src/platform/config/schema-domain-hosted-sessions.ts)
 defines these defaults:
 
 | Setting | Default | Meaning |
@@ -121,7 +121,7 @@ defines these defaults:
 | `hostedSessions.maxMessagesPerSession` | `500` | Most recent messages persisted per session |
 | `hostedSessions.terminatedRetentionMs` | `86400000` | Retention for terminated records |
 
-The [attachment implementation](../../../packages/engine/sdk/src/platform/hosted-sessions/attachments.ts)
+The [attachment implementation](../../../packages/engine/platform/src/platform/hosted-sessions/attachments.ts)
 sweeps leases at intervals between 15 and 60 seconds. Expiry is applied by that
 sweep, rather than exactly at the deadline.
 
@@ -140,8 +140,8 @@ changes how recovery treats it.
 Persistence failures are logged; a `survive` policy cannot guarantee recovery
 when the state was not written. Inspect `status`, `terminatedReason`, and
 `restoredFromDisk`, rather than treating a missing or interrupted turn as success.
-The [manager](../../../packages/engine/sdk/src/platform/hosted-sessions/manager.ts)
-and [store](../../../packages/engine/sdk/src/platform/hosted-sessions/store.ts)
+The [manager](../../../packages/engine/platform/src/platform/hosted-sessions/manager.ts)
+and [store](../../../packages/engine/platform/src/platform/hosted-sessions/store.ts)
 own these transitions.
 
 Hosted handlers distinguish `INVALID_ARGUMENT` with status 400,

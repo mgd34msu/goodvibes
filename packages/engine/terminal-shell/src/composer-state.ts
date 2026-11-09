@@ -1,6 +1,6 @@
 import type { SubmissionIntent } from './submission-intent.js';
 import type { SubmissionRouterInput } from './submission-router.js';
-import type { TurnState } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
+import type { TurnState } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 export interface ComposerState {
     readonly intent: SubmissionIntent;
     readonly modeLabel: string;

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { createDaemonTelemetryRouteHandlers } from '@goodvibes-jev/engine/sdk/platform/daemon';
+import { createDaemonTelemetryRouteHandlers } from '@goodvibes-jev/engine/platform/platform/daemon';
 import { RuntimeEventBus, createEventEnvelope } from '../../runtime/index.ts';
-import { createRuntimeStore } from '@goodvibes-jev/engine/sdk/platform/runtime/store';
+import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
 import { TelemetryApiService } from '../../runtime/index.ts';
 
 

@@ -1,11 +1,11 @@
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import {
   describeServingEffort,
   resolveRequestedEffortForServingModel,
   type EffortModelLike,
-} from '@goodvibes-jev/engine/sdk/platform/providers/reasoning-effort-surface';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+} from '@goodvibes-jev/engine/platform/platform/providers/reasoning-effort-surface';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { activeTokens } from './renderer/theme.js';
 export interface TerminalModelSelection {
   readonly model: {

@@ -19,7 +19,7 @@
  * the next turn." before a single token had been counted. The evaluator was
  * not at fault: `evaluateSessionMaintenance` reaches 'suggest-compact' when
  * `remainingTokens <= 15_000`, and at boot the resolved window is still the
- * SDK's DEFAULT_CONTEXT_WINDOW fallback (8,192, the "8.2k" the footer meter
+ * platform's DEFAULT_CONTEXT_WINDOW fallback (8,192, the "8.2k" the footer meter
  * shows before the real window arrives), so 8,192 free tokens tripped that
  * rule instantly. Arithmetically consistent; factually false. No context had
  * been consumed and no auto-compact was imminent.
@@ -37,7 +37,7 @@
  * running rather than a prediction about headroom.
  */
 
-import { DEFAULT_CONTEXT_WINDOW } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { DEFAULT_CONTEXT_WINDOW } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { ViewSessionMaintenanceLevel } from '../views/session-maintenance.ts';
 
 interface ContextStatusHintOptions {

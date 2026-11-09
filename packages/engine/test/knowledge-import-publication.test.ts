@@ -1,14 +1,14 @@
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.ts';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import * as nativeFs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import type { KnowledgeImportInput } from '../sdk/src/platform/knowledge/store-import.js';
-import type { SQLiteStore } from '../sdk/src/platform/state/sqlite-store.js';
-import type { SQLiteStorePersistence } from '../sdk/src/platform/state/sqlite-store-persistence.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import type { KnowledgeImportInput } from '../platform/src/platform/knowledge/store-import.js';
+import type { SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
+import type { SQLiteStorePersistence } from '../platform/src/platform/state/sqlite-store-persistence.js';
 
 const roots: string[] = [], stores: KnowledgeStore[] = [];
 afterEach(async () => {
@@ -179,7 +179,7 @@ test('Classic import rejects a retired native guard before publishing any staged
 });
 
 /** UNRUN: completion observers cannot revoke an acknowledged native import. */
-import { logger } from '../sdk/src/platform/utils/logger.js';
+import { logger } from '../platform/src/platform/utils/logger.js';
 
 test('throwing postcommit notification retains the real receipt and native rows across reopen', async () => {
   const store = await fixture(), warnings: unknown[] = [], secret = 'SYNTHETIC_PRIVATE_OBSERVER_ERROR';

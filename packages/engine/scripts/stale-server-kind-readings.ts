@@ -54,11 +54,11 @@ export function saveStaleServerKindReadings(readings: StaleServerKindReadings, p
   writeFileSync(path, `${JSON.stringify({ ...readings, readings: sorted }, null, 2)}\n`, 'utf-8');
 }
 
-/** The members of the `SDKErrorKind` union in errors/src/index.ts, in declared order. */
+/** The members of the `EngineErrorKind` union in errors/src/index.ts, in declared order. */
 export function currentErrorKinds(root: string = ENGINE_ROOT): string[] {
   const source = readFileSync(resolve(root, 'errors/src/index.ts'), 'utf-8');
-  const union = /export\s+type\s+SDKErrorKind\s*=\s*([\s\S]*?);/.exec(source)?.[1];
-  if (union === undefined) throw new Error('errors/src/index.ts must export SDKErrorKind');
+  const union = /export\s+type\s+EngineErrorKind\s*=\s*([\s\S]*?);/.exec(source)?.[1];
+  if (union === undefined) throw new Error('errors/src/index.ts must export EngineErrorKind');
   return [...union.matchAll(/['"]([^'"]+)['"]/g)].map((match) => match[1]!);
 }
 
@@ -81,9 +81,9 @@ export function staleServerKindFindings(
       continue;
     }
     if (reading.verdict === 'yes') {
-      findings.push(`${rel} still documents stale SDKErrorKind 'server' (probability ${reading.probability}, ${reading.outcome})`);
+      findings.push(`${rel} still documents stale EngineErrorKind 'server' (probability ${reading.probability}, ${reading.outcome})`);
     } else if (!isSettledNo(reading)) {
-      findings.push(`${rel} has no settled reading on stale SDKErrorKind 'server' (${reading.verdict}, ${reading.outcome}, probability ${reading.probability}); only a settled no passes, so reword the file until it reads clearly`);
+      findings.push(`${rel} has no settled reading on stale EngineErrorKind 'server' (${reading.verdict}, ${reading.outcome}, probability ${reading.probability}); only a settled no passes, so reword the file until it reads clearly`);
     }
   }
   return findings;

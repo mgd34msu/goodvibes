@@ -4,8 +4,8 @@ import type {
   AttemptJudgment,
   AttemptPickResult,
   HeldMergeGroup,
-} from '@goodvibes-jev/engine/sdk/platform/orchestration';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+} from '@goodvibes-jev/engine/platform/platform/orchestration';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { operatorFlagValue, parseOperatorCommandArgs } from './operator-command-args.ts';
 import { withRuntimeServices } from './management.ts';
 import type { CliCommandOutput } from './types.ts';

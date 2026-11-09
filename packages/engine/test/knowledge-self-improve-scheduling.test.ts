@@ -11,12 +11,12 @@
  * self-improve mid-pressure), and state-map eviction.
  */
 import { describe, expect, test } from 'bun:test';
-import { KnowledgeSemanticService } from '../sdk/src/platform/knowledge/index.js';
+import { KnowledgeSemanticService } from '../platform/src/platform/knowledge/index.js';
 import type {
   KnowledgeSemanticGapRepairer,
   KnowledgeSemanticSelfImproveInput,
   KnowledgeSemanticSelfImproveResult,
-} from '../sdk/src/platform/knowledge/semantic/types.js';
+} from '../platform/src/platform/knowledge/semantic/types.js';
 import { createStores } from './_helpers/knowledge-semantic-fixtures.js';
 
 const gapRepairer = {} as unknown as KnowledgeSemanticGapRepairer;

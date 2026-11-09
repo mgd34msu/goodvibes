@@ -4,7 +4,7 @@ import * as crypto from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { readSQLitePersistedImage, SQLitePublicationError, SQLiteStorePersistence,
-  type SQLitePublicationIO } from '../sdk/src/platform/state/sqlite-store-persistence.ts';
+  type SQLitePublicationIO } from '../platform/src/platform/state/sqlite-store-persistence.ts';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });

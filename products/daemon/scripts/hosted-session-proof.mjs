@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { Agent } from 'undici';
-import { fieldKind, redactionCredential, residualCredential } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { fieldKind, redactionCredential, residualCredential } from '@goodvibes-jev/engine/platform/platform/utils';
 import { sessionEventDecoder, syntheticSystemOneAnswers } from './hosted-session-protocol.mjs';
 
 const pause = () => new Promise(resolve => setTimeout(resolve, 20));

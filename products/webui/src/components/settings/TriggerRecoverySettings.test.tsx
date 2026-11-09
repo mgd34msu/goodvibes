@@ -6,11 +6,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { invalidateClientLifetime } from '../../lib/client-lifetime';
-import type { TriggerOperatorStatus } from '@goodvibes-jev/engine/sdk/platform/triggers/browser';
+import type { TriggerOperatorStatus } from '@goodvibes-jev/engine/platform/platform/triggers/browser';
 let status: TriggerOperatorStatus = { ownership: 'migration-required', migrationRequired: true,
   records: [{ id: 'watch', label: 'Build readiness', kind: 'condition', state: 'idle' }], message: 'Close older GoodVibes instances before migrating.' };
 const calls: unknown[] = [];
-mock.module('../../lib/goodvibes', () => ({ sdk: { operator: { watchers: { triggers: {
+mock.module('../../lib/goodvibes', () => ({ client: { operator: { watchers: { triggers: {
   status: async () => status,
   migrate: async (input: unknown) => { calls.push(input); return { migrated: true, status: { ...status, ownership: 'local', migrationRequired: false, message: 'This process owns trigger execution.' } }; },
 } } } } }));

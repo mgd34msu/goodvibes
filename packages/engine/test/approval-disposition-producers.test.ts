@@ -2,12 +2,12 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ApprovalBroker } from '../sdk/src/platform/control-plane/approval-broker.js';
-import { createOperatorClient } from '../sdk/src/platform/runtime/operator-client.js';
-import type { OperatorClientServices } from '../sdk/src/platform/runtime/foundation-services.js';
-import { createHttpTransport } from '../sdk/src/platform/runtime/transports/daemon-http-client.js';
-import { createClientApprovalRaiser } from '../sdk/src/platform/runtime/client/approval-raiser.js';
-import type { PermissionPromptRequest } from '../sdk/src/platform/permissions/prompt.js';
+import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-broker.js';
+import { createOperatorClient } from '../platform/src/platform/runtime/operator-client.js';
+import type { OperatorClientServices } from '../platform/src/platform/runtime/foundation-services.js';
+import { createHttpTransport } from '../platform/src/platform/runtime/transports/daemon-http-client.js';
+import { createClientApprovalRaiser } from '../platform/src/platform/runtime/client/approval-raiser.js';
+import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

@@ -1,6 +1,6 @@
 import { mkdirSync, chmodSync, lstatSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { nativeReaderCapabilities, resolveDaemonNativePayloads, resolveDaemonNativeTargets, sha256, type DaemonInstallationReceipt, type DaemonArtifactSource, type DaemonCiArtifact } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { nativeReaderCapabilities, resolveDaemonNativePayloads, resolveDaemonNativeTargets, sha256, type DaemonInstallationReceipt, type DaemonArtifactSource, type DaemonCiArtifact } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import type { DaemonNativeTarget } from '../../cli/native-artifact.ts';
 /** Metadata fixture for inert/synthetic interpreters; it does not claim actual ELF execution. */
 export function nativeRuntimeProvenance(runtime: string, target: DaemonNativeTarget = 'linux-x64'): string {

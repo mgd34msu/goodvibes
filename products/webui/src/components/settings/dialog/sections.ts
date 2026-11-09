@@ -13,7 +13,7 @@
  * heading. A `?settings=<section>` link opens the section's page and scrolls
  * to it, so every older section link still works.
  *
- * Every SDK config namespace belongs to exactly one section: the section that
+ * Every platform config namespace belongs to exactly one section: the section that
  * lists it in `namespaces`, else "All settings", which also holds namespaces
  * the daemon reports that this build has never heard of. So a schema key is
  * never unreachable, and moving a namespace between sections is a one-line

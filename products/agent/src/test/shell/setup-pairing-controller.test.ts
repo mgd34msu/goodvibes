@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { InputTokenizer } from '@goodvibes-jev/engine/sdk/platform/core';
+import { InputTokenizer } from '@goodvibes-jev/engine/platform/platform/core';
 import { SetupPairingController } from '../../shell/setup-pairing-controller.ts';
 import { handleBlockingShellInput, type PendingPermissionState } from '../../shell/blocking-input.ts';
 import { agentHostPairingStorePath, readAgentHostPairing } from '../../runtime/connected-host-pairing-store.ts';

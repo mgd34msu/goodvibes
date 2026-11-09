@@ -18,9 +18,9 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ModelLimitsService } from '../sdk/src/platform/providers/model-limits.js';
-import { ProviderCapabilityRegistry } from '../sdk/src/platform/providers/capabilities.js';
-import type { ModelDefinition } from '../sdk/src/platform/providers/registry-types.js';
+import { ModelLimitsService } from '../platform/src/platform/providers/model-limits.js';
+import { ProviderCapabilityRegistry } from '../platform/src/platform/providers/capabilities.js';
+import type { ModelDefinition } from '../platform/src/platform/providers/registry-types.js';
 import { fakePort } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 

@@ -10,18 +10,18 @@
  * remains the off switch (now default-ON so the pass genuinely runs).
  */
 import { describe, expect, test } from 'bun:test';
-import { MemoryConsolidationScheduler } from '../sdk/src/platform/state/memory-consolidation-scheduler.ts';
+import { MemoryConsolidationScheduler } from '../platform/src/platform/state/memory-consolidation-scheduler.ts';
 import { trackDisposables } from './_helpers/disposables.ts';
 import { useMemoryReadings } from './_helpers/memory-readings.ts';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type {
   MemoryConsolidationRegistry,
   MemoryRecord,
-} from '../sdk/src/platform/state/index.js';
+} from '../platform/src/platform/state/index.js';
 // MemoryReviewPatch is defined in memory-store.ts but not re-exported from the
 // state/index.ts barrel (index.ts re-exports MemoryReviewState from the same
 // module but omits MemoryReviewPatch), import it directly from its module.
-import type { MemoryReviewPatch } from '../sdk/src/platform/state/memory-store.js';
+import type { MemoryReviewPatch } from '../platform/src/platform/state/memory-store.js';
 
 const NOW = 1_700_000_000_000;
 const HOUR = 60 * 60 * 1000;

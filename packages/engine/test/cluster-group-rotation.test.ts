@@ -18,8 +18,8 @@ import {
   type GroupTestNode,
   type GroupTestWorld,
 } from './cluster-group-harness.js';
-import { createGroup, joinGroup } from '../sdk/src/platform/cluster/group-operations.js';
-import { ClusterCoordinator } from '../sdk/src/platform/cluster/coordinator.js';
+import { createGroup, joinGroup } from '../platform/src/platform/cluster/group-operations.js';
+import { ClusterCoordinator } from '../platform/src/platform/cluster/coordinator.js';
 import {
   adoptGroupKeys,
   GroupKeyring,
@@ -30,13 +30,13 @@ import {
   sweepKeyHistory,
   type GroupKeyMaterial,
   type GroupKeyRecord,
-} from '../sdk/src/platform/cluster/group-store.js';
+} from '../platform/src/platform/cluster/group-store.js';
 import {
   decodeEnvelope,
   encodeEnvelope,
-} from '../sdk/src/platform/cluster/protocol-envelope.js';
-import type { ClusterConsumerGate, ClusterSettings } from '../sdk/src/platform/cluster/types.js';
-import { surfaceIdFor, type ClusterSurfaceKey } from '../sdk/src/platform/cluster/surface-id.js';
+} from '../platform/src/platform/cluster/protocol-envelope.js';
+import type { ClusterConsumerGate, ClusterSettings } from '../platform/src/platform/cluster/types.js';
+import { surfaceIdFor, type ClusterSurfaceKey } from '../platform/src/platform/cluster/surface-id.js';
 import { join } from 'node:path';
 
 let world: GroupTestWorld | null = null;

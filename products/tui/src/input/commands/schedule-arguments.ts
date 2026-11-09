@@ -1,4 +1,4 @@
-import { shellSplit } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { shellSplit } from '@goodvibes-jev/engine/platform/platform/utils';
 
 /** Quoting is command grammar, never schedule meaning. Reject incomplete input. */
 export function scheduleCommandArguments(command: string): string[] | undefined {

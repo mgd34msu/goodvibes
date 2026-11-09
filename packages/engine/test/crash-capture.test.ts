@@ -9,11 +9,11 @@ import {
   CRASH_LOG_MAX_RECORDS,
   CRASH_STACK_MAX_CHARS,
   readCrashRecords,
-} from '../sdk/src/platform/runtime/crash-capture.ts';
+} from '../platform/src/platform/runtime/crash-capture.ts';
 import {
   APPEND_ONLY_STORES,
   isAppendOnlyStoreRegistered,
-} from '../sdk/src/platform/runtime/retention/append-only-registry.ts';
+} from '../platform/src/platform/runtime/retention/append-only-registry.ts';
 
 // The gap this closes: an agent died on an uncaught exception and the stack
 // existed ONLY on the operator's terminal, nothing in the activity log, no

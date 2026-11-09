@@ -24,9 +24,9 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { WatcherRegistry } from '../sdk/src/platform/watchers/registry.js';
-import type { WatcherRecord } from '../sdk/src/platform/runtime/store/domains/watchers.js';
-import type { AutomationSourceRecord } from '../sdk/src/platform/automation/sources.js';
+import { WatcherRegistry } from '../platform/src/platform/watchers/registry.js';
+import type { WatcherRecord } from '../platform/src/platform/runtime/store/domains/watchers.js';
+import type { AutomationSourceRecord } from '../platform/src/platform/automation/sources.js';
 
 const roots: string[] = [];
 const registries: WatcherRegistry[] = [];

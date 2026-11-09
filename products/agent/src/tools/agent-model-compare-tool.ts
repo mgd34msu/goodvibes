@@ -1,10 +1,10 @@
 import { isDeepStrictEqual } from 'node:util';
-import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
 import { agentRecordNonce } from '../utils/record-nonce.ts';
-import type { ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import type { ChatRequest, ChatResponse, LLMProvider } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import { assertCurrentToolEffect, ToolInputProjectionError, type ToolInputProjector, type ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { ChatRequest, ChatResponse, LLMProvider } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { assertCurrentToolEffect, ToolInputProjectionError, type ToolInputProjector, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { registerComparisonCandidate, runAdmittedComparisonCandidate } from './agent-model-compare-candidate.ts';
 import { createComparisonOperation } from './agent-model-compare-operation.ts';
 import { createZipArchive } from './artifact-archive.ts';

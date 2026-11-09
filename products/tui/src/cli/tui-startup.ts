@@ -2,16 +2,16 @@ import { reportStartupFailure, applySeededCliPrompt, resumeSessionAndRender } fr
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
 import type { InputHandler } from '../input/handler.ts';
 import type { SelectionItem } from '../input/selection-modal.ts';
-import type { WorkspaceRegistrationManager } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import type { WorkspaceRegistrationManager } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { hasResumableWizardProgress, readOnboardingCheckMarker, readWizardProgress } from '../runtime/onboarding/index.ts';
 import { startOnboardingFastPath } from '../runtime/onboarding/fast-path.ts';
 import { checkRecoveryForSession, readLastSessionPointer, type SessionSurface } from '@/runtime/index.ts';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { writeFatalLine } from '@goodvibes-jev/engine/sdk/platform/daemon';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { writeFatalLine } from '@goodvibes-jev/engine/platform/platform/daemon';
 import { offerRecoverySnapshot, type RecoveryTypeaheadHooks } from '../runtime/recovery-prompt.ts';
 import { buildRecoveryOfferWiring } from '../runtime/recovery-offer-wiring.ts';
 import type { ConversationManager } from '../core/conversation.ts';
-import type { SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
+import type { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import type { GoodVibesCliParseResult } from '@goodvibes-jev/engine/terminal-shell';
 
 export type TuiStartupShellPaths = Parameters<typeof readOnboardingCheckMarker>[0] & {

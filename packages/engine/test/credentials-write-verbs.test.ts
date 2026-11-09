@@ -24,11 +24,11 @@ import {
   createCredentialSetHandler,
   type CredentialWriteAuditEntry,
   type CredentialWriteDeps,
-} from '../sdk/src/platform/control-plane/routes/credentials-write.ts';
-import { isGatewayVerbError } from '../sdk/src/platform/control-plane/routes/gateway-verb-error.ts';
+} from '../platform/src/platform/control-plane/routes/credentials-write.ts';
+import { isGatewayVerbError } from '../platform/src/platform/control-plane/routes/gateway-verb-error.ts';
 import { useConfigReadings } from './_helpers/config-readings.js';
-import { builtinGatewayAdminMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-admin.ts';
-import type { GatewayMethodInvocation } from '../sdk/src/platform/control-plane/method-catalog-shared.ts';
+import { builtinGatewayAdminMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-admin.ts';
+import type { GatewayMethodInvocation } from '../platform/src/platform/control-plane/method-catalog-shared.ts';
 
 const SECRET_CONFIG_KEY = 'surfaces.telegram.botToken';
 const SECRET_STORE_KEY = 'GOODVIBES_SURFACES_TELEGRAM_BOT_TOKEN';

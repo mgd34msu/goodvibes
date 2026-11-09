@@ -1,19 +1,19 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { ArtifactStore } from '../sdk/src/platform/artifacts/index.js';
-import { handleHomeAssistantSurfaceWebhook } from '../sdk/src/platform/adapters/homeassistant/index.js';
-import type { SurfaceAdapterContext } from '../sdk/src/platform/adapters/types.js';
-import type { AutomationRouteBinding } from '../sdk/src/platform/automation/routes.js';
-import type { ChannelPolicyDecision } from '../sdk/src/platform/channels/types.js';
-import { createHomeAssistantDeliveryStrategy } from '../sdk/src/platform/channels/delivery/strategies-core.js';
-import type { ChannelDeliveryRequest } from '../sdk/src/platform/channels/delivery/types.js';
+import type { ArtifactStore } from '../platform/src/platform/artifacts/index.js';
+import { handleHomeAssistantSurfaceWebhook } from '../platform/src/platform/adapters/homeassistant/index.js';
+import type { SurfaceAdapterContext } from '../platform/src/platform/adapters/types.js';
+import type { AutomationRouteBinding } from '../platform/src/platform/automation/routes.js';
+import type { ChannelPolicyDecision } from '../platform/src/platform/channels/types.js';
+import { createHomeAssistantDeliveryStrategy } from '../platform/src/platform/channels/delivery/strategies-core.js';
+import type { ChannelDeliveryRequest } from '../platform/src/platform/channels/delivery/types.js';
 import {
   buildHomeAssistantManifest,
   listHomeAssistantTools,
-} from '../sdk/src/platform/channels/builtin/homeassistant.js';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import type { ServiceRegistry } from '../sdk/src/platform/config/service-registry.js';
-import { HomeAssistantConversationRoutes } from '../sdk/src/platform/daemon/http/homeassistant-routes.js';
-import { HomeAssistantIntegration } from '../sdk/src/platform/integrations/homeassistant.js';
+} from '../platform/src/platform/channels/builtin/homeassistant.js';
+import type { ConfigManager } from '../platform/src/platform/config/manager.js';
+import type { ServiceRegistry } from '../platform/src/platform/config/service-registry.js';
+import { HomeAssistantConversationRoutes } from '../platform/src/platform/daemon/http/homeassistant-routes.js';
+import { HomeAssistantIntegration } from '../platform/src/platform/integrations/homeassistant.js';
 
 let originalFetch: typeof globalThis.fetch;
 

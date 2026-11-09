@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { createPluginAPI, type PluginAPIContext } from '../sdk/src/platform/plugins/api.ts';
-import { createOwnedPluginCapabilities } from '../sdk/src/platform/plugins/owned-capabilities.ts';
-import { PluginClosedError, PluginInFlightTracker } from '../sdk/src/platform/plugins/in-flight.ts';
-import { ChannelPluginRegistry } from '../sdk/src/platform/channels/plugin-registry.ts';
-import type { ChannelPlugin } from '../sdk/src/platform/channels/plugin-registry.ts';
-import type { LLMProvider, ChatRequest, ChatResponse } from '../sdk/src/platform/providers/interface.ts';
-import type { VoiceProvider, VoiceAudioChunk } from '../sdk/src/platform/voice/types.ts';
+import { createPluginAPI, type PluginAPIContext } from '../platform/src/platform/plugins/api.ts';
+import { createOwnedPluginCapabilities } from '../platform/src/platform/plugins/owned-capabilities.ts';
+import { PluginClosedError, PluginInFlightTracker } from '../platform/src/platform/plugins/in-flight.ts';
+import { ChannelPluginRegistry } from '../platform/src/platform/channels/plugin-registry.ts';
+import type { ChannelPlugin } from '../platform/src/platform/channels/plugin-registry.ts';
+import type { LLMProvider, ChatRequest, ChatResponse } from '../platform/src/platform/providers/interface.ts';
+import type { VoiceProvider, VoiceAudioChunk } from '../platform/src/platform/voice/types.ts';
 
 function gate() {
   let release!: () => void;
@@ -254,7 +254,7 @@ test('the convenience OpenAI registration also installs the owned callback facad
 });
 
 test('cleanup does not remove a newer provider or strategy occupying the same registry key', async () => {
-  const { ChannelDeliveryRouter } = await import('../sdk/src/platform/channels/delivery-router.ts');
+  const { ChannelDeliveryRouter } = await import('../platform/src/platform/channels/delivery-router.ts');
   const router = new ChannelDeliveryRouter({ strategies: [] });
   const providers = new Map<string, LLMProvider>();
   const cleanup: Array<() => void> = [];
@@ -367,10 +367,10 @@ test('the owned Response retains BYOB reading for native byte streams', async ()
 });
 
 test('real registries retain tracked prototype methods through their normalization copies', async () => {
-  const { MediaProviderRegistry } = await import('../sdk/src/platform/media/provider-registry.ts');
-  const { VoiceProviderRegistry } = await import('../sdk/src/platform/voice/provider-registry.ts');
-  const { MemoryEmbeddingProviderRegistry } = await import('../sdk/src/platform/state/memory-embeddings.ts');
-  const { WebSearchProviderRegistry } = await import('../sdk/src/platform/web-search/provider-registry.ts');
+  const { MediaProviderRegistry } = await import('../platform/src/platform/media/provider-registry.ts');
+  const { VoiceProviderRegistry } = await import('../platform/src/platform/voice/provider-registry.ts');
+  const { MemoryEmbeddingProviderRegistry } = await import('../platform/src/platform/state/memory-embeddings.ts');
+  const { WebSearchProviderRegistry } = await import('../platform/src/platform/web-search/provider-registry.ts');
   const media = new MediaProviderRegistry();
   const voice = new VoiceProviderRegistry();
   const memory = new MemoryEmbeddingProviderRegistry({ configManager: { get: () => '' } as never });

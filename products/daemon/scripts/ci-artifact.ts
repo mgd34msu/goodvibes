@@ -3,8 +3,8 @@ import { createHash } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { createReadStream, lstatSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { parseDaemonCiArtifact, parseNativeReaderCapabilities, realUpdateFileIo, type NativeReaderCapabilities } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
-import { atomicWriteFileSync } from '@goodvibes-jev/engine/sdk/platform/config';
+import { parseDaemonCiArtifact, parseNativeReaderCapabilities, realUpdateFileIo, type NativeReaderCapabilities } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/config';
 import { drainNativeProcessGroup, signalNativeProcessGroup } from './native-execution-process.mjs';
 
 import { daemonCiPayloads, daemonNativeHost, type DaemonArtifactSource, type DaemonCiArtifact } from '../src/cli/native-artifact.ts';

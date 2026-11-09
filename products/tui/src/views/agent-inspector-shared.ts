@@ -1,5 +1,5 @@
 import { formatDuration } from '../utils/format-duration.ts';
-import { calcSessionCost, isModelPriced } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { calcSessionCost, isModelPriced } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { AgentEvent } from '@/runtime/index.ts';
 import type { UiEventFeed } from '@/runtime/index.ts';
 
@@ -188,13 +188,13 @@ interface AgentUsageLike {
 
 /**
  * True when a usage object carries actual reported token data rather than
- * being present-but-empty.: the SDK's AgentRecord.usage is initialised
+ * being present-but-empty.: the platform's AgentRecord.usage is initialised
  * to an all-zero object at agent spawn (platform/tools/agent/manager.ts) and
- *, in the currently pinned SDK version, is never updated past that, so a
+ *, in the currently pinned platform version, is never updated past that, so a
  * plain truthiness check on `rec.usage` treats every agent, including ones
  * that did real work, as "has data" and renders a fabricated $0.00/0-token
  * reading. Guarding on real (nonzero) counts instead keeps today's "n/a"
- * honest and lights up automatically once a future SDK actually populates
+ * honest and lights up automatically once a future platform actually populates
  * usage, no further TUI change needed.
  */
 export function hasReportedUsage(

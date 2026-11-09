@@ -5,7 +5,7 @@ import {
   createPermissionSimulator,
   buildDefaultPolicySimulationScenarios,
   runPolicySimulationScenarios,
-} from '../sdk/src/platform/runtime/permissions/index.ts';
+} from '../platform/src/platform/runtime/permissions/index.ts';
 
 describe('policy simulation scenarios', () => {
   // Each scenario is read by Jev (the gate's reading) before the two policy

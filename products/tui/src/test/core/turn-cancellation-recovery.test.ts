@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
-import { Orchestrator, ConversationManager } from '@goodvibes-jev/engine/sdk/platform/core';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { createOperatorNativeConversationIntakeClient, type NativeConversationIntakeResult } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
+import { Orchestrator, ConversationManager } from '@goodvibes-jev/engine/platform/platform/core';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { createOperatorNativeConversationIntakeClient, type NativeConversationIntakeResult } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 import { createCancelGeneration, runOwnedTurnRetry } from '../../core/turn-cancellation.ts';
 import { nativeRetryConfigManager, nativeRetryPermissionManager } from '../helpers/held-native-retry.ts';
 
@@ -12,7 +12,7 @@ function deferred() {
 }
 
 for (const cause of ['grace expiry', 'real cancel action', 'cancel during admission'] as const) {
-  test(`${cause} aborts real native SDK admission after memory preparation and before TURN_SUBMITTED`, async () => {
+  test(`${cause} aborts real native platform admission after memory preparation and before TURN_SUBMITTED`, async () => {
     const gate = deferred(); const entered = deferred();
     const text = 'Explain the recorded change';
     const result: NativeConversationIntakeResult = { kind: 'turn', projectId: 'p', requestId: 'request', route: 'answer', text,

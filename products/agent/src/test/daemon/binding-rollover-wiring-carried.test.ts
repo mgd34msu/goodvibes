@@ -1,8 +1,8 @@
 /**
- * Binding-rollover wiring: carried by the SDK path this fork already uses, not
+ * Binding-rollover wiring: carried by the platform path this fork already uses, not
  * duplicated here.
  *
- * The SDK's daemon facade composition wires two pieces onto the graph it is
+ * The platform's daemon facade composition wires two pieces onto the graph it is
  * handed: the session register's own voice on a channel, used when it heals a
  * route binding that named an unusable session (so the person on the other end
  * is told the conversation moved instead of meeting an assistant that has
@@ -11,7 +11,7 @@
  * through a working channel rather than warning into a debug log).
  *
  * This fork composes NO daemon facade of its own, and composes no server at
- * all. What it hands the SDK's discovery path is
+ * all. What it hands the platform's discovery path is
  * `asDaemonGradeView()`, the graph with its two client narrowings substituted
  * back, so THAT is the object these seams have to be reachable on. Re-doing
  * either here would be a second sender competing with the first for the same
@@ -23,7 +23,7 @@
  * composition root that stopped returning one of those members, or returned
  * something that no longer carried the method, would leave a daemon whose
  * rollovers announce nothing, and it would still compile, because the call
- * sites are inside the SDK.
+ * sites are inside the platform.
  *
  * The type pin in services.ts (`_ClientRuntimeServicesPin`) proves the graph is
  * a CLIENT graph. It says nothing about what the daemon-grade view actually
@@ -34,7 +34,7 @@ import { getTestRuntimeServices } from '../helpers/runtime-services.ts';
 
 describe('binding-rollover wiring is reachable on this fork\'s composed graph', () => {
   const services = getTestRuntimeServices();
-  // What the SDK is actually handed. `services.sessionBroker` is the client
+  // What the platform is actually handed. `services.sessionBroker` is the client
   // dispatch seam and carries none of these methods by design.
   const view = services.asDaemonGradeView();
 
@@ -65,7 +65,7 @@ describe('binding-rollover wiring is reachable on this fork\'s composed graph', 
 
   test('the reply binder the same helper installs is also reachable', () => {
     // Named here because it is the sibling seam on the same object: if a future
-    // SDK bump renamed the notice sender, it would most likely rename this too,
+    // platform bump renamed the notice sender, it would most likely rename this too,
     // and one assertion covering both narrows the search.
     expect(typeof view.sessionBroker.setSurfaceReplyBinder).toBe('function');
   });

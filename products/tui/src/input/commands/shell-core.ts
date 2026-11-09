@@ -14,8 +14,8 @@ import {
 } from '../../renderer/compaction-preview.ts';
 import { buildCompactionHistoryText } from '../../renderer/compaction-history-modal.ts';
 import { ensureProviderKeyThenSelect } from '../provider-key-intake.ts';
-import '@goodvibes-jev/engine/sdk/platform/utils';
-import '@goodvibes-jev/engine/sdk/platform/utils';
+import '@goodvibes-jev/engine/platform/platform/utils';
+import '@goodvibes-jev/engine/platform/platform/utils';
 
 const coreActions = createShellCoreActions<CommandContext>(
   { requireProviderApi, requireKeybindingsManager, startFreshConversation },

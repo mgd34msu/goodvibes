@@ -9,7 +9,7 @@ import { describe, expect, test } from 'bun:test';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerHealthRuntimeCommands } from '../../input/commands/health-runtime.ts';
 import type { ApprovalsPanelSnapshot, ApprovalsView } from '../../runtime/client/approvals-view.ts';
-import type { SharedApprovalRecord } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import type { SharedApprovalRecord } from '@goodvibes-jev/engine/platform/platform/control-plane';
 
 function approval(id: string, tool: string, sessionId?: string): SharedApprovalRecord {
   return {

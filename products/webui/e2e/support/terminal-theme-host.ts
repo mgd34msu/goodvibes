@@ -7,8 +7,8 @@ import {
   isJsonRecord,
   type DaemonOperatorRouteHandlers,
   type DaemonSystemRouteContext,
-} from '@goodvibes-jev/engine/daemon-sdk';
-import { ConfigManager, isValidConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
+} from '@goodvibes-jev/engine/daemon-api';
+import { ConfigManager, isValidConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { forgetFailureReadings, installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { makeProjectTempDir } from '../../scripts/helpers/project-temp';

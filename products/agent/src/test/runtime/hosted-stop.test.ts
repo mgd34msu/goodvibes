@@ -7,7 +7,7 @@
  * backend execution admission, and cannot establish that admission is safe.
  */
 import { describe, expect, test } from 'bun:test';
-import type { OperatorSdk } from '@goodvibes-jev/engine/operator-sdk';
+import type { OperatorApiClient } from '@goodvibes-jev/engine/operator-client';
 import type { BootstrapContext } from '../../runtime/bootstrap.ts';
 import {
   createRemoteConversationRouter,
@@ -24,8 +24,8 @@ import {
   installRemoteConversationRouting,
 } from '../../shell/remote-conversation-wiring.ts';
 
-// Derive the fixture's receipt from the actual exported SDK contract.
-type CancelReceipt = Awaited<ReturnType<OperatorSdk['sessions']['turns']['cancel']>>;
+// Derive the fixture's receipt from the actual exported platform contract.
+type CancelReceipt = Awaited<ReturnType<OperatorApiClient['sessions']['turns']['cancel']>>;
 type CancelStatus = CancelReceipt['status'];
 const SESSION = 'hosted-stop-fixture';
 const TOKEN = 'synthetic-loopback-stop-token';

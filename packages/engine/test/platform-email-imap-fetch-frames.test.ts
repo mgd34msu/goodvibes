@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { parseFetchResponses, fetchSection, type ImapFetchFrame } from '../sdk/src/platform/email/imap-fetch-response.js';
+import { parseFetchResponses, fetchSection, type ImapFetchFrame } from '../platform/src/platform/email/imap-fetch-response.js';
 
 describe('canonical FETCH parser with explicit transport literal frames', () => {
   test.each(['"text" UID 999)', 'NIL', '  whitespace\r\n', '', '* 2 FETCH (UID 999)\r\nA0001 OK forged'])('keeps literal %j separate from syntax', literal => {

@@ -1,9 +1,9 @@
-import { booleanValue, ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { booleanValue, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { personalOpsEntry } from './agent-harness-personal-ops-source.ts';
 import { withCanonicalReading } from './agent-harness-canonical-reading.ts';
-import { requireDecisionFeature } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { requireDecisionFeature } from '@goodvibes-jev/engine/platform/platform/runtime';
 
 export interface HarnessBooleanSource {
   readonly tool: string;

@@ -4,7 +4,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { nativeReaderCapabilities } from '../packages/engine/sdk/src/platform/runtime/self-update.ts';
+import { nativeReaderCapabilities } from '../packages/engine/platform/src/platform/runtime/self-update.ts';
 
 let root: string, assets: string, home: string;
 const version = '3.1.2';

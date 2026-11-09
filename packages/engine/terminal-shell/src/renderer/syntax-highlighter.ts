@@ -1,4 +1,4 @@
-import { requireDefined } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { requireDefined } from '@goodvibes-jev/engine/platform/platform/utils';
 /**
  * SyntaxHighlighter, Tree-sitter-powered syntax highlighting for code blocks.
  *
@@ -14,9 +14,9 @@ import { requireDefined } from '@goodvibes-jev/engine/sdk/platform/utils';
  * roles, so a theme change re-colours cached blocks without re-parsing.
  */
 import type { Node } from 'web-tree-sitter';
-import { TreeSitterService } from '@goodvibes-jev/engine/sdk/platform/intelligence';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { TreeSitterService } from '@goodvibes-jev/engine/platform/platform/intelligence';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { syntaxStyles, type SyntaxRole, type SyntaxStyle } from './syntax-theme.js';
 
 // ─── Types ───────────────────────────────────────────────────────────────────

@@ -15,25 +15,25 @@ import { describe, expect, test, afterEach, beforeEach } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createStateTool } from '../sdk/src/platform/tools/state/index.js';
-import { KVState } from '../sdk/src/platform/state/kv-state.js';
-import { ProjectIndex } from '../sdk/src/platform/state/project-index.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
+import { createStateTool } from '../platform/src/platform/tools/state/index.js';
+import { KVState } from '../platform/src/platform/state/kv-state.js';
+import { ProjectIndex } from '../platform/src/platform/state/project-index.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import {
   MemoryEmbeddingProviderRegistry,
   MemoryRegistry,
   MemoryStore,
-} from '../sdk/src/platform/state/index.js';
+} from '../platform/src/platform/state/index.js';
 import {
   buildPerTurnKnowledgeInjection,
   DEFAULT_TURN_KNOWLEDGE_RELEVANCE_FLOOR,
-} from '../sdk/src/platform/agents/turn-knowledge-injection.js';
+} from '../platform/src/platform/agents/turn-knowledge-injection.js';
 import { memoryReadingsPort } from './_helpers/memory-readings.ts';
 import { toolReadingsPort, type ToolReadingTable } from './_helpers/tool-readings.ts';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort } from '@goodvibes-jev/judgment/testing';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 
 // Memory search and knowledge ranking read through the judgment port, and so

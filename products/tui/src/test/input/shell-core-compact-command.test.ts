@@ -71,7 +71,7 @@ describe('/compact handler: capacity-% plumbing', () => {
 
     await registry.execute('compact', [], context);
 
-    // The mocked conversationManager.compact() never touches the SDK's real
+    // The mocked conversationManager.compact() never touches the platform's real
     // compaction-event log, so compactConversation() correctly reports "no
     // new event" and the handler falls back to the plain complete message.
     expect(printed.some((line) => line.includes('[Context] Compact complete.'))).toBe(true);

@@ -11,7 +11,7 @@
 //
 // The semantic services + ingest services receive the memory-governor
 // backpressure seams (isBackgroundPaused for the knowledge-self-improvement job
-// + admitExpensiveWork for the critical-tier refusal), mirroring the SDK's own
+// + admitExpensiveWork for the critical-tier refusal), mirroring the platform's own
 // createRuntimeServices. The web-knowledge gap repairer is wired by the caller
 // AFTER webSearchService exists (it is constructed later in services.ts), using
 // the semantic + ingest handles this returns.
@@ -28,13 +28,13 @@ import {
   createConfiguredPlanningStore,
   configureKnowledgeArtifactReferences,
   createProviderBackedKnowledgeSemanticLlm,
-} from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import type { MemoryRegistry } from '@goodvibes-jev/engine/sdk/platform/state';
+} from '@goodvibes-jev/engine/platform/platform/knowledge';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
 import type { RuntimeEventBus } from '@/runtime/index.ts';
-import { WorkPlanStore } from '@goodvibes-jev/engine/sdk/platform/workflow';
+import { WorkPlanStore } from '@goodvibes-jev/engine/platform/platform/workflow';
 
 const REGULAR_KNOWLEDGE_DB_FILE = 'knowledge-wiki.sqlite';
 const HOME_GRAPH_KNOWLEDGE_DB_FILE = 'knowledge-home-graph.sqlite';

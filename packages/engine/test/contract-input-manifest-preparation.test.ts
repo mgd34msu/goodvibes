@@ -3,10 +3,10 @@ import { mkdtempSync, mkdirSync, renameSync, rmSync, symlinkSync, unlinkSync, wr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { assertContractInputObjects, assertContractInputView, captureContractInput, contractInputPath, createContractInputViewAssertion, materializeContractInput } from '../sdk/src/platform/contract/input-snapshot.js';
-import { assertContractInputReadAccess, authorizeContractInputPath, createContractInputAuthority, revokeContractInputAuthority } from '../sdk/src/platform/contract/input-authority.js';
-import type { Contract } from '../sdk/src/platform/contract/types.js';
-import type { ReadAccessFilter } from '../sdk/src/platform/tools/shared/read-access.js';
+import { assertContractInputObjects, assertContractInputView, captureContractInput, contractInputPath, createContractInputViewAssertion, materializeContractInput } from '../platform/src/platform/contract/input-snapshot.js';
+import { assertContractInputReadAccess, authorizeContractInputPath, createContractInputAuthority, revokeContractInputAuthority } from '../platform/src/platform/contract/input-authority.js';
+import type { Contract } from '../platform/src/platform/contract/types.js';
+import type { ReadAccessFilter } from '../platform/src/platform/tools/shared/read-access.js';
 
 const cleanups = new Set<() => Promise<void>>();
 afterEach(async () => {

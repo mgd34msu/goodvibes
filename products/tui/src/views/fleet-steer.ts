@@ -9,11 +9,11 @@
 // module rather than duplicating the logic inline.
 // ---------------------------------------------------------------------------
 
-import { STEER_TTL_MS, type ProcessNode, type ProcessKind, type SteerResult } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
+import { STEER_TTL_MS, type ProcessNode, type ProcessKind, type SteerResult } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import { isTerminalProcessState } from './fleet-read-model.ts';
 import type { FleetTab, SteerBadge, SteerBadgeStatus } from './fleet-session-tabs.ts';
 import { buildViewLine, DEFAULT_VIEW_PALETTE, type ViewPalette } from './polish.ts';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 
 /** Linger before an explicitly resolved (consumed/dropped) steer badge is cleared from the tab. */
 export const STEER_BADGE_LINGER_MS = 4_000;

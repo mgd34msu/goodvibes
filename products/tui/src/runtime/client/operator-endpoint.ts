@@ -19,7 +19,7 @@
  * Refusals are values, never throws: a disabled daemon or an underivable base
  * URL comes back as `{ available: false, reason }` so a caller prints an honest
  * line instead of guessing. Once a call is made, a non-2xx (including the 404 a
- * daemon that has not wired a verb returns) throws `GoodVibesSdkError` and
+ * daemon that has not wired a verb returns) throws `GoodVibesError` and
  * `describeOperatorRpcError` renders it.
  *
  * Auth is the loopback file-token bootstrap: the token
@@ -28,19 +28,19 @@
  * daemon's bearer into the same file, so this resolution covers both.
  */
 import { join } from 'node:path';
-import { createGoodVibesSdk } from '@goodvibes-jev/engine/sdk';
-import type { GoodVibesSdk } from '@goodvibes-jev/engine/sdk';
-import { GoodVibesSdkError } from '@goodvibes-jev/engine/sdk';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { resolveDaemonEnabled } from '@goodvibes-jev/engine/sdk/platform/config';
-import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/sdk/platform/pairing';
-import type { DaemonVerbCaller } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
+import type { GoodVibesPlatform } from '@goodvibes-jev/engine/platform';
+import { GoodVibesError } from '@goodvibes-jev/engine/platform';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
+import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/platform/platform/pairing';
+import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 
 /** Re-exported so this repo's importers keep one import site for the shape
  * every client seam takes. See the doc comment further down for why
- * `OperatorRpc`/`OperatorRpcAvailable` (declared below, carrying `sdk`)
- * structurally satisfy the SDK's `DaemonReachability`, and so `DaemonVerbCaller`
- * built here still type-checks as the SDK's own. */
+ * `OperatorRpc`/`OperatorRpcAvailable` (declared below, carrying `platform`)
+ * structurally satisfy the platform's `DaemonReachability`, and so `DaemonVerbCaller`
+ * built here still type-checks as the platform's own. */
 export type { DaemonVerbCaller };
 
 export interface OperatorRpcUnavailable {
@@ -50,7 +50,7 @@ export interface OperatorRpcUnavailable {
 
 export interface OperatorRpcAvailable {
   readonly available: true;
-  readonly sdk: GoodVibesSdk;
+  readonly platformClient: GoodVibesPlatform;
 }
 
 export type OperatorRpc = OperatorRpcUnavailable | OperatorRpcAvailable;
@@ -83,7 +83,7 @@ export function resolveDaemonStateDirectory(homeDirectory: string): string {
 }
 
 /**
- * Resolve (or honestly refuse to resolve) an operator SDK client wired to this
+ * Resolve (or honestly refuse to resolve) an operator platform client wired to this
  * workspace's control-plane daemon, from just the two things the resolution
  * actually needs, the config manager and the home directory.
  */
@@ -112,8 +112,8 @@ export function resolveOperatorRpc(deps: {
   // unavailable reason above, never a "shell paths not wired" throw.
   const homeDirectory = typeof deps.homeDirectory === 'function' ? deps.homeDirectory() : deps.homeDirectory;
   const token = getOrCreateCompanionToken('tui', { daemonHomeDir: resolveDaemonStateDirectory(homeDirectory) }).token;
-  const sdk = createGoodVibesSdk({ baseUrl, authToken: token });
-  return { available: true, sdk };
+  const platformClient = createGoodVibesPlatform({ baseUrl, authToken: token });
+  return { available: true, platformClient };
 }
 
 /**
@@ -122,7 +122,7 @@ export function resolveOperatorRpc(deps: {
  * yet), never "no result" or a fabricated empty state.
  */
 export function describeOperatorRpcError(error: unknown): string {
-  if (error instanceof GoodVibesSdkError) {
+  if (error instanceof GoodVibesError) {
     if (error.status === 404) {
       return 'the connected daemon returned 404; this operator verb is not wired up on that daemon yet.';
     }
@@ -138,7 +138,7 @@ export function describeOperatorRpcError(error: unknown): string {
  * The generic gateway-method route, for a verb the contract carries with a
  * WEBSOCKET binding only.
  *
- * This matters more than it looks. `sdk.operator.invoke` resolves a method's
+ * This matters more than it looks. `platform.operator.invoke` resolves a method's
  * declared `http` route and refuses, with a contract error, before any request
  * is made, when the method has none. A large part of what this client needs is
  * exactly that class: `approvals.raise`, `credentials.set`/`delete`,
@@ -170,7 +170,7 @@ async function invokeGatewayMethodOverHttp<T>(
     const described = payload && typeof payload === 'object' && 'error' in payload
       ? String((payload as { error: unknown }).error)
       : `HTTP ${response.status}`;
-    throw new GoodVibesSdkError(`'${methodId}' failed: ${described}`, {
+    throw new GoodVibesError(`'${methodId}' failed: ${described}`, {
       // Mapped from the status rather than fixed, so `describeOperatorRpcError`
       // and every caller that branches on category sees the same classification
       // it would have seen through the typed client path.
@@ -195,13 +195,13 @@ export function createDaemonVerbCaller(deps: {
       const rpc = resolveOperatorRpc(deps);
       if (!rpc.available) throw new Error(`cannot invoke '${methodId}': ${rpc.reason}`);
       try {
-        return await rpc.sdk.operator.invoke(methodId as never, (input ?? {}) as never) as T;
+        return await rpc.platformClient.operator.invoke(methodId as never, (input ?? {}) as never) as T;
       } catch (error) {
         // A CONTRACT_MISMATCH here means exactly one thing: this verb declares
         // no HTTP route. That is a routing fact, not a failure of the call, so
         // it falls through to the generic gateway route rather than surfacing
         // as "the daemon refused" to a user who did nothing wrong.
-        if (!(error instanceof GoodVibesSdkError) || error.code !== 'CONTRACT_MISMATCH') throw error;
+        if (!(error instanceof GoodVibesError) || error.code !== 'CONTRACT_MISMATCH') throw error;
         const baseUrl = resolveControlPlaneBaseUrl(deps.configManager);
         if (!baseUrl) throw error;
         const homeDirectory = typeof deps.homeDirectory === 'function' ? deps.homeDirectory() : deps.homeDirectory;

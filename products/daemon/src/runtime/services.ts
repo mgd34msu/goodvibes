@@ -1,9 +1,9 @@
-import { completeGatewayScopePolicyBootstrap } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import { completeGatewayScopePolicyBootstrap } from '@goodvibes-jev/engine/platform/platform/control-plane';
 /** The product's async composition boundary over its real runtime graph. */
 import { createDisposalScope } from './disposal-wiring.js';
 import { createRuntimeBaseServices } from './service-graph.js';
 import { createDaemonHandlerComposition } from './daemon-handler-composition.js';
-import { resumeContracts } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { resumeContracts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { createDaemonBootController, type DaemonBootController } from './boot-tasks.js';
 import type { RuntimeServicesOptions, RuntimeServices } from './runtime-services-types.js';
 import { observeNativeStartupPhase } from './startup-observation.js';

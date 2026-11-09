@@ -6,12 +6,12 @@
  *   4. Each promoted feature maps to the exact keys it was promoted for.
  */
 import { describe, expect, test } from 'bun:test';
-import { FEATURE_FLAGS } from '../sdk/src/platform/runtime/feature-flags/flags.js';
+import { FEATURE_FLAGS } from '../platform/src/platform/runtime/feature-flags/flags.js';
 import {
   FEATURE_FLAG_CONFIG,
   getFeatureFlagConfig,
-} from '../sdk/src/platform/runtime/feature-flags/flag-config-map.js';
-import { CONFIG_KEYS } from '../sdk/src/platform/config/schema.js';
+} from '../platform/src/platform/runtime/feature-flags/flag-config-map.js';
+import { CONFIG_KEYS } from '../platform/src/platform/config/schema.js';
 
 describe('FEATURE_FLAG_CONFIG completeness', () => {
   test('every FEATURE_FLAGS id has an association entry', () => {

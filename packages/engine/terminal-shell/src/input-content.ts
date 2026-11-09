@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, lstatSync, readdirSync } from 'node:fs';
 import { basename, relative } from 'node:path';
-import type { ContentPart } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { logger, summarizeError, resolveAndValidatePath, requireDefined } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
+import { logger, summarizeError, resolveAndValidatePath, requireDefined } from '@goodvibes-jev/engine/platform/platform/utils';
 import { pasteImageFromClipboard, pasteFromClipboard } from './clipboard.js';
 const URL_REFERENCE_REGEX = /^https?:\/\/[^\s]+$/i;
 const CONTEXT_REFERENCE_REGEX = /(^|\s)@([^\s]+)/g;

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { createProcessRegistry, type ProcessRegistry, type ProcessNode } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
-import type { ContractView } from '@goodvibes-jev/engine/sdk/platform/contract';
+import { createProcessRegistry, type ProcessRegistry, type ProcessNode } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+import type { ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
 import { buildFleetTreeHints } from '../../views/fleet-stop.ts';
 import { FleetActs, type FleetDiffSurface } from '../../views/fleet-acts.ts';
 import { workstreamIdFromNodeId, workItemIdFromNodeId, type FleetGateway, type FleetHeldMergeGroup } from '../../views/fleet-gateway.ts';

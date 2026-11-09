@@ -26,7 +26,7 @@ function fixture(options: {
   statusExitCode?: number;
 } = {}) {
   // Reuse the dev-tool fixture prefix so the existing stale-root sweep owns it.
-  const root = makeProjectTempDir('webui-sdk-dev-');
+  const root = makeProjectTempDir('webui-engine-dev-');
   const bin = join(root, 'bin'); const home = join(root, 'home'); const daemon = join(root, 'daemon');
   mkdirSync(bin); mkdirSync(home);
   const calls = join(root, 'calls'); const unsafe = join(root, 'unsafe-start');

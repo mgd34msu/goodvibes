@@ -14,9 +14,9 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { dispatchDaemonApiRoutes } from '../daemon-sdk/src/api-router.js';
-import { createDaemonControlRouteHandlers } from '../daemon-sdk/src/control-routes.js';
-import { dispatchOperatorRoutes } from '../daemon-sdk/src/operator.js';
+import { dispatchDaemonApiRoutes } from '../daemon-api/src/api-router.js';
+import { createDaemonControlRouteHandlers } from '../daemon-api/src/control-routes.js';
+import { dispatchOperatorRoutes } from '../daemon-api/src/operator.js';
 import { makeDefaultDaemonHandlerStub } from './_helpers/daemon-stub-handlers.js';
 import { makeRequest } from './_helpers/router-requests.js';
 
@@ -96,7 +96,7 @@ describe('router-e2e control: GET /status (happy path)', () => {
     expect(statusRequests[1]).toBe(authenticatedRequest);
     // Three version fields, not one: `version` is what every client already
     // reads and carries the running artifact's build; `platformVersion` is the
-    // SDK composition underneath it. This stub states no artifact identity, so
+    // platform composition underneath it. This stub states no artifact identity, so
     // all three are the platform build.
     expect(await authenticated!.json()).toEqual({
       status: 'running',

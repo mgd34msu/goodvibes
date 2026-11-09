@@ -24,7 +24,7 @@ import { RelayOverflowBanner } from './components/status/RelayOverflowBanner';
 import { WakeBanner } from './components/voice/WakeBanner';
 import { useWakeHost } from './lib/voice/useWake';
 import { DaemonReceipts } from './components/status/DaemonReceipts';
-import { clearStoredAuthToken, getCurrentAuth, hasStoredTokenSync, sdk } from './lib/goodvibes';
+import { clearStoredAuthToken, getCurrentAuth, hasStoredTokenSync, client as platformClient } from './lib/goodvibes';
 import { loadBootSnapshot, queryKeys } from './lib/queries';
 import { ChatView } from './views/ChatView';
 import { WorkView } from './views/work/WorkView';
@@ -134,7 +134,7 @@ export default function App() {
   // client store.
   const fleetSnapshot = useQuery({
     queryKey: queryKeys.fleet,
-    queryFn: () => sdk.operator.fleet.snapshot(),
+    queryFn: () => platformClient.operator.fleet.snapshot(),
     enabled: auth.isSuccess,
     refetchInterval: fleetSubscriptionActive ? 60_000 : 15_000,
   });
@@ -144,7 +144,7 @@ export default function App() {
   );
   const chatSessions = useQuery({
     queryKey: ['companion-chat', 'sessions'],
-    queryFn: () => sdk.chat.sessions.list({ limit: 100 }),
+    queryFn: () => platformClient.chat.sessions.list({ limit: 100 }),
     // The sidebar's "Recent" list shows in every view, so the list loads whenever
     // signed in (it used to load only on the chat view).
     enabled: auth.isSuccess,
@@ -177,16 +177,16 @@ export default function App() {
   const deleteChat = useMutation({
     mutationFn: async (sessionId: string) => {
       try {
-        await sdk.chat.sessions.close(sessionId);
+        await platformClient.chat.sessions.close(sessionId);
       } catch (error) {
         if (!isMethodUnavailableError(error) && !isSessionNotFoundError(error)) throw error;
       }
       try {
-        await sdk.chat.sessions.delete(sessionId);
+        await platformClient.chat.sessions.delete(sessionId);
       } catch (error) {
         if (!isSessionNotFoundError(error)) throw error;
       }
-      const reconciled = await sdk.chat.sessions.list({ includeClosed: true, limit: 100 });
+      const reconciled = await platformClient.chat.sessions.list({ includeClosed: true, limit: 100 });
       const stillPresent = companionSessionsFromListResponse(reconciled)
         .some((session) => bestId(session) === sessionId);
       if (stillPresent) {

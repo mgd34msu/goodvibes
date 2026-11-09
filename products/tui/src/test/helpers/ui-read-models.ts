@@ -1,5 +1,5 @@
 // Deliberately per-repo test scaffolding, byte-identical to the sibling product's copy by design: it binds to this repo's own working tree, source layout and Bun test lifecycle, so a shared home would mean inventing a test-only published package rather than hoisting anything.
-import type { SharedApprovalRecord, SharedSessionRecord, ControlPlaneRecentEvent } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import type { SharedApprovalRecord, SharedSessionRecord, ControlPlaneRecentEvent } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type {
   UiAutomationSnapshot,
   UiCockpitSnapshot,
@@ -12,9 +12,9 @@ import type {
   UiWatchersSnapshot,
 } from '../../runtime/ui-read-models.ts';
 import type { RuntimeStore } from '../../runtime/store/index.ts';
-import type { AutomationJob } from '@goodvibes-jev/engine/sdk/platform/automation';
-import type { AutomationRun } from '@goodvibes-jev/engine/sdk/platform/automation';
-import type { AutomationRouteBinding } from '@goodvibes-jev/engine/sdk/platform/automation';
+import type { AutomationJob } from '@goodvibes-jev/engine/platform/platform/automation';
+import type { AutomationRun } from '@goodvibes-jev/engine/platform/platform/automation';
+import type { AutomationRouteBinding } from '@goodvibes-jev/engine/platform/platform/automation';
 import type { WatcherRecord } from '@/runtime/index.ts';
 import type { RuntimeCommunicationRecord } from '@/runtime/index.ts';
 import type { RuntimeTask } from '@/runtime/index.ts';

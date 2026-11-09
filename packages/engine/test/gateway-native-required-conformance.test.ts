@@ -1,4 +1,4 @@
-import { registerNativeHostedTurnGatewayMethods } from '../sdk/src/platform/control-plane/routes/native-hosted-turn.js';
+import { registerNativeHostedTurnGatewayMethods } from '../platform/src/platform/control-plane/routes/native-hosted-turn.js';
 /**
  * Authenticated counterpart to gateway-verb-required-conformance.test.ts.
  * The generic probe uses a user principal and cannot reach native validation:
@@ -10,11 +10,11 @@ import { registerNativeHostedTurnGatewayMethods } from '../sdk/src/platform/cont
  * pairing-native-authority and work-ledger-native-{execution,intake-routes}.
  */
 import { describe, expect, test } from 'bun:test';
-import { GatewayMethodCatalog, type GatewayMethodInvocation } from '../sdk/src/platform/control-plane/method-catalog.js';
-import { registerNativeConversationIntakeGatewayMethods } from '../sdk/src/platform/control-plane/routes/native-intake.js';
-import { registerNativeWorkSubmissionGatewayMethods } from '../sdk/src/platform/control-plane/routes/native-work-submission.js';
-import { registerNativeWorkExecutionGatewayMethods } from '../sdk/src/platform/control-plane/routes/native-work-execution.js';
-import type { NativePairedSnapshot } from '../sdk/src/platform/security/http-auth.js';
+import { GatewayMethodCatalog, type GatewayMethodInvocation } from '../platform/src/platform/control-plane/method-catalog.js';
+import { registerNativeConversationIntakeGatewayMethods } from '../platform/src/platform/control-plane/routes/native-intake.js';
+import { registerNativeWorkSubmissionGatewayMethods } from '../platform/src/platform/control-plane/routes/native-work-submission.js';
+import { registerNativeWorkExecutionGatewayMethods } from '../platform/src/platform/control-plane/routes/native-work-execution.js';
+import type { NativePairedSnapshot } from '../platform/src/platform/security/http-auth.js';
 
 const revision = { work: 1, criteria: 1, attempt: 1 };
 const cases: ReadonlyArray<readonly [string, Record<string, unknown>, string]> = [

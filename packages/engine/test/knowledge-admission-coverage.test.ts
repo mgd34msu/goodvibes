@@ -12,9 +12,9 @@
 import { describe, expect, test } from 'bun:test';
 
 import { trackDisposables } from './_helpers/disposables.ts';
-import { KnowledgeService } from '../sdk/src/platform/knowledge/service.js';
-import { HomeGraphService } from '../sdk/src/platform/knowledge/home-graph/service.js';
-import { enrichAndImproveHomeGraphSource } from '../sdk/src/platform/knowledge/home-graph/sync-self-improvement.js';
+import { KnowledgeService } from '../platform/src/platform/knowledge/service.js';
+import { HomeGraphService } from '../platform/src/platform/knowledge/home-graph/service.js';
+import { enrichAndImproveHomeGraphSource } from '../platform/src/platform/knowledge/home-graph/sync-self-improvement.js';
 import { createStores } from './_helpers/knowledge-semantic-fixtures.js';
 
 /**

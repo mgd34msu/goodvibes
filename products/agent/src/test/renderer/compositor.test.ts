@@ -1,8 +1,8 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { activeTokens } from '../../renderer/theme.ts';
 import { Compositor } from '../../renderer/compositor.ts';
-import { createStyledCell, createEmptyLine } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { Line, Cell } from '@goodvibes-jev/engine/sdk/platform/types';
+import { createStyledCell, createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types';
+import type { Line, Cell } from '@goodvibes-jev/engine/platform/platform/types';
 import type { CompositeRequest, SelectionInfo } from '../../renderer/compositor.ts';
 
 // ---------------------------------------------------------------------------

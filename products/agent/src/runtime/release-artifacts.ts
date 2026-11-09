@@ -14,14 +14,14 @@
  *     is plain JavaScript, so one archive serves every platform;
  *   - one `SHA256SUMS.txt` manifest covering every asset above.
  *
- * The checksum manifest name and parser are the SDK's canonical ones
+ * The checksum manifest name and parser are the platform's canonical ones
  * (platform/runtime/self-update) so the agent verifies with the same
  * mechanism every other surface uses. Asset NAMING stays local because it
- * encodes THIS repo's release layout, the SDK's resolveArtifactNames names
+ * encodes THIS repo's release layout, the platform's resolveArtifactNames names
  * the TUI's `goodvibes` binary and the daemon repo's `goodvibes-daemon-*`
  * assets, neither of which this repo ships.
  */
-export { CHECKSUM_MANIFEST_NAME, parseChecksumFile } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+export { CHECKSUM_MANIFEST_NAME, parseChecksumFile } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 export { extractTarGzEntry } from './tar-archive.ts';
 
 const SUPPORTED_ARCHES = new Set(['x64', 'arm64']);
@@ -74,7 +74,7 @@ export function resolveSqliteVecArchive(platform: string, arch: string): SqliteV
  * plain JavaScript, and the browser binaries it drives are downloaded
  * separately into the managed cache. Extracting it beside the executable
  * produces `<execDir>/playwright-core/…`, the first entry in
- * driverSearchDirectories (see @goodvibes-jev/engine/sdk/platform/browser, and
+ * driverSearchDirectories (see @goodvibes-jev/engine/platform/platform/browser, and
  * runtime/agent-browser.ts for this surface's binding of it).
  */
 export const BROWSER_DRIVER_ARCHIVE_NAME = 'browser-driver.tar.gz';

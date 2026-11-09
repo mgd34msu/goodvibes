@@ -10,9 +10,9 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { WatcherRegistry } from '../sdk/src/platform/watchers/registry.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
-import type { AutomationSourceRecord } from '../sdk/src/platform/automation/sources.js';
+import { WatcherRegistry } from '../platform/src/platform/watchers/registry.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
+import type { AutomationSourceRecord } from '../platform/src/platform/automation/sources.js';
 import { useFailureReadings } from './_helpers/failure-readings.js';
 
 const roots: string[] = [];

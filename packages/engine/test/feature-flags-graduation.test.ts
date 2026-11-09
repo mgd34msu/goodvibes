@@ -10,9 +10,9 @@ import {
   buildFlagGraduationReport,
   evaluateGraduationReleaseGate,
   type FlagGraduationAnnotation,
-} from '../sdk/src/platform/runtime/feature-flags/graduation.js';
-import { FEATURE_FLAGS } from '../sdk/src/platform/runtime/feature-flags/flags.js';
-import type { FeatureFlag } from '../sdk/src/platform/runtime/feature-flags/types.js';
+} from '../platform/src/platform/runtime/feature-flags/graduation.js';
+import { FEATURE_FLAGS } from '../platform/src/platform/runtime/feature-flags/flags.js';
+import type { FeatureFlag } from '../platform/src/platform/runtime/feature-flags/types.js';
 
 function flag(id: string, defaultState: FeatureFlag['defaultState']): FeatureFlag {
   return { id, name: id, description: id, defaultState, tier: 1, runtimeToggleable: true };

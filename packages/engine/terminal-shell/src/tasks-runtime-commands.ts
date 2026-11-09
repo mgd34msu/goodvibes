@@ -3,10 +3,10 @@ import {
   type LocalTaskSource,
   type DaemonVerbCaller,
   type UnionTask,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/client';
-import type { OpsApi } from '@goodvibes-jev/engine/sdk/platform/runtime/bootstrap';
-import type { TaskKind } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+} from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import type { OpsApi } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+import type { TaskKind } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { sortUnionTasks } from './task-presentation.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
 interface TaskCommandContext {

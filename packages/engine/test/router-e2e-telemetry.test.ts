@@ -14,9 +14,9 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { createDaemonTelemetryRouteHandlers } from '../daemon-sdk/src/telemetry-routes.js';
-import { dispatchOperatorRoutes } from '../daemon-sdk/src/operator.js';
-import type { DaemonApiRouteHandlers } from '../daemon-sdk/src/context.js';
+import { createDaemonTelemetryRouteHandlers } from '../daemon-api/src/telemetry-routes.js';
+import { dispatchOperatorRoutes } from '../daemon-api/src/operator.js';
+import type { DaemonApiRouteHandlers } from '../daemon-api/src/context.js';
 import { makeDefaultDaemonHandlerStub } from './_helpers/daemon-stub-handlers.js';
 import { makeRequest } from './_helpers/router-requests.js';
 

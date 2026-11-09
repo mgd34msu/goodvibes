@@ -6,9 +6,9 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { clientReaderPayloadPaths, clientReaderAsset, nativeReaderCapabilities, parseClientReaderArtifact, parseNativeReaderCapabilities,
-  type ClientReaderArtifact, type ClientReaderPackage, type ClientReaderTarget } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
-import { fileObservationIdentity } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { writeFileAtomic } from '@goodvibes-jev/engine/sdk/platform/utils';
+  type ClientReaderArtifact, type ClientReaderPackage, type ClientReaderTarget } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import { fileObservationIdentity } from '@goodvibes-jev/engine/platform/platform/utils';
+import { writeFileAtomic } from '@goodvibes-jev/engine/platform/platform/utils';
 
 export interface TerminalReaderSource {
   readonly sourceCommit: string;

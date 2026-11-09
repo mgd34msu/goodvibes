@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { gzipSync } from 'node:zlib';
 import { prepareNativeDirectoryRollback, prepareNativeUpdateDirectory, retainNativeUpdateTree,
-  NATIVE_UPDATE_DIRECTORY_RELEASE_FILE, NativeDirectoryUpdateError } from '../sdk/src/platform/runtime/update-directories.js';
+  NATIVE_UPDATE_DIRECTORY_RELEASE_FILE, NativeDirectoryUpdateError } from '../platform/src/platform/runtime/update-directories.js';
 const cleanup: (() => void)[] = [];
 afterEach(() => { for (const close of cleanup.splice(0).reverse()) close(); });
 function fixture() {

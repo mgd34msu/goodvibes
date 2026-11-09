@@ -18,17 +18,17 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ChannelPluginRegistry } from '../sdk/src/platform/channels/plugin-registry.js';
-import { ChannelReplyPipeline } from '../sdk/src/platform/channels/reply-pipeline.js';
+import { ChannelPluginRegistry } from '../platform/src/platform/channels/plugin-registry.js';
+import { ChannelReplyPipeline } from '../platform/src/platform/channels/reply-pipeline.js';
 import {
   DaemonSurfaceDeliveryHelper,
   type SurfaceDeliveryLedgerEntry,
-} from '../sdk/src/platform/daemon/surface-delivery.js';
-import { SharedSessionBroker } from '../sdk/src/platform/control-plane/session-broker.js';
-import type { RouteBindingManager } from '../sdk/src/platform/channels/index.js';
-import type { AutomationRouteBinding } from '../sdk/src/platform/automation/routes.js';
-import type { PendingSurfaceReply } from '../sdk/src/platform/daemon/types.js';
-import { logger } from '../sdk/src/platform/utils/logger.js';
+} from '../platform/src/platform/daemon/surface-delivery.js';
+import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.js';
+import type { RouteBindingManager } from '../platform/src/platform/channels/index.js';
+import type { AutomationRouteBinding } from '../platform/src/platform/automation/routes.js';
+import type { PendingSurfaceReply } from '../platform/src/platform/daemon/types.js';
+import { logger } from '../platform/src/platform/utils/logger.js';
 import { trackDisposables } from './_helpers/disposables.ts';
 
 const disposables = trackDisposables();

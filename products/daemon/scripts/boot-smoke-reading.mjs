@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { matchesJudgmentModel } from '@goodvibes-jev/judgment';
 import { nativeAddonFailure } from '@goodvibes-jev/engine/toolchain';
-import { retainStrictJudgmentJson, snapshotJudgmentInput, prepareJudgmentResult } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { retainStrictJudgmentJson, snapshotJudgmentInput, prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
 export { nativeAddonFailure };
 
 export async function readNativeAddonEvidence(port, evidence, signal) {

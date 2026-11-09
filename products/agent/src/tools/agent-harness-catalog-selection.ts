@@ -1,11 +1,11 @@
 import { LIMITS } from '@goodvibes-jev/judgment';
 import { types as nodeTypes } from 'node:util';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { gateJudgmentRegistry, prepareJudgmentResult } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { registryCatalogGroupFit, registrySelect, ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { gateJudgmentRegistry, prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
+import { registryCatalogGroupFit, registrySelect, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogMethods, captureCatalogSnapshot, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
-import { activateClassicFallback, decisionOrClassic, isClassicOperation, selectClassicCatalog } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { activateClassicFallback, decisionOrClassic, isClassicOperation, selectClassicCatalog } from '@goodvibes-jev/engine/platform/platform/runtime';
 
 function requireSynchronousRestriction(result: unknown): void {
   if (result === undefined) return;

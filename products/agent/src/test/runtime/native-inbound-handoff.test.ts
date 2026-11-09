@@ -2,9 +2,9 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SharedSessionBroker, createNativeInboundSourceOwner, type NativeInboundResolvedSource, type NativeInboundSourceHandle, type NativeInboundSourceRef } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { AutomationRouteStore } from '@goodvibes-jev/engine/sdk/platform/automation';
-import { RouteBindingManager } from '@goodvibes-jev/engine/sdk/platform/channels';
+import { SharedSessionBroker, createNativeInboundSourceOwner, type NativeInboundResolvedSource, type NativeInboundSourceHandle, type NativeInboundSourceRef } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { AutomationRouteStore } from '@goodvibes-jev/engine/platform/platform/automation';
+import { RouteBindingManager } from '@goodvibes-jev/engine/platform/platform/channels';
 import { createNativeInboundHandoff, type NativeInboundAcceptance } from '../../runtime/client/native-inbound-handoff.ts';
 
 const cleanups: Array<() => void | Promise<void>> = [];
@@ -193,7 +193,7 @@ test('forged reference cannot revoke the genuine source and repeat release canno
 });
 
 test('wire acknowledgment recovery uses the same receiver acceptance without replay', async () => {
-  const { createWireSessionDispatch } = await import('@goodvibes-jev/engine/sdk/platform/runtime/client');
+  const { createWireSessionDispatch } = await import('@goodvibes-jev/engine/platform/platform/runtime/client');
   const f = await fixture(); let acknowledgments = 0;
   const dispatch = createWireSessionDispatch({ hostedSessionIds: () => [f.target.sessionId], intervalMs: 5 });
   cleanups.push(() => dispatch.stop()); dispatch.setContinuationRunner(f.handoff.run);

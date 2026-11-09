@@ -3,16 +3,16 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { registerToolWithContractGate } from '../sdk/src/platform/tools/index.js';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.js';
-import { executeFetchInput } from '../sdk/src/platform/tools/fetch/index.js';
-import { guardExecCommand } from '../sdk/src/platform/tools/exec/ast-guard.js';
-import { createPhasedExecutor } from '../sdk/src/platform/runtime/tools/index.js';
-import { DeliveryQueue } from '../sdk/src/platform/integrations/delivery.js';
-import { Notifier } from '../sdk/src/platform/integrations/notifier.js';
-import { RouteBindingManager } from '../sdk/src/platform/channels/route-manager.js';
-import { ChannelPluginRegistry, SurfaceRegistry } from '../sdk/src/platform/channels/index.js';
-import { bindProviderOptimizerFeatureFlag } from '../sdk/src/platform/runtime/services.js';
+import { registerToolWithContractGate } from '../platform/src/platform/tools/index.js';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.js';
+import { executeFetchInput } from '../platform/src/platform/tools/fetch/index.js';
+import { guardExecCommand } from '../platform/src/platform/tools/exec/ast-guard.js';
+import { createPhasedExecutor } from '../platform/src/platform/runtime/tools/index.js';
+import { DeliveryQueue } from '../platform/src/platform/integrations/delivery.js';
+import { Notifier } from '../platform/src/platform/integrations/notifier.js';
+import { RouteBindingManager } from '../platform/src/platform/channels/route-manager.js';
+import { ChannelPluginRegistry, SurfaceRegistry } from '../platform/src/platform/channels/index.js';
+import { bindProviderOptimizerFeatureFlag } from '../platform/src/platform/runtime/services.js';
 import {
   createDivergenceDashboard,
   createPermissionEvaluator,
@@ -20,44 +20,44 @@ import {
   loadPolicyBundle,
   PermissionSimulator,
   signBundle,
-} from '../sdk/src/platform/runtime/permissions/index.js';
-import { PermissionManager } from '../sdk/src/platform/permissions/manager.js';
-import type { PermissionConfigReader } from '../sdk/src/platform/permissions/manager.js';
-import type { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.js';
-import { createPluginLifecycleManager } from '../sdk/src/platform/runtime/plugins/index.js';
-import { createMcpLifecycleManager } from '../sdk/src/platform/runtime/mcp/index.js';
-import { createShellPlanRuntime } from '../sdk/src/platform/runtime/shell-command-ops.js';
-import { AdaptivePlanner } from '../sdk/src/platform/core/adaptive-planner.js';
-import { createTelemetryProvider } from '../sdk/src/platform/runtime/telemetry/index.js';
-import { createRuntimeStore } from '../sdk/src/platform/runtime/store/index.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { createTaskManager } from '../sdk/src/platform/runtime/tasks/index.js';
-import { createFeatureFlagManager } from '../sdk/src/platform/runtime/feature-flags/index.js';
-import { getSecuritySettingsReport } from '../sdk/src/platform/runtime/security-settings.js';
-import { AgentOrchestrator } from '../sdk/src/platform/agents/orchestrator.js';
-import { resolveContextWindowModelDefinition } from '../sdk/src/platform/agents/orchestrator-runner.js';
-import { AgentMessageBus } from '../sdk/src/platform/agents/message-bus.js';
-import { AgentManager } from '../sdk/src/platform/tools/agent/manager.js';
-import { configureDaemonSessionContinuation } from '../sdk/src/platform/daemon/facade-composition.js';
-import { buildSharedSessionAgentSpawnRoutingInput } from '../sdk/src/platform/control-plane/session-intents.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { WatcherRegistry } from '../sdk/src/platform/watchers/index.js';
-import { PlatformServiceManager } from '../sdk/src/platform/daemon/service-manager.js';
-import { AutomationDeliveryManager, AutomationManager } from '../sdk/src/platform/automation/index.js';
-import { ControlPlaneGateway } from '../sdk/src/platform/control-plane/index.js';
-import { OverflowHandler, createSpillBackend } from '../sdk/src/platform/tools/shared/overflow.js';
-import { ApiTokenAuditor } from '../sdk/src/platform/security/token-audit.js';
-import { ModeManager } from '../sdk/src/platform/state/mode-manager.js';
-import type { Tool, ToolResult } from '../sdk/src/platform/types/tools.js';
-import type { ToolRuntimeContext } from '../sdk/src/platform/runtime/tools/index.js';
-import type { AutomationRouteStore } from '../sdk/src/platform/automation/store/routes.js';
-import type { AutomationRouteBinding } from '../sdk/src/platform/automation/routes.js';
-import type { AutomationJob } from '../sdk/src/platform/automation/jobs.js';
-import type { AutomationRun } from '../sdk/src/platform/automation/runs.js';
-import type { LLMProvider, ChatResponse } from '../sdk/src/platform/providers/interface.js';
-import type { AgentRecord } from '../sdk/src/platform/tools/agent/manager.js';
-import type { ServiceSecretField } from '../sdk/src/platform/config/service-registry.js';
-import type { ConfigKey, ConfigValue } from '../sdk/src/platform/config/schema-types.js';
+} from '../platform/src/platform/runtime/permissions/index.js';
+import { PermissionManager } from '../platform/src/platform/permissions/manager.js';
+import type { PermissionConfigReader } from '../platform/src/platform/permissions/manager.js';
+import type { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.js';
+import { createPluginLifecycleManager } from '../platform/src/platform/runtime/plugins/index.js';
+import { createMcpLifecycleManager } from '../platform/src/platform/runtime/mcp/index.js';
+import { createShellPlanRuntime } from '../platform/src/platform/runtime/shell-command-ops.js';
+import { AdaptivePlanner } from '../platform/src/platform/core/adaptive-planner.js';
+import { createTelemetryProvider } from '../platform/src/platform/runtime/telemetry/index.js';
+import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { createTaskManager } from '../platform/src/platform/runtime/tasks/index.js';
+import { createFeatureFlagManager } from '../platform/src/platform/runtime/feature-flags/index.js';
+import { getSecuritySettingsReport } from '../platform/src/platform/runtime/security-settings.js';
+import { AgentOrchestrator } from '../platform/src/platform/agents/orchestrator.js';
+import { resolveContextWindowModelDefinition } from '../platform/src/platform/agents/orchestrator-runner.js';
+import { AgentMessageBus } from '../platform/src/platform/agents/message-bus.js';
+import { AgentManager } from '../platform/src/platform/tools/agent/manager.js';
+import { configureDaemonSessionContinuation } from '../platform/src/platform/daemon/facade-composition.js';
+import { buildSharedSessionAgentSpawnRoutingInput } from '../platform/src/platform/control-plane/session-intents.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { WatcherRegistry } from '../platform/src/platform/watchers/index.js';
+import { PlatformServiceManager } from '../platform/src/platform/daemon/service-manager.js';
+import { AutomationDeliveryManager, AutomationManager } from '../platform/src/platform/automation/index.js';
+import { ControlPlaneGateway } from '../platform/src/platform/control-plane/index.js';
+import { OverflowHandler, createSpillBackend } from '../platform/src/platform/tools/shared/overflow.js';
+import { ApiTokenAuditor } from '../platform/src/platform/security/token-audit.js';
+import { ModeManager } from '../platform/src/platform/state/mode-manager.js';
+import type { Tool, ToolResult } from '../platform/src/platform/types/tools.js';
+import type { ToolRuntimeContext } from '../platform/src/platform/runtime/tools/index.js';
+import type { AutomationRouteStore } from '../platform/src/platform/automation/store/routes.js';
+import type { AutomationRouteBinding } from '../platform/src/platform/automation/routes.js';
+import type { AutomationJob } from '../platform/src/platform/automation/jobs.js';
+import type { AutomationRun } from '../platform/src/platform/automation/runs.js';
+import type { LLMProvider, ChatResponse } from '../platform/src/platform/providers/interface.js';
+import type { AgentRecord } from '../platform/src/platform/tools/agent/manager.js';
+import type { ServiceSecretField } from '../platform/src/platform/config/service-registry.js';
+import type { ConfigKey, ConfigValue } from '../platform/src/platform/config/schema-types.js';
 
 const flags = (enabledIds: readonly string[]) => ({
   isEnabled(id: string): boolean {
@@ -1575,12 +1575,12 @@ describe('feature flag safe-default gates', () => {
   // to record the truth rather than be silently overridden by a bug, see
   // CHANGELOG.md [Unreleased] for the history.
   test('runtime.unifiedTasks defaults true, and unified-runtime-task defaults enabled to match', async () => {
-    const { CONFIG_SCHEMA } = await import('../sdk/src/platform/config/schema.js');
+    const { CONFIG_SCHEMA } = await import('../platform/src/platform/config/schema.js');
     const entry = CONFIG_SCHEMA.find((s) => s.key === 'runtime.unifiedTasks');
     expect(entry).toBeDefined();
     expect(entry!.default).toBe(true);
 
-    const { FEATURE_FLAG_MAP } = await import('../sdk/src/platform/runtime/feature-flags/flags.js');
+    const { FEATURE_FLAG_MAP } = await import('../platform/src/platform/runtime/feature-flags/flags.js');
     const flag = FEATURE_FLAG_MAP.get('unified-runtime-task');
     expect(flag?.defaultState).toBe('enabled');
 
@@ -1589,7 +1589,7 @@ describe('feature flag safe-default gates', () => {
     // composition roots changes nothing for an existing install.
     const configManager = new ConfigManager({ configDir: mkdtempSync(join(tmpdir(), 'gv-unified-tasks-default-')) });
     expect(configManager.get('runtime.unifiedTasks')).toBe(true);
-    const { deriveFeatureStates } = await import('../sdk/src/platform/runtime/feature-flags/feature-settings.js');
+    const { deriveFeatureStates } = await import('../platform/src/platform/runtime/feature-flags/feature-settings.js');
     const states = deriveFeatureStates(configManager);
     expect(states['unified-runtime-task']).toBe('enabled');
   });

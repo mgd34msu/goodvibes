@@ -1,6 +1,6 @@
 /**
  * presentation-bridge.ts, the semantic bridge from web UI status vocabulary
- * onto the SDK presentation contract's glyphs (@goodvibes-jev/engine/sdk/platform/presentation),
+ * onto the platform presentation contract's glyphs (@goodvibes-jev/engine/platform/platform/presentation),
  * the same contract the TUI and agent already render through.
  *
  * HAND-WRITTEN, not generated, see src/lib/generated/presentation-tokens.ts
@@ -21,7 +21,7 @@
  * up here too, without inventing a wording correspondence that doesn't
  * genuinely exist.
  *
- * A webui state with no honest SDK-contract analogue is not force-fit here
+ * A webui state with no honest platform-contract analogue is not force-fit here
  * (e.g. "unconfigured" / "status unavailable" are absent-health states, not
  * a severity level, they map to `info`, matching STATE_GLYPHS' own "this
  * isn't a fault" bucket, never to `bad`).
@@ -143,7 +143,7 @@ export function contractStateForSse(state: SseState): ContractStatusState {
 }
 
 // ---------------------------------------------------------------------------
-// Memory pressure tier (ops.memory.get, SDK 1.9.0-dev) <-> contract severity bucket
+// Memory pressure tier (ops.memory.get, platform 1.9.0-dev) <-> contract severity bucket
 // ---------------------------------------------------------------------------
 
 const MEMORY_TIER_TO_CONTRACT_STATE: Record<MemoryTier, ContractStatusState> = {

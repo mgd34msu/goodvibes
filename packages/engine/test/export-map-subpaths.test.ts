@@ -2,7 +2,7 @@
  * Export-map subpath resolution: consumer imports of the public subpaths are
  * proven against the COMMITTED package.json exports manifest, not just
  * compilation. Every import here goes through the package NAME (the engine
- * package's own name, @goodvibes-jev/engine/sdk/...), so Bun applies the real
+ * package's own name, @goodvibes-jev/engine/platform/...), so Bun applies the real
  * exports map exactly as a consumer install would, a subpath missing from the
  * manifest fails here even though the source file exists on disk.
  */
@@ -10,7 +10,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const PACKAGE = '@goodvibes-jev/engine/sdk';
+const PACKAGE = '@goodvibes-jev/engine/platform';
 
 /** subpath -> the export names a consumer composes with. */
 const SUBPATH_SURFACE: Record<string, readonly string[]> = {
@@ -24,20 +24,20 @@ const SUBPATH_SURFACE: Record<string, readonly string[]> = {
   './platform/runtime/voice-setup': ['createVoiceSetupService'],
   './platform/daemon/auto-updater': ['DaemonAutoUpdater', 'defaultDownloadBaseUrl'],
   './platform/daemon/receipts': ['DaemonReceiptStore', 'formatReceiptTime', 'realReceiptStoreIo'],
-  // Single-file module: the SDK's own version constant (cli/acp/mcp compose it).
+  // Single-file module: the platform's own version constant (cli/acp/mcp compose it).
   './platform/version': ['VERSION'],
 };
 
 /**
  * Directory-barrel subpaths (dist targets are <dir>/index.*, unlike the
  * file-shaped table above). Same manifest-proven contract: each module a
- * consumer composition root needs (the SDK's own cli.ts/services.ts imports
+ * consumer composition root needs (the platform's own cli.ts/services.ts imports
  * are the reference set) must be declared AND resolve through the package
  * name.
  */
 const DIR_SUBPATH_SURFACE: Record<string, readonly string[]> = {
   // Host-only ledger composition is intentionally a narrow nested subpath,
-  // not a root SDK or workflow-barrel export.
+  // not a root platform or workflow-barrel export.
   './platform/workflow/work-ledger': ['createWorkLedger', 'createEmptyWorkLedgerState', 'WorkLedgerAccessError', 'workLedgerCommandSchema', 'workLedgerStateSchema'],
   './platform/power': ['PowerManager', 'wireRuntimePower', 'createLinuxLogindSeam', 'bindPowerWorkSignals', 'createUnavailablePowerSeam'],
   './platform/relay': ['StepUpService', 'createRelayReachability', 'buildDaemonRelayReachability', 'evaluateStepUp', 'isMutatingMethod'],
@@ -53,21 +53,21 @@ const DIR_SUBPATH_SURFACE: Record<string, readonly string[]> = {
     'KNOWN_MEMORY_CACHES', 'isMemoryCacheRegistered', 'assertMemoryCacheRegistered',
     'resolveEffectiveSystemRamMb',
   ],
-  // singleFlight is composition machinery the SDK's own voice-install path
+  // singleFlight is composition machinery the platform's own voice-install path
   // uses, consumers must not have to duplicate it.
   './platform/utils': ['singleFlight', 'logger'],
 };
 
 describe('export-map subpath resolution (committed manifest)', () => {
-  // The engine manifest; each ./sdk subpath names its source module under the
+  // The engine manifest; each ./platform subpath names its source module under the
   // workspace source condition and its built output under types and import.
   const manifest = JSON.parse(
     readFileSync(join(import.meta.dir, '..', 'package.json'), 'utf8'),
   ) as { exports: Record<string, Record<string, string>> };
   const conditions = (module: string) => ({
-    bun: `./sdk/src${module}.ts`,
-    types: `./sdk/dist${module}.d.ts`,
-    import: `./sdk/dist${module}.js`,
+    bun: `./platform/src${module}.ts`,
+    types: `./platform/dist${module}.d.ts`,
+    import: `./platform/dist${module}.js`,
   });
 
   for (const [subpath, expectedExports] of Object.entries(SUBPATH_SURFACE)) {
@@ -103,7 +103,7 @@ describe('export-map subpath resolution (committed manifest)', () => {
   test('./platform/runtime/memory entrypoint COMPOSES: a consumer builds a working governor through the package name', async () => {
     // The way a fork-composed runtime (agent, TUI) constructs it, real
     // registry + controller, injected sampler/clock, no interval started.
-    const memory = await import('@goodvibes-jev/engine/sdk/platform/runtime/memory');
+    const memory = await import('@goodvibes-jev/engine/platform/platform/runtime/memory');
     let rss = 10 * 1024 * 1024;
     const { cacheRegistry, pauseController, memoryGovernor } = memory.createMemoryGovernance({
       config: { budgetMb: 100, elevatedPct: 60, highPct: 80, criticalPct: 95, tripwireRateMbPerSec: 25, tripwireSustainSec: 60 },
@@ -131,7 +131,7 @@ describe('export-map subpath resolution (committed manifest)', () => {
     // The way a fork-composed runtime (TUI) constructs it, the provisioner and
     // status-read are injected seams, so the entrypoint runs with no network,
     // no download, and no real voice runtime on the host.
-    const { createVoiceSetupService } = await import('@goodvibes-jev/engine/sdk/platform/runtime/voice-setup');
+    const { createVoiceSetupService } = await import('@goodvibes-jev/engine/platform/platform/runtime/voice-setup');
 
     const config = new Map<string, string>();
     let resetCalls = 0;
@@ -197,7 +197,7 @@ describe('export-map subpath resolution (committed manifest)', () => {
     // The failure this encodes: an install where every byte landed and every
     // checksum matched, reported as provisioned, on a machine where speech to
     // text did not work. A proof that fails is an honest "not provisioned".
-    const { createVoiceSetupService } = await import('@goodvibes-jev/engine/sdk/platform/runtime/voice-setup');
+    const { createVoiceSetupService } = await import('@goodvibes-jev/engine/platform/platform/runtime/voice-setup');
     const service = createVoiceSetupService({
       managedVoiceRoot: join(import.meta.dir, '.test-tmp', `voice-setup-unproven-${process.pid}-${Date.now()}`),
       getConfig: () => '',
@@ -233,7 +233,7 @@ describe('export-map subpath resolution (committed manifest)', () => {
   });
 
   test('./platform/runtime/voice-setup install() refuses honestly under critical memory pressure', async () => {
-    const { createVoiceSetupService } = await import('@goodvibes-jev/engine/sdk/platform/runtime/voice-setup');
+    const { createVoiceSetupService } = await import('@goodvibes-jev/engine/platform/platform/runtime/voice-setup');
     let provisionCalls = 0;
     const service = createVoiceSetupService({
       managedVoiceRoot: join(import.meta.dir, '.test-tmp', `voice-setup-denied-${process.pid}-${Date.now()}`),
@@ -256,7 +256,7 @@ describe('export-map subpath resolution (committed manifest)', () => {
   });
 
   test('./platform/utils entrypoint serves a WORKING singleFlight through the package name', async () => {
-    const { singleFlight } = await import('@goodvibes-jev/engine/sdk/platform/utils');
+    const { singleFlight } = await import('@goodvibes-jev/engine/platform/platform/utils');
     let runs = 0;
     let release: (() => void) | undefined;
     const gate = new Promise<void>((resolve) => { release = resolve; });

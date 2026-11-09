@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { resolveRouteId } from '../sdk/src/platform/intake/providers/route-util.js';
-import type { AdapterContext } from '../sdk/src/platform/intake/provider-adapter.js';
+import { resolveRouteId } from '../platform/src/platform/intake/providers/route-util.js';
+import type { AdapterContext } from '../platform/src/platform/intake/provider-adapter.js';
 
 function context(resolveRouteId?: AdapterContext['resolveRouteId']) {
   const warnings: unknown[] = [];

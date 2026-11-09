@@ -7,10 +7,10 @@ import { withWorkspaceLock } from './workspace-lock.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-export const SDK_ROOT = resolve(__dirname, '..');
-export const REPO_ROOT = resolve(SDK_ROOT, '../..');
+export const ENGINE_ROOT = resolve(__dirname, '..');
+export const REPO_ROOT = resolve(ENGINE_ROOT, '../..');
 // The repo root .tmp, as before: the stage copies the engine, so it cannot sit inside it.
-const SDK_TEMP_ROOT = resolve(REPO_ROOT, '.tmp');
+const ENGINE_TEMP_ROOT = resolve(REPO_ROOT, '.tmp');
 // The engine is one package: every old workspace package is a subpath of it.
 // The judgment package it depends on is released with it, so a packed engine
 // always has the judgment tarball it resolves `@goodvibes-jev/judgment` to.
@@ -58,7 +58,7 @@ export interface RunOptions {
 }
 
 export function getRootPackage(): PackageManifest {
-  return JSON.parse(readFileSync(resolve(SDK_ROOT, 'package.json'), 'utf8'));
+  return JSON.parse(readFileSync(resolve(ENGINE_ROOT, 'package.json'), 'utf8'));
 }
 
 export function getRootVersion(): string {
@@ -72,7 +72,7 @@ export function readJson(path: string): unknown {
 }
 
 export function getPackageDirectoryPath(dir: string): string {
-  return resolve(SDK_ROOT, dir);
+  return resolve(ENGINE_ROOT, dir);
 }
 
 export function getPackageJsonPath(dir: string): string {
@@ -123,14 +123,14 @@ function shouldCopyPath(path: string): boolean {
   const parts = path.split('/');
   return (
     // The engine's own scratch directories are not package content.
-    !path.startsWith(resolve(SDK_ROOT, '.tmp')) &&
-    !path.startsWith(resolve(SDK_ROOT, '.test-tmp')) &&
+    !path.startsWith(resolve(ENGINE_ROOT, '.tmp')) &&
+    !path.startsWith(resolve(ENGINE_ROOT, '.test-tmp')) &&
     !parts.some((p) => p === 'node_modules' || p === '.git' || p === 'coverage') &&
     !path.endsWith('.tsbuildinfo')
   );
 }
 
-function stageSdkSecurityMitigationAssets(stageDir: string): void {
+function stagePlatformSecurityMitigationAssets(stageDir: string): void {
   const vendorDir = resolve(stageDir, 'vendor');
   mkdirSync(vendorDir, { recursive: true });
   rmSync(resolve(vendorDir, 'bash-language-server'), { recursive: true, force: true });
@@ -166,7 +166,7 @@ function addUniqueFiles(files: unknown, entries: readonly string[]): readonly st
   return next;
 }
 
-export function applySdkVendorMitigations(manifest: PackageManifest): PackageManifest {
+export function applyPlatformVendorMitigations(manifest: PackageManifest): PackageManifest {
   // npm links an embedded file: directory without installing that directory's
   // own dependencies. Declare the vendored Bash package's leaves at the real
   // installable engine layer. Its version-conflicting zod/tree-sitter leaves
@@ -228,26 +228,26 @@ export function normalizeManifest(pkg: PackageManifest, rootVersion = getRootVer
   };
 }
 
-export function createSdkTempDir(prefix: string): string {
-  mkdirSync(SDK_TEMP_ROOT, { recursive: true });
-  return mkdtempSync(join(SDK_TEMP_ROOT, prefix));
+export function createPlatformTempDir(prefix: string): string {
+  mkdirSync(ENGINE_TEMP_ROOT, { recursive: true });
+  return mkdtempSync(join(ENGINE_TEMP_ROOT, prefix));
 }
 
 export async function stagePackages(): Promise<{ readonly tempRoot: string; readonly stages: readonly PackageStage[]; readonly publicStages: readonly PackageStage[] }> {
   return withWorkspaceLock('stage packages', () => {
     const rootVersion = getRootVersion();
-    const tempRoot = createSdkTempDir('goodvibes-sdk-release-');
+    const tempRoot = createPlatformTempDir('goodvibes-release-');
     const stages: PackageStage[] = [];
     for (const dir of packageDirs) {
       const sourceDir = getPackageDirectoryPath(dir);
       const stageDir = resolve(tempRoot, stageDirName(dir));
       cpSync(sourceDir, stageDir, { recursive: true, filter: shouldCopyPath });
       if (dir === '.') {
-        stageSdkSecurityMitigationAssets(stageDir);
+        stagePlatformSecurityMitigationAssets(stageDir);
       }
       const manifest = normalizeManifest(readPackage(dir), rootVersion);
       if (dir === '.') {
-        Object.assign(manifest, applySdkVendorMitigations(manifest));
+        Object.assign(manifest, applyPlatformVendorMitigations(manifest));
       }
       writeFileSync(resolve(stageDir, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
       stages.push({ dir, sourceDir, stageDir, manifest });
@@ -302,7 +302,7 @@ export function createAuthEnv(extraEnv: NodeJS.ProcessEnv = {}, options: { reado
     return { env: merged };
   }
   const registryHost = getRegistryHost(registry);
-  const npmrcTempDir = createSdkTempDir('goodvibes-sdk-npmrc-');
+  const npmrcTempDir = createPlatformTempDir('goodvibes-npmrc-');
   const userConfigPath = resolve(npmrcTempDir, '.npmrc');
   const npmrcLines = [`//${registryHost}/:_authToken=${token}`];
   const scope = getPackageScope(options.packageName);
@@ -478,7 +478,7 @@ export function escapeRegExp(value: string): string {
 }
 
 export function assertChangelogSection(version: string, label: string): void {
-  const changelogPath = resolve(SDK_ROOT, 'CHANGELOG.md');
+  const changelogPath = resolve(ENGINE_ROOT, 'CHANGELOG.md');
   const changelog = readFileSync(changelogPath, 'utf8');
   const headerPattern = new RegExp(`^##\\s*\\[${escapeRegExp(version)}\\]`, 'm');
   if (headerPattern.test(changelog)) return;

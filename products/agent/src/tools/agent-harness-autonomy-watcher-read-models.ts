@@ -1,4 +1,4 @@
-import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
@@ -7,14 +7,14 @@ import { captureCatalogData, captureCatalogMethods, type CatalogRankingOptions }
 import { modelReadingServicePath } from './agent-harness-model-reading-source.ts';
 import { assertPersonalOpsDataCurrent, capturePersonalOpsData, protectPersonalOpsData } from './agent-harness-personal-ops-source.ts';
 import { readPersonalOpsReceiptStatus } from './agent-harness-personal-ops-readings.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { types as nodeTypes } from 'node:util';
 import { safeRecordIdPart } from './agent-harness-personal-ops-records.ts';
 import type { AutonomyQueueLiveRecord, AutonomyQueueRecordControl, AutonomyQueueRecordOutput } from './agent-harness-autonomy-queue-types.ts';
 import { captureNativeReadModelObservation } from './agent-harness-autonomy-live-records.ts';
 
 type WatcherReadModelLane = 'watcher-run' | 'provider-source' | 'native-watcher';
-type WatcherReadModelSourceKind = 'daemon-read-model' | 'sdk-read-model';
+type WatcherReadModelSourceKind = 'daemon-read-model' | 'platform-read-model';
 
 interface WatcherReadModelSource {
   readonly path: string;
@@ -80,9 +80,9 @@ const WATCHER_SOURCES = [
   { path: 'context.platform.readModels.automation.runHistory', kind: 'daemon-read-model', lane: 'watcher-run' },
   { path: 'context.platform.readModels.gmail.watcherRuns', kind: 'daemon-read-model', lane: 'watcher-run' },
   { path: 'context.platform.readModels.email.watcherRuns', kind: 'daemon-read-model', lane: 'watcher-run' },
-  { path: 'context.clients.operator.watchers.runs', kind: 'sdk-read-model', lane: 'watcher-run' },
-  { path: 'context.clients.operator.watchers.runHistory', kind: 'sdk-read-model', lane: 'watcher-run' },
-  { path: 'context.clients.operator.automation.watcherRuns', kind: 'sdk-read-model', lane: 'watcher-run' },
+  { path: 'context.clients.operator.watchers.runs', kind: 'platform-read-model', lane: 'watcher-run' },
+  { path: 'context.clients.operator.watchers.runHistory', kind: 'platform-read-model', lane: 'watcher-run' },
+  { path: 'context.clients.operator.automation.watcherRuns', kind: 'platform-read-model', lane: 'watcher-run' },
   { path: 'context.platform.readModels.watchers.sources', kind: 'daemon-read-model', lane: 'provider-source' },
   { path: 'context.platform.readModels.watchers.providerSources', kind: 'daemon-read-model', lane: 'provider-source' },
   { path: 'context.platform.readModels.watcherSources', kind: 'daemon-read-model', lane: 'provider-source' },
@@ -94,9 +94,9 @@ const WATCHER_SOURCES = [
   { path: 'context.platform.readModels.email.sources', kind: 'daemon-read-model', lane: 'provider-source' },
   { path: 'context.platform.readModels.email.providerSources', kind: 'daemon-read-model', lane: 'provider-source' },
   { path: 'context.platform.readModels.email.watchers', kind: 'daemon-read-model', lane: 'provider-source' },
-  { path: 'context.clients.operator.watchers.sources', kind: 'sdk-read-model', lane: 'provider-source' },
-  { path: 'context.clients.operator.gmail.sources', kind: 'sdk-read-model', lane: 'provider-source' },
-  { path: 'context.clients.operator.email.sources', kind: 'sdk-read-model', lane: 'provider-source' },
+  { path: 'context.clients.operator.watchers.sources', kind: 'platform-read-model', lane: 'provider-source' },
+  { path: 'context.clients.operator.gmail.sources', kind: 'platform-read-model', lane: 'provider-source' },
+  { path: 'context.clients.operator.email.sources', kind: 'platform-read-model', lane: 'provider-source' },
 ] as const;
 
 function watcherSources(context: CommandContext): readonly WatcherReadModelSource[] {
@@ -489,7 +489,7 @@ function normalizeProviderSource(entry: CollectedWatcherRecord, index: number, s
       route: inspectRoute,
       source: 'provider-source-preview',
       preview: safePreview(preview, 220),
-      policy: 'Bounded provider-source event preview from a daemon or SDK read model; private text is protected and provider mutations require separate confirmed routes.',
+      policy: 'Bounded provider-source event preview from a daemon or platform read model; private text is protected and provider mutations require separate confirmed routes.',
     }
     : undefined;
   return {

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { createToolRegistryDouble } from '../helpers/tool-registry-double.ts';
-import type { BrowserEngine } from '@goodvibes-jev/engine/sdk/platform/browser';
-import { BrowserSessionError } from '@goodvibes-jev/engine/sdk/platform/browser';
+import type { BrowserEngine } from '@goodvibes-jev/engine/platform/platform/browser';
+import { BrowserSessionError } from '@goodvibes-jev/engine/platform/platform/browser';
 import {
   BROWSER_TOOL_ACTIONS,
   BROWSER_TOOL_READ_ONLY_ACTIONS,
@@ -191,13 +191,13 @@ describe('browser tool surface', () => {
 
 
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { DEFAULT_CONFIG } from '@goodvibes-jev/engine/sdk/platform/config';
-import { PermissionManager, type PermissionConfigReader } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { PolicyRuntimeState } from '@goodvibes-jev/engine/sdk/platform/runtime/security';
+import { DEFAULT_CONFIG } from '@goodvibes-jev/engine/platform/platform/config';
+import { PermissionManager, type PermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { PolicyRuntimeState } from '@goodvibes-jev/engine/platform/platform/runtime/security';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import type { Tool, ToolExecuteOptions } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Tool, ToolExecuteOptions } from '@goodvibes-jev/engine/platform/platform/types';
 
 const admissionCleanup: (() => void)[] = [];
 afterEach(() => { for (const close of admissionCleanup.splice(0).reverse()) close(); });

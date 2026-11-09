@@ -7,7 +7,7 @@
 // (worktrees.discard). These are gateway verbs with no named facade on the
 // in-process OperatorClient, so, exactly like /ci and /worktree setup, they
 // go over the generic operator invoke path (operator-rpc.ts's resolveOperatorRpc
-// -> sdk.operator.invoke), reaching the SAME daemon the command layer does.
+// -> platform.operator.invoke), reaching the SAME daemon the command layer does.
 //
 // The current public registry emits group:<contract>:<group> and
 // unit:<contract>:<unit>. The verbs retain workstreamId/itemId wire names but
@@ -16,8 +16,8 @@
 // workstream/work-item IDs are refused. Selection comes from recorded views.
 // ---------------------------------------------------------------------------
 
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/sdk';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
 import { resolveOperatorRpc } from '../input/commands/operator-rpc.ts';
 
 /** fleet.attempts.list output, the held-merge groups awaiting a winner pick. */
@@ -111,14 +111,14 @@ export interface FleetGatewayDeps {
 export function createFleetGateway(deps: FleetGatewayDeps): FleetGatewayResolution {
   const rpc = resolveOperatorRpc({ configManager: deps.configManager, homeDirectory: deps.homeDirectory });
   if (!rpc.available) return { available: false, reason: rpc.reason };
-  const { sdk } = rpc;
+  const { platformClient } = rpc;
   const gateway: FleetGateway = {
-    listAttempts: (workstreamId) => sdk.operator.invoke('fleet.attempts.list', { workstreamId }),
-    pick: (input) => sdk.operator.invoke('fleet.attempts.pick', input),
-    resolveConflict: (itemId) => sdk.operator.invoke('fleet.conflicts.resolve', { itemId }),
-    discardWorktree: (path) => sdk.operator.invoke('worktrees.discard', { path }),
-    getGraph: (workstreamId) => sdk.operator.invoke('fleet.graph.get', { workstreamId }),
-    steerObserved: (input) => sdk.operator.invoke('fleet.observed.steer', input),
+    listAttempts: (workstreamId) => platformClient.operator.invoke('fleet.attempts.list', { workstreamId }),
+    pick: (input) => platformClient.operator.invoke('fleet.attempts.pick', input),
+    resolveConflict: (itemId) => platformClient.operator.invoke('fleet.conflicts.resolve', { itemId }),
+    discardWorktree: (path) => platformClient.operator.invoke('worktrees.discard', { path }),
+    getGraph: (workstreamId) => platformClient.operator.invoke('fleet.graph.get', { workstreamId }),
+    steerObserved: (input) => platformClient.operator.invoke('fleet.observed.steer', input),
     armFixSessionAttach: deps.armFixSessionAttach,
   };
   return { available: true, gateway };

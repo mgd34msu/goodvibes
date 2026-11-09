@@ -1,4 +1,4 @@
-import type { ContentPart } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
 import { captureNativeConversationInput, type ProductInputContext } from './native/native-conversation-input.js';
 /** Per-frame observations shared by terminal renderers; presentation remains in each shell. */
 export function readShellFrameFacts<PromptInfo>(

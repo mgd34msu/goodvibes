@@ -12,10 +12,10 @@ import { describe, expect, test, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { WorkspaceSwapManager } from '../sdk/src/platform/workspace/workspace-swap-manager.ts';
-import { MemoryStore } from '../sdk/src/platform/state/memory-store.ts';
-import { MemoryEmbeddingProviderRegistry } from '../sdk/src/platform/state/memory-embeddings.ts';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
+import { WorkspaceSwapManager } from '../platform/src/platform/workspace/workspace-swap-manager.ts';
+import { MemoryStore } from '../platform/src/platform/state/memory-store.ts';
+import { MemoryEmbeddingProviderRegistry } from '../platform/src/platform/state/memory-embeddings.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

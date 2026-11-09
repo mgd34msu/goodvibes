@@ -2,9 +2,9 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createOperatorSdk } from '@goodvibes-jev/engine/operator-sdk';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { revalidateNativeConversationTurnPermit } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
+import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { revalidateNativeConversationTurnPermit } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 import { createNativeHostFetch } from '../../runtime/client/native-host-fetch.ts';
 import { createNativeWorkSubmissionBinding } from '../../runtime/native-work-submission-host.ts';
 import { createNativeConversationIntakeBinding } from '../../runtime/native-conversation-intake-host.ts';
@@ -145,7 +145,7 @@ for (const action of ['reader', 'execution', 'discovery', 'headless', 'legacy'] 
   } finally { if (binding?.available) { binding.execution?.dispose(); binding.client.dispose(); } f.close(); }
 });
 
-test('queued turn revalidation fences SDK gaps and refuses redirects even after intake disposal', async () => {
+test('queued turn revalidation fences platform gaps and refuses redirects even after intake disposal', async () => {
   let current = true; let redirect = false; let requests = 0; let delivered = 0;
   const other = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() { delivered++; return Response.json(turn); } });
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() { requests++; return redirect ? new Response(null, { status: 307, headers: { location: `http://127.0.0.1:${other.port}/turn` } }) : Response.json(turn); } });
@@ -159,7 +159,7 @@ test('queued turn revalidation fences SDK gaps and refuses redirects even after 
   } finally { intake.dispose(); server.stop(true); other.stop(true); }
 });
 
-for (const kind of ['submission', 'intake'] as const) test(`disposing ${kind} during SDK middleware prevents its principal request`, async () => {
+for (const kind of ['submission', 'intake'] as const) test(`disposing ${kind} during platform middleware prevents its principal request`, async () => {
   let requests = 0;
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() { requests++; return Response.json(auth); } });
   const host = { baseUrl: `http://127.0.0.1:${server.port}`, token: 'private-token', workspace: '/unused' };
@@ -171,10 +171,10 @@ for (const kind of ['submission', 'intake'] as const) test(`disposing ${kind} du
 });
 
 
-test('SDK retry rechecks the selection at fetch rather than resending the captured bearer', async () => {
+test('platform retry rechecks the selection at fetch rather than resending the captured bearer', async () => {
   let current = true; let requests = 0; let retries = 0;
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() { requests++; return Response.json({ error: 'Retry fixture' }, { status: 503 }); } });
-  const operator = createOperatorSdk({ baseUrl: `http://127.0.0.1:${server.port}`, authToken: 'private-token', fetchImpl: createNativeHostFetch({ current: () => current }),
+  const operator = createOperatorApiClient({ baseUrl: `http://127.0.0.1:${server.port}`, authToken: 'private-token', fetchImpl: createNativeHostFetch({ current: () => current }),
     retry: { maxAttempts: 2, baseDelayMs: 1, maxDelayMs: 1 }, onRetryScheduled() { retries++; current = false; } });
   try {
     await expect(operator.control.auth.current({})).rejects.toThrow(); expect(retries).toBe(1); expect(requests).toBe(1);

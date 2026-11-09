@@ -24,7 +24,7 @@ mock.module("../lib/goodvibes", () => ({
     storedToken = token;
     return validation.promise;
   },
-  sdk: { operator: { pairing: { posture: { get: () => Promise.resolve({ posture: {} }) } } } },
+  client: { operator: { pairing: { posture: { get: () => Promise.resolve({ posture: {} }) } } } },
 }));
 
 const { usePairingHandoff, resetPairingCaptureForTest } = await import("./usePairingHandoff");

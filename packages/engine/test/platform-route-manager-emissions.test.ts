@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { RouteBindingManager } from '../sdk/src/platform/channels/route-manager.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import type { AutomationRouteStore } from '../sdk/src/platform/automation/store/routes.js';
-import type { AutomationRouteBinding } from '../sdk/src/platform/automation/routes.js';
+import { RouteBindingManager } from '../platform/src/platform/channels/route-manager.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import type { AutomationRouteStore } from '../platform/src/platform/automation/store/routes.js';
+import type { AutomationRouteBinding } from '../platform/src/platform/automation/routes.js';
 import { settleEvents } from './_helpers/test-timeout.js';
 
 // ---------------------------------------------------------------------------

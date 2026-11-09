@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { createSessionAutoTitler, sanitizeTitle, type TitlerConversation } from '@/core/session-auto-titler.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
 
 const cfg: Pick<ConfigManager, 'getRaw'> = { getRaw: () => ({} as ReturnType<ConfigManager['getRaw']>) };
 

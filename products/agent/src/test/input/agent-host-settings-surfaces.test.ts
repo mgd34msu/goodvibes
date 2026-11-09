@@ -1,11 +1,11 @@
 import { describe, expect, spyOn, test } from 'bun:test';
 import { join } from 'node:path';
 import { chmodSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { ConfigManager, SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { FocusTracker } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import type { PermissionPromptRequest } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import { SlackIntegration } from '@goodvibes-jev/engine/sdk/platform/integrations';
-import { defaultStore } from '@goodvibes-jev/engine/sdk/platform/runtime/settings';
+import { ConfigManager, SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import type { PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { SlackIntegration } from '@goodvibes-jev/engine/platform/platform/integrations';
+import { defaultStore } from '@goodvibes-jev/engine/platform/platform/runtime/settings';
 import { AgentConfigManager, AGENT_NOTIFICATIONS_METADATA_ONLY_KEY as KEY, AGENT_HOSTED_RESEARCH_SCREENING_KEY as RESEARCH_KEY, readAgentHostSetting } from '../../config/host-settings.ts';
 import { getHarnessSetting, resetHarnessSetting, setHarnessSetting } from '../../agent/harness-control.ts';
 import { agentWorkspaceSettingSchema, applyAgentWorkspaceSettingValue, buildAgentWorkspaceSettingActionEffect, previewAgentWorkspaceTuiSettingsImport, importAgentWorkspaceTuiSettings } from '../../input/agent-workspace-settings.ts';
@@ -121,7 +121,7 @@ describe('Agent host notification setting through actual settings surfaces', () 
       expect(config.getHostBooleanSetting(KEY).get()).toBe(false);
     }
     expect(await resetHarnessSetting(config, null, KEY)).toMatchObject({ key: KEY, current: true });
-    // Ordinary SDK keys retain the harness's existing string coercion.
+    // Ordinary platform keys retain the harness's existing string coercion.
     expect(await setHarnessSetting(config, null, 'display.stream', 'false')).toMatchObject({ current: false });
   });
 
@@ -154,7 +154,7 @@ describe('Agent host notification setting through actual settings surfaces', () 
     expect(notices).toHaveLength(3);
   });
 
-  test('runtime-bus fake sink follows current SDK literal-false admission and live revocation', async () => {
+  test('runtime-bus fake sink follows current platform literal-false admission and live revocation', async () => {
     const { config } = fixture();
     const sent: string[] = [];
     const sink = spyOn(SlackIntegration.prototype, 'postWebhook').mockImplementation(async (text: string) => { sent.push(text); });

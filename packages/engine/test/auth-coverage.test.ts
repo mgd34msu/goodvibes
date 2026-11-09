@@ -1,5 +1,5 @@
 /**
- * Coverage backfill for packages/sdk/src/auth.ts
+ * Coverage backfill for packages/platform/src/auth.ts
  *
  * Targets uncovered branches:
  * - requireStorage() throws ConfigurationError when no localStorage and no custom storage
@@ -14,10 +14,10 @@ import {
   createBrowserTokenStore,
   createGoodVibesAuthClient,
   createMemoryTokenStore,
-} from '../sdk/src/auth.js';
+} from '../platform/src/auth.js';
 import { ConfigurationError } from '../errors/src/index.js';
-import type { OperatorSdk } from '../operator-sdk/src/index.js';
-import type { SDKObserver, AuthTransitionInfo } from '../sdk/src/observer/index.js';
+import type { OperatorApiClient } from '../operator-client/src/index.js';
+import type { PlatformObserver, AuthTransitionInfo } from '../platform/src/observer/index.js';
 import { captureConsole } from './_helpers/test-timeout.js';
 
 function makeStorage(initial: Record<string, string> = {}): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> {
@@ -53,7 +53,7 @@ function makeOperator(loginToken = 'auth-tok') {
         }),
       },
     },
-  } as unknown as OperatorSdk;
+  } as unknown as OperatorApiClient;
 }
 
 // ---------------------------------------------------------------------------
@@ -183,7 +183,7 @@ describe('createGoodVibesAuthClient: read-only getAuthToken resolver', () => {
 describe('createGoodVibesAuthClient: observer onAuthTransition', () => {
   test('login fires onAuthTransition from anonymous → token when no prior token', async () => {
     const transitions: AuthTransitionInfo[] = [];
-    const observer: SDKObserver = {
+    const observer: PlatformObserver = {
       onAuthTransition(t) { transitions.push(t); },
     };
     const tokenStore = createMemoryTokenStore();
@@ -197,7 +197,7 @@ describe('createGoodVibesAuthClient: observer onAuthTransition', () => {
 
   test('login fires onAuthTransition from token → token on re-login', async () => {
     const transitions: AuthTransitionInfo[] = [];
-    const observer: SDKObserver = {
+    const observer: PlatformObserver = {
       onAuthTransition(t) { transitions.push(t); },
     };
     const tokenStore = createMemoryTokenStore('prior-token');
@@ -210,7 +210,7 @@ describe('createGoodVibesAuthClient: observer onAuthTransition', () => {
 
   test('clearToken fires onAuthTransition from token → anonymous', async () => {
     const transitions: AuthTransitionInfo[] = [];
-    const observer: SDKObserver = {
+    const observer: PlatformObserver = {
       onAuthTransition(t) { transitions.push(t); },
     };
     const tokenStore = createMemoryTokenStore('existing-token');
@@ -224,7 +224,7 @@ describe('createGoodVibesAuthClient: observer onAuthTransition', () => {
 
   test('clearToken fires onAuthTransition from anonymous → anonymous when no token', async () => {
     const transitions: AuthTransitionInfo[] = [];
-    const observer: SDKObserver = {
+    const observer: PlatformObserver = {
       onAuthTransition(t) { transitions.push(t); },
     };
     const tokenStore = createMemoryTokenStore();
@@ -236,7 +236,7 @@ describe('createGoodVibesAuthClient: observer onAuthTransition', () => {
   });
 
   test('observer that throws on onAuthTransition is reported but does not propagate into login', async () => {
-    const observer: SDKObserver = {
+    const observer: PlatformObserver = {
       onAuthTransition(_t) { throw new Error('observer exploded'); },
     };
     const tokenStore = createMemoryTokenStore();
@@ -252,7 +252,7 @@ describe('createGoodVibesAuthClient: observer onAuthTransition', () => {
   });
 
   test('observer that throws on onAuthTransition is reported but does not propagate into clearToken', async () => {
-    const observer: SDKObserver = {
+    const observer: PlatformObserver = {
       onAuthTransition(_t) { throw new Error('observer exploded'); },
     };
     const tokenStore = createMemoryTokenStore('existing');

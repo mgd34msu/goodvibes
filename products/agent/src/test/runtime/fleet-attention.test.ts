@@ -3,13 +3,13 @@ import { describe, test, expect, mock } from 'bun:test';
 import { existsSync, readFileSync, rmSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { AgentOrchestrator } from '@goodvibes-jev/engine/sdk/platform/agents';
-import type { AgentRecord } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { LLMProvider, ChatRequest, ChatResponse } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { FileStateCache } from '@goodvibes-jev/engine/sdk/platform/state';
-import { MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/sdk/platform/state';
-import { ProjectIndex } from '@goodvibes-jev/engine/sdk/platform/state';
-import { PermissionManager, createPermissionConfigReader } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import { AgentOrchestrator } from '@goodvibes-jev/engine/platform/platform/agents';
+import type { AgentRecord } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { LLMProvider, ChatRequest, ChatResponse } from '@goodvibes-jev/engine/platform/platform/providers';
+import { FileStateCache } from '@goodvibes-jev/engine/platform/platform/state';
+import { MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/platform/platform/state';
+import { ProjectIndex } from '@goodvibes-jev/engine/platform/platform/state';
+import { PermissionManager, createPermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { createArchivableFleetRegistry } from '@goodvibes-jev/engine/terminal-shell';
 import { PolicyRuntimeState } from '@/runtime/index.ts';
 import { approvalMetadataForRequest } from '../../runtime/bootstrap-core.ts';
@@ -175,7 +175,7 @@ describe('fleet plane adoption', () => {
 
       const record = makeRecord({ id: 'agent-fleet-attention-01', tools: ['write'] });
 
-      // A narrow, SDK-real fleet registry: the same createArchivableFleetRegistry
+      // A narrow, platform-real fleet registry: the same createArchivableFleetRegistry
       // seam production composes through (runtime/services.ts), fed a stub
       // agentManager that lists this one live record (mutated in place by
       // orchestrator.runAgent, see AgentRecord semantics in orchestrator.test.ts)

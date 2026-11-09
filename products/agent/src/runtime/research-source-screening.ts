@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-import { createClassicProtectedSourceOwner } from '@goodvibes-jev/engine/sdk/platform/security';
+import { createClassicProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
 import { types as nodeTypes } from 'node:util';
-import { isSecretRefInput, normalizeSecretRef, type ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { isSecretRefInput, normalizeSecretRef, type ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createProtectedSourceOwner, type ProtectedSourceOwner, type ProtectedSource, type ProtectedResearchReference,
-  type SourceScreeningReceipt, type ResearchReferenceScreeningReceipt, type ResearchReferenceOperation } from '@goodvibes-jev/engine/sdk/platform/security';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+  type SourceScreeningReceipt, type ResearchReferenceScreeningReceipt, type ResearchReferenceOperation } from '@goodvibes-jev/engine/platform/platform/security';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { SecretsManager } from '../config/secrets.ts';
 import { AGENT_HOSTED_RESEARCH_SCREENING_KEY } from '../config/host-settings.ts';
 

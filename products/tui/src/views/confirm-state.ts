@@ -19,7 +19,7 @@
 // do not implement a bespoke two-press or Enter-only variant.
 // ---------------------------------------------------------------------------
 
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { buildViewLine } from './polish.ts';
 import { DEFAULT_VIEW_PALETTE } from './polish.ts';
 

@@ -22,7 +22,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { CONFIG_SCHEMA } from '../sdk/src/platform/config/schema.js';
+import { CONFIG_SCHEMA } from '../platform/src/platform/config/schema.js';
 
 /**
  * Every source file that declares part of the union or the mapping.
@@ -35,7 +35,7 @@ import { CONFIG_SCHEMA } from '../sdk/src/platform/config/schema.js';
  * explicit and the anchors below match a FAMILY of declarations rather than
  * one fixed name.
  */
-const CONFIG_DIR = join(import.meta.dir, '..', 'sdk', 'src', 'platform', 'config');
+const CONFIG_DIR = join(import.meta.dir, '..', 'platform', 'src', 'platform', 'config');
 
 /**
  * Discovered, not listed.

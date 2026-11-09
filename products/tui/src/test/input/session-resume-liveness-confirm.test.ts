@@ -11,13 +11,13 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, rmSync } from 'node:fs';
-import { SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
+import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { ConversationManager } from '../../core/conversation.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { handleSessionWorkflowCommand } from '../../input/commands/session-workflow.ts';
-import { writeLivenessMarker } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import { clearTurnAnchors, getTurnAnchors, recordTurnAnchor, restoreTurnAnchors } from '@goodvibes-jev/engine/sdk/platform/rewind';
+import { writeLivenessMarker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { clearTurnAnchors, getTurnAnchors, recordTurnAnchor, restoreTurnAnchors } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { loadWorkTreeTurnOutcomes } from '../../core/work-tree-fold-store.ts';
 import { makeTestSurface } from '../helpers/session-surface.ts';
 

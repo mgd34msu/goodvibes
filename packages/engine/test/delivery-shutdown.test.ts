@@ -1,11 +1,11 @@
 import { describe, expect, spyOn, test } from 'bun:test';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { forgetFailureReadings, installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { DeliveryError, DeliveryQueue } from '../sdk/src/platform/integrations/delivery.ts';
-import { Notifier } from '../sdk/src/platform/integrations/notifier.ts';
-import { SlackIntegration } from '../sdk/src/platform/integrations/slack.ts';
-import { DiscordIntegration } from '../sdk/src/platform/integrations/discord.ts';
-import { RuntimeEventBus, createEventEnvelope } from '../sdk/src/platform/runtime/events/index.ts';
+import { DeliveryError, DeliveryQueue } from '../platform/src/platform/integrations/delivery.ts';
+import { Notifier } from '../platform/src/platform/integrations/notifier.ts';
+import { SlackIntegration } from '../platform/src/platform/integrations/slack.ts';
+import { DiscordIntegration } from '../platform/src/platform/integrations/discord.ts';
+import { RuntimeEventBus, createEventEnvelope } from '../platform/src/platform/runtime/events/index.ts';
 
 function deferred() {
   let resolve!: () => void;

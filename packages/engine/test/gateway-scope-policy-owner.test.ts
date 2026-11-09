@@ -2,9 +2,9 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { GatewayMethodCatalog, grantedGatewayScopes, type GatewayMethodDescriptor } from '../sdk/src/platform/control-plane/method-catalog.js';
-import * as atomic from '../sdk/src/platform/utils/atomic-json-store.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { GatewayMethodCatalog, grantedGatewayScopes, type GatewayMethodDescriptor } from '../platform/src/platform/control-plane/method-catalog.js';
+import * as atomic from '../platform/src/platform/utils/atomic-json-store.js';
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });

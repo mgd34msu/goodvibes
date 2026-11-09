@@ -26,7 +26,7 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const NATIVE_DIR = join(REPO_ROOT, 'native/speexdsp-wasm');
 const GENERATED = join(
   REPO_ROOT,
-  'sdk/src/platform/voice/capture/vendor/speexdsp-wasm.ts',
+  'platform/src/platform/voice/capture/vendor/speexdsp-wasm.ts',
 );
 const WORK_DIR = join(REPO_ROOT, '.tmp/speexdsp-wasm');
 

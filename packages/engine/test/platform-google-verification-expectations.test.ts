@@ -7,13 +7,13 @@ import {
   type CandidateEmail,
   type SurfaceAuthorityProbe,
   type VerificationExpectation,
-} from '../sdk/src/platform/google/verification-expectations.ts';
-import { mintAddressFor, mintCatchAllAddressFor, parseAlias } from '../sdk/src/platform/google/signup-address.ts';
+} from '../platform/src/platform/google/verification-expectations.ts';
+import { mintAddressFor, mintCatchAllAddressFor, parseAlias } from '../platform/src/platform/google/signup-address.ts';
 import {
   deliveredRecipientFromAliasMailbox,
   deliveredRecipientFromDeliveryHeaders,
-} from '../sdk/src/platform/google/delivery-evidence.ts';
-import { UNTRUSTED_CONTENT_RULE } from '../sdk/src/platform/security/untrusted-content.ts';
+} from '../platform/src/platform/google/delivery-evidence.ts';
+import { UNTRUSTED_CONTENT_RULE } from '../platform/src/platform/security/untrusted-content.ts';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PERMANENT REGRESSION GUARDS.

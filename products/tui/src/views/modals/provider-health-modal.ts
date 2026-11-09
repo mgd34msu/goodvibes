@@ -1,6 +1,6 @@
 import type { ConfigModalActionContext, ConfigModalRow, ConfigModalSurface, ConfigModalView } from '../../input/config-modal-types.ts';
 import type { UiReadModel, UiProvidersSnapshot } from '../../runtime/ui-read-models.ts';
-import type { ProviderRuntimeSnapshot } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ProviderRuntimeSnapshot } from '@goodvibes-jev/engine/platform/platform/providers';
 import { buildAccountPosture, isRouteUsable } from '../provider-health-routes.ts';
 import { buildProviderHealthDomainSummaries, type ProviderHealthDomainInputs } from '../provider-health-domains.ts';
 import { toneStyle, statusGlyph, pad, postureLine, kv } from './modal-surface-helpers.ts';

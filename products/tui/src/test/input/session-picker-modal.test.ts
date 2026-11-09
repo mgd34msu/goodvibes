@@ -5,7 +5,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { rmSync, existsSync } from 'fs';
 import { SessionPickerModal } from '../../input/session-picker-modal.ts';
 import { handleSessionPickerToken } from '../../input/handler-modal-routes.ts';
-import { SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
+import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { makeTestSurface } from '../helpers/session-surface.ts';
 
@@ -154,7 +154,7 @@ describe('SessionPickerModal', () => {
       requestRender: () => {},
       handleEscape: () => { dismissals++; modal.close(); },
     };
-    const enter = { type: 'key', name: 'enter', logicalName: 'enter', ctrl: false, shift: false, meta: false } satisfies import('@goodvibes-jev/engine/sdk/platform/core').InputToken;
+    const enter = { type: 'key', name: 'enter', logicalName: 'enter', ctrl: false, shift: false, meta: false } satisfies import('@goodvibes-jev/engine/platform/platform/core').InputToken;
     try {
       expect(handleSessionPickerToken(state, enter)).toBe(true);
       const first = modal.pendingResume;

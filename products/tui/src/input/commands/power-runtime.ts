@@ -44,7 +44,7 @@ export function registerPowerRuntimeCommands(registry: CommandRegistry): void {
         const next = sub === 'on' ? true : sub === 'off' ? false : !current;
         const state = await ctx.setKeepAwake(next);
         const lines = [state.keepAwake ? 'Keep-awake ON: this host will not idle-sleep.' : 'Keep-awake OFF.'];
-        // Surface the honest lid-split note verbatim if the SDK served one.
+        // Surface the honest lid-split note verbatim if the platform served one.
         if (state.note) lines.push(`  ${state.note}`);
         ctx.print(lines.join('\n'));
         return;

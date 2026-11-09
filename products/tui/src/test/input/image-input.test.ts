@@ -4,7 +4,7 @@ import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
 import { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';
 import { createDefaultUiRuntimeServices } from '../helpers/ui-services.ts';
 import { disposeTestRuntimeServicesAfterAll } from '../helpers/runtime-services.ts';
-import type { ContentPart } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
 import { handleClipboardPaste } from '../../input/handler-content-actions.ts';
 
 // Stop the shared test runtime graph when this file ends. Called here, not

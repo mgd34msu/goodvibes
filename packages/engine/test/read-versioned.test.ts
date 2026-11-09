@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { readVersioned } from '../sdk/src/platform/config/read-versioned.ts';
-import type { VersionMigration } from '../sdk/src/platform/config/read-versioned.ts';
+import { readVersioned } from '../platform/src/platform/config/read-versioned.ts';
+import type { VersionMigration } from '../platform/src/platform/config/read-versioned.ts';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 

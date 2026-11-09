@@ -1,6 +1,6 @@
 import { beforeEach, afterEach } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { prepareSystemMessagePresentation } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { prepareSystemMessagePresentation } from '@goodvibes-jev/engine/platform/platform/runtime';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 

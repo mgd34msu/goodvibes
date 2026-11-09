@@ -10,9 +10,9 @@
 // ---------------------------------------------------------------------------
 
 import type { CommandContext } from '../input/command-registry.ts';
-import type { PowerManager } from '@goodvibes-jev/engine/sdk/platform/power';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { PowerManager } from '@goodvibes-jev/engine/platform/platform/power';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createCancelToolCall, type ToolCancelOrchestrator } from '../core/turn-cancellation.ts';
 import { powerSurfaceFromState } from '../core/power-status.ts';
 import { memoryRecordIdsFromTurn, readMemoryShowProvenance } from '../core/memory-provenance.ts';

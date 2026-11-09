@@ -2,10 +2,10 @@ import { afterEach, expect, test } from 'bun:test';
 import { existsSync, linkSync, lstatSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { KnowledgeStore } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import { SQLiteStore } from '@goodvibes-jev/engine/sdk/platform/state';
-import { createSchema, KNOWLEDGE_SCHEMA_VERSION } from '../sdk/src/platform/knowledge/store-schema.js';
-import { acquireCrossProcessLock } from '../sdk/src/platform/workspace/checkpoint/cross-process-lock.js';
+import { KnowledgeStore } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { SQLiteStore } from '@goodvibes-jev/engine/platform/platform/state';
+import { createSchema, KNOWLEDGE_SCHEMA_VERSION } from '../platform/src/platform/knowledge/store-schema.js';
+import { acquireCrossProcessLock } from '../platform/src/platform/workspace/checkpoint/cross-process-lock.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -265,7 +265,7 @@ test('default in-memory subclasses retain their existing batch save lifecycle', 
 test('a concurrent ordinary process writer cannot undo a successful guarded process write', async () => {
   const file = path(); const seed = await open(file); await seed.upsertSource(source('original'));
   const script = `
-    import { KnowledgeStore } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+    import { KnowledgeStore } from '@goodvibes-jev/engine/platform/platform/knowledge';
     const store = new KnowledgeStore({ dbPath: process.argv[1] }); await store.init();
     console.log('ready'); await Bun.stdin.text();
     let result;

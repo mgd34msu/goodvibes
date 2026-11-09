@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { SOURCE_SCREENING_LIMITS } from '@goodvibes-jev/engine/sdk/platform/security';
+import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { SOURCE_SCREENING_LIMITS } from '@goodvibes-jev/engine/platform/platform/security';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { captureCatalogData } from '../../tools/agent-harness-catalog-ranking.ts';
 import { captureModelReadingInput, captureModelReadingSnapshotGuard, assertModelReadingInputCurrent, withModelReadingSource } from '../../tools/agent-harness-model-reading-source.ts';

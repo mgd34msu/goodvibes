@@ -1,5 +1,5 @@
 /**
- * wrangler-CLI harness, @goodvibes-jev/engine/sdk Workers parity test.
+ * wrangler-CLI harness, @goodvibes-jev/engine/platform Workers parity test.
  *
  * Spawns `wrangler dev --local` against test/workers-wrangler/worker.ts and
  * exercises the same endpoint surface as the Miniflare harness in
@@ -22,7 +22,7 @@
  *
  * Prerequisites:
  *   - wrangler must be installed (devDependency)
- *   - SDK must be built (dist/web.js must exist)
+ *   - platform must be built (dist/web.js must exist)
  *   - No Cloudflare account or API token required (--local mode)
  *
  * Startup behaviour:
@@ -194,7 +194,7 @@ async function get(path: string): Promise<{ status: number; body: unknown }> {
 // ---------------------------------------------------------------------------
 
 describe('Workers wrangler: smoke', () => {
-  test('SDK loads and factory produces a valid sdk object through wrangler bundling pipeline', async () => {
+  test('platform loads and factory produces a valid sdk object through wrangler bundling pipeline', async () => {
     const { status, body } = await get('/smoke');
     expect(status).toBe(200);
 
@@ -204,7 +204,7 @@ describe('Workers wrangler: smoke', () => {
     expect(b.hasAuth).toBe(true);
     expect(b.hasRealtime).toBe(true);
 
-    const keys = b.sdkKeys as string[];
+    const keys = b.engineKeys as string[];
     expect(keys).toContain('operator');
     expect(keys).toContain('auth');
     expect(keys).toContain('realtime');
@@ -261,16 +261,16 @@ describe('Workers wrangler: transport-http round-trip', () => {
 });
 
 describe('Workers wrangler: error taxonomy', () => {
-  test('errors subpath loads and GoodVibesSdkError is instantiable', async () => {
+  test('errors subpath loads and GoodVibesError is instantiable', async () => {
     const { status, body } = await get('/errors');
     expect(status).toBe(200);
 
     const b = body as Record<string, unknown>;
     expect(b.ok).toBe(true);
-    expect(b.sdkErrorWorks).toBe(true);
+    expect(b.engineErrorWorks).toBe(true);
 
     const names = b.errorClassNames as string[];
-    expect(names).toContain('GoodVibesSdkError');
+    expect(names).toContain('GoodVibesError');
   }, 10_000);
 });
 

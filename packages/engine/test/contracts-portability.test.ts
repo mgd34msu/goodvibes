@@ -8,8 +8,8 @@ describe('contracts portability', () => {
     const runtimeNeutralEntries = [
       'contracts/dist/index.js',
       'errors/dist/index.js',
-      'operator-sdk/dist/index.js',
-      'peer-sdk/dist/index.js',
+      'operator-client/dist/index.js',
+      'peer-client/dist/index.js',
       'sdk/dist/index.js',
       'sdk/dist/browser.js',
       'sdk/dist/browser-homeassistant.js',

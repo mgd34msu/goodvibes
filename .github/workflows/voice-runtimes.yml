@@ -7,10 +7,10 @@ name: Voice runtimes
 # filename. Upload is therefore non-clobbering: re-running for an already-present
 # filename fails loudly rather than silently replacing a pinned asset.
 #
-# Manual only: this publishes a durable artifact that the SDK manifest pins, so
+# Manual only: this publishes a durable artifact that the platform manifest pins, so
 # it is never triggered automatically. After a successful run, stamp the printed
 # WHISPER_ENGINES entry (url + bytes + sha256) into
-# packages/sdk/src/platform/voice/provisioning/manifest.ts in the same PR.
+# packages/platform/src/platform/voice/provisioning/manifest.ts in the same PR.
 
 permissions:
   contents: read

@@ -1,9 +1,9 @@
-import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { matchesJudgmentModel } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { captureOwnedJson, prepareJudgmentResult } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { modelReasonTheme, MODEL_REASON_THEME_LABELS, routingRegistry, type ModelReasonTheme } from '@goodvibes-jev/engine/sdk/platform/routing';
-import { assertProjectionCurrent, ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { captureOwnedJson, prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
+import { modelReasonTheme, MODEL_REASON_THEME_LABELS, routingRegistry, type ModelReasonTheme } from '@goodvibes-jev/engine/platform/platform/routing';
+import { assertProjectionCurrent, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { toJson, type YesNoReading } from '@goodvibes-jev/judgment';
 import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 import { captureModelReadingInput, assertModelReadingInputCurrent, withModelReadingSource, type ModelReadingOptions } from './agent-harness-model-reading-source.ts';

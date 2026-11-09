@@ -4,10 +4,10 @@ import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { authoredPrivacyAnswer } from '../helpers/authored-diagnostic-readings.ts';
-import * as Knowledge from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import * as Providers from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { KnowledgeApi } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import type { ProviderApi } from '@goodvibes-jev/engine/sdk/platform/providers';
+import * as Knowledge from '@goodvibes-jev/engine/platform/platform/knowledge';
+import * as Providers from '@goodvibes-jev/engine/platform/platform/providers';
+import type { KnowledgeApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import type { ProviderApi } from '@goodvibes-jev/engine/platform/platform/providers';
 import {
   createDirectTransportServices,
   createOperatorClientServices,

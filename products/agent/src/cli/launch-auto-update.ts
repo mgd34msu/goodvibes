@@ -1,5 +1,5 @@
 import { retainSuiteUpdateConfiguration, type SuiteUpdateConfigurationSource } from '@goodvibes-jev/engine/terminal-shell/release-update-preflight';
-import { installedSuiteNeedsRepair, suiteUpdateRequiresRecovery, type SuiteUpdateResult } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { installedSuiteNeedsRepair, suiteUpdateRequiresRecovery, type SuiteUpdateResult } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { runLaunchUpdatePreflight } from '@goodvibes-jev/engine/terminal-shell/launch-update-preflight';
 import { restartOntoUpdatedBinary as restart, type RestartOntoUpdatedBinaryOptions } from '@goodvibes-jev/engine/terminal-shell/service-io';
 export type { RestartOntoUpdatedBinaryOptions } from '@goodvibes-jev/engine/terminal-shell/service-io';

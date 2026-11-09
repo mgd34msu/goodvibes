@@ -1,5 +1,5 @@
 /**
- * Task graph (fleet.graph.get, SDK 1.8.0's fix-phase workstream rework),
+ * Task graph (fleet.graph.get, platform 1.8.0's fix-phase workstream rework),
  * the dependency-graph view of one workstream rendered in the
  * workstream/fleet detail pane. Proves the represented state tells
  * (ready/running/blocked/at-cap/stalled) render legibly against the mock

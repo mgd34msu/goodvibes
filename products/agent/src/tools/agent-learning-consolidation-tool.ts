@@ -1,10 +1,10 @@
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
-import { resolveAndValidatePath } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { resolveAndValidatePath } from '@goodvibes-jev/engine/platform/platform/utils';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import { assertCurrentToolExecution, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { MemoryBundle, MemoryRecord, MemoryRegistry } from '@goodvibes-jev/engine/sdk/platform/state';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { assertCurrentToolExecution, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { MemoryBundle, MemoryRecord, MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { AgentPersonaRegistry } from '../agent/persona-registry.ts';
 import { AgentRoutineRegistry } from '../agent/routine-registry.ts';
@@ -284,7 +284,7 @@ function recreateGuidance(
         supported: true,
         possible,
         method: receipt.domain === 'memory'
-          ? 'SDK memory bundle import preserves record ids.'
+          ? 'platform memory bundle import preserves record ids.'
           : 'Agent-local registry ids are deterministic from name when the old generated id and name are still free.',
         reason: possible
           ? 'Exact-id recreation is currently available.'

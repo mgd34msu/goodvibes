@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { ConfigManager } from '../../config/index.ts';
 import { handleGoodVibesCliCommand, parseGoodVibesCli } from '../../cli/index.ts';
 import { renderGoodVibesCommandHelp, renderGoodVibesHelp } from '../../cli/help.ts';
-import { MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/sdk/platform/state';
+import { MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/platform/platform/state';
 import { mockFetch } from '../helpers/typed-fetch-mock.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 

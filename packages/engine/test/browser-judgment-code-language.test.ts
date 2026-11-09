@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { WEBUI_CODE_LANGUAGES, type AuthenticatedPrincipal, type BrowserJudgmentRequest } from '../daemon-sdk/src/index.ts';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { createWebuiBrowserJudgment } from '../sdk/src/platform/judgment-browser/webui-runtime.ts';
-import { readCanonicalFencedBlock } from '../sdk/src/platform/judgment-browser/code-source.ts';
+import { WEBUI_CODE_LANGUAGES, type AuthenticatedPrincipal, type BrowserJudgmentRequest } from '../daemon-api/src/index.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { createWebuiBrowserJudgment } from '../platform/src/platform/judgment-browser/webui-runtime.ts';
+import { readCanonicalFencedBlock } from '../platform/src/platform/judgment-browser/code-source.ts';
 
 const content = 'Before\n```\nconst count: number = 2;\n```\nAfter';
 const owner: AuthenticatedPrincipal = { principalId: 'code-fixture-owner', principalKind: 'user', admin: false, scopes: ['write:judgment', 'read:sessions'] };

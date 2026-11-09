@@ -4,7 +4,7 @@
  *
  * The owner's ruling (docs/occasions.md §4.2) names Telegram AND the agent, and
  * excludes the TUI in his own words: *"that's more of a 'get work done' kind of
- * interface."* The SDK enforces the exclusion structurally rather than by
+ * interface."* The platform enforces the exclusion structurally rather than by
  * convention, `resolveNudgeDestinations` drops a `tui` entry outright, keeping
  * the rest of the list, so this file is not free to reach the owner by pushing
  * at the terminal surface, and it does not try to.
@@ -31,7 +31,7 @@
  *
  * ## How the pull works
  *
- * `occasions.pending` exists for this, and the SDK's own docstring on it says
+ * `occasions.pending` exists for this, and the platform's own docstring on it says
  * what this module is: *"This is how a surface that is not a push destination
  * receives a nudge: it pulls what is open at the top of a turn rather than being
  * pushed at. A stored date is the prior scheduling that permits raising something
@@ -61,7 +61,7 @@
  *
  * The pull is per turn either way. Saying it at the END is a rendering choice:
  * appending an assistant message while a response is still streaming interleaves
- * two voices in one transcript. This is the same placement the SDK's own
+ * two voices in one transcript. This is the same placement the platform's own
  * follow-up acknowledgements use, an assistant message after the turn settles.
  *
  * ## Why the daemon's words go in verbatim
@@ -79,7 +79,7 @@
  *    (`composeNudge`'s `answerable`), and it is the difference between a question
  *    he can act on and a statement he cannot.
  *
- * The SDK's `OrchestratorFollowUpRuntime` was the other candidate, and it is the
+ * The platform's `OrchestratorFollowUpRuntime` was the other candidate, and it is the
  * right mechanism for what it does, turning a background milestone into a
  * model-written acknowledgement. It is the wrong one here: the prompt it builds
  * instructs the model "Do not ask questions" and "Do not call tools", which
@@ -95,7 +95,7 @@
  * interprets his words.
  */
 
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ConversationManager } from '../core/conversation.ts';
 import {
   decideOccasionsRaises,

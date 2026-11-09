@@ -22,13 +22,13 @@ function makeTmpDir(): string {
 
 describe('platform/bookmarks: smoke', () => {
   test('BookmarkManager can be constructed with a minimal config store', async () => {
-    const { BookmarkManager } = await import('../sdk/src/platform/bookmarks/index.js');
+    const { BookmarkManager } = await import('../platform/src/platform/bookmarks/index.js');
     const mgr = new BookmarkManager(makeTmpDir());
     expect(mgr).toBeInstanceOf(BookmarkManager); // instance check is stronger than toBeDefined
   });
 
   test('BookmarkManager.list returns an array on empty store', async () => {
-    const { BookmarkManager } = await import('../sdk/src/platform/bookmarks/index.js');
+    const { BookmarkManager } = await import('../platform/src/platform/bookmarks/index.js');
     const mgr = new BookmarkManager(makeTmpDir());
     const result = mgr.list();
     expect(result).toBeInstanceOf(Array);

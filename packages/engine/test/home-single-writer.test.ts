@@ -23,11 +23,11 @@ import {
   surfaceHomeClaimPath,
   SurfaceHomeInUseError,
   type HomeOwnerClaim,
-} from '../sdk/src/platform/runtime/home-single-writer.ts';
-import { createClientRuntimeServices } from '../sdk/src/platform/runtime/client-services.ts';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
-import { createRuntimeStore } from '../sdk/src/platform/runtime/store/index.ts';
+} from '../platform/src/platform/runtime/home-single-writer.ts';
+import { createClientRuntimeServices } from '../platform/src/platform/runtime/client-services.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
+import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.ts';
 
 const AGENT = '/usr/local/bin/goodvibes-agent --daemon';
 
@@ -91,7 +91,7 @@ describe('claimSurfaceHome', () => {
 
   test('simultaneous processes cannot both acquire an empty home', async () => {
     const home = newHome();
-    const module = new URL('../sdk/src/platform/runtime/home-single-writer.ts', import.meta.url).href;
+    const module = new URL('../platform/src/platform/runtime/home-single-writer.ts', import.meta.url).href;
     const children = Array.from({ length: 6 }, () => Bun.spawn([process.execPath, '-e', `
       const { claimSurfaceHome, readProcessIdentity } = await import(process.argv[1]);
       console.log('ready');

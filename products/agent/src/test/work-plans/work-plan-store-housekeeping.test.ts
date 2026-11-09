@@ -1,7 +1,7 @@
 /**
  * Recovery and bounding for the Agent's work plan.
  *
- * The store is the SDK's (@goodvibes-jev/engine/sdk/platform/workflow), constructed
+ * The store is the platform's (@goodvibes-jev/engine/platform/platform/workflow), constructed
  * with this product's surface root so the plan file lands at
  * <home>/.goodvibes/agent/work-plans/. What is pinned here is
  * what the Agent depends on: /work-plan stays usable when the file on disk is
@@ -15,7 +15,7 @@ import {
   WorkPlanStore,
   WORK_PLAN_TERMINAL_ITEM_CAP,
   type WorkPlanItemStatus,
-} from '@goodvibes-jev/engine/sdk/platform/workflow';
+} from '@goodvibes-jev/engine/platform/platform/workflow';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 

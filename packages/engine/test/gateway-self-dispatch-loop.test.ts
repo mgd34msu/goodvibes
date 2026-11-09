@@ -28,13 +28,13 @@
  * These tests fail if either half comes back.
  */
 import { describe, expect, test } from 'bun:test';
-import { GATEWAY_REST_ROUTES } from '../daemon-sdk/src/gateway-rest-routes.ts';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
+import { GATEWAY_REST_ROUTES } from '../daemon-api/src/gateway-rest-routes.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
 import {
   DaemonControlPlaneHelper,
   type DaemonControlPlaneContext,
-} from '../sdk/src/platform/daemon/control-plane.ts';
-import { SDKErrorCodes } from '../errors/src/index.ts';
+} from '../platform/src/platform/daemon/control-plane.ts';
+import { EngineErrorCodes } from '../errors/src/index.ts';
 
 /**
  * A helper whose router would faithfully reproduce the loop: anything it is
@@ -159,7 +159,7 @@ describe('an advertised binding that routes back to its own methodId cannot loop
 
       const body = result.body as Record<string, unknown>;
       expect(result.status).toBe(501);
-      expect(body.code).toBe(SDKErrorCodes.NOT_INVOKABLE);
+      expect(body.code).toBe(EngineErrorCodes.NOT_INVOKABLE);
       expect(String(body.error)).toContain(methodId);
       expect(String(body.error)).toContain('not wired up');
       expect(dispatches()).toBe(0);
@@ -181,7 +181,7 @@ describe('the depth guard refuses a re-entered synthesized request as a loop', (
 
     expect(result.status).toBe(500);
     const body = result.body as Record<string, unknown>;
-    expect(body.code).toBe(SDKErrorCodes.INTERNAL_ERROR);
+    expect(body.code).toBe(EngineErrorCodes.INTERNAL_ERROR);
     expect(String(body.error)).toContain('dispatch loop');
     // Refused before it could consume any of the concurrent-call budget.
     expect(dispatches()).toBe(0);

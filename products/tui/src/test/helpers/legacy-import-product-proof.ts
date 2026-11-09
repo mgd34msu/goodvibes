@@ -1,6 +1,6 @@
 /** Actual product entry surface, without starting unrelated full-screen services. */
 import { strict as assert } from 'node:assert';
-import { createShellPathService } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
+import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { IMPORT_FIXTURE_TOKEN } from './legacy-import-host-fixture.ts';
 import { beginTuiHostPairing, completeTuiHostPairing } from '../../runtime/tui-host-credential-store.ts';
 import { CommandRegistry as TuiRegistry, type CommandContext as TuiContext } from '../../input/command-registry.ts';

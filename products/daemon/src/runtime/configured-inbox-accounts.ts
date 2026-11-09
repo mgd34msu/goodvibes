@@ -1,8 +1,8 @@
 /** Native account selectors remain independent of permission to screen message text. */
-import { createSurfaceEmailInboxConfigReader } from '@goodvibes-jev/engine/sdk/platform/email';
-import type { EmailInboxAccount, SlackInboxAccount, OwnedInboxSource } from '@goodvibes-jev/engine/sdk/platform/intake';
-import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/sdk/platform/security';
+import { createSurfaceEmailInboxConfigReader } from '@goodvibes-jev/engine/platform/platform/email';
+import type { EmailInboxAccount, SlackInboxAccount, OwnedInboxSource } from '@goodvibes-jev/engine/platform/platform/intake';
+import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/platform/platform/security';
 import type { DaemonInboxFactory } from './daemon-handler-composition.js';
 import type { DaemonInboxSourceFactory } from './multiowner-inbox-composition.js';
 import { createSlackDaemonInboxSourceFactory, type SlackDaemonInboxSourceFactories } from './slack-inbox-composition.js';

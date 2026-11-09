@@ -17,14 +17,14 @@ afterEach(() => { installJudgmentPort(previous); forgetFailureReadings(); });
 describe('normalize/summarize pairing diagnostics', () => {
 
   test('normalizeError retains the original local diagnostic', async () => {
-    const { normalizeError } = await import('../sdk/src/platform/utils/error-display.js');
+    const { normalizeError } = await import('../platform/src/platform/utils/error-display.js');
     const err = new Error('Auth failed: Bearer sk-ant-abc123xyz Bearer sk-prod-999 is invalid');
     const result = normalizeError(err);
     expect(result.summary).toBe(err.message);
   });
 
   test('synchronous normalizeError preserves prose and keeps its native category', async () => {
-    const { normalizeError } = await import('../sdk/src/platform/utils/error-display.js');
+    const { normalizeError } = await import('../platform/src/platform/utils/error-display.js');
     const error = new Error('ECONNREFUSED 127.0.0.1:3000');
     const result = normalizeError(error);
     expect(result.category).toBe('unknown');
@@ -33,7 +33,7 @@ describe('normalize/summarize pairing diagnostics', () => {
   });
 
   test('a pairing timeout read by Jev preserves the message and includes retry guidance', async () => {
-    const { readFormattedError } = await import('../sdk/src/platform/utils/error-display.js');
+    const { readFormattedError } = await import('../platform/src/platform/utils/error-display.js');
     const result = await readFormattedError(new Error('ETIMEDOUT: companion pairing handshake'), { site: 'test.pairing' });
     expect(result).toContain('ETIMEDOUT: companion pairing handshake');
     expect(result).toContain('Check network stability');

@@ -21,7 +21,7 @@ import {
   redactCardShapes,
   renderCardShapeRefusal,
   type CardShapeFinding,
-} from '../sdk/src/platform/security/card-shapes.ts';
+} from '../platform/src/platform/security/card-shapes.ts';
 
 /** Published test PANs. None of these is a real card. */
 const VISA = '4111111111111111';

@@ -1,6 +1,6 @@
 /**
  * Release-artifact naming and checksum verification, re-exported from the
- * SDK's canonical update policy module (platform/runtime/self-update), which
+ * platform's canonical update policy module (platform/runtime/self-update), which
  * was hoisted from this file's semantics. One mechanism everywhere: the
  * asset naming convention (`goodvibes[-daemon]-{platform}-{arch}`), the
  * sqlite-vec addon naming, and the "no manifest entry is as fatal as a
@@ -20,7 +20,7 @@ export {
   verifyChecksum,
   type ReleaseArtifactNames,
   type SqliteVecAsset,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+} from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 
 export type SupportedPlatform = 'linux' | 'darwin';
 export type SupportedArch = 'x64' | 'arm64';

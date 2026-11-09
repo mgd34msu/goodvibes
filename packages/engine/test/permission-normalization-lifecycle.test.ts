@@ -2,16 +2,16 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { bindJudgmentPortAuthority, installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { createJudgmentSourceLifetime } from '../sdk/src/platform/runtime/judgment-source-lifetime.js';
+import { createJudgmentSourceLifetime } from '../platform/src/platform/runtime/judgment-source-lifetime.js';
 import {
   brokerSandboxEscalation,
   resolveRuntimeSandboxPlan,
   type ExecSandboxRuntime,
-} from '../sdk/src/platform/tools/exec/sandbox.js';
+} from '../platform/src/platform/tools/exec/sandbox.js';
 import {
   forgetCommandNeeds,
   readCommandNeeds,
-} from '../sdk/src/platform/runtime/permissions/normalization/classifier.js';
+} from '../platform/src/platform/runtime/permissions/normalization/classifier.js';
 
 let previous: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previous = installJudgmentPort(undefined); forgetCommandNeeds(); });

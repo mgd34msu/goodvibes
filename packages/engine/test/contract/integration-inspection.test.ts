@@ -1,12 +1,12 @@
 /** Lightweight projection tests. Full source-bound native lifecycle proof is separate. */
 import { expect, test } from 'bun:test';
-import { inspectContractIntegration } from '../../sdk/src/platform/contract/integration-inspection.js';
-import { contractIntegrationInspectionSchema } from '../../sdk/src/platform/contract/integration-inspection-wire.js';
-import { ContractRun } from '../../sdk/src/platform/contract/run-context.js';
-import type { Contract, UnitCheck } from '../../sdk/src/platform/contract/types.js';
-import type { OrchestrationEngine } from '../../sdk/src/platform/orchestration/engine.js';
-import { emptyWorkItemUsage, type WorkItem, type Workstream } from '../../sdk/src/platform/orchestration/types.js';
-import { readContractConfig } from '../../sdk/src/platform/contract/config.js';
+import { inspectContractIntegration } from '../../platform/src/platform/contract/integration-inspection.js';
+import { contractIntegrationInspectionSchema } from '../../platform/src/platform/contract/integration-inspection-wire.js';
+import { ContractRun } from '../../platform/src/platform/contract/run-context.js';
+import type { Contract, UnitCheck } from '../../platform/src/platform/contract/types.js';
+import type { OrchestrationEngine } from '../../platform/src/platform/orchestration/engine.js';
+import { emptyWorkItemUsage, type WorkItem, type Workstream } from '../../platform/src/platform/orchestration/types.js';
+import { readContractConfig } from '../../platform/src/platform/contract/config.js';
 import { configReader } from './plan-support.js';
 import { makeContract, makeUnit } from './fixtures.js';
 

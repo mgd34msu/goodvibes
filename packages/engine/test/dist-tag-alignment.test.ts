@@ -44,7 +44,7 @@ describe('semver ordering', () => {
 
 describe('npm view response parsing', () => {
   test('dist-tags.latest arrives WRAPPED in an array, which must not read as unset', () => {
-    // The real shape, captured from `npm view @goodvibes-jev/engine/sdk
+    // The real shape, captured from `npm view @goodvibes-jev/engine/platform
     // dist-tags.latest --json`. Reading it as a bare string made all 11
     // packages look untagged and would have rewritten every latest tag.
     expect(parseDistTagLatestResponse('[\n  "2.0.17"\n]')).toBe('2.0.17');

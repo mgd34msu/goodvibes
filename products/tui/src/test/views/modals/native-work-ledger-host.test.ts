@@ -2,7 +2,7 @@ import { test, expect } from 'bun:test';
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createNativeWorkLedgerHost } from '../../../runtime/native-work-ledger-host.ts';
 import { NativeWorkLedgerModel } from '../../../runtime/native-work-ledger.ts';
 import { createNativeWorkLedgerModalSurface } from '../../../views/modals/native-work-ledger-modal.ts';

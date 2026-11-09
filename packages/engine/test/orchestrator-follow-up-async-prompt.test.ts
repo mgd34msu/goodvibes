@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
-import { OrchestratorFollowUpRuntime } from '../sdk/src/platform/core/orchestrator-follow-up-runtime.js';
-import type { ConversationFollowUpItem } from '../sdk/src/platform/core/conversation-follow-ups.js';
+import { OrchestratorFollowUpRuntime } from '../platform/src/platform/core/orchestrator-follow-up-runtime.js';
+import type { ConversationFollowUpItem } from '../platform/src/platform/core/conversation-follow-ups.js';
 
 const runtimes: OrchestratorFollowUpRuntime[] = [];
 afterEach(() => { for (const runtime of runtimes.splice(0)) runtime.dispose(); });

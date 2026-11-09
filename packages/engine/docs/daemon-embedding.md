@@ -4,7 +4,7 @@ This is the **full surface**. Bun runtime required. See [Runtime surfaces](./sur
 
 ## What the daemon surface gives you
 
-Use `@goodvibes-jev/engine/sdk/daemon` when you want to host GoodVibes daemon routes in another server process, rather than running the standalone `goodvibes-daemon` binary. It gives you:
+Use `@goodvibes-jev/engine/platform/daemon` when you want to host GoodVibes daemon routes in another server process, rather than running the standalone `goodvibes-daemon` binary. It gives you:
 
 - **Agent execution and lifecycle management**: creating, running, and tearing down agent turns.
 - **Tool execution, LSP integration, and MCP protocol support**: the tool-calling surface an agent turn drives, including language-server-backed tools and MCP server connections.
@@ -12,14 +12,14 @@ Use `@goodvibes-jev/engine/sdk/daemon` when you want to host GoodVibes daemon ro
 - **An HTTP server built on `Bun.serve`** with typed daemon route contracts, so route handlers and their request/response shapes are checked at compile time.
 - **File-system state and process spawning**: the daemon's own persisted state and the subprocesses it starts for tools and channels.
 - **Full operator control and telemetry surfaces**: the control-plane routes and metrics/tracing endpoints an operator dashboard or CLI drives.
-- **Structured daemon error handling** through the `SDKErrorKind` taxonomy described below, so callers branch on an error's kind instead of parsing English messages.
+- **Structured daemon error handling** through the `EngineErrorKind` taxonomy described below, so callers branch on an error's kind instead of parsing English messages.
 
 Concretely, the package gives you:
 - **typed route-handler contracts**, the request/response shapes each route factory expects and returns;
 - **route-group builders**, factories like `createDaemonControlRouteHandlers` that build a set of handlers from your service adapters;
 - **route dispatchers**, functions like `dispatchDaemonApiRoutes` that route a request to the right handler for you;
 - **shared auth/scope helpers**, for resolving the authenticated principal and checking required scopes;
-- **structured daemon error helpers**, for building and summarizing `GoodVibesSdkError`-shaped responses.
+- **structured daemon error helpers**, for building and summarizing `GoodVibesError`-shaped responses.
 
 ## Control and telemetry routes
 
@@ -27,18 +27,18 @@ Concretely, the package gives you:
 import {
   createDaemonControlRouteHandlers,
   createDaemonTelemetryRouteHandlers,
-} from '@goodvibes-jev/engine/sdk/daemon';
+} from '@goodvibes-jev/engine/platform/daemon';
 ```
 
 ## Operator/automation/session/task dispatch
 
 ```ts
-import { dispatchDaemonApiRoutes } from '@goodvibes-jev/engine/sdk/daemon';
+import { dispatchDaemonApiRoutes } from '@goodvibes-jev/engine/platform/daemon';
 ```
 
 ## Other exported dispatchers
 
-The daemon package (`@goodvibes-jev/engine/sdk/daemon`) also exports:
+The daemon package (`@goodvibes-jev/engine/platform/daemon`) also exports:
 
 ```ts
 import {
@@ -47,7 +47,7 @@ import {
   dispatchTaskRoutes,
   dispatchOperatorRoutes,
   dispatchRemoteRoutes,
-} from '@goodvibes-jev/engine/sdk/daemon';
+} from '@goodvibes-jev/engine/platform/daemon';
 ```
 
 Other route categories (channel, integration, system, knowledge, media) are host-owned
@@ -66,10 +66,10 @@ entry point requires an already prepared project context or an existing
 The preparation API's default mode only inspects existing project metadata;
 activation explicitly registers the project for an active runtime.
 
-The SDK does not replace your server framework. You still own:
+The platform does not replace your server framework. You still own:
 - **request routing**: matching incoming requests to the handlers this package builds.
 - **concrete service implementations**: the objects (session stores, provider clients, and so on) the route-handler factories are built from.
-- **auth/session storage**: where tokens and sessions actually live; the SDK gives you the auth/scope helpers, not the storage.
+- **auth/session storage**: where tokens and sessions actually live; the platform gives you the auth/scope helpers, not the storage.
 - **host-specific surface/storage root decisions**: where on disk or in which bucket your host keeps its state.
 - **runtime bootstrapping**: starting your process and wiring these pieces together.
 - **concrete host policies** like CORS, TLS termination, and deployment-specific auth envelopes.
@@ -133,15 +133,15 @@ The example at [daemon-fetch-handler-quickstart.ts](../examples/daemon-fetch-han
 
 ## Error handling
 
-All SDK errors extend `GoodVibesSdkError`. The daemon surface emits typed errors across the full `SDKErrorKind` union (`'auth'`, `'config'`, `'contract'`, `'network'`, `'not-found'`, `'protocol'`, `'rate-limit'`, `'service'`, `'internal'`, `'tool'`, `'validation'`, `'unknown'`). Tool-execution, upstream-service, protocol, and daemon-internal failures surface through their matching kind so callers do not need to infer them from English messages. See [Error Kinds](./error-kinds.md) for details.
+All platform errors extend `GoodVibesError`. The daemon surface emits typed errors across the full `EngineErrorKind` union (`'auth'`, `'config'`, `'contract'`, `'network'`, `'not-found'`, `'protocol'`, `'rate-limit'`, `'service'`, `'internal'`, `'tool'`, `'validation'`, `'unknown'`). Tool-execution, upstream-service, protocol, and daemon-internal failures surface through their matching kind so callers do not need to infer them from English messages. See [Error Kinds](./error-kinds.md) for details.
 
 ```ts
-import { GoodVibesSdkError } from '@goodvibes-jev/engine/sdk/errors';
+import { GoodVibesError } from '@goodvibes-jev/engine/platform/errors';
 
 try {
   await handler(req);
 } catch (err) {
-  if (err instanceof GoodVibesSdkError) {
+  if (err instanceof GoodVibesError) {
     switch (err.kind) {
       case 'auth':
         // scope or token problem, return 401/403
@@ -167,9 +167,9 @@ try {
 
 ## Observability
 
-`SDKObserver` is not part of the daemon route-handler surface itself: `bootDaemon`
-and `DaemonServer` take no observer option. It belongs to the client SDK
-(`createGoodVibesSdk`), the HTTP client other code uses to call a running
+`PlatformObserver` is not part of the daemon route-handler surface itself: `bootDaemon`
+and `DaemonServer` take no observer option. It belongs to the client platform
+(`createGoodVibesPlatform`), the HTTP client other code uses to call a running
 daemon's API, so it is the right tool when your host both embeds daemon routes
 and also talks to a daemon (its own or another one) as a client. Use
 `createConsoleObserver` during development or wire a custom observer for
@@ -177,9 +177,9 @@ production telemetry pipelines. See [Observability](./observability.md) for the
 full observer API.
 
 ```ts
-import { createGoodVibesSdk, createConsoleObserver } from '@goodvibes-jev/engine/sdk';
+import { createGoodVibesPlatform, createConsoleObserver } from '@goodvibes-jev/engine/platform';
 
-const sdk = createGoodVibesSdk({
+const platformClient = createGoodVibesPlatform({
   baseUrl: 'https://daemon.example.com',
   authToken: process.env.GV_TOKEN,
   observer: createConsoleObserver(),

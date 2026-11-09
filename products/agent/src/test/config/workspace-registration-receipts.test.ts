@@ -19,7 +19,7 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { createShellPathService } from '@/runtime/index.ts';
 import {
   backfillCheckpointEligibilityIfNeeded,

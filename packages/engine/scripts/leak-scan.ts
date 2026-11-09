@@ -38,12 +38,12 @@ import {
 import { withWorkspaceLock } from './workspace-lock.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SDK_ROOT = resolve(__dirname, '..');
+const ENGINE_ROOT = resolve(__dirname, '..');
 const args = process.argv.slice(2);
 const RUN_TMP_DIR_NAME = makeRunTmpDirName();
 
-const testArgs = args.length > 0 ? args : defaultTestArgs(SDK_ROOT);
-const reportPath = process.env.GOODVIBES_LEAK_REPORT ?? resolve(SDK_ROOT, '.tmp/leak-report.json');
+const testArgs = args.length > 0 ? args : defaultTestArgs(ENGINE_ROOT);
+const reportPath = process.env.GOODVIBES_LEAK_REPORT ?? resolve(ENGINE_ROOT, '.tmp/leak-report.json');
 
 await withWorkspaceLock('leak-scan', async () => {
   sweepStaleTmpDirs(TEST_TMP_ROOT, RUN_TMP_PREFIX, STALE_RUN_MS);
@@ -59,7 +59,7 @@ await withWorkspaceLock('leak-scan', async () => {
     const { exitCode, stopped, stopReason } = await runOwnedTestChild({
         ownProcessGroup: process.platform !== 'win32',
       argv: ['--preload', './test/_helpers/leak-detector.ts', ...testArgs],
-      cwd: SDK_ROOT,
+      cwd: ENGINE_ROOT,
       env: {
         ...process.env,
         ...testTmpEnv(runTmpDir),

@@ -1,10 +1,10 @@
 /**
  * assert-contract-shape.ts, binds the e2e fixtures (seed.ts / mock-daemon.ts)
- * to the SDK's generated operator-contract.json, the SAME artifact
+ * to the platform's generated operator-contract.json, the SAME artifact
  * src/lib/goodvibes.test.ts's `bridge-matches-schema` suite (L354, assertConforms)
  * walks. The e2e harness is hermetic by design (never hits a port, see
  * mock-daemon.ts's header) and models real wire shapes, but nothing PINNED the
- * fixtures to the SDK contract, so a method rename or a reshaped envelope on the real
+ * fixtures to the platform contract, so a method rename or a reshaped envelope on the real
  * contract still passed the e2e mock green (the provider-pills incident: seed.ts's
  * providers.list fixture once invented a top-level `authenticated`/`freshnessSeconds`
  * the wire never sends, see providersResponse()'s header in seed.ts). This module
@@ -111,7 +111,7 @@ export function assertFixtureMatchesOperatorContract(methodId: string, sample: u
   const method = METHODS.get(methodId);
   if (!method) {
     throw new ContractShapeError(
-      `"${methodId}" is not a method in the installed @goodvibes-jev/engine/sdk operator-contract.json. The fixture is bound to a method id the contract no longer declares.`,
+      `"${methodId}" is not a method in the installed @goodvibes-jev/engine/platform operator-contract.json. The fixture is bound to a method id the contract no longer declares.`,
     );
   }
   walk(method.outputSchema, sample, '');

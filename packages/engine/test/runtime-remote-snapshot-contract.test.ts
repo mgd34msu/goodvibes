@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { firstJsonSchemaFailure } from '../transport-http/src/index.js';
-import { REMOTE_SNAPSHOT_SCHEMA } from '../sdk/src/platform/control-plane/operator-contract-schemas-remote.js';
-import { IntegrationHelperService } from '../sdk/src/platform/runtime/integration/helpers.js';
+import { REMOTE_SNAPSHOT_SCHEMA } from '../platform/src/platform/control-plane/operator-contract-schemas-remote.js';
+import { IntegrationHelperService } from '../platform/src/platform/runtime/integration/helpers.js';
 
 describe('IntegrationHelperService remote snapshot', () => {
   test('serializes distributed runtime state with the public remote.snapshot contract shape', () => {

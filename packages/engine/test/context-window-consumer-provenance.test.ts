@@ -1,19 +1,19 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { compactionQualityPort } from './_helpers/compaction-quality.ts';
-import { CompactionManager } from '../sdk/src/platform/runtime/compaction/manager.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { createFeatureFlagManager } from '../sdk/src/platform/runtime/feature-flags/manager.js';
-import { createSessionCompactionManager } from '../sdk/src/platform/core/compaction-lifecycle-route.js';
-import { readModelContextWindow } from '../sdk/src/platform/providers/context-window-reading.js';
-import { createSessionRuntimeControls } from '../sdk/src/platform/control-plane/routes/session-runtime.js';
-import { ModelLimitsService } from '../sdk/src/platform/providers/model-limits.js';
-import type { ModelDefinition } from '../sdk/src/platform/providers/registry-types.js';
-import type { ProviderMessage } from '../sdk/src/platform/providers/interface.js';
-import type { BoundaryCommit } from '../sdk/src/platform/runtime/compaction/types.js';
-import { enrichModelEntries } from '../sdk/src/platform/runtime/ui/model-picker/health-enrichment.js';
-import { createInitialModelState } from '../sdk/src/platform/runtime/store/domains/model.js';
-import { createInitialProviderHealthState } from '../sdk/src/platform/runtime/store/domains/provider-health.js';
+import { CompactionManager } from '../platform/src/platform/runtime/compaction/manager.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { createFeatureFlagManager } from '../platform/src/platform/runtime/feature-flags/manager.js';
+import { createSessionCompactionManager } from '../platform/src/platform/core/compaction-lifecycle-route.js';
+import { readModelContextWindow } from '../platform/src/platform/providers/context-window-reading.js';
+import { createSessionRuntimeControls } from '../platform/src/platform/control-plane/routes/session-runtime.js';
+import { ModelLimitsService } from '../platform/src/platform/providers/model-limits.js';
+import type { ModelDefinition } from '../platform/src/platform/providers/registry-types.js';
+import type { ProviderMessage } from '../platform/src/platform/providers/interface.js';
+import type { BoundaryCommit } from '../platform/src/platform/runtime/compaction/types.js';
+import { enrichModelEntries } from '../platform/src/platform/runtime/ui/model-picker/health-enrichment.js';
+import { createInitialModelState } from '../platform/src/platform/runtime/store/domains/model.js';
+import { createInitialProviderHealthState } from '../platform/src/platform/runtime/store/domains/provider-health.js';
 
 const model: ModelDefinition = { id: 'm', provider: 'p', registryKey: 'p:m', displayName: 'm', description: '', selectable: true,
   capabilities: { toolCalling: true, codeEditing: true, reasoning: false, multimodal: false }, contextWindow: 8192 };

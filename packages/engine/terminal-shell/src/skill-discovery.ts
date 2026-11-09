@@ -4,7 +4,7 @@ import {
   listInstalledEcosystemEntries,
   type EcosystemCatalogPathOptions,
   type ShellPathService,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
+} from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { parseMarkdownFrontmatter, stripMarkdownFrontmatter } from './markdown-frontmatter.js';
 export type SkillOrigin = 'project-local' | 'global' | 'custom';
 export interface TerminalSkillRecord {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
-import { createEmptyLine, createStyledCell, type Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import { createEmptyLine, createStyledCell, type Line } from '@goodvibes-jev/engine/platform/platform/types';
 
 function makeHistory(lines: Line[]) {
   return {

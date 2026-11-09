@@ -21,27 +21,27 @@
  *    at all. So this lists what is attached and stops, rather than rendering a
  *    download control that no daemon method backs.
  *
- * The read verb is explicitly non-mutating on the server (BODY.PEEK, the SDK's
+ * The read verb is explicitly non-mutating on the server (BODY.PEEK, the platform's
  * own description says it does not mark the message read), so opening a message
  * does not silently change the operator's mailbox state. The unread dot in the
  * list stays truthful after a read, which is why nothing here clears it.
  */
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { AlertCircle, Mail } from 'lucide-react';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { formatError } from '../../lib/errors';
 import { mailRefusalNote } from '../../lib/mail-refusal';
 import { Button } from '../../components/ui';
 import { DetailSection, EmptyState, Facts, SkeletonRows } from '../../components/data-view/DataView';
 
-export type MailMessageData = Awaited<ReturnType<typeof sdk.operator.email.inbox.read>>;
+export type MailMessageData = Awaited<ReturnType<typeof platformClient.operator.email.inbox.read>>;
 
 export function useMailMessage(uid: number | null): UseQueryResult<MailMessageData> {
   return useQuery({
     queryKey: queryKeys.emailMessage(uid ?? -1),
     enabled: uid !== null && Number.isFinite(uid),
-    queryFn: () => sdk.operator.email.inbox.read(uid ?? -1),
+    queryFn: () => platformClient.operator.email.inbox.read(uid ?? -1),
   });
 }
 

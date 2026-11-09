@@ -4,7 +4,7 @@ import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/test
 import { CommandPalette } from '../../input/command-palette.ts';
 import { SurfaceModalHost } from '../../input/surface-modal-host.ts';
 import type { PaletteEntry } from '../../input/command-palette-types.ts';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 const entries: PaletteEntry[] = [
   { id: 'compact', title: 'Compact context', description: 'Summarize context to reduce token usage.', category: 'Session', group: 'Session', aliases: [], keywords: [], needsArgs: false },
   { id: 'clear', title: 'Clear conversation', description: 'Delete conversation history.', category: 'Session', group: 'Session', aliases: [], keywords: [], needsArgs: false },

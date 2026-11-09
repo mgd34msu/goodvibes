@@ -7,9 +7,9 @@ import {
   clearAtRestCredentialReadings,
   readAtRestCredentialSpans,
   redactAtRestLine,
-} from '../sdk/src/platform/runtime/at-rest-persistence.ts';
-import { logger } from '../sdk/src/platform/utils/logger.ts';
-import { captureRedactionSource, redactSensitiveData, registerAccountIdentityRedaction, registerProfileRedactionValues } from '../sdk/src/platform/utils/redaction.ts';
+} from '../platform/src/platform/runtime/at-rest-persistence.ts';
+import { logger } from '../platform/src/platform/utils/logger.ts';
+import { captureRedactionSource, redactSensitiveData, registerAccountIdentityRedaction, registerProfileRedactionValues } from '../platform/src/platform/utils/redaction.ts';
 
 const DOCUMENT = 'key-rotation-policy-for-tenants';
 // Synthetic sentinel values only. Nothing in this suite contacts a live service.

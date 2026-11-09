@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { CONFIG_SCHEMA, ConfigError } from '@goodvibes-jev/engine/sdk/platform/config';
+import { CONFIG_SCHEMA, ConfigError } from '@goodvibes-jev/engine/platform/platform/config';
 import { REDACTED_VALUE } from '@goodvibes-jev/engine/terminal-shell';
 import { renderConfigValue, runConfigCommand } from '../../daemon/config-command.js';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';

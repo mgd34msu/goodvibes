@@ -41,14 +41,14 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import {
   findCredentialScopeDeclaration,
-} from '../sdk/src/platform/config/credential-scope-registry.ts';
-import { daemonSecretKeyFor, listDaemonOwnedSecretKeys } from '../sdk/src/platform/config/daemon-secret-keys.ts';
+} from '../platform/src/platform/config/credential-scope-registry.ts';
+import { daemonSecretKeyFor, listDaemonOwnedSecretKeys } from '../platform/src/platform/config/daemon-secret-keys.ts';
 import { credentialReadingStanding, loadCredentialKeyReadings, undeclaredSchemaKeys } from './credential-key-readings.ts';
-import { CONFIG_SCHEMA } from '../sdk/src/platform/config/schema.ts';
-import { structuredCredentialConfigSchemaFailures } from '../sdk/src/platform/config/structured-credential-config.ts';
+import { CONFIG_SCHEMA } from '../platform/src/platform/config/schema.ts';
+import { structuredCredentialConfigSchemaFailures } from '../platform/src/platform/config/structured-credential-config.ts';
 
 const REPO_ROOT = process.env['CREDENTIAL_SCOPE_ROOT'] ?? resolve(import.meta.dir, '..');
-const DEFAULT_DIRS = ['sdk/src'];
+const DEFAULT_DIRS = ['platform/src'];
 const SCAN_DIRS: readonly string[] = process.env['CREDENTIAL_SCOPE_DIRS_JSON']
   ? (JSON.parse(process.env['CREDENTIAL_SCOPE_DIRS_JSON']!) as string[])
   : DEFAULT_DIRS;
@@ -372,7 +372,7 @@ function checkDeclarationsCoverCredentials(): Finding[] {
   const file = 'etc/credential-key-readings.json';
   const stored = loadCredentialKeyReadings();
   const findings: Finding[] = structuredCredentialConfigSchemaFailures(CONFIG_SCHEMA).map(({ key, reason }) => ({
-    file: 'sdk/src/platform/config/structured-credential-config.ts', line: 0, snippet: key, reason,
+    file: 'platform/src/platform/config/structured-credential-config.ts', line: 0, snippet: key, reason,
   }));
   for (const { key, description } of undeclaredSchemaKeys()) {
     const reading = stored?.readings[key];
@@ -388,7 +388,7 @@ function checkDeclarationsCoverCredentials(): Finding[] {
     const standing = credentialReadingStanding(reading);
     if (standing === 'settled-no') continue;
     findings.push({
-      file: 'sdk/src/platform/config/secret-bearing-config-keys.ts',
+      file: 'platform/src/platform/config/secret-bearing-config-keys.ts',
       line: 0,
       snippet: key,
       reason: standing === 'credential'
@@ -414,7 +414,7 @@ function checkDeclarationsCoverCredentials(): Finding[] {
  * without classifying its credential fails the build.
  */
 function checkChannelSecretNamesAreClassified(): Finding[] {
-  const accountsPath = resolve(REPO_ROOT, 'sdk/src/platform/channels/builtin/accounts.ts');
+  const accountsPath = resolve(REPO_ROOT, 'platform/src/platform/channels/builtin/accounts.ts');
   let source: string;
   try {
     source = readFileSync(accountsPath, 'utf-8');
@@ -434,7 +434,7 @@ function checkChannelSecretNamesAreClassified(): Finding[] {
       seen.add(name);
       if (isClassified(name)) continue;
       findings.push({
-        file: 'sdk/src/platform/config/credential-scope-registry.ts',
+        file: 'platform/src/platform/config/credential-scope-registry.ts',
         line: 0,
         snippet: name,
         reason:
@@ -471,7 +471,7 @@ function main(): void {
     console.error(`    ${finding.reason}\n`);
   }
   console.error('A credential nothing classifies is a credential nothing can route. See');
-  console.error('sdk/src/platform/config/credential-scope-registry.ts for the rule.');
+  console.error('platform/src/platform/config/credential-scope-registry.ts for the rule.');
   process.exit(1);
 }
 

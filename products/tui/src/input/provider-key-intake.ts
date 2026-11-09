@@ -11,11 +11,11 @@
  * var; it is used only as the storage key and is never shown to the user.
  */
 
-import type { LLMProvider } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { LLMProvider } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { SecretScope } from '../config/secrets.ts';
 import type { ConcealedInputRequest } from './concealed-input.ts';
 import type { CommandContext } from './command-registry.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 /** The intake decision derived purely from a provider's registration truth. */
 export interface ProviderKeyIntakeDecision {

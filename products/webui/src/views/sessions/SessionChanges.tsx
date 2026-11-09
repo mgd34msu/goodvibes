@@ -2,7 +2,7 @@
  * SessionChanges, the session review COCKPIT: every changed file the session made in one
  * scrollable multibuffer (DiffMultibuffer), each hunk a tap target with three actions.
  *
- * DAEMON SURFACE: sessions.changes.get (SDK 1.6.1) returns a session's aggregate workspace
+ * DAEMON SURFACE: sessions.changes.get (platform 1.6.1) returns a session's aggregate workspace
  * diff, joined over the workspace checkpoints stamped with that session's id, the net
  * change from before the session's earliest stamped checkpoint to its latest. That is the
  * PRIMARY, default source. A session with no stamped checkpoints answers honestly with
@@ -25,7 +25,7 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, RefreshCw } from 'lucide-react';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import type { WorkspaceCheckpoint, CheckpointsRevertHunkPreviewResult } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { formatError, isConflictError, isMethodUnavailableError, isSessionClosedError } from '../../lib/errors';
@@ -87,7 +87,7 @@ export function SessionChanges({ sessionId, canSteer, closed, streamPaused = fal
   // ── Primary: sessions.changes.get, genuinely session-scoped ──────────────────
   const sessionChanges = useQuery({
     queryKey: queryKeys.sessionChanges(sessionId),
-    queryFn: () => sdk.operator.sessions.changes.get(sessionId),
+    queryFn: () => platformClient.operator.sessions.changes.get(sessionId),
     enabled: mode === 'session',
   });
   const sessionChangesUnavailable = sessionChanges.isError && isMethodUnavailableError(sessionChanges.error);
@@ -97,7 +97,7 @@ export function SessionChanges({ sessionId, canSteer, closed, streamPaused = fal
   // ── Secondary/fallback: checkpoints.list + checkpoints.diff (workspace-wide) ──
   const list = useQuery({
     queryKey: queryKeys.checkpoints,
-    queryFn: () => sdk.operator.checkpoints.list(),
+    queryFn: () => platformClient.operator.checkpoints.list(),
     enabled: mode === 'workspace',
   });
 
@@ -122,7 +122,7 @@ export function SessionChanges({ sessionId, canSteer, closed, streamPaused = fal
 
   const diff = useQuery({
     queryKey: [...queryKeys.checkpoints, effectiveBaselineId, 'diff', 'working-tree'],
-    queryFn: () => sdk.operator.checkpoints.diff({ a: effectiveBaselineId }),
+    queryFn: () => platformClient.operator.checkpoints.diff({ a: effectiveBaselineId }),
     enabled: mode === 'workspace' && Boolean(effectiveBaselineId),
   });
 
@@ -178,8 +178,8 @@ export function SessionChanges({ sessionId, canSteer, closed, streamPaused = fal
   const send = useMutation({
     mutationFn: (body: string) => (
       mutationMode === 'steer'
-        ? sdk.operator.sessions.steer(sessionId, { body })
-        : sdk.operator.sessions.followUp(sessionId, { body })
+        ? platformClient.operator.sessions.steer(sessionId, { body })
+        : platformClient.operator.sessions.followUp(sessionId, { body })
     ),
     onSuccess: async () => {
       setSendState('delivered');
@@ -202,7 +202,7 @@ export function SessionChanges({ sessionId, canSteer, closed, streamPaused = fal
   // ── Reject → revert (preview + apply, honest conflict on stale) ───────────────
   const preview = useMutation({
     mutationFn: (target: HunkTarget) =>
-      sdk.operator.checkpoints.revertHunkPreview({ path: target.file.path, hunk: hunkToPatch(target.hunk), sessionId }),
+      platformClient.operator.checkpoints.revertHunkPreview({ path: target.file.path, hunk: hunkToPatch(target.hunk), sessionId }),
     onSuccess: (result, target) => {
       if (!(result.applies && result.token)) {
         setRevertConflict(result.conflict ?? 'this hunk no longer applies cleanly');
@@ -213,7 +213,7 @@ export function SessionChanges({ sessionId, canSteer, closed, streamPaused = fal
 
   const apply = useMutation({
     mutationFn: (input: { target: HunkTarget; token: string }) =>
-      sdk.operator.checkpoints.revertHunk({
+      platformClient.operator.checkpoints.revertHunk({
         path: input.target.file.path,
         hunk: hunkToPatch(input.target.hunk),
         confirmToken: input.token,

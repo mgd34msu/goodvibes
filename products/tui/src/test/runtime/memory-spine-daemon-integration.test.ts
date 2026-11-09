@@ -15,17 +15,17 @@ import { seedBenchmarkCacheFixture } from '../helpers/benchmark-cache-fixture.ts
  *     real sqlite-vec unavailability is not a deterministic condition to boot).
  *
  * Deactivation-on-daemon-loss is NOT covered here any more: it exercised
- * `syncMemorySpineToHostStatus`, retired in the memory-spine SDK convergence
- * (2026-07-31) in favor of the SDK's own `createSpineAdoptionSync`, whose
- * adoption policy (including deactivate-on-loss) is pinned in the SDK's own
+ * `syncMemorySpineToHostStatus`, retired in the memory-spine platform convergence
+ * (2026-07-31) in favor of the platform's own `createSpineAdoptionSync`, whose
+ * adoption policy (including deactivate-on-loss) is pinned in the platform's own
  * test suite.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
-import { bootDaemon, type BootedDaemon } from '@goodvibes-jev/engine/sdk/platform/daemon';
-import { MemorySpineClient } from '@goodvibes-jev/engine/sdk/platform/runtime/memory-spine';
-import type { MemoryAccess } from '@goodvibes-jev/engine/sdk/platform/runtime/memory-spine';
-import type { MemoryLink, MemoryRecord } from '@goodvibes-jev/engine/sdk/platform/state';
+import { bootDaemon, type BootedDaemon } from '@goodvibes-jev/engine/platform/platform/daemon';
+import { MemorySpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
+import type { MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
+import type { MemoryLink, MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
 import { createTuiMemorySpineTransport } from '../../runtime/memory-spine-transport.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
@@ -297,8 +297,8 @@ describe('memory-spine version-skew wire honesty (route-not-found vs record-miss
 
 // Note: the previous "memory-spine deactivation on daemon loss" block here
 // exercised `syncMemorySpineToHostStatus`, which was retired in the
-// memory-spine SDK convergence (2026-07-31): activation is now folded into
-// the SDK's `createSpineAdoptionSync` (see `spine-adoption.ts`), and that
+// memory-spine platform convergence (2026-07-31): activation is now folded into
+// the platform's `createSpineAdoptionSync` (see `spine-adoption.ts`), and that
 // adoption policy, including deactivate-on-loss reverting to local access,
-// is pinned in the SDK's own test suite
+// is pinned in the platform's own test suite
 // (test/client-seam-spine-adoption.test.ts), not duplicated here.

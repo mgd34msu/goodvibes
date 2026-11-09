@@ -1,11 +1,11 @@
 import { expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { ConfigManager, createDaemonCredentialStore } from '@goodvibes-jev/engine/sdk/platform/config';
-import { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { registerDraftMethods, registerRoutingMethods } from '@goodvibes-jev/engine/sdk/platform/channels';
-import { registerInboxSurface } from '@goodvibes-jev/engine/sdk/platform/intake';
-import { registerRemoteSurface } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import { ATTACHED_PAYMENTS_METHOD_IDS, PaymentReplyInboxClosedError } from '@goodvibes-jev/engine/sdk/platform/payments';
+import { ConfigManager, createDaemonCredentialStore } from '@goodvibes-jev/engine/platform/platform/config';
+import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { registerDraftMethods, registerRoutingMethods } from '@goodvibes-jev/engine/platform/platform/channels';
+import { registerInboxSurface } from '@goodvibes-jev/engine/platform/platform/intake';
+import { registerRemoteSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { ATTACHED_PAYMENTS_METHOD_IDS, PaymentReplyInboxClosedError } from '@goodvibes-jev/engine/platform/platform/payments';
 import { registerDaemonHandlers, type DaemonHandlerSurfaceProviders } from '../../daemon/handlers/index.js';
 import type { HandlerContext, OwnedHandlerSurface } from '../../daemon/handlers/context.js';
 import { createPaymentsServices, type PaymentsServices } from '../../runtime/payments-composition.js';

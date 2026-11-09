@@ -8,7 +8,7 @@ import {
   renderConfirmLines,
   type ConfirmState,
 } from '../../views/confirm-state.ts';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 
 function lineText(line: Line): string {
   return line.map((c) => c.char ?? ' ').join('').trimEnd();

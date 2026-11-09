@@ -74,7 +74,7 @@ This project uses semantic versioning with `vMAJOR.MINOR.PATCH` git tags.
 ### Changes
 
 The web UI is redesigned from top to bottom. It talks to the same daemon
-and SDK as 1.13.20; old links and bookmarks still work.
+and platform as 1.13.20; old links and bookmarks still work.
 
 - **Four places instead of thirteen.** The sidebar holds New chat, Search,
   Work, Library and Personal, with your Recent chats underneath. Work brings
@@ -115,7 +115,7 @@ and SDK as 1.13.20; old links and bookmarks still work.
 
 ### Changes
 
-- **The pin moves to sdk 2.1.0.** The settings schema lists the bundled
+- **The pin moves to platform 2.1.0.** The settings schema lists the bundled
   themes for display.theme (goodvibes, goodvibes-neon, catppuccin,
   tokyonight, dracula, nord, gruvbox, one-dark, rosepine, solarized, github
   and system) and carries display.treeGlyphs and the
@@ -128,7 +128,7 @@ and SDK as 1.13.20; old links and bookmarks still work.
 
 ### Changes
 
-- **The pin moves to sdk 2.0.23**, which carries the honest calendar-auth
+- **The pin moves to platform 2.0.23**, which carries the honest calendar-auth
   mapping, the fixed error hints, the routes-folded provider aggregates, and
   the reasoning-effort surface this release's composer control reads.
 
@@ -153,7 +153,7 @@ and SDK as 1.13.20; old links and bookmarks still work.
   healthy subscription sign-in beside an unset API-key env var).
 - **Reasoning effort is selectable in the composer.** A compact control next
   to the model picker lists the effort levels the current model actually
-  accepts (served per model by the daemon from sdk 2.0.23) and persists the
+  accepts (served per model by the daemon from platform 2.0.23) and persists the
   choice through the same verb that switches models. No control renders for
   models with no ladder or against daemons predating the field.
 - **The sidebar wordmark stops abbreviating.** The sidebar is wide enough for
@@ -180,7 +180,7 @@ and SDK as 1.13.20; old links and bookmarks still work.
 - Platform runtime 2.0.22: a dead subscription login is stamped and shown as
   ended everywhere instead of green; a near-expiry token refreshes silently
   before the send; this surface adopts the running daemon again (the version
-  gate had refused it since sdk 2.0.0 and silently ran local-only). No webui
+  gate had refused it since platform 2.0.0 and silently ran local-only). No webui
   code change; the pin is the fix.
 
 ## [1.13.16] - 2026-08-21
@@ -196,14 +196,14 @@ and SDK as 1.13.20; old links and bookmarks still work.
   service-worker and asset cache keys derive from the package version, and a
   `cache-bust:check` gate in the build chain fails the build if they drift,
   so a deploy can no longer serve stale assets under a new version.
-- Platform runtime 2.0.20: the pin rides the payments boot-recovery sdk
+- Platform runtime 2.0.20: the pin rides the payments boot-recovery platform
   cycle; the config schema is regenerated against it. No webui behavior
   change was needed for it.
 
 ## [1.13.14] - 2026-08-21
 
 - Platform runtime 2.0.19: the pin rides the checkout-seam and wake-verb-fix
-  sdk cycle. The daemon-side wake model fix in that cycle is what repairs
+  platform cycle. The daemon-side wake model fix in that cycle is what repairs
   this surface's wake feature; no webui code change was needed for it.
 - **Pair a phone by pointing its camera at the terminal's QR** (platform
   runtime 2.0.19): the sign-in screen gains a camera scanner (native
@@ -355,7 +355,7 @@ and SDK as 1.13.20; old links and bookmarks still work.
 
 - Fixed: importing settings that include `display.themeMode` no longer reports
   an "unknown key" warning. The key is declared in the platform configuration
-  schema (SDK 2.0.1); the web UI ingests it like any other `display.*` setting.
+  schema (platform 2.0.1); the web UI ingests it like any other `display.*` setting.
 
 ## [1.13.0] - 2026-08-01
 
@@ -416,7 +416,7 @@ email, any other configured channel) to the daemon to host from its first
 message onward, instead of letting it live only inside the surface process
 that received it.
 
-Ships against `legacy-package:goodvibes-sdk` 2.0.0. The daemon's unified inbox verb,
+Ships against `legacy-package:goodvibes-platform` 2.0.0. The daemon's unified inbox verb,
 `channels.inbox.list`: one merged, newest-first feed across every channel
 provider (Slack DMs, Discord messages, email threads), distinct from the
 mail-specific verbs the Mail view already uses, arrives with a real REST
@@ -439,7 +439,7 @@ longer dies at startup over an absent optional package. Fresh registry
 install, no local overlay; generated config-schema, config-ownership and
 presentation artifacts regenerated against the published package, picking up
 the new `update.alertAfterFailedChecks` setting in the schema mirror. README
-badges and index.html's favicon cache-bust move to 1.12.1 / SDK 1.21.0.
+badges and index.html's favicon cache-bust move to 1.12.1 / platform 1.21.0.
 
 ## [1.12.0] - 2026-07-30
 
@@ -631,7 +631,7 @@ to work: your choice is remembered for the release that adds microphone capture.
 Every one of those settings is reachable and searchable in the settings
 workspace like the existing ones, which is now pinned by tests.
 
-Ships against `legacy-package:goodvibes-sdk` 1.15.0.
+Ships against `legacy-package:goodvibes-platform` 1.15.0.
 
 ## [1.8.1] - 2026-07-25
 
@@ -662,18 +662,18 @@ Because this record is built from the stream this browser tab watched live, it
 is present only for turns that ran while the tab was open; it is never
 reconstructed or guessed for older turns.
 
-Ships against `legacy-package:goodvibes-sdk` 1.13.1.
+Ships against `legacy-package:goodvibes-platform` 1.13.1.
 
 ## [1.7.7] - 2026-07-25
 
-Ships against `legacy-package:goodvibes-sdk` 1.12.1, which makes crash-recovery
+Ships against `legacy-package:goodvibes-platform` 1.12.1, which makes crash-recovery
 offers respect live writers and makes snapshot retirement act on exactly one
 identified snapshot. No webui-side code changes.
 
 
 ## [1.7.6] - 2026-07-24
 
-Ships against `legacy-package:goodvibes-sdk` 1.12.0, which introduces declare-once
+Ships against `legacy-package:goodvibes-platform` 1.12.0, which introduces declare-once
 product storage surfaces, the ask-then-retire recovery lifecycle, and the
 cross-process workspace-checkpoint lock. No webui behavior depends on those
 paths (verified: the webui holds no session-persistence call sites), so this
@@ -693,53 +693,53 @@ release carries the platform pin plus documentation.
 
 ## [1.7.5] - 2026-07-18
 
-Ships against `legacy-package:goodvibes-sdk` 1.11.4, which closes the secrets-store
+Ships against `legacy-package:goodvibes-platform` 1.11.4, which closes the secrets-store
 key-mismatch class (race-safe key generation, pre-write key revalidation,
 key fingerprints in store envelopes). No webui-side code changes.
 
 ## [1.7.4] - 2026-07-17
 
-Ships against `legacy-package:goodvibes-sdk` 1.11.3. Compaction-continuation user
+Ships against `legacy-package:goodvibes-platform` 1.11.3. Compaction-continuation user
 messages, the compactor's re-injected instruction handoff after every
 automatic compaction, now render as a closed "Compaction handoff" disclosure
 in session transcripts instead of the full multi-kilobyte instruction wall.
-The detection header is pinned byte-for-byte against the SDK's
+The detection header is pinned byte-for-byte against the platform's
 `COMPACTION_HANDOFF_HEADER` export by a contract test.
 
 ## [1.7.3] - 2026-07-17
 
-Ships against `legacy-package:goodvibes-sdk` 1.11.2, which now carries the shared
+Ships against `legacy-package:goodvibes-platform` 1.11.2, which now carries the shared
 release toolchain (`legacy-package:goodvibes-toolchain`) as a dependency of its own.
 The separate direct toolchain pin in this repo's `devDependencies` is gone;
-`release-gate.ts` resolves the toolchain transitively through the SDK
+`release-gate.ts` resolves the toolchain transitively through the platform
 package instead. Releases are now zero-touch: a green CI run on a release
 commit pushed to `main` tags the commit and creates the GitHub release page
-itself, with no manual step afterward. SDK 1.11.x remains release-engineering
+itself, with no manual step afterward. platform 1.11.x remains release-engineering
 only: no wire-contract changes affecting the WebUI.
 
 ## [1.7.2] - 2026-07-17
 
-Ships against `legacy-package:goodvibes-sdk` 1.11.1 and adopts the platform's shared
+Ships against `legacy-package:goodvibes-platform` 1.11.1 and adopts the platform's shared
 CI/CD system: the local release gate is a thin wrapper over the published
-`legacy-package:goodvibes-toolchain` (sdk-pin-gate), CI single-sources its Bun
+`legacy-package:goodvibes-toolchain` (engine-pin-gate), CI single-sources its Bun
 version, and a workflow-shape test suite pins the pipeline's structure. The
-SDK 1.11.x releases are release-engineering only: no wire-contract changes
+platform 1.11.x releases are release-engineering only: no wire-contract changes
 affecting the WebUI.
 
 ## [1.7.1] - 2026-07-16
 
-Ships against `legacy-package:goodvibes-sdk` 1.10.1. Alignment patch: the SDK's 1.10.1
+Ships against `legacy-package:goodvibes-platform` 1.10.1. Alignment patch: the platform's 1.10.1
 release contains type-level additions only, with no wire-contract changes
 affecting this repo.
 
 ### Changed
 
-- Updated `legacy-package:goodvibes-sdk` to `1.10.1` (fresh lockfile from the registry;
+- Updated `legacy-package:goodvibes-platform` to `1.10.1` (fresh lockfile from the registry;
   generated config schema verified unchanged).
 
 ## [1.7.0] - 2026-07-16
 
-Ships against `legacy-package:goodvibes-sdk` 1.10.0. This release adds the admin
+Ships against `legacy-package:goodvibes-platform` 1.10.0. This release adds the admin
 memory diagnostics panel and the one-act local voice setup flow, and re-pins
 from the local dev-link build onto the published 1.10.0 package.
 
@@ -758,13 +758,13 @@ from the local dev-link build onto the published 1.10.0 package.
 
 ### Changed
 
-- Re-pinned `legacy-package:goodvibes-sdk` from the local dev-link build to the published
+- Re-pinned `legacy-package:goodvibes-platform` from the local dev-link build to the published
   `1.10.0` registry package; removed the dev-link `file:` overrides so all nested
   `the retired package scope` resolutions come from the registry.
 
 ## [1.6.0] - 2026-07-14
 
-Ships against `legacy-package:goodvibes-sdk` 1.9.0. This release rolls up the pairing,
+Ships against `legacy-package:goodvibes-platform` 1.9.0. This release rolls up the pairing,
 fleet, task-graph, voice, memory-provenance, and remote-access work accumulated
 since 1.5.0, adds the fleet review acceptance checklist, and re-pins from the
 local dev-link build onto the published 1.9.0 package.
@@ -790,7 +790,7 @@ local dev-link build onto the published 1.9.0 package.
 - **Fix-phase task graph.** A fix workstream's dependency graph renders and stays
   legible on a phone.
 - **Local voice provider.** The speech-to-text provider selection shows a local
-  option beside ElevenLabs, driven by the SDK's `voice.local.*` surface.
+  option beside ElevenLabs, driven by the platform's `voice.local.*` surface.
 - **Turn and queue control.** A running tool call can be cancelled; queued
   messages stay editable and deletable before they send.
 - **Memory provenance and receipts.** A provenance chip proves the real
@@ -801,13 +801,13 @@ local dev-link build onto the published 1.9.0 package.
 
 ### Changed
 
-- Re-pinned `legacy-package:goodvibes-sdk` from the local dev-link build to the published
+- Re-pinned `legacy-package:goodvibes-platform` from the local dev-link build to the published
   `1.9.0` registry package; removed the dev-link `file:` overrides so all nested
   `the retired package scope` resolutions come from the registry.
 
 ## [1.5.0] - 2026-07-13
 
-Ships against `legacy-package:goodvibes-sdk` 1.8.0. This release rolls up the
+Ships against `legacy-package:goodvibes-platform` 1.8.0. This release rolls up the
 approvals, costs, fleet, receipts, and settings work accumulated since 1.4.0
 and re-pins from the local dev-link build onto the published 1.8.0 package.
 
@@ -833,13 +833,13 @@ and re-pins from the local dev-link build onto the published 1.8.0 package.
 - **CI fix sessions.** Accepting a CI watch's fix offer opens the spawned fix
   session directly; the opened id is a real session, and a failed spawn says
   so instead of presenting a dead button.
-- **Domain-grouped settings.** Settings adopt the SDK's dissolved feature
+- **Domain-grouped settings.** Settings adopt the platform's dissolved feature
   model: domains replace the enablement bucket, driven end to end in e2e,
   including the pricing-editor and approvals-depth journeys.
 
 ### Changed
 
-- Re-pinned `legacy-package:goodvibes-sdk` from the local dev-link build to the
+- Re-pinned `legacy-package:goodvibes-platform` from the local dev-link build to the
   published `1.8.0` registry package; removed the dev-link `file:` overrides
   so all nested `the retired package scope` resolutions come from the registry.
 - Phone-width checkpoint and task mutations complete through their confirm
@@ -852,7 +852,7 @@ and re-pins from the local dev-link build onto the published 1.8.0 package.
 
 ## [1.4.0] - 2026-07-11
 
-Ships against `legacy-package:goodvibes-sdk` 1.7.0. This release rolls up the SDK
+Ships against `legacy-package:goodvibes-platform` 1.7.0. This release rolls up the platform
 adoption and surface work accumulated since 1.3.0 and re-pins from the local
 dev-link build onto the published 1.7.0 package.
 
@@ -866,14 +866,14 @@ dev-link build onto the published 1.7.0 package.
   either surface reflects everywhere over the existing `permissions`
   realtime domain.
 - **Context-usage chip and compaction receipts.** A session's detail pane
-  now shows a compact context-usage indicator and renders the SDK's
+  now shows a compact context-usage indicator and renders the platform's
   post-compaction receipts (strategy, token/message counts before and after,
   quality grade, outcome) as distinct cards in the transcript, fed by the
-  SDK's real `compaction` runtime-event domain. Both are honest about
+  platform's real `compaction` runtime-event domain. Both are honest about
   absence: a session with no observed compaction activity shows "not
   observed yet" rather than a fabricated number.
 - **Schema-driven settings surface.** Settings render from a build-time
-  snapshot of the SDK's `CONFIG_SCHEMA` plus the feature-flag registry
+  snapshot of the platform's `CONFIG_SCHEMA` plus the feature-flag registry
   (`FEATURE_FLAGS` / `FEATURE_FLAG_CONFIG`), with typed editors per key and
   feature-unit grouping. The snapshot keeps the node-only config barrel out
   of the browser bundle; a schema change that was not regenerated fails the
@@ -902,7 +902,7 @@ dev-link build onto the published 1.7.0 package.
 
 ### Changed
 
-- Re-pinned `legacy-package:goodvibes-sdk` from the local dev-link build to the
+- Re-pinned `legacy-package:goodvibes-platform` from the local dev-link build to the
   published `1.7.0` registry package; removed the dev-link `file:` overrides
   so all nested `the retired package scope` resolutions come from the registry. No behavior
   change from the pin itself: the surfaces above were validated end to end
@@ -919,7 +919,7 @@ dev-link build onto the published 1.7.0 package.
 
 ## [1.3.0] - 2026-07-09
 
-Ships against `legacy-package:goodvibes-sdk` 1.6.1.
+Ships against `legacy-package:goodvibes-platform` 1.6.1.
 
 ### Added
 
@@ -934,18 +934,18 @@ Ships against `legacy-package:goodvibes-sdk` 1.6.1.
 
 ### Changed
 
-- Sessions benefit from SDK 1.6.1 daemon behavior: immediate compact-and-retry
+- Sessions benefit from platform 1.6.1 daemon behavior: immediate compact-and-retry
   when a provider rejects a request as exceeding the context window, learned
   per-model context ceilings, and agent-completion notices that deliver
   exactly once instead of repeating with escalating urgency tags.
 
 ## [1.2.2] - 2026-07-08
 
-Maintenance release on `legacy-package:goodvibes-sdk` 1.5.0.
+Maintenance release on `legacy-package:goodvibes-platform` 1.5.0.
 
 ### Changed
 
-- Validated against SDK 1.5.0: the daemon now compacts a session immediately
+- Validated against platform 1.5.0: the daemon now compacts a session immediately
   when the model itself reports its context window filled up, and honors
   persistent per-model context-window overrides. No WebUI code change:
   session behavior improves through the daemon; model context windows shown
@@ -953,18 +953,18 @@ Maintenance release on `legacy-package:goodvibes-sdk` 1.5.0.
 
 ## [1.2.1] - 2026-07-07
 
-Maintenance release on `legacy-package:goodvibes-sdk` 1.4.1.
+Maintenance release on `legacy-package:goodvibes-platform` 1.4.1.
 
 ### Changed
 
-- Validated against SDK 1.4.1, which makes permission settings the sole
+- Validated against platform 1.4.1, which makes permission settings the sole
   authority for command-class risk in the daemon's exec tool. No WebUI
   behavior change: the WebUI has no exec surface. This release keeps the
-  ecosystem pinned to one SDK version.
+  ecosystem pinned to one platform version.
 
 ## [1.2.0] - 2026-07-07
 
-The turn-control release, on `legacy-package:goodvibes-sdk` 1.4.0.
+The turn-control release, on `legacy-package:goodvibes-platform` 1.4.0.
 
 ### Added
 
@@ -1023,7 +1023,7 @@ Test-harness and CI honesty release: no product code changed.
   feature surface, verification, release checklist), the operator guide (all
   eleven views plus voice and install), the architecture doc (typed contract
   client, session union, memory/voice/PWA models, multiplexed invalidation),
-  the SDK surface matrix (new method families; the `sessions.followUp`
+  the platform surface matrix (new method families; the `sessions.followUp`
   exclusion narrowed to what it means), known limitations (no longer claims
   gaps that were fixed), security notes (Web Push key custody), the screenshot
   tour, and the pinned Bun version in the development guide. All screenshots
@@ -1034,7 +1034,7 @@ Test-harness and CI honesty release: no product code changed.
 
 The desktop release: the web UI becomes a full chat application and operator
 console with feature parity across most of the terminal UI's surface, on the
-typed `legacy-package:goodvibes-sdk` 1.3.1 contracts.
+typed `legacy-package:goodvibes-platform` 1.3.1 contracts.
 
 ### Added
 
@@ -1076,7 +1076,7 @@ typed `legacy-package:goodvibes-sdk` 1.3.1 contracts.
 
 ### Added
 
-- **Cross-surface credential status.** The typed `sdk.operator.credentials.get`
+- **Cross-surface credential status.** The typed `platform.operator.credentials.get`
   facade over the daemon's admin-scoped, secret-free credential-status read, plus
   `deriveCredentialAvailability`: a `503 CREDENTIAL_STORE_UNAVAILABLE`, a
   `METHOD_NOT_FOUND` from an older daemon, or any transport failure degrades to an
@@ -1087,7 +1087,7 @@ typed `legacy-package:goodvibes-sdk` 1.3.1 contracts.
 ## [1.0.0] - 2026-07-06
 
 First stable release of the GoodVibes WebUI, the browser surface of the
-one-platform ecosystem, running on the typed `legacy-package:goodvibes-sdk` 1.0.0
+one-platform ecosystem, running on the typed `legacy-package:goodvibes-platform` 1.0.0
 operator contracts. It reaches the same daemon as the TUI and the agent, so a
 session, provider, or checkpoint is visible across every surface.
 
@@ -1113,7 +1113,7 @@ session, provider, or checkpoint is visible across every surface.
 
 ### Changed
 
-- Updated `legacy-package:goodvibes-sdk` to `1.0.0` (from `0.38.0`), the 1.0.0
+- Updated `legacy-package:goodvibes-platform` to `1.0.0` (from `0.38.0`), the 1.0.0
   release-train pin. The operator-method contract families the webui facade
   calls (`fleet.*`, `checkpoints.*`, `sessions.search`) now carry real
   `OperatorMethodInputMap`/`OperatorMethodOutputMap` entries, so
@@ -1130,7 +1130,7 @@ session, provider, or checkpoint is visible across every surface.
 ### Deferred
 
 - The C1 webui credentials-facade block and provider-status honest-degrade
-  rewire is deferred to a follow-up: the SDK C1 credential-status method ships
+  rewire is deferred to a follow-up: the platform C1 credential-status method ships
   in 1.0.0, but the security-sensitive webui adoption is not gate-blocking and
   its verbatim design notes were not persisted, so it is not improvised here.
 
@@ -1226,7 +1226,7 @@ session, provider, or checkpoint is visible across every surface.
 ### Added
 
 - Added a screenshot tour with real captures from the running WebUI.
-- Added known limitations, security notes, and SDK surface matrix docs.
+- Added known limitations, security notes, and platform surface matrix docs.
 - Added README CI/status badges and embedded screenshot previews.
 
 ## [0.1.36] - 2026-05-16
@@ -1235,50 +1235,50 @@ session, provider, or checkpoint is visible across every surface.
 
 - Reworked the README into a complete project entrypoint with runtime topology,
   auth, surfaces, verification, and release notes.
-- Added architecture, operator guide, development, SDK update checklist, and
+- Added architecture, operator guide, development, platform update checklist, and
   troubleshooting documentation under `docs/`.
 
 ## [0.1.35] - 2026-05-11
 
 ### Changed
 
-- Updated `legacy-package:goodvibes-sdk` to `0.33.30`.
+- Updated `legacy-package:goodvibes-platform` to `0.33.30`.
 
 ## [0.1.34] - 2026-05-10
 
 ### Changed
 
-- Updated `legacy-package:goodvibes-sdk` to `0.33.26`.
+- Updated `legacy-package:goodvibes-platform` to `0.33.26`.
 
 ## [0.1.33] - 2026-05-10
 
 ### Changed
 
-- Updated `legacy-package:goodvibes-sdk` to `0.33.24`.
+- Updated `legacy-package:goodvibes-platform` to `0.33.24`.
 
 ## [0.1.32] - 2026-05-10
 
 ### Changed
 
-- Updated `legacy-package:goodvibes-sdk` to `0.33.23` for WRFC authoritative request-scope fixes.
+- Updated `legacy-package:goodvibes-platform` to `0.33.23` for WRFC authoritative request-scope fixes.
 
 ## [0.1.31] - 2026-05-09
 
 ### Changed
 
-- Updated `legacy-package:goodvibes-sdk` to `0.33.22` for the WRFC owner-chain orchestration contract update.
+- Updated `legacy-package:goodvibes-platform` to `0.33.22` for the WRFC owner-chain orchestration contract update.
 
 ## [0.1.30] - 2026-05-09
 
 ### Changed
 
-- Updated `legacy-package:goodvibes-sdk` to `0.33.21` for shared work-plan APIs and WRFC lifecycle metadata fixes.
+- Updated `legacy-package:goodvibes-platform` to `0.33.21` for shared work-plan APIs and WRFC lifecycle metadata fixes.
 
 ## [0.1.29] - 2026-05-09
 
 ### Changed
 
-- Updated `legacy-package:goodvibes-sdk` to `0.33.19`.
+- Updated `legacy-package:goodvibes-platform` to `0.33.19`.
 
 ## [0.1.28] - 2026-05-08
 
@@ -1304,7 +1304,7 @@ session, provider, or checkpoint is visible across every surface.
 
 ### Changed
 
-- Updated `legacy-package:goodvibes-sdk` to `0.33.18` for the WRFC owner orchestration additions.
+- Updated `legacy-package:goodvibes-platform` to `0.33.18` for the WRFC owner orchestration additions.
 
 ## [0.1.24] - 2026-05-08
 
@@ -1328,7 +1328,7 @@ session, provider, or checkpoint is visible across every surface.
 
 ### Changed
 
-- Updated `legacy-package:goodvibes-sdk` to `0.33.17` for the physically separated regular Knowledge/Wiki and Home Assistant Home Graph runtime stores.
+- Updated `legacy-package:goodvibes-platform` to `0.33.17` for the physically separated regular Knowledge/Wiki and Home Assistant Home Graph runtime stores.
 
 ## [0.1.20] - 2026-05-08
 
@@ -1367,13 +1367,13 @@ session, provider, or checkpoint is visible across every surface.
 
 ### Changed
 
-- Updated `legacy-package:goodvibes-sdk` to `0.33.16` for the upstream default Knowledge/Wiki scoping fix while keeping WebUI on regular browser knowledge routes with no Home Assistant filters or explicit scope flags.
+- Updated `legacy-package:goodvibes-platform` to `0.33.16` for the upstream default Knowledge/Wiki scoping fix while keeping WebUI on regular browser knowledge routes with no Home Assistant filters or explicit scope flags.
 
 ## [0.1.14] - 2026-05-07
 
 ### Changed
 
-- Updated `legacy-package:goodvibes-sdk` to `0.33.11` so regular Knowledge/Wiki routes use the upstream default knowledge-space scoping fix without WebUI-side HomeGraph filtering.
+- Updated `legacy-package:goodvibes-platform` to `0.33.11` so regular Knowledge/Wiki routes use the upstream default knowledge-space scoping fix without WebUI-side HomeGraph filtering.
 
 ## [0.1.13] - 2026-05-07
 
@@ -1401,7 +1401,7 @@ session, provider, or checkpoint is visible across every surface.
 
 ### Added
 
-- Updated `legacy-package:goodvibes-sdk` to `0.33.10` and enabled real companion-chat file attachments through `sdk.artifacts.create` plus `sdk.chat.messages.create` attachment references.
+- Updated `legacy-package:goodvibes-platform` to `0.33.10` and enabled real companion-chat file attachments through `platform.artifacts.create` plus `platform.chat.messages.create` attachment references.
 
 ### Fixed
 
@@ -1449,9 +1449,9 @@ session, provider, or checkpoint is visible across every surface.
 
 - Reworked the chat theme toward the `goodvibes.sh` terminal/vaporwave direction with neon accents, grid texture, and mono typography.
 - Added a collapsible app sidebar and moved browser/control-plane/realtime status from the sidebar into Admin.
-- Replaced the duplicate chat-session dropdown with an editable chat title backed by `sdk.chat.sessions.update`.
+- Replaced the duplicate chat-session dropdown with an editable chat title backed by `platform.chat.sessions.update`.
 - Split daemon model selection into provider and model dropdowns, with model choices filtered by the selected provider.
-- Kept chat file attachment controls out of the composer because companion chat still has no public attachment contract in SDK `0.33.9`.
+- Kept chat file attachment controls out of the composer because companion chat still has no public attachment contract in platform `0.33.9`.
 
 ### Fixed
 
@@ -1462,8 +1462,8 @@ session, provider, or checkpoint is visible across every surface.
 
 ### Changed
 
-- Updated `legacy-package:goodvibes-sdk` to `0.33.9` and switched the chat sidebar to the public `sdk.chat.sessions.list` API.
-- Removed the temporary local recent-session workaround used before SDK chat session listing existed.
+- Updated `legacy-package:goodvibes-platform` to `0.33.9` and switched the chat sidebar to the public `platform.chat.sessions.list` API.
+- Removed the temporary local recent-session workaround used before platform chat session listing existed.
 - Reworked Chat into the primary workspace with chat recents in the app sidebar, a centered conversation canvas, and an integrated composer.
 - Added subtle per-message hover actions for copy and resend plus delivery status indicators.
 - Kept attachment and voice controls disabled because companion chat has no public attachment or voice contract yet.
@@ -1476,14 +1476,14 @@ session, provider, or checkpoint is visible across every surface.
 - Prevented chat turns from showing `completed` unless assistant content has rendered or synced.
 - Removed duplicated session ids, daemon receipts, and provider/model controls from the chat composer.
 - Added daemon current-model viewing and selection to the Providers page through `/api/models/current`.
-- Showed newly created chat sessions immediately while the SDK lacks companion chat session listing.
+- Showed newly created chat sessions immediately while the platform lacks companion chat session listing.
 
 ## [0.1.1] - 2026-05-07
 
 ### Fixed
 
 - Fixed companion chat explicit provider/model routing to use the selected runtime provider row and raw model id.
-- Replaced the operator-session chat sidebar with a local recent companion-chat session list backed by `sdk.chat.sessions.get`.
+- Replaced the operator-session chat sidebar with a local recent companion-chat session list backed by `platform.chat.sessions.get`.
 - Rendered submitted chat messages immediately and surfaced companion turn errors as errors instead of misleading accepted receipts.
 
 ## [0.1.0] - 2026-05-07
@@ -1491,15 +1491,15 @@ session, provider, or checkpoint is visible across every surface.
 ### Added
 
 - Initial Bun, Vite, React, and TypeScript WebUI for the GoodVibes daemon.
-- Browser SDK auth flow using daemon login/session auth and token storage.
+- Browser platform auth flow using daemon login/session auth and token storage.
 - Dashboard, provider, work, admin, and base knowledge/wiki operator views.
-- Standalone daemon-owned companion chat via `legacy-package:goodvibes-sdk@0.33.8` `sdk.chat`.
+- Standalone daemon-owned companion chat via `legacy-package:goodvibes-platform@0.33.8` `platform.chat`.
 - Provider-qualified model routing for new companion chat sessions.
 - Local and GitHub CI for tests, typecheck, and production build.
 
 ### Changed
 
-- Updated GoodVibes SDK dependencies to `0.33.8`.
+- Updated GoodVibes platform dependencies to `0.33.8`.
 - Switched WebUI chat away from shared-session follow-up/task semantics.
 
 ### Removed

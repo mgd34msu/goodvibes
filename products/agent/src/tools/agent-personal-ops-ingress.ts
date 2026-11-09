@@ -1,7 +1,7 @@
 import { types as nodeTypes } from 'node:util';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { SOURCE_SCREENING_LIMITS } from '@goodvibes-jev/engine/sdk/platform/security';
-import { ToolInputProjectionError, type ToolInputProjector, type ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
+import { SOURCE_SCREENING_LIMITS } from '@goodvibes-jev/engine/platform/platform/security';
+import { ToolInputProjectionError, type ToolInputProjector, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
 import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 

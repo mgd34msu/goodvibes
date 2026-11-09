@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerDevicesRuntimeCommands } from '../../input/commands/devices-runtime.ts';
-import type { MintedPairingToken, PublicPairingToken } from '@goodvibes-jev/engine/sdk/platform/pairing';
+import type { MintedPairingToken, PublicPairingToken } from '@goodvibes-jev/engine/platform/platform/pairing';
 
 function fakePairingTokens(initial: PublicPairingToken[] = []) {
   let tokens = [...initial];

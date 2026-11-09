@@ -12,27 +12,27 @@ import {
   voiceWakeConfigSettings,
   parseWakeModelList,
   DEFAULT_WAKE_MODEL_ID,
-} from '../sdk/src/platform/config/schema-domain-voice-wake.js';
-import { DEFAULT_CONFIG, CONFIG_SCHEMA, CONFIG_KEYS } from '../sdk/src/platform/config/schema.js';
-import { FEATURE_FLAGS } from '../sdk/src/platform/runtime/feature-flags/flags.js';
-import { FEATURE_SETTINGS } from '../sdk/src/platform/runtime/feature-flags/feature-settings.js';
-import { getFeatureFlagConfig } from '../sdk/src/platform/runtime/feature-flags/flag-config-map.js';
+} from '../platform/src/platform/config/schema-domain-voice-wake.js';
+import { DEFAULT_CONFIG, CONFIG_SCHEMA, CONFIG_KEYS } from '../platform/src/platform/config/schema.js';
+import { FEATURE_FLAGS } from '../platform/src/platform/runtime/feature-flags/flags.js';
+import { FEATURE_SETTINGS } from '../platform/src/platform/runtime/feature-flags/feature-settings.js';
+import { getFeatureFlagConfig } from '../platform/src/platform/runtime/feature-flags/flag-config-map.js';
 import {
   WakeSupervisor,
   WAKE_SUPERVISOR_DEFAULTS,
-} from '../sdk/src/platform/voice/wake/supervisor.js';
+} from '../platform/src/platform/voice/wake/supervisor.js';
 import {
   featureInoperability,
   isFeatureGateEnabled,
   requireFeatureGate,
-} from '../sdk/src/platform/runtime/feature-flags/gates.js';
+} from '../platform/src/platform/runtime/feature-flags/gates.js';
 import {
   WAKE_SETTING_KEYS,
   resolveWakeRuntimeSettings,
   wakeSurfaceKey,
   type WakeSurface,
-} from '../sdk/src/platform/voice/wake/settings.js';
-import { deriveFeatureState, FEATURE_SETTINGS_BINDINGS } from '../sdk/src/platform/runtime/feature-flags/feature-settings.js';
+} from '../platform/src/platform/voice/wake/settings.js';
+import { deriveFeatureState, FEATURE_SETTINGS_BINDINGS } from '../platform/src/platform/runtime/feature-flags/feature-settings.js';
 
 const WAKE = voiceWakeConfigDefaults.voice.wake;
 

@@ -151,7 +151,7 @@ export interface PersonalOpsRecordFreshness {
     | 'connector-attention'
     | 'provider-contract-missing'
     | 'source-tool-missing';
-  readonly source: 'connector-read' | 'saved-review-artifact' | 'daemon-read-model' | 'sdk-read-model';
+  readonly source: 'connector-read' | 'saved-review-artifact' | 'daemon-read-model' | 'platform-read-model';
   readonly sourceTool?: string;
   readonly lastReviewedAt?: string;
   readonly refreshRoute?: string;

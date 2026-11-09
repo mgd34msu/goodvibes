@@ -21,17 +21,17 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createSystemOnePort, judgmentConfigFromEnv } from '@goodvibes-jev/judgment';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { ProviderRegistry } from '../sdk/src/platform/providers/registry.ts';
-import { ProviderCapabilityRegistry } from '../sdk/src/platform/providers/capabilities.ts';
-import { CacheHitTracker } from '../sdk/src/platform/providers/cache-strategy.ts';
-import { FavoritesStore } from '../sdk/src/platform/providers/favorites.ts';
-import { BenchmarkStore } from '../sdk/src/platform/providers/model-benchmarks.ts';
-import { prepareRouteBenchmarks, routeBenchmarkFor } from '../sdk/src/platform/runtime/contract-composition.ts';
-import { ModelLimitsService } from '../sdk/src/platform/providers/model-limits.ts';
-import { createRoutePlanner, type RoutePlanRequest } from '../sdk/src/platform/routing/route-planner.ts';
-import { planTaskRoute } from '../sdk/src/platform/routing/task-routes/planner.ts';
-import { modelProviderNamedIds } from '../sdk/src/platform/routing/task-routes/named-ids.ts';
-import { readUserFacingErrorLine } from '../sdk/src/platform/routing/user-error.ts';
+import { ProviderRegistry } from '../platform/src/platform/providers/registry.ts';
+import { ProviderCapabilityRegistry } from '../platform/src/platform/providers/capabilities.ts';
+import { CacheHitTracker } from '../platform/src/platform/providers/cache-strategy.ts';
+import { FavoritesStore } from '../platform/src/platform/providers/favorites.ts';
+import { BenchmarkStore } from '../platform/src/platform/providers/model-benchmarks.ts';
+import { prepareRouteBenchmarks, routeBenchmarkFor } from '../platform/src/platform/runtime/contract-composition.ts';
+import { ModelLimitsService } from '../platform/src/platform/providers/model-limits.ts';
+import { createRoutePlanner, type RoutePlanRequest } from '../platform/src/platform/routing/route-planner.ts';
+import { planTaskRoute } from '../platform/src/platform/routing/task-routes/planner.ts';
+import { modelProviderNamedIds } from '../platform/src/platform/routing/task-routes/named-ids.ts';
+import { readUserFacingErrorLine } from '../platform/src/platform/routing/user-error.ts';
 
 type RegistryOptions = ConstructorParameters<typeof ProviderRegistry>[0];
 

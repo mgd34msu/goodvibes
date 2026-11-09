@@ -2,10 +2,10 @@
 import { afterEach, expect, test } from 'bun:test';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort, bindJudgmentPortAuthority } from '../errors/src/index.js';
-import { buildPerTurnKnowledgeInjection, type TurnCodeIndexSource } from '../sdk/src/platform/agents/turn-knowledge-injection.js';
-import { rankCodeInjectionSnapshots } from '../sdk/src/platform/state/code-injection-ranking.js';
-import type { CodeContextResult } from '../sdk/src/platform/state/code-index-types.js';
-import type { MemoryRecord } from '../sdk/src/platform/state/memory-store.js';
+import { buildPerTurnKnowledgeInjection, type TurnCodeIndexSource } from '../platform/src/platform/agents/turn-knowledge-injection.js';
+import { rankCodeInjectionSnapshots } from '../platform/src/platform/state/code-injection-ranking.js';
+import type { CodeContextResult } from '../platform/src/platform/state/code-index-types.js';
+import type { MemoryRecord } from '../platform/src/platform/state/memory-store.js';
 
 let previous: ReturnType<typeof installJudgmentPort>;
 let installed = false;

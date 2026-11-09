@@ -8,8 +8,8 @@ import {
   type ModelTier,
   type TierPromptAudience,
   type TierPromptSupplementOptions,
-} from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { ModelFacts, ModelTierStore, TierRecord } from '../sdk/src/platform/routing/model-tiers.js';
+} from '@goodvibes-jev/engine/platform/platform/providers';
+import type { ModelFacts, ModelTierStore, TierRecord } from '../platform/src/platform/routing/model-tiers.js';
 
 const facts: ModelFacts = { registryKey: 'fixture:small', id: 'small', name: 'Small fixture', provider: 'fixture' };
 const economy: TierRecord = { tier: 'economy', frontier: 0, small: 1 };

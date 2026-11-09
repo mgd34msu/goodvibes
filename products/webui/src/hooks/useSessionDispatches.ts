@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { OperatorMethodOutput } from '@goodvibes-jev/engine/contracts';
 import { isClientLifetimeCurrent, subscribeClientLifetime, type ClientLifetime } from '../lib/client-lifetime';
-import { hasStoredTokenSync, sdk } from '../lib/goodvibes';
+import { hasStoredTokenSync, client as platformClient } from '../lib/goodvibes';
 import { formatError, isSessionClosedError, serializeError } from '../lib/errors';
 import { asRecord } from '../lib/object';
 import { queryKeys } from '../lib/queries';
@@ -76,7 +76,7 @@ export function useSessionDispatches(lifetime: ClientLifetime, sessionId: string
       try {
         if (signal.aborted || !current()) cancel();
         abort.signal.throwIfAborted();
-        const result = await sdk.operator.sessions.inputs.list(sessionId, abort.signal);
+        const result = await platformClient.operator.sessions.inputs.list(sessionId, abort.signal);
         if (!current()) cancel();
         abort.signal.throwIfAborted();
         if (!Array.isArray(result?.inputs) || result.inputs.some((input) => !validReceipt(input, sessionId))) {
@@ -119,8 +119,8 @@ export function useSessionDispatches(lifetime: ClientLifetime, sessionId: string
       if (!owned()) abort.abort();
       abort.signal.throwIfAborted();
       const data = await (mode === 'steer'
-        ? sdk.operator.sessions.steer(sessionId, { body }, abort.signal)
-        : sdk.operator.sessions.followUp(sessionId, { body }, abort.signal));
+        ? platformClient.operator.sessions.steer(sessionId, { body }, abort.signal)
+        : platformClient.operator.sessions.followUp(sessionId, { body }, abort.signal));
       if (!owned() || abort.signal.aborted) return;
       setDispatches((previous) => previous.map((entry) => entry.id !== id ? entry
         : validReceipt(data?.input, sessionId) ? adopt(entry, data.input)

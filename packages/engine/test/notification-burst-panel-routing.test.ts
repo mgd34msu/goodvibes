@@ -10,9 +10,9 @@
  * suppressed to the panel while critical and alert items keep their surface.
  */
 import { describe, expect, test } from 'bun:test';
-import { createNotificationRouter, NotificationRouter } from '../sdk/src/platform/runtime/notifications/index.js';
-import type { Notification, RoutingDecision } from '../sdk/src/platform/runtime/notifications/index.js';
-import { DEFAULT_CONFIG } from '../sdk/src/platform/config/schema.js';
+import { createNotificationRouter, NotificationRouter } from '../platform/src/platform/runtime/notifications/index.js';
+import type { Notification, RoutingDecision } from '../platform/src/platform/runtime/notifications/index.js';
+import { DEFAULT_CONFIG } from '../platform/src/platform/config/schema.js';
 
 function fakeConfig(overrides: Record<string, unknown> = {}) {
   return {

@@ -4,7 +4,7 @@
  *
  * ## The defect this closes
  *
- * The SDK shipped `platform/personal-capture` and the daemon wired it into the
+ * The platform shipped `platform/personal-capture` and the daemon wired it into the
  * shared-session continuation runner, so a channel turn records what the owner
  * tells it. The Agent product answers on a DIFFERENT path, its own
  * `Orchestrator.handleUserInput` turn (runtime/bootstrap.ts), with its own tool
@@ -17,49 +17,49 @@
  * registered and reachable, and nothing in the prompt said that using them was
  * part of answering.
  *
- * ## Why the text is here and not imported verbatim from the SDK
+ * ## Why the text is here and not imported verbatim from the platform
  *
- * The doctrine is the SDK's and is imported where it is executable:
+ * The doctrine is the platform's and is imported where it is executable:
  * `resolveCaptureAuthority` decides this turn's write authority, and
  * `CONVERSATIONAL_TURN_TOOLS` names the capability set a conversational turn
- * needs. The INSTRUCTION text cannot be imported verbatim, because the SDK's
- * copy names the SDK's own capture tool and its actions (`profile` action
+ * needs. The INSTRUCTION text cannot be imported verbatim, because the platform's
+ * copy names the platform's own capture tool and its actions (`profile` action
  * `record_trip`). This product's capture surface is two different tools with
  * different verbs, `occasions` for anything dated, `profile` for fields and
- * prose, reaching the daemon through the operator gateway. Injecting the SDK's
+ * prose, reaching the daemon through the operator gateway. Injecting the platform's
  * wording here would instruct the model to call actions this build's tools do
  * not have, which is a tool error per turn rather than a capture.
  *
  * So the rules are restated against THIS product's verbs, in the same order and
- * with the same force as the SDK contract, and
+ * with the same force as the platform contract, and
  * `src/test/runtime/conversational-capture-contract.test.ts` pins each rule so
  * neither copy can lose one quietly.
  *
  * ## Authority
  *
  * The Agent's surface is local: the owner is sitting at it, typing. That is the
- * `local-surface` case in the SDK's authority module, and it resolves to
+ * `local-surface` case in the platform's authority module, and it resolves to
  * `owner-direct`, the only authority the profile write gate accepts. It is
  * derived here through `resolveCaptureAuthority` rather than written as a
- * literal so that the one place deciding "may this turn write" stays the SDK's.
+ * literal so that the one place deciding "may this turn write" stays the platform's.
  */
 
 import {
   CONVERSATIONAL_TURN_TOOLS,
   resolveCaptureAuthority,
   type CaptureAuthorityDecision,
-} from '@goodvibes-jev/engine/sdk/platform/personal-capture';
+} from '@goodvibes-jev/engine/platform/platform/personal-capture';
 
 /**
  * The capture-capable tools a conversational Agent turn needs registered.
  *
- * COMPOSED with the SDK's list, never substituted for the Agent's own. The
+ * COMPOSED with the platform's list, never substituted for the Agent's own. The
  * Agent's main conversation is a full operator session, it keeps `exec`,
  * `write`, `edit`, `browser` and the rest, because that is the product. What
- * the SDK list contributes is the floor: whatever else a turn can do, it must
+ * the platform list contributes is the floor: whatever else a turn can do, it must
  * be able to look things up AND record what it learned. `occasions` is this
  * product's half of the capture surface (anything dated, plans included), which
- * the SDK's single `profile` tool covers on its own side.
+ * the platform's single `profile` tool covers on its own side.
  */
 export const AGENT_CONVERSATIONAL_CAPTURE_TOOLS: readonly string[] = [
   ...CONVERSATIONAL_TURN_TOOLS,
@@ -85,7 +85,7 @@ export function missingConversationalCaptureTools(
 /**
  * This turn's write authority.
  *
- * No channel identity: an Agent turn is the owner at his own keyboard. The SDK
+ * No channel identity: an Agent turn is the owner at his own keyboard. The platform
  * resolves that to `owner-direct` via `local-surface`, and a turn arriving any
  * other way would be resolved by the caller that knows where it came from.
  */
@@ -96,7 +96,7 @@ export function resolveAgentTurnCaptureAuthority(): CaptureAuthorityDecision {
 /**
  * The capture contract, as the operator policy carries it on every turn.
  *
- * The rules, in the order the SDK contract states them:
+ * The rules, in the order the platform contract states them:
  *
  *  1. Recording what he states is part of answering, not something to offer.
  *  2. Recording what the turn FOUND while answering is part of that same
@@ -112,8 +112,8 @@ export function resolveAgentTurnCaptureAuthority(): CaptureAuthorityDecision {
  */
 export const AGENT_CONVERSATIONAL_CAPTURE_POLICY: string = [
   '## Recording what you learn is part of answering',
-  // Rule 1, the SDK contract's "recording it is part of answering, not
-  // something to offer to do". The Agent's tools, not the SDK's.
+  // Rule 1, the platform contract's "recording it is part of answering, not
+  // something to offer to do". The Agent's tools, not the platform's.
   '- When he tells you something about himself, recording it is part of answering, not something to offer to do, and not something to ask permission for. A preference, an address, where he works, a person who matters to him: `profile action:"set"` for a keyed field, `profile action:"append"` for prose, in the same turn, then answer.',
   // Rule 2, capture-on-use. This is the itinerary defect stated as a rule: the
   // information did not arrive in his message, it arrived in a tool result the
@@ -131,7 +131,7 @@ export const AGENT_CONVERSATIONAL_CAPTURE_POLICY: string = [
   // finishes it under his own authority. That is one extra beat, not a dead
   // end, and it needs no new trust tier to work.
   '- A refusal there is not the end of it. Put the exact thing in front of him in the same reply so one word finishes it: for a trip or a dated plan call `occasions action:"plan_propose"` with the dates and details you found and say its confirmation line back to him as written; for a date, `action:"propose"`. When he answers, "yes", "that\'s right", anything of his own, THAT turn carries `owner-direct`, and you complete it immediately with `plan_confirm` (or `confirm`) using his words as `said`. Do not make him retype what you already found. Say where it came from, the sender and the subject, so he knows what he is confirming.',
-  // Rule 3, inference and use. The SDK's "Recording is the floor, not the job",
+  // Rule 3, inference and use. The platform's "Recording is the floor, not the job",
   // with its named examples kept, because vague instructions to "infer" produce
   // nothing.
   '- Recording is the floor, not the job. Read what the thing MEANS and fold that into the same turn. An itinerary is not just two dates: it says he is away for that span, say the span back to him in plain words, the people travelling with him are people in his life, and the destination plus the reason are durable facts worth keeping in the same capture (visiting his parents in a town means his parents live there). Capture what it implies, not only what it states.',

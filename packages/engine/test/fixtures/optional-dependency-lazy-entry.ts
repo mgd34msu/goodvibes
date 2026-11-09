@@ -20,8 +20,8 @@ import { htmlExtractionPort } from '../_helpers/html-extraction-readings.js';
  * lightweight path.
  */
 
-import { describeHtmlReadabilityAvailability } from '../../sdk/src/platform/knowledge/html-readability.ts';
-import { extractKnowledgeArtifact } from '../../sdk/src/platform/knowledge/extractors.ts';
+import { describeHtmlReadabilityAvailability } from '../../platform/src/platform/knowledge/html-readability.ts';
+import { extractKnowledgeArtifact } from '../../platform/src/platform/knowledge/extractors.ts';
 
 // Printed before anything else: a static import of a missing package never
 // reaches this line, which is the whole difference being measured.

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
-import type { ChatResponse, LLMProvider } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { OllamaProvider } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { ProviderError } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { ChatResponse, LLMProvider } from '@goodvibes-jev/engine/platform/platform/providers';
+import { OllamaProvider } from '@goodvibes-jev/engine/platform/platform/providers';
+import { ProviderError } from '@goodvibes-jev/engine/platform/platform/types';
 
 function ndjson(lines: Record<string, unknown>[]): string {
   return lines.map((line) => JSON.stringify(line)).join('\n');

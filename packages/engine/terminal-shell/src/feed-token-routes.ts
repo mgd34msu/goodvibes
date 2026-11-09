@@ -1,6 +1,6 @@
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { ContentPart } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { BlockMeta, TerminalConversationManager } from './terminal-conversation.js';
 import type { InputHistory } from './input-history.js';
 import type { TerminalCommandRegistry, TerminalSlashCommand } from './command-registry.js';

@@ -5,16 +5,16 @@ import { join } from 'node:path';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { PermissionManager, createPermissionConfigReader, isAuthenticAutonomousAdmission,
-  type AutonomousPermissionAdmission, type PermissionConfigReader } from '../sdk/src/platform/permissions/manager.ts';
-import { UserPermissionRuleStore } from '../sdk/src/platform/permissions/user-rule-store.ts';
-import { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.ts';
-import { ToolRegistry, assertCurrentToolExecution } from '../sdk/src/platform/tools/registry.ts';
-import { ToolInputProjectionError, type ToolInputProjector } from '../sdk/src/platform/tools/input-projection.ts';
-import { EXEC_TOOL_SCHEMA } from '../sdk/src/platform/tools/exec/schema.ts';
-import type { Tool, ToolExecuteOptions } from '../sdk/src/platform/types/tools.ts';
-import { executeToolCalls, type ToolExecutionDeps } from '../sdk/src/platform/core/orchestrator-tool-runtime.ts';
+  type AutonomousPermissionAdmission, type PermissionConfigReader } from '../platform/src/platform/permissions/manager.ts';
+import { UserPermissionRuleStore } from '../platform/src/platform/permissions/user-rule-store.ts';
+import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
+import { ToolRegistry, assertCurrentToolExecution } from '../platform/src/platform/tools/registry.ts';
+import { ToolInputProjectionError, type ToolInputProjector } from '../platform/src/platform/tools/input-projection.ts';
+import { EXEC_TOOL_SCHEMA } from '../platform/src/platform/tools/exec/schema.ts';
+import type { Tool, ToolExecuteOptions } from '../platform/src/platform/types/tools.ts';
+import { executeToolCalls, type ToolExecutionDeps } from '../platform/src/platform/core/orchestrator-tool-runtime.ts';
 import { forgetGateReadings, gateReadingsPort } from './_helpers/gate-readings.ts';
 import { replaceInternalStore } from './_helpers/controllable-store.ts';
 

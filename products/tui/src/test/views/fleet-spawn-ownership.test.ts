@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import { FleetSpawn, type AcpDiscoveredAgent, type AcpWorkspaceRegistration, type AcpSpawnGateway } from '../../views/fleet-spawn.ts';
 import { AgentsModal } from '../../input/agents-modal.ts';
 import { SurfaceModalHost } from '../../input/surface-modal-host.ts';

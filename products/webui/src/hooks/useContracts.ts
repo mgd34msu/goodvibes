@@ -4,7 +4,7 @@ import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime, ty
 import { firstJsonSchemaFailure } from '@goodvibes-jev/engine/transport-http';
 import contractSchema from '../lib/generated/contract-inspection-schema.json';
 import type { ContractRecord } from '../lib/contract-bridge-types';
-import { hasStoredTokenSync, sdk } from '../lib/goodvibes';
+import { hasStoredTokenSync, client as platformClient } from '../lib/goodvibes';
 import { queryKeys } from '../lib/queries';
 
 /** A local revision, never a token or user-provided identifier, owns these caches. */
@@ -59,7 +59,7 @@ export function useContractList(lifetime: ClientLifetime, includeTerminal: boole
   return useQuery({
     queryKey: queryKeys.contractList(lifetime.revision, includeTerminal),
     queryFn: ({ signal }) => readInContractScope(lifetime, signal, async (current) => {
-      const result = await sdk.operator.contracts.list({ includeTerminal }, current);
+      const result = await platformClient.operator.contracts.list({ includeTerminal }, current);
       if (!result || !Array.isArray(result.contracts)) throw new Error('The daemon returned an unreadable contract list.');
       result.contracts.forEach(assertContractTree);
       return result;
@@ -75,7 +75,7 @@ export function useContractDetail(lifetime: ClientLifetime, id: string, live: bo
   return useQuery({
     queryKey: queryKeys.contractDetail(lifetime.revision, id),
     queryFn: ({ signal }) => readInContractScope(lifetime, signal, async (current) => {
-      const result = await sdk.operator.contracts.get(id, current);
+      const result = await platformClient.operator.contracts.get(id, current);
       assertContractTree(result);
       if (result.id !== id) throw new Error('The daemon returned a different contract. Refresh to try again.');
       return result;

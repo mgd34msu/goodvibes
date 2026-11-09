@@ -33,7 +33,7 @@ import type {
   ImapBodyProbe,
   ImapBodyUnreadableEvidence,
   ImapConnectionReport,
-} from '@goodvibes-jev/engine/sdk/platform/email';
+} from '@goodvibes-jev/engine/platform/platform/email';
 
 declare const probe: ImapBodyProbe;
 

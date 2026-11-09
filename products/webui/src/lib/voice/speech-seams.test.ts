@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import type { BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-sdk';
+import type { BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-api';
 import { readSpeechSeams, readSpeechSeamsResponse } from './speech-seams';
 import { tokenStore } from '../goodvibes';
 import { browserDecisionPolicy } from '../decision-policy';

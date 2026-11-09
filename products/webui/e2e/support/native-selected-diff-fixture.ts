@@ -9,12 +9,12 @@ import {
   nativeConversationIntakeLookupResultSchema,
   selectNativeDiffHunk,
   type NativeConversationIntakeCaptureRequest,
-} from "@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client";
+} from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client";
 import {
   nativeHostedSessionLookupSchema,
   nativeHostedTurnLookupSchema,
-} from "@goodvibes-jev/engine/sdk/platform/hosted-sessions/native-turn-client";
-import { nativeWorkExecutionSnapshotSchema } from "@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client";
+} from "@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client";
+import { nativeWorkExecutionSnapshotSchema } from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client";
 import { installMockDaemon } from "./mock-daemon";
 import { sessionRecord, STEERABLE_SESSION } from "./seed";
 

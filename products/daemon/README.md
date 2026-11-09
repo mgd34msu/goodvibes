@@ -266,7 +266,7 @@ pagination and protected-read contracts.
 
 ## Explicit local release preparation
 
-Root `bun run sync:version` synchronizes the SDK fallback, daemon manifest and
+Root `bun run sync:version` synchronizes the platform fallback, daemon manifest and
 daemon compiled fallback with the repository release version. Root `version:check`
 includes the daemon. Native prebuild validates that shared identity without writes.
 

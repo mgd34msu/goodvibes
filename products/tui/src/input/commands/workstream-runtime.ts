@@ -1,6 +1,6 @@
 import { routeNativeConversationInput } from '../../runtime/native-conversation-ingress.ts';
-import { isTerminalContractStatus, type ContractOperatorService, type ContractView } from '@goodvibes-jev/engine/sdk/platform/contract';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { isTerminalContractStatus, type ContractOperatorService, type ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { directOwnerWorkstreamInput, type CommandContext, type CommandRegistry } from '../command-registry.ts';
 
 const USAGE = 'start <request> | list | status <id> | cancel <id> | reply <id> <escalation-id> <answer>';

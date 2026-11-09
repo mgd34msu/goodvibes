@@ -15,8 +15,8 @@
 
 import { describe, expect, test, beforeEach } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { createDaemonRuntimeSessionRouteHandlers } from '../daemon-sdk/src/runtime-session-routes.js';
-import type { DaemonRuntimeRouteContext } from '../daemon-sdk/src/runtime-route-types.js';
+import { createDaemonRuntimeSessionRouteHandlers } from '../daemon-api/src/runtime-session-routes.js';
+import type { DaemonRuntimeRouteContext } from '../daemon-api/src/runtime-route-types.js';
 
 type SessionBroker = DaemonRuntimeRouteContext['sessionBroker'];
 type SubmitMessageInput = Parameters<SessionBroker['submitMessage']>[0];

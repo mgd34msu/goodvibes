@@ -1,8 +1,8 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { getPeerContract } from '@goodvibes-jev/engine/sdk/contracts';
-import { GatewayMethodCatalog, buildOperatorContract } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { getKnowledgeGraphqlSchemaText, renderKnowledgeSchemaSql } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import { getPeerContract } from '@goodvibes-jev/engine/platform/contracts';
+import { GatewayMethodCatalog, buildOperatorContract } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { getKnowledgeGraphqlSchemaText, renderKnowledgeSchemaSql } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { categorizeBuiltinCommands } from '../src/input/commands.ts';
 import { renderCommandReferenceMarkdown } from '../src/input/command-reference.ts';
 

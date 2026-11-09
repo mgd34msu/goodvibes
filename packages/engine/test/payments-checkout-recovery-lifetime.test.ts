@@ -1,10 +1,10 @@
 import { afterEach, expect, test } from 'bun:test';
-import { BudgetLedger } from '../sdk/src/platform/payments/budget.js';
-import { CheckoutRecovery, type CheckoutRecoveryDeps } from '../sdk/src/platform/payments/checkout-recovery.js';
-import { CheckoutOwnershipError } from '../sdk/src/platform/payments/checkout-ownership.js';
-import { CheckoutRegistry, MemoryCheckoutJournal, type InFlightCheckout } from '../sdk/src/platform/payments/checkout-registry.js';
-import { parseCurrencyCode, unsafeOwnerSuppliedTextForTests } from '../sdk/src/platform/payments/types.js';
-import { DurablePaymentOperations } from '../sdk/src/platform/payments/host/operation-store.js';
+import { BudgetLedger } from '../platform/src/platform/payments/budget.js';
+import { CheckoutRecovery, type CheckoutRecoveryDeps } from '../platform/src/platform/payments/checkout-recovery.js';
+import { CheckoutOwnershipError } from '../platform/src/platform/payments/checkout-ownership.js';
+import { CheckoutRegistry, MemoryCheckoutJournal, type InFlightCheckout } from '../platform/src/platform/payments/checkout-registry.js';
+import { parseCurrencyCode, unsafeOwnerSuppliedTextForTests } from '../platform/src/platform/payments/types.js';
+import { DurablePaymentOperations } from '../platform/src/platform/payments/host/operation-store.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const releases: (() => void)[] = [], owners: CheckoutRecovery[] = [];

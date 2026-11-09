@@ -9,7 +9,7 @@
  */
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import type { ApprovalApproveInput } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { refetchAfterDecision } from '../../lib/approval-refresh';
@@ -46,7 +46,7 @@ export function useApprovalActions() {
         ...(rememberTier ? { rememberTier, remember: true } : {}),
         ...(answer !== undefined ? { modifiedArgs: { answer } } : {}),
       };
-      return sdk.operator.approvals.approve(id, Object.keys(input).length > 0 ? input : undefined);
+      return platformClient.operator.approvals.approve(id, Object.keys(input).length > 0 ? input : undefined);
     },
     onSuccess: async (result, variables) => {
       await refetchAfterDecision(queryClient, queryKeys.approvals);
@@ -83,7 +83,7 @@ export function useApprovalActions() {
   const deny = useMutation({
     // The one optional reason rides both wire fields (note + reason).
     mutationFn: ({ id, reason }: { id: string; reason?: string }) =>
-      sdk.operator.approvals.deny(id, reason ? { note: reason, reason } : undefined),
+      platformClient.operator.approvals.deny(id, reason ? { note: reason, reason } : undefined),
     onSuccess: async (result, variables) => {
       await refetchAfterDecision(queryClient, queryKeys.approvals);
       toast(variables.reason && recordedReasonStored(result)
@@ -96,7 +96,7 @@ export function useApprovalActions() {
   });
 
   const claim = useMutation({
-    mutationFn: (id: string) => sdk.operator.approvals.claim(id),
+    mutationFn: (id: string) => platformClient.operator.approvals.claim(id),
     onSuccess: async () => {
       await refetchAfterDecision(queryClient, queryKeys.approvals);
       toast({ title: 'Claimed', tone: 'info' });
@@ -107,7 +107,7 @@ export function useApprovalActions() {
   });
 
   const cancel = useMutation({
-    mutationFn: (id: string) => sdk.operator.approvals.cancel(id),
+    mutationFn: (id: string) => platformClient.operator.approvals.cancel(id),
     onSuccess: async () => {
       await refetchAfterDecision(queryClient, queryKeys.approvals);
       toast({ title: 'Cancelled', tone: 'info' });

@@ -12,7 +12,7 @@ import {
   testContainsSecretLikeText,
   testDescribeSenderClaim,
 } from './_helpers/platform-email-fixtures.ts';
-import type { EmailSummary } from '../sdk/src/platform/email/email-service.ts';
+import type { EmailSummary } from '../platform/src/platform/email/email-service.ts';
 import {
   classifyTone as nativeClassifyTone,
   composeDraftReply as nativeComposeDraftReply,
@@ -24,13 +24,13 @@ import {
   replySubject,
   StyleReplyReadingError,
   type StyleProfile,
-} from '../sdk/src/platform/email/style-reply.ts';
+} from '../platform/src/platform/email/style-reply.ts';
 import {
   buildStyleReplyLaneAdditions,
   styleReplyLiveRecord,
   styleReplyWorkflow,
   styleReplyWorkflowStatus,
-} from '../sdk/src/platform/email/style-reply-lane.ts';
+} from '../platform/src/platform/email/style-reply-lane.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

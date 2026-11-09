@@ -15,7 +15,7 @@ name: Reusable GitHub release
 #   Call it:
 #     jobs:
 #       gh-release:
-#         uses: mgd34msu/goodvibes-sdk/.github/workflows/reusable-gh-release.yml@<commit-sha>
+#         uses: mgd34msu/goodvibes/.github/workflows/reusable-gh-release.yml@<commit-sha>
 #         with:
 #           tag: ${{ github.ref_name }}
 #           artifact-name: release-assets
@@ -23,7 +23,7 @@ name: Reusable GitHub release
 #           notes-file: "docs/releases/{version}.md"   # optional prose override
 #
 #   Pin `<commit-sha>` to a full commit SHA, never `@main`; note alongside the
-#   pin which goodvibes-sdk version it corresponds to. Bumping the pin is a
+#   pin which GoodVibes version it corresponds to. Bumping the pin is a
 #   deliberate, reviewed change (its own commit/PR), not an automatic float
 #   onto whatever main has become.
 #

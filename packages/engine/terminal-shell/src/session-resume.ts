@@ -26,12 +26,12 @@
  * writeLastSessionPointer, all bootstrap-hook-bridge-only, pre-existing
  * asymmetries out of this module's scope).
  */
-import type { SessionManager, SessionMeta } from '@goodvibes-jev/engine/sdk/platform/sessions';
-import type { SessionSurface } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import type { SessionManager, SessionMeta } from '@goodvibes-jev/engine/platform/platform/sessions';
+import type { SessionSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { TerminalConversationManager as ConversationManager } from './terminal-conversation.js';
-import { restoreTurnAnchors } from '@goodvibes-jev/engine/sdk/platform/rewind';
+import { restoreTurnAnchors } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { restoreWorkTreeFolds } from './work-tree-wiring.js';
-import { replayJournalForSession, type ReplayIntoConversationResult } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { replayJournalForSession, type ReplayIntoConversationResult } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 export interface SessionResumeRuntime {
   sessionId: string;
   model: string;
@@ -76,7 +76,7 @@ export interface SessionResumeOutcome {
  *
  * Sessions saved by an older TUI can carry a legacy pane list in their
  * return context (`returnContext.openPanels` plus an "Open panels: ..."
- * line). The SDK's session loader (`loadedReturnContext`) drops both, so
+ * line). The platform's session loader (`loadedReturnContext`) drops both, so
  * `meta.returnContext` here never has them, and the journal-replay rewrite
  * below writes the session back without them.
  */
@@ -141,7 +141,7 @@ export async function resumeSessionCore(sessionId: string, deps: SessionResumeDe
 }
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { clearTurnAnchors, getTurnAnchors, persistTurnAnchors, recordTurnAnchor } from '@goodvibes-jev/engine/sdk/platform/rewind';
+import { clearTurnAnchors, getTurnAnchors, persistTurnAnchors, recordTurnAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { saveWorkTreeFolds } from './work-tree-fold-store.js';
 import { readConversationMessageSnapshots } from './conversation-message-snapshot.js';
 /** Restore both resume entry points from the same clean conversation boundary. */

@@ -2,7 +2,7 @@
  * sandbox-exec-gate.ts, sandbox-aware layer over the exec approval ask.
  *
  * The per-command exec sandbox already RUNS boundary-safe commands inside a
- * bubblewrap boundary (the SDK exec tool's runner half). This is the APPROVAL
+ * bubblewrap boundary (the platform exec tool's runner half). This is the APPROVAL
  * half: when the base permission policy would prompt ("ask") for an exec, and
  * the sandbox is genuinely active, a command that runs entirely inside the OS
  * boundary with no host-access need should auto-allow instead of prompting,
@@ -10,9 +10,9 @@
  * that NAMES what it wants ("wants network …", "wants host privilege
  * escalation").
  *
- * The decision is the SDK's `decideSandboxedExec`, never re-implemented here.
+ * The decision is the platform's `decideSandboxedExec`, never re-implemented here.
  * This module only (a) reads the live sandbox posture, (b) extracts the exec
- * command(s) from the request, (c) maps the SDK decision onto the existing ask
+ * command(s) from the request, (c) maps the platform decision onto the existing ask
  * callback: allow → approve without prompting; ask → attach the named
  * escalations to the request so the approval card renders them, then delegate to
  * the underlying ask. Non-exec requests, and any request while the sandbox is
@@ -23,14 +23,14 @@
  * base policy already resolved to "ask", it can never turn a deny into an allow,
  * and the frozen catastrophic block is untouched.
  */
-import { decideSandboxedExec, readCommandNeeds } from '@goodvibes-jev/engine/sdk/platform/runtime/permissions/sandbox-policy';
-import { detectSandboxAvailability, probeSandboxHost, type SandboxAvailability } from '@goodvibes-jev/engine/sdk/platform/tools/exec/sandbox';
+import { decideSandboxedExec, readCommandNeeds } from '@goodvibes-jev/engine/platform/platform/runtime/permissions/sandbox-policy';
+import { detectSandboxAvailability, probeSandboxHost, type SandboxAvailability } from '@goodvibes-jev/engine/platform/platform/tools/exec/sandbox';
 import { JudgmentAuthorityRetiredError, decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import type {
   PermissionPromptRequest,
   PermissionRequestHandler,
-} from '@goodvibes-jev/engine/sdk/platform/permissions';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+} from '@goodvibes-jev/engine/platform/platform/permissions';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
 import { readSandboxExecList, SANDBOX_EGRESS_ALLOWLIST_CONFIG_KEY } from '../input/sandbox-exec-config.ts';
 
@@ -43,7 +43,7 @@ import { readSandboxExecList, SANDBOX_EGRESS_ALLOWLIST_CONFIG_KEY } from '../inp
 export interface SandboxAskAnnotation {
   /** True when the command(s) will run inside the boundary. */
   readonly sandboxed: boolean;
-  /** Named host-access needs to show as the ask's escalations (from the SDK policy). */
+  /** Named host-access needs to show as the ask's escalations (from the platform policy). */
   readonly sandboxEscalations: readonly string[];
 }
 

@@ -2,11 +2,11 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { ConfigManager, CONFIG_SCHEMA, DEFAULT_CONFIG, type ConfigKey, type HostBooleanSetting } from '../sdk/src/platform/config/index.ts';
+import { ConfigManager, CONFIG_SCHEMA, DEFAULT_CONFIG, type ConfigKey, type HostBooleanSetting } from '../platform/src/platform/config/index.ts';
 import {
   applySettingsSyncBundle, applyStagedManagedBundle, exportSettingsSyncBundle,
   defaultStore, getResolvedSettingLookup, getSettingsControlPlaneSnapshot, stageManagedSettingsBundle,
-} from '../sdk/src/platform/runtime/settings.ts';
+} from '../platform/src/platform/runtime/settings.ts';
 
 const KEY = 'behavior.hostPrivacyExample';
 const definition: HostBooleanSetting = { key: KEY, type: 'boolean', default: true, description: 'Restrict this host capability by default.' };

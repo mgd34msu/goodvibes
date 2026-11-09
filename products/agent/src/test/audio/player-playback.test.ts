@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { VoiceAudioChunk } from '@goodvibes-jev/engine/sdk/platform/voice';
+import type { VoiceAudioChunk } from '@goodvibes-jev/engine/platform/platform/voice';
 import { LocalStreamingAudioPlayer } from '../../audio/player.ts';
 import type { LocalStreamingAudioPlayerOptions, StreamingAudioPlayer } from '../../audio/player.ts';
 import { buildActivationChimeWav, playActivationSound } from '../../audio/activation-sound.ts';

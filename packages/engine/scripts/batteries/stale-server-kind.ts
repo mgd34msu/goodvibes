@@ -1,8 +1,8 @@
 /**
  * `errors.stale-server-kind`: whether a window of a consumer-facing error doc
- * or worker test still presents 'server' as an SDK error kind. It replaces six
+ * or worker test still presents 'server' as an engine error kind. It replaces six
  * shape regexes in error-contract-check.ts (`case 'server'`, `kind: 'server'`,
- * 'server' within 240 characters of `SDKErrorKind` or `validKinds`, "typed
+ * 'server' within 240 characters of `EngineErrorKind` or `validKinds`, "typed
  * 'server' kind", "use 'server' for"), which flagged a migration note saying
  * 'server' was replaced and missed any other phrasing of the same advice.
  *
@@ -11,7 +11,7 @@
  * (etc/stale-server-kind-readings.json) offline.
  *
  * State: `{ path, currentKinds, text }`, the file's repo-relative path, the
- * members of the current `SDKErrorKind` union, and one window of the file.
+ * members of the current `EngineErrorKind` union, and one window of the file.
  *
  * Band: low stakes. A wrong yes blocks a commit with a message a person can
  * check; a wrong no lets a stale sentence into a doc, with no runtime effect.
@@ -32,11 +32,11 @@ const at = (path: string, text: string): StaleServerKindState => ({ path, curren
 export const staleServerKind = defineBattery({
   name: 'errors.stale-server-kind',
   version: 2,
-  description: "Whether a doc or test window presents 'server' as an SDK error kind callers should use today.",
+  description: "Whether a doc or test window presents 'server' as an engine error kind callers should use today.",
   accuracyFloor: 0.9,
   items: {
     stale: yesNo(
-      "`currentKinds` lists every error kind the SDK has today; 'server' is not one of them. Does `text` present 'server' as an error kind that callers of the SDK should use, match on or expect today, for example a kind table or list that includes it, a code sample that sets or switches on `kind` 'server' as a live value, or advice to handle or use the 'server' kind? Text that says 'server' was an old kind that was removed or replaced, text that checks it is absent, and text that uses the word server for a remote server, a server process or a server-side component rather than as an error kind are not.",
+      "`currentKinds` lists every error kind the engine has today; 'server' is not one of them. Does `text` present 'server' as an error kind that callers of the engine should use, match on or expect today, for example a kind table or list that includes it, a code sample that sets or switches on `kind` 'server' as a live value, or advice to handle or use the 'server' kind? Text that says 'server' was an old kind that was removed or replaced, text that checks it is absent, and text that uses the word server for a remote server, a server process or a server-side component rather than as an error kind are not.",
       STAKES_BANDS.low.yesNo,
     ),
   },
@@ -53,7 +53,7 @@ export const staleServerKind = defineBattery({
     },
     {
       name: 'advice to use the kind',
-      state: at('docs/web-ui-integration.md', "When the daemon answers with a 5xx status, the SDK raises an error of kind 'server'; show a retry banner for it."),
+      state: at('docs/web-ui-integration.md', "When the daemon answers with a 5xx status, the engine raises an error of kind 'server'; show a retry banner for it."),
       expect: { stale: 'yes' },
     },
     {
@@ -83,7 +83,7 @@ export const staleServerKind = defineBattery({
     },
     {
       name: 'test asserting absence',
-      state: at('test/workers-wrangler/wrangler.test.ts', "// Assert 'kind' is a typed SDKErrorKind, never the removed 'server'.\nexpect(kinds).not.toContain('server');"),
+      state: at('test/workers-wrangler/wrangler.test.ts', "// Assert 'kind' is a typed EngineErrorKind, never the removed 'server'.\nexpect(kinds).not.toContain('server');"),
       expect: { stale: 'no' },
     },
     {

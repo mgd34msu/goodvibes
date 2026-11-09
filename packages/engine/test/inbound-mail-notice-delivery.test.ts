@@ -17,12 +17,12 @@ import { describe, expect, test } from 'bun:test';
 import {
   noticeChannelForSurface,
   renderNoticeForSurface,
-} from '../sdk/src/platform/email/inbound-notice-channels.ts';
+} from '../platform/src/platform/email/inbound-notice-channels.ts';
 import {
   receiptTimestamp,
   renderInboundMailNotice,
-} from '../sdk/src/platform/email/inbound-notice.ts';
-import { DaemonSurfaceDeliveryHelper } from '../sdk/src/platform/daemon/surface-delivery.ts';
+} from '../platform/src/platform/email/inbound-notice.ts';
+import { DaemonSurfaceDeliveryHelper } from '../platform/src/platform/daemon/surface-delivery.ts';
 import { useSecurityReadings } from './helpers/security-readings.ts';
 
 useSecurityReadings();

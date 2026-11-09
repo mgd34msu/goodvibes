@@ -18,7 +18,7 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PersistentStore } from '../../sdk/src/platform/state/persistent-store.js';
+import { PersistentStore } from '../../platform/src/platform/state/persistent-store.js';
 
 export class ControllableStore<T extends Record<string, unknown>> extends PersistentStore<T> {
   /** Applied to the next write only, before it reaches the disk. */

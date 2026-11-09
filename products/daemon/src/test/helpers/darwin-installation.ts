@@ -1,7 +1,7 @@
 /** Inert Darwin-shaped release sources. Actual Mach-O execution/dlopen is not claimed. */
 import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { clientReaderPayloadPaths, nativeReaderCapabilities, sha256, type ClientReaderArtifact } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { clientReaderPayloadPaths, nativeReaderCapabilities, sha256, type ClientReaderArtifact } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { daemonSqliteRuntime, initializeDaemonNativeSqlite, type DaemonSqliteOwner } from '../../cli/native-sqlite-runtime.js';
 import { captureOriginalDarwinDaemonInstallation } from '../../config/native-installation.js';
 export function darwinInstallationFixture(root: string, arch: 'x64' | 'arm64' = 'x64', version = '3.1.2') {

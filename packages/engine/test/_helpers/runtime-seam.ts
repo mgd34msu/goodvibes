@@ -1,19 +1,19 @@
 /**
- * runtime-seam.ts, the SDK runtime surface under the names the terminal
+ * runtime-seam.ts, the platform runtime surface under the names the terminal
  * front-ends reach it by.
  *
  * The two terminal products each keep a `src/runtime/index.ts` barrel that
- * re-exports the SDK's public runtime seams (state, store, ui, observability,
+ * re-exports the platform's public runtime seams (state, store, ui, observability,
  * settings, sandbox) plus flattened aliases over the `bootstrap`, `operations`,
  * `security` and `transport` namespace objects. Their test suites imported
  * subjects through that barrel, so the tests read as `from '@/runtime/index.ts'`
- * even when every symbol involved is SDK-owned.
+ * even when every symbol involved is platform-owned.
  *
  * Those tests now live here. This helper gives them the same names from the
- * SDK's own modules, so what they assert is the SDK implementation and not a
+ * platform's own modules, so what they assert is the platform implementation and not a
  * consumer's re-export of it. Two of the barrel's names were consumer-local
  * re-implementations rather than re-exports, `extractForwardedClientIp` is the
- * one that reached these tests, and it is bound below to the SDK's function in
+ * one that reached these tests, and it is bound below to the platform's function in
  * platform/runtime/network, which is the implementation that actually ships.
  */
 
@@ -22,29 +22,29 @@ import {
   operations,
   security,
   transport,
-} from '@goodvibes-jev/engine/sdk/platform/runtime';
+} from '@goodvibes-jev/engine/platform/platform/runtime';
 import type {
   operations as Operations,
   security as Security,
-} from '@goodvibes-jev/engine/sdk/platform/runtime';
+} from '@goodvibes-jev/engine/platform/platform/runtime';
 // `Playbook` is not re-exported from the `operations` namespace (only the
 // playbook instances are), so there is no public, bare-specifier name for it.
 // Imported directly from source, matching the resolution style the rest of
-// this test suite already uses for SDK-internal types, purely to give the
+// this test suite already uses for platform-internal types, purely to give the
 // seven playbook re-exports below an explicit annotation; without one, `tsc`
 // cannot name their inferred type across the dist/src module-instance split
 // (TS2883).
-import type { Playbook } from '../../sdk/src/platform/runtime/ops/types.ts';
+import type { Playbook } from '../../platform/src/platform/runtime/ops/types.ts';
 
-export * from '@goodvibes-jev/engine/sdk/platform/runtime/state';
-export * from '@goodvibes-jev/engine/sdk/platform/runtime/store';
-export * from '@goodvibes-jev/engine/sdk/platform/runtime/ui';
-export * from '@goodvibes-jev/engine/sdk/platform/runtime/observability';
+export * from '@goodvibes-jev/engine/platform/platform/runtime/state';
+export * from '@goodvibes-jev/engine/platform/platform/runtime/store';
+export * from '@goodvibes-jev/engine/platform/platform/runtime/ui';
+export * from '@goodvibes-jev/engine/platform/platform/runtime/observability';
 
 export type {
   TaskEvent,
   TurnEvent,
-} from '@goodvibes-jev/engine/sdk/events';
+} from '@goodvibes-jev/engine/platform/events';
 
 // Bootstrap seam.
 export const loadRuntimeSystemPrompt = bootstrap.loadRuntimeSystemPrompt;

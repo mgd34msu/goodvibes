@@ -16,7 +16,7 @@
  * can be one without touching the handler plumbing again.
  */
 
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { SurfaceLayer } from './renderer/surface-kit.js';
 
 export type SurfaceModalCloseReason = 'escape' | 'done' | 'cleared';

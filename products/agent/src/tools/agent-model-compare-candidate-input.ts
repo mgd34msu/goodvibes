@@ -1,5 +1,5 @@
-import { SOURCE_SCREENING_LIMITS, type ProtectedSource, type SourceScreeningReceipt } from '@goodvibes-jev/engine/sdk/platform/security';
-import { ToolInputProjectionError, type ToolInputProjectionRequest, type ToolInputProjector, type ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { SOURCE_SCREENING_LIMITS, type ProtectedSource, type SourceScreeningReceipt } from '@goodvibes-jev/engine/platform/platform/security';
+import { ToolInputProjectionError, type ToolInputProjectionRequest, type ToolInputProjector, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 import { captureModelReadingInput } from './agent-harness-model-reading-source.ts';
 import { createComparisonOperation } from './agent-model-compare-operation.ts';

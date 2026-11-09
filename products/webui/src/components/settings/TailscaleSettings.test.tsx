@@ -36,7 +36,7 @@ mock.module('../../lib/goodvibes', () => ({
   // MemoryView.test.tsx documents).
   getCurrentAuth: () => Promise.resolve({}),
   invokeMethod: () => Promise.resolve({}),
-  sdk: {
+  client: {
     operator: {
       tailscale: {
         get: () => Promise.resolve(getData),
@@ -167,7 +167,7 @@ describe('TailscaleSettings: usable environment', () => {
     await waitFor(() => Boolean(el.querySelector('.gv-confirm')));
     click(el.querySelector('.gv-confirm__cancel'));
     // The sheet closes as ask() resolves false. The handler resumes after that
-    // await on a microtask, and a serve mutation would reach the SDK on further
+    // await on a microtask, and a serve mutation would reach the platform on further
     // microtasks, so one real event-loop turn after the close lets all of it run.
     await waitFor(() => !el.querySelector('.gv-confirm'));
     await new Promise<void>((resolve) => setImmediate(resolve));

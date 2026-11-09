@@ -29,7 +29,7 @@ export class ScheduleReadingLifetime {
     return active !== undefined;
   }
 
-  /** Compose with the existing key action without changing its recovery/SDK abort semantics. */
+  /** Compose with the existing key action without changing its recovery/platform abort semantics. */
   withCancellation(cancelTurn: () => boolean): () => boolean {
     return () => { const cancelled = this.cancel(); return cancelTurn() || cancelled; };
   }

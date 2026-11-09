@@ -15,7 +15,7 @@
  * Every failure exits non-zero with a plain-language message naming the fix.
  */
 import { createInterface } from 'node:readline/promises';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type {
   RotateKeyResult,
   CreateGroupResult,
@@ -25,7 +25,7 @@ import type {
   JoinGroupResult,
   JoinKeyResult,
   NodesResult,
-} from '@goodvibes-jev/engine/sdk/platform/cluster';
+} from '@goodvibes-jev/engine/platform/platform/cluster';
 import {
   callDaemonVerb,
   resolveRemoteDaemonTarget,
@@ -34,7 +34,7 @@ import {
 } from './cluster-remote-daemon-target.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { clusterJoinGroup } from './batteries/cluster-join-group.js';
-import { decisionOrClassic } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { decisionOrClassic } from '@goodvibes-jev/engine/platform/platform/runtime';
 import {
   describeAge,
   renderCreated,

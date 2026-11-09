@@ -1,5 +1,5 @@
-import { isSecretRefInput, isDaemonOwnedConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
+import { isSecretRefInput, isDaemonOwnedConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import type { SecretScope, SecretStorageMedium } from './secrets.ts';
 
 export const SECRET_CONFIG_KEYS = new Set<ConfigKey>([
@@ -42,7 +42,7 @@ export const SECRET_CONFIG_KEYS = new Set<ConfigKey>([
   'surfaces.bluebubbles.password',
   'surfaces.mattermost.botToken',
   'surfaces.matrix.accessToken',
-  // Local synthetic sub-keys, one level under the SDK's real `payments`
+  // Local synthetic sub-keys, one level under the platform's real `payments`
   // section (not yet a scalar CONFIG_SCHEMA entry, same situation as
   // tts.speed, behavior.notifyAfterSeconds, etc. in settings-modal-data.ts),
   // hence the cast. See input/payments-config.ts for why these are named flat
@@ -131,7 +131,7 @@ export function buildSecretBackedConfigUpdate(configKey: ConfigKey, rawValue: st
  * A daemon-owned config key (`surfaces.*`, `payments.*`, `controlPlane.*`, ...)
  * names a credential the DAEMON executes with, not this interactive client, so
  * its secret material belongs in the daemon-scoped tier the daemon actually
- * reads, the same rule the SDK's config-ownership.ts already applies to the
+ * reads, the same rule the platform's config-ownership.ts already applies to the
  * `goodvibes://` reference that points at it.
  *
  * Defaulting these to 'user' (the historical behavior here) split the pair: the

@@ -1,5 +1,5 @@
 /**
- * Live process registry (packages/sdk/src/platform/runtime/fleet/).
+ * Live process registry (packages/platform/src/platform/runtime/fleet/).
  *
  * Exercises process-registry behavior with stub managers:
  *  - Per-kind adapter mapping (agent/contract/group/unit/workflow/trigger/schedule/watcher/background-process).
@@ -13,25 +13,25 @@
  *  - Empty fleet → empty snapshot, no throw.
  */
 import { describe, expect, test } from 'bun:test';
-import { createProcessRegistry } from '../sdk/src/platform/runtime/fleet/index.js';
+import { createProcessRegistry } from '../platform/src/platform/runtime/fleet/index.js';
 import type {
   ProcessNode,
   ProcessRegistry,
-} from '../sdk/src/platform/runtime/fleet/index.js';
-import type { ProcessRegistryDeps, RegistryTimers } from '../sdk/src/platform/runtime/fleet/registry.js';
-import type { AgentRecord } from '../sdk/src/platform/tools/agent/manager.js';
-import type { Contract, ContractView } from '../sdk/src/platform/contract/types.js';
+} from '../platform/src/platform/runtime/fleet/index.js';
+import type { ProcessRegistryDeps, RegistryTimers } from '../platform/src/platform/runtime/fleet/registry.js';
+import type { AgentRecord } from '../platform/src/platform/tools/agent/manager.js';
+import type { Contract, ContractView } from '../platform/src/platform/contract/types.js';
 import { makeContract, makeGroup, makeUnit } from './contract/fixtures.js';
-import type { BackgroundProcess } from '../sdk/src/platform/tools/shared/process-manager.js';
-import type { WatcherRecord } from '../sdk/src/platform/runtime/store/domains/watchers.js';
+import type { BackgroundProcess } from '../platform/src/platform/tools/shared/process-manager.js';
+import type { WatcherRecord } from '../platform/src/platform/runtime/store/domains/watchers.js';
 import type {
   ScheduleEntry,
   TriggerDefinition,
   WorkflowInstance,
-} from '../sdk/src/platform/tools/workflow/index.js';
-import type { SharedApprovalRecord } from '../sdk/src/platform/control-plane/approval-broker.js';
-import type { SharedSessionRecord } from '../sdk/src/platform/control-plane/session-types.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
+} from '../platform/src/platform/tools/workflow/index.js';
+import type { SharedApprovalRecord } from '../platform/src/platform/control-plane/approval-broker.js';
+import type { SharedSessionRecord } from '../platform/src/platform/control-plane/session-types.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
 import {
   emitAgentAwaitingMessage,
   emitAgentAwaitingTool,
@@ -39,9 +39,9 @@ import {
   emitAgentFailed,
   emitAgentProgress,
   emitAgentStreamDelta,
-} from '../sdk/src/platform/runtime/emitters/agents.js';
-import { emitStreamRetry } from '../sdk/src/platform/runtime/emitters/turn.js';
-import type { EmitterContext } from '../sdk/src/platform/runtime/emitters/index.js';
+} from '../platform/src/platform/runtime/emitters/agents.js';
+import { emitStreamRetry } from '../platform/src/platform/runtime/emitters/turn.js';
+import type { EmitterContext } from '../platform/src/platform/runtime/emitters/index.js';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 

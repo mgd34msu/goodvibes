@@ -4,11 +4,11 @@
  * Lists profiles from ProfileManager.list(), tracks selected index,
  * and handles load/delete/save actions.
  */
-import type { ProfileInfo, ProfileData, ProfileManager } from '@goodvibes-jev/engine/sdk/platform/profiles';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { ProfileInfo, ProfileData, ProfileManager } from '@goodvibes-jev/engine/platform/platform/profiles';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 /** Known display setting keys (subset of ConfigKey that maps to display.*). */
 const DISPLAY_KEYS: ConfigKey[] = [
   'display.stream',

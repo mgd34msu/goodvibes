@@ -2,8 +2,8 @@ import { afterEach, expect, test } from 'bun:test';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { captureUpdateFileIo, realUpdateFileIo } from '../sdk/src/platform/runtime/self-update.ts';
-import { retainDaemonNativeFiles, createDaemonNativeRenameGuard } from '../sdk/src/platform/runtime/daemon-native-cohort.ts';
+import { captureUpdateFileIo, realUpdateFileIo } from '../platform/src/platform/runtime/self-update.ts';
+import { retainDaemonNativeFiles, createDaemonNativeRenameGuard } from '../platform/src/platform/runtime/daemon-native-cohort.ts';
 import { nativeMemoryIo } from './_helpers/daemon-native-cohort.ts';
 
 const roots: string[] = [];

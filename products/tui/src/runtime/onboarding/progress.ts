@@ -1,6 +1,6 @@
 import { existsSync, unlinkSync } from 'node:fs';
-import { atomicWriteFileSync } from '@goodvibes-jev/engine/sdk/platform/config';
-import { readVersioned } from '@goodvibes-jev/engine/sdk/platform/config';
+import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/config';
+import { readVersioned } from '@goodvibes-jev/engine/platform/platform/config';
 
 import type {
   OnboardingMode,

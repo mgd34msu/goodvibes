@@ -1,6 +1,6 @@
 import type { LegacyImportOperatorSession } from './legacy-work-ledger-import-operator.js';
 import type { LegacyImportEntry } from './legacy-work-ledger-import-journal.js';
-import { projectLegacyImportWorks } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger';
+import { projectLegacyImportWorks } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 interface Context { print(text: string): void }
 interface Registry<T extends Context> { register(command: { name: string; description: string; usage: string; argsHint: string; handler(args: string[], context: T): Promise<void> }): void }
 const quote = (value: string): string => JSON.stringify(value).replace(/[\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, char => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`);

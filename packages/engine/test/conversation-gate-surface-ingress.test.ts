@@ -17,10 +17,10 @@ useConversationReadings();
  * - mode 'off': previous behavior restored
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { DaemonSurfaceActionHelper } from '../sdk/src/platform/daemon/surface-actions.ts';
-import { handleNtfySurfacePayload } from '../sdk/src/platform/adapters/ntfy/index.ts';
-import { WorkProposalStore } from '../sdk/src/platform/agents/work-proposal-store.ts';
-import { ntfyInboundDedup } from '../sdk/src/platform/adapters/inbound-dedup.ts';
+import { DaemonSurfaceActionHelper } from '../platform/src/platform/daemon/surface-actions.ts';
+import { handleNtfySurfacePayload } from '../platform/src/platform/adapters/ntfy/index.ts';
+import { WorkProposalStore } from '../platform/src/platform/agents/work-proposal-store.ts';
+import { ntfyInboundDedup } from '../platform/src/platform/adapters/inbound-dedup.ts';
 import { trackDisposables } from './_helpers/disposables.ts';
 
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';

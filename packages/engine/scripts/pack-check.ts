@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import {
   cleanupStage,
   collectTarballs,
-  createSdkTempDir,
+  createPlatformTempDir,
   inspectPackedManifest,
   listPackedFiles,
   packStage,
@@ -67,8 +67,8 @@ function assertBundledBashLspPatchManifest(tarball: string): void {
   }
 }
 
-// The sdk ships inside the engine package, so the engine carries its mitigations.
-function isSdkPackage(manifest: PackageManifestLike): boolean {
+// The engine ships inside the engine package, so the engine carries its mitigations.
+function isEnginePackage(manifest: PackageManifestLike): boolean {
   return manifest.name === '@goodvibes-jev/engine';
 }
 
@@ -130,7 +130,7 @@ function assertFacadeImportsAreDeclared(
   );
   // One extraction per tarball, then plain reads: the engine ships thousands
   // of dist files, and a tar process per file made this scan take minutes.
-  const extracted = createSdkTempDir('goodvibes-sdk-pack-scan-');
+  const extracted = createPlatformTempDir('goodvibes-pack-scan-');
   try {
     execFileSync('tar', ['-xzf', tarball, '-C', extracted], { stdio: ['ignore', 'ignore', 'inherit'] });
     scanDistFiles(tarball, extracted, distFiles, manifest, packageSpecifiers);
@@ -164,12 +164,12 @@ function referencesPackageSpecifier(content: string, specifier: string): boolean
 }
 
 const { tempRoot, publicStages } = await stagePackages();
-const packDestination = createSdkTempDir('goodvibes-sdk-pack-');
+const packDestination = createPlatformTempDir('goodvibes-pack-');
 
 try {
   const packageSpecifiers = publicStages
     .map((stage) => stage.manifest.name)
-    .filter((name): name is string => typeof name === 'string' && !name.endsWith('/goodvibes-sdk'));
+    .filter((name): name is string => typeof name === 'string' && !name.endsWith('/goodvibes'));
   const packResults = publicStages.map((stage) => packStage(stage.stageDir, packDestination));
   const tarballs = collectTarballs(packResults, packDestination);
   tarballs.forEach((tarball) => {
@@ -178,7 +178,7 @@ try {
     const files = listPackedFiles(resolve(tarball));
     assertFlatPackageLayout(tarball, files);
     assertExportTargetsExist(tarball, files, manifest);
-    if (isSdkPackage(manifest)) {
+    if (isEnginePackage(manifest)) {
       assertBundledBashLspMitigationManifest(manifest, tarball);
       assertSecurityMitigationAssets(tarball, files);
       assertBundledBashLspPatchManifest(resolve(tarball));

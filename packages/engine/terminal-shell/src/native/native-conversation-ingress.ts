@@ -1,4 +1,4 @@
-import type { Orchestrator, OrchestratorUserInputOptions } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { Orchestrator, OrchestratorUserInputOptions } from '@goodvibes-jev/engine/platform/platform/core';
 import type { NativeConversationInput } from './native-conversation-input.js';
 import {
   nativeConversationIntakeLines,

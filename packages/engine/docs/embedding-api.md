@@ -1,6 +1,6 @@
-# SDK embedding API 1.0
+# platform embedding API 1.0
 
-`@goodvibes-jev/engine/sdk/embed` is the supported, stability-marked surface for
+`@goodvibes-jev/engine/platform/embed` is the supported, stability-marked surface for
 embedding a GoodVibes session in another application. It is a curation of
 existing runtime machinery. It adds no new engine. It names the minimal stable
 contract: **create a session against a workspace, send input, receive typed
@@ -9,7 +9,7 @@ events, inject a permission callback, and shut down.**
 ## Quick start
 
 ```ts
-import { createEmbeddedSession } from '@goodvibes-jev/engine/sdk/embed';
+import { createEmbeddedSession } from '@goodvibes-jev/engine/platform/embed';
 
 const session = await createEmbeddedSession({
   workspace: process.cwd(),
@@ -70,7 +70,7 @@ carries `type`, `payload` (the typed event), and correlation ids
 ## Stability guarantees
 
 The surface is **frozen at 1.0** and pinned by an api-extractor report
-(`etc/goodvibes-sdk-embed.api.md`) so an accidental breaking change fails the
+(`etc/goodvibes-platform-embed.api.md`) so an accidental breaking change fails the
 `api:check` gate. Frozen:
 
 - `createEmbeddedSession` and the `EmbeddedSession` shape;

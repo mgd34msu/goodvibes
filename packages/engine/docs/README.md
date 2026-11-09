@@ -1,7 +1,7 @@
 # GoodVibes engine documentation
 
 These documents describe `packages/engine` in the GoodVibes Jev monorepo. The
-SDK facade and its supporting libraries are subpaths of the engine workspace
+platform facade and its supporting libraries are subpaths of the engine workspace
 package. Public imports use explicit package entrypoints. Start with the
 [repository README](../../../README.md) and [suite installation guide](../../../docs/installation.md)
 for application setup. [`CHANGELOG.md`](../CHANGELOG.md) preserves engine release
@@ -38,7 +38,7 @@ history, including upstream releases.
 ## Daemon and runtime
 
 - [Daemon embedding](./daemon-embedding.md)
-- [SDK embedding API](./embedding-api.md): the stability-marked `/embed` surface for hosting the runtime in another app.
+- [platform embedding API](./embedding-api.md): the stability-marked `/embed` surface for hosting the runtime in another app.
 - [Provider and model API](./provider-model-api.md)
 - [Provider architecture](./providers.md)
 - [Runtime orchestration](./runtime-orchestration.md)
@@ -89,7 +89,7 @@ history, including upstream releases.
 - [Transport architecture](./transports.md)
 - [Error architecture](./errors.md): internal error model and category sources.
 - [Error handling](./error-handling.md): consumer patterns for catching structured errors.
-- [Error kinds reference](./error-kinds.md): public `SDKErrorKind` reference table.
+- [Error kinds reference](./error-kinds.md): public `EngineErrorKind` reference table.
 - [Troubleshooting](./troubleshooting.md)
 - Testing and validation: commands and CI gates.
 - Testing architecture: suite structure and intent.

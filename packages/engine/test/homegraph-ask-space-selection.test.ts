@@ -13,12 +13,12 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { ArtifactStore } from '../sdk/src/platform/artifacts/index.js';
+import { ArtifactStore } from '../platform/src/platform/artifacts/index.js';
 import {
   HomeGraphService,
   homeAssistantKnowledgeSpaceId,
-} from '../sdk/src/platform/knowledge/index.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
+} from '../platform/src/platform/knowledge/index.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { trackDisposables } from './_helpers/disposables.ts';
 
 /**

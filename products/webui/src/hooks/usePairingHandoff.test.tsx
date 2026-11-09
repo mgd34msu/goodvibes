@@ -22,7 +22,7 @@ mock.module('../lib/goodvibes', () => ({
       ? Promise.reject(Object.assign(new Error('rejected'), { status: 401 }))
       : Promise.resolve({ authenticated: true });
   },
-  sdk: {
+  client: {
     operator: {
       pairing: {
         posture: {

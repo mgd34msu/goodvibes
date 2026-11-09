@@ -5,9 +5,9 @@ import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_REBUILD_COMMAND } from './workspac
  * detection.
  *
  * Version comparison and the release-tag lookup are re-exported from the
- * SDK's canonical update policy module (platform/runtime/self-update), one
+ * platform's canonical update policy module (platform/runtime/self-update), one
  * mechanism everywhere, the same module the TUI and the daemon's hourly loop
- * consume. Install-kind detection comes from the SDK too
+ * consume. Install-kind detection comes from the platform too
  * (platform/runtime/install-kind): the same three-way answer, compiled
  * binary, package-managed vendored binary, or a source run, everywhere. What
  * stays here is this product's own answer to "then what should I run
@@ -23,12 +23,12 @@ export {
   parseReleaseTagFromLocation,
   resolveLatestReleaseTag,
   type UpdateFetchLike,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+} from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 
-export type { InstallKind } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-export { detectInstallKind } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+export type { InstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+export { detectInstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 
-import type { InstallKind } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import type { InstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 
 /**
  * The exact command to tell the user to run instead of an in-place swap.

@@ -17,9 +17,9 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { FakeClusterClock, MemoryClusterBus, inboxSurface, surfaceIdFor } from '@goodvibes-jev/engine/sdk/platform/cluster';
+import { FakeClusterClock, MemoryClusterBus, inboxSurface, surfaceIdFor } from '@goodvibes-jev/engine/platform/platform/cluster';
 import { createClusterServices, startClusterServices } from '../../runtime/cluster-group-composition.js';
-import type { ConfigManager, SecretsManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager, SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ShellPathService } from '../../runtime/index.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 

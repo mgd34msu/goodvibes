@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { ControlPlaneGateway } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import { ControlPlaneGateway } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { RuntimeEventBus } from './_helpers/runtime-seam.ts';
 
 // Drain queued microtasks so bus.emit() listeners (async dispatch) run before assertions.

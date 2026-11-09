@@ -28,12 +28,12 @@ import {
   listWatchableConfigPaths,
   toConfigEventValue,
   type ConfigChangeSource,
-} from '../sdk/src/platform/runtime/config/index.ts';
-import { clearConfigEventKeyReadings } from '../sdk/src/platform/runtime/config/emit-bridge.ts';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
-import { RUNTIME_EVENT_DOMAINS } from '../sdk/src/platform/runtime/events/index.ts';
-import type { ConfigEvent } from '../sdk/src/platform/runtime/events/index.ts';
-import { builtinGatewayEventDescriptors } from '../sdk/src/platform/control-plane/method-catalog-events.ts';
+} from '../platform/src/platform/runtime/config/index.ts';
+import { clearConfigEventKeyReadings } from '../platform/src/platform/runtime/config/emit-bridge.ts';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
+import { RUNTIME_EVENT_DOMAINS } from '../platform/src/platform/runtime/events/index.ts';
+import type { ConfigEvent } from '../platform/src/platform/runtime/events/index.ts';
+import { builtinGatewayEventDescriptors } from '../platform/src/platform/control-plane/method-catalog-events.ts';
 import { decisionPort } from './helpers/decision-port.ts';
 
 /** A ConfigManager stand-in with the one seam the bridge uses. */

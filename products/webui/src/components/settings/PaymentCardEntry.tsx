@@ -9,7 +9,7 @@
  * The list itself lives in payments-cards.ts as CARD_ENTRY_CONDITIONS.
  *
  *  1. POSTED OVER THE AUTHENTICATED DAEMON CHANNEL, submit() calls
- *     sdk.operator.payments.cards.create, the same scoped, token-carrying
+ *     platform.operator.payments.cards.create, the same scoped, token-carrying
  *     transport every other secret takes. The daemon puts the values in its own
  *     secret store, encrypted at rest, at DAEMON scope: it is the process that
  *     charges the card with every surface closed, so a client-scoped write
@@ -61,8 +61,8 @@
  */
 import { useCallback, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { describeCardEntryRefusal } from '@goodvibes-jev/engine/sdk/platform/payments/browser';
-import { sdk } from '../../lib/goodvibes';
+import { describeCardEntryRefusal } from '@goodvibes-jev/engine/platform/platform/payments/browser';
+import { client as platformClient } from '../../lib/goodvibes';
 import { formatError } from '../../lib/errors';
 import { Button } from '../ui/Button';
 import { Chip } from '../ui/Chip';
@@ -105,7 +105,7 @@ export function PaymentCardEntry({ currency = 'USD', surface = WEBUI_CARD_ENTRY_
   // listing them either.
   const cards = useQuery({
     queryKey: ['payments', 'cards'],
-    queryFn: () => sdk.operator.payments.cards.list(),
+    queryFn: () => platformClient.operator.payments.cards.list(),
     enabled: offered,
     retry: false,
   });
@@ -132,7 +132,7 @@ export function PaymentCardEntry({ currency = 'USD', surface = WEBUI_CARD_ENTRY_
 
     setSaving(true);
     try {
-      await sdk.operator.payments.cards.create(input);
+      await platformClient.operator.payments.cards.create(input);
       // Condition 6, and the only place it can be honoured: the whole draft is
       // replaced with a blank one the instant the write succeeds. `input` is a
       // local that goes out of scope with this call; nothing retains it.

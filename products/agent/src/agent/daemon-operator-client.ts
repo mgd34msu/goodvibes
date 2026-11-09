@@ -18,7 +18,7 @@ import { readConnectedHostOperatorToken } from '../runtime/connected-host-auth.t
  */
 
 import { connectedHostBaseUrl } from '../config/connected-host-dial.ts';
-import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
 import { isDeepStrictEqual } from 'node:util';
 import {
   READ_ONLY_HTTP_METHODS,

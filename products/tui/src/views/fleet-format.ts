@@ -7,15 +7,15 @@
 // renderItem/renderDetail call, with no `this` dependency.
 // ---------------------------------------------------------------------------
 
-import type { ProcessCostState, ProcessNode, ProcessCheckSummary, ProcessUsage } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { ProcessCostState, ProcessNode, ProcessCheckSummary, ProcessUsage } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { formatAgentCost } from './agent-inspector-shared.ts';
 import { buildViewLine, DEFAULT_VIEW_PALETTE, type ColumnSpec, type ViewPalette } from './polish.ts';
 import { fleetAttentionText, fleetNodeAttention, fleetStallMarker, fleetUsageTokens, hasFleetCost, type FleetStateTone } from './fleet-read-model.ts';
 import { fleetStateDisplay } from './fleet-stop.ts';
 import { formatElapsed } from '../utils/format-elapsed.ts';
 import { truncateDisplay } from '../utils/terminal-width.ts';
-import { contractTree, type ContractView } from '@goodvibes-jev/engine/sdk/platform/contract';
+import { contractTree, type ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
 import { cellText } from '../renderer/lane-graph/bead.ts';
 import { wrapText } from '../utils/terminal-width.ts';
 import { buildAlignedRow } from './polish.ts';
@@ -98,7 +98,7 @@ export function renderFleetRowLine(
   const disp = fleetStateDisplay(node.state, stopping, blocked);
   const color = toneColor(disp.tone, C);
   // Best-of-N grouping: badge a sibling attempt so the N candidates read as one
-  // group and a held (pick-ready) candidate is visible (node.attemptGroup, SDK).
+  // group and a held (pick-ready) candidate is visible (node.attemptGroup, platform).
   const attemptBadge = node.attemptGroup
     ? ` [attempt ${node.attemptGroup.index + 1}/${node.attemptGroup.total}${node.attemptGroup.held ? ', held' : ''}]`
     : '';

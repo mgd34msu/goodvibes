@@ -15,8 +15,8 @@ import { createVoiceCapturePorts, wireTerminalWakeCapture } from '@goodvibes-jev
  * out of the shell-UI layers the architecture check bars src/audio from importing.
  */
 
-import '@goodvibes-jev/engine/sdk/platform/utils';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import '@goodvibes-jev/engine/platform/platform/utils';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { VoiceCaptureIndicatorState } from '../core/voice-capture-status.ts';
 import { createTuiCaptureOpener } from './capture.ts';
 import { playActivationSound } from './activation-sound.ts';
@@ -25,7 +25,7 @@ import type { StreamingAudioPlayer } from './player.ts';
 import { createVoiceSttGateway } from '../core/voice-stt-gateway.ts';
 import { wireVoiceInputRuntime } from './voice-input-session.ts';
 import { startWakeRuntime, wireWakeRuntime } from './wake-runtime.ts';
-import { resolveWakeRuntimeSettings } from '@goodvibes-jev/engine/sdk/platform/voice/wake/runtime';
+import { resolveWakeRuntimeSettings } from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
 
 export interface VoiceCaptureWiringDeps {
   readonly configManager: ConfigManager;
@@ -34,7 +34,7 @@ export interface VoiceCaptureWiringDeps {
   /** A directory this surface owns for the extracted onnxruntime assets. */
   readonly assetDirectory: string;
   readonly homeDirectory: string | (() => string);
-  /** Names retained clips so the SDK's sweeper can reap them when the session ends. */
+  /** Names retained clips so the platform's sweeper can reap them when the session ends. */
   readonly sessionId: string;
   /** Writes recognised text into the composer draft. */
   readonly writeDraft: (text: string) => void;

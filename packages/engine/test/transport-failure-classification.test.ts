@@ -26,7 +26,7 @@
 import { describe, it, expect } from 'bun:test';
 import { HttpStatusError } from '../errors/src/index.js';
 import { createNetworkTransportError } from '../transport-http/src/http-core.js';
-import { isNetworkTransportError } from '../sdk/src/platform/types/errors.js';
+import { isNetworkTransportError } from '../platform/src/platform/types/errors.js';
 import { useFailureReadings } from './_helpers/failure-readings.ts';
 
 const readings = useFailureReadings([

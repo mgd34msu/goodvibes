@@ -3,7 +3,7 @@
  * plugin-bundle.ts, capability-bundle CLI (init / validate).
  *
  * Backed entirely by the exported library functions in
- * sdk/src/platform/runtime/ecosystem/*, so the CLI is a thin argv
+ * engine/src/platform/runtime/ecosystem/*, so the CLI is a thin argv
  * front-end and every behavior it exposes is also callable programmatically.
  *
  * Usage:
@@ -18,8 +18,8 @@ import {
   validateCapabilityBundleManifest,
   summarizeBundleCapabilities,
   type CapabilityBundleManifest,
-} from '../sdk/src/platform/runtime/ecosystem/bundle-manifest.ts';
-import { parseMarketplaceIndex } from '../sdk/src/platform/runtime/ecosystem/marketplace-index.ts';
+} from '../platform/src/platform/runtime/ecosystem/bundle-manifest.ts';
+import { parseMarketplaceIndex } from '../platform/src/platform/runtime/ecosystem/marketplace-index.ts';
 
 function flag(args: string[], name: string): string | undefined {
   const eq = args.find((a) => a.startsWith(`--${name}=`));

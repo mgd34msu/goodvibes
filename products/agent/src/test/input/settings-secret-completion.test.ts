@@ -1,9 +1,9 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { describe, expect, test, spyOn } from 'bun:test';
-import { ConfigManager, SecretsManager, type ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager, SecretsManager, type ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { setSecretBackedSettingValue } from '../../input/settings-modal-secrets.ts';
 import { persistSecretBackedConfigValue, buildGoodVibesSecretKey, buildGoodVibesSecretRef } from '../../config/secret-config.ts';
 

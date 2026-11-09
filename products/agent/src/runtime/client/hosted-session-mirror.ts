@@ -22,7 +22,7 @@
  * conversation is finished and belongs in the store) and reconnect (this
  * process died mid-turn and is now catching up on what happened without it).
  */
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 /** The daemon's history row shape (platform/hosted-sessions HostedSessionHistoryMessage). */
 export interface HostedHistoryMessage {
@@ -52,7 +52,7 @@ export interface HostedSessionMirrorDeps {
   readonly clientId: string;
   /**
    * Writes the conversation to the agent's session store AND moves
-   * last-session.json onto it, the SDK's `persistConversation`.
+   * last-session.json onto it, the platform's `persistConversation`.
    */
   readonly persist: (
     sessionId: string,

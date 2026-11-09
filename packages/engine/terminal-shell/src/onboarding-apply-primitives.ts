@@ -3,7 +3,7 @@ import {
   isMalformedGoodVibesSecretReferenceValue,
   type LiteralSecretsManager,
   type SecretScope,
-} from '@goodvibes-jev/engine/sdk/platform/config';
+} from '@goodvibes-jev/engine/platform/platform/config';
 import type { createOnboardingStateStorage } from './onboarding-state.js';
 import type {
   OnboardingAcknowledgementTarget,

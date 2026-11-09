@@ -15,12 +15,12 @@ import {
   setManagedSettingLock,
   type SettingsSyncBundle,
 } from '@/runtime/index.ts';
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { type ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
-import { CONFIG_KEYS } from '@goodvibes-jev/engine/sdk/platform/config';
+import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
+import { type ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import { CONFIG_KEYS } from '@goodvibes-jev/engine/platform/platform/config';
 import type { CommandRegistry } from '../command-registry.ts';
 import { requireShellPaths } from './runtime-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 export function registerSettingsSyncRuntimeCommands(registry: CommandRegistry): void {
   registry.register({

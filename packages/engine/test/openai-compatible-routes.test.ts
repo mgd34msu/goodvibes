@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { dispatchOpenAICompatibleRoutes } from '../sdk/src/platform/daemon/http/openai-compatible-routes.js';
-import type { LLMProvider } from '../sdk/src/platform/providers/interface.js';
-import type { ProviderRegistry } from '../sdk/src/platform/providers/registry.js';
-import type { ModelDefinition } from '../sdk/src/platform/providers/registry-types.js';
+import { dispatchOpenAICompatibleRoutes } from '../platform/src/platform/daemon/http/openai-compatible-routes.js';
+import type { LLMProvider } from '../platform/src/platform/providers/interface.js';
+import type { ProviderRegistry } from '../platform/src/platform/providers/registry.js';
+import type { ModelDefinition } from '../platform/src/platform/providers/registry-types.js';
 
 function makeModel(provider: string, id: string): ModelDefinition {
   return {

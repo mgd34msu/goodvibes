@@ -1,13 +1,13 @@
 import type { Socket } from 'node:net';
-import { nodeEmailTransport } from '@goodvibes-jev/engine/sdk/platform/email/node';
+import { nodeEmailTransport } from '@goodvibes-jev/engine/platform/platform/email/node';
 import { SnapshotSocket } from '../helpers/email-snapshot-socket.js';
 /** Real owner/source constructors; no polling, judgment or provider mutation is started by activation. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
-import { ConfigManager, createDaemonCredentialStore } from '@goodvibes-jev/engine/sdk/platform/config';
-import { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { createSlackInboxOwner, createEmailInboxOwner, createOwnedInboxSource, type OwnedInboxTagging, type OwnedInboxSource } from '@goodvibes-jev/engine/sdk/platform/intake';
-import type { ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/sdk/platform/security';
-import { EmailService } from '@goodvibes-jev/engine/sdk/platform/email';
+import { ConfigManager, createDaemonCredentialStore } from '@goodvibes-jev/engine/platform/platform/config';
+import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { createSlackInboxOwner, createEmailInboxOwner, createOwnedInboxSource, type OwnedInboxTagging, type OwnedInboxSource } from '@goodvibes-jev/engine/platform/platform/intake';
+import type { ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/platform/platform/security';
+import { EmailService } from '@goodvibes-jev/engine/platform/platform/email';
 import { SecretsManager } from '../../config/secrets.js';
 import { composeMailDeps } from '../../runtime/mail-composition.js';
 import { createSlackDaemonInboxSourceFactory } from '../../runtime/slack-inbox-composition.js';

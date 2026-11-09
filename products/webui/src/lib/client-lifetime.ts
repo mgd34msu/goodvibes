@@ -1,4 +1,4 @@
-import { createBrowserTokenStore } from '@goodvibes-jev/engine/sdk/auth';
+import { createBrowserTokenStore } from '@goodvibes-jev/engine/platform/auth';
 
 export const WEBUI_TOKEN_STORE_KEY = 'goodvibes.webui.token';
 export const RELAY_PAIRING_STORAGE_KEY = 'goodvibes.webui.relayPairing';
@@ -15,7 +15,7 @@ const identity = (): readonly (string | null)[] | undefined => {
   } catch { return undefined; }
 };
 let observed = identity();
-// The SDK stores optional expiresAt as Unix milliseconds beside the token.
+// The platform stores optional expiresAt as Unix milliseconds beside the token.
 // Absence is supported for pasted tokens; malformed or elapsed expiry cannot
 // support a semantic action. This does not assert that a token is authorized.
 function canObserveCurrentIdentity(): boolean {
@@ -75,7 +75,7 @@ export function subscribeClientLifetime(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-// Observe the storage seam itself: SDK login, setToken, clearToken and expiring
+// Observe the storage seam itself: platform login, setToken, clearToken and expiring
 // entries all pass here, including A → B → A before a pending request resumes.
 export const tokenStore = createBrowserTokenStore({ key: WEBUI_TOKEN_STORE_KEY, storage: {
   getItem: (key) => globalThis.localStorage.getItem(key),

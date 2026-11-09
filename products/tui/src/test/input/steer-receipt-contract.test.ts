@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
-import { createProcessRegistry, STEER_TTL_MS, type ProcessRegistryDeps } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
-import { RuntimeEventBus } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
-import { emitCommunicationConsumed } from '@goodvibes-jev/engine/sdk/platform/runtime/emitters';
+import { createProcessRegistry, STEER_TTL_MS, type ProcessRegistryDeps } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+import { RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { emitCommunicationConsumed } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
 import { AgentsModal } from '../../input/agents-modal.ts';
 import { SurfaceModalHost } from '../../input/surface-modal-host.ts';
 import { createFleetReadModel } from '../../views/fleet-read-model.ts';

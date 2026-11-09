@@ -4,7 +4,7 @@ import * as asyncFs from 'node:fs/promises';
 import * as syncFs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { RetainedFileBytes } from '../sdk/src/platform/utils/retained-file-bytes.js';
+import { RetainedFileBytes } from '../platform/src/platform/utils/retained-file-bytes.js';
 
 const roots: string[] = [];
 const bundles = new Set<RetainedFileBytes>();

@@ -1,5 +1,5 @@
 /**
- * Conversation-snapshot bridge (SDK side).
+ * Conversation-snapshot bridge (platform side).
  *
  * The audit's central finding: a fleet agent's real ConversationManager (full
  * message content) is a local variable in orchestrator-runner.ts's
@@ -20,9 +20,9 @@ import { describe, expect, test } from 'bun:test';
 import {
   AgentManager,
   DEFAULT_CONVERSATION_SNAPSHOT_RETENTION,
-} from '../sdk/src/platform/tools/agent/manager.js';
-import type { ConversationMessageSnapshot } from '../sdk/src/platform/core/conversation.js';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.js';
+} from '../platform/src/platform/tools/agent/manager.js';
+import type { ConversationMessageSnapshot } from '../platform/src/platform/core/conversation.js';
+import type { ConfigManager } from '../platform/src/platform/config/manager.js';
 
 function makeManager(conversationSnapshotRetention?: number): AgentManager {
   return new AgentManager({

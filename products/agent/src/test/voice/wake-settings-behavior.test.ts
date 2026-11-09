@@ -31,7 +31,7 @@
  * `noiseSuppression`, `vadThreshold`, `activationSound`, `activationSoundPath`,
  * `indicator`, `captureMaxSeconds`, `silenceStopMs`, `autoSubmit`, `retainAudio`
  * and `customModelDir` all reach real code here and are driven to two values
- * against it in "the capture host on this surface" below, through the REAL SDK
+ * against it in "the capture host on this surface" below, through the REAL platform
  * listener, the REAL capture opener and the REAL engine, over an injected recorder
  * subprocess and stub inference sessions.
  *
@@ -68,13 +68,13 @@ import {
   WAKE_EMBED_DIM,
   type WakeInferenceSession,
   type WakeTensor,
-} from '@goodvibes-jev/engine/sdk/platform/voice';
+} from '@goodvibes-jev/engine/platform/platform/voice';
 import {
   resolveManagedWakePaths,
   retainedClipFileName,
   type CaptureChildProcess,
   type UtteranceAudioArtifact,
-} from '@goodvibes-jev/engine/sdk/platform/voice';
+} from '@goodvibes-jev/engine/platform/platform/voice';
 import { createAgentCaptureOpener } from '../../audio/capture.ts';
 import { startWakeRuntime, wireWakeRuntime, type WakeRuntime, type WakeRuntimeDeps } from '../../audio/wake-runtime.ts';
 import { voiceCaptureRowVisible } from '../../core/voice-capture-status.ts';
@@ -115,7 +115,7 @@ function silentFrame(): Float32Array {
 // The capture host on this surface.
 //
 // Everything below drives a `voice.wake.*` row to two values through the REAL
-// pieces, the SDK listener and engine, the SDK capture opener, this surface's
+// pieces, the platform listener and engine, the platform capture opener, this surface's
 // wake runtime, with only two things faked: the recorder subprocess and the
 // inference sessions. No microphone is opened, no recorder is spawned, no model
 // file is read, no clock is real.
@@ -130,7 +130,7 @@ type DataListener = (chunk: Uint8Array) => void;
 type CloseListener = (code: number | null, signal: string | null) => void;
 
 /**
- * A recorder subprocess under test control. Mirrors what the SDK's capture opener
+ * A recorder subprocess under test control. Mirrors what the platform's capture opener
  * actually consumes: stdout data, stderr data, 'error', 'close', kill.
  */
 class FakeRecorder implements CaptureChildProcess {
@@ -153,7 +153,7 @@ class FakeRecorder implements CaptureChildProcess {
   kill(signal?: string): unknown {
     this.killSignals.push(signal ?? 'SIGTERM');
     // A real recorder exits on SIGTERM; emitting on a microtask (not synchronously)
-    // matches that ordering and lets the SDK's bounded stop() settle immediately
+    // matches that ordering and lets the platform's bounded stop() settle immediately
     // instead of waiting out its escalation timer.
     void Promise.resolve().then(() => this.emitClose(0));
     return true;
@@ -210,7 +210,7 @@ function pcmBytes(samples: readonly number[] | Float32Array): Uint8Array {
   return bytes;
 }
 
-/** A run of loud audio, well above the SDK's silence floor. */
+/** A run of loud audio, well above the platform's silence floor. */
 function loudSamples(count: number, seed = 1): number[] {
   return Array.from({ length: count }, (_unused, index) => (index % 2 === 0 ? 9000 + seed : -9000 - seed));
 }
@@ -403,7 +403,7 @@ function makeCaptureHarness(options: CaptureHarnessOptions = {}): CaptureHarness
         ? { ready: false, reason: 'not-provisioned', vadReady: false }
         : { ready: true, reason: null, vadReady: options.vadReady ?? false }),
     ...(options.ensureProvisioned !== undefined ? { ensureProvisioned: options.ensureProvisioned } : {}),
-    // The stage the SDK listener wraps this surface's opener with. Injected so the
+    // The stage the platform listener wraps this surface's opener with. Injected so the
     // wiring is asserted without instantiating WebAssembly, what is under test here
     // is that the stage is built and every frame goes through it, which is this
     // surface's half; the filter's own arithmetic is the platform's.
@@ -444,7 +444,7 @@ function makeCaptureHarness(options: CaptureHarnessOptions = {}): CaptureHarness
 }
 
 /**
- * Feed enough frames to fill the SDK front end's window, so the frames after this
+ * Feed enough frames to fill the platform front end's window, so the frames after this
  * are the ones that actually get scored.
  */
 async function primeFrontEnd(recorder: FakeRecorder): Promise<void> {
@@ -576,7 +576,7 @@ describe('a confirmed wake lands in this surface\'s conversation input', () => {
     expect(harness.sounds).toEqual([{ kind: 'chime', path: '' }]);
     expect(harness.runtime.status()?.kind).toBe('wake-capturing');
 
-    // Silence ends the utterance the SDK recorder is holding.
+    // Silence ends the utterance the platform recorder is holding.
     for (let i = 0; i < 12; i += 1) {
       recorder.emitBytes(pcmBytes(silentSamples(WAKE_CHUNK_SAMPLES)));
       await flush(2);
@@ -699,7 +699,7 @@ describe('the capture rows choose the device, the recorder, and what is refused'
 
   test('voice.wake.noiseSuppression: "speex" RUNS the stage over every frame; "none" builds no stage at all', async () => {
     // This row used to refuse on this surface. The platform carries SpeexDSP's
-    // preprocessor now and the SDK listener wraps this surface's opener with it, so
+    // preprocessor now and the platform listener wraps this surface's opener with it, so
     // the row's outcome is a filter that runs, and what this asserts is the wiring
     // this surface owns: the stage is built for the frame size the engine wants, and
     // every captured frame goes through it before anything scores it.
@@ -858,7 +858,7 @@ describe('the post-wake capture rows bound what is recorded', () => {
     expect(patient.transcribed).toEqual([]);
   });
 
-  test('voice.wake.retainAudio: "session-temp" writes the clip where the SDK sweeper can find its owner; "none" writes nothing', async () => {
+  test('voice.wake.retainAudio: "session-temp" writes the clip where the platform sweeper can find its owner; "none" writes nothing', async () => {
     const retainedRoot = makeProjectTempDir('wake-retain');
     const retaining = makeCaptureHarness({
       config: { 'voice.wake.retainAudio': 'session-temp' },
@@ -875,7 +875,7 @@ describe('the post-wake capture rows bound what is recorded', () => {
     const retainedDir = resolveManagedWakePaths(retainedRoot).retainedDir;
     const written = readdirSync(retainedDir);
     expect(written.length).toBe(1);
-    // The SDK owns the name, and the sweeper parses the owning session out of it.
+    // The platform owns the name, and the sweeper parses the owning session out of it.
     expect(written[0]).toBe(retainedClipFileName('session-under-test', retaining.now));
     expect(statSync(join(retainedDir, written[0] ?? '')).size).toBeGreaterThan(0);
 

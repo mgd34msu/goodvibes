@@ -2,7 +2,7 @@ import { fakePort, choiceAnswer, noulAnswer, scoreAnswer } from '@goodvibes-jev/
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { ConversationManager } from '../../core/conversation.ts';
-import { prepareConversationForTurn } from '@goodvibes-jev/engine/sdk/platform/core';
+import { prepareConversationForTurn } from '@goodvibes-jev/engine/platform/platform/core';
 
 const providerRegistry = {
   getCurrentModel: () => ({

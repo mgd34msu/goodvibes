@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import {
-  failureReading, failureState, forgetFailureReadings, GoodVibesSdkError, installJudgmentPort, SDKErrorCodes,
+  failureReading, failureState, forgetFailureReadings, GoodVibesError, installJudgmentPort, EngineErrorCodes,
 } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { redactSensitiveDataAsync, redactionCredential } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { redactSensitiveDataAsync, redactionCredential } from '@goodvibes-jev/engine/platform/platform/utils';
 import { isDeepStrictEqual } from 'node:util';
 import {
   buildRoutineSchedulePreview, classifyConnectedHostScheduleError, promoteRoutineToConnectedSchedule,
@@ -80,7 +80,7 @@ const classify = (error: unknown) => classifyConnectedHostScheduleError(error, c
 describe('routine schedule public failure contract', () => {
   test.each([401, 403])('HTTP %s is auth even when wording suggests connectivity or 404', async (status) => {
     const log = await reading('network');
-    expect((await classify(new GoodVibesSdkError('connection 404 auth', { status }))).kind).toBe('auth_required');
+    expect((await classify(new GoodVibesError('connection 404 auth', { status }))).kind).toBe('auth_required');
     expect(log).toHaveLength(0);
     expect(requests).toHaveLength(0);
   });
@@ -90,13 +90,13 @@ describe('routine schedule public failure contract', () => {
     expect(log).toHaveLength(0);
     expect(requests).toHaveLength(0);
   });
-  test.each([SDKErrorCodes.AUTH_REQUIRED, SDKErrorCodes.TOKEN_EXPIRED, SDKErrorCodes.PERMISSION_DENIED])('typed %s remains auth with opaque wording', async (code) => {
-    expect((await classify(new GoodVibesSdkError('opaque', { code }))).kind).toBe('auth_required');
+  test.each([EngineErrorCodes.AUTH_REQUIRED, EngineErrorCodes.TOKEN_EXPIRED, EngineErrorCodes.PERMISSION_DENIED])('typed %s remains auth with opaque wording', async (code) => {
+    expect((await classify(new GoodVibesError('opaque', { code }))).kind).toBe('auth_required');
     expect(requests).toHaveLength(0);
   });
-  test.each([SDKErrorCodes.CANCELLED, SDKErrorCodes.PAYMENT_REQUIRED, SDKErrorCodes.CONFLICT])('typed %s does not grant a probe or retry', async (code) => {
+  test.each([EngineErrorCodes.CANCELLED, EngineErrorCodes.PAYMENT_REQUIRED, EngineErrorCodes.CONFLICT])('typed %s does not grant a probe or retry', async (code) => {
     const log = await reading('not_found');
-    expect((await classify(new GoodVibesSdkError('auth 404 fetch', { code }))).kind).toBe('connected_host_error');
+    expect((await classify(new GoodVibesError('auth 404 fetch', { code }))).kind).toBe('connected_host_error');
     expect(log).toHaveLength(0);
     expect(requests).toHaveLength(0);
   });
@@ -109,8 +109,8 @@ describe('routine schedule public failure contract', () => {
     expect(requests).toHaveLength(0);
   });
   test.each([
-    new GoodVibesSdkError('opaque', { code: SDKErrorCodes.NETWORK_UNREACHABLE }),
-    new GoodVibesSdkError('opaque', { category: 'timeout' }),
+    new GoodVibesError('opaque', { code: EngineErrorCodes.NETWORK_UNREACHABLE }),
+    new GoodVibesError('opaque', { category: 'timeout' }),
     new Error('opaque', { cause: { code: 'ECONNREFUSED' } }),
     Object.assign(new Error('opaque'), { code: 'ENOTFOUND' }),
     new DOMException('opaque', 'TimeoutError'),
@@ -121,19 +121,19 @@ describe('routine schedule public failure contract', () => {
     expect(requests).toHaveLength(0);
   });
   test('missing method probes status once, read-only and with the same token', async () => {
-    const result = await classify(new GoodVibesSdkError('opaque', { code: SDKErrorCodes.METHOD_NOT_FOUND }));
+    const result = await classify(new GoodVibesError('opaque', { code: EngineErrorCodes.METHOD_NOT_FOUND }));
     expect(result).toMatchObject({ kind: 'connected_host_incompatible', error: options.incompatibleMessage });
     expect(requests).toEqual([{ url: `${connection.baseUrl}/status`, method: 'GET', authorization: 'Bearer fixture-token', body: undefined }]);
   });
   test.each([401, 404, 503])('status probe failure %s preserves route-unavailable behavior', async (status) => {
     response = async () => new Response('opaque', { status });
-    expect((await classify(new GoodVibesSdkError('opaque', { status: 404 }))).kind).toBe('connected_host_route_unavailable');
+    expect((await classify(new GoodVibesError('opaque', { status: 404 }))).kind).toBe('connected_host_route_unavailable');
     expect(requests).toHaveLength(1);
   });
   test('probe transport failure preserves the original error', async () => {
     response = async () => { throw new Error('probe failed'); };
     await reading('not_found', 0.99, 'original');
-    expect(await classify(new GoodVibesSdkError('original', { status: 404 }))).toMatchObject({ kind: 'connected_host_route_unavailable', error: 'original' });
+    expect(await classify(new GoodVibesError('original', { status: 404 }))).toMatchObject({ kind: 'connected_host_route_unavailable', error: 'original' });
   });
   test.each([
     ['authentication', 'auth_required'], ['authorization', 'auth_required'],
@@ -161,29 +161,29 @@ describe('routine schedule public failure contract', () => {
   });
 });
 
-describe('real routine promotion and browser SDK transport', () => {
-  test('missing token never reaches SDK, judgment or status probe', async () => {
+describe('real routine promotion and browser platform transport', () => {
+  test('missing token never reaches platform, judgment or status probe', async () => {
     const log = await reading('network');
     expect((await promoteRoutineToConnectedSchedule({ ...connection, token: null }, preview)).kind).toBe('auth_required');
     expect(requests).toHaveLength(0);
     expect(log).toHaveLength(0);
   });
-  test.each([401, 403])('revoked/denied token HTTP %s adds no retries beyond SDK auth handling', async (status) => {
+  test.each([401, 403])('revoked/denied token HTTP %s adds no retries beyond platform auth handling', async (status) => {
     const log = await reading('network');
     response = async () => new Response('opaque', { status });
     expect((await promoteRoutineToConnectedSchedule(connection, preview)).kind).toBe('auth_required');
-    // The SDK retries a 401 once after rereading its token; classification adds none.
+    // The platform retries a 401 once after rereading its token; classification adds none.
     expect(requests).toHaveLength(status === 401 ? 2 : 1);
     expect(requests.every(({ method }) => method === 'POST')).toBe(true);
     expect(JSON.parse(String(requests[0]?.body))).toMatchObject({ autoApprove: false, allowUnsafeExternalContent: false });
     expect(log).toHaveLength(0);
   });
-  test('actual SDK 404 performs one probe and never repeats creation', async () => {
+  test('actual platform 404 performs one probe and never repeats creation', async () => {
     response = async () => requests.length === 1 ? new Response('opaque', { status: 404 }) : new Response('{}');
     expect((await promoteRoutineToConnectedSchedule(connection, preview)).kind).toBe('connected_host_incompatible');
     expect(requests.map(({ method }) => method)).toEqual(['POST', 'GET']);
   });
-  test('SDK transport rejection uses its structured category without judgment', async () => {
+  test('platform transport rejection uses its structured category without judgment', async () => {
     const log = await reading('network');
     response = async () => { throw new Error('socket fixture interrupted'); };
     expect((await promoteRoutineToConnectedSchedule(connection, preview)).kind).toBe('connected_host_unavailable');

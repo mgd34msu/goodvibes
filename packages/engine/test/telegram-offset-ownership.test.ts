@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from 'bun:test';
 import { lstatSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { TelegramOffsetStore } from '../sdk/src/platform/channels/telegram/offset-store.js';
-import { tryAcquireCrossProcessLock } from '../sdk/src/platform/workspace/checkpoint/cross-process-lock.js';
+import { TelegramOffsetStore } from '../platform/src/platform/channels/telegram/offset-store.js';
+import { tryAcquireCrossProcessLock } from '../platform/src/platform/workspace/checkpoint/cross-process-lock.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const releases: Array<() => void> = [];

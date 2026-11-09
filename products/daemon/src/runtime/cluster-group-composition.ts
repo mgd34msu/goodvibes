@@ -30,15 +30,15 @@ import {
   type ClusterClock,
   type ClusterSurfaceHolding,
   type GroupOperationsContext,
-} from '@goodvibes-jev/engine/sdk/platform/cluster';
-import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+} from '@goodvibes-jev/engine/platform/platform/cluster';
+import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { SecretsManager } from '../config/secrets.js';
-import type { ClusterTransport } from '@goodvibes-jev/engine/sdk/platform/cluster';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { ClusterTransport } from '@goodvibes-jev/engine/platform/platform/cluster';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ShellPathService } from './index.js';
 import { createClusterComposition } from './cluster-composition.js';
-import type { ClusterCoordinator } from '@goodvibes-jev/engine/sdk/platform/cluster';
+import type { ClusterCoordinator } from '@goodvibes-jev/engine/platform/platform/cluster';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import { VERSION } from '../version.js';
 
@@ -134,7 +134,7 @@ export function createClusterGroupComposition(options: {
     logger,
     ...(options.isMaster ? { isMaster: options.isMaster } : {}),
     ...(options.surfaceHoldings ? { surfaceHoldings: options.surfaceHoldings } : {}),
-    // Only daemon-owned, group-scoped keys ever reach this; the SDK's
+    // Only daemon-owned, group-scoped keys ever reach this; the platform's
     // replication policy decides which, and refuses anything machine-specific.
     config: {
       get: (path) => (options.configManager as unknown as {

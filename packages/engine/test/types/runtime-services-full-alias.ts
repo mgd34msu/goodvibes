@@ -7,14 +7,14 @@
  *
  * The assertions below fail to compile if:
  *   - the alias ever narrows to the published foundation slice (it must stay a
- *     strict superset, it carries the SDK-internal members the slice omits:
+ *     strict superset, it carries the platform-internal members the slice omits:
  *     memoryGovernor / cacheRegistry / pauseController / schedulers), or
  *   - the alias drifts away from the exact type `startHostServices` accepts.
  *
  * Everything resolves through the package NAME so the exports map is exercised
  * exactly as a consumer install would (checked by `bun run types:check`).
  */
-import type { bootstrap } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import type { bootstrap } from '@goodvibes-jev/engine/platform/platform/runtime';
 
 // Mutual assignability == the alias IS the exact runtimeServices parameter type
 // (index 3 of startHostServices), no re-anchoring through the positional tuple.
@@ -29,7 +29,7 @@ declare function stub<T>(): T;
 declare const full: bootstrap.RuntimeServices;
 const slice: bootstrap.RuntimeFoundationServicesSlice = full;
 
-// ...and it carries the SDK-internal members the slice deliberately omits.
+// ...and it carries the platform-internal members the slice deliberately omits.
 const memoryGovernor = full.memoryGovernor;
 const cacheRegistry = full.cacheRegistry;
 const pauseController = full.pauseController;

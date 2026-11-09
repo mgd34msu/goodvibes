@@ -1,4 +1,4 @@
-import { KnowledgeStore, type KnowledgeSourceSnapshot } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import { KnowledgeStore, type KnowledgeSourceSnapshot } from '@goodvibes-jev/engine/platform/platform/knowledge';
 
 /**
  * Fresh persisted planning rows, including their exact raw-value fingerprints.
@@ -15,7 +15,7 @@ export async function readPlanningSourceSnapshots(dbPath: string, projectId: str
       .filter(source => (source.metadata.projectId === projectId || source.metadata.knowledgeSpaceId === `project:${projectId}`)
         && (source.metadata.projectPlanning === true || source.connectorId === 'goodvibes-project-planning'))
       .sort((left, right) => left.id.localeCompare(right.id))
-      // The public SDK generation hashes column names and every raw SQLite
+      // The public platform generation hashes column names and every raw SQLite
       // value, including unparsed JSON, rather than only timestamps/objects.
       .map(source => store.getSourceSnapshot({ id: source.id }));
   } finally { await store.close(); }

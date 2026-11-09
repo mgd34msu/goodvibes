@@ -3,7 +3,7 @@
  * parses as JSON, not because its first character is { or [.
  */
 import { describe, expect, test } from 'bun:test';
-import { sniffContentType } from '../sdk/src/platform/tools/fetch/extract.ts';
+import { sniffContentType } from '../platform/src/platform/tools/fetch/extract.ts';
 
 describe('sniffContentType', () => {
   test('a body that parses as JSON is JSON', () => {

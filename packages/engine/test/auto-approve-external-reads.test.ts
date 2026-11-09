@@ -5,11 +5,11 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigManager, isEffectiveDangerMode } from '../sdk/src/platform/config/index.js';
-import { ProjectIndex } from '../sdk/src/platform/state/project-index.js';
-import { ReadTool } from '../sdk/src/platform/tools/read/index.js';
-import { createFindTool } from '../sdk/src/platform/tools/find/executor.js';
-import { createRepoMapTool } from '../sdk/src/platform/tools/repo-map/index.js';
+import { ConfigManager, isEffectiveDangerMode } from '../platform/src/platform/config/index.js';
+import { ProjectIndex } from '../platform/src/platform/state/project-index.js';
+import { ReadTool } from '../platform/src/platform/tools/read/index.js';
+import { createFindTool } from '../platform/src/platform/tools/find/executor.js';
+import { createRepoMapTool } from '../platform/src/platform/tools/repo-map/index.js';
 
 let previous: ReturnType<typeof installJudgmentPort>;
 let root: string;

@@ -2,7 +2,7 @@
  * notification-link.ts, where a push notification's tap deep-links to.
  *
  * The daemon fans an approval out as a PushMessage whose `data` is
- * `{ kind: 'approval', approvalId }` (SDK push/service.ts). A tap should land
+ * `{ kind: 'approval', approvalId }` (platform push/service.ts). A tap should land
  * the operator on the view where that action lives, not just the app root.
  *
  * This is the PURE, unit-tested source of truth for that mapping. The service

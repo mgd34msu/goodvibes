@@ -2,17 +2,17 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.js';
-import type { GatewayMethodInvocation } from '../sdk/src/platform/control-plane/method-catalog-shared.js';
-import { registerNativeWorkExecutionGatewayMethods } from '../sdk/src/platform/control-plane/routes/native-work-execution.js';
-import { createNativeWorkExecutionHost, type NativePairedExecutionSnapshot, type NativePairedExecutionAuthority, type NativeWorkExecutionStatus } from '../sdk/src/platform/workflow/work-ledger/native-execution.js';
-import type { NativeWorkExecutionStorage, NativeWorkExecutionRecord, NativeWorkExecutionTransaction } from '../sdk/src/platform/workflow/work-ledger/native-execution-types.js';
-import { createOperatorNativeWorkExecutionClient } from '../sdk/src/platform/workflow/work-ledger/native-execution-client.js';
-import { nativeWorkExecutionSnapshotSchema, NATIVE_WORK_EXECUTION_MAX_RESPONSE_BYTES, type NativeWorkExecutionExecutionSnapshot } from '../sdk/src/platform/workflow/work-ledger/native-execution-wire.js';
-import type { ContractRunner } from '../sdk/src/platform/contract/runner.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
+import type { GatewayMethodInvocation } from '../platform/src/platform/control-plane/method-catalog-shared.js';
+import { registerNativeWorkExecutionGatewayMethods } from '../platform/src/platform/control-plane/routes/native-work-execution.js';
+import { createNativeWorkExecutionHost, type NativePairedExecutionSnapshot, type NativePairedExecutionAuthority, type NativeWorkExecutionStatus } from '../platform/src/platform/workflow/work-ledger/native-execution.js';
+import type { NativeWorkExecutionStorage, NativeWorkExecutionRecord, NativeWorkExecutionTransaction } from '../platform/src/platform/workflow/work-ledger/native-execution-types.js';
+import { createOperatorNativeWorkExecutionClient } from '../platform/src/platform/workflow/work-ledger/native-execution-client.js';
+import { nativeWorkExecutionSnapshotSchema, NATIVE_WORK_EXECUTION_MAX_RESPONSE_BYTES, type NativeWorkExecutionExecutionSnapshot } from '../platform/src/platform/workflow/work-ledger/native-execution-wire.js';
+import type { ContractRunner } from '../platform/src/platform/contract/runner.js';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { makeContract } from './contract/fixtures.js';
-import { createEmptyWorkLedgerState } from '../sdk/src/platform/workflow/work-ledger/index.js';
+import { createEmptyWorkLedgerState } from '../platform/src/platform/workflow/work-ledger/index.js';
 import { firstJsonSchemaFailure } from '../transport-http/src/index.js';
 
 const identity = { projectId: 'project', workId: 'work', attemptId: 'attempt', expectedRevision: { work: 1, criteria: 1, attempt: 1 } };

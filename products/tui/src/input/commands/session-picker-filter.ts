@@ -3,7 +3,7 @@
  * session pickers.
  *
  * Subagents spawned during a session get their own SessionManager-persisted
- * transcript, named `agent-<id>` (see the SDK's agent manager, which mints
+ * transcript, named `agent-<id>` (see the platform's agent manager, which mints
  * ids as `agent-${uuid.slice(0, 8)}`). Those files are real, loadable
  * sessions, useful for forensic/debugging access, but they are not
  * sessions a user ever started, and in a workspace with many spawned agents
@@ -15,7 +15,7 @@
  * agent-xxxxxxxx`) is untouched and still reaches them, this only affects
  * what shows up when the id isn't already known.
  */
-import type { SessionInfo } from '@goodvibes-jev/engine/sdk/platform/sessions';
+import type { SessionInfo } from '@goodvibes-jev/engine/platform/platform/sessions';
 
 /** Whether a saved session's name follows the subagent-transcript naming convention. */
 export function isAgentSessionName(name: string): boolean {

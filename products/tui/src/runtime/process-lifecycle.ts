@@ -19,13 +19,13 @@
  * `unsubs` registry is shared by reference and drained on exit.
  */
 import { existsSync } from 'node:fs';
-import { flushActivityLogSync, logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { flushActivityLogSync, logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { createTerminalLifecycle, TERMINAL_ESCAPES } from '@goodvibes-jev/engine/terminal-shell';
 import { createErrorNoticeOwner, unavailableErrorLine, userErrorLine } from '../core/format-user-error.ts';
 import { allowTerminalWrite } from '@goodvibes-jev/engine/terminal-shell/terminal-output-guard';
 import { buildPersistedSessionContext, deleteRecoveryFile } from '@/runtime/index.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
-import { removeLivenessMarker } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { removeLivenessMarker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { BootstrapContext } from './bootstrap.ts';
 import type { InputHandler } from '../input/handler.ts';
 import type { ConversationMessageSnapshot } from '../core/conversation.ts';

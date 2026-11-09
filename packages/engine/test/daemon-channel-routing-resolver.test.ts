@@ -3,10 +3,10 @@ import {
   createRoutingResolver,
   resolveProfile,
   WILDCARD_SURFACE,
-} from '../sdk/src/platform/channels/host-routing/routing-resolver.ts';
-import type { RoutingChannelRoute } from '../sdk/src/platform/channels/host-routing/route-store.ts';
-import { RouteStore } from '../sdk/src/platform/channels/host-routing/route-store.ts';
-import { createInboxRouteResolver } from '../sdk/src/platform/channels/host-routing/inbox-bridge.ts';
+} from '../platform/src/platform/channels/host-routing/routing-resolver.ts';
+import type { RoutingChannelRoute } from '../platform/src/platform/channels/host-routing/route-store.ts';
+import { RouteStore } from '../platform/src/platform/channels/host-routing/route-store.ts';
+import { createInboxRouteResolver } from '../platform/src/platform/channels/host-routing/inbox-bridge.ts';
 import { makeTmpWorkingDir } from './_helpers/daemon-routing-temp.ts';
 
 function route(partial: Partial<RoutingChannelRoute>): RoutingChannelRoute {

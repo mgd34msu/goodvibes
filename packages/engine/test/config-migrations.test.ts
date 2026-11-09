@@ -9,9 +9,9 @@
  * that hazard; see manager.ts load() for where it is wired in.
  */
 import { describe, expect, test } from 'bun:test';
-import { migrateDangerDaemonAlias } from '../sdk/src/platform/config/migrations.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { resolveDaemonEnabled } from '../sdk/src/platform/config/index.js';
+import { migrateDangerDaemonAlias } from '../platform/src/platform/config/migrations.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { resolveDaemonEnabled } from '../platform/src/platform/config/index.js';
 import { mkdirSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';

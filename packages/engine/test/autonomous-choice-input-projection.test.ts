@@ -2,12 +2,12 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort, type JudgmentRequest, type Questions } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { PermissionManager, type PermissionConfigReader } from '../sdk/src/platform/permissions/manager.ts';
-import type { AutonomousChoiceProjection } from '../sdk/src/platform/permissions/autonomous-input-projection.ts';
-import type { AutonomousToolChoices, AutonomousToolSource } from '../sdk/src/platform/permissions/autonomous.ts';
-import { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.ts';
-import { ToolRegistry, type PreparedToolCall } from '../sdk/src/platform/tools/registry.ts';
-import type { ProjectedToolCall, ToolInputProjectionRequest } from '../sdk/src/platform/tools/input-projection.ts';
+import { PermissionManager, type PermissionConfigReader } from '../platform/src/platform/permissions/manager.ts';
+import type { AutonomousChoiceProjection } from '../platform/src/platform/permissions/autonomous-input-projection.ts';
+import type { AutonomousToolChoices, AutonomousToolSource } from '../platform/src/platform/permissions/autonomous.ts';
+import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
+import { ToolRegistry, type PreparedToolCall } from '../platform/src/platform/tools/registry.ts';
+import type { ProjectedToolCall, ToolInputProjectionRequest } from '../platform/src/platform/tools/input-projection.ts';
 import { gateReadingsPort, forgetGateReadings } from './_helpers/gate-readings.ts';
 
 const RAW = 'https://synthetic.invalid/reference?pat=SYNTHETIC_CATALOG_ONLY';

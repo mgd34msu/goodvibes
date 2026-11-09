@@ -6,13 +6,13 @@ import {
   describeMemoryIndexUnavailable,
   describeMemoryIndexCaveat,
   HASHED_MEMORY_EMBEDDING_PROVIDER,
-} from '../sdk/src/platform/state/index.js';
-import type { MemoryRecord, MemoryVectorStats } from '../sdk/src/platform/state/index.js';
+} from '../platform/src/platform/state/index.js';
+import type { MemoryRecord, MemoryVectorStats } from '../platform/src/platform/state/index.js';
 
 /**
  * The cross-surface recall-honesty contract (memory unification).
  *
- * Promotes the agent's memory-honesty discipline to the SDK so every surface shares
+ * Promotes the agent's memory-honesty discipline to the platform so every surface shares
  * ONE honesty contract. Asserts: floor is 60 (not a starving 70), the eligibility
  * receipt is honest, flagged records are excluded regardless of confidence, and an
  * unavailable index degrades with a STATED reason (not a silent empty).

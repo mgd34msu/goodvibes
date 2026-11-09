@@ -4,10 +4,10 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { GitHubCopilotProvider, COPILOT_DATED_STATIC_MODELS } from '../sdk/src/platform/providers/github-copilot.js';
-import { CopilotSessions } from '../sdk/src/platform/providers/github-copilot-session.js';
-import { ProviderAttemptDeniedError } from '../sdk/src/platform/providers/attempt-guard.js';
-import { runLiveModelRefresh } from '../sdk/src/platform/providers/live-model-discovery.js';
+import { GitHubCopilotProvider, COPILOT_DATED_STATIC_MODELS } from '../platform/src/platform/providers/github-copilot.js';
+import { CopilotSessions } from '../platform/src/platform/providers/github-copilot-session.js';
+import { ProviderAttemptDeniedError } from '../platform/src/platform/providers/attempt-guard.js';
+import { runLiveModelRefresh } from '../platform/src/platform/providers/live-model-discovery.js';
 
 const roots: string[] = [], releases: (() => void)[] = [], work: Promise<unknown>[] = [];
 const originalFetch = globalThis.fetch;

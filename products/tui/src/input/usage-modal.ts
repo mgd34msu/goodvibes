@@ -11,7 +11,7 @@
  * entry first, then the modal.
  */
 
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { SurfaceModal, SurfaceModalHost } from './surface-modal-host.ts';
 import type { SurfaceLayer } from '../renderer/surface-kit.ts';
 import { renderUsageModal, USAGE_TABS, type UsageModalView, type UsageTab } from '../renderer/usage-modal.ts';

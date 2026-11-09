@@ -1,5 +1,5 @@
 /**
- * Auth hardening tests, goodvibes-sdk
+ * Auth hardening tests, goodvibes-platform
  *
  * Covers:
  *   1. fsync parity, atomicWriteSecretFile uses fsync (structural test via file integrity check)
@@ -25,11 +25,11 @@ import { scryptSync, randomBytes } from 'node:crypto';
 import {
   UserAuthManager,
   type ScryptParams,
-} from '../sdk/src/platform/security/user-auth.js';
+} from '../platform/src/platform/security/user-auth.js';
 import {
   authenticateOperatorToken,
-} from '../sdk/src/platform/security/http-auth.js';
-import { isCloudflareIp } from '../sdk/src/platform/daemon/http-listener.js';
+} from '../platform/src/platform/security/http-auth.js';
+import { isCloudflareIp } from '../platform/src/platform/daemon/http-listener.js';
 
 function tempDir(suffix: string): string {
   const d = join(tmpdir(), `gv-auth-hardening-${suffix}-${Date.now()}-${randomBytes(4).toString('hex')}`);

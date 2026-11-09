@@ -5,11 +5,11 @@
  * seen, and ended contracts are bounded.
  */
 import { describe, expect, test } from 'bun:test';
-import { createDomainDispatch, createRuntimeStore } from '../../sdk/src/platform/runtime/store/index.js';
-import { selectContracts } from '../../sdk/src/platform/runtime/store/selectors/index.js';
-import { MAX_RETAINED_CONTRACTS, updateContractsState } from '../../sdk/src/platform/runtime/store/helpers/reducers/contracts.js';
-import { createInitialContractsState } from '../../sdk/src/platform/runtime/store/domains/contracts.js';
-import type { ContractEvent } from '../../sdk/src/events/index.js';
+import { createDomainDispatch, createRuntimeStore } from '../../platform/src/platform/runtime/store/index.js';
+import { selectContracts } from '../../platform/src/platform/runtime/store/selectors/index.js';
+import { MAX_RETAINED_CONTRACTS, updateContractsState } from '../../platform/src/platform/runtime/store/helpers/reducers/contracts.js';
+import { createInitialContractsState } from '../../platform/src/platform/runtime/store/domains/contracts.js';
+import type { ContractEvent } from '../../platform/src/events/index.js';
 import { ALL_CONTRACT_EVENTS, CTR, SAMPLES } from './event-samples.js';
 
 function fold(events: readonly ContractEvent[]) {

@@ -9,12 +9,12 @@ New terminal requests use native conversation intake. The historical project-pla
 | Exact original terminal input capture and native request/recovery display | TUI |
 | Semantic routing, admission and autonomous execution decisions | Native engine and Jev |
 | Passive display of saved historical planning records | TUI |
-| Explicit compatibility edits to saved answers/approval metadata | TUI commands through the revision-guarded SDK action |
-| Durable project-scoped planning artifacts in `project:<projectId>` knowledge spaces | SDK |
-| Historical readiness evaluation and next-question API compatibility | SDK; not a TUI interview |
-| Project-language, decision, task and verification records | SDK |
+| Explicit compatibility edits to saved answers/approval metadata | TUI commands through the revision-guarded platform action |
+| Durable project-scoped planning artifacts in `project:<projectId>` knowledge spaces | platform |
+| Historical readiness evaluation and next-question API compatibility | platform; not a TUI interview |
+| Project-language, decision, task and verification records | platform |
 
-Saved readiness, questions, answers and approval metadata describe historical artifacts. They are not native criteria, current execution evidence or authority to admit/start/resume native work. This change does not rewrite stored records, alter SDK APIs or schemas, or add a native reply protocol.
+Saved readiness, questions, answers and approval metadata describe historical artifacts. They are not native criteria, current execution evidence or authority to admit/start/resume native work. This change does not rewrite stored records, alter platform APIs or schemas, or add a native reply protocol.
 
 ## Native input and recovery
 
@@ -42,7 +42,7 @@ Opening and refreshing are passive reads. The modal does not call readiness eval
 
 | Key | Action |
 | --- | --- |
-| `r` | Reload saved SDK-backed records |
+| `r` | Reload saved platform-backed records |
 | Navigation keys | Inspect and scroll saved content |
 | `Esc` | Close the view |
 
@@ -61,9 +61,9 @@ Closing, reopening, refreshing or repeatedly pressing former action keys cannot 
 | `/project-plan list` and `/project-plan show <id>` | Inspect older execution-plan records |
 | `/project-plan mode\|explain\|override\|status\|clear` | Route to the existing adaptive runtime controls |
 
-Both current-record and selected-revision answer/approve forms remain compatible. Manual commands capture the current source revision once; selected commands retain their explicit planning/source/generation binding. Both use the SDK's atomic revision guard. A stale or malformed selected revision cannot fall back to another record, a fresh interview or native intake. Numeric references in manual answers remain one-based question indexes; selected-revision answers keep opaque question IDs, including numeric IDs.
+Both current-record and selected-revision answer/approve forms remain compatible. Manual commands capture the current source revision once; selected commands retain their explicit planning/source/generation binding. Both use the platform's atomic revision guard. A stale or malformed selected revision cannot fall back to another record, a fresh interview or native intake. Numeric references in manual answers remain one-based question indexes; selected-revision answers keep opaque question IDs, including numeric IDs.
 
-Successful historical edits report only the saved action. They do not print fresh readiness, recommended answers or a next question. SDK normalization within an explicitly requested write is unchanged; the TUI does not consume its evaluation hints. Existing saved approval metadata is retained by passive inspection and is never reinterpreted as native execution authority.
+Successful historical edits report only the saved action. They do not print fresh readiness, recommended answers or a next question. platform normalization within an explicitly requested write is unchanged; the TUI does not consume its evaluation hints. Existing saved approval metadata is retained by passive inspection and is never reinterpreted as native execution authority.
 
 `/project-plan` is unrelated to `/plan`, which toggles the session's existing read-only permission plan mode. `/plan` never touches project-planning state; `Shift+Tab` cycles that same permission mode. These retained compatibility controls do not claim that other legacy permission/runtime consumers have already completed their autonomous migration.
 
@@ -108,9 +108,9 @@ The modal's keys:
 
 When the selected item has linked ids (`item.linked` holds any of `agentId`, `wrfcId`, `taskId`, `sessionId`), the detail block shows them with their jump key.
 
-## SDK routes and operator methods
+## platform routes and operator methods
 
-The SDK retains its passive historical storage/evaluation routes and matching operator methods. Their compatibility contract is unchanged. Opening or refreshing the TUI historical view only reads saved records; it does not call the evaluation route or turn its next-question hints into an interview:
+The platform retains its passive historical storage/evaluation routes and matching operator methods. Their compatibility contract is unchanged. Opening or refreshing the TUI historical view only reads saved records; it does not call the evaluation route or turn its next-question hints into an interview:
 
 | Route | Operator method(s) | Purpose |
 | --- | --- | --- |

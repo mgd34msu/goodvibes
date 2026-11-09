@@ -5,7 +5,7 @@
  * maps say "none reported" rather than showing zeros, and an unobserved quota
  * renders as an explicit "no signal yet" instead of a fabricated full quota.
  */
-import { GoodVibesSdkError } from '@goodvibes-jev/engine/sdk';
+import { GoodVibesError } from '@goodvibes-jev/engine/platform';
 
 /** Cap on how many entries of a single metric map we list before summarizing the rest. */
 export const METRIC_MAP_LIST_CAP = 40;
@@ -32,13 +32,13 @@ export function renderMetricMap(label: string, map: Record<string, unknown> | un
  * Returns the honest line, or null when the error is not a scope refusal.
  */
 export function telemetryScopeRefusalLine(error: unknown, what: string): string | null {
-  if (error instanceof GoodVibesSdkError && (error.status === 401 || error.status === 403)) {
+  if (error instanceof GoodVibesError && (error.status === 401 || error.status === 403)) {
     return `  ${what}: unavailable; the companion token lacks the read:telemetry scope this data requires (daemon returned ${error.status}).`;
   }
   return null;
 }
 
-/** The shape of quota.snapshot.get we render (a superset-safe subset of the SDK type). */
+/** The shape of quota.snapshot.get we render (a superset-safe subset of the platform type). */
 export interface QuotaSnapshotView {
   readonly hasSignal: boolean;
   readonly remaining?: number | undefined;

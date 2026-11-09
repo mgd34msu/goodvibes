@@ -35,8 +35,8 @@ function readPackage(directory: string, expectedName: string, boundary?: string)
 
 /** Locate a package from its dependency owner, including linked stores and export subpaths. */
 export function resolveOwnedPackageManifest(ownerManifestPath: string, packageName: string): string | null {
-  // SDK imports can be export subpaths of the engine package. Resolve that
-  // package's manifest rather than requiring a fictitious sdk/package.json.
+  // engine imports can be export subpaths of the engine package. Resolve that
+  // package's manifest rather than requiring a fictitious engine/package.json.
   const parts = packageName.split('/');
   const ownerName = parts.slice(0, packageName.startsWith('@') ? 2 : 1).join('/');
   const require = createRequire(resolve(ownerManifestPath));
@@ -71,7 +71,7 @@ export interface ProvideNativeAddonOptions {
   readonly addonOutDir: string;
   readonly target: BinaryTarget;
   readonly sameHost: boolean;
-  readonly sdkPackage?: string;
+  readonly enginePackage?: string;
   readonly exec?: Exec;
   readonly logger?: Logger;
 }
@@ -88,14 +88,14 @@ export function provideNativeAddon(options: ProvideNativeAddonOptions): boolean 
   let ownerPath = declaredByProduct ? resolveOwnedPackageManifest(productManifest, 'sqlite-vec') : null;
   // Private clients depend on the engine; sqlite-vec belongs to that declared
   // dependency, not to a fictitious product-level or hoisted installation.
-  if (!declaredByProduct && options.sdkPackage) {
-    const sdkName = options.sdkPackage.split('/').slice(0, options.sdkPackage.startsWith('@') ? 2 : 1).join('/');
-    if (Object.hasOwn(product.dependencies ?? {}, sdkName) || Object.hasOwn(product.optionalDependencies ?? {}, sdkName)) {
-      const sdkPath = resolveOwnedPackageManifest(productManifest, options.sdkPackage);
-      if (sdkPath !== null) {
-        const sdk = JSON.parse(readFileSync(sdkPath, 'utf8')) as PackageManifest;
-        if (Object.hasOwn(sdk.dependencies ?? {}, 'sqlite-vec') || Object.hasOwn(sdk.optionalDependencies ?? {}, 'sqlite-vec')) {
-          ownerPath = resolveOwnedPackageManifest(sdkPath, 'sqlite-vec');
+  if (!declaredByProduct && options.enginePackage) {
+    const engineName = options.enginePackage.split('/').slice(0, options.enginePackage.startsWith('@') ? 2 : 1).join('/');
+    if (Object.hasOwn(product.dependencies ?? {}, engineName) || Object.hasOwn(product.optionalDependencies ?? {}, engineName)) {
+      const enginePath = resolveOwnedPackageManifest(productManifest, options.enginePackage);
+      if (enginePath !== null) {
+        const engine = JSON.parse(readFileSync(enginePath, 'utf8')) as PackageManifest;
+        if (Object.hasOwn(engine.dependencies ?? {}, 'sqlite-vec') || Object.hasOwn(engine.optionalDependencies ?? {}, 'sqlite-vec')) {
+          ownerPath = resolveOwnedPackageManifest(enginePath, 'sqlite-vec');
         }
       }
     }

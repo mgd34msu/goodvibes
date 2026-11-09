@@ -22,19 +22,19 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { deflateSync } from 'node:zlib';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { ArtifactStore } from '../sdk/src/platform/artifacts/index.js';
+import { ArtifactStore } from '../platform/src/platform/artifacts/index.js';
 import {
   HomeGraphService,
   homeAssistantKnowledgeSpaceId,
-} from '../sdk/src/platform/knowledge/index.js';
-import { extractKnowledgeArtifact } from '../sdk/src/platform/knowledge/extractors.js';
-import { refreshDevicePagesForHomeGraphAsk } from '../sdk/src/platform/knowledge/home-graph/ask-page-refresh.js';
-import { HOME_GRAPH_PAGE_POLICY_VERSION } from '../sdk/src/platform/knowledge/home-graph/generated-pages.js';
-import type { HomeGraphAskResult } from '../sdk/src/platform/knowledge/home-graph/types.js';
-import type { SQLiteStore } from '../sdk/src/platform/state/sqlite-store.js';
-import { writeKnowledgeNodeRow } from '../sdk/src/platform/knowledge/store-node-history.js';
-import type { KnowledgeNodeRecord } from '../sdk/src/platform/knowledge/types.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
+} from '../platform/src/platform/knowledge/index.js';
+import { extractKnowledgeArtifact } from '../platform/src/platform/knowledge/extractors.js';
+import { refreshDevicePagesForHomeGraphAsk } from '../platform/src/platform/knowledge/home-graph/ask-page-refresh.js';
+import { HOME_GRAPH_PAGE_POLICY_VERSION } from '../platform/src/platform/knowledge/home-graph/generated-pages.js';
+import type { HomeGraphAskResult } from '../platform/src/platform/knowledge/home-graph/types.js';
+import type { SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
+import { writeKnowledgeNodeRow } from '../platform/src/platform/knowledge/store-node-history.js';
+import type { KnowledgeNodeRecord } from '../platform/src/platform/knowledge/types.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { trackDisposables } from './_helpers/disposables.ts';
 
 /**

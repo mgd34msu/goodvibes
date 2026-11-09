@@ -91,25 +91,25 @@ describe('workflow pins', () => {
   const OLD = 'a'.repeat(40);
   const NEW = 'b'.repeat(40);
   const WORKFLOW = [
-    `    uses: mgd34msu/goodvibes-sdk/.github/workflows/reusable-release-verify.yml@${OLD} # sdk 2.1.0 release`,
-    '      toolchain-spec: "@goodvibes-jev/engine/toolchain@2.1.0"',
-    `    uses: mgd34msu/goodvibes-sdk/.github/workflows/reusable-gh-release.yml@${OLD} # sdk 2.1.0 release`,
+    `    uses: mgd34msu/goodvibes/.github/workflows/reusable-release-verify.yml@${OLD} # engine 2.1.0 release`,
+    '      toolchain-spec: "@goodvibes-jev/engine@2.1.0"',
+    `    uses: mgd34msu/goodvibes/.github/workflows/reusable-gh-release.yml@${OLD} # engine 2.1.0 release`,
     '      uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1',
-    `      publish-command: 'bunx @goodvibes-jev/engine/toolchain@2.1.0 goodvibes-publish-package --poll'`,
+    `      publish-command: 'bunx @goodvibes-jev/engine@2.1.0 goodvibes-publish-package --poll'`,
   ].join('\n');
 
-  test('every SDK reusable-workflow ref and toolchain spec moves; other actions do not', () => {
-    const out = rewriteWorkflowPins(WORKFLOW, { sdkVersion: '2.2.0', sdkSha: NEW, toolchainVersion: '2.2.1' });
+  test('every engine reusable-workflow ref and toolchain spec moves; other actions do not', () => {
+    const out = rewriteWorkflowPins(WORKFLOW, { engineVersion: '2.2.0', engineSha: NEW, toolchainVersion: '2.2.1' });
     expect(out).not.toContain(OLD);
-    expect(out.match(new RegExp(`@${NEW} # sdk 2\\.2\\.0 release`, 'g'))).toHaveLength(2);
-    expect(out.match(/@goodvibes-jev\/engine\/toolchain@2\.2\.1/g)).toHaveLength(2);
+    expect(out.match(new RegExp(`@${NEW} # engine 2\\.2\\.0 release`, 'g'))).toHaveLength(2);
+    expect(out.match(/@goodvibes-jev\/engine@2\.2\.1/g)).toHaveLength(2);
     expect(out).toContain('actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1');
   });
 
   test('without a resolved SHA only the toolchain specs move', () => {
-    const out = rewriteWorkflowPins(WORKFLOW, { sdkVersion: '2.2.0', sdkSha: null, toolchainVersion: '2.2.1' });
-    expect(out.match(new RegExp(`@${OLD} # sdk 2\\.1\\.0 release`, 'g'))).toHaveLength(2);
-    expect(out.match(/@goodvibes-jev\/engine\/toolchain@2\.2\.1/g)).toHaveLength(2);
+    const out = rewriteWorkflowPins(WORKFLOW, { engineVersion: '2.2.0', engineSha: null, toolchainVersion: '2.2.1' });
+    expect(out.match(new RegExp(`@${OLD} # engine 2\\.1\\.0 release`, 'g'))).toHaveLength(2);
+    expect(out.match(/@goodvibes-jev\/engine@2\.2\.1/g)).toHaveLength(2);
   });
 
   test('the peeled tag line wins over the tag object line', () => {
@@ -130,14 +130,14 @@ describe('retained standalone release boundary', () => {
     try {
       writeFileSync(join(root, 'package.json'), JSON.stringify({
         name: '@goodvibes-jev/agent', private: false, version: '2.1.0',
-        devDependencies: { '@goodvibes-jev/engine/sdk': '2.1.0', '@goodvibes-jev/engine/toolchain': '2.1.1' },
+        devDependencies: { '@goodvibes-jev/engine': '2.1.0' },
       }));
       writeFileSync(join(root, 'README.md'), '# GoodVibes Agent\n');
       writeFileSync(join(root, 'CHANGELOG.md'), CHANGELOG);
       mkdirSync(join(root, '.github/workflows'), { recursive: true });
       const workflow = [
-        `uses: mgd34msu/goodvibes-sdk/.github/workflows/release.yml@${'a'.repeat(40)} # sdk 2.0.0 release`,
-        'toolchain-spec: "@goodvibes-jev/engine/toolchain@2.0.0"',
+        `uses: mgd34msu/goodvibes/.github/workflows/release.yml@${'a'.repeat(40)} # engine 2.0.0 release`,
+        'toolchain-spec: "@goodvibes-jev/engine@2.0.0"',
       ].join('\n');
       writeFileSync(join(root, '.github/workflows/release.yml'), workflow);
       const calls: Array<{ command: string; args: readonly string[]; cwd: string }> = [];
@@ -151,13 +151,13 @@ describe('retained standalone release boundary', () => {
       expect(calls.map(({ command, args }) => [command, ...args])).toEqual([
         ['bun', 'run', 'scripts/prebuild.ts'],
         ['bun', 'run', 'scripts/generate-google-runbook.ts'],
-        ['git', 'ls-remote', 'https://github.com/mgd34msu/goodvibes-sdk', 'refs/tags/v2.1.0', 'refs/tags/v2.1.0^{}'],
+        ['git', 'ls-remote', 'https://github.com/mgd34msu/goodvibes', 'refs/tags/v2.1.0', 'refs/tags/v2.1.0^{}'],
       ]);
       expect(calls.every((call) => call.cwd === root)).toBe(true);
       const result = readFileSync(join(root, '.github/workflows/release.yml'), 'utf8');
-      expect(result).toContain('@goodvibes-jev/engine/toolchain@2.1.1');
-      expect(result).toContain(`@${'b'.repeat(40)} # sdk 2.1.0 release`);
-      expect(result).not.toContain('@goodvibes-jev/engine/toolchain@2.0.0');
+      expect(result).toContain('@goodvibes-jev/engine@2.1.0');
+      expect(result).toContain(`@${'b'.repeat(40)} # engine 2.1.0 release`);
+      expect(result).not.toContain('@goodvibes-jev/engine@2.0.0');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

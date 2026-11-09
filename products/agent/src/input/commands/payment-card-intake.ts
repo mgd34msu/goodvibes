@@ -29,7 +29,7 @@ import { createCardFieldPrompter, CARD_SECRET_FIELDS, cardFieldConfigured } from
  * unattended purchase, and it does so with every surface closed, this program
  * not running at all. A card that only this process can resolve is the feature
  * not working. The config reference half lands in the daemon-owned tier for
- * the same reason: `payments.` is one of the SDK's DAEMON_OWNED_CONFIG_PREFIXES,
+ * the same reason: `payments.` is one of the platform's DAEMON_OWNED_CONFIG_PREFIXES,
  * so ConfigManager routes it to the daemon's own settings file, visible to the
  * daemon, the TUI and the webui alike. See input/payments-config.ts.
  *
@@ -46,7 +46,7 @@ import { createCardFieldPrompter, CARD_SECRET_FIELDS, cardFieldConfigured } from
  *
  * ── Where card details may be typed at all ───────────────────────────────
  *
- * Gated on the SDK's own allowlist (platform/payments/entry-surface.ts), never
+ * Gated on the platform's own allowlist (platform/payments/entry-surface.ts), never
  * on a literal decided here. Card material may be TYPED only on `tui`,
  * `agent-terminal` or `webui`, never over Telegram, ntfy, Discord, Slack,
  * WhatsApp, Signal, a webhook, or any other remote messaging surface. A card
@@ -57,24 +57,24 @@ import { createCardFieldPrompter, CARD_SECRET_FIELDS, cardFieldConfigured } from
  *
  * That is a SEPARATE question from which surfaces may APPROVE or VETO a
  * purchase, every command-authority channel still can, and the two checks are
- * never merged. See the SDK module's header.
+ * never merged. See the platform module's header.
  *
  * This command always runs in the agent's own composer, which the allowlist
  * accepts, so the gate changes nothing about today's behavior. What it buys is
  * that the refusal already exists the moment a shared command registry ever
  * grows a path that reaches `/payments card` from somewhere else: the check is
- * real and SDK-driven, not an implicit "this is a terminal so it's fine".
+ * real and platform-driven, not an implicit "this is a terminal so it's fine".
  */
 
 import type { CommandContext } from '../command-registry.ts';
 import { openPendingPaymentWindows } from './payments-pending.ts';
 import { persistSecretBackedConfigValue } from '../../config/secret-config.ts';
 import type { ConfigKey } from '../../config/index.ts';
-import '@goodvibes-jev/engine/sdk/platform/payments';
+import '@goodvibes-jev/engine/platform/platform/payments';
 import { PAYMENTS_ADDRESS_FIELD_SUFFIXES, paymentsAddressConfigKey, type PaymentsAddressKind } from '../payments-config.ts';
 
 /**
- * This surface's identity in the SDK's card-entry allowlist.
+ * This surface's identity in the platform's card-entry allowlist.
  *
  * `agent-terminal`, not `tui`: they are different surfaces with different
  * command registries, and naming this one honestly is what lets the allowlist
@@ -152,7 +152,7 @@ function renderStatus(ctx: CommandContext): string[] {
 /** Chain a masked prompt for each card secret field, storing each at daemon scope. */
 
 /**
- * Start the card-entry flow, gated on the SDK's own entry-surface allowlist
+ * Start the card-entry flow, gated on the platform's own entry-surface allowlist
  * rather than an assumption baked into this command. `surface` defaults to this
  * command's real, fixed identity, exposed as a parameter only so tests can
  * drive the refusal path without this program actually being reachable from a

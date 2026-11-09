@@ -24,7 +24,7 @@ stores in browser code.
 - A pairing link's one-time token is captured and stripped from the URL
   immediately, so it never lingers in the address bar or a history entry, and
   the QR scanner never renders or logs the secret it carried.
-- Browser token storage uses the SDK token store key
+- Browser token storage uses the platform token store key
   `goodvibes.webui.token`.
 
 Browser code must not read or scrape:
@@ -75,7 +75,7 @@ deployment should add explicit TLS, host allow-listing, and daemon auth policy.
 
 Chat attachments are uploaded to daemon artifacts before being referenced from a
 chat message. The browser sends file bytes to the daemon as base64 through the
-published SDK helper. Operators should avoid attaching secrets unless they intend
+published platform helper. Operators should avoid attaching secrets unless they intend
 the daemon and selected model route to process them.
 
 ## Logging and screenshots
@@ -85,14 +85,14 @@ the daemon and selected model route to process them.
   provider keys, or sensitive Knowledge records.
 - Documentation screenshots should use empty or non-sensitive states.
 
-## Dependency and SDK safety
+## Dependency and platform safety
 
-- Use the npm-published `@goodvibes-jev/engine/sdk` package.
-- Do not point WebUI to a local SDK checkout for validation.
-- Verify the installed SDK version with:
+- Use the npm-published `@goodvibes-jev/engine/platform` package.
+- Do not point WebUI to a local platform checkout for validation.
+- Verify the installed platform version with:
 
 ```bash
-node -p "require('./node_modules/@goodvibes-jev/engine/sdk/package.json').version"
+node -p "require('./node_modules/@goodvibes-jev/engine/platform/package.json').version"
 ```
 
 ## Security issue checklist
@@ -100,9 +100,9 @@ node -p "require('./node_modules/@goodvibes-jev/engine/sdk/package.json').versio
 When investigating a security-relevant bug, capture:
 
 - WebUI version
-- installed SDK version
+- installed platform version
 - daemon `/status` version
-- route or SDK helper used
+- route or platform helper used
 - request payload shape without secrets
 - response status and error code
 - whether the issue occurs through same-origin proxy, direct backend URL, or both

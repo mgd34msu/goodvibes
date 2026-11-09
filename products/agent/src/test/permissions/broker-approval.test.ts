@@ -1,8 +1,8 @@
 import { bindApprovals } from '../../shell/approvals-binding.ts';
 import type { ApprovalsView } from '../../runtime/client/approvals-view.ts';
 import { describe, expect, test } from 'bun:test';
-import { ApprovalBroker } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import type { PermissionPromptDecision } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import { ApprovalBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import type { PermissionPromptDecision } from '@goodvibes-jev/engine/platform/platform/permissions';
 import {
   handleBrokerApprovalChange,
   type BrokerApprovalBroker,

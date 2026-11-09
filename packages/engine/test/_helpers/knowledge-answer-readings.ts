@@ -1,14 +1,14 @@
-import { webGapCoverage } from '../../sdk/src/platform/knowledge/semantic/web-gap-repair/battery.js';
-import { extractedSentenceKind } from '../../sdk/src/platform/knowledge/semantic/repair-decisions.js';
-import { repairSourceRelevance } from '../../sdk/src/platform/knowledge/semantic/repair-decisions.js';
-import { homeGraphQualityBatteries } from '../../sdk/src/platform/knowledge/home-graph/quality/batteries.js';
+import { webGapCoverage } from '../../platform/src/platform/knowledge/semantic/web-gap-repair/battery.js';
+import { extractedSentenceKind } from '../../platform/src/platform/knowledge/semantic/repair-decisions.js';
+import { repairSourceRelevance } from '../../platform/src/platform/knowledge/semantic/repair-decisions.js';
+import { homeGraphQualityBatteries } from '../../platform/src/platform/knowledge/home-graph/quality/batteries.js';
 import { extractionValueFixtureReading, type ExtractionValueFixtures } from './knowledge-extraction-value-readings.js';
 import { selfImprovementFixtureReading, type SelfImprovementFixtureValues } from './knowledge-self-improvement-readings.js';
 import { repairScoringFixtureReading } from './repair-scoring-fixture-readings.js';
-import { homeGraphPagePriorityInstructions } from '../../sdk/src/platform/knowledge/home-graph/batteries/page-priority.js';
+import { homeGraphPagePriorityInstructions } from '../../platform/src/platform/knowledge/home-graph/batteries/page-priority.js';
 import { repairSubjectFixtureReading } from './repair-subject-fixture-readings.js';
 /** Explicit plumbing readings for synthetic answer fixtures, not a semantic evaluator. */
-import { homeGraphDocumentKind, homeGraphDocumentSubject } from '../../sdk/src/platform/knowledge/home-graph/auto-link/battery.js';
+import { homeGraphDocumentKind, homeGraphDocumentSubject } from '../../platform/src/platform/knowledge/home-graph/auto-link/battery.js';
 import { answerObjectFixtureReading, type AnswerObjectFixtureReadings } from './answer-object-fixture-readings.js';
 import { afterEach, beforeEach } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';

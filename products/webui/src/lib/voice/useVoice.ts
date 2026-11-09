@@ -8,7 +8,7 @@
  *
  * WHAT CHANGED UNDERNEATH useVoiceInput, and why its external contract did not:
  * capture no longer runs a MediaRecorder of its own. It goes through the ONE browser
- * capture primitive (lib/voice/capture.ts) and the SDK's `PushToTalkSession`, so
+ * capture primitive (lib/voice/capture.ts) and the platform's `PushToTalkSession`, so
  * dictation and always-on wake detection share a single device path, and through the
  * arbiter (lib/voice/mic-arbiter.ts), so a press while the wake listener holds the
  * microphone stands that listener down instead of opening a second stream.
@@ -29,8 +29,8 @@ import {
   utteranceToAudioArtifact,
   type AudioCaptureFailureReason,
   type CapturedUtterance,
-} from '@goodvibes-jev/engine/sdk/platform/voice/capture';
-import { sdk } from '../goodvibes';
+} from '@goodvibes-jev/engine/platform/platform/voice/capture';
+import { client as platformClient } from '../goodvibes';
 import { asRecord } from '../object';
 import { readSpeechSeams, type SpeechSource } from './speech-seams';
 import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime } from '../client-lifetime';
@@ -42,7 +42,7 @@ import {
   type SharedVoiceConfig,
   type VoiceAvailability,
 } from './voice-config';
-import type { WakeRuntimeSettings } from '@goodvibes-jev/engine/sdk/platform/voice/wake/runtime';
+import type { WakeRuntimeSettings } from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
 import { detectMicSupport, type MicSupport } from './capture';
 import { micArbiter, type MicLease } from './mic-arbiter';
 import { resolveWebuiWakeSettings } from './wake-config';
@@ -57,7 +57,7 @@ const EMPTY_CONFIG: SharedVoiceConfig = { provider: '', voice: '' };
 export function useVoiceStatus(): { availability: VoiceAvailability; isLoading: boolean } {
   const query = useQuery({
     queryKey: ['voice', 'status'],
-    queryFn: () => sdk.operator.voice.status(),
+    queryFn: () => platformClient.operator.voice.status(),
     staleTime: 30_000,
   });
   const availability = useMemo(() => deriveVoiceAvailability(query.data), [query.data]);
@@ -69,7 +69,7 @@ export function useVoiceStatus(): { availability: VoiceAvailability; isLoading: 
 export function useSharedVoiceConfig(): { config: SharedVoiceConfig; isLoading: boolean } {
   const query = useQuery({
     queryKey: ['voice', 'config'],
-    queryFn: () => sdk.operator.config.get(),
+    queryFn: () => platformClient.operator.config.get(),
     staleTime: 30_000,
     retry: false,
   });
@@ -112,7 +112,7 @@ export function useTts(source?: SpeechSource): UseTtsResult {
   // shared tts.* defaults itself.
   const synth = useCallback(
     (text: string, signal: AbortSignal) =>
-      sdk.operator.voice
+      platformClient.operator.voice
         .ttsStream(
           {
             text,
@@ -168,7 +168,7 @@ export const WAKE_STATUS_QUERY_KEY = ['voice', 'wake', 'status'] as const;
 export function useWakeSettings(): { settings: WakeRuntimeSettings; isLoading: boolean } {
   const query = useQuery({
     queryKey: ['voice', 'config'],
-    queryFn: () => sdk.operator.config.get(),
+    queryFn: () => platformClient.operator.config.get(),
     staleTime: 30_000,
     retry: false,
   });
@@ -178,7 +178,7 @@ export function useWakeSettings(): { settings: WakeRuntimeSettings; isLoading: b
   // A failed or absent read leaves it false, which is the safe direction.
   const gate = useQuery({
     queryKey: WAKE_STATUS_QUERY_KEY,
-    queryFn: () => sdk.operator.voice.wake.status(),
+    queryFn: () => platformClient.operator.voice.wake.status(),
     staleTime: 30_000,
     retry: false,
   });
@@ -195,7 +195,7 @@ export function useWakeSettings(): { settings: WakeRuntimeSettings; isLoading: b
 export type MicPhase = 'idle' | 'requesting' | 'recording' | 'transcribing' | 'error';
 
 export interface MicError {
-  /** The SDK's capture failure reasons, plus this surface's own transcription one. */
+  /** The platform's capture failure reasons, plus this surface's own transcription one. */
   readonly reason: AudioCaptureFailureReason | 'stt-failed';
   readonly message: string;
 }
@@ -224,7 +224,7 @@ export async function transcribeUtterance(
   providerId?: string,
 ): Promise<string> {
   const artifact = utteranceToAudioArtifact(utterance);
-  const result = await sdk.operator.voice.stt({
+  const result = await platformClient.operator.voice.stt({
     audio: {
       mimeType: artifact.mimeType,
       format: artifact.format,

@@ -15,7 +15,7 @@ import {
   type DivergenceStats,
   type EnforceGateResult,
   type PolicyRule,
-} from '../sdk/src/platform/runtime/permissions/index.ts';
+} from '../platform/src/platform/runtime/permissions/index.ts';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

@@ -10,8 +10,8 @@
  * turn without tool calls.)
  */
 import { afterEach, expect, test } from 'bun:test';
-import { GeminiProvider } from '../sdk/src/platform/providers/gemini.ts';
-import type { ChatRequest } from '../sdk/src/platform/providers/interface.ts';
+import { GeminiProvider } from '../platform/src/platform/providers/gemini.ts';
+import type { ChatRequest } from '../platform/src/platform/providers/interface.ts';
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });

@@ -1,4 +1,4 @@
-import { GoodVibesSdkError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes-jev/engine/errors';
 
 /**
  * Transport middleware (Koa-style) for the HTTP transport layer.
@@ -9,7 +9,7 @@ import { GoodVibesSdkError } from '@goodvibes-jev/engine/errors';
  * `ctx.durationMs` are populated; `ctx.error` is set if the fetch threw.
  *
  * @example
- * sdk.use(async (ctx, next) => {
+ * client.use(async (ctx, next) => {
  *   console.log('->', ctx.method, ctx.url);
  *   await next();
  *   console.log('<-', ctx.response?.status, ctx.durationMs, 'ms');
@@ -47,7 +47,7 @@ export interface TransportContext {
   /**
    * Set to `true` when the error originated from within the middleware chain
    * (as opposed to from the real fetch). Used by the transport to wrap
-   * middleware errors as `SDKError{kind:'unknown'}`.
+   * middleware errors as `GoodVibesError{kind:'unknown'}`.
    */
   middlewareError?: boolean | undefined;
   /**
@@ -94,7 +94,7 @@ export function composeMiddleware(
   innerFetch: (ctx: TransportContext) => Promise<Response>,
 ): (ctx: TransportContext) => Promise<void> {
   if (middleware.length > MAX_MIDDLEWARE_DEPTH) {
-    throw new GoodVibesSdkError(`Transport middleware chain exceeds the maximum depth of ${MAX_MIDDLEWARE_DEPTH}.`, {
+    throw new GoodVibesError(`Transport middleware chain exceeds the maximum depth of ${MAX_MIDDLEWARE_DEPTH}.`, {
       category: 'config',
       source: 'transport',
       recoverable: false,
@@ -109,14 +109,14 @@ export function composeMiddleware(
       // reusing `i` (which is the chain index and cannot exceed chain length).
       dispatchCount += 1;
       if (dispatchCount > MAX_MIDDLEWARE_DEPTH) {
-        throw new GoodVibesSdkError(`Transport middleware recursion exceeded the maximum depth of ${MAX_MIDDLEWARE_DEPTH}.`, {
+        throw new GoodVibesError(`Transport middleware recursion exceeded the maximum depth of ${MAX_MIDDLEWARE_DEPTH}.`, {
           category: 'internal',
           source: 'transport',
           recoverable: false,
         });
       }
       if (i <= index) {
-        throw new GoodVibesSdkError('next() called multiple times in transport middleware', {
+        throw new GoodVibesError('next() called multiple times in transport middleware', {
           category: 'protocol',
           source: 'transport',
           recoverable: false,

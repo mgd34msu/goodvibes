@@ -9,9 +9,9 @@
  * schedulers. Every one of those owners already had a `stop()` or `dispose()`;
  * nothing called them, because the graph had no disposal seam.
  *
- * Unlike the SDK, this fork composes no DaemonServer of its own, it hands its
+ * Unlike the platform, this fork composes no DaemonServer of its own, it hands its
  * graph to one via startHostServices, which passes `runtimeServices` in, so the
- * SDK's ownership rule deliberately leaves that graph alone. `dispose()` here is
+ * platform's ownership rule deliberately leaves that graph alone. `dispose()` here is
  * the only thing that stops these, and this file is its proof.
  *
  * Measured on this file before the seam existed: composing the graph created 23
@@ -38,11 +38,11 @@
  * composition has quiesced, because KnowledgeScheduleService.dispose() clears
  * its timer map without setting a disposed flag: an initializeSchedules() still
  * in flight re-arms three bootstrap-schedule timers AFTER teardown ran. That is
- * an SDK-internal race this fork has no seam into, and it is reachable from the
+ * an platform-internal race this fork has no seam into, and it is reachable from the
  * short-lived CLI paths (cli/management.ts withRuntimeServices,
  * cli/bundle-command.ts) that compose the graph, answer one question and
  * dispose within milliseconds. The fix belongs beside the other owner fixes in
- * the SDK, as the same dispose-after-disposed guard createDisposalScope carries.
+ * the platform, as the same dispose-after-disposed guard createDisposalScope carries.
  */
 
 import { beforeAll, expect, test } from 'bun:test';

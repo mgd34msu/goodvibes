@@ -3,8 +3,8 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { createRuntimeStore, createDomainDispatch } from '../../runtime/store/index.ts';

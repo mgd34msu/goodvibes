@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { createServiceBackedGateway, instrumentEmailGateway } from '../sdk/src/platform/control-plane/routes/email-composition.js';
+import { createServiceBackedGateway, instrumentEmailGateway } from '../platform/src/platform/control-plane/routes/email-composition.js';
 import { deferred, mailFixture, tick } from './_helpers/mail-subject-source.js';
-import { hasVerifiedImapMessageIdentity, readMessageDetail } from '../sdk/src/platform/email/imap-message-read.js';
-import type { ImapSession } from '../sdk/src/platform/email/imap-session.js';
-import type { ImapFetchFrame } from '../sdk/src/platform/email/imap-fetch-response.js';
+import { hasVerifiedImapMessageIdentity, readMessageDetail } from '../platform/src/platform/email/imap-message-read.js';
+import type { ImapSession } from '../platform/src/platform/email/imap-session.js';
+import type { ImapFetchFrame } from '../platform/src/platform/email/imap-fetch-response.js';
 import { testDescribeSenderClaim } from './_helpers/platform-email-fixtures.js';
 
 function required<T>(value: T | null | undefined): T {

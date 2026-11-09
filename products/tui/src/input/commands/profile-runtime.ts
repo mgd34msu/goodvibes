@@ -126,7 +126,7 @@ function unrecognizedResponse(verb: string): string {
  *
  * A dotted token is already an id and is passed through untouched. A bare label
  * ("shipping address") is matched against the labels in the live `profile.read`
- * response, deliberately NOT against a copy of the SDK's field registry, which
+ * response, deliberately NOT against a copy of the platform's field registry, which
  * would be a second list to keep in step with the first. A label that matches
  * nothing is passed through unchanged so the daemon answers with its own message
  * naming what is wrong, rather than this command guessing.
@@ -274,7 +274,7 @@ export function registerProfileRuntimeCommands(
       // `methodId as string` is what picks the generic overload, so the result
       // stays `unknown` and has to go through a checker, see ProfileInvoke.
       const invoke: ProfileInvoke = (methodId, input) =>
-        rpc.sdk.operator.invoke(methodId as string, input as unknown as Record<string, unknown>);
+        rpc.platformClient.operator.invoke(methodId as string, input as unknown as Record<string, unknown>);
       const print = (text: string): void => { ctx.print(text); };
 
       if (sub === 'show') {

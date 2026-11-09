@@ -4,10 +4,10 @@ import * as fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { DaemonServer } from '../sdk/src/platform/daemon/facade.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { DaemonServer } from '../platform/src/platform/daemon/facade.ts';
 import { seedBenchmarkCache } from './_helpers/benchmark-cache.ts';
-import { WorkProposalStore } from '../sdk/src/platform/agents/work-proposal-store.ts';
+import { WorkProposalStore } from '../platform/src/platform/agents/work-proposal-store.ts';
 
 const roots: string[] = [];
 const stores: WorkProposalStore[] = [];

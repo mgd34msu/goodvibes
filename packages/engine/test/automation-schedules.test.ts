@@ -9,7 +9,7 @@ import {
   parseEveryInterval,
   resolveAutomationCronOffsetMs,
   ensureAutomationCronPhase,
-} from '@goodvibes-jev/engine/sdk/platform/automation';
+} from '@goodvibes-jev/engine/platform/platform/automation';
 
 describe('automation schedules', () => {
   test('parses and formats every intervals', () => {

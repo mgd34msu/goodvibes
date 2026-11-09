@@ -5,7 +5,7 @@
  * pasted as an image, however long it is, and a small real image is.
  */
 import { describe, expect, test } from 'bun:test';
-import { isImageData } from '../sdk/src/platform/utils/clipboard.ts';
+import { isImageData } from '../platform/src/platform/utils/clipboard.ts';
 
 const bytes = (...values: number[]): Uint8Array => Uint8Array.from(values);
 const text = (value: string): Uint8Array => new TextEncoder().encode(value);

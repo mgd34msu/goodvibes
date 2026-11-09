@@ -5,7 +5,7 @@ import {
   isSecretBearingConfigKey,
   isStructuredCredentialReferenceConfigKey,
   captureStructuredCredentialReferenceConfigValue,
-} from "@goodvibes-jev/engine/sdk/platform/judgment-browser/catalogs";
+} from "@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs";
 import { CONFIG_SCHEMA_ENTRIES } from "./generated/config-schema";
 
 export const SECRET_CONFIG_KEYS: ReadonlySet<string> = new Set(SECRET_BEARING_CONFIG_PATHS);
@@ -59,7 +59,7 @@ export function displayConfigValue(key: string, value: unknown, cleared = false)
 }
 
 // ---------------------------------------------------------------------------
-// Namespace display labels. The GROUPING SOURCE is SDK metadata (CONFIG_SCHEMA
+// Namespace display labels. The GROUPING SOURCE is platform metadata (CONFIG_SCHEMA
 // namespaces + each feature flag's configCategories, see settings-model.ts);
 // this table supplies only the human LABEL for a namespace, special-casing
 // acronyms/casing the mechanical Title Case fallback (titleCase, below) would
@@ -67,7 +67,7 @@ export function displayConfigValue(key: string, value: unknown, cleared = false)
 // no entry here Title-Cases itself, honest, never a fabricated label.
 //
 // This replaces the earlier hand-copied port of the TUI's CATEGORY_LABELS: the
-// key namespaces now come from the SDK schema the TUI is also being rebuilt
+// key namespaces now come from the platform schema the TUI is also being rebuilt
 // onto, so parity is structural rather than a maintained duplicate list. Every
 // namespace CONFIG_SCHEMA actually defines is covered here or by titleCase.
 // ---------------------------------------------------------------------------
@@ -123,10 +123,10 @@ export const CATEGORY_LABELS: Record<string, string> = {
   profile: 'Owner Profile',
   // Covers both voice.local.* (STT/TTS engine paths) and voice.wake.*
   // (wake-word detection). Wake-word rows render as their own titled feature
-  // unit inside this group, from the SDK's FEATURE_SETTINGS surface.
+  // unit inside this group, from the platform's FEATURE_SETTINGS surface.
   voice: 'Voice',
   device: 'Paired Phone Capabilities',
-  // Features are configured through their domain settings keys (SDK 1.7.1's
+  // Features are configured through their domain settings keys (platform 1.7.1's
   // dissolved feature model), no enablement bucket exists anymore. An OLDER
   // daemon can still hold the legacy `featureFlags` record, which then renders
   // honestly as read-only raw rows; this label names that leftover store

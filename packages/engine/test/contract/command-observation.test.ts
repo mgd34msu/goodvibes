@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { commandObservation } from '../../sdk/src/platform/contract/command-observation.js';
+import { commandObservation } from '../../platform/src/platform/contract/command-observation.js';
 
 test('native exec output is exposed without confusing the executed script with stdout', () => {
   const raw = JSON.stringify({ cmd: 'verify archive', exit_code: 0, success: true,

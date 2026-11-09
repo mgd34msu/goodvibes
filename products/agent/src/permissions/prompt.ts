@@ -4,15 +4,15 @@ import { activeTokens } from '../renderer/theme.ts';
 import { beginModal, finishModal, wrapLines, type KitHint, type SurfaceLayer } from '../renderer/surface-kit.ts';
 import { button, buttonWidth, type ButtonTone } from '../renderer/surface-kit-parts.ts';
 import { modalHeightFor, modalTextWidth } from '../renderer/surface-kit-extra.ts';
-import type { PermissionRequestAnalysis } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import { buildPermissionApprovalBrief, getDisplayArg } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import type { PermissionRequestAnalysis } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { buildPermissionApprovalBrief, getDisplayArg } from '@goodvibes-jev/engine/platform/platform/permissions';
 
 import type {
   PermissionPromptRequest,
   PermissionPromptDecision,
   PermissionRequestHandler,
   PermissionRequest,
-} from '@goodvibes-jev/engine/sdk/platform/permissions';
+} from '@goodvibes-jev/engine/platform/platform/permissions';
 export type { PermissionPromptRequest, PermissionPromptDecision, PermissionRequestHandler, PermissionRequest };
 
 /**
@@ -42,7 +42,7 @@ export class PermissionPromptUI extends PermissionPromptFacts {
   }
 
   /**
-   * "Who is asking" line for the two attribution kinds (SDK 1.6.1) that have
+   * "Who is asking" line for the two attribution kinds (platform 1.6.1) that have
    * no OTHER rendered channel for it. `background-agent` attribution is
    * deliberately excluded here: it already flows into the fleet
    * ProcessRegistry via `metadata.agentId` (see

@@ -7,12 +7,12 @@ import { afterAll, afterEach, describe, expect, test } from 'bun:test';
 import {
   DedupingInboundMailSink,
   createInboundMailDedup,
-} from '../sdk/src/platform/email/inbound/sink.ts';
+} from '../platform/src/platform/email/inbound/sink.ts';
 import {
   InboundMailboxWatcher,
   resolveWatcherSettings,
-} from '../sdk/src/platform/email/inbound/index.ts';
-import type { InboundMailboxMessage } from '../sdk/src/platform/email/inbound/ports.ts';
+} from '../platform/src/platform/email/inbound/index.ts';
+import type { InboundMailboxMessage } from '../platform/src/platform/email/inbound/ports.ts';
 import { makeFakeMailbox, openMailboxSocket, type FakeMailboxServer } from './_helpers/fake-imap-mailbox.ts';
 import {
   FakeClock,

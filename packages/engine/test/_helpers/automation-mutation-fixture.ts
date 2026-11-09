@@ -1,12 +1,12 @@
 import { join } from 'node:path';
-import { ConfigManager } from '../../sdk/src/platform/config/manager.js';
-import { AutomationManager } from '../../sdk/src/platform/automation/manager.js';
-import { AutomationJobStore } from '../../sdk/src/platform/automation/store/jobs.js';
-import { AutomationRunStore } from '../../sdk/src/platform/automation/store/runs.js';
-import { AutomationRouteStore } from '../../sdk/src/platform/automation/store/routes.js';
-import { RouteBindingManager } from '../../sdk/src/platform/channels/index.js';
-import { SharedSessionBroker } from '../../sdk/src/platform/control-plane/session-broker.js';
-import type { AutomationJob, ManagedAutomationJob } from '../../sdk/src/platform/automation/jobs.js';
+import { ConfigManager } from '../../platform/src/platform/config/manager.js';
+import { AutomationManager } from '../../platform/src/platform/automation/manager.js';
+import { AutomationJobStore } from '../../platform/src/platform/automation/store/jobs.js';
+import { AutomationRunStore } from '../../platform/src/platform/automation/store/runs.js';
+import { AutomationRouteStore } from '../../platform/src/platform/automation/store/routes.js';
+import { RouteBindingManager } from '../../platform/src/platform/channels/index.js';
+import { SharedSessionBroker } from '../../platform/src/platform/control-plane/session-broker.js';
+import type { AutomationJob, ManagedAutomationJob } from '../../platform/src/platform/automation/jobs.js';
 
 export function automationMutationFixture(directory: string) {
   const path = join(directory, 'jobs.json');

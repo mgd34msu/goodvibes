@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { buildIncidentMemoryAddOptions } from '@goodvibes-jev/engine/sdk/platform/state';
+import { buildIncidentMemoryAddOptions } from '@goodvibes-jev/engine/platform/platform/state';
 import type { ForensicsBundle } from './_helpers/runtime-seam.ts';
 
 describe('buildIncidentMemoryAddOptions', () => {

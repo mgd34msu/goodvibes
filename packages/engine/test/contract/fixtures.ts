@@ -3,7 +3,7 @@
  * work group with one implementation unit, and the fields every contract
  * carries. Tests override what they exercise.
  */
-import { emptyWorkItemUsage } from '../../sdk/src/platform/orchestration/types.js';
+import { emptyWorkItemUsage } from '../../platform/src/platform/orchestration/types.js';
 import {
   CURRENT_CONTRACT_SCHEMA_VERSION,
   newContractId,
@@ -11,7 +11,7 @@ import {
   type ContractGroup,
   type ContractUnit,
   type Criterion,
-} from '../../sdk/src/platform/contract/index.js';
+} from '../../platform/src/platform/contract/index.js';
 
 export function makeCriterion(overrides: Partial<Criterion> & Pick<Criterion, 'id'>): Criterion {
   return {

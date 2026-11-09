@@ -1,5 +1,5 @@
 /** Canonical successor of the engineer → failing review → fixer → passing review scene. */
-import type { ContractView, ContractUnitView } from '@goodvibes-jev/engine/sdk/platform/contract';
+import type { ContractView, ContractUnitView } from '@goodvibes-jev/engine/platform/platform/contract';
 import { contractCriterion, contractFixture, contractUnit } from './contract-work-tree-fixtures.ts';
 
 export function correctedContractScene(startedAt: number): ContractView {

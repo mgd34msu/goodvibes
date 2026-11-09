@@ -18,8 +18,8 @@ import {
   postSessionSpineClose,
   postSessionSpineRegister,
   type SessionSpineRestConnection,
-} from '../sdk/src/platform/runtime/session-spine/rest-transport.ts';
-import { AGENT_SPINE_PARTICIPANT, SessionSpineClient } from '../sdk/src/platform/runtime/session-spine/client.ts';
+} from '../platform/src/platform/runtime/session-spine/rest-transport.ts';
+import { AGENT_SPINE_PARTICIPANT, SessionSpineClient } from '../platform/src/platform/runtime/session-spine/client.ts';
 
 interface CapturedRequest {
   readonly url: string;

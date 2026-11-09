@@ -16,13 +16,13 @@ import {
   MAX_ACKNOWLEDGEMENTS,
   OccasionStateStore,
   validateOccasionState,
-} from '../sdk/src/platform/occasions/state-store.ts';
+} from '../platform/src/platform/occasions/state-store.ts';
 import type {
   GiftRecord,
   Interview,
   OccasionAcknowledgement,
   OpenItem,
-} from '../sdk/src/platform/occasions/types.ts';
+} from '../platform/src/platform/occasions/types.ts';
 
 const dirs: string[] = [];
 function statePath(): string {

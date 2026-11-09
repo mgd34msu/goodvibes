@@ -16,8 +16,8 @@ import {
   type WorkItem,
   type WorkItemSpec,
   type Workstream,
-} from '../sdk/src/platform/orchestration/index.js';
-import { dependencyStatus } from '../sdk/src/platform/orchestration/scheduler.js';
+} from '../platform/src/platform/orchestration/index.js';
+import { dependencyStatus } from '../platform/src/platform/orchestration/scheduler.js';
 
 function makeItem(spec: WorkItemSpec): WorkItem {
   return {

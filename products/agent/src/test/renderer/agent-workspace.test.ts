@@ -15,10 +15,10 @@ import type { CommandContext } from '../../input/command-registry.ts';
 import { renderAgentWorkspace } from '../../renderer/agent-workspace.ts';
 import type { SurfaceLayer } from '../../renderer/surface-kit.ts';
 import { createShellPathService } from '@/runtime/index.ts';
-import type { ArtifactDescriptor } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import type { ConfigSetting } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { MemoryApi } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import type { MemoryRecord } from '@goodvibes-jev/engine/sdk/platform/state';
+import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
+import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import type { MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 /** The workspace modal's text (it is a kit layer drawn over the screen). */

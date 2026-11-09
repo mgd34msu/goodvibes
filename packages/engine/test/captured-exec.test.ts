@@ -3,16 +3,16 @@ import { spawnSync } from 'node:child_process';
 import { closeSync, openSync, ftruncateSync, chmodSync, statSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { admitCapturedExecDependency } from '../sdk/src/platform/tools/exec/captured-exec-dependencies.js';
+import { admitCapturedExecDependency } from '../platform/src/platform/tools/exec/captured-exec-dependencies.js';
 import { useToolReadings } from './_helpers/tool-readings.js';
 useToolReadings([['"CAPTURE_SYNTHETIC_TOKEN"', { credential: true }]], [['CAPTURE_NETWORK_POLICY', { catastrophic: false, needsNetwork: true }]]);
-import { captureContractInput, materializeContractInput, contractInputPath } from '../sdk/src/platform/contract/input-snapshot.js';
-import { assertContractInputReadAccess, createContractInputAuthority, revokeContractInputAuthority } from '../sdk/src/platform/contract/input-authority.js';
-import type { Contract } from '../sdk/src/platform/contract/types.js';
-import { runCapturedCommand, probeCapturedExecAvailability, type CapturedExecAuthority } from '../sdk/src/platform/tools/exec/captured-exec.js';
-import { formatResult } from '../sdk/src/platform/tools/exec/result-format.js';
-import { publishCapturedProjection } from '../sdk/src/platform/tools/exec/captured-exec-publication.js';
-import { RetainedFileBytes } from '../sdk/src/platform/utils/retained-file-bytes.js';
+import { captureContractInput, materializeContractInput, contractInputPath } from '../platform/src/platform/contract/input-snapshot.js';
+import { assertContractInputReadAccess, createContractInputAuthority, revokeContractInputAuthority } from '../platform/src/platform/contract/input-authority.js';
+import type { Contract } from '../platform/src/platform/contract/types.js';
+import { runCapturedCommand, probeCapturedExecAvailability, type CapturedExecAuthority } from '../platform/src/platform/tools/exec/captured-exec.js';
+import { formatResult } from '../platform/src/platform/tools/exec/result-format.js';
+import { publishCapturedProjection } from '../platform/src/platform/tools/exec/captured-exec-publication.js';
+import { RetainedFileBytes } from '../platform/src/platform/utils/retained-file-bytes.js';
 
 const roots: string[] = [];
 const ownedAuthorities = new Set<Parameters<typeof revokeContractInputAuthority>[0]>();
@@ -207,9 +207,9 @@ test.skipIf(!supported)('forged authority and detached commands cannot select a 
   expect((await runCapturedCommand(binding, 'echo DETACHED', { background: true }, binding.root, 5000)).denied).toBe(true);
 });
 test('captured backend identity is construction-owned, not a copied name or model property', async () => {
-  const { createExecTool, isCapturedExecTool } = await import('../sdk/src/platform/tools/exec/runtime.js');
-  const { ProcessManager } = await import('../sdk/src/platform/tools/shared/process-manager.js');
-  const { OverflowHandler } = await import('../sdk/src/platform/tools/shared/overflow.js');
+  const { createExecTool, isCapturedExecTool } = await import('../platform/src/platform/tools/exec/runtime.js');
+  const { ProcessManager } = await import('../platform/src/platform/tools/shared/process-manager.js');
+  const { OverflowHandler } = await import('../platform/src/platform/tools/shared/overflow.js');
   const binding = await fixture();
   const tool = createExecTool(new ProcessManager(), {
     overflowHandler: new OverflowHandler({ baseDir: binding.root }), defaultWorkingDirectory: binding.root, capturedInput: binding,
@@ -256,9 +256,9 @@ test('unsupported ABI has a typed availability refusal without executing a comma
 
 for (const policy of ['disabled', 'enabled', 'denied'] as const)
   test.skipIf(!supported)(`captured exec preserves existing ${policy} sandbox network policy`, async () => {
-    const { createExecTool } = await import('../sdk/src/platform/tools/exec/runtime.js');
-    const { ProcessManager } = await import('../sdk/src/platform/tools/shared/process-manager.js');
-    const { OverflowHandler } = await import('../sdk/src/platform/tools/shared/overflow.js');
+    const { createExecTool } = await import('../platform/src/platform/tools/exec/runtime.js');
+    const { ProcessManager } = await import('../platform/src/platform/tools/shared/process-manager.js');
+    const { OverflowHandler } = await import('../platform/src/platform/tools/shared/overflow.js');
     const binding = await fixture();
     let escalations = 0;
     const tool = createExecTool(new ProcessManager(), {
@@ -413,9 +413,9 @@ test.skipIf(!supported)('workspace remapping refuses excluded owner targets', as
 
 for (const mode of ['default', 'override', 'allowlist', 'disabled'] as const)
   test.skipIf(!supported)(`captured ambient environment preserves existing scrub and ${mode} opt-in semantics`, async () => {
-    const { createExecTool } = await import('../sdk/src/platform/tools/exec/runtime.js');
-    const { ProcessManager } = await import('../sdk/src/platform/tools/shared/process-manager.js');
-    const { OverflowHandler } = await import('../sdk/src/platform/tools/shared/overflow.js');
+    const { createExecTool } = await import('../platform/src/platform/tools/exec/runtime.js');
+    const { ProcessManager } = await import('../platform/src/platform/tools/shared/process-manager.js');
+    const { OverflowHandler } = await import('../platform/src/platform/tools/shared/overflow.js');
     const binding = await fixture();
     const previousOrdinary = process.env.CAPTURE_BUILD_SETTING;
     const previousToken = process.env.CAPTURE_SYNTHETIC_TOKEN;
@@ -444,9 +444,9 @@ for (const mode of ['default', 'override', 'allowlist', 'disabled'] as const)
 for (const position of ['top-level', 'command'] as const)
   for (const option of ['stdin', 'input'] as const)
   test(`captured unsupported ${position} ${option} is a typed refusal, never false success`, async () => {
-    const { createExecTool } = await import('../sdk/src/platform/tools/exec/runtime.js');
-    const { ProcessManager } = await import('../sdk/src/platform/tools/shared/process-manager.js');
-    const { OverflowHandler } = await import('../sdk/src/platform/tools/shared/overflow.js');
+    const { createExecTool } = await import('../platform/src/platform/tools/exec/runtime.js');
+    const { ProcessManager } = await import('../platform/src/platform/tools/shared/process-manager.js');
+    const { OverflowHandler } = await import('../platform/src/platform/tools/shared/overflow.js');
     const binding = await fixture();
     const tool = createExecTool(new ProcessManager(), {
       capturedInput: binding, defaultWorkingDirectory: binding.root, overflowHandler: new OverflowHandler({ baseDir: binding.root }),

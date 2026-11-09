@@ -22,8 +22,8 @@
  * visible on purpose: it is a pointer, not a secret, and hiding it would make
  * the indirection impossible to verify.
  */
-import type { ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/sdk/platform/config';
-import { ConfigError } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
+import { ConfigError } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   REDACTED_VALUE,
   isSensitiveConfigPath,

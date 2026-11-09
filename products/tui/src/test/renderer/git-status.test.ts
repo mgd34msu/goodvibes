@@ -2,7 +2,7 @@ import { describe, test, expect, afterEach } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { GitService } from '@goodvibes-jev/engine/sdk/platform/git';
+import { GitService } from '@goodvibes-jev/engine/platform/platform/git';
 import { GitStatusProvider } from '../../renderer/git-status.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 

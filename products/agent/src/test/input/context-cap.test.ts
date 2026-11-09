@@ -9,17 +9,17 @@ import { ModelPickerModal } from '../../input/model-picker.ts';
 import {
   type ModelDefinition,
   ProviderRegistry,
-} from '@goodvibes-jev/engine/sdk/platform/providers';
-import { createLaunchTolerantProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+} from '@goodvibes-jev/engine/platform/platform/providers';
+import { createLaunchTolerantProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { SecretsManager } from '../../config/secrets.ts';
-import { ServiceRegistry } from '@goodvibes-jev/engine/sdk/platform/config';
-import { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { CacheHitTracker } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { ProviderCapabilityRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { FavoritesStore } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { BenchmarkStore } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { DiscoveredServer } from '@goodvibes-jev/engine/sdk/platform/discovery';
+import { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
+import { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { CacheHitTracker } from '@goodvibes-jev/engine/platform/platform/providers';
+import { ProviderCapabilityRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { FavoritesStore } from '@goodvibes-jev/engine/platform/platform/providers';
+import { BenchmarkStore } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { DiscoveredServer } from '@goodvibes-jev/engine/platform/platform/discovery';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 // ---------------------------------------------------------------------------

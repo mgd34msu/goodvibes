@@ -3,17 +3,17 @@ import { conversationReadingsPort } from '../helpers/conversation-readings.ts';
  * Main-session passive-injection WIRING tests, the regression
  * class the stubbed /recall tests could not catch.
  *
- * Background: the SDK turn loop hard-gates per-turn passive knowledge
+ * Background: the platform turn loop hard-gates per-turn passive knowledge
  * injection on `Orchestrator.coreServices.memoryRegistry` (undefined is a
  * silent no-op). Both TUI `setCoreServices()` call sites (runtime/bootstrap.ts
  * and main.ts) originally omitted `memoryRegistry`, so main-session injection
  * was dead in production while every /recall test passed against stubs.
  *
- * SDK 1.2.0 update: `memoryRegistry` is no longer forwarded by identity, the
+ * platform 1.2.0 update: `memoryRegistry` is no longer forwarded by identity, the
  * turn loop needs a SYNCHRONOUS `getAll()`, but the memory spine's wire reads
  * are asynchronous, so the builder now synthesizes `memoryRegistry` from the
  * spine's freshness-stamped, synchronously-readable `recallSnapshot()` (see
- * docs/decisions/2026-07-06-memory-wire-full-detach.md in the SDK repo, and
+ * docs/decisions/2026-07-06-memory-wire-full-detach.md in the platform repo, and
  * the comment on `buildSharedOrchestratorCoreServices`). These tests were
  * updated to build a fake `memorySpine` (exposing `recallSnapshot()`) rather
  * than a raw `{ getAll }` registry, while preserving their original intent:
@@ -34,15 +34,15 @@ import { beforeEach, afterEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { RuntimeEventBus } from '@/runtime/index.ts';
-import { Orchestrator } from '@goodvibes-jev/engine/sdk/platform/core';
+import { Orchestrator } from '@goodvibes-jev/engine/platform/platform/core';
 import { ConversationManager } from '../../core/conversation.ts';
 import { buildSharedOrchestratorCoreServices, type OrchestratorCoreServicesSource } from '../../runtime/orchestrator-core-services.ts';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { PermissionManager } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { UNKNOWN_MODEL_PRICING } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { ChatResponse, LLMProvider, ModelDefinition, ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { MemoryRecord } from '@goodvibes-jev/engine/sdk/platform/state';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { PermissionManager } from '@goodvibes-jev/engine/platform/platform/permissions';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { UNKNOWN_MODEL_PRICING } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { ChatResponse, LLMProvider, ModelDefinition, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
 
 let previousPort: ReturnType<typeof installJudgmentPort>;
 const RATE_LIMIT_RESPONSE = 'Configure a token bucket for the API with a limit of 100 requests per minute.';
@@ -77,7 +77,7 @@ const FAKE_MODEL: ModelDefinition = {
   selectable: true,
 };
 
-/** A reviewed, high-confidence record that scores over the relevance floor for the rate-limiting query below (mirrors the SDK's own turn-loop fixture). */
+/** A reviewed, high-confidence record that scores over the relevance floor for the rate-limiting query below (mirrors the platform's own turn-loop fixture). */
 function makeRelevantRecord(): MemoryRecord {
   return {
     id: 'mem_ratelimit',

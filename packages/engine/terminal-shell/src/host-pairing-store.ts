@@ -1,6 +1,6 @@
 import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readSync, type Stats } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { acquireCrossProcessLock, confirmFileDurable, writeJsonFileAtomic } from '@goodvibes-jev/engine/sdk/platform/state/durable-file-io';
+import { acquireCrossProcessLock, confirmFileDurable, writeJsonFileAtomic } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
 export const HOST_PAIRING_MAX_RECORDS = 32;
 export const HOST_PAIRING_MAX_BYTES = 256 * 1024;
 export interface HostPairingAttempt {

@@ -5,7 +5,7 @@ import type { CommandContext } from '../../input/command-registry.ts';
 import { registerRemoteRuntimeCommands } from '../../input/commands/remote-runtime.ts';
 import { createShellPathService } from '@/runtime/index.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
-import { AgentManager } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { AgentManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import { createStaticUiReadModel } from '../helpers/ui-read-models.ts';
 import {
   getTestAgentManager,

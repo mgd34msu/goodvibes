@@ -1,8 +1,8 @@
 import { dirname, join, resolve } from 'node:path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import type { CommandContext } from '../command-registry.ts';
-import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
-import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
 import { requireShellPaths } from './runtime-services.ts';
 
 export interface SetupReviewSnapshot {

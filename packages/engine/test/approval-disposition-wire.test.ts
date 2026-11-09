@@ -2,10 +2,10 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createDaemonSystemRouteHandlers } from '../daemon-sdk/src/system-routes.js';
-import type { DaemonSystemRouteContext } from '../daemon-sdk/src/system-route-types.js';
-import { ApprovalBroker, type SharedApprovalRecord } from '../sdk/src/platform/control-plane/approval-broker.js';
-import type { PermissionPromptRequest } from '../sdk/src/platform/permissions/prompt.js';
+import { createDaemonSystemRouteHandlers } from '../daemon-api/src/system-routes.js';
+import type { DaemonSystemRouteContext } from '../daemon-api/src/system-route-types.js';
+import { ApprovalBroker, type SharedApprovalRecord } from '../platform/src/platform/control-plane/approval-broker.js';
+import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

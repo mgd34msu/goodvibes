@@ -19,7 +19,7 @@
 import { buildPendingPermissionExtras } from './hunk-selection.ts';
 import type { ApprovalRequesterLookup } from './hunk-selection.ts';
 import type { PendingPermissionState } from '../shell/blocking-input.ts';
-import type { PermissionPromptRequest, RememberTier } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import type { PermissionPromptRequest, RememberTier } from '@goodvibes-jev/engine/platform/platform/permissions';
 
 /** The broker seam this helper answers through, a subset of ApprovalBroker. */
 export interface BrokerApprovalCardBroker extends ApprovalRequesterLookup {

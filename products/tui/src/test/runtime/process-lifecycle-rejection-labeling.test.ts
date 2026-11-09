@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { installProcessLifecycle, type ProcessLifecycleDeps } from '../../runtime/process-lifecycle.ts';
 import { publicErrorTextAnswer, preparePublicErrorText, flushErrorNotices } from '../helpers/user-error-reading.ts';
 import { failureReading, failureState, installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { userErrorEvidence, userErrorReading } from '@goodvibes-jev/engine/sdk/platform/routing';
+import { userErrorEvidence, userErrorReading } from '@goodvibes-jev/engine/platform/platform/routing';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import type { BootstrapContext } from '../../runtime/bootstrap.ts';

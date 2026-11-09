@@ -2,9 +2,9 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ApprovalBroker, type SharedApprovalRecord } from '../sdk/src/platform/control-plane/approval-broker.js';
-import type { PermissionPromptDecision, PermissionPromptRequest } from '../sdk/src/platform/permissions/prompt.js';
-import { PersistentStore } from '../sdk/src/platform/state/persistent-store.js';
+import { ApprovalBroker, type SharedApprovalRecord } from '../platform/src/platform/control-plane/approval-broker.js';
+import type { PermissionPromptDecision, PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.js';
+import { PersistentStore } from '../platform/src/platform/state/persistent-store.js';
 
 interface Snapshot extends Record<string, unknown> { readonly approvals: readonly SharedApprovalRecord[] }
 function deferred<T>() {

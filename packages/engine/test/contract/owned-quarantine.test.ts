@@ -3,10 +3,10 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ContractStore, ContractStoreVersionError, contractPath, contractsDir } from '../../sdk/src/platform/contract/store.js';
-import { CURRENT_CONTRACT_SCHEMA_VERSION } from '../../sdk/src/platform/contract/types.js';
-import { ownedContractCheckpointText, readOwnedContractCheckpoint, type OwnedContractCheckpointRead } from '../../sdk/src/platform/contract/owned-checkpoint-read.js';
-import { captureQuarantineSource, type QuarantineSource } from '../../sdk/src/platform/utils/atomic-json-store.js';
+import { ContractStore, ContractStoreVersionError, contractPath, contractsDir } from '../../platform/src/platform/contract/store.js';
+import { CURRENT_CONTRACT_SCHEMA_VERSION } from '../../platform/src/platform/contract/types.js';
+import { ownedContractCheckpointText, readOwnedContractCheckpoint, type OwnedContractCheckpointRead } from '../../platform/src/platform/contract/owned-checkpoint-read.js';
+import { captureQuarantineSource, type QuarantineSource } from '../../platform/src/platform/utils/atomic-json-store.js';
 import { makeContract } from './fixtures.js';
 
 const roots: string[] = [];

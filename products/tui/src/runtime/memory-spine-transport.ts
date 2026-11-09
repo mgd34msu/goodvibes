@@ -1,10 +1,10 @@
 /**
  * memory-spine-transport.ts
  *
- * The TUI memory-spine cutover: a thin wrapper over the SDK's own canonical
+ * The TUI memory-spine cutover: a thin wrapper over the platform's own canonical
  * memory-spine REST transport
  * (`createMemorySpineRestTransport` from
- * `@goodvibes-jev/engine/sdk/platform/runtime/memory-spine`).
+ * `@goodvibes-jev/engine/platform/platform/runtime/memory-spine`).
  *
  * ── Hoist provenance (2026-07-30 daemon/TUI split) ──────────────────────────
  *
@@ -17,11 +17,11 @@
  * rule that a transport failure propagates rather than silently falling back
  * to a divergent local copy.
  *
- * The SDK's `rest-transport.ts` (`platform/runtime/memory-spine`) adopted
+ * The platform's `rest-transport.ts` (`platform/runtime/memory-spine`) adopted
  * this file's version as the superset, same routes,
  * same discriminator functions, same honesty contract, same transport-http
  * primitives, so this file now just delegates. `MemorySpineWireOptions`
- * (`{baseUrl, authToken, fetchImpl?}`) is the same shape the SDK's
+ * (`{baseUrl, authToken, fetchImpl?}`) is the same shape the platform's
  * `MemorySpineRestTransportOptions` takes, so there is nothing to adapt: this
  * export is a direct pass-through, kept as this file's own named symbol only
  * because `spine-adoption.ts` and this surface's tests already import it from
@@ -29,7 +29,7 @@
  *
  * Retired in the same hoist: `syncMemorySpineToHostStatus` and
  * `MemorySpineActiveRef`. Memory-spine activation is now folded into the
- * SDK's `createSpineAdoptionSync` (see `src/runtime/client/spine-adoption.ts`)
+ * platform's `createSpineAdoptionSync` (see `src/runtime/client/spine-adoption.ts`)
  *, `spine-adoption.ts` supplies `memoryTransport` in the connect bundle
  * instead of calling a separate sync function on the daemon-status signal.
  * Confirmed zero non-test callers remained (only
@@ -37,9 +37,9 @@
  * them) before deleting both.
  */
 import {
-  createMemorySpineRestTransport as createSdkMemorySpineRestTransport,
+  createMemorySpineRestTransport as createPlatformMemorySpineRestTransport,
   type MemoryTransport,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/memory-spine';
+} from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 
 export interface MemorySpineWireOptions {
   readonly baseUrl: string;
@@ -49,11 +49,11 @@ export interface MemorySpineWireOptions {
 
 /**
  * Build the `MemorySpineClient` wire transport: a direct delegate to the
- * SDK's canonical `createMemorySpineRestTransport`, which implements the full
+ * platform's canonical `createMemorySpineRestTransport`, which implements the full
  * memory.records.* route catalog (five CORE routes plus the ten 1.2.0
  * EXTENDED routes). `spine-adoption.ts` builds a client from this the same
  * way it adopts the session spine.
  */
 export function createTuiMemorySpineTransport(options: MemorySpineWireOptions): MemoryTransport {
-  return createSdkMemorySpineRestTransport(options);
+  return createPlatformMemorySpineRestTransport(options);
 }

@@ -1,14 +1,14 @@
 /** Real authentication and contract REST dispatch over an ephemeral loopback listener. */
 import { join } from 'node:path';
-import { createDaemonControlRouteHandlers } from '../../daemon-sdk/src/control-routes.js';
-import { dispatchDaemonApiRoutes } from '../../daemon-sdk/src/api-router.js';
-import { GatewayMethodCatalog } from '../../sdk/src/platform/control-plane/method-catalog.js';
-import { registerContractGatewayMethods } from '../../sdk/src/platform/control-plane/routes/contracts.js';
-import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../../sdk/src/platform/daemon/control-plane.js';
-import { resolveAuthenticatedPrincipal } from '../../sdk/src/platform/daemon/http-policy.js';
-import { UserAuthManager } from '../../sdk/src/platform/security/user-auth.js';
-import { OPERATOR_SESSION_COOKIE_NAME } from '../../sdk/src/platform/security/http-auth.js';
-import { createContractOperatorService } from '../../sdk/src/platform/contract/index.js';
+import { createDaemonControlRouteHandlers } from '../../daemon-api/src/control-routes.js';
+import { dispatchDaemonApiRoutes } from '../../daemon-api/src/api-router.js';
+import { GatewayMethodCatalog } from '../../platform/src/platform/control-plane/method-catalog.js';
+import { registerContractGatewayMethods } from '../../platform/src/platform/control-plane/routes/contracts.js';
+import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../../platform/src/platform/daemon/control-plane.js';
+import { resolveAuthenticatedPrincipal } from '../../platform/src/platform/daemon/http-policy.js';
+import { UserAuthManager } from '../../platform/src/platform/security/user-auth.js';
+import { OPERATOR_SESSION_COOKIE_NAME } from '../../platform/src/platform/security/http-auth.js';
+import { createContractOperatorService } from '../../platform/src/platform/contract/index.js';
 import { makeDefaultDaemonHandlerStub } from '../_helpers/daemon-stub-handlers.js';
 import type { Harness } from './runner-support.js';
 

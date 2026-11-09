@@ -17,7 +17,7 @@
  *  (c) real HTTP, over a live bootDaemon instance (port 0, isolated home):
  *      `GET /api/control-plane/methods/{unknownId}` and
  *      `POST /api/control-plane/methods/{unknownId}/invoke`
- *      (packages/daemon-sdk/src/control-routes.ts getGatewayMethod /
+ *      (packages/daemon-api/src/control-routes.ts getGatewayMethod /
  *      invokeGatewayMethod), what webui/TUI actually see on the wire.
  *  (d) regression: NOT_INVOKABLE is unchanged and the two codes never collide.
  */
@@ -26,11 +26,11 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { bootDaemon, type BootedDaemon } from '../sdk/src/platform/daemon/boot.ts';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { isGatewayVerbError } from '../sdk/src/platform/control-plane/routes/gateway-verb-error.ts';
-import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../sdk/src/platform/daemon/control-plane.ts';
-import { SDKErrorCodes } from '../errors/src/index.ts';
+import { bootDaemon, type BootedDaemon } from '../platform/src/platform/daemon/boot.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { isGatewayVerbError } from '../platform/src/platform/control-plane/routes/gateway-verb-error.ts';
+import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../platform/src/platform/daemon/control-plane.ts';
+import { EngineErrorCodes } from '../errors/src/index.ts';
 
 const UNKNOWN_ID = 'w6-c4.definitely-not-a-real-method';
 
@@ -46,7 +46,7 @@ describe('(a) GatewayMethodCatalog.invoke(): uncataloged id throws a coded Gatew
     }
     expect(isGatewayVerbError(caught)).toBe(true);
     if (isGatewayVerbError(caught)) {
-      expect(caught.code).toBe(SDKErrorCodes.METHOD_NOT_FOUND);
+      expect(caught.code).toBe(EngineErrorCodes.METHOD_NOT_FOUND);
       expect(caught.status).toBe(404);
       // human message preserved for people, code added for machines
       expect(caught.message).toContain(UNKNOWN_ID);
@@ -67,7 +67,7 @@ describe('(b) DaemonControlPlaneHelper.invokeGatewayMethodCall: uncataloged id 4
     const result = await helper.invokeGatewayMethodCall({ authToken: 'irrelevant', methodId: UNKNOWN_ID });
     expect(result.status).toBe(404);
     expect(result.ok).toBe(false);
-    expect((result.body as Record<string, unknown>).code).toBe(SDKErrorCodes.METHOD_NOT_FOUND);
+    expect((result.body as Record<string, unknown>).code).toBe(EngineErrorCodes.METHOD_NOT_FOUND);
     expect((result.body as Record<string, unknown>).error).toContain('Unknown gateway method');
   });
 });
@@ -106,7 +106,7 @@ describe('(c) real bootDaemon HTTP proof: the wire shape webui/TUI actually cons
     const res = await fetch(`${daemon.url}/api/control-plane/methods/${UNKNOWN_ID}`, { headers: auth() });
     expect(res.status).toBe(404);
     const body = await res.json() as { error?: string; code?: string };
-    expect(body.code).toBe(SDKErrorCodes.METHOD_NOT_FOUND);
+    expect(body.code).toBe(EngineErrorCodes.METHOD_NOT_FOUND);
     expect(body.error ?? '').toContain('Unknown gateway method');
   });
 
@@ -118,7 +118,7 @@ describe('(c) real bootDaemon HTTP proof: the wire shape webui/TUI actually cons
     });
     expect(res.status).toBe(404);
     const body = await res.json() as { error?: string; code?: string };
-    expect(body.code).toBe(SDKErrorCodes.METHOD_NOT_FOUND);
+    expect(body.code).toBe(EngineErrorCodes.METHOD_NOT_FOUND);
   });
 
   test('(d) regression: a real cataloged method (control.methods.list) is unaffected: no code on a 200', async () => {
@@ -131,6 +131,6 @@ describe('(c) real bootDaemon HTTP proof: the wire shape webui/TUI actually cons
 
 describe('(d) METHOD_NOT_FOUND and NOT_INVOKABLE never collide', () => {
   test('the two codes are distinct string literals', () => {
-    expect(SDKErrorCodes.METHOD_NOT_FOUND).not.toBe(SDKErrorCodes.NOT_INVOKABLE);
+    expect(EngineErrorCodes.METHOD_NOT_FOUND).not.toBe(EngineErrorCodes.NOT_INVOKABLE);
   });
 });

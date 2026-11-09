@@ -5,7 +5,7 @@ import { describe, test, expect } from 'bun:test';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { SessionPickerModal } from '../../input/session-picker-modal.ts';
-import { SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
+import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { renderSessionPickerModal } from '../../renderer/session-picker-modal.ts';
 import { activeTokens } from '../../renderer/theme.ts';
 import { layerText, layerTextBlock } from '../helpers/surface-frame.ts';

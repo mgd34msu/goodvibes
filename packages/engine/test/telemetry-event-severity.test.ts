@@ -8,9 +8,9 @@
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import ts from 'typescript';
-import { EVENT_SEVERITY } from '../sdk/src/platform/runtime/telemetry/event-severity.ts';
-import { inferSeverity, isErrorEventType } from '../sdk/src/platform/runtime/telemetry/api-helpers.ts';
-import type { NormalizedError } from '../sdk/src/platform/utils/error-display.ts';
+import { EVENT_SEVERITY } from '../platform/src/platform/runtime/telemetry/event-severity.ts';
+import { inferSeverity, isErrorEventType } from '../platform/src/platform/runtime/telemetry/api-helpers.ts';
+import type { NormalizedError } from '../platform/src/platform/utils/error-display.ts';
 
 /** Every string literal in the `type` field of the `AnyRuntimeEvent` union. */
 function declaredEventTypes(): readonly string[] {

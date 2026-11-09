@@ -218,7 +218,7 @@ const ALLOWED_PACKAGE_DOC_FILENAMES = [
   'connected-host.md',
   'getting-started.md',
   // The Google pages are user-facing package docs: the runbook is the written
-  // fallback for the /google setup automation (generated from the SDK's setup
+  // fallback for the /google setup automation (generated from the platform's setup
   // plan) and the scope strategy explains exactly what that integration
   // requests. They ship via the package `files` glob either way; listing them
   // here brings them under the same required-path, docs-index, and

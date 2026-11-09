@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'bun:test';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SDK_DIST = resolve(__dirname, '../sdk/dist');
+const PLATFORM_DIST = resolve(__dirname, '../platform/dist');
 
 /**
  * Companion entry points that must be free of `node:*` imports and `Bun.*`
@@ -50,7 +50,7 @@ describe('Companion bundle guard: no node: imports or Bun.* calls', () => {
   for (const entry of COMPANION_ENTRIES) {
     for (const { pattern, label } of DISALLOWED) {
       test(`dist/${entry} contains no ${label}`, () => {
-        const filePath = resolve(SDK_DIST, entry);
+        const filePath = resolve(PLATFORM_DIST, entry);
         const fileExists = existsSync(filePath);
         expect(fileExists).toBe(true); // Fail loudly if dist not built
         if (!fileExists) return;

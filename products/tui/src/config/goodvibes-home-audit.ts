@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
-import { CONFIG_SCHEMA, DEFAULT_CONFIG } from '@goodvibes-jev/engine/sdk/platform/config';
+import { CONFIG_SCHEMA, DEFAULT_CONFIG } from '@goodvibes-jev/engine/platform/platform/config';
 
 export type HomeFileOwner = 'tui' | 'daemon' | 'foreign-goodvibes-product' | 'unknown-root';
 
@@ -88,7 +88,7 @@ const KNOWN_FOREIGN_ROOTS = new Set([
   'memory',
   'providers',
   'scripts',
-  'sdk',
+  'platform',
   'skills',
   'state',
   'telemetry',
@@ -104,7 +104,7 @@ export const GOODVIBES_ALLOWED_WRITE_ROOTS = ['tui/', 'daemon/'] as const;
 export const GOODVIBES_READ_ONLY_ROOTS = [
   '*.api.json',
   'archive/',
-  'sdk/',
+  'platform/',
   'state/',
   'events/',
   'companion-chat/',

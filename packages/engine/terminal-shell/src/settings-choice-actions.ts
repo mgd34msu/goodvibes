@@ -1,7 +1,7 @@
-import type { ConfigKey, ConfigManager, JudgmentFallbackSettings } from '@goodvibes-jev/engine/sdk/platform/config';
-import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigKey, ConfigManager, JudgmentFallbackSettings } from '@goodvibes-jev/engine/platform/platform/config';
+import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
 import { DECISION_MODEL_PROFILES, captureJudgmentBackendSettings, validEndpointURL, type DecisionModelProfile } from '@goodvibes-jev/judgment';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { OpenSelection, SelectionItem } from './selection-modal.js';
 
 export type SettingsChoiceAction = 'judgment-provider' | 'judgment-model' | 'decision-policy' | 'permission-mode' | 'decision-router' | 'judgment-fallbacks';

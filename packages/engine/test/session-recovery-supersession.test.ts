@@ -34,10 +34,10 @@ import {
   saveSession,
   writeRecoveryFile,
   type SessionSnapshot,
-} from '../sdk/src/platform/runtime/session-persistence.ts';
-import { createSessionSurface, type SessionSurface } from '../sdk/src/platform/runtime/session-surface.ts';
-import { resolveSharedDirectory } from '../sdk/src/platform/runtime/surface-root.ts';
-import { sanitizeSessionName } from '../sdk/src/platform/sessions/manager.ts';
+} from '../platform/src/platform/runtime/session-persistence.ts';
+import { createSessionSurface, type SessionSurface } from '../platform/src/platform/runtime/session-surface.ts';
+import { resolveSharedDirectory } from '../platform/src/platform/runtime/surface-root.ts';
+import { sanitizeSessionName } from '../platform/src/platform/sessions/manager.ts';
 
 const roots: string[] = [];
 

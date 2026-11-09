@@ -1,12 +1,12 @@
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { installCatalogModelFacts } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { installCatalogModelFacts } from '@goodvibes-jev/engine/platform/platform/providers';
 /**
  * The model picker opens at once on the cached catalog and fills in the slow
  * reads (credential sources, the live model re-check) afterwards, with a muted "loading catalog…" row meanwhile. The open never
  * waits on those reads.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
 import { ModelPickerModal, type ModelPickerTargetInfo } from '../../input/model-picker.ts';
 import { openModelPickerNow, type ModelPickerOpenDeps } from '../../input/model-picker-open.ts';
 import { renderModelWorkspace } from '../../renderer/model-workspace.ts';

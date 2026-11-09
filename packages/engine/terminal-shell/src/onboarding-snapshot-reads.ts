@@ -1,5 +1,5 @@
-import type { ConfigManager, GoodVibesConfig } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ServiceInspectionQuery } from '@goodvibes-jev/engine/sdk/platform/runtime/ui';
+import type { ConfigManager, GoodVibesConfig } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ServiceInspectionQuery } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
 import type { OnboardingServiceState } from './onboarding-data-types.js';
 import { sortUnique } from './onboarding-read-facts.js';
 export interface SnapshotReadIssue<Area extends string> {

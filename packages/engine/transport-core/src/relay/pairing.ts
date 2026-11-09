@@ -14,7 +14,7 @@
 
 import { fromBase64Url, toBase64Url, decodeUtf8, encodeUtf8 } from './crypto.js';
 import { RELAY_PROTOCOL_VERSION, type RendezvousId } from './protocol.js';
-import { GoodVibesSdkError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes-jev/engine/errors';
 
 /** Self-describing prefix so a scanner can recognize a relay pairing string. */
 export const PAIRING_SCHEME = 'gvrelay1';
@@ -74,7 +74,7 @@ export function decodeRelayPairingString(text: string): RelayPairingPayload {
   const trimmed = text.trim();
   const dot = trimmed.indexOf('.');
   if (dot < 0 || trimmed.slice(0, dot) !== PAIRING_SCHEME) {
-    throw new GoodVibesSdkError('Not a recognizable relay pairing string.', {
+    throw new GoodVibesError('Not a recognizable relay pairing string.', {
       category: 'bad_request',
       source: 'transport',
       recoverable: false,
@@ -85,7 +85,7 @@ export function decodeRelayPairingString(text: string): RelayPairingPayload {
   try {
     wire = JSON.parse(decodeUtf8(fromBase64Url(trimmed.slice(dot + 1))));
   } catch {
-    throw new GoodVibesSdkError('Corrupt relay pairing string.', { category: 'bad_request', source: 'transport', recoverable: false });
+    throw new GoodVibesError('Corrupt relay pairing string.', { category: 'bad_request', source: 'transport', recoverable: false });
   }
   if (
     typeof wire !== 'object' ||
@@ -95,7 +95,7 @@ export function decodeRelayPairingString(text: string): RelayPairingPayload {
     typeof (wire as WirePairing).r !== 'string' ||
     typeof (wire as WirePairing).k !== 'string'
   ) {
-    throw new GoodVibesSdkError('Relay pairing string is missing required fields.', { category: 'bad_request', source: 'transport', recoverable: false });
+    throw new GoodVibesError('Relay pairing string is missing required fields.', { category: 'bad_request', source: 'transport', recoverable: false });
   }
   const w = wire as WirePairing;
   return {

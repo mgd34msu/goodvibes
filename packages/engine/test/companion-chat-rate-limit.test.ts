@@ -3,7 +3,7 @@
  *
  * Verifies the rate-limiting behaviour of CompanionChatManager.
  *
- * (N+1)-th message in 1 minute throws GoodVibesSdkError{kind:'rate-limit'} (per-session).
+ * (N+1)-th message in 1 minute throws GoodVibesError{kind:'rate-limit'} (per-session).
  * Per-client limit is enforced across sessions.
  * Error includes retryAfterMs inside the configured window.
  * Rate limiter can be disabled via `rateLimiter: false`.
@@ -11,17 +11,17 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { CompanionChatManager } from '../sdk/src/platform/companion/companion-chat-manager.js';
+import { CompanionChatManager } from '../platform/src/platform/companion/companion-chat-manager.js';
 import {
   CompanionChatRateLimiter,
   DEFAULT_MESSAGES_PER_MINUTE_PER_SESSION,
-} from '../sdk/src/platform/companion/companion-chat-rate-limiter.js';
+} from '../platform/src/platform/companion/companion-chat-rate-limiter.js';
 import type {
   CompanionLLMProvider,
   CompanionProviderChunk,
-} from '../sdk/src/platform/companion/companion-chat-manager.js';
-import { GoodVibesSdkError } from '../errors/src/index.js';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.js';
+} from '../platform/src/platform/companion/companion-chat-manager.js';
+import { GoodVibesError } from '../errors/src/index.js';
+import type { ConfigManager } from '../platform/src/platform/config/manager.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -77,11 +77,11 @@ describe('per-session rate limit: (N+1)-th message throws', () => {
       await manager.postMessage(session.id, 'over the limit');
     } catch (err: unknown) {
       threw = true;
-      expect(err).toBeInstanceOf(GoodVibesSdkError);
-      const sdkErr = err as GoodVibesSdkError;
-      expect(sdkErr.kind).toBe('rate-limit');
-      expect(sdkErr.category).toBe('rate_limit');
-      expect(sdkErr.recoverable).toBe(true);
+      expect(err).toBeInstanceOf(GoodVibesError);
+      const engineErr = err as GoodVibesError;
+      expect(engineErr.kind).toBe('rate-limit');
+      expect(engineErr.category).toBe('rate_limit');
+      expect(engineErr.recoverable).toBe(true);
     }
     expect(threw).toBe(true);
 
@@ -143,7 +143,7 @@ describe('runtime configManager overrides per-session limit', () => {
 // ---------------------------------------------------------------------------
 
 describe('per-client rate limit: enforced across messages', () => {
-  test('throws GoodVibesSdkError after perClientLimit messages from same client', async () => {
+  test('throws GoodVibesError after perClientLimit messages from same client', async () => {
     const PER_CLIENT = 4;
     // Set per-session high so client limit triggers first
     const manager = makeManager({ perSessionLimit: 100, perClientLimit: PER_CLIENT });
@@ -159,10 +159,10 @@ describe('per-client rate limit: enforced across messages', () => {
       await manager.postMessage(session.id, 'client over limit', clientId);
     } catch (err: unknown) {
       threw = true;
-      expect(err).toBeInstanceOf(GoodVibesSdkError);
-      const sdkErr = err as GoodVibesSdkError;
-      expect(sdkErr.kind).toBe('rate-limit');
-      expect(sdkErr.code).toBe('COMPANION_CHAT_CLIENT_RATE_LIMIT');
+      expect(err).toBeInstanceOf(GoodVibesError);
+      const engineErr = err as GoodVibesError;
+      expect(engineErr.kind).toBe('rate-limit');
+      expect(engineErr.code).toBe('COMPANION_CHAT_CLIENT_RATE_LIMIT');
     }
     expect(threw).toBe(true);
 
@@ -182,10 +182,10 @@ describe('rate-limit error includes retryAfterMs inside the rate-limit window', 
     await manager.postMessage(session.id, 'first');
 
     const err = await manager.postMessage(session.id, 'second, over limit').catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(GoodVibesSdkError);
-    const sdkErr = err as GoodVibesSdkError;
-    expect(sdkErr.retryAfterMs).toBeGreaterThanOrEqual(59_000);
-    expect(sdkErr.retryAfterMs).toBeLessThanOrEqual(60_001);
+    expect(err).toBeInstanceOf(GoodVibesError);
+    const engineErr = err as GoodVibesError;
+    expect(engineErr.retryAfterMs).toBeGreaterThanOrEqual(59_000);
+    expect(engineErr.retryAfterMs).toBeLessThanOrEqual(60_001);
 
     manager.dispose();
   });
@@ -240,9 +240,9 @@ describe('client limit spans multiple sessions', () => {
       await manager.postMessage(session2.id, 'd', clientId);
     } catch (err: unknown) {
       threw = true;
-      expect(err).toBeInstanceOf(GoodVibesSdkError);
-      const sdkErr = err as GoodVibesSdkError;
-      expect(sdkErr.kind).toBe('rate-limit');
+      expect(err).toBeInstanceOf(GoodVibesError);
+      const engineErr = err as GoodVibesError;
+      expect(engineErr.kind).toBe('rate-limit');
     }
     expect(threw).toBe(true);
 

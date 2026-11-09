@@ -2,7 +2,7 @@
  * exec-env-scrub-config.ts, TUI-local synthetic settings entry for
  * permissions.execEnvScrubAllowlist.
  *
- * The SDK's credential-bearing env-var scrub (platform/tools/exec/credential-env.ts)
+ * The platform's credential-bearing env-var scrub (platform/tools/exec/credential-env.ts)
  * removes well-known credential-bearing variable NAMES (AWS_SECRET_ACCESS_KEY,
  * GITHUB_TOKEN, OPENAI_API_KEY, …) from the environment handed to every spawned
  * exec command, and is threaded into `registerAllTools`'s `credentialEnvScrub`
@@ -14,7 +14,7 @@
  * re-reading its own signing key). NEVER a value; the scrub only ever inspects
  * and reports NAMES.
  *
- * `permissions.execEnvScrubAllowlist` is not in CONFIG_SCHEMA, there is no SDK
+ * `permissions.execEnvScrubAllowlist` is not in CONFIG_SCHEMA, there is no platform
  * config domain for the exec env scrub at all (it is consumer-wired, not
  * schema-registered), so this mirrors the other TUI-local synthetic settings
  * (worktree.setup.*, sandbox.egressAllowlist, …). No defensive try/catch is
@@ -29,7 +29,7 @@
  * comma-separated list and parsed back into an array on commit (see
  * isExecEnvScrubAllowlistConfigKey's use in settings-modal.ts#commitEdit).
  */
-import type { ConfigKey, ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigKey, ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
 import type { SettingEntry, SettingsCategory } from './settings-modal-types.ts';
 
 export const EXEC_ENV_SCRUB_ALLOWLIST_CONFIG_KEY = 'permissions.execEnvScrubAllowlist' as ConfigKey;

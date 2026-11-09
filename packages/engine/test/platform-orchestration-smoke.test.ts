@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { evaluateOrchestrationSpawn } from '../sdk/src/platform/runtime/orchestration/spawn-policy.js';
+import { evaluateOrchestrationSpawn } from '../platform/src/platform/runtime/orchestration/spawn-policy.js';
 
 describe('platform/runtime/orchestration: spawn-policy smoke', () => {
 

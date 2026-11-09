@@ -1,6 +1,6 @@
 import { afterAll, afterEach, expect, test } from 'bun:test';
-import { ToolInputProjectionError, ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { ArtifactCreateInput, ArtifactDescriptor, ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
+import { ToolInputProjectionError, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ArtifactCreateInput, ArtifactDescriptor, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import { bindAgentResearchSourceOwner, createAgentResearchReportProjector, prepareProtectedResearchReport } from '../../agent/protected-research-report.ts';
 import { createAgentResearchReportTool, registerAgentResearchReportTool } from '../../tools/agent-research-report-tool.ts';
 import { registerAgentResearchTool } from '../../tools/agent-research-tool.ts';

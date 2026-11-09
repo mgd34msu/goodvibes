@@ -24,7 +24,7 @@ import {
   CALENDAR_OAUTH_CLIENT_ID_KEYS,
   CALENDAR_OAUTH_CLIENT_SECRET_KEYS,
 } from '../agent/calendar/calendar-oauth-service.ts';
-import { ensureCalendarConfigDefaults } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ensureCalendarConfigDefaults } from '@goodvibes-jev/engine/platform/platform/config';
 import type { AgentWorkspaceActionResult, AgentWorkspaceEditorKind, AgentWorkspaceLocalEditor } from './agent-workspace-types.ts';
 
 type FieldReader = (id: string) => string;
@@ -47,7 +47,7 @@ const CONNECT_HINT: Record<Provider, string> = { google: '/calendar connect goog
 
 /**
  * Build-state-aware card message (F1c): while the build still ships only the
- * bundled SDK placeholder client id, /calendar connect always fails at the
+ * bundled platform placeholder client id, /calendar connect always fails at the
  * config stage, so the old "most people can skip this" wording was a dead
  * end. Once a client id has been stored (through this same card), the
  * original skip-this-if-you-don't-need-it wording applies again.

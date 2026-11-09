@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { gateJudgmentRegistry } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { remotePublisherOutcomeKind, remotePublisherSchemaStatus } from '@goodvibes-jev/engine/sdk/platform/routing';
+import { gateJudgmentRegistry } from '@goodvibes-jev/engine/platform/platform/gate';
+import { remotePublisherOutcomeKind, remotePublisherSchemaStatus } from '@goodvibes-jev/engine/platform/platform/routing';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { readRemotePublisherOutcomeKind, readRemotePublisherSchemaStatus } from '../../tools/agent-harness-remote-publisher-readings.ts';
 import { cleanupResearchScreeningFixtures, exactSensitiveSpans, ordinaryResearchOwner, researchScreeningFixture } from '../helpers/research-screening.ts';

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ShellPathService } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import type { TerminalSlashCommand } from './command-registry.js';
 import { requireYesFlag, stripYesFlag } from './command-confirmation.js';
 import { inspectVoiceBundle, type VoiceBundle } from './voice-settings-review.js';

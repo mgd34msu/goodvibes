@@ -3,7 +3,7 @@ import { SystemMessageRouter, createSystemMessageRouter, type SystemMessageKind,
 import type { ConversationManager } from '../../core/conversation';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, choiceAnswer } from '@goodvibes-jev/judgment/testing';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 
 let previousPort: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previousPort = installJudgmentPort(fakePort((_name, question) => choiceAnswer(question, 'low')).port); });

@@ -15,9 +15,9 @@
  * kept quietly disappears on a later sweep, and nothing points at the save
  * that failed to say so.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, rmSync } from 'node:fs';
-import { SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import type { SessionSurface } from '@/runtime/index.ts';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { ConversationManager } from '../../core/conversation.ts';
@@ -89,6 +89,24 @@ describe('user-directed saves are stamped as user saves', () => {
     const renamed = sm.list().find((s) => s.title === 'a deliberate name' || s.name.includes('deliberate'));
     expect(renamed).toBeDefined();
     expect(sm.getMeta(renamed!.name)?.saveSource).toBe('user');
+    expect(sm.getMeta(renamed!.name)?.titleSource).toBe('user');
+    const persisted = JSON.parse(readFileSync(renamed!.filePath, 'utf8').split('\n')[0]!);
+    expect(persisted).toMatchObject({ title: 'a deliberate name', titleSource: 'user', model: 'm', provider: 'p', saveSource: 'user' });
+    expect(sm.load(renamed!.name).messages).toContainEqual(expect.objectContaining({ role: 'user', content: 'hello' }));
+  });
+
+  test('renaming an already saved session preserves its original transcript and metadata without recapturing the live conversation', async () => {
+    const sm = new SessionManager(tmpDir, { surface }), ctx = makeCtx(sm, []);
+    sm.save('current-session', [{ role: 'user', content: 'Original saved history' }], {
+      title: 'Original title', titleSource: 'user', model: 'saved-model', provider: 'saved-provider', timestamp: 1234, saveSource: 'user',
+    });
+    const capture = spyOn(ctx.session.conversationManager, 'toJSON').mockImplementation(() => { throw new Error('Existing rename must not capture live history'); });
+    try {
+      await handleSessionWorkflowCommand(['rename', 'Renamed original'], ctx);
+      expect(capture).not.toHaveBeenCalled();
+      expect(sm.getMeta('current-session')).toMatchObject({ title: 'Renamed original', titleSource: 'user', model: 'saved-model', provider: 'saved-provider', timestamp: 1234, saveSource: 'user' });
+      expect(sm.load('current-session').messages).toContainEqual(expect.objectContaining({ role: 'user', content: 'Original saved history' }));
+    } finally { capture.mockRestore(); }
   });
 });
 

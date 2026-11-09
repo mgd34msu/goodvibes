@@ -1,5 +1,5 @@
 /**
- * Tailscale one-action https (tailscale.get / tailscale.serve.run, SDK 1.8.0's
+ * Tailscale one-action https (tailscale.get / tailscale.serve.run, platform 1.8.0's
  * LAN-http posture work). Proves: absence is quiet (no panel, no nag, no dead
  * button); a usable tailscale environment offers "Serve over tailscale" behind
  * the shared ConfirmSheet idiom; the resulting receipt (success or failure)

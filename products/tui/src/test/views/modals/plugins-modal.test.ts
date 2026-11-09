@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import { createPluginsModalSurface, type PluginsModalManager } from '../../../views/modals/plugins-modal.ts';
-import type { PluginStatus } from '@goodvibes-jev/engine/sdk/platform/plugins';
+import type { PluginStatus } from '@goodvibes-jev/engine/platform/platform/plugins';
 import { actionCtx, captureCommands, findAction, open, tabText } from './modal-surface-test-helpers.ts';
 
 function manager(plugins: PluginStatus[], overrides: Partial<PluginsModalManager> = {}): PluginsModalManager {

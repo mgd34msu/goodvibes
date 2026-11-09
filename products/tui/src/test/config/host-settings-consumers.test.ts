@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { TuiConfigManager, TUI_NOTIFICATIONS_METADATA_ONLY_KEY as KEY, readTuiConfigValue, readTuiNotificationsMetadataOnly, subscribeTuiConfigValue } from '../../config/host-settings.ts';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerConfigCommand } from '../../input/commands/config.ts';
@@ -15,7 +15,7 @@ function fixture() {
  return { options, config: new TuiConfigManager(options) };
 }
 
-test('notification readers use registered live handle and stay restrictive for bare SDK raw false', () => {
+test('notification readers use registered live handle and stay restrictive for bare platform raw false', () => {
  const { config, options } = fixture();
  expect(readTuiNotificationsMetadataOnly(config)).toBe(true);
  const handle = config.getHostBooleanSetting(KEY); handle.set(false);

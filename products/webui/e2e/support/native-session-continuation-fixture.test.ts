@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { firstJsonSchemaFailure } from "@goodvibes-jev/engine/transport-http";
 import operatorContract from "@goodvibes-jev/engine/contracts/operator-contract.json" with { type: "json" };
-import { nativeHostedTurnLookupSchema } from "@goodvibes-jev/engine/sdk/platform/hosted-sessions/native-turn-client";
-import { nativeConversationIntakeLookupResultSchema } from "@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client";
+import { nativeHostedTurnLookupSchema } from "@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client";
+import { nativeConversationIntakeLookupResultSchema } from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client";
 import {
   loadNativeContinuationCapture,
   nativeContinuationFleetSnapshot,
@@ -29,7 +29,7 @@ describe("native continuation genuine HTTP recordings", () => {
       snapshot.nodes[1]!.sessionRef!.sessionId
     );
   });
-  test("all routes and response bytes validate the generated operator contract and SDK", () => {
+  test("all routes and response bytes validate the generated operator contract and platform", () => {
     const capture = loadNativeContinuationCapture();
     expect(JSON.stringify(capture)).not.toContain("Bearer ");
     const auth = JSON.parse(capture.auth.body) as { principalId: string; scopes: string[] };

@@ -5,9 +5,9 @@ import { createKnowledgeAnswerRenderer } from '@goodvibes-jev/engine/terminal-sh
 import '@goodvibes-jev/engine/terminal-shell/command-arguments';
 import { createKnowledgeLabels } from '@goodvibes-jev/engine/terminal-shell/knowledge-labels';
 const { nodeLabel } = createKnowledgeLabels(' confidence=');
-import type { KnowledgeService } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import type { KnowledgeService } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { CommandContext, SlashCommand } from '../command-registry.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
 
 type KnowledgeAskInput = Parameters<KnowledgeService['ask']>[0];

@@ -2,7 +2,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { contractInputPath } from '../../sdk/src/platform/contract/input-snapshot.js';
+import { contractInputPath } from '../../platform/src/platform/contract/input-snapshot.js';
 import { makeHarness, makeRepo, oneUnitPlan, startContract, waitFor, type Harness } from './runner-support.js';
 import { plannerOutput } from './plan-support.js';
 import { finishes, git, terminal } from './steps-support.js';
@@ -101,7 +101,7 @@ test('restart during planning reuses the recorded generation despite later owner
 }, 20_000);
 
 test('legacy worktree records do not invent a receipt or silently capture current source', async () => {
-  const { findZombieCause } = await import('../../sdk/src/platform/contract/resume.js');
+  const { findZombieCause } = await import('../../platform/src/platform/contract/resume.js');
   const { makeContract } = await import('./fixtures.js');
   expect(findZombieCause(makeContract({ schemaVersion: 1, isolation: 'worktree', status: 'planning' }))).toContain('no recorded input receipt');
   expect(findZombieCause(makeContract({ schemaVersion: 2, isolation: 'worktree', status: 'planning' }))).toContain('no recorded input receipt');

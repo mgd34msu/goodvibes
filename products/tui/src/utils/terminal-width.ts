@@ -1,1 +1,1 @@
-export { getDisplayWidth, center, truncateDisplay, joinPrioritizedSegments, padDisplayEnd, fitDisplay, wrapText, BODY_TAB_WIDTH, expandTabs, wrapPreservingIndent, interpolateColor, type PrioritizedSegment } from '@goodvibes-jev/engine/sdk/platform/utils';
+export { getDisplayWidth, center, truncateDisplay, joinPrioritizedSegments, padDisplayEnd, fitDisplay, wrapText, BODY_TAB_WIDTH, expandTabs, wrapPreservingIndent, interpolateColor, type PrioritizedSegment } from '@goodvibes-jev/engine/platform/platform/utils';

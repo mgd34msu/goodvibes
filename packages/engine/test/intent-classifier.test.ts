@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { createEmitterContext } from '../sdk/src/platform/core/orchestrator-runtime.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { ConversationManager } from '../sdk/src/platform/core/conversation.js';
-import { classifyIntent } from '../sdk/src/platform/core/intent-classifier.js';
-import { maybeEmitAdaptivePlannerDecision, prepareConversationForTurn } from '../sdk/src/platform/core/orchestrator-turn-helpers.js';
-import type { ExecutionPlan } from '../sdk/src/platform/core/execution-plan.js';
-import { AdaptivePlanner } from '../sdk/src/platform/core/adaptive-planner.js';
+import { createEmitterContext } from '../platform/src/platform/core/orchestrator-runtime.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { ConversationManager } from '../platform/src/platform/core/conversation.js';
+import { classifyIntent } from '../platform/src/platform/core/intent-classifier.js';
+import { maybeEmitAdaptivePlannerDecision, prepareConversationForTurn } from '../platform/src/platform/core/orchestrator-turn-helpers.js';
+import type { ExecutionPlan } from '../platform/src/platform/core/execution-plan.js';
+import { AdaptivePlanner } from '../platform/src/platform/core/adaptive-planner.js';
 import { useCoreReadings } from './_helpers/core-readings.ts';
 
 const readings = useCoreReadings({ intent: 'task', needsPlan: false, risk: 0 });

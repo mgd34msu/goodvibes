@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { HandlerSqliteStore } from '../sdk/src/platform/state/daemon-handler-sqlite-store.ts';
+import { HandlerSqliteStore } from '../platform/src/platform/state/daemon-handler-sqlite-store.ts';
 import {
   PeerRegistry,
   PeerRegistryValidationError,
   normalizeBackendConfig,
-} from '../sdk/src/platform/runtime/remote/host/peer-registry.ts';
+} from '../platform/src/platform/runtime/remote/host/peer-registry.ts';
 
 const PEER_ROW_SCHEMA = [
   `CREATE TABLE IF NOT EXISTS peers (

@@ -1,10 +1,10 @@
 import { captureModelArtifactClockSource } from './agent-harness-model-reading-source.ts';
 import { captureCatalogPath, withCapturedResearchCatalog, rankResearchRecords } from './agent-harness-research-catalog-source.ts';
 import { captureCatalogMethods, captureCatalogSnapshot } from './agent-harness-catalog-ranking.ts';
-import { ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import { observeImportFile, assertImportFileCurrent } from '@goodvibes-jev/engine/sdk/platform/config';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { ArtifactDescriptor } from '@goodvibes-jev/engine/sdk/platform/artifacts';
+import { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import { observeImportFile, assertImportFileCurrent } from '@goodvibes-jev/engine/platform/platform/config';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { CommandContext } from '../input/command-registry.ts';
 import {
   AgentResearchRunRegistry,
@@ -321,7 +321,7 @@ function browserItem(context: CommandContext, includeParameters: boolean, browse
     label: 'Browser-backed research runner',
     status: hasCertifiedRunner ? 'certified-live-runner' : browser.configured ? 'ready-with-confirmation' : 'setup-needed',
     summary: hasCertifiedRunner
-      ? 'The SDK/daemon published certified live browser-backed research runner evidence.'
+      ? 'The platform/daemon published certified live browser-backed research runner evidence.'
       : browser.configured
       ? 'Browser or desktop control is configured; use it only when public web/fetch is insufficient.'
       : 'Browser-backed research needs setup before live browser execution should be promised.',

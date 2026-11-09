@@ -1,5 +1,5 @@
-import type { KnowledgeStore, ProjectPlanningService } from '../../sdk/src/platform/knowledge/index.ts';
-import { findCardNumberShapes } from '../../sdk/src/platform/security/card-shapes.ts';
+import type { KnowledgeStore, ProjectPlanningService } from '../../platform/src/platform/knowledge/index.ts';
+import { findCardNumberShapes } from '../../platform/src/platform/security/card-shapes.ts';
 
 /**
  * Ordinary stale-revision cases need an ordinary comparison token. A native

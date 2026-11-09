@@ -19,7 +19,7 @@
 import { useState, type SyntheticEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Pencil, Plus, RefreshCw, Trash2, Users } from 'lucide-react';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import type { OperatorMethodInput, OperatorMethodOutput } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { EmptyState } from '../../components/feedback/EmptyState';
@@ -35,7 +35,7 @@ import { formatError, isMethodUnavailableError } from '../../lib/errors';
 import { useToast } from '../../lib/toast';
 import { Select } from '../../components/ui/Select';
 import '../../styles/components/principals.css';
-import { GATE_PRESETS, SESSION_GATE_PRESET_NAMES } from '@goodvibes-jev/engine/sdk/platform/gate/presets';
+import { GATE_PRESETS, SESSION_GATE_PRESET_NAMES } from '@goodvibes-jev/engine/platform/platform/gate/presets';
 
 type Principal = OperatorMethodOutput<'principals.list'>['principals'][number];
 type PrincipalKind = Principal['kind'];
@@ -132,7 +132,7 @@ function PrincipalsSection() {
 
   const list = useQuery({
     queryKey: queryKeys.principals,
-    queryFn: () => sdk.operator.principals.list(),
+    queryFn: () => platformClient.operator.principals.list(),
   });
   const principals = list.data?.principals ?? [];
   const unavailable = list.isError && isMethodUnavailableError(list.error);
@@ -140,7 +140,7 @@ function PrincipalsSection() {
   const invalidate = () => queryClient.invalidateQueries({ queryKey: queryKeys.principals });
 
   const create = useMutation({
-    mutationFn: (input: OperatorMethodInput<'principals.create'>) => sdk.operator.principals.create(input),
+    mutationFn: (input: OperatorMethodInput<'principals.create'>) => platformClient.operator.principals.create(input),
     onSuccess: async () => {
       setShowCreate(false);
       await invalidate();
@@ -151,7 +151,7 @@ function PrincipalsSection() {
 
   const update = useMutation({
     mutationFn: ({ principalId, input }: { principalId: string; input: Omit<OperatorMethodInput<'principals.update'>, 'principalId'> }) =>
-      sdk.operator.principals.update(principalId, input),
+      platformClient.operator.principals.update(principalId, input),
     onSuccess: async () => {
       setEditingId('');
       await invalidate();
@@ -161,7 +161,7 @@ function PrincipalsSection() {
   });
 
   const remove = useMutation({
-    mutationFn: (principalId: string) => sdk.operator.principals.delete(principalId),
+    mutationFn: (principalId: string) => platformClient.operator.principals.delete(principalId),
     onSuccess: async (result) => {
       if (!result.deleted) toast({ title: 'Principal already gone', description: 'No principal with that id existed.', tone: 'info' });
       await invalidate();
@@ -348,7 +348,7 @@ function ChannelProfilesSection() {
 
   const list = useQuery({
     queryKey: queryKeys.channelProfiles,
-    queryFn: () => sdk.operator.channels.profiles.list(),
+    queryFn: () => platformClient.operator.channels.profiles.list(),
   });
   const bindings = list.data?.bindings ?? [];
   const unavailable = list.isError && isMethodUnavailableError(list.error);
@@ -356,7 +356,7 @@ function ChannelProfilesSection() {
   const invalidate = () => queryClient.invalidateQueries({ queryKey: queryKeys.channelProfiles });
 
   const set = useMutation({
-    mutationFn: (input: OperatorMethodInput<'channels.profiles.set'>) => sdk.operator.channels.profiles.set(input),
+    mutationFn: (input: OperatorMethodInput<'channels.profiles.set'>) => platformClient.operator.channels.profiles.set(input),
     onSuccess: async () => {
       setShowCreate(false);
       setEditingKey('');
@@ -367,7 +367,7 @@ function ChannelProfilesSection() {
   });
 
   const remove = useMutation({
-    mutationFn: ({ surfaceKind, channelId }: { surfaceKind: string; channelId?: string }) => sdk.operator.channels.profiles.delete(surfaceKind, channelId),
+    mutationFn: ({ surfaceKind, channelId }: { surfaceKind: string; channelId?: string }) => platformClient.operator.channels.profiles.delete(surfaceKind, channelId),
     onSuccess: async (result) => {
       if (!result.deleted) toast({ title: 'Binding already gone', description: 'No binding with that key existed.', tone: 'info' });
       await invalidate();

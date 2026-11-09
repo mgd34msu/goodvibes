@@ -1,21 +1,21 @@
 /**
  * The agent half of the Google-flow command contract.
  *
- * The SDK names commands in its error and help text; this repo is what makes
+ * The platform names commands in its error and help text; this repo is what makes
  * those names resolve. The defect that makes this file necessary: an error
  * told the owner to re-authorize by running a `/google setup` variant, and the
  * command surface answered "Unknown setup item google". The command existed
  * and the subcommand did not, so the sentence was authoritative and wrong. Five
  * more attempts died the same way on "Unknown setting calendar".
  *
- * So the SDK publishes `GOOGLE_REFERENCED_COMMANDS`, every invocation it names,
+ * So the platform publishes `GOOGLE_REFERENCED_COMMANDS`, every invocation it names,
  * command AND subcommand, and this test walks that list against the real
  * registry, built by the real registration functions. A dead pointer on either
  * side goes red here.
  */
 
 import { describe, expect, test } from 'bun:test';
-import { GOOGLE_REFERENCED_COMMANDS } from '@goodvibes-jev/engine/sdk/platform/google';
+import { GOOGLE_REFERENCED_COMMANDS } from '@goodvibes-jev/engine/platform/platform/google';
 import { CommandRegistry } from '../../input/command-registry.ts';
 import { registerGoogleRuntimeCommands } from '../../input/commands/google-runtime.ts';
 
@@ -46,7 +46,7 @@ describe('every command the Google flow names actually resolves', () => {
     expect(registry.get('google')).toBeDefined();
   });
 
-  test('every /google invocation named in SDK text is a subcommand /google handles', () => {
+  test('every /google invocation named in platform text is a subcommand /google handles', () => {
     const handled = declaredSubcommands(registry, 'google');
     const missing: string[] = [];
 
@@ -61,7 +61,7 @@ describe('every command the Google flow names actually resolves', () => {
 
   test('the commands the incident named by hand are all present', () => {
     // Named explicitly rather than only through the list, so deleting an entry
-    // from the SDK list cannot quietly delete its coverage here too.
+    // from the platform list cannot quietly delete its coverage here too.
     const handled = declaredSubcommands(registry, 'google');
     for (const sub of ['connect', 'status', 'reauthorize', 'forget', 'adopt']) {
       expect(handled).toContain(sub);

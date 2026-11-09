@@ -5,12 +5,12 @@
  * symptom with the `engine.ops.playbook-search` rerank: one request per
  * playbook, only playbooks read as a match are returned, best first.
  */
-import { JudgmentHeldError } from '../sdk/src/platform/types/judgment-held.ts';
+import { JudgmentHeldError } from '../platform/src/platform/types/judgment-held.ts';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { Question } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { findPlaybooksBySymptom, getPlaybookRegistry } from '../sdk/src/platform/runtime/ops/index.ts';
+import { findPlaybooksBySymptom, getPlaybookRegistry } from '../platform/src/platform/runtime/ops/index.ts';
 
 /** A port that reads each playbook's match from `probabilities` by playbook name (default no). */
 function playbookPort(probabilities: Readonly<Record<string, number>>) {

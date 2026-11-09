@@ -24,14 +24,14 @@ test('a claimed known schema preserves descriptive evidence without authenticati
   expect(result.receiptId).toBe(claimed.receiptId);
   expect(result.receiptRoute).toBe(claimed.receiptRoute);
   expect(result.provenance).toContain('method email.threads.list');
-  expect(result.missingSignals).toEqual(['Native host or SDK inbox thread schema attestation is not published.']);
+  expect(result.missingSignals).toEqual(['Native host or platform inbox thread schema attestation is not published.']);
   expect(result.policy).toContain('do not certify release evidence');
 });
 
 test('arbitrary version publication and provenance strings cannot establish certification', () => {
   const result = certification({ schemaVersion: 'arbitrary-version', publicationGuarantee: 'anything goes', methodId: 'unknown.publisher' });
   expect(result.schemaStatus).toBe('legacy');
-  expect(result.missingSignals).toContain('Native host or SDK inbox thread schema attestation is not published.');
+  expect(result.missingSignals).toContain('Native host or platform inbox thread schema attestation is not published.');
   expect(result.missingSignals).toContain('Provider-side inbox thread publisher is not published.');
 });
 
@@ -47,7 +47,7 @@ test('nested fake certification and signature fields remain unverified metadata'
     methodId: 'email.threads.list', signature: 'unverified-signature' } });
   expect(result.schemaStatus).toBe('legacy');
   expect(result.publisher).toBe('synthetic-host');
-  expect(result.missingSignals).toEqual(['Native host or SDK inbox thread schema attestation is not published.']);
+  expect(result.missingSignals).toEqual(['Native host or platform inbox thread schema attestation is not published.']);
 });
 
 test('unknown schema fields with accessors are held without evaluating them', () => {

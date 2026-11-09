@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { updateConfigDefaults, updateConfigSettings } from '../sdk/src/platform/config/schema-domain-update.js';
-import { resolveDaemonInstalledFiles } from '../sdk/src/platform/daemon/auto-updater.js';
-import { inspectDaemonNativeInstallation, resolveDaemonNativePayloads } from '../sdk/src/platform/runtime/self-update.js';
+import { updateConfigDefaults, updateConfigSettings } from '../platform/src/platform/config/schema-domain-update.js';
+import { resolveDaemonInstalledFiles } from '../platform/src/platform/daemon/auto-updater.js';
+import { inspectDaemonNativeInstallation, resolveDaemonNativePayloads } from '../platform/src/platform/runtime/self-update.js';
 import { nativeCohortFixture, nativeMemoryIo } from './_helpers/daemon-native-cohort.ts';
 
 const DAEMON_REPO_LATEST = 'https://github.com/mgd34msu/goodvibes/releases/latest';

@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { GeminiProvider } from '../sdk/src/platform/providers/gemini.js';
-import { SyntheticProvider } from '../sdk/src/platform/providers/synthetic.js';
-import { createGeminiResponseIdentityAccumulator, MAX_GEMINI_RESPONSE_IDENTITY_LENGTH } from '../sdk/src/platform/providers/gemini-response-identity.js';
-import type { ChatRequest } from '../sdk/src/platform/providers/interface.js';
+import { GeminiProvider } from '../platform/src/platform/providers/gemini.js';
+import { SyntheticProvider } from '../platform/src/platform/providers/synthetic.js';
+import { createGeminiResponseIdentityAccumulator, MAX_GEMINI_RESPONSE_IDENTITY_LENGTH } from '../platform/src/platform/providers/gemini-response-identity.js';
+import type { ChatRequest } from '../platform/src/platform/providers/interface.js';
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });

@@ -9,8 +9,8 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { createDaemonRuntimeSessionRouteHandlers } from '../daemon-sdk/src/runtime-session-routes.js';
-import type { DaemonRuntimeRouteContext } from '../daemon-sdk/src/runtime-route-types.js';
+import { createDaemonRuntimeSessionRouteHandlers } from '../daemon-api/src/runtime-session-routes.js';
+import type { DaemonRuntimeRouteContext } from '../daemon-api/src/runtime-route-types.js';
 
 const ADMIN_REQUEST = new Request('http://localhost/api/sessions/test-session/inputs/input/cancel', { method: 'POST' });
 

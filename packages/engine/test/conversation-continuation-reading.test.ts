@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { configureDaemonSessionContinuation } from '../sdk/src/platform/daemon/facade-composition.js';
-import { WorkProposalStore } from '../sdk/src/platform/agents/work-proposal-store.js';
-import type { SharedSessionContinuationRunner, SharedSessionInputRecord } from '../sdk/src/platform/control-plane/session-intents.js';
-import type { SharedSessionBroker } from '../sdk/src/platform/control-plane/session-broker.js';
-import type { DaemonSurfaceActionHelper } from '../sdk/src/platform/daemon/surface-actions.js';
-import type { AutomationRouteBinding } from '../sdk/src/platform/automation/routes.js';
+import { configureDaemonSessionContinuation } from '../platform/src/platform/daemon/facade-composition.js';
+import { WorkProposalStore } from '../platform/src/platform/agents/work-proposal-store.js';
+import type { SharedSessionContinuationRunner, SharedSessionInputRecord } from '../platform/src/platform/control-plane/session-intents.js';
+import type { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.js';
+import type { DaemonSurfaceActionHelper } from '../platform/src/platform/daemon/surface-actions.js';
+import type { AutomationRouteBinding } from '../platform/src/platform/automation/routes.js';
 let previous: ReturnType<typeof installJudgmentPort>; let pause: (() => Promise<void>) | undefined; let calls = 0;
 let requests: Array<Parameters<import('@goodvibes-jev/judgment').JudgmentPort['ask']>[0]> = [];
 beforeEach(() => {
@@ -72,9 +72,9 @@ for (const outcome of ['false', 'throw', 'closed', 'replacement', 'dispose']) te
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SharedSessionBroker as RealBroker } from '../sdk/src/platform/control-plane/session-broker.js';
-import { DaemonSurfaceActionHelper as RealHelper } from '../sdk/src/platform/daemon/surface-actions.js';
-import type { RouteBindingManager } from '../sdk/src/platform/channels/index.js';
+import { SharedSessionBroker as RealBroker } from '../platform/src/platform/control-plane/session-broker.js';
+import { DaemonSurfaceActionHelper as RealHelper } from '../platform/src/platform/daemon/surface-actions.js';
+import type { RouteBindingManager } from '../platform/src/platform/channels/index.js';
 
 for (const outcome of ['success', 'refused', 'claim-race', 'policy-race', 'config-race']) test(`real broker ${outcome} transfer owns exactly one guarded input completion`, async () => {
   const directory = mkdtempSync(join(tmpdir(), 'conversation-transfer-'));

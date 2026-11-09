@@ -21,9 +21,9 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { runtimeConfigDefaults, runtimePrimaryConfigSettings } from '../sdk/src/platform/config/schema-domain-runtime.ts';
-import { isCloudflareIp } from '../sdk/src/platform/daemon/http-listener.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { runtimeConfigDefaults, runtimePrimaryConfigSettings } from '../platform/src/platform/config/schema-domain-runtime.ts';
+import { isCloudflareIp } from '../platform/src/platform/daemon/http-listener.ts';
 
 function configManager(values: Record<string, unknown> = {}): { manager: ConfigManager; dispose: () => void } {
   const root = mkdtempSync(join(tmpdir(), 'trust-cloudflare-'));

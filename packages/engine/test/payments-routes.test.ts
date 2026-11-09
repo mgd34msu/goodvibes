@@ -14,8 +14,8 @@ import {
   createPaymentsPurchasesListHandler,
   type PaymentCardView,
   type PaymentsGatewayService,
-} from '../sdk/src/platform/control-plane/routes/payments.js';
-import { GatewayVerbError } from '../sdk/src/platform/control-plane/routes/gateway-verb-error.js';
+} from '../platform/src/platform/control-plane/routes/payments.js';
+import { GatewayVerbError } from '../platform/src/platform/control-plane/routes/gateway-verb-error.js';
 
 const FIXTURE_NUMBER = '4242424242424242';
 const FIXTURE_CVV = 'CVV-SENTINEL-4b21';

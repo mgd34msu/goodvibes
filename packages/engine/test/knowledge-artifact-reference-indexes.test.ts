@@ -3,8 +3,8 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SQLiteStore } from '../sdk/src/platform/state/sqlite-store.ts';
-import { artifactReferenceIndexes, createArtifactReferenceIndexes, persistedArtifactIsReferenced, persistedArtifactsReferenced, persistedArtifactReferenceSql, validateArtifactReferenceIndexes } from '../sdk/src/platform/knowledge/store-artifact-references.ts';
+import { SQLiteStore } from '../platform/src/platform/state/sqlite-store.ts';
+import { artifactReferenceIndexes, createArtifactReferenceIndexes, persistedArtifactIsReferenced, persistedArtifactsReferenced, persistedArtifactReferenceSql, validateArtifactReferenceIndexes } from '../platform/src/platform/knowledge/store-artifact-references.ts';
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 async function fixture() {

@@ -1,8 +1,8 @@
-import { runAgentTask, type AgentOrchestratorRunContext } from '../../sdk/src/platform/agents/orchestrator-runner.js';
-import { ToolRegistry } from '../../sdk/src/platform/tools/registry.js';
-import type { ChatRequest, LLMProvider } from '../../sdk/src/platform/providers/interface.js';
-import type { ModelDefinition } from '../../sdk/src/platform/providers/registry-types.js';
-import { emitAgentCompleted, emitAgentFailed, emitAgentRunning } from '../../sdk/src/platform/runtime/emitters/agents.js';
+import { runAgentTask, type AgentOrchestratorRunContext } from '../../platform/src/platform/agents/orchestrator-runner.js';
+import { ToolRegistry } from '../../platform/src/platform/tools/registry.js';
+import type { ChatRequest, LLMProvider } from '../../platform/src/platform/providers/interface.js';
+import type { ModelDefinition } from '../../platform/src/platform/providers/registry-types.js';
+import { emitAgentCompleted, emitAgentFailed, emitAgentRunning } from '../../platform/src/platform/runtime/emitters/agents.js';
 import type { HarnessOptions } from '../contract/runner-support.js';
 
 /** Entirely offline provider; the normal agent turn loop and runner hooks execute. */

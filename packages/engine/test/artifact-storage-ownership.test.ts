@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync,
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
-import { ArtifactStore } from '../sdk/src/platform/artifacts/store.js';
+import { ArtifactStore } from '../platform/src/platform/artifacts/store.js';
 
 const cleanup: (() => void)[] = [];
 afterEach(() => { for (const close of cleanup.splice(0).reverse()) close(); });

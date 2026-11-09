@@ -6,9 +6,9 @@ import {
   exportToHTML,
   exportToMarkdownExtended,
   defaultExportPath,
-} from '@goodvibes-jev/engine/sdk/platform/export';
-import { redactSensitiveDataAsync as redactSensitiveData, registerAccountIdentityRedaction } from '@goodvibes-jev/engine/sdk/platform/utils';
-import type { ExportMessage, ExportMetadata } from '@goodvibes-jev/engine/sdk/platform/export';
+} from '@goodvibes-jev/engine/platform/platform/export';
+import { redactSensitiveDataAsync as redactSensitiveData, registerAccountIdentityRedaction } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { ExportMessage, ExportMetadata } from '@goodvibes-jev/engine/platform/platform/export';
 
 useSecurityReadings();
 

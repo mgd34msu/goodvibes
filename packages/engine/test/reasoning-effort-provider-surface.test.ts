@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { installCatalogModelFacts } from '../sdk/src/platform/providers/model-catalog-facts.ts';
-import { effortSpecForModel } from '../sdk/src/platform/providers/reasoning-effort-surface.ts';
+import { installCatalogModelFacts } from '../platform/src/platform/providers/model-catalog-facts.ts';
+import { effortSpecForModel } from '../platform/src/platform/providers/reasoning-effort-surface.ts';
 
 test('effort surfaces resolve the exact serving provider when model IDs collide', () => {
   installCatalogModelFacts(['one', 'two'].map(providerId => ({

@@ -2,11 +2,11 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { assertCurrentToolEffect, assertCurrentToolInvocation, ToolRegistry, type ToolExecutionEffect } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { DEFAULT_CONFIG, type PermissionAction, type PermissionMode } from '../sdk/src/platform/config/index.ts';
-import { PermissionManager, type PermissionConfigReader } from '../sdk/src/platform/permissions/manager.ts';
-import { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.ts';
-import type { Tool, ToolExecuteOptions } from '../sdk/src/platform/types/tools.ts';
+import { assertCurrentToolEffect, assertCurrentToolInvocation, ToolRegistry, type ToolExecutionEffect } from '@goodvibes-jev/engine/platform/platform/tools';
+import { DEFAULT_CONFIG, type PermissionAction, type PermissionMode } from '../platform/src/platform/config/index.ts';
+import { PermissionManager, type PermissionConfigReader } from '../platform/src/platform/permissions/manager.ts';
+import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
+import type { Tool, ToolExecuteOptions } from '../platform/src/platform/types/tools.ts';
 import { forgetGateReadings, gateReadingsPort, READ_ONLY } from './_helpers/gate-readings.ts';
 
 const NAME = 'effect_authority_fixture';

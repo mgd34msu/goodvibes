@@ -10,14 +10,14 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { EvalRunner } from '../sdk/src/platform/runtime/eval/runner.js';
+import { EvalRunner } from '../platform/src/platform/runtime/eval/runner.js';
 import type {
   EvalResult,
   EvalScenario,
   EvalScorecard,
   EvalSuiteResult,
   EvalBaseline,
-} from '../sdk/src/platform/runtime/eval/types.js';
+} from '../platform/src/platform/runtime/eval/types.js';
 
 const SUITE = 'gate-test-suite';
 

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import { StringDecoder } from 'node:string_decoder';
-import { ImapClient, type ImapConnector, type ImapSocket } from '../sdk/src/platform/intake/providers/imap-client.js';
+import { ImapClient, type ImapConnector, type ImapSocket } from '../platform/src/platform/intake/providers/imap-client.js';
 
 /** A real socket emits bytes unless the client explicitly enables decoding. */
 class ByteSocket extends EventEmitter implements ImapSocket {

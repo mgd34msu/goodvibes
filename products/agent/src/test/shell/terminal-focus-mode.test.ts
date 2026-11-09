@@ -22,7 +22,7 @@ import {
   wrapRequestPermissionWithApprovalAlert,
 } from '../../shell/terminal-focus-mode.ts';
 import { FocusTracker } from '@/runtime/index.ts';
-import type { PermissionPromptRequest } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import type { PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
 
 describe('FOCUS_ENABLE / FOCUS_DISABLE constants', () => {
   test('match the DECSET ?1004h sequences (product parity with goodvibes-tui)', () => {
@@ -139,7 +139,7 @@ describe('wrapRequestPermissionWithApprovalAlert', () => {
     expect((result as { approved: boolean }).approved).toBe(true); // original handler's resolution is unchanged
   });
 
-  test('the actual SDK approval bell passes the installed full-screen guard without leaking direct output', async () => {
+  test('the actual platform approval bell passes the installed full-screen guard without leaking direct output', async () => {
     const writes: string[] = [], captures: number[] = [];
     const output = spyOn(process.stdout, 'write').mockImplementation((...args: unknown[]) => { writes.push(String(args[0])); return true; });
     const tty = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');

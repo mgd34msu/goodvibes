@@ -98,7 +98,7 @@ ${serialize(exceptions)}
 const target = join(
   import.meta.dir,
   '..',
-  'sdk/src/platform/security/generated/public-suffix-data.ts',
+  'platform/src/platform/security/generated/public-suffix-data.ts',
 );
 writeFileSync(target, file, 'utf8');
 console.log(

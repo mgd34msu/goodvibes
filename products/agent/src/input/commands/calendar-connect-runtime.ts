@@ -12,7 +12,7 @@
  * The service is injectable so tests drive every path against fakes with no real
  * network, port, or browser.
  */
-import type { CalendarProviderId, DeviceCodeFlowStart, EventWindow, MergedCalendarEvent } from '@goodvibes-jev/engine/sdk/platform/calendar';
+import type { CalendarProviderId, DeviceCodeFlowStart, EventWindow, MergedCalendarEvent } from '@goodvibes-jev/engine/platform/platform/calendar';
 import type { CommandContext } from '../command-registry.ts';
 import { requireSecretsManager } from './runtime-services.ts';
 import { CalendarOAuthService, type CalendarConfigReader, type CalendarSecretSlice } from '../../agent/calendar/calendar-oauth-service.ts';
@@ -63,7 +63,7 @@ function authUrlMessage(label: string, url: string): string {
 
 /**
  * The real guide for a bare `/calendar connect` (F1a): what connecting does, the
- * two providers, and, since this build ships only the SDK's placeholder client
+ * two providers, and, since this build ships only the platform's placeholder client
  * ids until someone registers a project app, the honest situation and the exact
  * next step, instead of a bare usage line that dead-ends with no explanation.
  */

@@ -1,7 +1,7 @@
-import { factsFor } from '@goodvibes-jev/engine/sdk/platform/routing';
-import type { MemoryApi } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import { readTierPromptSupplement } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { MemoryRecord } from '@goodvibes-jev/engine/sdk/platform/state';
+import { factsFor } from '@goodvibes-jev/engine/platform/platform/routing';
+import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { readTierPromptSupplement } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
 import { describeMemoryPromptEligibility, isPromptActiveMemory, MIN_PROMPT_MEMORY_CONFIDENCE } from '../agent/memory-prompt.ts';
 import { AgentPersonaRegistry, buildActivePersonaPrompt } from '../agent/persona-registry.ts';
 import { buildProjectContextPrompt, discoverProjectContextFiles } from '../agent/project-context-files.ts';

@@ -1,10 +1,10 @@
-import { builtinDelegatedInboundMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-delegated-inbound.js';
-import { builtinGatewayNativeHostedTurnMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-native-hosted-turn.ts';
-import { builtinGatewayNativeConversationIntakeMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-native-intake.ts';
-import { builtinGatewayNativeWorkSubmissionMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-native-work-submission.ts';
-import { builtinGatewayWorkLedgerMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-work-ledger.ts';
-import { builtinGatewayNativeWorkExecutionMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-native-work-execution.ts';
-import { builtinTriggerSupervisorMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-trigger-supervisor.js';
+import { builtinDelegatedInboundMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-delegated-inbound.js';
+import { builtinGatewayNativeHostedTurnMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-native-hosted-turn.ts';
+import { builtinGatewayNativeConversationIntakeMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-native-intake.ts';
+import { builtinGatewayNativeWorkSubmissionMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-native-work-submission.ts';
+import { builtinGatewayWorkLedgerMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-work-ledger.ts';
+import { builtinGatewayNativeWorkExecutionMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-native-work-execution.ts';
+import { builtinTriggerSupervisorMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-trigger-supervisor.js';
 // foundation-io-catalog.ts
 //
 // The one composition of every builtin gateway method descriptor, used by both
@@ -12,7 +12,7 @@ import { builtinTriggerSupervisorMethodDescriptors } from '../sdk/src/platform/c
 // entry generator (generate-foundation-io-entries.ts).
 //
 // It mirrors BUILTIN_GATEWAY_METHODS in
-// sdk/src/platform/control-plane/method-catalog.ts exactly, the same
+// engine/src/platform/control-plane/method-catalog.ts exactly, the same
 // descriptor arrays in the same order. That constant is module-private, so
 // this file re-composes it from the exported arrays rather than duplicating any
 // descriptor. `assertCoversMethodIds` below proves the composition has not
@@ -20,41 +20,41 @@ import { builtinTriggerSupervisorMethodDescriptors } from '../sdk/src/platform/c
 // that is wired into method-catalog.ts but not into this file FAILS the gate
 // instead of silently dropping its verbs out of typed-IO coverage.
 
-import { builtinGatewayAdminMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-admin.ts';
-import { builtinBrowserJudgmentMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-browser-judgment.ts';
-import { builtinGatewayChannelMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-channels.ts';
-import { builtinGatewayChannelTestMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-channels-test.ts';
-import { builtinGatewayCostMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-cost.ts';
-import { builtinGatewayPermissionRuleMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-permission-rules.ts';
-import { builtinGatewayControlMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-control.ts';
-import { builtinGatewayEmailMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-email.ts';
-import { builtinGatewayPaymentsMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-payments.ts';
-import { builtinGatewayOwnerProfileMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-owner-profile.ts';
-import { builtinGatewayOccasionsMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-occasions.ts';
-import { builtinGatewayCalendarMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-calendar.ts';
-import { builtinGatewayBrowserMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-browser.ts';
-import { builtinGatewayRuntimeMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-runtime.ts';
-import { builtinGatewayModelMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-models.ts';
-import { builtinGatewayUpdateMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-update.ts';
-import { builtinGatewayRelayMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-relay.ts';
-import { builtinGatewayKnowledgeMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-knowledge.ts';
-import { builtinGatewayMediaMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-media.ts';
-import { builtinGatewayPushMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-push.ts';
-import { builtinGatewayPairingMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-pairing.ts';
-import { builtinGatewayTailscaleMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-tailscale.ts';
-import { builtinGatewayAcpMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-acp.ts';
-import { builtinGatewaySkillsMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-skills.ts';
-import { builtinGatewayPrincipalsMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-principals.ts';
-import { builtinGatewayChannelProfilesMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-channel-profiles.ts';
-import { builtinGatewayCheckinMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-checkin.ts';
-import { builtinGatewayCiMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-ci.ts';
-import { builtinGatewayFlagsMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-flags.ts';
-import { builtinGatewayRewindMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-rewind.ts';
-import { builtinGatewayWorkspacesMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-workspaces.ts';
-import { builtinGatewayStepUpMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-stepup.ts';
+import { builtinGatewayAdminMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-admin.ts';
+import { builtinBrowserJudgmentMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-browser-judgment.ts';
+import { builtinGatewayChannelMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-channels.ts';
+import { builtinGatewayChannelTestMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-channels-test.ts';
+import { builtinGatewayCostMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-cost.ts';
+import { builtinGatewayPermissionRuleMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-permission-rules.ts';
+import { builtinGatewayControlMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-control.ts';
+import { builtinGatewayEmailMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-email.ts';
+import { builtinGatewayPaymentsMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-payments.ts';
+import { builtinGatewayOwnerProfileMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-owner-profile.ts';
+import { builtinGatewayOccasionsMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-occasions.ts';
+import { builtinGatewayCalendarMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-calendar.ts';
+import { builtinGatewayBrowserMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-browser.ts';
+import { builtinGatewayRuntimeMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-runtime.ts';
+import { builtinGatewayModelMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-models.ts';
+import { builtinGatewayUpdateMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-update.ts';
+import { builtinGatewayRelayMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-relay.ts';
+import { builtinGatewayKnowledgeMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-knowledge.ts';
+import { builtinGatewayMediaMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-media.ts';
+import { builtinGatewayPushMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-push.ts';
+import { builtinGatewayPairingMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-pairing.ts';
+import { builtinGatewayTailscaleMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-tailscale.ts';
+import { builtinGatewayAcpMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-acp.ts';
+import { builtinGatewaySkillsMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-skills.ts';
+import { builtinGatewayPrincipalsMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-principals.ts';
+import { builtinGatewayChannelProfilesMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-channel-profiles.ts';
+import { builtinGatewayCheckinMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-checkin.ts';
+import { builtinGatewayCiMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-ci.ts';
+import { builtinGatewayFlagsMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-flags.ts';
+import { builtinGatewayRewindMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-rewind.ts';
+import { builtinGatewayWorkspacesMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-workspaces.ts';
+import { builtinGatewayStepUpMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-stepup.ts';
 
-import { EMPTY_OBJECT_SCHEMA } from '../sdk/src/platform/control-plane/method-catalog-shared.ts';
-import type { GatewayMethodDescriptor } from '../sdk/src/platform/control-plane/method-catalog-shared.ts';
+import { EMPTY_OBJECT_SCHEMA } from '../platform/src/platform/control-plane/method-catalog-shared.ts';
+import type { GatewayMethodDescriptor } from '../platform/src/platform/control-plane/method-catalog-shared.ts';
 
 /** Every builtin gateway method descriptor, in method-catalog.ts's own order. */
 export const ALL_GATEWAY_METHOD_DESCRIPTORS: readonly GatewayMethodDescriptor[] = [
@@ -112,8 +112,8 @@ const DESCRIPTORS_BY_ID = new Map(ALL_GATEWAY_METHOD_DESCRIPTORS.map((d) => [d.i
  * members include several deeply nested unions (delivery targets, failure
  * policy, session target, each with a 19-member surfaceKind). Intersecting that
  * with a requirement union makes the operator client's method map exceed the
- * compiler's union-complexity ceiling, `operator-sdk/src/client-core.ts`
- * fails with TS2590, and so does `sdk/src/browser-scoped.ts`. Measured
+ * compiler's union-complexity ceiling, `operator-client/src/client-core.ts`
+ * fails with TS2590, and so does `engine/src/browser-scoped.ts`. Measured
  * at two, three and four branches, and with the branch contents reduced to a
  * single property: every one fails, while the same file compiles the moment the
  * intersection is removed. There is no branch count that fits.

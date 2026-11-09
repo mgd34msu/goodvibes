@@ -3,14 +3,14 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PermissionManager, type PermissionConfigReader } from '../sdk/src/platform/permissions/manager.js';
-import type { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.js';
-import { executeToolCalls, type ToolExecutionDeps } from '../sdk/src/platform/core/orchestrator-tool-runtime.js';
-import type { ToolRegistry } from '../sdk/src/platform/tools/registry.js';
-import type { ToolCall, ToolResult } from '../sdk/src/platform/types/tools.js';
-import { FileStateCache } from '../sdk/src/platform/state/file-cache.js';
-import { FileUndoManager } from '../sdk/src/platform/state/file-undo.js';
-import { createEditTool } from '../sdk/src/platform/tools/edit/index.js';
+import { PermissionManager, type PermissionConfigReader } from '../platform/src/platform/permissions/manager.js';
+import type { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.js';
+import { executeToolCalls, type ToolExecutionDeps } from '../platform/src/platform/core/orchestrator-tool-runtime.js';
+import type { ToolRegistry } from '../platform/src/platform/tools/registry.js';
+import type { ToolCall, ToolResult } from '../platform/src/platform/types/tools.js';
+import { FileStateCache } from '../platform/src/platform/state/file-cache.js';
+import { FileUndoManager } from '../platform/src/platform/state/file-undo.js';
+import { createEditTool } from '../platform/src/platform/tools/edit/index.js';
 
 useGateReadings();
 

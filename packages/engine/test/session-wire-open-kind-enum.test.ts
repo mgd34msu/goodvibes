@@ -4,7 +4,7 @@ import {
   SESSION_BROKER_SNAPSHOT_SCHEMA,
   SHARED_SESSION_RECORD_SCHEMA,
   SHARED_SESSION_REGISTER_INPUT_SCHEMA,
-} from '../sdk/src/platform/control-plane/operator-contract-schemas-runtime.ts';
+} from '../platform/src/platform/control-plane/operator-contract-schemas-runtime.ts';
 
 // CONTRACT-VALIDATION ENUM LEG. Response validation must treat the session
 // `kind` as an OPEN enum on READ (accept unknown strings per-record so one alien

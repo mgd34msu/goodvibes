@@ -6,8 +6,8 @@
  * the standing-watch completion notification + opt-in fix-session trigger.
  */
 import { describe, expect, test } from 'bun:test';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { registerCiGatewayMethods } from '../sdk/src/platform/control-plane/routes/ci.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { registerCiGatewayMethods } from '../platform/src/platform/control-plane/routes/ci.ts';
 import {
   CiWatchService,
   CiWatchStore,
@@ -16,7 +16,7 @@ import {
   type CiJob,
   type CiStatusSource,
   type FixSessionBrief,
-} from '../sdk/src/platform/ci-watch/index.ts';
+} from '../platform/src/platform/ci-watch/index.ts';
 
 function job(name: string, conclusion: string | null, extra: Partial<CiJob> = {}): CiJob {
   return { name, status: conclusion === null ? 'in_progress' : 'completed', conclusion, ...extra };

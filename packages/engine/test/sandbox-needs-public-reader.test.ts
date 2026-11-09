@@ -5,7 +5,7 @@ import {
   decideSandboxedExec,
   readCommandNeeds,
   type CommandNeeds,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/permissions/sandbox-policy';
+} from '@goodvibes-jev/engine/platform/platform/runtime/permissions/sandbox-policy';
 
 let previous: ReturnType<typeof installJudgmentPort>;
 let sequence = 0;

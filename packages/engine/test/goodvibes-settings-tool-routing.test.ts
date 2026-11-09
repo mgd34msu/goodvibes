@@ -17,15 +17,15 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import {
   createGoodVibesSettingsTool,
   GOODVIBES_RUNTIME_AWARENESS_PROMPT,
-} from '../sdk/src/platform/tools/goodvibes-runtime/index.js';
+} from '../platform/src/platform/tools/goodvibes-runtime/index.js';
 import {
   readRoutedConfigValue,
   readRoutedConfigValues,
-} from '../sdk/src/platform/tools/goodvibes-runtime/config-routing.js';
+} from '../platform/src/platform/tools/goodvibes-runtime/config-routing.js';
 import { useConfigReadings } from './_helpers/config-readings.ts';
 
 // A stated value the tool reports back is read for credential material

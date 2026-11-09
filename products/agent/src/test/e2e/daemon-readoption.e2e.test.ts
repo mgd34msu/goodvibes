@@ -1,9 +1,9 @@
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { seedProviderMetadataCacheFixture, seedProviderModelListCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
 /**
  * Daemon drop and re-adoption, on the built binary.
  *
- * A real GoodVibes daemon (the SDK's fully composed `bootDaemon`, on the
+ * A real GoodVibes daemon (the platform's fully composed `bootDaemon`, on the
  * isolated home, sharing one bearer token with the Agent) answers behind the
  * configured port. The port is held by a recording door (harness
  * createDaemonDoor), so the test sees every call the Agent makes to it.
@@ -24,7 +24,7 @@ import { seedProviderMetadataCacheFixture, seedProviderModelListCacheFixture } f
 import { afterAll, describe, expect, test } from 'bun:test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { bootDaemon, type BootedDaemon } from '@goodvibes-jev/engine/sdk/daemon';
+import { bootDaemon, type BootedDaemon } from '@goodvibes-jev/engine/platform/daemon';
 import {
   createDaemonDoor,
   inputAreaVisible,

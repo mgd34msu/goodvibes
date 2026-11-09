@@ -16,8 +16,8 @@ import { beforeEach, afterEach, describe, expect, test } from 'bun:test';
 let previousImapPort: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previousImapPort = installJudgmentPort(imapFixturePort().port); });
 afterEach(() => { installJudgmentPort(previousImapPort); });
-import { IMAP_MAX_FETCH_UIDS } from '../sdk/src/platform/email/imap-client.ts';
-import { composeOpenFailure } from '../sdk/src/platform/email/imap-open.ts';
+import { IMAP_MAX_FETCH_UIDS } from '../platform/src/platform/email/imap-client.ts';
+import { composeOpenFailure } from '../platform/src/platform/email/imap-open.ts';
 import {
   BackoffSchedule,
   CapabilityStateTracker,
@@ -36,7 +36,7 @@ import {
   verdictForOpenConnection,
   type MailboxReader,
   type MailboxWire,
-} from '../sdk/src/platform/email/inbound/index.ts';
+} from '../platform/src/platform/email/inbound/index.ts';
 import {
   FakeClock,
   RecordingObserver,

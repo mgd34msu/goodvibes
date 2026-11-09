@@ -1,11 +1,11 @@
-import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   GOODVIBES_NTFY_AGENT_TOPIC,
   GOODVIBES_NTFY_CHAT_TOPIC,
   GOODVIBES_NTFY_REMOTE_TOPIC,
   resolveGoodVibesNtfyTopics,
-} from '@goodvibes-jev/engine/sdk/platform/integrations';
-import { enableFeatureFlags, getMissingSurfaceFeatureFlags, getServerSurfaceFeatureFlags, surfaceFeatureGateSettingsKeys } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+} from '@goodvibes-jev/engine/platform/platform/integrations';
+import { enableFeatureFlags, getMissingSurfaceFeatureFlags, getServerSurfaceFeatureFlags, surfaceFeatureGateSettingsKeys } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { formatRuntimeEndpointBinding, resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
 import { classifyBindPosture, isNetworkFacing } from './network-posture.ts';
 import type { CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';

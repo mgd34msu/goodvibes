@@ -18,16 +18,16 @@ import {
   buildEcosystemRecommendations,
   collectRecommendationCandidates,
   MAX_RECOMMENDATIONS,
-} from '../sdk/src/platform/runtime/ecosystem/recommendations.ts';
-import { RECOMMENDATION_NEEDS } from '../sdk/src/platform/runtime/ecosystem/batteries/recommendation-fit.ts';
+} from '../platform/src/platform/runtime/ecosystem/recommendations.ts';
+import { RECOMMENDATION_NEEDS } from '../platform/src/platform/runtime/ecosystem/batteries/recommendation-fit.ts';
 import {
   installEcosystemCatalogEntry,
   upsertEcosystemCatalogEntry,
   type EcosystemCatalogEntry,
   type EcosystemEntryKind,
-} from '../sdk/src/platform/runtime/ecosystem/catalog.ts';
-import type { RuntimeStore } from '../sdk/src/platform/runtime/store/index.ts';
-import { createSystemObservabilityReadModels } from '../sdk/src/platform/runtime/ui-read-models-observability-system.ts';
+} from '../platform/src/platform/runtime/ecosystem/catalog.ts';
+import type { RuntimeStore } from '../platform/src/platform/runtime/store/index.ts';
+import { createSystemObservabilityReadModels } from '../platform/src/platform/runtime/ui-read-models-observability-system.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 type FitState = { readonly need: string; readonly entry: { readonly id: string } };

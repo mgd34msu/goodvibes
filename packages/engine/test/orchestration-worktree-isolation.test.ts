@@ -15,13 +15,13 @@ import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { emitAgentCancelled, emitAgentCompleted, emitAgentFailed } from '../sdk/src/platform/runtime/emitters/agents.js';
-import { createOrchestrationEngine, type OrchestrationEngineDeps } from '../sdk/src/platform/orchestration/engine.js';
-import { snapshotDirtyTree } from '../sdk/src/platform/orchestration/dirty-guard.js';
-import type { PhaseRunnerAgentManagerLike } from '../sdk/src/platform/orchestration/phase-runner.js';
-import type { AgentRecord } from '../sdk/src/platform/tools/agent/manager.js';
-import type { OrchestrationEvent, PhaseSpec, WorkItemSpec, Workstream } from '../sdk/src/platform/orchestration/types.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { emitAgentCancelled, emitAgentCompleted, emitAgentFailed } from '../platform/src/platform/runtime/emitters/agents.js';
+import { createOrchestrationEngine, type OrchestrationEngineDeps } from '../platform/src/platform/orchestration/engine.js';
+import { snapshotDirtyTree } from '../platform/src/platform/orchestration/dirty-guard.js';
+import type { PhaseRunnerAgentManagerLike } from '../platform/src/platform/orchestration/phase-runner.js';
+import type { AgentRecord } from '../platform/src/platform/tools/agent/manager.js';
+import type { OrchestrationEvent, PhaseSpec, WorkItemSpec, Workstream } from '../platform/src/platform/orchestration/types.js';
 import { engineerReportOutput, makeFakeConfigManager, makeRecord } from './_helpers/orchestration-harness.js';
 
 const ctx = { sessionId: 'test', traceId: 'test', source: 'test' } as const;
@@ -712,7 +712,7 @@ describe('WorktreeIsolationManager: bounded kept-worktree cap, oldest-first evic
     // commit AND uncommitted follow-up edits goes past the cap; after evict()
     // the directory is gone but every byte is on the branch.
     root = freshRoot();
-    const { IsolatedWorktree } = await import('../sdk/src/platform/agents/worktree.js');
+    const { IsolatedWorktree } = await import('../platform/src/platform/agents/worktree.js');
     const wtPath = join(root, '.goodvibes', '.worktrees', 'ws', 'x', 'y');
     const wt = new IsolatedWorktree(root, wtPath, 'ws/x/y', 'main');
     await wt.create();
@@ -739,7 +739,7 @@ describe('WorktreeIsolationManager: bounded kept-worktree cap, oldest-first evic
 
   test('evict() on an already-clean kept worktree removes only the directory and keeps the branch', async () => {
     root = freshRoot();
-    const { IsolatedWorktree } = await import('../sdk/src/platform/agents/worktree.js');
+    const { IsolatedWorktree } = await import('../platform/src/platform/agents/worktree.js');
     const wtPath = join(root, '.goodvibes', '.worktrees', 'ws', 'c', 'd');
     const wt = new IsolatedWorktree(root, wtPath, 'ws/c/d', 'main');
     await wt.create();

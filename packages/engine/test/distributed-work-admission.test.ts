@@ -3,8 +3,8 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
 import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
-import { DistributedRuntimeManager } from '../sdk/src/platform/runtime/remote/distributed-runtime-manager.js';
-import type { DistributedRuntimeSnapshotStore, DistributedWorkAdmission } from '../sdk/src/platform/runtime/remote/distributed-runtime-types.js';
+import { DistributedRuntimeManager } from '../platform/src/platform/runtime/remote/distributed-runtime-manager.js';
+import type { DistributedRuntimeSnapshotStore, DistributedWorkAdmission } from '../platform/src/platform/runtime/remote/distributed-runtime-types.js';
 import { makeProjectTempDir } from './_helpers/project-temp.js';
 
 function deferred() {

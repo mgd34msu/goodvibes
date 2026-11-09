@@ -11,11 +11,11 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SDK_ROOT = resolve(__dirname, '..');
-const PACKAGE_DIR = resolve(SDK_ROOT, 'sdk');
+const ENGINE_ROOT = resolve(__dirname, '..');
+const PACKAGE_DIR = resolve(ENGINE_ROOT, 'platform');
 const PLATFORM_DIR = resolve(PACKAGE_DIR, 'src', 'platform');
 
-/** Daemon-owned modules exposed through control-plane methods, not SDK imports. */
+/** Daemon-owned modules exposed through control-plane methods, not engine imports. */
 const KNOWN_UNDECLARED: readonly string[] = [
   './platform/channel-profiles',
   './platform/channel-sync',
@@ -25,14 +25,14 @@ const KNOWN_UNDECLARED: readonly string[] = [
 ];
 
 function declaredSubpaths(): ReadonlySet<string> {
-  const manifest = JSON.parse(readFileSync(join(SDK_ROOT, 'package.json'), 'utf8')) as {
+  const manifest = JSON.parse(readFileSync(join(ENGINE_ROOT, 'package.json'), 'utf8')) as {
     exports?: Record<string, unknown>;
   };
-  // The sdk's subpaths are the engine package's ./sdk/* exports.
+  // The engine's subpaths are the engine package's ./platform/* exports.
   return new Set(
     Object.keys(manifest.exports ?? {})
-      .filter((key) => key.startsWith('./sdk/'))
-      .map((key) => `.${key.slice('./sdk'.length)}`),
+      .filter((key) => key.startsWith('./platform/'))
+      .map((key) => `.${key.slice('./platform'.length)}`),
   );
 }
 
@@ -71,7 +71,7 @@ function main(): void {
       '',
       ...added.map((subpath) => `  + ${subpath}`),
       '',
-      'Fix: add a ./sdk/<subpath> exports entry in the engine package.json pointing at its index,',
+      'Fix: add a ./platform/<subpath> exports entry in the engine package.json pointing at its index,',
       'then verify against a PACKED TARBALL, source-tree resolution does not prove this.',
     );
   }

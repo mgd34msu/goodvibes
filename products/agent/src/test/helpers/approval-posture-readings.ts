@@ -4,7 +4,7 @@
  * Unknown calls and questions fail rather than silently becoming safe.
  */
 import { isDeepStrictEqual } from 'node:util';
-import type { PermissionRequestAnalysis } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import type { PermissionRequestAnalysis } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 
 type Family = NonNullable<PermissionRequestAnalysis['riskFamily']>;

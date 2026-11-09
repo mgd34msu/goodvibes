@@ -1,5 +1,5 @@
-import type { GoodVibesConfig, SecretStorageReview } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { LocalAuthSnapshot } from '@goodvibes-jev/engine/sdk/platform/security';
+import type { GoodVibesConfig, SecretStorageReview } from '@goodvibes-jev/engine/platform/platform/config';
+import type { LocalAuthSnapshot } from '@goodvibes-jev/engine/platform/platform/security';
 import type { createOnboardingStateStorage } from './onboarding-state.js';
 import type { OnboardingAcknowledgementSnapshot, OnboardingShellPaths, OnboardingStateScope } from './onboarding-state-types.js';
 export function sortUnique(values: readonly string[]): string[] {

@@ -11,10 +11,10 @@
  *
  * The wizard step builders and the apply builder both read from this single
  * declarative table so the onboarding surface and the settings surface stay in
- * lockstep with the SDK feature-flag set.
+ * lockstep with the platform feature-flag set.
  */
 
-import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { getFeatureSetting, isFeatureDefaultEnabled } from '@goodvibes-jev/engine/terminal-shell';
 import type {
   OnboardingWizardControllerLike,

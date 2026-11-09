@@ -2,15 +2,15 @@
  * insecure-origin.ts, the entry guard for the plain-http-on-a-genuinely-PUBLIC-origin
  * white screen.
  *
- * THE FAILURE THIS CATCHES: the SDK transport refuses an insecure PUBLIC baseUrl by
- * THROWING at module evaluation (`SDK_TRANSPORT_INSECURE_BASE_URL` in
+ * THE FAILURE THIS CATCHES: the platform transport refuses an insecure PUBLIC baseUrl by
+ * THROWING at module evaluation (`ENGINE_TRANSPORT_INSECURE_BASE_URL` in
  * @goodvibes-jev/engine/transport-http). That throw fires the instant `src/lib/goodvibes.ts`
  * is imported, before React mounts, so an operator who opens the daemon over a plain
  * `http://` public hostname used to get a silent blank `#root` with only a console
  * pageerror. The guard itself is correct (a genuinely public origin is meant to run over
  * HTTPS); the gap was purely the SILENT failure mode.
  *
- * PRIVATE-NETWORK LAN POSTURE (SDK 1.8.0): plain http on a private-network origin,
+ * PRIVATE-NETWORK LAN POSTURE (platform 1.8.0): plain http on a private-network origin,
  * loopback, an RFC 1918 range (10/8, 172.16/12, 192.168/16), or an mDNS `.local` name,
  * is a DELIBERATE, SUPPORTED posture (a phone on the same LAN talking to the daemon), not
  * a mistake to wall off: TLS on a home network is the user's own responsibility and the
@@ -23,7 +23,7 @@
  * So this module re-derives the SAME public/private-network boundary the transport uses
  * (`isPrivateNetworkHost`, packages/transport-http/src/paths.ts) WITHOUT importing
  * lib/goodvibes (importing it would re-trigger the very throw we are trying to get ahead
- * of, and pulling in the SDK package here at all would be pointless weight for a guard
+ * of, and pulling in the platform package here at all would be pointless weight for a guard
  * that must run before anything else). main.tsx checks `isInsecureTransportOrigin()`
  * FIRST and, when true, renders the honest HTTPS message instead of importing App at all.
  */
@@ -38,7 +38,7 @@ export const INSECURE_ORIGIN_BODY =
   + 'there.';
 
 /**
- * The baseUrl the SDK transport would be handed, identical source to
+ * The baseUrl the platform transport would be handed, identical source to
  * `GOODVIBES_BASE_URL` in lib/goodvibes.ts, re-derived here so we never import that
  * (throwing) module. `VITE_GOODVIBES_BASE_URL` wins if set; otherwise the page origin.
  */
@@ -50,10 +50,10 @@ function effectiveBaseUrl(): string {
 }
 
 /**
- * Mirror of `isPrivateNetworkHost` (packages/transport-http/src/paths.ts, SDK 1.8.0):
+ * Mirror of `isPrivateNetworkHost` (packages/transport-http/src/paths.ts, platform 1.8.0):
  * loopback, an RFC 1918 range, or an mDNS `.local` name. Kept as a local, dependency-free
  * duplicate rather than an import for the reason in the file header, this predicate must
- * stay correct even if the SDK package can't be loaded at all.
+ * stay correct even if the platform package can't be loaded at all.
  */
 function isPrivateNetworkHost(hostname: string): boolean {
   const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
@@ -73,13 +73,13 @@ function isPrivateNetworkHost(hostname: string): boolean {
 /**
  * Mirror of the transport guard's insecure predicate: an http/ws baseUrl on a genuinely
  * PUBLIC host (never a private-network one), unless GOODVIBES_ALLOW_INSECURE_TRANSPORT=true
- * opts out. Returns true exactly when the SDK would throw SDK_TRANSPORT_INSECURE_BASE_URL,
+ * opts out. Returns true exactly when the platform would throw ENGINE_TRANSPORT_INSECURE_BASE_URL,
  * so the honest message shows in precisely the cases the app would otherwise blank-screen,
  * and never otherwise. A private-network http origin (LAN IP, .local, localhost) is a
  * supported posture and never trips this wall, see the file header.
  */
 export function isInsecureTransportOrigin(): boolean {
-  // Honor the same explicit override the SDK guard honors, so an intentional insecure
+  // Honor the same explicit override the platform guard honors, so an intentional insecure
   // deployment does not get the message.
   const runtimeProcess = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
   if (runtimeProcess?.env?.GOODVIBES_ALLOW_INSECURE_TRANSPORT === 'true') return false;

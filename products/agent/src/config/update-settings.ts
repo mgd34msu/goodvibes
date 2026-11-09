@@ -1,7 +1,7 @@
 /**
  * `update.*`, launch-time self-update behavior.
  *
- * The SDK owns settings.json's typed schema and already defines an `update`
+ * The platform owns settings.json's typed schema and already defines an `update`
  * namespace (auto, intervalMinutes, firstCheckSeconds, …). Its loader
  * deep-merges user JSON over the defaults and keeps keys it does not know
  * through `getRaw()` (the same passthrough contract checkpoint-settings.ts
@@ -101,7 +101,7 @@ export function readUpdateSettings(configManager: Pick<ConfigManager, 'getRaw'>)
 /**
  * Which `update.*` keys the person actually WROTE, as opposed to inherited.
  *
- * `readUpdateSettings` reads the resolved config, and the SDK ships real
+ * `readUpdateSettings` reads the resolved config, and the platform ships real
  * defaults for part of the `update` namespace (`auto`, `intervalMinutes`,
  * `firstCheckSeconds`, …). So a resolved `auto: true` says nothing about
  * whether anyone chose it, every install reports it. That distinction is

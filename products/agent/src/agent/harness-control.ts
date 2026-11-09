@@ -2,11 +2,11 @@ import { readExecutionMode, setExecutionMode } from '../permissions/execution-mo
 import { captureModelReadingInput } from '../tools/agent-harness-model-reading-source.ts';
 import { types as nodeTypes } from 'node:util';
 import type { Ranked } from '@goodvibes-jev/judgment';
-import { PostalAddressHeldError, postalConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/sdk/platform/config';
+import { PostalAddressHeldError, postalConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
 import { isAgentHostSettingKey } from '../config/host-settings.ts';
 import { getAgentSettingsSchema, type AgentConfigSetting, type AgentHostReader, type AgentSettingsCatalog } from '../config/settings-catalog.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { applyWakeEnablementCompanion, type WakeCompanionWrite } from '../config/wake-enablement-companion.ts';
 import type { SecretsManager } from '../config/secrets.ts';
 import {
@@ -20,7 +20,7 @@ import {
   isAgentHiddenSettingKey,
 } from '../config/agent-settings-policy.ts';
 import { rankHarnessCatalog, captureCatalogData, type CatalogRankingOptions } from '../tools/agent-harness-catalog-ranking.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import {
   agentDaemonConfigClient,
   agentDaemonConfigClientRevision,

@@ -17,7 +17,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ExternalLink, MoreHorizontal } from 'lucide-react';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import type { FleetProcessNode } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { formatSessionContextUsage } from '../../lib/session-context-usage';
@@ -35,7 +35,7 @@ import {
 import { companionMessagesFromListResponse } from '../../lib/companion-chat';
 import { firstString } from '../../lib/object';
 import { formatError, isMethodUnavailableError, isSessionNotLocalError } from '../../lib/errors';
-import { gatePresetLabel, type SettableGatePresetName } from '@goodvibes-jev/engine/sdk/platform/gate/presets';
+import { gatePresetLabel, type SettableGatePresetName } from '@goodvibes-jev/engine/platform/platform/gate/presets';
 import { outcomeLabel, type CompactionCheck, type CompactionReceipt } from '../../lib/compaction';
 import { useCompactionReceipts } from '../../hooks/useCompactionReceipts';
 import { PermissionModeSheet } from '../../components/confirm/PermissionModeSheet';
@@ -74,7 +74,7 @@ function PermissionModeFact({ sessionId }: { sessionId: string }) {
   const [sheetOpen, setSheetOpen] = useState(false);
   const modeQuery = useQuery({
     queryKey: queryKeys.sessionPermissionMode(sessionId),
-    queryFn: () => sdk.operator.sessions.permissionMode.get(sessionId),
+    queryFn: () => platformClient.operator.sessions.permissionMode.get(sessionId),
     enabled: Boolean(sessionId),
     staleTime: 15_000,
     retry: false,
@@ -82,7 +82,7 @@ function PermissionModeFact({ sessionId }: { sessionId: string }) {
   const notLocal = modeQuery.isError && isSessionNotLocalError(modeQuery.error);
   const mode = modeQuery.data?.mode ?? '';
   const setMode = useMutation({
-    mutationFn: (nextMode: SettableGatePresetName) => sdk.operator.sessions.permissionMode.set(sessionId, nextMode),
+    mutationFn: (nextMode: SettableGatePresetName) => platformClient.operator.sessions.permissionMode.set(sessionId, nextMode),
     onSuccess: async () => {
       setSheetOpen(false);
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessionPermissionMode(sessionId) });
@@ -118,7 +118,7 @@ function PermissionModeFact({ sessionId }: { sessionId: string }) {
 function useContextUsage(sessionId: string, check: CompactionCheck | null): string {
   const usage = useQuery({
     queryKey: queryKeys.sessionContextUsage(sessionId),
-    queryFn: () => sdk.operator.sessions.contextUsage.get(sessionId),
+    queryFn: () => platformClient.operator.sessions.contextUsage.get(sessionId),
     enabled: Boolean(sessionId),
     staleTime: 10_000,
     retry: false,
@@ -139,7 +139,7 @@ function useContextUsage(sessionId: string, check: CompactionCheck | null): stri
 function useKnownCost(sessionId: string) {
   const attribution = useQuery({
     queryKey: queryKeys.costAttribution('24h', 'session'),
-    queryFn: () => sdk.operator.cost.attribution.get({ window: '24h', dimension: 'session' }),
+    queryFn: () => platformClient.operator.cost.attribution.get({ window: '24h', dimension: 'session' }),
     enabled: Boolean(sessionId),
     staleTime: 30_000,
     retry: false,
@@ -195,7 +195,7 @@ export function SessionDetail({ record, agents, tab, onTabChange, streamPaused, 
 
   const messages = useQuery({
     queryKey: queryKeys.sessionMessages(record.id),
-    queryFn: () => sdk.operator.sessions.messages.list(record.id),
+    queryFn: () => platformClient.operator.sessions.messages.list(record.id),
     enabled: Boolean(record.id) && tab === 'transcript',
   });
   const items = useMemo(() => companionMessagesFromListResponse(messages.data), [messages.data]);
@@ -206,7 +206,7 @@ export function SessionDetail({ record, agents, tab, onTabChange, streamPaused, 
   // stream comes back (the daemon may have been upgraded meanwhile).
   const deleteCapability = useQuery({
     queryKey: ['capability', 'sessions.delete'],
-    queryFn: () => sdk.operator.control.methodInfo('sessions.delete'),
+    queryFn: () => platformClient.operator.control.methodInfo('sessions.delete'),
     staleTime: 5 * 60_000,
     retry: false,
   });

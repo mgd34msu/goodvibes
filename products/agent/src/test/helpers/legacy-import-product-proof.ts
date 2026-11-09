@@ -1,13 +1,13 @@
 /** Actual product entry surface, without starting unrelated full-screen services. */
 import { strict as assert } from 'node:assert';
-import { createShellPathService } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
+import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { IMPORT_FIXTURE_TOKEN } from './legacy-import-host-fixture.ts';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { assertCurrentToolExecution } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { DEFAULT_CONFIG } from '@goodvibes-jev/engine/sdk/platform/config';
-import { PermissionManager, type PermissionConfigReader } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import { PolicyRuntimeState } from '@goodvibes-jev/engine/sdk/platform/runtime/security';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { assertCurrentToolExecution } from '@goodvibes-jev/engine/platform/platform/tools';
+import { DEFAULT_CONFIG } from '@goodvibes-jev/engine/platform/platform/config';
+import { PermissionManager, type PermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { PolicyRuntimeState } from '@goodvibes-jev/engine/platform/platform/runtime/security';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';

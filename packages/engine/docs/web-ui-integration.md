@@ -6,15 +6,15 @@ Web UI apps cannot run the full agentic surface (tool execution, LSP, MCP, workf
 
 Use the narrowest browser entrypoint that matches the app. A normal GoodVibes
 WebUI that presents the base knowledge/wiki system should use
-`@goodvibes-jev/engine/sdk/browser/knowledge`; it contains base knowledge routes,
+`@goodvibes-jev/engine/platform/browser/knowledge`; it contains base knowledge routes,
 shared session/auth/provider routes, and realtime domains without loading Home
-Assistant Home Graph route metadata. Use `@goodvibes-jev/engine/sdk/browser` only
+Assistant Home Graph route metadata. Use `@goodvibes-jev/engine/platform/browser` only
 when the app intentionally needs the complete operator route contract.
 
 ```ts
-import { createBrowserKnowledgeSdk } from '@goodvibes-jev/engine/sdk/browser/knowledge';
+import { createBrowserKnowledgePlatform } from '@goodvibes-jev/engine/platform/browser/knowledge';
 
-const sdk = createBrowserKnowledgeSdk({
+const platformClient = createBrowserKnowledgePlatform({
   baseUrl: 'https://goodvibes.example.com',
 });
 ```
@@ -56,22 +56,22 @@ or admin scoping.
 For a browser-based web UI:
 - use the narrowest scoped browser entrypoint
 - prefer same-origin cookie-backed auth when hosting the UI with the daemon
-- use `sdk.realtime.viaSse()` for dashboards and live status panes
-- use `sdk.knowledge.*` or `sdk.operator.invoke(...)` for the base knowledge/wiki methods exposed by the scoped entrypoint
-- use `sdk.chat.*` for standalone companion chat sessions
-- use `sdk.operator.invoke('control.snapshot', {})` for shared control-plane state
+- use `platformClient.realtime.viaSse()` for dashboards and live status panes
+- use `platformClient.knowledge.*` or `platformClient.operator.invoke(...)` for the base knowledge/wiki methods exposed by the scoped entrypoint
+- use `platformClient.chat.*` for standalone companion chat sessions
+- use `platformClient.operator.invoke('control.snapshot', {})` for shared control-plane state
 - treat realtime as live update flow, not as the only source of truth
 
 ## Choosing browser entrypoints
 
-`@goodvibes-jev/engine/sdk/browser/knowledge` is the default for the base GoodVibes
-WebUI. `@goodvibes-jev/engine/sdk/browser/homeassistant` is for Home Assistant
+`@goodvibes-jev/engine/platform/browser/knowledge` is the default for the base GoodVibes
+WebUI. `@goodvibes-jev/engine/platform/browser/homeassistant` is for Home Assistant
 panels and includes Home Graph routes without pulling the base knowledge/wiki
-route table. `@goodvibes-jev/engine/sdk/browser/agent` (via `createBrowserAgentSdk`)
+route table. `@goodvibes-jev/engine/platform/browser/agent` (via `createBrowserAgentPlatform`)
 scopes to the GoodVibes Agent surface: the agent's own knowledge/wiki space
 served under `/api/goodvibes-agent/knowledge`, plus work-plan, artifact, and
-companion-chat routes. `@goodvibes-jev/engine/sdk/browser` and
-`@goodvibes-jev/engine/sdk/web` remain full all-method browser clients for
+companion-chat routes. `@goodvibes-jev/engine/platform/browser` and
+`@goodvibes-jev/engine/platform/web` remain full all-method browser clients for
 applications that need the entire operator contract.
 
 See [public-surface.md](./public-surface.md) for the full entry-point reference.
@@ -85,24 +85,24 @@ See [public-surface.md](./public-surface.md) for the full entry-point reference.
 
 ## Companion chat
 
-Use `sdk.chat` from `@goodvibes-jev/engine/sdk/browser/knowledge` for standalone
+Use `platformClient.chat` from `@goodvibes-jev/engine/platform/browser/knowledge` for standalone
 browser chat. These sessions are separate from operator task sessions and do
 not call `sessions.followUp`.
 
 ```ts
-const created = await sdk.chat.sessions.create({
+const created = await platformClient.chat.sessions.create({
   title: 'WebUI chat',
   provider: 'openai-subscriber',
   model: 'gpt-5.5',
 });
 
-await sdk.chat.events.stream(created.sessionId, {
+await platformClient.chat.events.stream(created.sessionId, {
   onEvent(eventName, payload) {
     // companion-chat.turn.delta / companion-chat.turn.completed / companion-chat.turn.error
   },
 });
 
-await sdk.chat.messages.create(created.sessionId, {
+await platformClient.chat.messages.create(created.sessionId, {
   body: 'Hello',
 });
 ```
@@ -114,8 +114,8 @@ provider, the daemon also accepts the provider-qualified registry key as
 `model`, such as `openai:gpt-5.5`, as long as `provider` remains the selected
 runtime provider row id.
 
-Use `sdk.chat.sessions.list()` for the chat sidebar and
-`sdk.chat.sessions.update(sessionId, { provider, model })` when a user changes
+Use `platformClient.chat.sessions.list()` for the chat sidebar and
+`platformClient.chat.sessions.update(sessionId, { provider, model })` when a user changes
 the model for an existing companion-chat session. Do not send provider/model on
 `messages.create`; message creation uses the session's stored route.
 
@@ -127,14 +127,14 @@ chat message. Do not encode files in message metadata and do not create local
 attachment-only state in the WebUI.
 
 ```ts
-const uploaded = await sdk.artifacts.create({
+const uploaded = await platformClient.artifacts.create({
   filename: file.name,
   mimeType: file.type || 'application/octet-stream',
   dataBase64: await fileToBase64(file),
   metadata: { surface: 'webui' },
 });
 
-await sdk.chat.messages.create(created.sessionId, {
+await platformClient.chat.messages.create(created.sessionId, {
   body: 'Use this file in your answer.',
   attachments: [
     {
@@ -209,7 +209,7 @@ cancels the upstream provider stream.
 
 ## Error handling
 
-All SDK errors extend `GoodVibesSdkError` and expose the same `kind` taxonomy
+All platform errors extend `GoodVibesError` and expose the same `kind` taxonomy
 across every browser surface. See
 [Browser Integration → Error handling](./browser-integration.md#error-handling)
 for the handling pattern and [Error Kinds](./error-kinds.md) for the full
@@ -218,9 +218,9 @@ taxonomy.
 ## Observability
 
 Observability works from web UI contexts exactly as on the full surface. Import
-observer helpers from `@goodvibes-jev/engine/sdk/observer` so scoped browser bundles
+observer helpers from `@goodvibes-jev/engine/platform/observer` so scoped browser bundles
 stay narrow, and pass `createConsoleObserver()` as the `observer` option when
-creating the SDK. See
+creating the platform. See
 [Browser Integration → Observability](./browser-integration.md#observability) for
 the shared example and [Observability](./observability.md) for the full observer
 API.

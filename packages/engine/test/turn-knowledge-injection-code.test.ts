@@ -14,10 +14,10 @@ import {
   CODE_RELEVANCE_TO_SCORE_SCALE,
   DEFAULT_TURN_KNOWLEDGE_RELEVANCE_FLOOR,
   type TurnCodeIndexSource,
-} from '../sdk/src/platform/agents/turn-knowledge-injection.js';
-import type { MemoryRecord } from '../sdk/src/platform/state/memory-store.js';
-import type { CodeContextResult, CodeIndexStats } from '../sdk/src/platform/state/index.js';
-import type { ProviderMessage } from '../sdk/src/platform/providers/interface.js';
+} from '../platform/src/platform/agents/turn-knowledge-injection.js';
+import type { MemoryRecord } from '../platform/src/platform/state/memory-store.js';
+import type { CodeContextResult, CodeIndexStats } from '../platform/src/platform/state/index.js';
+import type { ProviderMessage } from '../platform/src/platform/providers/interface.js';
 import { useMemoryReadings } from './_helpers/memory-readings.ts';
 
 // Knowledge ranking reads through the judgment port; the fake reads a memory record

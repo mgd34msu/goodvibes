@@ -1,16 +1,16 @@
 /**
  * bootstrap / insecure-origin guard, Finding 3 (plain-http LAN white screen), and its
- * SDK 1.8.0 narrowing to public-only.
+ * platform 1.8.0 narrowing to public-only.
  *
  * Proves the entry guard: on an insecure PUBLIC origin the honest "needs HTTPS" message
- * renders and the app graph (mount-app, which pulls the throwing SDK transport at module
+ * renders and the app graph (mount-app, which pulls the throwing platform transport at module
  * load) is NEVER imported; on a secure origin, or a private-network http origin (localhost,
  * a LAN IP, a .local name, the supported plain-http-on-LAN posture), the app mounts
  * normally.
  */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 
-// Stub the app-mount path so the secure branch does not drag in the whole App/SDK graph.
+// Stub the app-mount path so the secure branch does not drag in the whole App/platform graph.
 let mountAppCalls = 0;
 mock.module('./mount-app', () => ({
   mountApp: () => {

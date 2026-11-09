@@ -8,14 +8,14 @@ import { mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { SettingsModal, SETTINGS_CATEGORIES } from '../../input/settings-modal.ts';
-import { ConfigManager, CONFIG_SCHEMA } from '@goodvibes-jev/engine/sdk/platform/config';
-import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/sdk/platform/payments';
+import { ConfigManager, CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
+import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/platform/platform/payments';
 import { SecretsManager } from '../../config/secrets.ts';
-import { ServiceRegistry } from '@goodvibes-jev/engine/sdk/platform/config';
-import { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
+import { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
-import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
+import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
 
 function makeTmpDir(): string {
   const dir = join(tmpdir(), `gv-settings-payments-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -119,7 +119,7 @@ describe('SettingsModal payments category', () => {
   });
 
   describe('money fields round-trip exactly, as the plain amount typed', () => {
-    // SDK 2.0.5 dropped the Cents suffix and the minor-unit storage: the
+    // platform 2.0.5 dropped the Cents suffix and the minor-unit storage: the
     // config now holds exactly the number a person typed ("19.99" stores as
     // 19.99, not 1999), so there is no cent-rounding math left to prove here
     //, only that the value survives the edit buffer unchanged.
@@ -247,7 +247,7 @@ describe('SettingsModal payments category', () => {
   });
 
   test('changing payments.currency has no effect on a money field\'s edit buffer or stored value', () => {
-    // SDK 2.0.5 removed the currency-dependent minor-unit conversion this
+    // platform 2.0.5 removed the currency-dependent minor-unit conversion this
     // used to prove (JPY's zero-decimal exponent used to change what "500"
     // meant). A money key's value is now the plain number typed, independent
     // of payments.currency, so switching to JPY changes nothing about it,
@@ -275,7 +275,7 @@ describe('SettingsModal payments category', () => {
   });
 
   describe('CVV trade-off warning', () => {
-    test('selecting prompt surfaces the exact SDK warning string', () => {
+    test('selecting prompt surfaces the exact platform warning string', () => {
       while (modal.currentCategory !== 'payments') modal.nextCategory();
       modal.selectedIndex = modal.currentItems.findIndex((entry) => entry.setting.key === 'payments.cvvHandling');
       expect(modal.getSelected()?.currentValue).toBe('stored');

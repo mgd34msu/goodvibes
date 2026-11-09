@@ -10,7 +10,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { PairingTokenManager } from '../sdk/src/platform/pairing/pairing-token-store.ts';
+import { PairingTokenManager } from '../platform/src/platform/pairing/pairing-token-store.ts';
 
 const dirs: string[] = [];
 function tempFile(): string {

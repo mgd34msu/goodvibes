@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { WorkPlanStore, type WorkPlanLinkTargets } from '@goodvibes-jev/engine/sdk/platform/workflow';
-import { createProcessRegistry, contractNodeId, type ProcessRegistryDeps } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
+import { WorkPlanStore, type WorkPlanLinkTargets } from '@goodvibes-jev/engine/platform/platform/workflow';
+import { createProcessRegistry, contractNodeId, type ProcessRegistryDeps } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import { AgentsModal } from '../../input/agents-modal.ts';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerAcpRuntimeCommands } from '../../input/commands/acp-runtime.ts';

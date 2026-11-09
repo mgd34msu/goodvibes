@@ -14,8 +14,8 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { dispatchAutomationRoutes } from '../daemon-sdk/src/automation.js';
-import type { DaemonApiRouteHandlers } from '../daemon-sdk/src/context.js';
+import { dispatchAutomationRoutes } from '../daemon-api/src/automation.js';
+import type { DaemonApiRouteHandlers } from '../daemon-api/src/context.js';
 import { makeRequest } from './_helpers/router-requests.js';
 
 function makeJob(id = 'job-1') {

@@ -45,11 +45,11 @@ import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../runtime
  */
 import { detectInstallKind, normalizeVersion, type UpdateFetchLike } from '../runtime/update-check.ts';
 import { applyUpdate, checkForUpdate, createUpdateSwapProgress, type ApplyUpdateOptions } from '../input/commands/update-runtime.ts';
-import { configuredSuiteWebuiDirectory, installedSuiteNeedsRepair, suiteUpdateRequiresRecovery, type SuiteUpdateResult } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { configuredSuiteWebuiDirectory, installedSuiteNeedsRepair, suiteUpdateRequiresRecovery, type SuiteUpdateResult } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { readUpdateSettings, type UpdateSettings } from '../config/tui-extension-settings.ts';
-import { runDaemonHandover, type DaemonHandoverOutcome } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+import { runDaemonHandover, type DaemonHandoverOutcome } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { resolveGoodVibesDaemonExecutable } from './service-posture.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { VERSION } from '../version.ts';
 
 /**

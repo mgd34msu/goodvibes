@@ -2,7 +2,7 @@
  * worktree-setup-config.ts, TUI-local synthetic settings entries for
  * worktree.setup.commands / worktree.setup.carryOverGlobs.
  *
- * Neither key is in the SDK's ConfigKey union: the SDK's cold-start worktree
+ * Neither key is in the platform's ConfigKey union: the platform's cold-start worktree
  * setup (platform/runtime/worktree/setup.ts, resolveWorktreeSetupConfig)
  * reads them off a generic `get(key: string)` rather than the typed
  * CONFIG_SCHEMA, so without this file they are invisible to /config and the
@@ -12,12 +12,12 @@
  * settings-modal-data.ts (behavior.notifyAfterSeconds, storage.codeIndexEnabled, etc).
  *
  * Both keys hold a JSON array of strings on disk. The settings modal's
- * inline editor is a single-line text field, so, matching the SDK's own
+ * inline editor is a single-line text field, so, matching the platform's own
  * convention for controlPlane.cors.allowedOrigins, they are displayed and
  * edited as a comma-separated list and parsed back into an array on commit
  * (see isWorktreeSetupListConfigKey's use in settings-modal.ts#commitEdit).
  */
-import type { ConfigKey, ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigKey, ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
 import type { SettingEntry } from './settings-modal-types.ts';
 
 export const WORKTREE_SETUP_COMMANDS_CONFIG_KEY = 'worktree.setup.commands' as ConfigKey;
@@ -34,13 +34,13 @@ export function isWorktreeSetupListConfigKey(key: ConfigKey): boolean {
 }
 
 /**
- * Read a config value as a string array, mirrors the SDK's own tolerant
+ * Read a config value as a string array, mirrors the platform's own tolerant
  * readStringArray (non-array/malformed degrades to empty).
  *
- * Defensive try/catch (now belt-and-suspenders): the SDK registers the
+ * Defensive try/catch (now belt-and-suspenders): the platform registers the
  * `worktree` section in DEFAULT_CONFIG (setup.commands / setup.carryOverGlobs,
  * both empty lists) as of this repack, so ConfigManager.get no longer throws
- * for these keys on a fresh store. The guard is retained so an older SDK, or
+ * for these keys on a fresh store. The guard is retained so an older platform, or
  * a config store whose section was pruned, degrades to an empty list here
  * (this read runs on every settings-modal build) rather than crashing /config
  * or /settings.

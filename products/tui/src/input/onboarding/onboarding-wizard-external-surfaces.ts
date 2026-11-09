@@ -1,25 +1,25 @@
 // ---------------------------------------------------------------------------
 // onboarding-wizard-external-surfaces.ts
 //
-// The channel setup FIELD SET is owned by the SDK: getBuiltinSetupSchema is the
+// The channel setup FIELD SET is owned by the platform: getBuiltinSetupSchema is the
 // single source of truth for which fields each surface has, their config keys,
 // and their input kind. This module no longer re-authors that schema. Instead it
-// builds the onboarding ExternalSurfaceSpec[] by reading the SDK schema and
+// builds the onboarding ExternalSurfaceSpec[] by reading the platform schema and
 // layering a clearly-separated, genuinely-TUI-only PRESENTATION overlay on top:
 //   • onboarding field-id namespace (`external-services.<surface>.<field>`),
 //   • curated per-field label / hint / placeholder wording,
 //   • the per-surface auto-start enablement model (see the auto-start helpers),
-//   • numeric UI bounds (min/max) the SDK schema does not carry,
+//   • numeric UI bounds (min/max) the platform schema does not carry,
 //   • radio option copy (with hints) for select fields.
 // Everything else, a field's existence, its config key, its input kind, and its
-// default value, is derived from the SDK schema + DEFAULT_CONFIG, so the two can
-// never silently drift. A field the overlay names that the SDK no longer defines
-// is a loud build error; a field the SDK adds that the overlay has not curated is
-// appended automatically with SDK-derived presentation.
+// default value, is derived from the platform schema + DEFAULT_CONFIG, so the two can
+// never silently drift. A field the overlay names that the platform no longer defines
+// is a loud build error; a field the platform adds that the overlay has not curated is
+// appended automatically with platform-derived presentation.
 //
-// Two fields are genuine TUI-only extras the onboarding exposes but the SDK setup
+// Two fields are genuine TUI-only extras the onboarding exposes but the platform setup
 // schema intentionally omits (surfaces.ntfy.defaultPriority, surfaces.webhook.
-// timeoutMs). They are declared with `tuiOnly` and are not matched to the SDK.
+// timeoutMs). They are declared with `tuiOnly` and are not matched to the platform.
 // ---------------------------------------------------------------------------
 
 import {
@@ -27,14 +27,14 @@ import {
   GOODVIBES_NTFY_CHAT_TOPIC,
   GOODVIBES_NTFY_REMOTE_TOPIC,
   resolveGoodVibesNtfyTopics,
-} from '@goodvibes-jev/engine/sdk/platform/integrations';
-import { getBuiltinSetupSchema } from '@goodvibes-jev/engine/sdk/platform/channels';
+} from '@goodvibes-jev/engine/platform/platform/integrations';
+import { getBuiltinSetupSchema } from '@goodvibes-jev/engine/platform/platform/channels';
 import type {
   ChannelSetupFieldDescriptor,
   ChannelSetupFieldKind,
   ChannelSurface,
-} from '@goodvibes-jev/engine/sdk/platform/channels';
-import { DEFAULT_CONFIG, type ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
+} from '@goodvibes-jev/engine/platform/platform/channels';
+import { DEFAULT_CONFIG, type ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import type { OnboardingSnapshotState } from '../../runtime/onboarding/index.ts';
 import { TELEGRAM_MODE_OPTIONS, WHATSAPP_PROVIDER_OPTIONS } from './onboarding-wizard-constants.ts';
 import type { ExternalSurfaceSetupFieldSpec, ExternalSurfaceSpec, OnboardingWizardRadioOption } from './onboarding-wizard-types.ts';
@@ -74,8 +74,8 @@ function readFieldDefault(configKey: ConfigKey, snapshot: OnboardingSnapshotStat
   return chosen === null || chosen === undefined ? '' : String(chosen);
 }
 
-/** Map an SDK setup-field kind to an onboarding input kind. */
-function mapSdkKind(kind: ChannelSetupFieldKind): 'text' | 'masked' | 'radio' {
+/** Map a platform setup-field kind to an onboarding input kind. */
+function mapPlatformKind(kind: ChannelSetupFieldKind): 'text' | 'masked' | 'radio' {
   if (kind === 'secret') return 'masked';
   if (kind === 'select') return 'radio';
   return 'text'; // string | url | number | boolean → text (boolean=enabled is handled separately)
@@ -84,36 +84,36 @@ function mapSdkKind(kind: ChannelSetupFieldKind): 'text' | 'masked' | 'radio' {
 // ---- the TUI-only presentation overlay -----------------------------------
 
 interface SurfaceFieldOverlay {
-  /** Join key to the SDK schema (and the config path). */
+  /** Join key to the platform schema (and the config path). */
   readonly configKey: ConfigKey;
   readonly label: string;
   readonly hint: string;
   readonly placeholder: string;
   /** Radio option copy (with hints) for a select field. */
   readonly options?: readonly OnboardingWizardRadioOption[];
-  /** Numeric UI bounds the SDK schema does not carry. */
+  /** Numeric UI bounds the platform schema does not carry. */
   readonly defaultNumber?: number;
   readonly min?: number;
   readonly max?: number;
-  /** Set only for a field the SDK setup schema does not define (TUI-only extra). */
+  /** Set only for a field the platform setup schema does not define (TUI-only extra). */
   readonly tuiOnly?: { readonly kind: 'text' | 'masked'; readonly valueType?: 'number' };
 }
 
 interface SurfaceOverlay {
   /** ExternalSurfaceSpec.id and the `surfaces.<id>.*` config segment (camelCase for google chat). */
   readonly onboardingId: string;
-  /** The SDK ChannelSurface whose setup schema owns this surface's field set. */
-  readonly sdkSurface: ChannelSurface;
+  /** The platform ChannelSurface whose setup schema owns this surface's field set. */
+  readonly engineSurface: ChannelSurface;
   readonly label: string;
   readonly hint: string;
-  /** Fields in onboarding display order; each references an SDK field by configKey (or a tuiOnly extra). */
+  /** Fields in onboarding display order; each references a platform field by configKey (or a tuiOnly extra). */
   readonly fields: readonly SurfaceFieldOverlay[];
 }
 
 const SURFACE_OVERLAYS: readonly SurfaceOverlay[] = [
   {
     onboardingId: 'slack',
-    sdkSurface: 'slack',
+    engineSurface: 'slack',
     label: 'Slack surface',
     hint: 'Enable Slack messages, slash-command/event handling, and thread-aware replies.',
     fields: [
@@ -126,7 +126,7 @@ const SURFACE_OVERLAYS: readonly SurfaceOverlay[] = [
   },
   {
     onboardingId: 'discord',
-    sdkSurface: 'discord',
+    engineSurface: 'discord',
     label: 'Discord surface',
     hint: 'Enable Discord command/event handling and channel replies.',
     fields: [
@@ -139,7 +139,7 @@ const SURFACE_OVERLAYS: readonly SurfaceOverlay[] = [
   },
   {
     onboardingId: 'telegram',
-    sdkSurface: 'telegram',
+    engineSurface: 'telegram',
     label: 'Telegram surface',
     hint: 'Enable Telegram bot messaging and event handling.',
     fields: [
@@ -152,7 +152,7 @@ const SURFACE_OVERLAYS: readonly SurfaceOverlay[] = [
   },
   {
     onboardingId: 'ntfy',
-    sdkSurface: 'ntfy',
+    engineSurface: 'ntfy',
     label: 'ntfy surface',
     hint: 'Configure ntfy chat, agent, remote-session, and notification delivery topics.',
     fields: [
@@ -167,7 +167,7 @@ const SURFACE_OVERLAYS: readonly SurfaceOverlay[] = [
   },
   {
     onboardingId: 'webhook',
-    sdkSurface: 'webhook',
+    engineSurface: 'webhook',
     label: 'Outbound webhook surface',
     hint: 'Enable outbound webhook delivery targets.',
     fields: [
@@ -178,7 +178,7 @@ const SURFACE_OVERLAYS: readonly SurfaceOverlay[] = [
   },
   {
     onboardingId: 'homeassistant',
-    sdkSurface: 'homeassistant',
+    engineSurface: 'homeassistant',
     label: 'Home Assistant surface',
     hint: 'Enable the Home Assistant companion surface, daemon callbacks, and event delivery.',
     fields: [
@@ -194,7 +194,7 @@ const SURFACE_OVERLAYS: readonly SurfaceOverlay[] = [
   },
   {
     onboardingId: 'googleChat',
-    sdkSurface: 'google-chat',
+    engineSurface: 'google-chat',
     label: 'Google Chat surface',
     hint: 'Enable Google Chat webhook and app routing.',
     fields: [
@@ -206,7 +206,7 @@ const SURFACE_OVERLAYS: readonly SurfaceOverlay[] = [
   },
   {
     onboardingId: 'signal',
-    sdkSurface: 'signal',
+    engineSurface: 'signal',
     label: 'Signal surface',
     hint: 'Enable Signal bridge messaging.',
     fields: [
@@ -218,7 +218,7 @@ const SURFACE_OVERLAYS: readonly SurfaceOverlay[] = [
   },
   {
     onboardingId: 'whatsapp',
-    sdkSurface: 'whatsapp',
+    engineSurface: 'whatsapp',
     label: 'WhatsApp surface',
     hint: 'Enable WhatsApp Cloud API or bridge messaging.',
     fields: [
@@ -233,7 +233,7 @@ const SURFACE_OVERLAYS: readonly SurfaceOverlay[] = [
   },
   {
     onboardingId: 'imessage',
-    sdkSurface: 'imessage',
+    engineSurface: 'imessage',
     label: 'iMessage surface',
     hint: 'Enable iMessage bridge messaging.',
     fields: [
@@ -245,7 +245,7 @@ const SURFACE_OVERLAYS: readonly SurfaceOverlay[] = [
   },
   {
     onboardingId: 'msteams',
-    sdkSurface: 'msteams',
+    engineSurface: 'msteams',
     label: 'Microsoft Teams surface',
     hint: 'Enable Microsoft Teams bot conversations and channel replies.',
     fields: [
@@ -260,7 +260,7 @@ const SURFACE_OVERLAYS: readonly SurfaceOverlay[] = [
   },
   {
     onboardingId: 'bluebubbles',
-    sdkSurface: 'bluebubbles',
+    engineSurface: 'bluebubbles',
     label: 'BlueBubbles surface',
     hint: 'Enable BlueBubbles bridge messaging for iMessage-compatible deployments.',
     fields: [
@@ -272,7 +272,7 @@ const SURFACE_OVERLAYS: readonly SurfaceOverlay[] = [
   },
   {
     onboardingId: 'mattermost',
-    sdkSurface: 'mattermost',
+    engineSurface: 'mattermost',
     label: 'Mattermost surface',
     hint: 'Enable Mattermost bot messaging and channel replies.',
     fields: [
@@ -284,7 +284,7 @@ const SURFACE_OVERLAYS: readonly SurfaceOverlay[] = [
   },
   {
     onboardingId: 'telephony',
-    sdkSurface: 'telephony',
+    engineSurface: 'telephony',
     label: 'Telephony surface',
     hint: 'Enable SMS/voice notification delivery: direct Twilio, or a self-hosted bridge.',
     fields: [
@@ -301,7 +301,7 @@ const SURFACE_OVERLAYS: readonly SurfaceOverlay[] = [
   },
   {
     onboardingId: 'matrix',
-    sdkSurface: 'matrix',
+    engineSurface: 'matrix',
     label: 'Matrix surface',
     hint: 'Enable Matrix bot messaging and room replies.',
     fields: [
@@ -313,15 +313,15 @@ const SURFACE_OVERLAYS: readonly SurfaceOverlay[] = [
   },
 ];
 
-// ---- the builder: SDK schema (source of truth) + overlay (presentation) ---
+// ---- the builder: platform schema (source of truth) + overlay (presentation) ---
 
 function buildFieldFromOverlay(
-  sdkSurface: ChannelSurface,
-  sdkFields: ReadonlyMap<string, ChannelSetupFieldDescriptor>,
+  engineSurface: ChannelSurface,
+  engineFields: ReadonlyMap<string, ChannelSetupFieldDescriptor>,
   overlay: SurfaceFieldOverlay,
 ): ExternalSurfaceSetupFieldSpec {
   const lastSegment = overlay.configKey.split('.').pop() ?? overlay.configKey;
-  const id = `external-services.${kebab(sdkSurface)}.${kebab(lastSegment)}`;
+  const id = `external-services.${kebab(engineSurface)}.${kebab(lastSegment)}`;
 
   let kind: 'text' | 'masked' | 'radio';
   let valueType: 'number' | undefined;
@@ -329,12 +329,12 @@ function buildFieldFromOverlay(
     kind = overlay.tuiOnly.kind;
     valueType = overlay.tuiOnly.valueType;
   } else {
-    const sdkField = sdkFields.get(overlay.configKey);
-    if (!sdkField) {
-      throw new Error(`onboarding overlay references ${overlay.configKey}, which the SDK setup schema for ${sdkSurface} no longer defines`);
+    const engineField = engineFields.get(overlay.configKey);
+    if (!engineField) {
+      throw new Error(`onboarding overlay references ${overlay.configKey}, which the platform setup schema for ${engineSurface} no longer defines`);
     }
-    kind = mapSdkKind(sdkField.kind);
-    valueType = sdkField.kind === 'number' ? 'number' : undefined;
+    kind = mapPlatformKind(engineField.kind);
+    valueType = engineField.kind === 'number' ? 'number' : undefined;
   }
 
   return {
@@ -353,49 +353,49 @@ function buildFieldFromOverlay(
   };
 }
 
-/** Append any SDK setup field the overlay has not curated, with SDK-derived presentation. */
-function buildUncoveredSdkField(
-  sdkSurface: ChannelSurface,
-  sdkField: ChannelSetupFieldDescriptor,
+/** Append any platform setup field the overlay has not curated, with platform-derived presentation. */
+function buildUncoveredPlatformField(
+  engineSurface: ChannelSurface,
+  engineField: ChannelSetupFieldDescriptor,
 ): ExternalSurfaceSetupFieldSpec {
-  const lastSegment = (sdkField.configKey ?? sdkField.id).split('.').pop() ?? sdkField.id;
+  const lastSegment = (engineField.configKey ?? engineField.id).split('.').pop() ?? engineField.id;
   return {
-    id: `external-services.${kebab(sdkSurface)}.${kebab(lastSegment)}`,
-    configKey: (sdkField.configKey ?? '') as ConfigKey,
-    kind: mapSdkKind(sdkField.kind),
-    label: sdkField.label,
-    hint: sdkField.detail ?? sdkField.label,
-    placeholder: sdkField.placeholder ?? '',
-    ...(sdkField.kind === 'number' ? { valueType: 'number' as const } : {}),
-    ...(sdkField.options ? { options: sdkField.options.map((o) => ({ id: o.value, label: o.label, hint: o.label })) } : {}),
-    defaultValue: (snapshot) => readFieldDefault((sdkField.configKey ?? '') as ConfigKey, snapshot),
+    id: `external-services.${kebab(engineSurface)}.${kebab(lastSegment)}`,
+    configKey: (engineField.configKey ?? '') as ConfigKey,
+    kind: mapPlatformKind(engineField.kind),
+    label: engineField.label,
+    hint: engineField.detail ?? engineField.label,
+    placeholder: engineField.placeholder ?? '',
+    ...(engineField.kind === 'number' ? { valueType: 'number' as const } : {}),
+    ...(engineField.options ? { options: engineField.options.map((o) => ({ id: o.value, label: o.label, hint: o.label })) } : {}),
+    defaultValue: (snapshot) => readFieldDefault((engineField.configKey ?? '') as ConfigKey, snapshot),
   };
 }
 
 function buildSurfaceSpec(overlay: SurfaceOverlay): ExternalSurfaceSpec {
-  const schema = getBuiltinSetupSchema(overlay.sdkSurface);
-  const sdkFields = new Map<string, ChannelSetupFieldDescriptor>();
+  const schema = getBuiltinSetupSchema(overlay.engineSurface);
+  const engineFields = new Map<string, ChannelSetupFieldDescriptor>();
   for (const f of schema.fields) {
-    if (f.configKey) sdkFields.set(f.configKey, f);
+    if (f.configKey) engineFields.set(f.configKey, f);
   }
 
-  const curated = overlay.fields.map((f) => buildFieldFromOverlay(overlay.sdkSurface, sdkFields, f));
+  const curated = overlay.fields.map((f) => buildFieldFromOverlay(overlay.engineSurface, engineFields, f));
 
-  // Auto-include any SDK field (other than the enabled toggle) the overlay did
-  // not curate, so a new SDK channel field surfaces in onboarding automatically.
+  // Auto-include any platform field (other than the enabled toggle) the overlay did
+  // not curate, so a new platform channel field surfaces in onboarding automatically.
   const coveredKeys = new Set<string>(overlay.fields.filter((f) => !f.tuiOnly).map((f) => f.configKey));
   const enabledKey = `surfaces.${overlay.onboardingId}.enabled`;
   const appended: ExternalSurfaceSetupFieldSpec[] = [];
-  for (const sdkField of schema.fields) {
-    if (!sdkField.configKey) continue;
-    if (sdkField.kind === 'boolean' || sdkField.configKey === enabledKey) continue;
-    if (coveredKeys.has(sdkField.configKey)) continue;
-    appended.push(buildUncoveredSdkField(overlay.sdkSurface, sdkField));
+  for (const engineField of schema.fields) {
+    if (!engineField.configKey) continue;
+    if (engineField.kind === 'boolean' || engineField.configKey === enabledKey) continue;
+    if (coveredKeys.has(engineField.configKey)) continue;
+    appended.push(buildUncoveredPlatformField(overlay.engineSurface, engineField));
   }
 
   return {
     id: overlay.onboardingId,
-    enabledFieldId: `external-services.${kebab(overlay.sdkSurface)}`,
+    enabledFieldId: `external-services.${kebab(overlay.engineSurface)}`,
     enabledConfigKey: `${enabledKey}` as ConfigKey,
     label: overlay.label,
     hint: overlay.hint,

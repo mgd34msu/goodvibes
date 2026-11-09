@@ -5,9 +5,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { ProjectPlanningRoutes } from '../sdk/src/platform/daemon/http/project-planning-routes.js';
-import { ProjectPlanningService } from '../sdk/src/platform/knowledge/index.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
+import { ProjectPlanningRoutes } from '../platform/src/platform/daemon/http/project-planning-routes.js';
+import { ProjectPlanningService } from '../platform/src/platform/knowledge/index.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 
 let previousPort: JudgmentPort | undefined;
 beforeEach(() => { previousPort = installJudgmentPort(fakePort(() => noulAnswer(0.99)).port); });
@@ -47,7 +47,7 @@ describe('project planning routes', () => {
       projectId: 'alpha',
       state: {
         goal: 'Add planning support',
-        scope: 'SDK passive storage',
+        scope: 'platform passive storage',
         tasks: [{ id: 'service', title: 'Build service', verification: ['unit tests'] }],
         verificationGates: [{ id: 'tests', description: 'Tests pass' }],
         executionApproved: true,
@@ -76,7 +76,7 @@ describe('project planning routes', () => {
     const created = await routes.handle(jsonRequest('/api/projects/planning/work-plan/tasks?projectId=alpha', {
       task: {
         title: 'Ship shared task model',
-        owner: 'sdk',
+        owner: 'platform',
         status: 'pending',
         contractId: 'ctr-1',
         originSurface: 'tui',

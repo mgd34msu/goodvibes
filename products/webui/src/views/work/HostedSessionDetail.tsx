@@ -18,7 +18,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { LogOut, OctagonX } from 'lucide-react';
 import { getClientLifetime, isClientLifetimeCurrent } from '../../lib/client-lifetime';
-import { hostedSessionDetachBeacon, sdk } from '../../lib/goodvibes';
+import { hostedSessionDetachBeacon, client as platformClient } from '../../lib/goodvibes';
 import type { HostedSessionHistoryMessage, HostedSessionRecord } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import {
@@ -138,7 +138,7 @@ export function useHostedAttachment(
   }, [listSessions, attachedSession]);
 
   const killMutation = useMutation({
-    mutationFn: (sessionId: string) => sdk.operator.sessions.hosted.kill(sessionId),
+    mutationFn: (sessionId: string) => platformClient.operator.sessions.hosted.kill(sessionId),
     onSuccess: (result) => {
       const updated = hostedSessionFromResult(result);
       if (updated) setAttachedSession(updated);
@@ -151,7 +151,7 @@ export function useHostedAttachment(
   });
 
   const passiveDetach = useCallback((sessionId: string, detachClientId: string) => {
-    void sdk.operator.sessions.hosted.detach(sessionId, detachClientId).catch((error: unknown) => {
+    void platformClient.operator.sessions.hosted.detach(sessionId, detachClientId).catch((error: unknown) => {
       console.warn(`[hosted-sessions] passive detach failed for session ${sessionId}`, error);
       toast({ title: 'Could not detach from a hosted session', description: formatError(error), tone: 'danger' });
     });
@@ -195,7 +195,7 @@ export function useHostedAttachment(
       pending = true;
       const revision = streamRevision.current;
       try {
-        const result = await sdk.operator.sessions.hosted.attach(owner.sessionId, owner.clientId);
+        const result = await platformClient.operator.sessions.hosted.attach(owner.sessionId, owner.clientId);
         if (!current()) {
           // Never send a previous owner's cleanup with a replacement credential.
           if (isClientLifetimeCurrent(lifetime)) passiveDetachRef.current(owner.sessionId, owner.clientId);
@@ -251,7 +251,7 @@ export function useHostedAttachment(
     });
     if (!confirmed || detachRef.current !== owner) return;
     try {
-      const result = await sdk.operator.sessions.hosted.detach(owner.sessionId, owner.clientId);
+      const result = await platformClient.operator.sessions.hosted.detach(owner.sessionId, owner.clientId);
       if (detachRef.current !== owner) return;
       const updated = hostedSessionFromResult(result);
       toast({ title: updated?.status === 'terminated' ? 'Session ended' : 'Left the session', tone: 'info' });

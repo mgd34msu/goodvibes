@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { DEFAULT_CONFIG } from '../sdk/src/platform/config/schema.js';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { evaluateSessionMaintenance, formatSessionMaintenanceLines } from '../sdk/src/platform/runtime/session-maintenance.js';
+import { DEFAULT_CONFIG } from '../platform/src/platform/config/schema.js';
+import type { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { evaluateSessionMaintenance, formatSessionMaintenanceLines } from '../platform/src/platform/runtime/session-maintenance.js';
 
 const configManager = { get(key: string) {
   return ({ 'behavior.guidanceMode': 'minimal', 'behavior.compactionStrategy': 'auto',

@@ -43,9 +43,9 @@ import { fileURLToPath } from 'node:url';
 import type { JsonSchema, OperatorContractManifest, OperatorMethodContract } from '../contracts/src/types.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SDK_ROOT = resolve(__dirname, '..');
-export const HA_CLIENT_CONTRACT_PATH = resolve(SDK_ROOT, 'contracts/artifacts/operator-contract.json');
-export const HA_CLIENT_OUT_PATH = resolve(SDK_ROOT, 'contracts/artifacts/python/homeassistant_operator_client.py');
+const ENGINE_ROOT = resolve(__dirname, '..');
+export const HA_CLIENT_CONTRACT_PATH = resolve(ENGINE_ROOT, 'contracts/artifacts/operator-contract.json');
+export const HA_CLIENT_OUT_PATH = resolve(ENGINE_ROOT, 'contracts/artifacts/python/homeassistant_operator_client.py');
 
 /**
  * The operator method ids the HA integration reaches as plain REST, inventoried

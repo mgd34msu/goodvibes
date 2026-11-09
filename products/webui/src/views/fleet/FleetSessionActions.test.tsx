@@ -24,7 +24,7 @@ mock.module("../../lib/goodvibes", () => ({
   getCurrentAuth: () => Promise.resolve({}),
   invokeMethod: () => Promise.resolve({}),
   hasStoredTokenSync: () => true,
-  sdk: { operator: { invoke, sessions: { steer: send, followUp: send, detach } } },
+  client: { operator: { invoke, sessions: { steer: send, followUp: send, detach } } },
 }));
 const form = mock(
   (props: { continuationSessionId?: string; projectId?: string; closed?: boolean }) => (

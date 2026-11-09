@@ -2,7 +2,7 @@
 
 A contract's acceptance criteria are the conditions its work must meet before the contract runner accepts it. This document covers how criteria are traced to the person's words when the plan is written, carried into each unit's brief, read by Jev while the unit's sub-agent works, and nudged until every one reads met. They replace the constraint list of the retired write-review-fix-confirm process.
 
-The code lives in `packages/engine/sdk/src/platform/contract/`. See [runtime orchestration](./runtime-orchestration.md#contracts) for the current contract lifecycle.
+The code lives in `packages/engine/platform/src/platform/contract/`. See [runtime orchestration](./runtime-orchestration.md#contracts) for the current contract lifecycle.
 
 See also: [Runtime events reference](./reference-runtime-events.md#contracts) for the `contracts` event domain, [Runtime orchestration](./runtime-orchestration.md) for the contract lifecycle, and [Observability](./observability.md) for event subscription.
 
@@ -60,7 +60,7 @@ interface Criterion {
 }
 ```
 
-The unions are declared once in `packages/engine/sdk/src/events/contract.ts` (`CRITERION_ORIGINS`, `CRITERION_DISPOSITIONS`, `CRITERION_STATUSES`) and re-exported by the contract module.
+The unions are declared once in `packages/engine/platform/src/events/contract.ts` (`CRITERION_ORIGINS`, `CRITERION_DISPOSITIONS`, `CRITERION_STATUSES`) and re-exported by the contract module.
 
 ### Origins
 

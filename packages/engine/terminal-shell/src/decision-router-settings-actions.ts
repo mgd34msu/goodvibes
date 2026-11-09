@@ -1,7 +1,7 @@
-import { captureDecisionRouterSettings, type ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { effortLevelsForModel } from '@goodvibes-jev/engine/sdk/platform/providers/reasoning-effort-surface';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { captureDecisionRouterSettings, type ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
+import { effortLevelsForModel } from '@goodvibes-jev/engine/platform/platform/providers/reasoning-effort-surface';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { OpenSelection } from './selection-modal.js';
 
 export interface DecisionRouterPickerContext {

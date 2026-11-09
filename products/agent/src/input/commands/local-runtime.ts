@@ -6,15 +6,15 @@ import 'node:fs';
 import 'node:fs/promises';
 import type { CommandRegistry, CommandContext } from '../command-registry.ts';
 
-import '@goodvibes-jev/engine/sdk/platform/utils';
-import '@goodvibes-jev/engine/sdk/platform/config';
+import '@goodvibes-jev/engine/platform/platform/utils';
+import '@goodvibes-jev/engine/platform/platform/config';
 import { requireBookmarkManager, requireProviderApi, requireSecretsManager } from './runtime-services.ts';
 import {
   credentialWriteScopeWasRelocated,
   resolveCredentialDeleteScope,
   resolveCredentialWriteScope,
 } from '../../config/credential-scope.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { requireYesFlag, stripYesFlag } from './confirmation.ts';
 import { formatAgentMediaGenerationResult, generateAgentMedia } from '../../agent/media-generation.ts';
 

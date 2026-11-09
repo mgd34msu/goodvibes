@@ -14,7 +14,7 @@
  * `kind` was declared for.
  */
 import { describe, expect, test } from 'bun:test';
-import { createDaemonChannelRouteHandlers } from '../daemon-sdk/src/channel-routes.ts';
+import { createDaemonChannelRouteHandlers } from '../daemon-api/src/channel-routes.ts';
 
 const CHANNEL_STATUS = [
   { surface: 'telegram', state: 'ready', enabled: true },

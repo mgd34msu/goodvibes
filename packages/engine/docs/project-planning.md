@@ -1,15 +1,15 @@
 # Project planning
 
-Project Planning is the SDK support layer for the TUI's conversational planning
+Project Planning is the platform support layer for the TUI's conversational planning
 loop. It stores project-scoped planning artifacts in the knowledge system and
 can evaluate whether a plan is ready to execute, but it does not start,
 resume, or drive planning conversations.
 
-Accessible via `@goodvibes-jev/engine/sdk/platform/knowledge` (daemon embedders). Consumer apps interact through operator methods documented below.
+Accessible via `@goodvibes-jev/engine/platform/platform/knowledge` (daemon embedders). Consumer apps interact through operator methods documented below.
 
 ## Boundary
 
-The SDK never decides what to ask or when to ask it; it only stores what the
+The platform never decides what to ask or when to ask it; it only stores what the
 conversation produces and reports whether the result is ready to execute. The
 TUI is what actually runs the planning conversation, and it owns:
 
@@ -23,14 +23,14 @@ TUI is what actually runs the planning conversation, and it owns:
   into a goal, a scope, and a list of open questions.
 - **Asking one question at a time.** Keeping the conversation disciplined
   rather than dumping a checklist on the user at once.
-- **The passive planning panel.** Rendering the state the SDK returns as a
+- **The passive planning panel.** Rendering the state the platform returns as a
   visible plan the user can watch build up.
 - **Execution approval.** Deciding when a plan is actually ready to hand to
-  agents, which the SDK can recommend against but never force.
+  agents, which the platform can recommend against but never force.
 - **Agent assignment UX.** Presenting which agent would take which task and
   letting the user confirm or change it.
 
-The SDK owns the passive infrastructure underneath that experience:
+The platform owns the passive infrastructure underneath that experience:
 
 - **Shared TypeScript types and operator contracts** that the TUI, webui, and
   daemon all use to agree on the shape of a plan.
@@ -74,7 +74,7 @@ contract units and planning decisions never appear as unrelated work.
 | `decisionId` | The recorded planning decision behind the task |
 | `sourceMessageId` | The message the task originated from |
 
-The SDK validates the work-plan status vocabulary
+The platform validates the work-plan status vocabulary
 (`ProjectWorkPlanTaskStatus`), and status transitions go through the dedicated
 status route rather than free-form patches.
 
@@ -96,7 +96,7 @@ for work postponed by a planning decision.
 Operator methods are exposed under `projectPlanning.workPlan.*` and daemon
 routes under `/api/projects/planning/work-plan`. Clients should use those
 routes instead of reading TUI-local files. TUI-local work-plan storage can be
-used as a migration/fallback cache, but the SDK store is the shared product
+used as a migration/fallback cache, but the platform store is the shared product
 model.
 
 Task changes emit planner-domain events so clients can refresh snapshots or
@@ -203,7 +203,7 @@ handoff:
 }
 ```
 
-The SDK does not decide what the TUI should ask next by itself. It returns gaps
+The platform does not decide what the TUI should ask next by itself. It returns gaps
 and a suggested `nextQuestion` so the TUI can keep the conversation disciplined
 while preserving conversational control.
 
@@ -342,7 +342,7 @@ The TUI should use this feature as a passive backing store:
 8. Request user approval before execution.
 9. Execute locally or delegate agents only after approval.
 
-The planning panel can render the same state returned by the SDK. The daemon
+The planning panel can render the same state returned by the platform. The daemon
 does not own panel state or conversational transitions.
 
 ## Next reads

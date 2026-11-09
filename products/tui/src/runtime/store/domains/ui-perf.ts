@@ -1,1 +1,1 @@
-export { createInitialUiPerfState, type UiPerfDomainState, type RenderCycleRecord, type InputLatencySample, type RenderBudgetStatus } from '@goodvibes-jev/engine/sdk/platform/runtime/store/domains/ui-perf';
+export { createInitialUiPerfState, type UiPerfDomainState, type RenderCycleRecord, type InputLatencySample, type RenderBudgetStatus } from '@goodvibes-jev/engine/platform/platform/runtime/store/domains/ui-perf';

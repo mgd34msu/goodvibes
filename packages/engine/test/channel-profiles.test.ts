@@ -9,17 +9,17 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SESSION_GATE_PRESET_NAMES } from '../sdk/src/platform/gate/presets.ts';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { registerChannelProfilesGatewayMethods } from '../sdk/src/platform/control-plane/routes/channel-profiles.ts';
+import { SESSION_GATE_PRESET_NAMES } from '../platform/src/platform/gate/presets.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { registerChannelProfilesGatewayMethods } from '../platform/src/platform/control-plane/routes/channel-profiles.ts';
 import {
   ChannelProfileRegistry,
   ChannelProfileStore,
   applyChannelProfileToSpawn,
   attributeInboundSession,
   buildInboundIntakeEnrichment,
-} from '../sdk/src/platform/channel-profiles/index.ts';
-import { PrincipalRegistry, PrincipalStore } from '../sdk/src/platform/principals/index.ts';
+} from '../platform/src/platform/channel-profiles/index.ts';
+import { PrincipalRegistry, PrincipalStore } from '../platform/src/platform/principals/index.ts';
 
 function makeRegistry(): ChannelProfileRegistry {
   return new ChannelProfileRegistry(new ChannelProfileStore(':memory:'));

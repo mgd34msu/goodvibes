@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { useCoreReadings } from './_helpers/core-readings.ts';
-import { AdaptivePlanner, type PlannerInputs } from '../sdk/src/platform/core/adaptive-planner.js';
-import { JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.js';
-import { synthesizeAnswer } from '../sdk/src/platform/knowledge/semantic/answer-llm.js';
-import type { AnswerEvidenceProjection } from '../sdk/src/platform/knowledge/semantic/answer-verification/types.js';
-import type { KnowledgeSemanticLlm } from '../sdk/src/platform/knowledge/semantic/types.js';
+import { AdaptivePlanner, type PlannerInputs } from '../platform/src/platform/core/adaptive-planner.js';
+import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input.js';
+import { synthesizeAnswer } from '../platform/src/platform/knowledge/semantic/answer-llm.js';
+import type { AnswerEvidenceProjection } from '../platform/src/platform/knowledge/semantic/answer-verification/types.js';
+import type { KnowledgeSemanticLlm } from '../platform/src/platform/knowledge/semantic/types.js';
 
 const marker = 'password=SYNTHETIC_CALLER_SNAPSHOT_ONLY';
 const options = () => ({ signal: new AbortController().signal, timeoutMs: 1000 });

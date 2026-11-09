@@ -1,12 +1,12 @@
 import { MODAL_TONES } from './modal-theme.ts';
 import { infoRow, headerRow } from './modal-surface-helpers.ts';
-import { listHookPointContracts } from '@goodvibes-jev/engine/sdk/platform/hooks';
+import { listHookPointContracts } from '@goodvibes-jev/engine/platform/platform/hooks';
 import type {
   HookActivityTracker,
   HookDefinition,
   HookDispatcher,
   HookWorkbench,
-} from '@goodvibes-jev/engine/sdk/platform/hooks';
+} from '@goodvibes-jev/engine/platform/platform/hooks';
 import type {
   ConfigModalActionContext,
   ConfigModalRow,
@@ -161,7 +161,7 @@ export function createHooksModalSurface(deps: HooksModalDeps): ConfigModalSurfac
 /**
  * Deterministic golden fixture: fixed dispatcher/workbench/activity-tracker
  * stand-ins with two managed hooks (one enabled, one disabled) and one recorded
- * activity entry. listHookPointContracts() reads the SDK's static contract table
+ * activity entry. listHookPointContracts() reads the platform's static contract table
  * (no disk/wall-clock). All timestamps are fixed epoch numbers.
  */
 export function hooksModalGoldenSurface(): ConfigModalSurface {

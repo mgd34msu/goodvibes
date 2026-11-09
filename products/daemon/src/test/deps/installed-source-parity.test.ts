@@ -14,7 +14,7 @@ test('daemon consumes its installed workspace engine rather than an external ove
   expect(product.dependencies['@goodvibes-jev/engine']).toBe('workspace:*');
   expect(JSON.parse(readFileSync(engineManifest, 'utf8')).name).toBe('@goodvibes-jev/engine');
   expect(realpathSync(dirname(engineManifest))).toBe(dirname(realpathSync(resolve(productRoot, '../../packages/engine/package.json'))));
-  expect(product.scripts['sdk-dev']).toBeUndefined();
+  expect(product.scripts['engine-dev']).toBeUndefined();
 });
 
 test('installed sql.js creates a table and reads its row', async () => {

@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
-import { BROWSER_JUDGMENT_BATTERY_IDS } from '../daemon-sdk/src/browser-judgment-contract.js';
-import { WEBUI_CODE_LANGUAGES } from '../daemon-sdk/src/browser-code-languages.js';
-import { builtinBrowserJudgmentMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-browser-judgment.js';
+import { BROWSER_JUDGMENT_BATTERY_IDS } from '../daemon-api/src/browser-judgment-contract.js';
+import { WEBUI_CODE_LANGUAGES } from '../daemon-api/src/browser-code-languages.js';
+import { builtinBrowserJudgmentMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-browser-judgment.js';
 import { renderType } from '../scripts/foundation-io-render.js';
 
 type EnvelopeSchema = Record<string, unknown> & {

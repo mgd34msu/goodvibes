@@ -5,8 +5,8 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { classifyFailure } from '../sdk/src/platform/runtime/forensics/classifier.js';
-import { ForensicsRegistry, DEFAULT_REGISTRY_LIMIT } from '../sdk/src/platform/runtime/forensics/registry.js';
+import { classifyFailure } from '../platform/src/platform/runtime/forensics/classifier.js';
+import { ForensicsRegistry, DEFAULT_REGISTRY_LIMIT } from '../platform/src/platform/runtime/forensics/registry.js';
 
 describe('platform/runtime/forensics: classifier and registry behavior', () => {
   test('DEFAULT_REGISTRY_LIMIT is a positive number', () => {

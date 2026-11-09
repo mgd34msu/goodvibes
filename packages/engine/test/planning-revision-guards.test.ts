@@ -6,7 +6,7 @@ import { ordinaryPlanningRevision } from './_helpers/planning-revision.ts';
 import {
   KnowledgeStore, ProjectPlanningService,
   type ProjectPlanningStateActionInput, type ProjectPlanningStateUpsertInput,
-} from '@goodvibes-jev/engine/sdk/platform/knowledge';
+} from '@goodvibes-jev/engine/platform/platform/knowledge';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

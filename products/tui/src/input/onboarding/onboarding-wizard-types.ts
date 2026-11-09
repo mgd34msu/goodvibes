@@ -9,7 +9,7 @@ import {
   type OnboardingStep1CapabilityItem,
   type OnboardingStepDerivationState,
 } from '../../runtime/onboarding/index.ts';
-import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 
 export type OnboardingWizardMode = OnboardingMode;
 
@@ -226,7 +226,7 @@ export interface ExternalSurfaceSpec {
   readonly label: string;
   readonly hint: string;
   /**
-   * Existing SDK config key. In onboarding this maps to the per-surface
+   * Existing platform config key. In onboarding this maps to the per-surface
    * auto-start choice, not to whether setup fields are shown.
    */
   readonly defaultEnabled: (snapshot: OnboardingSnapshotState | null) => boolean;

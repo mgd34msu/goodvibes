@@ -4,13 +4,13 @@ import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort, JudgmentRequest, JudgmentResult, Questions } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { knowledgeCommand } from '../../input/commands/knowledge.ts';
-import { createKnowledgeApi, KnowledgeService, KnowledgeStore } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import { MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/sdk/platform/state';
-import { MemoryEmbeddingProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/state';
+import { createKnowledgeApi, KnowledgeService, KnowledgeStore } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/platform/platform/state';
+import { MemoryEmbeddingProviderRegistry } from '@goodvibes-jev/engine/platform/platform/state';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 type CommandScopeReading = readonly [kind: 'source' | 'node' | 'issue', text: string, probability: number];

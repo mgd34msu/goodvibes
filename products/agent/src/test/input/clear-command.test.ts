@@ -11,9 +11,9 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { journalPathFor, openTranscriptJournal, replayJournal } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import { SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
-import { clearTurnAnchors, getTurnAnchors, recordTurnAnchor } from '@goodvibes-jev/engine/sdk/platform/rewind';
+import { journalPathFor, openTranscriptJournal, replayJournal } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
+import { clearTurnAnchors, getTurnAnchors, recordTurnAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerShellCoreCommands } from '../../input/commands/shell-core.ts';
 import { ConversationManager } from '../../core/conversation.ts';

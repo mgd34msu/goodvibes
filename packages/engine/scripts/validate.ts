@@ -3,9 +3,9 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SDK_ROOT = resolve(__dirname, '..');
+const ENGINE_ROOT = resolve(__dirname, '..');
 // npm scripts live in the repo root package.json.
-const REPO_ROOT = resolve(SDK_ROOT, '../..');
+const REPO_ROOT = resolve(ENGINE_ROOT, '../..');
 
 function run(command: string, args: readonly string[], label?: string): void {
   if (label) console.log(`[validate] ${label} ...`);

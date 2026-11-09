@@ -3,7 +3,7 @@
  */
 import { useEffect } from 'react';
 import * as SecureStore from 'expo-secure-store';
-import { createExpoGoodVibesSdk } from '@goodvibes-jev/engine/sdk/expo';
+import { createExpoGoodVibesPlatform } from '@goodvibes-jev/engine/platform/expo';
 
 export default function App() {
   useEffect(() => {
@@ -11,19 +11,19 @@ export default function App() {
 
     void (async () => {
       const token = await SecureStore.getItemAsync('goodvibes_token');
-      const sdk = createExpoGoodVibesSdk({
+      const platformClient = createExpoGoodVibesPlatform({
         baseUrl: 'https://goodvibes.example.com',
         authToken: token,
       });
 
-      const snapshot = await sdk.operator.control.snapshot();
+      const snapshot = await platformClient.operator.control.snapshot();
       console.log(snapshot);
 
       // Note: Hermes (React Native / Expo) runtimes may require a WebSocket
       // polyfill injection. If you see a "WebSocket implementation is required"
       // error, see docs/troubleshooting.md#websocket-implementation-is-required for the
       // WebSocketImpl option.
-      stop = sdk.realtime.viaWebSocket().agents.on('AGENT_COMPLETED', (event) => {
+      stop = platformClient.realtime.viaWebSocket().agents.on('AGENT_COMPLETED', (event) => {
         console.log('agent completed', event);
       });
     })();

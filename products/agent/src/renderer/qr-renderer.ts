@@ -1,7 +1,7 @@
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
-import { createEmptyLine, createStyledCell } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
+import { createEmptyLine, createStyledCell } from '@goodvibes-jev/engine/platform/platform/types';
 import { getDisplayWidth } from '../utils/terminal-width.ts';
-import { generateQrMatrix } from '@goodvibes-jev/engine/sdk/platform/pairing';
+import { generateQrMatrix } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { QR_MODULE_COLORS } from './theme.ts';
 
 export { generateQrMatrix };

@@ -18,7 +18,7 @@ import {
   toBase64Url,
   type RelayKeyPair,
 } from './crypto.js';
-import { GoodVibesSdkError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes-jev/engine/errors';
 
 /** Serializable form of a relay identity, safe to hand to a secret store. */
 export interface SerializedRelayIdentity {
@@ -33,7 +33,7 @@ export interface SerializedRelayIdentity {
 function subtle(): SubtleCrypto {
   const c = globalThis.crypto;
   if (!c || typeof c.subtle === 'undefined') {
-    throw new GoodVibesSdkError('Web Crypto (crypto.subtle) is unavailable in this runtime.', {
+    throw new GoodVibesError('Web Crypto (crypto.subtle) is unavailable in this runtime.', {
       category: 'config',
       source: 'transport',
       recoverable: false,
@@ -69,7 +69,7 @@ export async function serializeRelayIdentity(pair: RelayKeyPair): Promise<Serial
 /** Reconstruct an identity key pair from its serialized form. */
 export async function deserializeRelayIdentity(serialized: SerializedRelayIdentity): Promise<RelayKeyPair> {
   if (serialized.v !== 1) {
-    throw new GoodVibesSdkError('Unsupported relay identity format version.', { category: 'bad_request', source: 'transport', recoverable: false });
+    throw new GoodVibesError('Unsupported relay identity format version.', { category: 'bad_request', source: 'transport', recoverable: false });
   }
   const jwk = serialized.privateKeyJwk;
   const privateKey = await subtle().importKey('jwk', jwk, { name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);

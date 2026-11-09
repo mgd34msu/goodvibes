@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { profileDelegationForInvocation, assertCurrentProfileDelegation } from '@goodvibes-jev/engine/sdk/platform/owner-profile';
+import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { profileDelegationForInvocation, assertCurrentProfileDelegation } from '@goodvibes-jev/engine/platform/platform/owner-profile';
 import { createShellPathService } from '@/runtime/index.ts';
 import { createProfileGatewayInvoke } from '../../agent/owner-profile-gateway.ts';
 import { createAgentProfileTool, registerAgentProfileTool } from '../../tools/agent-profile-tool.ts';
 import { createAgentKnowledgeTool, registerAgentKnowledgeTool } from '../../tools/agent-knowledge-tool.ts';
-import { createAgentSdk, getAgentKnowledgeJson } from '../../cli/agent-knowledge-runtime.ts';
+import { createAgentPlatform, getAgentKnowledgeJson } from '../../cli/agent-knowledge-runtime.ts';
 import { admitLocalState } from '../helpers/local-state-admission.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { mockFetch } from '../helpers/typed-fetch-mock.ts';
@@ -207,7 +207,7 @@ function statusGateway(onInvoke: () => void) {
   return createProfileGatewayInvoke({ gatewayMethods: catalog, homeDirectory: directory(), configManager: { get() { return undefined; } } });
 }
 
-describe('direct gateway and SDK synchronous lifetime ingress', () => {
+describe('direct gateway and platform synchronous lifetime ingress', () => {
   for (const kind of ['pending', 'nonvoid', 'thenable'] as const) {
     test(`direct profile gateway refuses a ${kind} guard before native dispatch`, async () => {
       const guard = unfinishedGuard(kind); let dispatches = 0;
@@ -219,11 +219,11 @@ describe('direct gateway and SDK synchronous lifetime ingress', () => {
       } finally { await guard.drain(); await observed; }
     });
 
-    test(`direct Knowledge SDK refuses a ${kind} guard before fetch`, async () => {
+    test(`direct Knowledge platform refuses a ${kind} guard before fetch`, async () => {
       const guard = unfinishedGuard(kind), original = globalThis.fetch; let requests = 0;
       globalThis.fetch = mockFetch(async () => { requests++; return response('status'); });
       try {
-        expect(() => createAgentSdk({ baseUrl: 'http://127.0.0.1:3421', token: 'synthetic-token', tokenPath: 'synthetic-token-file' },
+        expect(() => createAgentPlatform({ baseUrl: 'http://127.0.0.1:3421', token: 'synthetic-token', tokenPath: 'synthetic-token-file' },
           { assertCurrent: guard.assertCurrent })).toThrow();
         expect(requests).toBe(0); expect(guard.calls()).toBe(1); expect(guard.thenReads()).toBe(0);
       } finally { await guard.drain(); globalThis.fetch = original; }
@@ -237,13 +237,13 @@ describe('direct gateway and SDK synchronous lifetime ingress', () => {
     expect(result.ok).toBe(true); expect(dispatches).toBe(1); expect(checks).toBeGreaterThan(1);
   });
 
-  test('direct Knowledge SDK accepts a synchronous void lifetime and checks the actual response', async () => {
+  test('direct Knowledge platform accepts a synchronous void lifetime and checks the actual response', async () => {
     const original = globalThis.fetch; let checks = 0, requests = 0;
     globalThis.fetch = mockFetch(async () => { requests++; expect(checks).toBeGreaterThan(0); return response('status'); });
     try {
-      const sdk = createAgentSdk({ baseUrl: 'http://127.0.0.1:3421', token: 'synthetic-token', tokenPath: 'synthetic-token-file' },
+      const platformClient = createAgentPlatform({ baseUrl: 'http://127.0.0.1:3421', token: 'synthetic-token', tokenPath: 'synthetic-token-file' },
         { assertCurrent() { checks++; } });
-      const result = await sdk.knowledge.status();
+      const result = await platformClient.knowledge.status();
       expect(result.ready).toBe(true); expect(requests).toBe(1); expect(checks).toBeGreaterThan(1);
     } finally { globalThis.fetch = original; }
   });

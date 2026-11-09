@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.js';
-import { projectToolInputBatch } from '../sdk/src/platform/core/tool-input-ingress.js';
-import type { ToolCall } from '../sdk/src/platform/types/tools.js';
-import { assertProjectionExecution } from '../sdk/src/platform/tools/input-projection.js';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.js';
+import { projectToolInputBatch } from '../platform/src/platform/core/tool-input-ingress.js';
+import type { ToolCall } from '../platform/src/platform/types/tools.js';
+import { assertProjectionExecution } from '../platform/src/platform/tools/input-projection.js';
 
 test('shared empty context tokens retain independent exact-argument execution lifetimes', async () => {
   const registry = new ToolRegistry(); const context = Object.freeze({}); const first = new AbortController();

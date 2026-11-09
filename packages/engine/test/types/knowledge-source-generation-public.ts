@@ -1,6 +1,6 @@
 /** Generic storage compatibility; intentionally no legacy planning actions. */
-import { KnowledgeStore, type KnowledgeSourceSnapshot, type KnowledgeSourceWriteResult } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import { SQLiteStore } from '@goodvibes-jev/engine/sdk/platform/state';
+import { KnowledgeStore, type KnowledgeSourceSnapshot, type KnowledgeSourceWriteResult } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { SQLiteStore } from '@goodvibes-jev/engine/platform/platform/state';
 declare const store: KnowledgeStore;
 const snapshot: KnowledgeSourceSnapshot = store.getSourceSnapshot({ id: 'source' });
 const generation: string | null = store.getSourceGeneration('source');

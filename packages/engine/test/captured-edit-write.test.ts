@@ -6,16 +6,16 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { captureContractInput, contractInputPath, materializeContractInput } from '../sdk/src/platform/contract/input-snapshot.js';
-import { createContractInputAuthority, revokeContractInputAuthority } from '../sdk/src/platform/contract/input-authority.js';
-import type { Contract } from '../sdk/src/platform/contract/types.js';
-import { capturedInputReadFilter, capturedInputTool } from '../sdk/src/platform/tools/shared/captured-input-tools.js';
-import { createEditTool } from '../sdk/src/platform/tools/edit/index.js';
-import { createCapturedValidatorRunner } from '../sdk/src/platform/tools/shared/captured-validators.js';
-import { probeCapturedExecAvailability } from '../sdk/src/platform/tools/exec/captured-exec.js';
-import { createWriteTool } from '../sdk/src/platform/tools/write/index.js';
-import { FileStateCache } from '../sdk/src/platform/state/file-cache.js';
-import type { ReadAccessFilter } from '../sdk/src/platform/tools/shared/read-access.js';
+import { captureContractInput, contractInputPath, materializeContractInput } from '../platform/src/platform/contract/input-snapshot.js';
+import { createContractInputAuthority, revokeContractInputAuthority } from '../platform/src/platform/contract/input-authority.js';
+import type { Contract } from '../platform/src/platform/contract/types.js';
+import { capturedInputReadFilter, capturedInputTool } from '../platform/src/platform/tools/shared/captured-input-tools.js';
+import { createEditTool } from '../platform/src/platform/tools/edit/index.js';
+import { createCapturedValidatorRunner } from '../platform/src/platform/tools/shared/captured-validators.js';
+import { probeCapturedExecAvailability } from '../platform/src/platform/tools/exec/captured-exec.js';
+import { createWriteTool } from '../platform/src/platform/tools/write/index.js';
+import { FileStateCache } from '../platform/src/platform/state/file-cache.js';
+import type { ReadAccessFilter } from '../platform/src/platform/tools/shared/read-access.js';
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function git(root: string, ...args: string[]) {
@@ -233,7 +233,7 @@ test.skipIf(!supported)('npx-backed validators report missing declared runtime w
 });
 
 
-import { publishWithinCapturedLease, withCapturedPublication, type CapturedPublicationLease } from '../sdk/src/platform/tools/shared/captured-publication.js';
+import { publishWithinCapturedLease, withCapturedPublication, type CapturedPublicationLease } from '../platform/src/platform/tools/shared/captured-publication.js';
 test('validator publication lease rejects copied, wrong-owner, concurrent and expired callbacks', async () => {
   const f = await fixture(); const other = await fixture(); let retained!: CapturedPublicationLease;
   await withCapturedPublication(f.authority, async (lease) => {
@@ -368,9 +368,9 @@ import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { gateReadingsPort, forgetGateReadings } from './_helpers/gate-readings.ts';
-import { PermissionManager, type PermissionConfigReader } from '../sdk/src/platform/permissions/manager.ts';
-import { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.ts';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.ts';
+import { PermissionManager, type PermissionConfigReader } from '../platform/src/platform/permissions/manager.ts';
+import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
 
 for (const name of ['write', 'edit'] as const) for (const forwarding of ['exact', 'copied-options', 'cloned-args'] as const) {
   test(`admitted captured ${name} requires ${forwarding} invocation identity through its real backend`, async () => {

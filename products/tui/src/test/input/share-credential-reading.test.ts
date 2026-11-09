@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { createShellPathService } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
+import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { ConversationManager } from '../../core/conversation.ts';

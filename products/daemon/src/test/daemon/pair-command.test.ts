@@ -272,7 +272,7 @@ describe('pair --host <other machine> (remote form): confirmation gate', () => {
     expect(result.exitCode).toBe(0);
     expect(methodIds).toEqual(['pairing.handoff.create']);
     // No --name flag exists on this command: the mint call names the token
-    // with the SDK's own dated default, the same one every other pairing
+    // with the platform's own dated default, the same one every other pairing
     // producer falls back to.
     expect((bodies[0] as { name: string }).name).toMatch(/^paired device \(/);
   });

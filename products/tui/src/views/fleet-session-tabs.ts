@@ -20,7 +20,7 @@
 // existing i/K "not supported" convention).
 // ---------------------------------------------------------------------------
 
-import type { ProcessKind, ProcessNode } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
+import type { ProcessKind, ProcessNode } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import { MessageLineCache } from '../core/conversation-line-cache.ts';
 import { fleetKindTag } from './fleet-read-model.ts';
 
@@ -52,7 +52,7 @@ export interface SteerBadge {
   readonly resolvedAt?: number;
   /**
    * epoch ms when status entered 'queued' (set once, at submit time). Drives
-   * fleet-steer.ts's reconcileSteerBadges TTL-expiry fallback: the SDK's
+   * fleet-steer.ts's reconcileSteerBadges TTL-expiry fallback: the platform's
    * MessageBus attaches its own STEER_TTL_MS to the underlying steer message
    * (see registry.js's steer()) but never tells the TUI when that TTL lapses
    * without delivery, the "agent stays healthy/non-terminal through one
@@ -84,7 +84,7 @@ export function appendSteerText(draft: string, ch: string): string {
 }
 
 /**
- * One attached session tab. `agentId` is the SDK attach handle for
+ * One attached session tab. `agentId` is the platform attach handle for
  * `AgentManager.getConversationSnapshot(agentId)`, populated only for
  * 'agent' tabs (agent.ts sets ProcessNode.id = record.id, so node.id IS the
  * agentId). 'contract' tabs render a live member-summary instead of a
@@ -106,7 +106,7 @@ export interface FleetTab {
   readonly lineCache: MessageLineCache;
   /**
    * Cached parsed ledger fallback for a terminal agent whose conversation
-   * snapshot has been evicted from the SDK's retention ring (the degraded
+   * snapshot has been evicted from the platform's retention ring (the degraded
    * fallback path). `null` = not yet loaded/attempted; `[]` = loaded and
    * empty (or the load failed), both render the same honest "no transcript"
    * state once loaded is true.

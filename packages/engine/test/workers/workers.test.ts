@@ -13,7 +13,7 @@
  * Module resolution: Miniflare resolves static imports relative to the
  * worker script location. We copy worker.ts into a tmp directory outside
  * dist/ to avoid racing with concurrent builds, and point modulesRoot at
- * packages/sdk/dist/ so that `import './web.js'` resolves correctly.
+ * packages/platform/dist/ so that `import './web.js'` resolves correctly.
  * The tmp directory is cleaned up in afterAll().
  *
  * Run:
@@ -32,7 +32,7 @@ import { Miniflare } from 'miniflare';
 // fileURLToPath alias: __dirname here is a local const, not the Node.js global
 // __dirname, which is unavailable in ESM.
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SDK_DIST = resolve(__dirname, '../../sdk/dist');
+const PLATFORM_DIST = resolve(__dirname, '../../platform/dist');
 const WORKER_SOURCE = resolve(__dirname, 'worker.ts');
 
 // Write to a tmp dir outside dist so concurrent builds that clean/rewrite dist
@@ -44,7 +44,7 @@ const WORKER_BUNDLED = resolve(TMP_DIR, '_workers-test-bundled.mjs');
 let mf: Miniflare;
 
 beforeAll(async () => {
-  // Stage a full snapshot of SDK_DIST in a tmp dir outside dist. modulesRoot
+  // Stage a full snapshot of PLATFORM_DIST in a tmp dir outside dist. modulesRoot
   // points to TMP_DIR so static imports resolve from a stable location that
   // concurrent builds cannot race against.
   if (existsSync(TMP_DIR)) {
@@ -52,9 +52,9 @@ beforeAll(async () => {
   }
   // (esbuild handles module resolution; no copyDir needed)
   mkdirSync(TMP_DIR, { recursive: true });
-  // Stage the worker source INSIDE SDK_DIST so its ./web.js / ./errors.js
+  // Stage the worker source INSIDE PLATFORM_DIST so its ./web.js / ./errors.js
   // relative imports resolve against the built dist during bundling.
-  const WORKER_IN_DIST = resolve(SDK_DIST, '_workers-test-entry.ts');
+  const WORKER_IN_DIST = resolve(PLATFORM_DIST, '_workers-test-entry.ts');
   writeFileSync(WORKER_IN_DIST, readFileSync(WORKER_SOURCE, 'utf8'), 'utf8');
 
   // Pre-bundle the worker entry via esbuild so bare-module specifiers
@@ -120,7 +120,7 @@ afterAll(async () => {
 // ─── Smoke ───────────────────────────────────────────────────────────────────
 
 describe('Workers harness: smoke', () => {
-  test('SDK loads and factory produces a valid sdk object', async () => {
+  test('platform loads and factory produces a valid sdk object', async () => {
     const res = await mf.dispatchFetch('http://workers.test/smoke');
     expect(res.status).toBe(200);
 
@@ -129,8 +129,8 @@ describe('Workers harness: smoke', () => {
     expect(body.hasOperator).toBe(true);
     expect(body.hasAuth).toBe(true);
     expect(body.hasRealtime).toBe(true);
-    // Verify expected top-level sdk namespaces are present
-    const keys = body.sdkKeys as string[];
+    // Verify expected top-level platform namespaces are present
+    const keys = body.engineKeys as string[];
     expect(keys).toContain('operator');
     expect(keys).toContain('auth');
     expect(keys).toContain('realtime');
@@ -164,7 +164,7 @@ describe('Workers harness: transport-http round-trip', () => {
 
     const body = await res.json() as Record<string, unknown>;
     expect(body.ok).toBe(true);
-    // result must be non-null: mock matched the real SDK route (GET /api/sessions)
+    // result must be non-null: mock matched the real platform route (GET /api/sessions)
     expect(body.result).not.toBeNull();
     // Verify real-shape fields from sessions.list output schema
     const result = body.result as Record<string, unknown>;
@@ -179,9 +179,9 @@ describe('Workers harness: transport-http round-trip', () => {
   }, 10_000);
 
   // Error path: mock returns 5xx. Asserts errorKind === 'service' (exact
-  // literal, not regex), proving SDK error taxonomy works under Workers runtime.
+  // literal, not regex), proving platform error taxonomy works under Workers runtime.
   // kind and ctor are returned as separate fields to avoid conflating
-  // typed SDKErrorKind values with raw constructor names.
+  // typed EngineErrorKind values with raw constructor names.
   test('error path: mock returns 5xx, errorKind is typed \'service\'', async () => {
     const res = await mf.dispatchFetch('http://workers.test/transport-error');
     // Worker must not crash (status 200 = error was caught and returned as JSON)
@@ -192,7 +192,7 @@ describe('Workers harness: transport-http round-trip', () => {
     // result is null because the call threw
     expect(body.result).toBeNull();
 
-    // Assert 'kind' is a typed SDKErrorKind, not a constructor name.
+    // Assert 'kind' is a typed EngineErrorKind, not a constructor name.
     const validKinds = ['auth', 'config', 'contract', 'network', 'not-found', 'protocol', 'rate-limit', 'service', 'internal', 'tool', 'validation', 'unknown'];
     expect(body.kind).toBe('service'); // 500 maps to category 'service' -> kind 'service'
     expect(validKinds).toContain(body.kind as string);
@@ -211,17 +211,17 @@ describe('Workers harness: transport-http round-trip', () => {
 // ─── Error taxonomy ───────────────────────────────────────────────────────────
 
 describe('Workers harness: error taxonomy', () => {
-  test('errors subpath loads and GoodVibesSdkError is instantiable', async () => {
+  test('errors subpath loads and GoodVibesError is instantiable', async () => {
     const res = await mf.dispatchFetch('http://workers.test/errors');
     expect(res.status).toBe(200);
 
     const body = await res.json() as Record<string, unknown>;
     expect(body.ok).toBe(true);
-    expect(body.sdkErrorWorks).toBe(true);
+    expect(body.engineErrorWorks).toBe(true);
     // errorClassNames contains only actual Error subclasses.
     const names = body.errorClassNames as string[];
-    // Sentinel: GoodVibesSdkError must be present (it IS an Error subclass)
-    expect(names).toContain('GoodVibesSdkError');
+    // Sentinel: GoodVibesError must be present (it IS an Error subclass)
+    expect(names).toContain('GoodVibesError');
   }, 10_000);
 });
 
@@ -281,7 +281,7 @@ describe('Workers harness: globals audit', () => {
     const body = await res.json() as Record<string, unknown>;
     const globals = body.globals as Record<string, boolean>;
 
-    // location.origin is absent in Workers, SDK throws ConfigurationError
+    // location.origin is absent in Workers, platform throws ConfigurationError
     // if baseUrl is omitted. Workers callers must pass baseUrl explicitly.
     expect(globals.location).toBe(false);
   }, 10_000);

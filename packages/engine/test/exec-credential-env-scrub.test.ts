@@ -10,14 +10,14 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createExecTool } from '../sdk/src/platform/tools/exec/runtime.ts';
-import { ProcessManager } from '../sdk/src/platform/tools/shared/process-manager.ts';
-import { OverflowHandler } from '../sdk/src/platform/tools/shared/overflow.ts';
+import { createExecTool } from '../platform/src/platform/tools/exec/runtime.ts';
+import { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.ts';
+import { OverflowHandler } from '../platform/src/platform/tools/shared/overflow.ts';
 import {
   readCredentialEnvName,
   resolveCredentialEnvScrub,
   scrubCredentialEnv,
-} from '../sdk/src/platform/tools/exec/credential-env.ts';
+} from '../platform/src/platform/tools/exec/credential-env.ts';
 import { useToolReadings } from './_helpers/tool-readings.ts';
 import { EXEC_GATE_TABLE, useGateReadings } from './_helpers/gate-readings.ts';
 

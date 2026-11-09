@@ -89,11 +89,11 @@ function siteOf(stack: string): string {
     if (!match) continue;
     if (/runtime-shutdown-probe|node:internal/.test(line)) continue;
     const fn = /at\s+(?:async\s+)?([^\s(]+)\s*\(/.exec(line)?.[1] ?? '';
-    // Normalize this repo's own frames and the SDK package's compiled frames
+    // Normalize this repo's own frames and the platform package's compiled frames
     // down to the module path that names the owner.
     const file = match[1]
-      .replace(/^.*\/@goodvibes-jev\/engine\/sdk\/dist\//, 'sdk/')
-      .replace(/^.*\/packages\/sdk\/dist\//, 'sdk/')
+      .replace(/^.*\/@goodvibes-jev\/engine\/platform\/dist\//, 'platform/')
+      .replace(/^.*\/packages\/engine\/platform\/dist\//, 'platform/')
       .replace(/^.*\/@goodvibes-jev\/engine\/terminal-shell\/dist\//, 'terminal-shell/')
       .replace(/^.*\/packages\/terminal-shell\/dist\//, 'terminal-shell/')
       .replace(/^.*\/src\//, 'src/');

@@ -2,8 +2,8 @@ import { createSystemOnePort, DEFAULT_MODEL, JudgmentError, SqliteDecisionLog, w
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import type { NativeContractDecisionHost } from '../../sdk/src/platform/contract/native-decisions.js';
-import type { NativeContractSource } from '../../sdk/src/platform/contract/types.js';
+import type { NativeContractDecisionHost } from '../../platform/src/platform/contract/native-decisions.js';
+import type { NativeContractSource } from '../../platform/src/platform/contract/types.js';
 import { makeHarness, oneUnitPlan, runnerPort, startContract, waitFor, type Harness, type HarnessOptions } from './runner-support.js';
 import { finishes, keepsFailing, stepPlanner, fixPlan, scriptsWith, terminal, judgeOf } from './steps-support.js';
 import { plannerOutput, type AnswerContext } from './plan-support.js';

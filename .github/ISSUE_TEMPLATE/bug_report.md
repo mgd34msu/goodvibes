@@ -1,6 +1,6 @@
 ---
 name: Bug Report
-about: Report a reproducible SDK bug
+about: Report a reproducible platform bug
 title: ''
 labels: bug
 assignees: ''
@@ -20,6 +20,6 @@ assignees: ''
 
 ## Environment
 
-- SDK version:
+- GoodVibes version:
 - Runtime:
 - OS:

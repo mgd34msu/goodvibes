@@ -18,9 +18,9 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { bootDaemon, type BootedDaemon } from '../sdk/src/platform/daemon/boot.ts';
+import { bootDaemon, type BootedDaemon } from '../platform/src/platform/daemon/boot.ts';
 import { seedBenchmarkCache } from './_helpers/benchmark-cache.ts';
-import { classifyMemoryWireError } from '../sdk/src/platform/runtime/memory-spine/index.ts';
+import { classifyMemoryWireError } from '../platform/src/platform/runtime/memory-spine/index.ts';
 import { useMemoryReadings } from './_helpers/memory-readings.ts';
 
 // Memory search and knowledge ranking read through the judgment port; the fake answers them.

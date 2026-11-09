@@ -10,10 +10,10 @@
 
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigManager } from '../../sdk/src/platform/config/manager.ts';
-import { resolveDaemonCliPaths } from '../../sdk/src/platform/daemon/cli-paths.ts';
-import { reportFatalBootFailure } from '../../sdk/src/platform/daemon/fatal-boot-report.ts';
-import { configureActivityLogger } from '../../sdk/src/platform/utils/logger.ts';
+import { ConfigManager } from '../../platform/src/platform/config/manager.ts';
+import { resolveDaemonCliPaths } from '../../platform/src/platform/daemon/cli-paths.ts';
+import { reportFatalBootFailure } from '../../platform/src/platform/daemon/fatal-boot-report.ts';
+import { configureActivityLogger } from '../../platform/src/platform/utils/logger.ts';
 
 async function main(): Promise<void> {
   const { workingDirectory, homeDirectory, daemonTierPath } = resolveDaemonCliPaths();

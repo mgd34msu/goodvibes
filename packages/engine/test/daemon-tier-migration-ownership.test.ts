@@ -20,12 +20,12 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { ingestSettingsFile } from '../sdk/src/platform/config/settings-ingestion.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { ingestSettingsFile } from '../platform/src/platform/config/settings-ingestion.ts';
 import {
   PAYMENTS_BUDGET_AMOUNTS_READER_FLOOR,
   readSettingsReaderFloor,
-} from '../sdk/src/platform/config/settings-reader-floor.ts';
+} from '../platform/src/platform/config/settings-reader-floor.ts';
 
 /** An old-keys daemon store, plus the surface dirs a manager needs. */
 function makeHomeWithOldKeysFile(label: string, surface: string): {

@@ -17,7 +17,7 @@ import { settleSyntaxHighlighting } from "../../renderer/code-block.ts";
 // ---------------------------------------------------------------------------
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { Line } from "@goodvibes-jev/engine/sdk/platform/types";
+import type { Line } from "@goodvibes-jev/engine/platform/platform/types";
 import {
   appendConversationMessages,
   type ConversationRenderContext,

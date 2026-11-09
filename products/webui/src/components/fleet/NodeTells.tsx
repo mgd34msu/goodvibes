@@ -88,7 +88,7 @@ function NodeCheckSummary({ node }: { readonly node: FleetProcessNode }) {
 /**
  * NodeReviewSummary, the latest review's verdict, score, cycles, and acceptance
  * checklist for a reviewed wrfc-chain / wrfc-subtask node (readReviewSummary,
- * SDK 1.9.0). Detail-pane only; renders NOTHING before a review has completed
+ * platform 1.9.0). Detail-pane only; renders NOTHING before a review has completed
  * (the field is absent, never a fabricated "not yet reviewed" shell). The
  * verdict is the CONTROLLER's `passed` (gate-inclusive), not the reviewer's own
  * claim. Each checklist item shows whether the requirement was independently

@@ -5,8 +5,8 @@
 // agent test's remaining assertions: what the broker is handed for a terminal
 // prompt, and that a non-string answer is never coerced into input.
 import { describe, expect, test } from 'bun:test';
-import type { PermissionPromptDecision, PermissionPromptRequest } from '../sdk/src/platform/permissions/prompt.ts';
-import { buildExecPromptAnswerHandler } from '../sdk/src/platform/runtime/permissions/exec-prompt-wiring.ts';
+import type { PermissionPromptDecision, PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.ts';
+import { buildExecPromptAnswerHandler } from '../platform/src/platform/runtime/permissions/exec-prompt-wiring.ts';
 
 const ASK = {
   command: 'ssh build-host',

@@ -6,7 +6,7 @@
  * only a generic `metadata?: Record<string, unknown>` bag (companion-chat-types.ts),
  * the same open-ended shape every message metadata field in this codebase already
  * is (see channels.profiles.*'s metadata, principals.*'s metadata). The convention
- * this module reads, `metadata.memory.recordIds: string[]`, mirrors the SDK's own
+ * this module reads, `metadata.memory.recordIds: string[]`, mirrors the platform's own
  * real per-turn injection accounting (TurnInjectionRecord.injectedIds,
  * platform/agents/turn-knowledge-injection.ts, "appended verbatim to the agent's
  * session transcript"), scoped down to just the ids a companion chat turn actually

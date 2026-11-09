@@ -9,7 +9,7 @@
  * deterministic, capturing the composed PushMessage by overriding deliver().
  */
 import { describe, expect, test } from 'bun:test';
-import { PushService } from '../sdk/src/platform/push/index.js';
+import { PushService } from '../platform/src/platform/push/index.js';
 import type {
   EscalationScheduler,
   FleetNotice,
@@ -17,7 +17,7 @@ import type {
   PushMessage,
   PushSubscriptionStore,
   VapidManager,
-} from '../sdk/src/platform/push/index.js';
+} from '../platform/src/platform/push/index.js';
 
 /** A manual scheduler: armed timers are fired explicitly by the test. */
 function manualScheduler(): {

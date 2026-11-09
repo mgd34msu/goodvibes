@@ -1,6 +1,6 @@
 /**
  * voice-local-setup.ts, the managed local-voice provisioning shapes and pure helper
- * functions (voice.local.status / voice.local.install, SDK 1.9.0-dev's
+ * functions (voice.local.status / voice.local.install, platform 1.9.0-dev's
  * memory-relay-voice-hardening work).
  *
  * `voice.local.status` reports the RESTING state of the managed runtime on disk
@@ -11,11 +11,11 @@
  * checksum-mismatch, bundle-unavailable, sideload-mismatch) because it describes what
  * THIS attempt did, not just where things stand.
  *
- * SDK ADOPTION NOTE (round: webui memory+voice compose, SDK commit efc1b380): the
+ * platform ADOPTION NOTE (round: webui memory+voice compose, platform commit efc1b380): the
  * calling brief's own context described voice.local.install as returning/streaming
  * "structured progress" and voice.local.status as reporting a `not-yet-published`
  * engine state. Neither exists on the wire at this commit, verified against
- * packages/sdk/src/platform/control-plane/routes/voice-setup.ts (install is a plain
+ * packages/engine/platform/src/platform/control-plane/routes/voice-setup.ts (install is a plain
  * POST returning ONE final JSON result; the provisioner's internal onProgress callback
  * is never wired to any runtime event, SSE frame, or chunked response) and against
  * method-catalog-voice-setup.ts's actual output enums (no `not-yet-published` value
@@ -49,7 +49,7 @@ export interface VoiceLocalSttStatus {
   readonly reason?: string;
 }
 
-/** The provisioner's phase vocabulary for one install component (SDK ProvisionPhase). */
+/** The provisioner's phase vocabulary for one install component (platform ProvisionPhase). */
 export type VoiceLocalInstallPhase = 'skip' | 'download' | 'verify' | 'extract' | 'done' | 'error';
 
 /** The latest observed state of one component of the ACTIVE install run. */
@@ -65,7 +65,7 @@ export interface VoiceLocalInstallProgressComponent {
 }
 
 /**
- * voice.local.status's OPTIONAL `installInProgress` section (SDK 5357f09e): present
+ * voice.local.status's OPTIONAL `installInProgress` section (platform 5357f09e): present
  * while, and only while, an install run is active, so a surface polling status
  * during its own install call renders live per-component progress. Absent on an
  * older daemon (or between installs), the surface falls back to a plain busy state.

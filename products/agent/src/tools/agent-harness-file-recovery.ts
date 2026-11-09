@@ -1,7 +1,7 @@
 import { isAbsolute, relative } from 'node:path';
 import { lstatSync, realpathSync } from 'node:fs';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import { resolveAndValidatePath } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { resolveAndValidatePath } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { CommandContext } from '../input/command-registry.ts';
 import { harnessCatalogInvocationAuthority } from './agent-harness-catalog-ingress.ts';
 

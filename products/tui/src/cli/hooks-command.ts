@@ -4,7 +4,7 @@ import type { CliCommandOutput, CliCommandRuntime } from '@goodvibes-jev/engine/
 // ---------------------------------------------------------------------------
 // `goodvibes hooks validate`, validate the user's hooks.json against the
 // hooks loader's REAL schema. The acceptance verdict comes from
-// buildHooksValidation (src/cli/hooks-report.ts), which runs the SDK's own
+// buildHooksValidation (src/cli/hooks-report.ts), which runs the platform's own
 // HookDispatcher.loadFromFile and getHookPointContract, the same machinery
 // `goodvibes doctor hooks` reuses. This command only reads and reports.
 // ---------------------------------------------------------------------------

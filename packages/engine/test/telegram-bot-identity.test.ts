@@ -16,8 +16,8 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { TelegramIngressSupervisor } from '../sdk/src/platform/channels/telegram/ingress.ts';
-import { TelegramBotApi } from '../sdk/src/platform/channels/telegram/api.ts';
+import { TelegramIngressSupervisor } from '../platform/src/platform/channels/telegram/ingress.ts';
+import { TelegramBotApi } from '../platform/src/platform/channels/telegram/api.ts';
 
 interface ApiCall { readonly method: string; }
 

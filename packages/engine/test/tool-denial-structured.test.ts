@@ -8,10 +8,10 @@
  * manager and assert the structured denial rides on the returned result.
  */
 import { describe, expect, test } from 'bun:test';
-import { createPhasedExecutor } from '../sdk/src/platform/runtime/tools/index.js';
-import type { ToolRuntimeContext } from '../sdk/src/platform/runtime/tools/index.js';
-import type { Tool } from '../sdk/src/platform/types/tools.js';
-import type { PermissionCheckResult } from '../sdk/src/platform/permissions/types.js';
+import { createPhasedExecutor } from '../platform/src/platform/runtime/tools/index.js';
+import type { ToolRuntimeContext } from '../platform/src/platform/runtime/tools/index.js';
+import type { Tool } from '../platform/src/platform/types/tools.js';
+import type { PermissionCheckResult } from '../platform/src/platform/permissions/types.js';
 
 function tool(name: string): Tool {
   return {

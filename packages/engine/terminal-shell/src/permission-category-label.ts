@@ -1,4 +1,4 @@
-import type { PermissionCategory } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import type { PermissionCategory } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { activeTokens } from './renderer/theme.js';
 export function getPermissionCategoryLabel(category: PermissionCategory): {
   label: string;

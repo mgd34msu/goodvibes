@@ -1,8 +1,8 @@
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogMethods, captureCatalogSnapshot, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureCatalogReadRequest, selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
-import { captureServiceReadSource, captureSubscriptionReadSource, listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/sdk/platform/config';
+import { captureServiceReadSource, captureSubscriptionReadSource, listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/platform/platform/config';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { ProviderAccountRecord, ProviderAccountSnapshot } from '../runtime/provider-account-snapshot.ts';
 import { buildProviderAccountSnapshot } from '../runtime/provider-account-snapshot.ts';

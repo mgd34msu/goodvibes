@@ -6,12 +6,12 @@
  * may change; it never passes a criterion that reads unmet.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { hasContractPlanConsumer } from '../../sdk/src/platform/tools/agent/contract-binding.js';
+import { hasContractPlanConsumer } from '../../platform/src/platform/tools/agent/contract-binding.js';
 import { SqliteDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { APPROVAL_REFUSED_LINE, ASK_AGAIN_LINE, NAME_AN_ATTEMPT_LINE, type EscalationReason, type OwnerReplyOutcome } from '../../sdk/src/platform/contract/index.js';
-import { unsettledReadingsNote } from '../../sdk/src/platform/contract/escalation.js';
-import { QUALITY_EVIDENCE_SENTENCES } from '../../sdk/src/platform/contract/nudge.js';
+import { APPROVAL_REFUSED_LINE, ASK_AGAIN_LINE, NAME_AN_ATTEMPT_LINE, type EscalationReason, type OwnerReplyOutcome } from '../../platform/src/platform/contract/index.js';
+import { unsettledReadingsNote } from '../../platform/src/platform/contract/escalation.js';
+import { QUALITY_EVIDENCE_SENTENCES } from '../../platform/src/platform/contract/nudge.js';
 import { unitTitleOf, type AnswerContext } from './plan-support.js';
 import { ASK, makeHarness, oneUnitPlan, startContract, waitFor, type AgentScript, type Harness, type HarnessOptions } from './runner-support.js';
 import {

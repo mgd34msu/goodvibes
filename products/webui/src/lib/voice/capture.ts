@@ -1,8 +1,8 @@
 /**
  * capture.ts, the ONE browser microphone path, shared by both voice consumers.
  *
- * This is the web UI's implementation of the SDK's `AudioCaptureOpener`
- * (@goodvibes-jev/engine/sdk/platform/voice/capture): the SDK owns the frame
+ * This is the web UI's implementation of the platform's `AudioCaptureOpener`
+ * (@goodvibes-jev/engine/platform/platform/voice/capture): the platform owns the frame
  * contract, the utterance policy and the WAV encoding; the surface owns opening
  * a device. Two consumers sit on this one opener and they must not each open
  * their own stream:
@@ -24,7 +24,7 @@
  * shipped classifier against: feeding it normalised audio produces scores that
  * never reach any threshold, which looks exactly like a microphone that is not
  * picking anything up. So every sample is multiplied by 32768 on the way through,
- * and the worklet's render quanta are re-cut by the SDK's `AudioFrameSlicer`
+ * and the worklet's render quanta are re-cut by the platform's `AudioFrameSlicer`
  * rather than assumed to be frame-sized (they are 128 samples).
  *
  * SAMPLE RATE IS ASKED FOR AND THEN VERIFIED
@@ -49,12 +49,12 @@ import {
   type AudioCaptureOpener,
   type AudioCaptureRequest,
   type AudioCaptureStream,
-} from '@goodvibes-jev/engine/sdk/platform/voice/capture';
+} from '@goodvibes-jev/engine/platform/platform/voice/capture';
 
 /**
  * Whether the microphone can be used here at all, decided before any capture is
  * attempted. Kept as this surface's own three-state posture (rather than the
- * SDK's wider failure enumeration) because it is what MicButton renders copy
+ * platform's wider failure enumeration) because it is what MicButton renders copy
  * for: 'insecure-context' is the actionable one, with an HTTPS pointer.
  */
 export type MicSupport = 'ok' | 'insecure-context' | 'unsupported';
@@ -203,7 +203,7 @@ export const CAPTURE_WORKLET_BATCH_QUANTA = 8;
 export const CAPTURE_WORKLET_PROCESSOR = 'goodvibes-capture';
 
 /**
- * Converts an arbitrary stream of Web Audio samples into the frames the SDK
+ * Converts an arbitrary stream of Web Audio samples into the frames the platform
  * contract describes: exactly `frameSamples` samples, 16 kHz, int16 magnitudes.
  *
  * Exported (rather than hidden inside the opener) because these three
@@ -315,7 +315,7 @@ export function scaleToPcm16Magnitudes(input: Float32Array): Float32Array {
  * Inline rather than a separate asset because it is three lines of glue whose
  * only contract is with this file, and a separate emitted asset would put a
  * build-output path between the two. It batches render quanta before posting so
- * the main thread receives ~43 messages a second rather than ~344; the SDK's
+ * the main thread receives ~43 messages a second rather than ~344; the platform's
  * slicer re-cuts whatever arrives, so the batch size is free to be a
  * performance choice.
  */
@@ -374,7 +374,7 @@ function classifyGetUserMediaError(error: unknown): AudioCaptureError {
  *
  * `request.noiseSuppression: 'speex'` reaching THIS opener is refused, and that is
  * not a statement about the platform: the speexdsp filter is a WebAssembly module
- * the SDK carries and it runs perfectly well in a tab, one layer up, inside
+ * the platform carries and it runs perfectly well in a tab, one layer up, inside
  * `createNoiseSuppressingOpener`, which WakeListener and PushToTalkSession apply
  * and which asks this opener for raw frames. So a `speex` request arriving here
  * means the wrapper was bypassed, and passing it through would hand back

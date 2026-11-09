@@ -3,7 +3,7 @@
 // The client half of the relay path. Its whole job is to produce a `fetch`
 // implementation backed by the end-to-end secure channel, so the EXISTING typed
 // operator/peer client works completely unchanged over the relay: you build the
-// SDK with `fetchImpl: relayClient.fetch` instead of the default, and every
+// platform with `fetchImpl: relayClient.fetch` instead of the default, and every
 // contract call is serialized to an HTTP request, tunneled as ciphertext to the
 // daemon, replayed there, and its response tunneled back. The relay operator
 // never sees any of it.
@@ -16,7 +16,7 @@
 // body) works over the relay unchanged. Overflow on the daemon's bounded send
 // buffer surfaces as a visible `relay-overflow` SSE event (never a silent gap).
 
-import { GoodVibesSdkError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes-jev/engine/errors';
 import { createUuidV4, type FetchLike } from '@goodvibes-jev/engine/transport-core';
 import {
   RelaySecureChannel,
@@ -55,7 +55,7 @@ export interface RelayClientOptions {
 
 /** A live relay client: a relay-backed `fetch` plus explicit lifecycle. */
 export interface RelayClient {
-  /** A `fetch` implementation to hand to the SDK as `fetchImpl`. */
+  /** A `fetch` implementation to hand to the platform as `fetchImpl`. */
   readonly fetch: FetchLike;
   /** Establish the pipe + E2E handshake. Idempotent; the fetch auto-connects too. */
   connect(): Promise<void>;
@@ -87,7 +87,7 @@ function resolvePairing(pairing: RelayPairingPayload | string): RelayPairingPayl
 function defaultWebSocket(url: string): RelayWebSocketLike {
   const Ctor = (globalThis as { WebSocket?: new (url: string) => RelayWebSocketLike }).WebSocket;
   if (!Ctor) {
-    throw new GoodVibesSdkError('No WebSocket implementation is available in this runtime.', {
+    throw new GoodVibesError('No WebSocket implementation is available in this runtime.', {
       category: 'config',
       source: 'transport',
       recoverable: false,
@@ -100,7 +100,7 @@ function defaultWebSocket(url: string): RelayWebSocketLike {
 function toBytes(data: unknown): Uint8Array<ArrayBuffer> {
   if (data instanceof ArrayBuffer) return new Uint8Array(data.slice(0));
   if (ArrayBuffer.isView(data)) return new Uint8Array(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
-  throw new GoodVibesSdkError('Relay received a non-binary data frame.', { category: 'protocol', source: 'transport', recoverable: false });
+  throw new GoodVibesError('Relay received a non-binary data frame.', { category: 'protocol', source: 'transport', recoverable: false });
 }
 
 /** Cancellation stops waiting without cancelling another caller's shared connection attempt. */
@@ -144,7 +144,7 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
     if (!current()) return Promise.resolve();
     const queue = outgoing.get(activeChannel) ?? { tail: Promise.resolve(), count: 0, bytes: 0 };
     if (queue.count >= MAX_QUEUED_FRAMES || queue.bytes + frame.byteLength > MAX_QUEUED_FRAME_BYTES) {
-      const error = new GoodVibesSdkError('Relay outgoing frame queue limit exceeded.', { category: 'protocol', source: 'transport', recoverable: true });
+      const error = new GoodVibesError('Relay outgoing frame queue limit exceeded.', { category: 'protocol', source: 'transport', recoverable: true });
       teardown(error); return Promise.reject(error);
     }
     queue.count++; queue.bytes += frame.byteLength;
@@ -164,7 +164,7 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
     if (socket !== ws) return Promise.resolve();
     const queue = incoming.get(ws) ?? { tail: Promise.resolve(), count: 0, bytes: 0 };
     if (queue.count >= MAX_QUEUED_FRAMES || queue.bytes + bytes.byteLength > MAX_QUEUED_FRAME_BYTES) {
-      const error = new GoodVibesSdkError('Relay incoming frame queue limit exceeded.', { category: 'protocol', source: 'transport', recoverable: true });
+      const error = new GoodVibesError('Relay incoming frame queue limit exceeded.', { category: 'protocol', source: 'transport', recoverable: true });
       teardown(error); return Promise.reject(error);
     }
     queue.count++; queue.bytes += bytes.byteLength;
@@ -197,7 +197,7 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
     for (const id of [...streams.keys()]) closeStream(id, { error });
   }
 
-  function teardown(error: unknown = new GoodVibesSdkError('Relay connection closed.', { category: 'network', source: 'transport', recoverable: true })): void {
+  function teardown(error: unknown = new GoodVibesError('Relay connection closed.', { category: 'network', source: 'transport', recoverable: true })): void {
     failAll(error);
     const previous = socket;
     const cancel = cancelConnection;
@@ -213,7 +213,7 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
   async function onBinary(bytes: Uint8Array<ArrayBuffer>, ws: RelayWebSocketLike, markReady: () => void): Promise<void> {
     if (!channel) {
       // First binary is the handshake response (message2).
-      if (!initiatorState) throw new GoodVibesSdkError('Unexpected relay frame before handshake start.', { category: 'protocol', source: 'transport', recoverable: false });
+      if (!initiatorState) throw new GoodVibesError('Unexpected relay frame before handshake start.', { category: 'protocol', source: 'transport', recoverable: false });
       const keys = await finishInitiatorHandshake(initiatorState, bytes);
       if (socket !== ws) return;
       channel = new RelaySecureChannel(keys, 'client');
@@ -277,7 +277,7 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
           resolve();
         }
       };
-      const timer = setTimeout(() => done(new GoodVibesSdkError('Timed out establishing the relay connection.', {
+      const timer = setTimeout(() => done(new GoodVibesError('Timed out establishing the relay connection.', {
         category: 'timeout',
         source: 'transport',
         recoverable: true,
@@ -306,14 +306,14 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
                 initiatorState = started.state;
                 ws.send(started.message1);
               } else if (frame.t === 'error') {
-                done(new GoodVibesSdkError(`Relay refused the connection: ${frame.message}`, {
+                done(new GoodVibesError(`Relay refused the connection: ${frame.message}`, {
                   category: frame.code === 'daemon-offline' ? 'not_found' : 'service',
                   source: 'transport',
                   recoverable: frame.code !== 'daemon-offline',
                   hint: frame.code === 'daemon-offline' ? 'The daemon is not registered on the relay (offline or wrong rendezvous id).' : undefined,
                 }));
               } else if (frame.t === 'pipe-close') {
-                done(new GoodVibesSdkError('Relay pipe closed.', { category: 'network', source: 'transport', recoverable: true }));
+                done(new GoodVibesError('Relay pipe closed.', { category: 'network', source: 'transport', recoverable: true }));
               }
               return;
             }
@@ -325,11 +325,11 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
       });
       ws.addEventListener('close', () => {
         if (socket !== ws) return;
-        done(new GoodVibesSdkError('Relay connection closed.', { category: 'network', source: 'transport', recoverable: true }));
+        done(new GoodVibesError('Relay connection closed.', { category: 'network', source: 'transport', recoverable: true }));
       });
       ws.addEventListener('error', () => {
         if (socket !== ws) return;
-        done(new GoodVibesSdkError('Relay WebSocket error.', { category: 'network', source: 'transport', recoverable: true }));
+        done(new GoodVibesError('Relay WebSocket error.', { category: 'network', source: 'transport', recoverable: true }));
       });
     });
     return connectPromise;
@@ -372,7 +372,7 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
       await whileActive(sendFrame(openFrame, activeChannel, activeSocket, current, () => { sent = true; }), signal);
       signal.throwIfAborted();
       if (channel !== activeChannel || socket !== activeSocket) {
-        throw new GoodVibesSdkError('Relay connection changed.', { category: 'network', source: 'transport', recoverable: true });
+        throw new GoodVibesError('Relay connection changed.', { category: 'network', source: 'transport', recoverable: true });
       }
       return response;
     } catch (error) {
@@ -386,7 +386,7 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
     request.signal.throwIfAborted();
     await whileActive(connect(), request.signal);
     request.signal.throwIfAborted();
-    if (!channel || !socket) throw new GoodVibesSdkError('Relay channel is not ready.', { category: 'network', source: 'transport', recoverable: true });
+    if (!channel || !socket) throw new GoodVibesError('Relay channel is not ready.', { category: 'network', source: 'transport', recoverable: true });
     const activeChannel = channel;
     const activeSocket = socket;
     const url = new URL(request.url, 'http://relay.local');
@@ -406,7 +406,7 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
       { id, kind: 'request', method: request.method, path: `${url.pathname}${url.search}`, headers },
       body,
     );
-    if (channel !== activeChannel || socket !== activeSocket) throw new GoodVibesSdkError('Relay connection changed.', { category: 'network', source: 'transport', recoverable: true });
+    if (channel !== activeChannel || socket !== activeSocket) throw new GoodVibesError('Relay connection changed.', { category: 'network', source: 'transport', recoverable: true });
     return new Promise<Response>((resolve, reject) => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       let sent = false;
@@ -435,7 +435,7 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
       if (request.method !== 'POST' || url.pathname !== '/api/judgment/batteries/run' || url.search !== '') {
         timer = setTimeout(() => {
           cancelRemote();
-          fail(new GoodVibesSdkError('Relay request timed out.', { category: 'timeout', source: 'transport', recoverable: true }));
+          fail(new GoodVibesError('Relay request timed out.', { category: 'timeout', source: 'transport', recoverable: true }));
         }, requestTimeoutMs);
       }
       if (request.signal.aborted) { cancel(); return; }

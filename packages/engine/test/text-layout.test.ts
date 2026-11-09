@@ -8,7 +8,7 @@
  * survives even when the detail column has to collapse to nothing.
  */
 import { describe, expect, test } from 'bun:test';
-import { getDisplayWidth } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils';
 import {
   fitLabelDetailColumns,
   wrapWithHangingIndent,

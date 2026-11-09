@@ -11,13 +11,13 @@
 
 import { describe, expect, test, beforeEach } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { createDaemonRuntimeSessionRouteHandlers } from '../daemon-sdk/src/runtime-session-routes.js';
-import type { DaemonRuntimeRouteContext } from '../daemon-sdk/src/runtime-route-types.js';
-import type { ConversationMessageEnvelope } from '../sdk/src/platform/control-plane/conversation-message.js';
+import { createDaemonRuntimeSessionRouteHandlers } from '../daemon-api/src/runtime-session-routes.js';
+import type { DaemonRuntimeRouteContext } from '../daemon-api/src/runtime-route-types.js';
+import type { ConversationMessageEnvelope } from '../platform/src/platform/control-plane/conversation-message.js';
 import type {
   CompanionChatTurnStartedEvent,
   CompanionChatTurnCompletedEvent,
-} from '../sdk/src/platform/companion/companion-chat-types.js';
+} from '../platform/src/platform/companion/companion-chat-types.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

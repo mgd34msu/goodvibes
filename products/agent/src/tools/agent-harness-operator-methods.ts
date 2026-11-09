@@ -1,5 +1,5 @@
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { getOperatorContract } from '@goodvibes-jev/engine/sdk/contracts';
+import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
+import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { CATALOG_QUERIES } from './agent-harness-catalog-filters.ts';
@@ -66,9 +66,9 @@ interface OperatorMethodDescriptor {
 }
 
 /**
- * Capability-advertisement honesty: the SDK operator contract marks
+ * Capability-advertisement honesty: the platform operator contract marks
  * a method `invokable: false` when it is cataloged but not backed by a real
- * daemon route (see @goodvibes-jev/engine/sdk's method-catalog-route-reconcile,
+ * daemon route (see @goodvibes-jev/engine/platform's method-catalog-route-reconcile,
  * email.inbox.list/read, email.draft.create, email.send are the dogfood
  * case: they advertise /api/email/* paths no router dispatch chain serves).
  * Before this, `invokable` was declared on the local contract-method shape
@@ -277,8 +277,8 @@ export function operatorMethodCatalogStatus(): Record<string, unknown> {
     unavailableMethods,
     categories,
     policy: unavailableMethods > 0
-      ? `Full GoodVibes SDK operator contract. Read-only routes can run through agent_operator_method; write/admin routes require confirm:true and explicitUserRequest. ${unavailableMethods} cataloged method(s) are currently unavailable (no served route), check each method's "available" field before treating it as callable.`
-      : 'Full GoodVibes SDK operator contract. Read-only routes can run through agent_operator_method; write/admin routes require confirm:true and explicitUserRequest.',
+      ? `Full GoodVibes platform operator contract. Read-only routes can run through agent_operator_method; write/admin routes require confirm:true and explicitUserRequest. ${unavailableMethods} cataloged method(s) are currently unavailable (no served route), check each method's "available" field before treating it as callable.`
+      : 'Full GoodVibes platform operator contract. Read-only routes can run through agent_operator_method; write/admin routes require confirm:true and explicitUserRequest.',
   };
 }
 

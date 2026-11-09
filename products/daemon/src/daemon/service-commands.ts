@@ -7,11 +7,11 @@
  * on Windows) so N surfaces share ONE daemon that survives reboots, instead of
  * every surface spawning a session-scoped daemon.
  *
- * Drift note: the SDK's older `systemd-user-service.ts` (a Linux-only,
- * bespoke systemd shim) was dead code and got deleted from the SDK. The SDK's
+ * Drift note: the platform's older `systemd-user-service.ts` (a Linux-only,
+ * bespoke systemd shim) was dead code and got deleted from the platform. The platform's
  * REAL wired service machinery, reached in production by the daemon's own HTTP
  * `/api/service/*` routes via facade-composition.ts, is
- * `PlatformServiceManager` (`@goodvibes-jev/engine/sdk/platform/daemon`): a single
+ * `PlatformServiceManager` (`@goodvibes-jev/engine/platform/platform/daemon`): a single
  * systemd/launchd/windows-aware manager with install/uninstall/status/start/
  * stop/restart and a `suggestedCommands` hint list. This module now rewires the
  * three CLI subcommands onto that manager instead of the deleted shim.
@@ -53,8 +53,8 @@
  *     touches a real running service in tests.
  */
 
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { PlatformServiceManager, type ManagedServiceStatus } from '@goodvibes-jev/engine/sdk/platform/daemon';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { PlatformServiceManager, type ManagedServiceStatus } from '@goodvibes-jev/engine/platform/platform/daemon';
 import {
   buildManagedDaemonServiceManager,
   detectLegacyUnit,
@@ -101,7 +101,7 @@ export type { ManagedServiceActionRunner } from '../runtime/legacy-daemon-migrat
 // independently, under its own architecture constraints.
 //
 // This detection is entirely independent of PlatformServiceManager's own
-// status(), it does not rely on (or get invalidated by) the parallel SDK
+// status(), it does not rely on (or get invalidated by) the parallel platform
 // fix that makes status().running itself query systemd honestly for the
 // TRACKED unit name.
 // ---------------------------------------------------------------------------
@@ -236,11 +236,11 @@ function statusLines(status: ManagedServiceStatus): string[] {
   if (status.platform !== 'manual' && status.installed && !status.running) {
     // W3 Finding 4: this used to assert "'running' here only reflects
     // processes this tool started directly", true for the pid-file-only
-    // check the (currently linked) SDK still uses, but the parallel SDK
+    // check the (currently linked) platform still uses, but the parallel platform
     // batch is making status().running query systemd honestly via
     // `is-active`, which would make that specific claim stale. Drop the
     // claim about HOW running was computed and just offer the escape
-    // hatch, true and useful under either SDK version.
+    // hatch, true and useful under either platform version.
     lines.push(
       `note: if this looks wrong, verify directly: ${status.suggestedCommands[status.suggestedCommands.length - 1] ?? 'the platform service-status command'}`,
     );
@@ -254,7 +254,7 @@ function statusLines(status: ManagedServiceStatus): string[] {
  * not-started case (W3 Finding 4 friction fix) rather than printed
  * unconditionally, and driving that through the full
  * PlatformServiceManager/systemd integration can't reliably produce
- * `running: true` under the (currently linked) SDK build, whose systemd
+ * `running: true` under the (currently linked) platform build, whose systemd
  * status check is still pid-file-only (see the honesty note above).
  */
 export function buildInstallResultLines(status: ManagedServiceStatus): string[] {
@@ -460,7 +460,7 @@ function runMigrateService(
   );
 }
 
-/** Dispatch a daemon service subcommand to the SDK's `PlatformServiceManager`. */
+/** Dispatch a daemon service subcommand to the platform's `PlatformServiceManager`. */
 export async function runDaemonServiceCli(input: DaemonServiceCliInput): Promise<DaemonServiceCliResult> {
   input.assertCurrent?.();
   const manager = buildManager(input);

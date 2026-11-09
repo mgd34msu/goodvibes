@@ -1,4 +1,4 @@
-import type { ArtifactDescriptor } from '@goodvibes-jev/engine/sdk/platform/artifacts';
+import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 
 export function readArtifactMetadataString(metadata: Readonly<Record<string, unknown>>, key: string): string {
   const value = metadata[key];

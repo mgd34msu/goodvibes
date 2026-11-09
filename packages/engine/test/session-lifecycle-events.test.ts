@@ -15,19 +15,19 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { ControlPlaneGateway } from '../sdk/src/platform/control-plane/gateway.js';
-import { createFeatureFlagManager } from '../sdk/src/platform/runtime/feature-flags/manager.js';
-import { SharedSessionBroker } from '../sdk/src/platform/control-plane/session-broker.js';
-import { PersistentStore } from '../sdk/src/platform/state/persistent-store.js';
-import { RouteBindingManager } from '../sdk/src/platform/channels/index.js';
-import { buildOperatorContract } from '../sdk/src/platform/control-plane/operator-contract.js';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.js';
-import { EVENT_DOMAIN } from '../sdk/src/platform/control-plane/gateway-scope-enforcement.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { ControlPlaneGateway } from '../platform/src/platform/control-plane/gateway.js';
+import { createFeatureFlagManager } from '../platform/src/platform/runtime/feature-flags/manager.js';
+import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.js';
+import { PersistentStore } from '../platform/src/platform/state/persistent-store.js';
+import { RouteBindingManager } from '../platform/src/platform/channels/index.js';
+import { buildOperatorContract } from '../platform/src/platform/control-plane/operator-contract.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
+import { EVENT_DOMAIN } from '../platform/src/platform/control-plane/gateway-scope-enforcement.js';
 import {
   SESSION_UPDATE_WIRE_EVENTS,
   SESSION_UPDATE_INTENT_MAP,
-} from '../sdk/src/platform/control-plane/method-catalog-events.js';
+} from '../platform/src/platform/control-plane/method-catalog-events.js';
 import { trackDisposables } from './_helpers/disposables.ts';
 
 const disposables = trackDisposables();
@@ -196,7 +196,7 @@ describe('session mutators advertise control.session_update', () => {
     // finalizeable input states, and assert each is declared in the enum. A future
     // emit of an undeclared name (e.g. a new session-input-<state>) fails here.
     const brokerSrc = readFileSync(
-      new URL('../sdk/src/platform/control-plane/session-broker.ts', import.meta.url),
+      new URL('../platform/src/platform/control-plane/session-broker.ts', import.meta.url),
       'utf-8',
     );
     const declared = new Set<string>(SESSION_UPDATE_WIRE_EVENTS);

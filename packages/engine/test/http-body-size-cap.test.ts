@@ -9,9 +9,9 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { UserAuthManager } from '../sdk/src/platform/security/user-auth.ts';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { HttpListener } from '../sdk/src/platform/daemon/http-listener.ts';
+import { UserAuthManager } from '../platform/src/platform/security/user-auth.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { HttpListener } from '../platform/src/platform/daemon/http-listener.ts';
 import { trackDisposables } from './_helpers/disposables.ts';
 import { stopListenerTimers } from './_helpers/listener-teardown.ts';
 
@@ -123,7 +123,7 @@ describe('HttpListener parseJsonBody body-size cap', () => {
 // DaemonHttpRouter parseJsonBody / parseOptionalJsonBody
 // ---------------------------------------------------------------------------
 
-import { DaemonHttpRouter } from '../sdk/src/platform/daemon/http/router.ts';
+import { DaemonHttpRouter } from '../platform/src/platform/daemon/http/router.ts';
 
 function makeRouter(): DaemonHttpRouter {
   const ctx = new Proxy({} as ConstructorParameters<typeof DaemonHttpRouter>[0], {

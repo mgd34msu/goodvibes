@@ -21,12 +21,12 @@ import { join } from 'node:path';
 import { waitFor } from './_helpers/test-timeout.js';
 import { makeControllableStore, readOnDisk, replaceInternalStore } from './_helpers/controllable-store.js';
 
-import { DistributedRuntimeManager } from '../sdk/src/platform/runtime/remote/distributed-runtime-manager.js';
-import { CheckinReceiptStore } from '../sdk/src/platform/checkin/receipts.js';
-import type { CheckinReceipt } from '../sdk/src/platform/checkin/types.js';
-import { KVState } from '../sdk/src/platform/state/kv-state.js';
-import { JsonFileStore } from '../sdk/src/platform/state/json-file-store.js';
-import { InboundMailHousekeeper } from '../sdk/src/platform/email/inbound/housekeeping.js';
+import { DistributedRuntimeManager } from '../platform/src/platform/runtime/remote/distributed-runtime-manager.js';
+import { CheckinReceiptStore } from '../platform/src/platform/checkin/receipts.js';
+import type { CheckinReceipt } from '../platform/src/platform/checkin/types.js';
+import { KVState } from '../platform/src/platform/state/kv-state.js';
+import { JsonFileStore } from '../platform/src/platform/state/json-file-store.js';
+import { InboundMailHousekeeper } from '../platform/src/platform/email/inbound/housekeeping.js';
 
 function tempDir(prefix: string): string {
   return mkdtempSync(join(tmpdir(), `gv-${prefix}-`));

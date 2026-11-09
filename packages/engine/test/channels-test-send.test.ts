@@ -8,13 +8,13 @@
  * carrying the real error, never a fabricated success, never a blanket throw.
  */
 import { describe, expect, test } from 'bun:test';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
 import {
   registerChannelTestGatewayMethods,
   type ChannelTestDeliveryRouter,
-} from '../sdk/src/platform/control-plane/routes/channel-test.ts';
-import type { ChannelDeliveryRequest } from '../sdk/src/platform/channels/delivery/types.ts';
-import { getBuiltinSetupSchema, CHANNEL_SETUP_VERSION } from '../sdk/src/platform/channels/index.ts';
+} from '../platform/src/platform/control-plane/routes/channel-test.ts';
+import type { ChannelDeliveryRequest } from '../platform/src/platform/channels/delivery/types.ts';
+import { getBuiltinSetupSchema, CHANNEL_SETUP_VERSION } from '../platform/src/platform/channels/index.ts';
 
 const ctx = { context: { admin: true } } as const;
 

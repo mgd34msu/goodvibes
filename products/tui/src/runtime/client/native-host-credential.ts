@@ -1,6 +1,6 @@
-import { OwnedSelectionObservation } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { resolveDaemonEnabled } from '@goodvibes-jev/engine/sdk/platform/config';
+import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveControlPlaneBaseUrl } from './operator-endpoint.ts';
 import { canonicalizePairingHost, readTuiHostPairing } from '../tui-host-credential-store.ts';
 

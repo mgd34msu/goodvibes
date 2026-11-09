@@ -26,7 +26,7 @@
  * surface that two unrelated layers read.
  */
 import type { HostedSessionRecord, HostedSessionsClient } from './hosted-sessions.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 export interface HostedRosterSnapshot {
   readonly sessions: readonly HostedSessionRecord[];

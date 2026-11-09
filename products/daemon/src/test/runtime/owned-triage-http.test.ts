@@ -1,8 +1,8 @@
 import { expect, spyOn, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { registerTriagedInbox, type OwnedTriagedInboxSource } from '@goodvibes-jev/engine/sdk/platform/intake';
+import { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { registerTriagedInbox, type OwnedTriagedInboxSource } from '@goodvibes-jev/engine/platform/platform/intake';
 import { createSystemOnePort } from '@goodvibes-jev/judgment';
 import { startDaemonFixture, type DaemonFixture } from '../../testing/daemon-fixture.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';

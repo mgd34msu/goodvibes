@@ -1,5 +1,5 @@
-import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogData, captureCatalogMethods, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { capturePersonalOpsData, assertPersonalOpsDataCurrent } from './agent-harness-personal-ops-source.ts';
 import { modelReadingServicePath } from './agent-harness-model-reading-source.ts';
@@ -314,7 +314,7 @@ function captureExecutionBackend(context: CommandContext, toolRegistry: ToolRegi
     captureCatalogMethods(toolRegistry, ['getToolDefinitions']), captureCatalogMethods(context.workspace, ['fileUndoManager', 'shellPaths']),
     captureCatalogMethods(context.session, ['runtime']), captureCatalogMethods(context.session.runtime, ['sessionId']),
     captureCatalogMethods(context.extensions, ['mcpRegistry', 'daemonRuntime']), captureCatalogMethods(context.platform, ['readModels'])];
-  if (context.clients) guards.push(captureCatalogMethods(context.clients, ['operator', 'operatorSdk', 'mcpApi']));
+  if (context.clients) guards.push(captureCatalogMethods(context.clients, ['operator', 'operatorApiClient', 'mcpApi']));
   if (context.workspace.shellPaths) guards.push(captureCatalogMethods(context.workspace.shellPaths, ['workingDirectory', 'homeDirectory']));
   const retainPublished = (subject: object, key: string, children?: readonly string[]) => {
     guards.push(captureCatalogMethods(subject, [key]));
@@ -364,8 +364,8 @@ function captureExecutionBackend(context: CommandContext, toolRegistry: ToolRegi
   }
   const daemonRuntime: unknown = Reflect.get(context.extensions, 'daemonRuntime');
   if (daemonRuntime && typeof daemonRuntime === 'object') retainPublished(daemonRuntime, 'interactiveRuntime');
-  const operatorSdk: unknown = context.clients ? Reflect.get(context.clients, 'operatorSdk') : undefined;
-  if (operatorSdk && typeof operatorSdk === 'object') retainPublished(operatorSdk, 'execution', ['interactiveRuntime']);
+  const operatorApiClient: unknown = context.clients ? Reflect.get(context.clients, 'operatorApiClient') : undefined;
+  if (operatorApiClient && typeof operatorApiClient === 'object') retainPublished(operatorApiClient, 'execution', ['interactiveRuntime']);
   if (context.workspace.fileUndoManager) guards.push(captureCatalogMethods(context.workspace.fileUndoManager, ['peekUndo', 'undoDepth', 'redoDepth']));
   const mcp = context.clients?.mcpApi ?? context.extensions.mcpRegistry;
   if (mcp) guards.push(captureCatalogMethods(mcp, ['listServerSecurity']));
@@ -443,7 +443,7 @@ export async function executionPostureSummary(context: CommandContext, toolRegis
       'Do not delegate ordinary local implementation, fix, review, or verification work when local tools and permissions are sufficient.',
       'Do delegate when isolation, parallelism, remote execution, a separate worktree, or a requested delegated review improves the user outcome.',
       'Report setup gaps directly for browser/desktop control instead of pretending browser automation exists.',
-      'Treat PTY, sudo, live output, and browser/desktop command execution as ready only when certified SDK/daemon runtime records publish exact visible routes and receipts.',
+      'Treat PTY, sudo, live output, and browser/desktop command execution as ready only when certified platform/daemon runtime records publish exact visible routes and receipts.',
       'Use tracked background processes for approved long-running local commands instead of hidden exec background mode.',
     ],
     routes: routes.map(({ entry, judgment }) => ({ ...(includeParameters ? entry.full : entry.summary), ...(judgment ? { judgment } : {}) })),

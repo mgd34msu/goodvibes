@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { type AuthenticatedPrincipal, type BrowserJudgmentRequest } from '../daemon-sdk/src/index.ts';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { createWebuiBrowserJudgment } from '../sdk/src/platform/judgment-browser/webui-runtime.ts';
+import { type AuthenticatedPrincipal, type BrowserJudgmentRequest } from '../daemon-api/src/index.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { createWebuiBrowserJudgment } from '../platform/src/platform/judgment-browser/webui-runtime.ts';
 
 const owner: AuthenticatedPrincipal = { principalId: 'platform-fixture', principalKind: 'user', admin: false, scopes: ['write:judgment'] };
 const request = (userAgent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) Version/17.0 Mobile/15E148 Safari/604.1'): BrowserJudgmentRequest<'webui.pwa.install-platform'> => ({

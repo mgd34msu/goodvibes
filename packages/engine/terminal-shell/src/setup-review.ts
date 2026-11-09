@@ -1,13 +1,13 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { getPluginDirectories } from '@goodvibes-jev/engine/sdk/platform/plugins';
+import { getPluginDirectories } from '@goodvibes-jev/engine/platform/platform/plugins';
 import {
   listBuiltinSubscriptionProviders,
   type ServiceRegistry,
   type SubscriptionManager,
-} from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ProviderApi } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { UiReadModels } from '@goodvibes-jev/engine/sdk/platform/runtime/ui';
-import type { ShellPathService } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
+} from '@goodvibes-jev/engine/platform/platform/config';
+import type { ProviderApi } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { UiReadModels } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 export interface SetupReviewIssue {
   readonly severity: 'pass' | 'warn' | 'fail';
   readonly area: string;

@@ -1,4 +1,4 @@
-import type { BrowserJudgmentRequest, BrowserJudgmentValueMap } from '@goodvibes-jev/engine/daemon-sdk';
+import type { BrowserJudgmentRequest, BrowserJudgmentValueMap } from '@goodvibes-jev/engine/daemon-api';
 import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime } from './client-lifetime';
 import { randomUuid } from './uuid';
 

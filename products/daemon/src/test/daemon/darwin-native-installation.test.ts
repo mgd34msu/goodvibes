@@ -4,7 +4,7 @@ import { copyFileSync, existsSync, readFileSync, renameSync, unlinkSync, writeFi
 import { join } from 'node:path';
 import { captureOriginalDarwinDaemonInstallation, createOriginalDarwinDaemonDataWriter, resolveInstalledDaemonUpdateArtifact } from '../../config/native-installation.js';
 import { originalDarwinProof } from '../../config/original-darwin-installation.js';
-import { inspectDarwinDaemonInstallation, parseClientReaderArtifact, realUpdateFileIo, resolveDarwinDaemonTargets } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { inspectDarwinDaemonInstallation, parseClientReaderArtifact, realUpdateFileIo, resolveDarwinDaemonTargets } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { darwinInstallationFixture } from '../helpers/darwin-installation.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 const homes = { isOverridden: false };

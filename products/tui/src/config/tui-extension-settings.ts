@@ -1,8 +1,8 @@
 /**
  * TUI-extension settings, config namespaces the TUI reads that are NOT part
- * of the SDK's ConfigManager schema.
+ * of the platform's ConfigManager schema.
  *
- * The SDK owns settings.json's typed schema (its `ConfigKey` union), but its
+ * The platform owns settings.json's typed schema (its `ConfigKey` union), but its
  * loader deep-merges user JSON over the defaults and only strips unknown
  * `permissions.tools` keys, every other unknown top-level key survives load
  * and round-trips through `save()`. That lets the TUI keep its own namespaces
@@ -17,7 +17,7 @@
  * owned by their real consumer instead of being duplicated in the TUI.
  */
 
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 
 type RawRecord = Record<string, unknown>;
 
@@ -143,20 +143,20 @@ export function readUpdateSettings(configManager: Pick<ConfigManager, 'getRaw'>)
 // ─── checkpoints.*, workspace checkpoint root-guard options ─────────────────
 
 /**
- * User-settable root-guard options for the SDK's WorkspaceCheckpointManager.
+ * User-settable root-guard options for the platform's WorkspaceCheckpointManager.
  * All optional: an omitted key defers to the manager's own default. Field
- * names and semantics mirror the SDK's `WorkspaceCheckpointManagerOptions`.
+ * names and semantics mirror the platform's `WorkspaceCheckpointManagerOptions`.
  */
 export interface CheckpointGuardSettings {
-  /** Prefer the enclosing git repo's top level over the raw workspace root. SDK default: true. */
+  /** Prefer the enclosing git repo's top level over the raw workspace root. platform default: true. */
   readonly preferGitRoot?: boolean;
-  /** Opt in to snapshotting a broad root (filesystem root / home / ~/.goodvibes). SDK default: false. */
+  /** Opt in to snapshotting a broad root (filesystem root / home / ~/.goodvibes). platform default: false. */
   readonly allowBroadRoot?: boolean;
-  /** Opt in to a first snapshot whose full sweep exceeds maxFirstSnapshotFiles. SDK default: false. */
+  /** Opt in to a first snapshot whose full sweep exceeds maxFirstSnapshotFiles. platform default: false. */
   readonly allowLargeFirstSnapshot?: boolean;
-  /** Ceiling for the first-ever snapshot's file sweep. SDK default: 50000. */
+  /** Ceiling for the first-ever snapshot's file sweep. platform default: 50000. */
   readonly maxFirstSnapshotFiles?: number;
-  /** Run a retention sweep automatically after each create() and once at init. SDK default: true. */
+  /** Run a retention sweep automatically after each create() and once at init. platform default: true. */
   readonly autoRetention?: boolean;
 }
 
@@ -164,10 +164,10 @@ export interface CheckpointGuardSettings {
  * Merge the user's `checkpoints.*` root-guard settings onto a base
  * WorkspaceCheckpointManager options object.
  *
- * NOTE: the pinned platform SDK's WorkspaceCheckpointManager may predate these
+ * NOTE: the pinned platform platform's WorkspaceCheckpointManager may predate these
  * root-guard options, an older constructor reads only
  * workspaceRoot/checkpointDir/runtimeBus/retention/now and silently ignores the
- * rest, making the guard keys INERT. They become effective the moment the SDK
+ * rest, making the guard keys INERT. They become effective the moment the platform
  * is upgraded to a build whose options type declares them (preferGitRoot,
  * allowBroadRoot, allowLargeFirstSnapshot, maxFirstSnapshotFiles,
  * autoRetention), no code change needed here. The return type intersects the
@@ -183,7 +183,7 @@ export function withCheckpointGuardSettings<T extends object>(
 
 /**
  * Read `checkpoints.*` from settings.json. Returns only the keys present and
- * well-typed; unknown or malformed values are dropped so the SDK's own
+ * well-typed; unknown or malformed values are dropped so the platform's own
  * defaults apply for them.
  */
 export function readCheckpointGuardSettings(configManager: Pick<ConfigManager, 'getRaw'>): CheckpointGuardSettings {

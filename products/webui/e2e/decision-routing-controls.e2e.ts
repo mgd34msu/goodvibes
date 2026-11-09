@@ -1,6 +1,6 @@
 /** Real config dispatcher/disk behind browser interception; catalog and model answers remain synthetic. */
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { DEFAULT_DECISION_ROUTER_SETTINGS } from '@goodvibes-jev/engine/sdk/browser/decision-router';
+import { DEFAULT_DECISION_ROUTER_SETTINGS } from '@goodvibes-jev/engine/platform/browser/decision-router';
 import { expectNoHorizontalScroll, openSettings } from './support/app';
 import { installTerminalThemeDaemon } from './support/terminal-theme-fixture';
 

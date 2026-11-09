@@ -6,11 +6,11 @@ import { join } from 'node:path';
 import { useGateReadings } from './_helpers/gate-readings.ts';
 import { makeControllableStore, readOnDisk, replaceInternalStore } from './_helpers/controllable-store.ts';
 import { waitFor } from './_helpers/test-timeout.ts';
-import { buildDurableRuleForDecision } from '../sdk/src/platform/permissions/approval-rules.ts';
-import { PermissionManager, type PermissionConfigReader } from '../sdk/src/platform/permissions/manager.ts';
-import type { PermissionRequestHandler } from '../sdk/src/platform/permissions/prompt.ts';
-import { UserPermissionRuleStore, type StoredUserPermissionRule } from '../sdk/src/platform/permissions/user-rule-store.ts';
-import { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.ts';
+import { buildDurableRuleForDecision } from '../platform/src/platform/permissions/approval-rules.ts';
+import { PermissionManager, type PermissionConfigReader } from '../platform/src/platform/permissions/manager.ts';
+import type { PermissionRequestHandler } from '../platform/src/platform/permissions/prompt.ts';
+import { UserPermissionRuleStore, type StoredUserPermissionRule } from '../platform/src/platform/permissions/user-rule-store.ts';
+import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
 
 useGateReadings();
 

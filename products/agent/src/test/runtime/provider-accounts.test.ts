@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildProviderAccountSnapshot } from '../../runtime/provider-account-snapshot.ts';
 import { createTestManagers } from '../helpers/test-managers.ts';
-import { ServiceRegistry } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
 import { SecretsManager } from '../../config/secrets.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
@@ -19,7 +19,7 @@ describe('provider account snapshot', () => {
     testManagers.providerRegistry.register({
       name: 'openai',
       models: ['gpt-5'],
-      // Hand-maintained fixture list; the SDK's registration-time model-source
+      // Hand-maintained fixture list; the platform's registration-time model-source
       // contract requires every register()-ed provider to declare its source.
       modelSource: { kind: 'dated-static', asOf: '2026-07-13' },
       credentialAuthority: 'resolver',

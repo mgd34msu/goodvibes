@@ -3,7 +3,7 @@
  * check-public-suffix-drift.ts
  *
  * Compares the BUNDLED public-suffix snapshot
- * (sdk/src/platform/security/public-suffix.ts) against the upstream
+ * (engine/src/platform/security/public-suffix.ts) against the upstream
  * Mozilla Public Suffix List, and FAILS on drift.
  *
  * ── Why bundled, and why a separate check ─────────────────────────────────
@@ -50,7 +50,7 @@
 import {
   bundledMultiLabelSuffixes,
   bundledWildcardSuffixParents,
-} from '../sdk/src/platform/security/public-suffix.ts';
+} from '../platform/src/platform/security/public-suffix.ts';
 
 const UPSTREAM_URL = 'https://publicsuffix.org/list/public_suffix_list.dat';
 const ICANN_BEGIN = '// ===BEGIN ICANN DOMAINS===';
@@ -164,7 +164,7 @@ async function main(): Promise<void> {
 
   console.error('');
   console.error('This is a DATA-ONLY fix: edit the tables in');
-  console.error('  sdk/src/platform/security/public-suffix.ts');
+  console.error('  engine/src/platform/security/public-suffix.ts');
   console.error('No code change is needed, and the module header carries the refresh procedure.');
   console.error('');
   console.error('Note the blast radius before treating this as urgent: the module falls back to a');

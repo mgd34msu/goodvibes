@@ -1,4 +1,4 @@
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import {
   getOnboardingWizardVisibleFieldCount,
   type OnboardingWizardAction,

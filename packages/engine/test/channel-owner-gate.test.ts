@@ -10,16 +10,16 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ChannelPolicyManager } from '../sdk/src/platform/channels/policy-manager.js';
-import { ApprovalBroker } from '../sdk/src/platform/control-plane/approval-broker.js';
-import { DaemonSurfaceActionHelper } from '../sdk/src/platform/daemon/surface-actions.js';
+import { ChannelPolicyManager } from '../platform/src/platform/channels/policy-manager.js';
+import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-broker.js';
+import { DaemonSurfaceActionHelper } from '../platform/src/platform/daemon/surface-actions.js';
 import { useApprovalReadings } from './helpers/approval-readings.ts';
 
 const readings = useApprovalReadings();
-import { handleSlackSurfacePayload } from '../sdk/src/platform/adapters/slack/index.js';
-import { logger } from '../sdk/src/platform/utils/logger.js';
-import type { PermissionPromptRequest } from '../sdk/src/platform/permissions/prompt.js';
-import type { SurfaceAdapterContext } from '../sdk/src/platform/adapters/index.js';
+import { handleSlackSurfacePayload } from '../platform/src/platform/adapters/slack/index.js';
+import { logger } from '../platform/src/platform/utils/logger.js';
+import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.js';
+import type { SurfaceAdapterContext } from '../platform/src/platform/adapters/index.js';
 
 const scratchDirs: string[] = [];
 

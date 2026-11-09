@@ -23,28 +23,28 @@ import {
   loadDaemonConfigSnapshot,
   readEffectiveConfig,
   type DaemonConfigRouterDeps,
-} from '../sdk/src/platform/config/index.js';
+} from '../platform/src/platform/config/index.js';
 import {
   detachedDaemonReapedPath,
   readDetachedDaemonReapReceipt,
   recordDetachedDaemonRuntime,
-} from '../sdk/src/platform/runtime/detached-daemon-runtime.js';
-import { preconfigureLocalVoiceKeys } from '../sdk/src/platform/voice/provisioning/config-preconfigure.js';
+} from '../platform/src/platform/runtime/detached-daemon-runtime.js';
+import { preconfigureLocalVoiceKeys } from '../platform/src/platform/voice/provisioning/config-preconfigure.js';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { proveVoiceRoundTrip } from '../sdk/src/platform/voice/provisioning/round-trip-proof.js';
-import { resolveWakeEnablementCompanion } from '../sdk/src/platform/voice/wake/settings.js';
-import { transcribeThroughBestRoute, SttRoutesExhaustedError } from '../sdk/src/platform/voice/stt-routing.js';
+import { proveVoiceRoundTrip } from '../platform/src/platform/voice/provisioning/round-trip-proof.js';
+import { resolveWakeEnablementCompanion } from '../platform/src/platform/voice/wake/settings.js';
+import { transcribeThroughBestRoute, SttRoutesExhaustedError } from '../platform/src/platform/voice/stt-routing.js';
 import {
   readVoiceDiagnostics,
   recordVoiceDiagnostic,
-} from '../sdk/src/platform/voice/diagnostics.js';
+} from '../platform/src/platform/voice/diagnostics.js';
 import {
   planVoiceSetupChain,
   voiceSetupChainStrings,
   voiceSetupStepsOfKind,
-} from '../sdk/src/platform/voice/setup-chain.js';
-import { SETUP_INTENT_CONTRACT_PROMPT } from '../sdk/src/platform/runtime/setup-contract.js';
+} from '../platform/src/platform/voice/setup-chain.js';
+import { SETUP_INTENT_CONTRACT_PROMPT } from '../platform/src/platform/runtime/setup-contract.js';
 import { namedCommandsAndKeys } from './_helpers/setup-vocabulary.ts';
 
 function daemonHome(): string {

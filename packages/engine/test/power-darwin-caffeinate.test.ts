@@ -18,9 +18,9 @@ import {
   reapOrphanedDarwinSleepWatchers,
   sleepWatchArgs,
   type DarwinPowerSource,
-} from '../sdk/src/platform/power/darwin-caffeinate.ts';
-import { createHostPowerSeam } from '../sdk/src/platform/power/runtime-wiring.ts';
-import { PowerManager, LID_SWITCH_HONEST_SPLIT } from '../sdk/src/platform/power/manager.ts';
+} from '../platform/src/platform/power/darwin-caffeinate.ts';
+import { createHostPowerSeam } from '../platform/src/platform/power/runtime-wiring.ts';
+import { PowerManager, LID_SWITCH_HONEST_SPLIT } from '../platform/src/platform/power/manager.ts';
 
 interface FakeChild {
   readonly child: ChildProcess;

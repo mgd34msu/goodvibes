@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
-import { createTriageTagger } from '../sdk/src/platform/intake/triage/tagger/index.ts';
-import { captureTags } from '../sdk/src/platform/intake/triage/tagger/shared.ts';
-import { applySlackTags } from '../sdk/src/platform/intake/triage/tagger/slack.ts';
-import { applyDiscordTags } from '../sdk/src/platform/intake/triage/tagger/discord.ts';
-import { imapStoreFlagOverTls, makeRetryingImapStoreFlag, ImapStoreError, type ImapStoreArgs, type ImapSocketLike } from '../sdk/src/platform/intake/triage/tagger/imap.ts';
+import { createTriageTagger } from '../platform/src/platform/intake/triage/tagger/index.ts';
+import { captureTags } from '../platform/src/platform/intake/triage/tagger/shared.ts';
+import { applySlackTags } from '../platform/src/platform/intake/triage/tagger/slack.ts';
+import { applyDiscordTags } from '../platform/src/platform/intake/triage/tagger/discord.ts';
+import { imapStoreFlagOverTls, makeRetryingImapStoreFlag, ImapStoreError, type ImapStoreArgs, type ImapSocketLike } from '../platform/src/platform/intake/triage/tagger/imap.ts';
 const guard = () => ({ signal: new AbortController().signal, assertCurrent() {} });
 function http(responses: Array<Response | (() => Response)>) {
   const calls: { url: string; init: RequestInit }[] = [];

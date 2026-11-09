@@ -13,7 +13,7 @@
  * fallback) instead of silently returning zero matches that read as "nothing
  * was ever stored."
  *
- * MEMORY-SPINE WIRING (SDK 1.2.0 full-detach catalog). Every action below now
+ * MEMORY-SPINE WIRING (platform 1.2.0 full-detach catalog). Every action below now
  * routes through `memorySpine`, local by default, or over the wire the moment
  * the agent has adopted a daemon (see services.ts's memorySpineClient).
  * get/create/review/stale/delete and the literal `search` path use the five
@@ -35,8 +35,8 @@ import {
   type MemoryScope,
   type MemorySemanticSearchResult,
   type MemoryVectorStats,
-} from '@goodvibes-jev/engine/sdk/platform/state';
-import type { MemoryAccess, MemoryOperationOptions } from '@goodvibes-jev/engine/sdk/platform/runtime/memory-spine';
+} from '@goodvibes-jev/engine/platform/platform/state';
+import type { MemoryAccess, MemoryOperationOptions } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import { assertNoSecretLikeMemoryText } from '../agent/memory-safety.ts';
 import { formatAgentRecordReference, formatAgentRecordReviewState } from '../agent/record-labels.ts';
 import {
@@ -146,7 +146,7 @@ export async function handleMemory(
     if (wantsLiteral) {
       // Literal search IS wire-covered, routes through the spine (honestSearch
       // with no `semantic` flag is exactly a literal scan; see
-      // runHonestMemorySearch in the SDK).
+      // runHonestMemorySearch in the platform).
       const { records } = await run(() => memorySpine.honestSearch({ query, limit: 10 }, undefined, options));
       return renderMemorySearch('literal, explicitly requested', query, records.map(formatMemory));
     }

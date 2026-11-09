@@ -1,9 +1,9 @@
 import { screeningAnswers } from './_helpers/screening-answers.js';
 import { afterEach, expect, test } from 'bun:test';
-import { createProtectedSourceOwner } from '../sdk/src/platform/security/source-screening/owner.ts';
-import { createProtectedInboxMapper } from '../sdk/src/platform/intake/protected-preview.ts';
-import { parseIntakeFetchResponse } from '../sdk/src/platform/intake/providers/imap-response.ts';
-import { digestSender } from '../sdk/src/platform/intake/text-normalization.ts';
+import { createProtectedSourceOwner } from '../platform/src/platform/security/source-screening/owner.ts';
+import { createProtectedInboxMapper } from '../platform/src/platform/intake/protected-preview.ts';
+import { parseIntakeFetchResponse } from '../platform/src/platform/intake/providers/imap-response.ts';
+import { digestSender } from '../platform/src/platform/intake/text-normalization.ts';
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });
 interface RecordedSource { revision: string; parts: string[]; }

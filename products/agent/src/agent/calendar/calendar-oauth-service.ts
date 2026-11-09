@@ -1,12 +1,12 @@
 /**
- * calendar-oauth-service.ts, the agent's bridge to the SDK calendar OAuth connector.
+ * calendar-oauth-service.ts, the agent's bridge to the platform calendar OAuth connector.
  *
- * It wires the SDK CalendarConnector with the REAL runtime adapters the SDK module
- * deliberately leaves injected (so the SDK stays pure and testable): the runtime
- * fetch, and a loopback redirect listener built on the SDK's createOAuthLocalListener.
+ * It wires the platform CalendarConnector with the REAL runtime adapters the platform module
+ * deliberately leaves injected (so the platform stays pure and testable): the runtime
+ * fetch, and a loopback redirect listener built on the platform's createOAuthLocalListener.
  * Tokens persist through the Agent secret manager. The OAuth app is the operator's
  * own, no client id ships with the product, so the client id is read from config
- * and the client secret from the secret store, under the keys the SDK profile names.
+ * and the client secret from the secret store, under the keys the platform profile names.
  * With none set, every connect returns an honest config-stage refusal naming the key.
  *
  * Every connect returns an honest STAGED result ({ ok, stage, error }), config,
@@ -30,8 +30,8 @@ import {
   type MergedCalendarEvent,
   type OAuthClientOverrides,
   type ResolvedClientConfig,
-} from '@goodvibes-jev/engine/sdk/platform/calendar';
-import { createOAuthLocalListener } from '@goodvibes-jev/engine/sdk/platform/config';
+} from '@goodvibes-jev/engine/platform/platform/calendar';
+import { createOAuthLocalListener } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ConfigKey } from '../../config/index.ts';
 import type { SecretScope } from '../../config/secrets.ts';
 import { resolveCredentialWriteScope } from '../../config/credential-scope.ts';
@@ -70,7 +70,7 @@ export interface CalendarSecretSlice {
  * Wrap a secret slice so every WRITE it receives is filed at the tier the
  * credential's reader actually reads from.
  *
- * The SDK's `CalendarTokenStore` writes `GOODVIBES_CALENDAR_<PROVIDER>_TOKENS`,
+ * The platform's `CalendarTokenStore` writes `GOODVIBES_CALENDAR_<PROVIDER>_TOKENS`,
  * `_ACCOUNT` and `_STATUS` through a two-argument `set(key, value)`, it has no
  * scope parameter to pass, and nothing in the chain from
  * `/calendar connect google` down to that call ever named one. The store's own
@@ -80,10 +80,10 @@ export interface CalendarSecretSlice {
  * the terminal, and the daemon reports no calendar account connected.
  *
  * Wrapping at this seam rather than changing the call is what makes it work
- * without an SDK change, the token store keeps its two-argument call and the
+ * without a platform change, the token store keeps its two-argument call and the
  * scope is decided by the name, one layer down, where the answer is known.
  * `resolveCredentialWriteScope` is what holds that answer, for these names and
- * for the SDK-derived ones alike.
+ * for the platform-derived ones alike.
  *
  * Reads and deletes pass straight through: `SecretsManager.get` already reads
  * across tiers, and a delete with no scope sweeps all of them, which is what a
@@ -152,7 +152,7 @@ export class CalendarOAuthService {
   /**
    * The scope-pinned slice, and the exact object handed to the connector below.
    *
-   * Readable so a test can write through the same object the SDK's token store
+   * Readable so a test can write through the same object the platform's token store
    * writes through and check where the value landed. That is the only way to
    * gate the wrapping from outside: the token store is built inside the
    * connector, and a service that stopped wrapping would keep every visible
@@ -166,7 +166,7 @@ export class CalendarOAuthService {
     // Every write this service makes, its own, and the token store's inside the
     // connector, goes through the scope-pinning wrapper, so the refresh token
     // lands where the daemon reads it. Wrapping here rather than at each call
-    // means a future write added inside the SDK connector is covered too.
+    // means a future write added inside the platform connector is covered too.
     this.secrets = daemonScopedSecrets(options.secrets);
     this.connector = options.connector ?? new CalendarConnector({
       secrets: this.secrets,

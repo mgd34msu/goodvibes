@@ -16,7 +16,7 @@ import {
   createBunRelayServer,
   createRelayDaemonRegistration,
   type RelayClientWebSocket,
-} from '../daemon-sdk/src/index.js';
+} from '../daemon-api/src/index.js';
 import { createRelayClient } from '../transport-realtime/src/relay-transport.js';
 import { generateRelayIdentity } from '../transport-core/src/relay/index.js';
 

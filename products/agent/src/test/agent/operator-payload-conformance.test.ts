@@ -3,9 +3,9 @@
  * breaking contract changes this round without any tarball at all.
  *
  * `invokeOperatorGatewayMethod` used to take `payload: unknown` and call
- * `sdk.operator.invoke(methodId, payload as never)`. That opted every operator
+ * `platform.operator.invoke(methodId, payload as never)`. That opted every operator
  * call in this repo out of type checking: a known method id carrying a wrong
- * body failed the SDK's typed overload and silently matched the loose
+ * body failed the platform's typed overload and silently matched the loose
  * `invoke<T>(methodId: string, input?: Record<string, unknown>)` beneath it.
  * `authority` becoming required on the profile write verbs, and `profile.forget`
  * dropping `lineIndex`, both compiled clean here.
@@ -23,8 +23,8 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { OPERATOR_CONTRACT } from '@goodvibes-jev/engine/sdk/contracts';
-import type { OperatorMethodId, OperatorMethodInput } from '@goodvibes-jev/engine/sdk/contracts';
+import { OPERATOR_CONTRACT } from '@goodvibes-jev/engine/platform/contracts';
+import type { OperatorMethodId, OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
 import { PROFILE_METHOD_IDS, PROFILE_RECORDING_SURFACE } from '../../tools/agent-profile-types.ts';
 
 /**
@@ -39,7 +39,7 @@ type KeysOfUnion<T> = T extends unknown ? keyof T : never;
  * Excess-key rejection that works on ANY body, not only a fresh literal.
  *
  * DO NOT REPLACE THIS WITH "just type the parameter", and do not assume the
- * compiler catches anything at a raw `sdk.operator.invoke` call. Measured on
+ * compiler catches anything at a raw `platform.operator.invoke` call. Measured on
  * this repo's contract and TypeScript, seeding a stale `lineIndex` into a
  * `profile.forget` body four ways, through four contexts:
  *

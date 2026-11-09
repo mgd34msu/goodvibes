@@ -1,4 +1,4 @@
-import { withDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { withDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
@@ -11,10 +11,10 @@ import { readLocalServingBoolean, readLocalServingStatus, readLocalResourcePress
 import { withModelReadingSource } from '../../tools/agent-harness-model-reading-source.ts';
 import { captureLocalModelRegistry } from '../../tools/agent-harness-local-model-endpoints.ts';
 import { runLocalModelServerSmoke } from '../../tools/agent-harness-local-model-smoke.ts';
-import { readLocalServerIdentity, localServerIdentity, localServerIdentityDefinition, localServingStatus, localResourcePressure, localServingSchemaStatus, routingRegistry } from '@goodvibes-jev/engine/sdk/platform/routing';
-import { booleanValue } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { gateJudgmentRegistry } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { ProviderRegistry, OpenAICompatProvider } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { readLocalServerIdentity, localServerIdentity, localServerIdentityDefinition, localServingStatus, localResourcePressure, localServingSchemaStatus, routingRegistry } from '@goodvibes-jev/engine/platform/platform/routing';
+import { booleanValue } from '@goodvibes-jev/engine/platform/platform/tools';
+import { gateJudgmentRegistry } from '@goodvibes-jev/engine/platform/platform/gate';
+import { ProviderRegistry, OpenAICompatProvider } from '@goodvibes-jev/engine/platform/platform/providers';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

@@ -1,5 +1,5 @@
 import type { ConnectedHostReadiness } from '../runtime/connected-host-readiness.ts';
-import type { ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
+import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { OnboardingStep1CapabilityItem, OnboardingSurfaceRecord } from '../runtime/onboarding/index.ts';
 import type { AgentHarnessVibeHealth } from './agent-harness-vibe-health.ts';
 import type { AgentHarnessSudoPosture } from './agent-harness-sudo-posture.ts';

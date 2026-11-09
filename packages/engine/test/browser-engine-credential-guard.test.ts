@@ -1,45 +1,45 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { runInNewContext } from 'node:vm';
-import { BrowserHostClient, BrowserHostError, remotePage, browserHostScriptPath } from '../sdk/src/platform/browser/browser-host-client.js';
+import { BrowserHostClient, BrowserHostError, remotePage, browserHostScriptPath } from '../platform/src/platform/browser/browser-host-client.js';
 import { liveControlDescriptor } from './_helpers/browser-control-descriptor.js';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 type BrowserContext = unknown;
-import { BrowserEngine, BrowserSessionError } from '../sdk/src/platform/browser/browser-engine.js';
-import { looksLikeCredentialPage } from '../sdk/src/platform/browser/browser-engine-contract.js';
-import { BrowserSessionManager } from '../sdk/src/platform/browser/browser-sessions.js';
+import { BrowserEngine, BrowserSessionError } from '../platform/src/platform/browser/browser-engine.js';
+import { looksLikeCredentialPage } from '../platform/src/platform/browser/browser-engine-contract.js';
+import { BrowserSessionManager } from '../platform/src/platform/browser/browser-sessions.js';
 import type {
   BrowserProvisionIo,
   OutwardEffectDecision,
   OwnerApproval,
   UntrustedContentEnvelope,
   UntrustedContentPort,
-} from '../sdk/src/platform/browser/browser-types.js';
+} from '../platform/src/platform/browser/browser-types.js';
 import { securityPort } from './helpers/security-readings.ts';
 import { bindJudgmentPortAuthority, installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
-import { createGoogleBrowserPort } from '../sdk/src/platform/google/browser-port.js';
-import { findElement, consumeGoogleElement } from '../sdk/src/platform/google/browser-elements.js';
-import { googleSetupControl, ownGoogleBrowser } from '../sdk/src/platform/google/browser-readings.js';
-import { DRIVER_VERSION } from '../sdk/src/platform/browser/browser-provision-io.js';
-import { browserCredentialPage } from '../sdk/src/platform/browser/browser-control-identity.js';
-import { CardMaterialRedactor } from '../sdk/src/platform/payments/card-redaction.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { PermissionManager, createPermissionConfigReader } from '../sdk/src/platform/permissions/manager.js';
-import { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.js';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.js';
-import { executeToolCalls } from '../sdk/src/platform/core/orchestrator-tool-runtime.js';
+import { createGoogleBrowserPort } from '../platform/src/platform/google/browser-port.js';
+import { findElement, consumeGoogleElement } from '../platform/src/platform/google/browser-elements.js';
+import { googleSetupControl, ownGoogleBrowser } from '../platform/src/platform/google/browser-readings.js';
+import { DRIVER_VERSION } from '../platform/src/platform/browser/browser-provision-io.js';
+import { browserCredentialPage } from '../platform/src/platform/browser/browser-control-identity.js';
+import { CardMaterialRedactor } from '../platform/src/platform/payments/card-redaction.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { PermissionManager, createPermissionConfigReader } from '../platform/src/platform/permissions/manager.js';
+import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.js';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.js';
+import { executeToolCalls } from '../platform/src/platform/core/orchestrator-tool-runtime.js';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { gateReadingsPort } from './_helpers/gate-readings.js';
 import { makeProjectTempDir } from './_helpers/project-temp.js';
-import type { CardFieldGuard } from '../sdk/src/platform/browser/browser-types.js';
-import { createBrowserCheckoutDriverFactory } from '../sdk/src/platform/payments/browser-checkout-driver.js';
-import { CheckoutSubmitRefused, type CheckoutTerms } from '../sdk/src/platform/payments/checkout-page.js';
-import { parseCurrencyCode } from '../sdk/src/platform/payments/types.js';
-import { checkoutTerms } from '../sdk/src/platform/payments/batteries/checkout-terms.js';
+import type { CardFieldGuard } from '../platform/src/platform/browser/browser-types.js';
+import { createBrowserCheckoutDriverFactory } from '../platform/src/platform/payments/browser-checkout-driver.js';
+import { CheckoutSubmitRefused, type CheckoutTerms } from '../platform/src/platform/payments/checkout-page.js';
+import { parseCurrencyCode } from '../platform/src/platform/payments/types.js';
+import { checkoutTerms } from '../platform/src/platform/payments/batteries/checkout-terms.js';
 
 let previous: ReturnType<typeof installJudgmentPort>;
 let pages: ReturnType<typeof fakePort>;

@@ -19,8 +19,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { KnowledgeScheduleService } from '../sdk/src/platform/knowledge/scheduling.ts';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.ts';
+import { KnowledgeScheduleService } from '../platform/src/platform/knowledge/scheduling.ts';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.ts';
 
 const realSetTimeout = globalThis.setTimeout;
 const realClearTimeout = globalThis.clearTimeout;

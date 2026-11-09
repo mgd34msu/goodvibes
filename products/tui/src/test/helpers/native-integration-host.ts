@@ -1,6 +1,6 @@
 /** Engine-owned native fixture; product tests use only its private control pipe and public HTTP. */
 import { isAbsolute, resolve } from 'node:path';
-import { nativeWorkExecutionIdentitySchema, type NativeWorkExecutionIdentity } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
+import { nativeWorkExecutionIdentitySchema, type NativeWorkExecutionIdentity } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
 
 async function within<T>(promise: Promise<T>, label: string, milliseconds: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;

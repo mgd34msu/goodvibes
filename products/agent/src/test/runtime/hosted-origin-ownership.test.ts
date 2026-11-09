@@ -1,12 +1,12 @@
 import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { createClientRuntimeServices } from '@goodvibes-jev/engine/sdk/platform/runtime/client-services';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { createClientRuntimeServices } from '@goodvibes-jev/engine/platform/platform/runtime/client-services';
 import { RuntimeEventBus } from '@/runtime/index.ts';
-import { createRuntimeStore } from '@goodvibes-jev/engine/sdk/platform/runtime/store';
-import { createHostedSessionRuntime, type HostedSessionRuntime } from '@goodvibes-jev/engine/sdk/platform/hosted-sessions';
-import type { DaemonVerbCaller } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
+import { createHostedSessionRuntime, type HostedSessionRuntime } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
+import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { createRemoteConversationRouter } from '../../runtime/client/remote-conversation.ts';
 import { createHostedConversationHandoff } from '../../runtime/client/hosted-handoff.ts';
 import { ConnectedHostVerbError } from '../../runtime/client/daemon-verbs.ts';

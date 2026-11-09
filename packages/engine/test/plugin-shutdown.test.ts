@@ -2,13 +2,13 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { PluginAPI } from '../sdk/src/platform/plugins/api.ts';
-import { PluginClosedError, PluginInFlightTracker } from '../sdk/src/platform/plugins/in-flight.ts';
-import type { PluginLoaderDeps } from '../sdk/src/platform/plugins/loader.ts';
-import { PluginManager } from '../sdk/src/platform/plugins/manager.ts';
-import type { HostSlashCommand } from '../sdk/src/platform/runtime/host-ui.ts';
-import { ChannelPluginRegistry } from '../sdk/src/platform/channels/plugin-registry.ts';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.ts';
+import type { PluginAPI } from '../platform/src/platform/plugins/api.ts';
+import { PluginClosedError, PluginInFlightTracker } from '../platform/src/platform/plugins/in-flight.ts';
+import type { PluginLoaderDeps } from '../platform/src/platform/plugins/loader.ts';
+import { PluginManager } from '../platform/src/platform/plugins/manager.ts';
+import type { HostSlashCommand } from '../platform/src/platform/runtime/host-ui.ts';
+import { ChannelPluginRegistry } from '../platform/src/platform/channels/plugin-registry.ts';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
 
 function gate() {
   let resolve!: () => void;

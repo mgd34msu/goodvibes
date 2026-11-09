@@ -24,7 +24,7 @@ import {
   loadBaseline,
   formatSuiteResult,
   formatGateResult,
-} from '../sdk/src/platform/runtime/eval/index.ts';
+} from '../platform/src/platform/runtime/eval/index.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(__dirname, '..');

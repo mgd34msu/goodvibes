@@ -4,11 +4,11 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import type { Page } from 'playwright-core';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { BrowserEngine } from '../sdk/src/platform/browser/browser-engine.ts';
-import type { BrowserSessionManager } from '../sdk/src/platform/browser/browser-sessions.ts';
-import type { UntrustedContentPort } from '../sdk/src/platform/browser/browser-types.ts';
-import { createGoogleBrowserPort } from '../sdk/src/platform/google/browser-port.ts';
-import { consumeGoogleElement, findElement } from '../sdk/src/platform/google/browser-elements.ts';
+import { BrowserEngine } from '../platform/src/platform/browser/browser-engine.ts';
+import type { BrowserSessionManager } from '../platform/src/platform/browser/browser-sessions.ts';
+import type { UntrustedContentPort } from '../platform/src/platform/browser/browser-types.ts';
+import { createGoogleBrowserPort } from '../platform/src/platform/google/browser-port.ts';
+import { consumeGoogleElement, findElement } from '../platform/src/platform/google/browser-elements.ts';
 
 let previous: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previous = installJudgmentPort(undefined); });

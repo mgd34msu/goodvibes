@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
-import { RuntimeEventBus } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
-import { emitAgentCompleted } from '@goodvibes-jev/engine/sdk/platform/runtime/emitters';
-import { runtimeEventKey, type RuntimeEventProvenance } from '@goodvibes-jev/engine/sdk/platform/runtime/bootstrap';
+import { RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { emitAgentCompleted } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
+import { runtimeEventKey, type RuntimeEventProvenance } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 import { NotificationFeed } from '../../core/notifications-feed.ts';
 import { publishNotice } from '../../core/notices.ts';
 

@@ -1,17 +1,17 @@
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { BookmarkManager } from '@goodvibes-jev/engine/sdk/platform/bookmarks';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { ServiceRegistry } from '@goodvibes-jev/engine/sdk/platform/config';
+import { BookmarkManager } from '@goodvibes-jev/engine/platform/platform/bookmarks';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
 import { SecretsManager } from '../../config/secrets.ts';
-import { FavoritesStore } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { BenchmarkStore } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { ToolLLM } from '@goodvibes-jev/engine/sdk/platform/config';
-import { ProviderCapabilityRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { CacheHitTracker } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { LLMProvider, ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { FavoritesStore } from '@goodvibes-jev/engine/platform/platform/providers';
+import { BenchmarkStore } from '@goodvibes-jev/engine/platform/platform/providers';
+import { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { ToolLLM } from '@goodvibes-jev/engine/platform/platform/config';
+import { ProviderCapabilityRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { CacheHitTracker } from '@goodvibes-jev/engine/platform/platform/providers';
+import { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { LLMProvider, ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
 
 export interface TestManagers {
   readonly configManager: ConfigManager;
@@ -42,13 +42,13 @@ export function buildTestModelDefinition(provider: string, modelId: string): Mod
 export function patchTestProviderRegistry(providerRegistry: ProviderRegistry): void {
   const originalRegister = providerRegistry.register.bind(providerRegistry);
   providerRegistry.register = ((provider: LLMProvider): void => {
-    // The sdk's credential-authority contract refuses registration without a
+    // The platform's credential-authority contract refuses registration without a
     // declared authority. Test doubles that don't care default to 'resolver'
     // (env/secrets-backed key) so every existing suite keeps registering.
     if (!provider.credentialAuthority) {
       (provider as { credentialAuthority?: string }).credentialAuthority = 'resolver';
     }
-    // The sdk's model-source contract likewise refuses a provider that never
+    // The platform's model-source contract likewise refuses a provider that never
     // declares where its model list comes from. Test doubles that don't care
     // default to a dated-static list so every existing suite keeps registering.
     if (!(provider as { modelSource?: unknown }).modelSource) {

@@ -1,5 +1,5 @@
 /**
- * WorkView against a mocked SDK: Needs you comes first and the first item
+ * WorkView against a mocked platform: Needs you comes first and the first item
  * opens by itself; the approval detail approves (with a Remember tier, an
  * exec-prompt answer, a hunk subset) and denies (with a reason); the push
  * hand-off fragments complete; the kind filter, the old Checkpoints link, the
@@ -92,7 +92,7 @@ mock.module('../../lib/goodvibes', () => ({
   invokeMethod: () => Promise.resolve({}),
   hostedSessionDetachBeacon: () => {},
   hasStoredTokenSync: () => true,
-  sdk: {
+  client: {
     streams: { open: (path: string) => {
       calls.streams.push(path);
       return Promise.resolve(() => {});

@@ -7,7 +7,7 @@ import {
 } from '@goodvibes-jev/engine/contracts';
 import {
   ConfigurationError,
-  GoodVibesSdkError,
+  GoodVibesError,
   isStructuredDaemonErrorBody,
 } from '@goodvibes-jev/engine/errors';
 import {
@@ -52,8 +52,8 @@ export interface RemoteRuntimeEventsOptions {
  * `e.sessionId` in every callback.
  *
  * @example
- * const events = sdk.realtime.viaSse();
- * const session = await sdk.operator.sessions.create({ title: 'demo' });
+ * const events = client.realtime.viaSse();
+ * const session = await client.operator.sessions.create({ title: 'demo' });
  * const sessionId = session.session.id;
  *
  * // Before forSession, repeated manual guard:
@@ -178,7 +178,7 @@ export function createWebSocketRemoteError(
   return new WebSocketTransportError(message, buildWsErrorOpts(options.code ?? 'WS_REMOTE_ERROR', overrides));
 }
 
-export class WebSocketTransportError extends GoodVibesSdkError {
+export class WebSocketTransportError extends GoodVibesError {
   /**
    * WebSocket runtime-event transport error.
    *
@@ -189,8 +189,8 @@ export class WebSocketTransportError extends GoodVibesSdkError {
    * Overrides Symbol.hasInstance to enable cross-realm instanceof checks.
    * Without this, `instanceof WebSocketTransportError` in a different realm
    * (e.g. a Cloudflare Worker or cross-frame context) falls through to the base
-   * GoodVibesSdkError brand only and cannot distinguish WS errors from other
-   * SDK errors. The brand check here also guards against plain objects with a
+   * GoodVibesError brand only and cannot distinguish WS errors from other
+   * platform errors. The brand check here also guards against plain objects with a
    * matching `code`.
    */
   static override [Symbol.hasInstance](value: unknown): boolean {
@@ -199,11 +199,11 @@ export class WebSocketTransportError extends GoodVibesSdkError {
         && value !== null
         && this.prototype.isPrototypeOf(value);
     }
-    // Require the base SDK brand AND a WS-specific code prefix to prevent plain
+    // Require the base platform brand AND a WS-specific code prefix to prevent plain
     // objects like { code: 'WEBSOCKET_TRANSPORT_ERROR' } from passing.
     // Use an explicit allowlist of canonical WS codes rather than
     // the open-ended 'WS_' prefix check which would match any hand-crafted
-    // GoodVibesSdkError with a WS_* code.
+    // GoodVibesError with a WS_* code.
     const CANONICAL_WS_CODES = new Set([
       'WEBSOCKET_TRANSPORT_ERROR',
       'WS_CLOSE_ABNORMAL',
@@ -212,7 +212,7 @@ export class WebSocketTransportError extends GoodVibesSdkError {
       'WS_REMOTE_ERROR',
       'WS_FRAME_TOO_LARGE',
     ]);
-    return GoodVibesSdkError[Symbol.hasInstance](value)
+    return GoodVibesError[Symbol.hasInstance](value)
       && typeof (value as Record<PropertyKey, unknown>).code === 'string'
       && CANONICAL_WS_CODES.has(String((value as Record<PropertyKey, unknown>).code));
   }
@@ -469,7 +469,7 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
         if (authToken === null || authToken === undefined) {
           options.onError?.(new ConfigurationError(
             'WebSocket auth token resolver returned null. Check transport options.authToken / options.getAuthToken.',
-            { code: 'SDK_AUTH_TOKEN_MISSING', source: 'config' },
+            { code: 'ENGINE_AUTH_TOKEN_MISSING', source: 'config' },
           ));
           closeSocket();
           return;
@@ -552,7 +552,7 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
           }, observer?.onObserverError);
         }
       } catch (error) {
-        const malformed = new GoodVibesSdkError(`Malformed WebSocket runtime event frame: ${transportErrorFromUnknown(error, 'parse error').message}`, {
+        const malformed = new GoodVibesError(`Malformed WebSocket runtime event frame: ${transportErrorFromUnknown(error, 'parse error').message}`, {
           category: 'protocol',
           source: 'transport',
           recoverable: true,

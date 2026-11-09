@@ -1,6 +1,6 @@
-import { requireDefined } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { type Line, type Cell, createStyledCell, createEmptyLine } from '@goodvibes-jev/engine/sdk/platform/types';
-import { getDisplayWidth, wrapPreservingIndent } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { requireDefined } from '@goodvibes-jev/engine/platform/platform/utils';
+import { type Line, type Cell, createStyledCell, createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types';
+import { getDisplayWidth, wrapPreservingIndent } from '@goodvibes-jev/engine/platform/platform/utils';
 import { TRANSCRIPT_LAYOUT as LAYOUT } from '../transcript-layout.js';
 import { SyntaxHighlighter, type SyntaxToken as HLToken } from './syntax-highlighter.js';
 import { activeTokens } from './theme.js';

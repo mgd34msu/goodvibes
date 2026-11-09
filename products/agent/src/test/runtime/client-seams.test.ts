@@ -15,9 +15,9 @@ import { describe, expect, test } from 'bun:test';
 import {
   createConversationRewindHost,
   createWireSessionDispatch,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/client';
-import type { DaemonReachability, DaemonVerbCaller } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
-import type { RewindAnchor } from '@goodvibes-jev/engine/sdk/platform/rewind';
+} from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import type { DaemonReachability, DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import type { RewindAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { createHostedSessionRegistry } from '../../runtime/client/hosted-sessions.ts';
 import { createAgentSessionInputsClient } from '../../runtime/client/session-inputs.ts';
 

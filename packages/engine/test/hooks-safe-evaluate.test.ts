@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { safeEvaluate } from '@goodvibes-jev/engine/sdk/platform/hooks';
+import { safeEvaluate } from '@goodvibes-jev/engine/platform/platform/hooks';
 
 describe('safeEvaluate', () => {
   describe('string methods', () => {

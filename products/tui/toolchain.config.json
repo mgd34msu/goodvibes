@@ -1,8 +1,8 @@
 {
   "//": "Private monorepo product. Build and release qualification are owned by the repository root; engine and toolchain modules resolve from the engine workspace.",
   "packageName": "@goodvibes-jev/tui",
-  "sdkPin": {
-    "sdkPackage": "@goodvibes-jev/engine",
+  "enginePin": {
+    "enginePackage": "@goodvibes-jev/engine",
     "pinSource": "dependencies",
     "lockfile": "../../bun.lock",
     "sourceRoots": [

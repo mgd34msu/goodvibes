@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { createTaskRouteTool, planTaskRoute, readSlots, type TaskRouteDeps, type TaskRouteReadOptions } from '../../sdk/src/platform/routing/task-routes/index.js';
+import { createTaskRouteTool, planTaskRoute, readSlots, type TaskRouteDeps, type TaskRouteReadOptions } from '../../platform/src/platform/routing/task-routes/index.js';
 import { exactRouteSourceSpans, taskRouteSourceFixture } from '../_helpers/task-route-source.js';
 
 function object(value: unknown): Record<string, unknown> {

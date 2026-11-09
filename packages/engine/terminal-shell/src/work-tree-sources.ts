@@ -9,8 +9,8 @@
  * format changing. Every field is optional: with no sources the work tree
  * still draws, just without times, agent lanes or waiting beads.
  */
-import type { ContractView } from '@goodvibes-jev/engine/sdk/platform/contract';
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
+import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
 type Message = ConversationMessageSnapshot;
 export interface CallTiming {
     /** Epoch ms the call started executing. */

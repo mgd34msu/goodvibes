@@ -1,7 +1,7 @@
 import { expect, spyOn, test } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager, SecretsManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager, SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 import { registerOwnedMailInbox } from '../../runtime/owned-inbox-mail.js';
 import type { DaemonInboxControls } from '../../runtime/daemon-handler-composition.js';

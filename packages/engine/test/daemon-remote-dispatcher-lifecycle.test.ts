@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { PeerRegistry, type PeerRecord } from '../sdk/src/platform/runtime/remote/host/peer-registry.ts';
-import { RemoteDispatcher, type RemoteDispatcherOptions } from '../sdk/src/platform/runtime/remote/host/dispatcher.ts';
-import { createBackends, type Backend, type BackendDispatchResult } from '../sdk/src/platform/runtime/remote/host/backends/index.ts';
+import { PeerRegistry, type PeerRecord } from '../platform/src/platform/runtime/remote/host/peer-registry.ts';
+import { RemoteDispatcher, type RemoteDispatcherOptions } from '../platform/src/platform/runtime/remote/host/dispatcher.ts';
+import { createBackends, type Backend, type BackendDispatchResult } from '../platform/src/platform/runtime/remote/host/backends/index.ts';
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;

@@ -1,6 +1,6 @@
 import { createShellFooter, statusCostText as priceUsage } from '@goodvibes-jev/engine/terminal-shell/shell-footer';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
-import '@goodvibes-jev/engine/sdk/platform/providers';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
+import '@goodvibes-jev/engine/platform/platform/providers';
 import { UIFactory } from './ui-factory.ts';
 import { type VoiceCaptureIndicatorState } from '../core/voice-capture-status.ts';
 import { activeTokens, activeUiTones } from './theme.ts';

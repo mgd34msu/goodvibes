@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { redactSensitiveDataAsync, redactStructuredData, redactStructuredDataAsync } from '../sdk/src/platform/utils/redaction.ts';
-import { snapshotJudgmentEvidence, snapshotJudgmentInput } from '../sdk/src/platform/gate/judgment-input.ts';
+import { redactSensitiveDataAsync, redactStructuredData, redactStructuredDataAsync } from '../platform/src/platform/utils/redaction.ts';
+import { snapshotJudgmentEvidence, snapshotJudgmentInput } from '../platform/src/platform/gate/judgment-input.ts';
 
 let previous: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previous = installJudgmentPort(undefined); });

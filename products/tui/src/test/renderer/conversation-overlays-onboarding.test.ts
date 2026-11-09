@@ -4,7 +4,7 @@ import { CommandRegistry, type CommandContext } from '../../input/command-regist
 import { InputHandler } from '../../input/handler.ts';
 import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
 import { applyConversationOverlays, buildConversationLayers } from '../../renderer/conversation-overlays.ts';
-import { createEmptyLine } from '@goodvibes-jev/engine/sdk/platform/types';
+import { createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types';
 import { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';
 import { createDefaultUiRuntimeServices } from '../helpers/ui-services.ts';
 import { disposeTestRuntimeServicesAfterAll } from '../helpers/runtime-services.ts';

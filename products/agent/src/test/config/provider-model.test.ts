@@ -4,7 +4,7 @@ import {
   getModelIdFromProviderModel,
   getProviderIdFromModel,
 } from '../../config/provider-model.ts';
-import { DEFAULT_CONFIG } from '@goodvibes-jev/engine/sdk/platform/config';
+import { DEFAULT_CONFIG } from '@goodvibes-jev/engine/platform/platform/config';
 
 const defaultProviderId = getProviderIdFromModel(DEFAULT_CONFIG.provider.model);
 

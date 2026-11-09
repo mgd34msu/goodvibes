@@ -11,14 +11,14 @@ import {
   InboundExpectationRegistry,
   expectationSweepIntervalMs,
   type ExpectationExpiryReport,
-} from '../sdk/src/platform/email/inbound/expectation-registry.ts';
-import { PersistedExpectationStore } from '../sdk/src/platform/email/inbound/expectation-store.ts';
-import { composeInboundMail } from '../sdk/src/platform/daemon/facade-inbound-mail.ts';
+} from '../platform/src/platform/email/inbound/expectation-registry.ts';
+import { PersistedExpectationStore } from '../platform/src/platform/email/inbound/expectation-store.ts';
+import { composeInboundMail } from '../platform/src/platform/daemon/facade-inbound-mail.ts';
 import {
   MAX_VERIFICATION_WINDOW_MS,
   MIN_VERIFICATION_WINDOW_MS,
-} from '../sdk/src/platform/google/verification-expectations.ts';
-import type { GatewayMethodHandler } from '../sdk/src/platform/control-plane/index.ts';
+} from '../platform/src/platform/google/verification-expectations.ts';
+import type { GatewayMethodHandler } from '../platform/src/platform/control-plane/index.ts';
 
 const dirs: string[] = [];
 const registries: InboundExpectationRegistry[] = [];

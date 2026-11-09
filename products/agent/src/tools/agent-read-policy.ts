@@ -8,4 +8,4 @@ export {
   validateReadToolInvocationForAgentPolicy,
   validateAgentReadMechanics,
   wrapReadToolForAdmittedAgentPolicy as wrapReadToolForAgentPolicy,
-} from '@goodvibes-jev/engine/sdk/platform/gate/policy';
+} from '@goodvibes-jev/engine/platform/platform/gate/policy';

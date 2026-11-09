@@ -2,9 +2,9 @@
 // call belongs to (the owner, or the surface the turn arrived on), never from
 // an operatorId the model writes into the arguments.
 import { describe, expect, test } from 'bun:test';
-import { createMcpTool } from '../sdk/src/platform/tools/mcp/index.ts';
-import { withTurnSurface } from '../sdk/src/platform/security/turn-boundary.ts';
-import type { McpRegistry } from '../sdk/src/platform/mcp/registry.ts';
+import { createMcpTool } from '../platform/src/platform/tools/mcp/index.ts';
+import { withTurnSurface } from '../platform/src/platform/security/turn-boundary.ts';
+import type { McpRegistry } from '../platform/src/platform/mcp/registry.ts';
 
 function toolWithRecorder() {
   const approvals: Array<[string, string]> = [];

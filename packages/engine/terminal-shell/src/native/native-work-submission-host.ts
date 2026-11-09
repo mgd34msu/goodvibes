@@ -1,9 +1,9 @@
 import { isNativePairedPrincipal } from './native-paired-principal.js';
 import { createNativeHostFetch } from './native-host-fetch.js';
 import { realpathSync } from 'node:fs';
-import { createOperatorSdk, type OperatorRemoteClient } from '@goodvibes-jev/engine/operator-sdk';
-import { createOperatorWorkLedgerReadClient } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/operator-read-client';
-import { createOperatorNativeWorkSubmissionClient } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-submission-client';
+import { createOperatorApiClient, type OperatorRemoteClient } from '@goodvibes-jev/engine/operator-client';
+import { createOperatorWorkLedgerReadClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/operator-read-client';
+import { createOperatorNativeWorkSubmissionClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-submission-client';
 import type { NativeWorkSubmissionBinding } from './native-work-submission.js';
 export type NativeHostIdentityFormat = 'credential' | 'paired';
 export interface NativeSubmissionHost {
@@ -42,7 +42,7 @@ export function createNativeSubmissionIdentity(identityFormat: NativeHostIdentit
 }
 export function createNativeWorkSubmissionBinding(host: NativeSubmissionHost, projectId: string, current: () => boolean = () => true): NativeWorkSubmissionBinding {
     let disposed = false;
-    const operator = createOperatorSdk({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: createNativeHostFetch({ current: () => !disposed && current() }) });
+    const operator = createOperatorApiClient({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: createNativeHostFetch({ current: () => !disposed && current() }) });
     const invoke = (async (...args: Parameters<OperatorRemoteClient['invoke']>) => {
         if (disposed || !current())
             throw new Error('Native submission host selection changed');

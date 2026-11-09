@@ -5,22 +5,22 @@ import { join } from 'node:path';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { KnowledgeStore } from '../../sdk/src/platform/knowledge/store.js';
-import { createWorkLedger } from '../../sdk/src/platform/workflow/work-ledger/service.js';
-import { createNativeWorkExecutionHost } from '../../sdk/src/platform/workflow/work-ledger/native-execution.js';
-import { createOperatorNativeWorkExecutionClient } from '../../sdk/src/platform/workflow/work-ledger/native-execution-client.js';
-import { createLocalWorkLedgerReadBinding } from '../../sdk/src/platform/workflow/work-ledger/read-client.js';
-import { criteriaSetIdForWork } from '../../sdk/src/platform/contract/durable-admission.js';
-import { PairingTokenManager } from '../../sdk/src/platform/pairing/pairing-token-store.js';
-import { WorkspaceRegistrationStore } from '../../sdk/src/platform/workspace/registration/store.js';
-import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../../sdk/src/platform/daemon/control-plane.js';
-import { GatewayMethodCatalog } from '../../sdk/src/platform/control-plane/method-catalog.js';
-import { registerNativeWorkExecutionGatewayMethods } from '../../sdk/src/platform/control-plane/routes/native-work-execution.js';
-import { registerWorkLedgerGatewayMethods } from '../../sdk/src/platform/control-plane/routes/work-ledger.js';
-import { createOperatorSdk } from '../../operator-sdk/src/client.js';
-import { dispatchGatewayRestRoutes } from '../../daemon-sdk/src/gateway-rest-routes.js';
-import { createOrchestrationEngine, type OrchestrationEngine } from '../../sdk/src/platform/orchestration/engine.js';
-import type { ConfigManager } from '../../sdk/src/platform/config/manager.js';
+import { KnowledgeStore } from '../../platform/src/platform/knowledge/store.js';
+import { createWorkLedger } from '../../platform/src/platform/workflow/work-ledger/service.js';
+import { createNativeWorkExecutionHost } from '../../platform/src/platform/workflow/work-ledger/native-execution.js';
+import { createOperatorNativeWorkExecutionClient } from '../../platform/src/platform/workflow/work-ledger/native-execution-client.js';
+import { createLocalWorkLedgerReadBinding } from '../../platform/src/platform/workflow/work-ledger/read-client.js';
+import { criteriaSetIdForWork } from '../../platform/src/platform/contract/durable-admission.js';
+import { PairingTokenManager } from '../../platform/src/platform/pairing/pairing-token-store.js';
+import { WorkspaceRegistrationStore } from '../../platform/src/platform/workspace/registration/store.js';
+import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../../platform/src/platform/daemon/control-plane.js';
+import { GatewayMethodCatalog } from '../../platform/src/platform/control-plane/method-catalog.js';
+import { registerNativeWorkExecutionGatewayMethods } from '../../platform/src/platform/control-plane/routes/native-work-execution.js';
+import { registerWorkLedgerGatewayMethods } from '../../platform/src/platform/control-plane/routes/work-ledger.js';
+import { createOperatorApiClient } from '../../operator-client/src/client.js';
+import { dispatchGatewayRestRoutes } from '../../daemon-api/src/gateway-rest-routes.js';
+import { createOrchestrationEngine, type OrchestrationEngine } from '../../platform/src/platform/orchestration/engine.js';
+import type { ConfigManager } from '../../platform/src/platform/config/manager.js';
 import { makeHarness, makeRepo, oneUnitPlan, runnerPort, waitFor, type AgentScript, type Harness, type HarnessOptions } from './runner-support.js';
 import { draftUnit, plannerOutput, type DraftPlan } from './plan-support.js';
 import { finishes, fixPlan, scriptsWith, stepPlanner } from './steps-support.js';
@@ -148,8 +148,8 @@ export async function createNativeIntegrationFixture(options: {
       return Response.json(result.body, { status: result.status });
     } }) ?? Response.json({ error: 'Not found' }, { status: 404 });
   };
-  const sdk = (token = paired.token) => createOperatorSdk({ baseUrl: 'http://127.0.0.1:1', authToken: token, fetch, retry: { maxAttempts: 1 } });
-  const client = createOperatorNativeWorkExecutionClient(sdk(), 'project');
+  const platformClient = (token = paired.token) => createOperatorApiClient({ baseUrl: 'http://127.0.0.1:1', authToken: token, fetch, retry: { maxAttempts: 1 } });
+  const client = createOperatorNativeWorkExecutionClient(platformClient(), 'project');
   let disposed = false;
   async function dispose() {
     if (disposed) return; disposed = true;
@@ -161,7 +161,7 @@ export async function createNativeIntegrationFixture(options: {
     await ledger.service.close(); await store.close(); log[Symbol.dispose](); rmSync(root, { recursive: true, force: true });
   }
   return { root, ...owned, get key() { return owned.key; }, addWork, tokens, paired, helper, authority, catalog, scopes, store, storage, ledger, log, host, hostOptions,
-    harness, engines, client, sdk, fetch, reader, requests, replaceHostForRecovery, get acquisitions() { return acquisitions; }, dispose };
+    harness, engines, client, platformClient, fetch, reader, requests, replaceHostForRecovery, get acquisitions() { return acquisitions; }, dispose };
 }
 
 /** A conflict held at an actual source-bound Jev fix-plan request. A later group

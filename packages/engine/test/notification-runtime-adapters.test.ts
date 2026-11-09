@@ -1,10 +1,10 @@
 import { describe, expect, spyOn, test } from 'bun:test';
-import { Notifier } from '../sdk/src/platform/integrations/notifier.ts';
-import { WebhookNotifier } from '../sdk/src/platform/integrations/webhooks.ts';
-import { SlackIntegration } from '../sdk/src/platform/integrations/slack.ts';
-import { DiscordIntegration } from '../sdk/src/platform/integrations/discord.ts';
-import { RuntimeEventBus, createEventEnvelope, type AgentEvent } from '../sdk/src/platform/runtime/events/index.ts';
-import type { ContractEvent } from '../sdk/src/events/contract.ts';
+import { Notifier } from '../platform/src/platform/integrations/notifier.ts';
+import { WebhookNotifier } from '../platform/src/platform/integrations/webhooks.ts';
+import { SlackIntegration } from '../platform/src/platform/integrations/slack.ts';
+import { DiscordIntegration } from '../platform/src/platform/integrations/discord.ts';
+import { RuntimeEventBus, createEventEnvelope, type AgentEvent } from '../platform/src/platform/runtime/events/index.ts';
+import type { ContractEvent } from '../platform/src/events/contract.ts';
 import { waitFor } from './_helpers/test-timeout.ts';
 
 type AdapterEvent = Extract<AgentEvent | ContractEvent, { type:

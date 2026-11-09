@@ -1,11 +1,11 @@
 /** Payment settings rows share the same daemon-backed references across terminal surfaces. */
-import type { ConfigManager, ConfigKey, ConfigSetting } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager, ConfigKey, ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   PAYMENTS_CARD_NUMBER_CONFIG_KEY,
   PAYMENTS_CARD_EXPIRY_CONFIG_KEY,
   PAYMENTS_CARD_CVV_CONFIG_KEY,
   PAYMENTS_CARD_CARDHOLDER_NAME_CONFIG_KEY,
-} from '@goodvibes-jev/engine/sdk/platform/config';
+} from '@goodvibes-jev/engine/platform/platform/config';
 export {
   PAYMENTS_CARD_NUMBER_CONFIG_KEY,
   PAYMENTS_CARD_EXPIRY_CONFIG_KEY,
@@ -17,8 +17,8 @@ export {
   paymentsAddressConfigKey,
   paymentsAddressConfigKeys,
   isPaymentsSyntheticConfigKey,
-} from '@goodvibes-jev/engine/sdk/platform/config';
-export type { PaymentsAddressKind } from '@goodvibes-jev/engine/sdk/platform/config';
+} from '@goodvibes-jev/engine/platform/platform/config';
+export type { PaymentsAddressKind } from '@goodvibes-jev/engine/platform/platform/config';
 export type PaymentsConfigReader = Pick<ConfigManager, 'get'>;
 export interface PaymentsSettingEntry {
   setting: ConfigSetting;

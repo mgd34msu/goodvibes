@@ -1,6 +1,6 @@
 import { resolve } from 'path';
-import type { PluginStatus } from '@goodvibes-jev/engine/sdk/platform/plugins';
-import { getPluginDirectories, getUserPluginDirectory } from '@goodvibes-jev/engine/sdk/platform/plugins';
+import type { PluginStatus } from '@goodvibes-jev/engine/platform/platform/plugins';
+import { getPluginDirectories, getUserPluginDirectory } from '@goodvibes-jev/engine/platform/platform/plugins';
 import type { CommandRegistry } from '../command-registry.ts';
 import {
   installEcosystemCatalogEntry,

@@ -1,7 +1,7 @@
-import { autoRegisterProviders } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { loadPersistedProviders } from '@goodvibes-jev/engine/sdk/platform/discovery';
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
-import type { BackgroundProviderDiscoveryOptions } from '@goodvibes-jev/engine/sdk/platform/runtime/bootstrap';
+import { autoRegisterProviders } from '@goodvibes-jev/engine/platform/platform/providers';
+import { loadPersistedProviders } from '@goodvibes-jev/engine/platform/platform/discovery';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { BackgroundProviderDiscoveryOptions } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 
 /**
  * Restore providers without probing this machine or its network. Discovery is

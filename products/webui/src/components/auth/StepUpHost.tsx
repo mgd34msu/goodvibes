@@ -16,7 +16,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Dialog } from '../ui/Dialog';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import {
   describeStepUpError,
   getRegisteredCredential,
@@ -94,7 +94,7 @@ export function StepUpHost() {
     const completion = Promise.resolve().then(async () => {
       try {
         if (!isCurrent()) return;
-        const challenge = await sdk.operator.stepup.mintChallenge({}, controller.signal);
+        const challenge = await platformClient.operator.stepup.mintChallenge({}, controller.signal);
         if (!isCurrent()) return;
         const registered = getRegisteredCredential();
         const { headerValue } = await runAssertion({

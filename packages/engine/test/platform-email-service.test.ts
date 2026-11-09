@@ -14,8 +14,8 @@ import {
   readEmailConfig,
   validateEmailConfig,
   resolveEmailPassword,
-} from '../sdk/src/platform/email/email-service.ts';
-import { describeEmailCapabilityFailure } from '../sdk/src/platform/email/imap-open.ts';
+} from '../platform/src/platform/email/email-service.ts';
+import { describeEmailCapabilityFailure } from '../platform/src/platform/email/imap-open.ts';
 import { createServer, connect, type Server, type Socket } from 'node:net';
 
 // ---------------------------------------------------------------------------
@@ -180,7 +180,7 @@ describe('EmailService.getStatus', () => {
 
   test('EmailSummary includes bodyPreview field', () => {
     // Verify the type shape, bodyPreview is always present, empty string by default
-    const summary: import('../sdk/src/platform/email/email-service.ts').EmailSummary = {
+    const summary: import('../platform/src/platform/email/email-service.ts').EmailSummary = {
       uid: 1,
       messageId: '<msg-1@example.test>',
       from: 'a@b.test',

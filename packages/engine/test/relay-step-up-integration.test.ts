@@ -8,12 +8,12 @@
  * and a real relay server + client, so the composition, not a stub, is tested.
  */
 import { afterAll, describe, expect, test } from 'bun:test';
-import { createBunRelayServer } from '../daemon-sdk/src/index.js';
-import { buildDaemonRelayReachability } from '../sdk/src/platform/relay/daemon-wiring.js';
-import { STEP_UP_ASSERTION_HEADER } from '../sdk/src/platform/relay/step-up-policy.js';
+import { createBunRelayServer } from '../daemon-api/src/index.js';
+import { buildDaemonRelayReachability } from '../platform/src/platform/relay/daemon-wiring.js';
+import { STEP_UP_ASSERTION_HEADER } from '../platform/src/platform/relay/step-up-policy.js';
 import { createRelayClient } from '../transport-realtime/src/relay-transport.js';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import type { SecretsManager } from '../sdk/src/platform/config/secrets.js';
+import type { ConfigManager } from '../platform/src/platform/config/manager.js';
+import type { SecretsManager } from '../platform/src/platform/config/secrets.js';
 
 const silent = { info: () => {}, warn: () => {}, error: () => {} };
 const server = createBunRelayServer({ port: 0, logger: silent });

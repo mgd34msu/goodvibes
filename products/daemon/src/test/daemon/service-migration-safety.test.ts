@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { runDaemonServiceCli } from '../../daemon/service-commands.js';
 import { buildManagedDaemonServiceManager, legacyUnitPath, runLegacyDaemonMigration, type ManagedServiceActionRunner } from '../../runtime/legacy-daemon-migration.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';

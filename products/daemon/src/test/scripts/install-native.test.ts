@@ -3,7 +3,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
-import { createNativeDataWriteOwner, NATIVE_READER_REQUIREMENT_FILE, realUpdateFileIo, UpdateTransactionError } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { createNativeDataWriteOwner, NATIVE_READER_REQUIREMENT_FILE, realUpdateFileIo, UpdateTransactionError } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { DAEMON_CI_PAYLOADS, recordDaemonCiArtifact } from '../../../scripts/ci-artifact.ts';
 import { assertNativeInstallHost, installDaemonNative, parseNativeInstallArgs, readDaemonInstallOwner, rollbackDaemonNative, type DaemonInstallOwner } from '../../../scripts/install-native.ts';
 import { makeOwnedTempDir } from '../helpers/owned-temp.ts';

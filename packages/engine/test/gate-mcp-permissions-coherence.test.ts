@@ -6,7 +6,7 @@
 // capability-to-risk table), so evaluateToolCall is asynchronous and these
 // tests answer those questions with a fake port. The role, scope and trust-mode rules under test stay code.
 import { describe, expect, test } from 'bun:test';
-import { McpPermissionManager } from '../sdk/src/platform/runtime/mcp/index.ts';
+import { McpPermissionManager } from '../platform/src/platform/runtime/mcp/index.ts';
 import { useGateReadings } from './_helpers/gate-readings.ts';
 
 const readings = useGateReadings([

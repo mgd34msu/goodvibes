@@ -11,7 +11,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 
 const dirs: string[] = [];
 

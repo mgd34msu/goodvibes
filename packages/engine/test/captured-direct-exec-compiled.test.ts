@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { provideCapturedBunRuntime } from '../toolchain/src/lib/captured-bun-runtime.js';
 import { realExec } from '../toolchain/src/lib/effects.js';
-import { probeCapturedExecAvailability } from '../sdk/src/platform/tools/exec/captured-exec.js';
+import { probeCapturedExecAvailability } from '../platform/src/platform/tools/exec/captured-exec.js';
 import type { runDirectExecContract } from './fixtures/captured-direct-exec-compiled-entry.js';
 
 const availability = await probeCapturedExecAvailability();

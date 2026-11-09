@@ -1,19 +1,19 @@
 # Performance and tuning
 
-> **Surface scope:** This document covers performance tuning for the **full surface (Bun runtime)**. Code examples use `createGoodVibesSdk` from the full-surface entry point. Companion-surface consumers (React Native, browser) use surface-specific constructors. See [Published surface matrix](./surfaces.md) for the full breakdown.
+> **Surface scope:** This document covers performance tuning for the **full surface (Bun runtime)**. Code examples use `createGoodVibesPlatform` from the full-surface entry point. Companion-surface consumers (React Native, browser) use surface-specific constructors. See [Published surface matrix](./surfaces.md) for the full breakdown.
 
-This guide covers the tuning knobs, runtime contracts, and internal subsystems that govern SDK performance across provider calls, context management, component rendering, and tool execution.
+This guide covers the tuning knobs, runtime contracts, and internal subsystems that govern platform performance across provider calls, context management, component rendering, and tool execution.
 
 ## Provider optimization
 
 ### Retry strategy
 
-The SDK uses deterministic exponential backoff (no jitter) for all retryable HTTP failures. The top-level `retry` config is an `HttpRetryPolicy` resolved by the transport-http retry layer (`resolveHttpRetryPolicy`) and applied via `computeBackoffDelay` in the HTTP transport loop; it is not handled by the `platform/utils` `withRetry` helper, which has a different config shape and is not wired to this config.
+The platform uses deterministic exponential backoff (no jitter) for all retryable HTTP failures. The top-level `retry` config is an `HttpRetryPolicy` resolved by the transport-http retry layer (`resolveHttpRetryPolicy`) and applied via `computeBackoffDelay` in the HTTP transport loop; it is not handled by the `platform/utils` `withRetry` helper, which has a different config shape and is not wired to this config.
 
 ```ts
-import { createGoodVibesSdk } from '@goodvibes-jev/engine/sdk';
+import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
 
-const sdk = createGoodVibesSdk({
+const platformClient = createGoodVibesPlatform({
   baseUrl: 'http://127.0.0.1:3421',
   authToken: process.env.GOODVIBES_TOKEN ?? null,
   retry: {
@@ -28,7 +28,7 @@ Delay for a one-based attempt `n` is: `min(baseDelayMs * backoffFactor^(attempt-
 
 Retries are only triggered for retryable errors. In the transport-http retry loop an error is retryable when:
 - Its HTTP status is in `RETRYABLE_STATUS_CODES` (408, 429, 500, 502, 503, 504) and the request method is eligible for retry, meaning a safe method (`GET`, `HEAD`, or `OPTIONS`), or a mutation the contract marks `idempotent` or that has a `perMethodPolicy` entry; or
-- It is a network-level failure (status `0`) surfaced as a `GoodVibesSdkError` with `recoverable: true` (the transport flags fetch/connection errors recoverable).
+- It is a network-level failure (status `0`) surfaced as a `GoodVibesError` with `recoverable: true` (the transport flags fetch/connection errors recoverable).
 
 Never retry unsafe mutations blindly. Only idempotent reads and operations with application-level idempotency guarantees are safe to retry.
 
@@ -48,7 +48,7 @@ Selection is a 0-100 score per strategy, not a hard gate, apart from three disqu
 `background`'s latency-budget bonus is exactly that, a bonus. An unconstrained latency budget is not required for `background` to win; it only pushes the score higher when present.
 
 ```ts
-import { AdaptivePlanner } from '@goodvibes-jev/engine/sdk/platform/core';
+import { AdaptivePlanner } from '@goodvibes-jev/engine/platform/platform/core';
 
 const planner = new AdaptivePlanner();
 
@@ -80,7 +80,7 @@ planner.clearOverride();      // return to automatic selection
 `ConsecutiveErrorBreaker` guards against runaway error loops. It tracks consecutive all-failed turns and returns graduated signals:
 
 ```ts
-import { ConsecutiveErrorBreaker } from '@goodvibes-jev/engine/sdk/platform/core';
+import { ConsecutiveErrorBreaker } from '@goodvibes-jev/engine/platform/platform/core';
 
 const breaker = new ConsecutiveErrorBreaker();
 
@@ -119,7 +119,7 @@ retry policy is also off by default (`maxAttempts: 1`). When reconnect is
 enabled, both stream/SSE and WebSocket reconnect default to a finite
 `maxAttempts` of `10` (`DEFAULT_STREAM_MAX_ATTEMPTS` / `DEFAULT_WS_MAX_ATTEMPTS`),
 using exponential backoff with the same `baseDelayMs * backoffFactor^(attempt-1)`
-formula as HTTP retry. On SSE reconnect the SDK sends `Last-Event-ID` so the server can replay
+formula as HTTP retry. On SSE reconnect the platform sends `Last-Event-ID` so the server can replay
 missed events when supported.
 
 For the configuration shapes, per-surface examples, and the full default table,
@@ -161,9 +161,9 @@ and every tenth overflow thereafter; `droppedCount` is always the cumulative tot
 For long-lived clients where tokens expire, use `tokenStore` or `getAuthToken` instead of a static `authToken`. Reconnects automatically pick up the latest token:
 
 ```ts
-import { createMemoryTokenStore } from '@goodvibes-jev/engine/sdk/auth';
+import { createMemoryTokenStore } from '@goodvibes-jev/engine/platform/auth';
 
-const sdk = createGoodVibesSdk({
+const platformClient = createGoodVibesPlatform({
   baseUrl: 'http://127.0.0.1:3421',
   tokenStore: createMemoryTokenStore(), // refreshed externally via tokenStore.setToken()
 });
@@ -175,7 +175,7 @@ const sdk = createGoodVibesSdk({
 
 ### Context window limits
 
-The SDK tracks token usage continuously against the active model's context window. Key constants:
+The platform tracks token usage continuously against the active model's context window. Key constants:
 
 | Constant | Value | Purpose |
 |---|---|---|
@@ -217,7 +217,7 @@ percentage threshold or the safety buffer:
 import {
   checkAndCompact,
   getAutoCompactDecision,
-} from '@goodvibes-jev/engine/sdk/platform/core';
+} from '@goodvibes-jev/engine/platform/platform/core';
 
 const decision = getAutoCompactDecision({
   currentTokens,
@@ -247,7 +247,7 @@ if (result) {
 **Manual compaction** bypasses the threshold check:
 
 ```ts
-import { compactMessages } from '@goodvibes-jev/engine/sdk/platform/core';
+import { compactMessages } from '@goodvibes-jev/engine/platform/platform/core';
 
 const result = await compactMessages(ctx, providerRegistry);
 ```
@@ -274,7 +274,7 @@ The compacted output is assembled from named sections, each with its own token b
 `estimateConversationTokens` scans the current message list and uses a 4-chars-per-token heuristic. It is fast and non-blocking, designed to be called every turn.
 
 ```ts
-import { estimateConversationTokens } from '@goodvibes-jev/engine/sdk/platform/core';
+import { estimateConversationTokens } from '@goodvibes-jev/engine/platform/platform/core';
 
 const estimate = estimateConversationTokens(messages); // number
 ```
@@ -287,7 +287,7 @@ const estimate = estimateConversationTokens(messages); // number
 
 Entry-file gzip diagnostics and runtime SLO gates measure different things.
 
-`bun run bundle:check` reports the gzip size of each built SDK entry file,
+`bun run bundle:check` reports the gzip size of each built platform entry file,
 excluding imported dependencies. Historical references are advisory; this
 report does not enforce a consumer bundle-size limit. Actual package and
 browser/RN compatibility checks remain separate required checks.
@@ -337,7 +337,7 @@ import {
   selectSystemHealth,
   selectRunningTasks,
   selectProviderHealth,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/state';
+} from '@goodvibes-jev/engine/platform/platform/runtime/state';
 
 // Read a single domain
 const session = selectSession(state);
@@ -367,7 +367,7 @@ rolls them up into the overall status with critical outranking degraded.
 Use read models for derived UI state rather than subscribing to raw domain state. Read models are pre-computed projections that compose multiple selectors and expose stable surface contracts:
 
 ```ts
-import { createObservabilityReadModels } from '@goodvibes-jev/engine/sdk/platform/runtime/ui';
+import { createObservabilityReadModels } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
 
 const models = createObservabilityReadModels(runtimeServices);
 // Each property is a UiReadModel<TSnapshot>: { getSnapshot(), subscribe(listener) }.
@@ -389,7 +389,7 @@ The `ComponentHealthMonitor` enforces per-component resource contracts at render
 **Registration and render gating:**
 
 ```ts
-import { ComponentHealthMonitor } from '@goodvibes-jev/engine/sdk/platform/runtime/observability';
+import { ComponentHealthMonitor } from '@goodvibes-jev/engine/platform/platform/runtime/observability';
 
 const monitor = new ComponentHealthMonitor();
 
@@ -460,7 +460,7 @@ monitor.resetHealth('agent-logs');
 Subscribe to multiple event types within a domain in a single feed to avoid per-event subscription overhead:
 
 ```ts
-const feed = sdk.realtime.viaSse();
+const feed = platformClient.realtime.viaSse();
 
 // Subscribe per event type, all share the same underlying connection
 const stopTurns = feed.turn.on('TURN_COMPLETED', (ev) => { /* ... */ });

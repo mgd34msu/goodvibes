@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { WorkspaceRegistrationStore } from '../sdk/src/platform/workspace/index.ts';
-import { WorkspaceRegistrationManager } from '../sdk/src/platform/runtime/workspace-registration.ts';
+import { WorkspaceRegistrationStore } from '../platform/src/platform/workspace/index.ts';
+import { WorkspaceRegistrationManager } from '../platform/src/platform/runtime/workspace-registration.ts';
 
 let home: string;
 

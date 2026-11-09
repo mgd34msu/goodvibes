@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test';
-import { BudgetLedger, type BudgetLimits } from '../sdk/src/platform/payments/budget.js';
-import { decidePurchase, type DecisionInput } from '../sdk/src/platform/payments/decide.js';
-import { windowForPurchase } from '../sdk/src/platform/payments/merchant-recourse.js';
-import { parseRequestedMaximum } from '../sdk/src/platform/payments/money-parsing.js';
-import { formatMinorUnits, renderApprovalMessage, renderVetoMessage, type PurchaseFacts } from '../sdk/src/platform/payments/message.js';
-import { parseCurrencyCode, unsafeOwnerSuppliedTextForTests } from '../sdk/src/platform/payments/types.js';
+import { BudgetLedger, type BudgetLimits } from '../platform/src/platform/payments/budget.js';
+import { decidePurchase, type DecisionInput } from '../platform/src/platform/payments/decide.js';
+import { windowForPurchase } from '../platform/src/platform/payments/merchant-recourse.js';
+import { parseRequestedMaximum } from '../platform/src/platform/payments/money-parsing.js';
+import { formatMinorUnits, renderApprovalMessage, renderVetoMessage, type PurchaseFacts } from '../platform/src/platform/payments/message.js';
+import { parseCurrencyCode, unsafeOwnerSuppliedTextForTests } from '../platform/src/platform/payments/types.js';
 
 function input(maximum?: number): DecisionInput {
   const currency = parseCurrencyCode('USD'); if (!currency) throw new Error('Invalid fixture currency');

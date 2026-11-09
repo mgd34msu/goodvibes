@@ -10,12 +10,12 @@
  * was told it was enabled, and nothing ever listened.
  *
  * So the write takes its companion with it, and says so. The rule itself is the
- * SDK's (platform/voice/wake/settings.ts) so every surface applies the same
+ * platform's (platform/voice/wake/settings.ts) so every surface applies the same
  * one; what lives here is this product's surface identity and its config
  * writer.
  */
-import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { resolveWakeEnablementCompanion } from '@goodvibes-jev/engine/sdk/platform/voice';
+import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { resolveWakeEnablementCompanion } from '@goodvibes-jev/engine/platform/platform/voice';
 import { AGENT_WAKE_SURFACE } from '../audio/wake-surface.ts';
 import { routeConfigWrite, type AgentConfigRoutingOptions } from './daemon-config-routing.ts';
 

@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { makeHarness, oneUnitPlan, startContract, waitFor } from './runner-support.js';
 import { finishes, terminal } from './steps-support.js';
-import type { NativeContractSource } from '../../sdk/src/platform/contract/types.js';
+import type { NativeContractSource } from '../../platform/src/platform/contract/types.js';
 
 const source: NativeContractSource = { sourceId: 'review-work', sourceRevision: '1', inputRevision: 'input-1', criteriaId: 'review-criteria', criteriaRevision: '1', goal: 'Deliver the original parser', criteria: ['Preserve all parser behavior'] };
 function plan() { return { ...oneUnitPlan(1), goal: source.goal, criteria: [{ id: 'c1', text: source.criteria[0]!, quote: source.criteria[0]! }] }; }

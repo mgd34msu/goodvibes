@@ -1,22 +1,22 @@
 /**
  * LAN-scan consent gate.
  *
- * The SDK's background provider-discovery pass (`startBackgroundProviderDiscovery`
- * in `@goodvibes-jev/engine/sdk/platform/runtime`) probes every host on this
+ * The platform's background provider-discovery pass (`startBackgroundProviderDiscovery`
+ * in `@goodvibes-jev/engine/platform/platform/runtime`) probes every host on this
  * computer's local subnet (254 addresses per non-internal network interface)
  * looking for local model servers such as Ollama or LM Studio, then dumps one
  * raw "[Scan] Found <name> at <host>:<port>" line per server straight into the
  * activity feed. It ran unconditionally, with no consent step, and no way to
  * turn it off.
  *
- * This module is the only place in the Agent that is allowed to call the SDK
+ * This module is the only place in the Agent that is allowed to call the platform
  * discovery entry point. It:
  *   1. Gates the call behind a persisted, explicit consent decision. The very
  *      first time the Agent starts, nothing is scanned; the user is told what
  *      the feature does, what it touches (the local subnet, nothing beyond
  *      it), and what it stores, then the decision defaults to "off" until the
  *      user turns it on.
- *   2. Reframes whatever the SDK emits when consent has been granted: instead
+ *   2. Reframes whatever the platform emits when consent has been granted: instead
  *      of one raw host:port line per server, the Agent surfaces a single
  *      framed summary ("Discovered N local model servers ..."), with full
  *      detail available on demand via /provider.
@@ -30,8 +30,8 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import {
   startBackgroundProviderRegistration,
   type BackgroundProviderDiscoveryOptions,
@@ -57,8 +57,8 @@ function consentFilePath(roots: ConsentRoots, surfaceRoot: string): string {
 }
 
 /**
- * The path the SDK persists discovered servers to, for display in user-facing
- * copy (this module does not read or write that file, the SDK owns it).
+ * The path the platform persists discovered servers to, for display in user-facing
+ * copy (this module does not read or write that file, the platform owns it).
  */
 export function discoveredProvidersFilePath(roots: ConsentRoots, surfaceRoot: string): string {
   return roots.resolveUserPath(surfaceRoot, DISCOVERED_PROVIDERS_FILE);
@@ -143,12 +143,12 @@ function stripRawIpMention(message: string): string {
 /**
  * Wraps the real system-message sink + requestRender callback so that the raw
  * per-server "[Scan] Found X at host:port" / "[Local] X at host:port ... from
- * last session" / "[Scan] X at host:port is no longer reachable" lines the SDK
+ * last session" / "[Scan] X at host:port is no longer reachable" lines the platform
  * emits are never forwarded verbatim. Instead they are counted, and a single
  * framed summary line is emitted the next time requestRender fires, which the
- * SDK reliably calls exactly once per batch of emitted messages (see
+ * platform reliably calls exactly once per batch of emitted messages (see
  * bootstrap-background.js), so this stays in lockstep with the underlying
- * scan/restore passes without needing to touch the SDK.
+ * scan/restore passes without needing to touch the platform.
  */
 function createFramedDiscoverySink(
   realRouter: HostSystemMessageSink,
@@ -208,7 +208,7 @@ function noopHandle(): BackgroundRuntimeTaskHandle {
 export interface LanScanGateOptions extends BackgroundProviderDiscoveryOptions {
   readonly shellPaths: BackgroundProviderDiscoveryOptions['shellPaths'] & ConsentRoots;
   /**
-   * Injectable seam for tests. Defaults to the real SDK discovery pass
+   * Injectable seam for tests. Defaults to the real platform discovery pass
    * (`startBackgroundProviderRegistration`, which performs a real subnet
    * scan). Tests must supply a fake here instead of exercising the real
    * network, never let a test fall through to the default.
@@ -219,7 +219,7 @@ export interface LanScanGateOptions extends BackgroundProviderDiscoveryOptions {
 /**
  * The single gated entry point to LAN provider discovery. Bootstrap's Phase 8
  * and the /network-scan command are the only two callers; neither calls the
- * SDK's startBackgroundProviderRegistration/startBackgroundProviderDiscovery
+ * platform's startBackgroundProviderRegistration/startBackgroundProviderDiscovery
  * directly.
  *
  * - No decision recorded (first run): shows the full consent explanation,
@@ -229,7 +229,7 @@ export interface LanScanGateOptions extends BackgroundProviderDiscoveryOptions {
  *   the first-run boot already explained the off state and how to turn it
  *   on; the ongoing state is discoverable on demand via `/network-scan
  *   status`, not repeated on every boot.
- * - Decision is "granted": runs the SDK discovery pass through a framing
+ * - Decision is "granted": runs the platform discovery pass through a framing
  *   wrapper that replaces the raw per-server feed dump with a single summary
  *   line.
  */

@@ -9,8 +9,8 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ProviderRegistry } from '../sdk/src/platform/providers/registry.js';
-import { ANTHROPIC_DATED_STATIC_MODELS } from '../sdk/src/platform/providers/anthropic.js';
+import { ProviderRegistry } from '../platform/src/platform/providers/registry.js';
+import { ANTHROPIC_DATED_STATIC_MODELS } from '../platform/src/platform/providers/anthropic.js';
 
 // Each registry gets its own fresh persistence root so the on-disk
 // provider-models cache never leaks state between tests (or between runs).

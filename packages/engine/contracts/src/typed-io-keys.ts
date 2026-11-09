@@ -23,7 +23,7 @@
 //                                  argument tuple, for instance) concludes the
 //                                  input has no required fields.
 //
-// Both were found in production: `Omit<OperatorMethodInput<M>, K>` in the SDK's
+// Both were found in production: `Omit<OperatorMethodInput<M>, K>` in the platform's
 // browser facade, and `WithoutKeys`/`RequiredKeys` in transport-http's client
 // plumbing. Strip the index signature FIRST, that is what `NamedProps` does,
 // then apply the key operation, then re-add the index signature if the open

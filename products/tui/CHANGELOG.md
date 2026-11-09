@@ -71,7 +71,7 @@ All notable changes to GoodVibes TUI.
   remaining fix tasks.
 - A remote model with no real window takes it from the models.dev catalog,
   so abacusai route-llm reads 128.0k instead of a guessed 8.2k.
-- The pins move to sdk 2.1.0 and daemon 1.29.0.
+- The pins move to platform 2.1.0 and daemon 1.29.0.
 - Every open dependency advisory is closed: undici, brace-expansion, the
   Anthropic client (0.92), qs, body-parser, ip-address, fflate, fast-uri,
   js-yaml and sharp move to patched versions.
@@ -96,7 +96,7 @@ All notable changes to GoodVibes TUI.
 
 ### Changes
 
-- **The pins move to sdk 2.0.23 and daemon 1.28.25.** The platform carries
+- **The pins move to platform 2.0.23 and daemon 1.28.25.** The platform carries
   honest calendar auth (a dead Google grant reads as an auth failure with a
   re-authorize pointer), provider auth summaries that fold in their routes (a
   usable subscription sign-in reads configured), derived api-key routes for
@@ -124,8 +124,8 @@ All notable changes to GoodVibes TUI.
 ### Changes
 
 - **This terminal adopts the running daemon again.** The adoption gate had
-  compared the daemon's 1.28.x artifact version against the sdk's 2.x
-  version and refused every adoption since sdk 2.0.0, silently running
+  compared the daemon's 1.28.x artifact version against the platform's 2.x
+  version and refused every adoption since platform 2.0.0, silently running
   local-only with no session spine. It now band-checks the platform build
   the daemon reports.
 - **A dead subscription login is stamped and shown as ended**, everywhere a
@@ -134,7 +134,7 @@ All notable changes to GoodVibes TUI.
   words, with a gentle retry every minute, not a wake-detector crash loop
   spamming the transcript and latching off. A busy device keeps prompt
   retries and the crash latch.
-- Pins move to sdk/terminal-shell/toolchain 2.0.22 and daemon 1.28.24;
+- Pins move to platform/terminal-shell/toolchain 2.0.22 and daemon 1.28.24;
   reusable-workflow pins repoint to the 2.0.22 release commit.
 
 ## [2.0.18] - 2026-08-21
@@ -165,7 +165,7 @@ All notable changes to GoodVibes TUI.
 ### Changes
 
 - **The bundled daemon is current again.** The daemon dependency moves to
-  1.28.22 (sdk 2.0.20 inside), so an install of this TUI no longer nests a
+  1.28.22 (platform 2.0.20 inside), so an install of this TUI no longer nests a
   daemon built against the previous platform runtime. 2.0.16 shipped hours
   earlier with the daemon still at 1.28.21; this release exists to correct
   that.
@@ -178,7 +178,7 @@ All notable changes to GoodVibes TUI.
   `/project-plan`, a command that does not exist; it now runs the registered
   planning command, and a guard test resolves every command the panels emit
   against the live command registry so a phantom fails the build.
-- Platform runtime 2.0.20: the pin rides the payments boot-recovery sdk
+- Platform runtime 2.0.20: the pin rides the payments boot-recovery platform
   cycle. No TUI code change was needed for it; the reusable-workflow and
   toolchain pins repoint to the 2.0.20 release commit.
 - Docs verified against the code: install steps match a tested clean
@@ -188,7 +188,7 @@ All notable changes to GoodVibes TUI.
 
 ### Changes
 
-- **Wake-word WASM assets are written by the SDK's own atomic writer**
+- **Wake-word WASM assets are written by the platform's own atomic writer**
   (platform runtime 2.0.19): `atomicWriteFileSync` now accepts raw bytes,
   not just strings, so the onnxruntime glue and WASM files this terminal
   extracts to disk go through the same temp-file-then-rename-and-fsync path
@@ -196,15 +196,15 @@ All notable changes to GoodVibes TUI.
   inlined in the wake module. Same content check, same target names, same
   crash-safety guarantee, one less code path to keep correct.
 - **Release publishing is gated before a tag exists, not after.** The
-  sdk-pin check now runs in CI on every push instead of only after a
+  platform-pin check now runs in CI on every push instead of only after a
   GitHub Release was already cut, the GitHub Packages mirror publish is
   ordered behind the npmjs publish and carries the same kill switch, and
   the release workflow verifies the git tag matches the package version as
   its first job. CI now builds through the real toolchain and runs the
   compiled binary's smoke test on pull requests too, not just a bare
-  compile. The four sdk reusable-workflow references are pinned to a
-  commit sha instead of floating on the sdk's default branch, so a commit
-  to the sdk repository can no longer change what runs against this
+  compile. The four platform reusable-workflow references are pinned to a
+  commit sha instead of floating on the platform's default branch, so a commit
+  to the platform repository can no longer change what runs against this
   repository's publish credentials without a deliberate pin bump here.
 - Comment and documentation prose across the source tree had its em dashes
   removed and its narration comments trimmed; a handful of command
@@ -278,11 +278,11 @@ All notable changes to GoodVibes TUI.
   `voice.wake.captureMaxSeconds: 0` genuinely means no hard maximum.
 - **The compiled TUI no longer plays a build-order lottery at load**
   (platform runtime 2.0.13): the runtime barrel read over a hundred values
-  off the SDK's runtime namespace objects at module scope, and the
+  off the platform's runtime namespace objects at module scope, and the
   single-file compiler emits module bodies in an order that varies
   build-to-build — on some builds such a read landed before the module that
   defines the binding and the binary died at load with a ReferenceError.
-  Every one of those reads is now a grouped live re-export from the SDK's
+  Every one of those reads is now a grouped live re-export from the platform's
   registered runtime subpaths, and the shared post-build check fails any
   artifact that carries the eager pattern, even one that happened to boot.
 - Bundled daemon floor moves to 1.28.16; the exec sandbox's
@@ -455,7 +455,7 @@ All notable changes to GoodVibes TUI.
 
 - Fixed: importing settings that include `display.themeMode` no longer prints
   an "unknown key" warning. The key is now declared in the platform
-  configuration schema (SDK 2.0.1) — `auto` probes the terminal background
+  configuration schema (platform 2.0.1) — `auto` probes the terminal background
   once at startup, `dark` and `light` force a fixed appearance — and the
   settings screen's row for it comes from that schema like every other
   `display.*` key, instead of a local stand-in descriptor.
@@ -549,30 +549,30 @@ All notable changes to GoodVibes TUI.
   route, and still names what is not covered: the control plane has no
   equivalent setting, so keep it reachable only through the tunnel.
 
-- Crash-restore is the SDK's mechanism now, and this app keeps the ask.
+- Crash-restore is the platform's mechanism now, and this app keeps the ask.
   `core/session-recovery.ts` is gone; `applyRecoverySnapshot` and the
-  journal-replay helpers it wrapped moved to the SDK
+  journal-replay helpers it wrapped moved to the platform
   (`platform/runtime/recovery-snapshot-apply.ts`, and the
   `transcript-journal-replay.ts` this repo had a second copy of).
   `runtime/recovery-prompt.ts` still owns the two-step modal, and
   `runtime/recovery-offer-wiring.ts` still owns this shell's live objects; what
-  they now hand the SDK is the user's answer. Reading a snapshot and retiring it
+  they now hand the platform is the user's answer. Reading a snapshot and retiring it
   are one operation there, so this flow can no longer load one and leave it
   behind — and a snapshot that turns out to be damaged is reported as such
   instead of being applied as an empty conversation.
 
 - Three config modules the daemon carried a byte-identical copy of are the
-  SDK's: `config/goodvibes-home.ts` (tree-root and daemon-home resolution),
+  platform's: `config/goodvibes-home.ts` (tree-root and daemon-home resolution),
   `config/provider-model.ts` (`provider:model` parsing) and `config/index.ts`
-  (which was a barrel over the SDK plus two derivation helpers, both of which
-  moved). Every importer reads them from `legacy-package:goodvibes-sdk/platform/config`
+  (which was a barrel over the platform plus two derivation helpers, both of which
+  moved). Every importer reads them from `legacy-package:goodvibes-platform/platform/config`
   and `.../platform/providers`. One behaviour came with them: an unreadable
   `provider.systemPromptFile` still degrades to "no configured system prompt"
-  rather than throwing, because the SDK adopted this app's version.
+  rather than throwing, because the platform adopted this app's version.
 
-- The local `sql.js` ambient declaration is gone. The SDK ships the declaration
+- The local `sql.js` ambient declaration is gone. The platform ships the declaration
   now, and the one file that imports `sql.js` picks it up with
-  `/// <reference types="legacy-package:goodvibes-sdk/sql-js" />`.
+  `/// <reference types="legacy-package:goodvibes-platform/sql-js" />`.
 
 ## [1.27.0] - 2026-07-30
 
@@ -720,22 +720,22 @@ Updated: bundled platform runtime to 1.11.4.
 Fixed: selecting a custom-provider model no longer crashes the app at the next startup — boot now waits for custom providers to load before resolving the current model, and falls back to a selectable model (with a logged warning) if the configured provider's file was removed.
 Fixed: startup failures now print a clear "goodvibes failed to start" message with the real error and exit, instead of hanging on a blank screen while the log recorded an empty error object.
 Fixed: after an automatic context compaction, the transcript shows a compact expandable "compaction handoff" block instead of re-printing the entire re-injected instruction text every time.
-Updated: legacy-package:goodvibes-sdk and legacy-package:goodvibes-terminal-shell to 1.11.3 (quieter startup when no hooks file exists; error summaries no longer mangle redacted paths).
+Updated: legacy-package:goodvibes-platform and legacy-package:goodvibes-terminal-shell to 1.11.3 (quieter startup when no hooks file exists; error summaries no longer mangle redacted paths).
 
 ## [1.19.3] - 2026-07-17
 
 ### Changes
 
-- Adopt published SDK 1.11.2, which now carries `legacy-package:goodvibes-toolchain` as a real dependency of its own — the toolchain devDependency pin is no longer needed here and has been dropped; it resolves transitively through the SDK.
+- Adopt published platform 1.11.2, which now carries `legacy-package:goodvibes-toolchain` as a real dependency of its own — the toolchain devDependency pin is no longer needed here and has been dropped; it resolves transitively through the platform.
 - Adopt zero-touch releases: a green CI run on a push to main now tags the release commit and dispatches the release workflow automatically (`ci.yml`'s new `auto-release` job), instead of requiring a manual tag push. `release.yml` gains a `workflow_dispatch` `mode` input (`dry-run` default, `release`) so a release-mode dispatch runs the full publish topology that used to be push-only, while a plain dispatch still behaves as the existing dry-validation path.
-- e1e4f446 deps: adopt published SDK 1.11.2 + zero-touch release adoption
+- e1e4f446 deps: adopt published platform 1.11.2 + zero-touch release adoption
 
 ## [1.19.2] - 2026-07-17
 
 ### Changes
 
-- deps: adopt published SDK 1.11.1 + toolchain 1.11.1 from the registry (1.11.1 ships the toolchain dispatcher bin that fixes consumer release verification)
-- f095f361 deps: adopt published SDK 1.11.0 + toolchain 1.11.0 from the registry
+- deps: adopt published platform 1.11.1 + toolchain 1.11.1 from the registry (1.11.1 ships the toolchain dispatcher bin that fixes consumer release verification)
+- f095f361 deps: adopt published platform 1.11.0 + toolchain 1.11.0 from the registry
 - f2b67cfd ci: caller jobs must grant the permissions their called reusable workflows request
 - 831a7d97 release: smoke matrix legs carry their own binary per the updated contract
 - 353774ad cicd: pin newline-separated glob inputs in the shape suite + setup train note
@@ -743,17 +743,17 @@ Updated: legacy-package:goodvibes-sdk and legacy-package:goodvibes-terminal-shel
 - 526d2dae cicd: rewire workflows onto the shared composite + reusable workflows
 - 4ad63923 cicd: swap release/build/gate scripts to thin toolchain invocations
 - 224f9b4b cicd: add toolchain.config.json contract + platform optional-deps sync
-- 1484f09a build: dev-link legacy-package:goodvibes-toolchain from SDK 20093d41 tarball
+- 1484f09a build: dev-link legacy-package:goodvibes-toolchain from platform 20093d41 tarball
 
 ## [1.19.1] — 2026-07-16
 
 ### Changes
-- 7e97ce37 deps: adopt SDK 1.10.1 and consume the exported voice-setup composer
+- 7e97ce37 deps: adopt platform 1.10.1 and consume the exported voice-setup composer
 
 ## [1.19.0] — 2026-07-16
 
 ### Changes
-- 654eae83 deps: adopt published SDK 1.10.0 and regenerate operator contract artifact
+- 654eae83 deps: adopt published platform 1.10.0 and regenerate operator contract artifact
 - a7055269 docs: regenerate command reference + foundation artifacts for the new surfaces
 - 17bcce8a voice setup: live per-component install progress
 - cd1d1889 extract knowledge + voice-setup construction to hold services.ts under the 800-line cap
@@ -912,12 +912,12 @@ Updated: legacy-package:goodvibes-sdk and legacy-package:goodvibes-terminal-shel
 ## [1.18.0] — 2026-07-14
 
 ### Changes
-- 04356a3b adopt published SDK 1.9.0 and opt real runtimes into the host power seam
+- 04356a3b adopt published platform 1.9.0 and opt real runtimes into the host power seam
 - 1551e7f2 memory: consolidation proposals surface in the TUI, and a modal clipping bug fix
 - 6d65128a gates: reviewer fixtures carry the acceptance checklist; command reference regenerated
 - a975efdd keep-awake is daemon-held and the chip syncs across surfaces
 - 101d00de surface honesty: resolved provenance summaries, in-panel review checklist and task-graph posture
-- 97ddf140 dev-link: re-link to sdk fd0e6b29 (review wire seam on the fleet node; observed-agent composition subpath bundle entry)
+- 97ddf140 dev-link: re-link to platform fd0e6b29 (review wire seam on the fleet node; observed-agent composition subpath bundle entry)
 - 28d48db4 recovery honesty: session-scoped delete, silent auto-restore, no more .preserved dance
 - ed61ab6b one-act lifecycle verbs: approve launches, discard really discards
 - 3ec4f97b surface honesty: two gate tests write fleet.maxSize, not the dead orchestration.maxActiveAgents key
@@ -925,48 +925,48 @@ Updated: legacy-package:goodvibes-sdk and legacy-package:goodvibes-terminal-shel
 - 70e55cf9 fork parity: run the startup retention sweep (full roots) and live config-file watch on TUI-composed runtimes
 - 86a3e24c fleet composition: extract createFleetServices helper so the observed wiring fits under the file-size cap
 - 6e50397b daemon composes observed foreign agents: wire observeExternalAgents through the fork so real users see observed rows
-- 4f92cb10 dev-link: re-link to sdk d0a1b96c (observed-agent source exposed on a daemon-composition subpath, unblocks the daemon composing observed rows)
-- 8f84a539 identifier rule: ban worded plan-item labels (mirror the SDK scanner extension)
-- cedeb53e dev-link: re-link to sdk e0a5595d (cert-minting removed, consolidation.receipts verb, recovery/ registered)
-- 62dd21e2 gates: adopt the SDK's fleet.maxSize rename and fix-phase rework; surface new keys; refresh goldens
-- d0d5d9d0 dev-link: re-link to sdk 89690d07 (memory-provenance rides TURN_COMPLETED.metadata.memory.recordIds)
+- 4f92cb10 dev-link: re-link to platform d0a1b96c (observed-agent source exposed on a daemon-composition subpath, unblocks the daemon composing observed rows)
+- 8f84a539 identifier rule: ban worded plan-item labels (mirror the platform scanner extension)
+- cedeb53e dev-link: re-link to platform e0a5595d (cert-minting removed, consolidation.receipts verb, recovery/ registered)
+- 62dd21e2 gates: adopt the platform's fleet.maxSize rename and fix-phase rework; surface new keys; refresh goldens
+- d0d5d9d0 dev-link: re-link to platform 89690d07 (memory-provenance rides TURN_COMPLETED.metadata.memory.recordIds)
 - d4ad82ce observed foreign agents render in the fleet pane; keep every touched file under the 800-line cap
 - fb721780 consolidation receipts: an idle memory-consolidation run surfaces as a one-line attach notice
-- d2402ea4 memory provenance chip: read the SDK metadata.memory.recordIds convention
+- d2402ea4 memory provenance chip: read the platform metadata.memory.recordIds convention
 - ebd7f06b task graph renders: a workstream's nodes, edges, states, and pool posture, legible
 - 124332e6 voice settings: local engines surface, the local provider joins the picker, cost stays honest
 - 7a5c5fa9 memory provenance chip: an opt-in "used N memories" turn indicator with a drill-in
 - 93fed956 power surfaces: the "sleep disabled" chip, held-because reasons, the honest lid-split, a one-key toggle
 - 04273e8b queued mid-turn messages: an editable list, edit/delete until delivery
-- 50093a07 dev-link: re-link to sdk a03bf218; adopt per-session recovery + power/consolidation/live-turn services
+- 50093a07 dev-link: re-link to platform a03bf218; adopt per-session recovery + power/consolidation/live-turn services
 - 547fbc36 per-tool cancel: a key stops the running tool call, cancelled result renders structurally
 - 78dc782b /git diff: route the full structural diff into the diff panel, delete the 4,000-char slice
-- 59d0d1b2 dev-link: re-link to sdk a5c63e3b (per-tool cancel, queued-message verbs, power, task graph)
+- 59d0d1b2 dev-link: re-link to platform a5c63e3b (per-tool cancel, queued-message verbs, power, task graph)
 - c48997e7 fleet: host third-party ACP agents as fleet rows, from the panel and a command
-- 2de952b9 pairing: LAN posture rendered honestly from the SDK, tailscale serve as one action
-- e0d548f9 dev-link: re-link to sdk 64c67eaf (LAN http posture, acp hosting)
+- 2de952b9 pairing: LAN posture rendered honestly from the platform, tailscale serve as one action
+- e0d548f9 dev-link: re-link to platform 64c67eaf (LAN http posture, acp hosting)
 - ee4c8f51 test: drop the forbidden any cast in the conflict-files detail fixture
 - 1573e2d0 operator-rpc: resolve shell paths lazily, after the static refusals
 - 60c9d177 fleet: the pick, conflict, and discard rows act from the panel selection
 - c58becd0 fleet gateway: the pick/conflict/discard verbs over the shared operator invoke path
 - cb150d8e fleet: waiting-on-human inherits the pick and conflict reasons everywhere
-- 5d4d40d4 dev-link: re-link to sdk d07b49e8 (fleet waiting-on-human: picks, conflicts, worktree discard)
+- 5d4d40d4 dev-link: re-link to platform d07b49e8 (fleet waiting-on-human: picks, conflicts, worktree discard)
 - fd3c1ad8 dev-link housekeeping: move the tarball pins off tmpfs to the durable job dir
 - 08066730 gates: relocate shared pairing modules to core, hold the 800-line cap
 - a8fe4ec7 blocked-too-long settings + honest turn-budget outcomes
 - 47b568c1 pairing bundle UX + a device manager in the security domain
 - 3735b46e pairing: the QR is the deep link, on a name that survives a lease change
-- 1a48f148 dev-link: adopt the SDK pairing hand-off + per-device token surface
+- 1a48f148 dev-link: adopt the platform pairing hand-off + per-device token surface
 
 ## [1.17.0] — 2026-07-13
 
 ### Changes
 - fix(smoke): opt the daemon post-build smoke out of service boot promotion so the daemon under test stays in-process
 - fix(daemon): print this binary's real version in the connection banner instead of the v0.0.0 default
-- a7780e18 Pin legacy-package:goodvibes-sdk and goodvibes-terminal-shell to published 1.8.0
-- 08d4c409 Sync foundation artifacts and test provider doubles to the round-10 SDK contract
+- a7780e18 Pin legacy-package:goodvibes-platform and goodvibes-terminal-shell to published 1.8.0
+- 08d4c409 Sync foundation artifacts and test provider doubles to the round-10 platform contract
 - 39134bb2 Complete the CI fix-session affordance: one-key attach to the real session, honest error line on a failed spawn
-- ce1b14bd Re-link the local SDK tarballs to the round-10 build carrying the real fix-session id contract
+- ce1b14bd Re-link the local platform tarballs to the round-10 build carrying the real fix-session id contract
 - 2acbba55 Offer a one-key jump to a spawned CI fix session instead of a resume command to retype
 - 52faa61d Rewrite the memory-modal sample record in plain language and drop its identifier-check carve-out
 - 92a9649c Name domain settings keys, not internal gate ids, in surface readiness output
@@ -977,11 +977,11 @@ Updated: legacy-package:goodvibes-sdk and legacy-package:goodvibes-terminal-shel
 - b20005a2 Sandbox: announce 'commands now run contained' on the first contained run
 - fb45c2a7 Daemon attach-time receipts + announcements consume as one-line notices
 - b783622a Slim main.ts: extract the session-continuity-hints builder
-- 715c414c dev-link: re-link to sdk 1d6a85e2, wire ci fix-session jump affordance
+- 715c414c dev-link: re-link to platform 1d6a85e2, wire ci fix-session jump affordance
 - f94d08e8 Automation: how-to-create-first-routine empty state with a real command pointer
 - f0e6fb18 Re-link fixups: regenerate foundation artifacts, mock resolveModelPricing
 - c0ccbd6c Daemon self-update via facade host-version wiring; workspace self-record provenance
-- b30e1008 dev-link: re-link to sdk d494938c
+- b30e1008 dev-link: re-link to platform d494938c
 - 21e82f3c Render broker-originated approval asks (including ci:fix-session) as cards
 - d40901bc Give the panel_only notification target a live producer
 - 40cfa261 Permissions settings: list and revoke remembered approval rules
@@ -991,30 +991,30 @@ Updated: legacy-package:goodvibes-sdk and legacy-package:goodvibes-terminal-shel
 - 17b66695 Generalize onboarding subscription rows; close codename-scanner holes
 - 794bf9f4 Provider-agnostic onboarding key capture
 - 017a9c09 Provider key intake at selection, and executable provider repair rows
-- 9e6544b8 dev-link: re-link to sdk 9be5fecd (committed export entries, receipt-consumption contract)
+- 9e6544b8 dev-link: re-link to platform 9be5fecd (committed export entries, receipt-consumption contract)
 - 60465227 daemon parity: pin the ci-watch recurring poller's attachment
 - e7ae78e5 approval card: remember tiers, colored diffs, whole commands, typed replies, an honest queue
 - 3b12178f costs and budgets: dollars name their source, unknown prices carry the one-key fix, manual prices persist live
 - ecbb4f91 fleet: per-node headlines, the quiet-Nm stall marker, and the canonical waiting-on-human classification
 - 7881abfc update mechanism: one canonical policy module everywhere
 - ef1cc4d8 onboarding fast path: copy generated from registration truth
-- b90f2615 daemon composition: mirror the sdk runtime-services round (approval rules, snapshots, pricing resolver, live credentials, exec prompts, update lifecycle)
-- b459c3b5 dev-link: four more sdk export subpaths for the daemon lifecycle family
-- b10a610f dev-link: expose store-snapshots and self-update subpaths on the sdk tarball
-- b5b22fbb dev-link: refresh sdk tarballs to snapshot 4d8d90ee
+- b90f2615 daemon composition: mirror the platform runtime-services round (approval rules, snapshots, pricing resolver, live credentials, exec prompts, update lifecycle)
+- b459c3b5 dev-link: four more platform export subpaths for the daemon lifecycle family
+- b10a610f dev-link: expose store-snapshots and self-update subpaths on the platform tarball
+- b5b22fbb dev-link: refresh platform tarballs to snapshot 4d8d90ee
 - 5a698519 auth-behavior test: OS-assigned ports end the port-in-use flake
 - 8d1c019e ops interventions: gate on the real control-plane gateway capability, proven live
 - 8d857c55 composition trims for the line cap; channel wiring in its own module
 - ff47c4aa onboarding: enablement-key coherence fixes surfaced by the coverage tests
-- 1fc2230b tests + recall sync: adopt new SDK contracts (catalog, models, projection ownership)
-- 637a7506 tests: adopt new SDK contracts across gates, automation, cli, fetch consumers
+- 1fc2230b tests + recall sync: adopt new platform contracts (catalog, models, projection ownership)
+- 637a7506 tests: adopt new platform contracts across gates, automation, cli, fetch consumers
 - e0121015 tests: daemon flag seeding and fetch localhost-approval tier
 - 6bac548d in-product feature docs: full documentation under the cursor, scrolling pane
 - 1572c8d0 onboarding: guided feature steps write domain settings keys
 - afa41a18 remove the flags command family; surviving surfaces speak domain settings
 - e08c7a65 settings modal: capabilities as feature units in their domains
 - 03d1d65c feature settings adoption: runtime plumbing on domain settings keys
-- 0865b52f dev-link: point sdk packages at local snapshot tarballs
+- 0865b52f dev-link: point platform packages at local snapshot tarballs
 - f3b5b8e0 auto-update: end-to-end proof of the whole launch loop with real processes
 - e0da9c5f grammar lint fixture: blank-description registration now asserts the refusal
 - 3d6d1965 docs: remote-access guide — daemon on an always-on box, reached from anywhere
@@ -1060,54 +1060,54 @@ Updated: legacy-package:goodvibes-sdk and legacy-package:goodvibes-terminal-shel
 ## [1.14.0] — 2026-07-11
 
 ### Changes
-- f45a47a6 chore: pin legacy-package:goodvibes-sdk 1.7.0 — published feature-flags and emitters runtime subpaths; add legacy-package:goodvibes-terminal-shell 1.7.0; drop dev-link overrides
-- e9f844d6 feat(flags): align TUI toggle path with the SDK live config->flag bridge
+- f45a47a6 chore: pin legacy-package:goodvibes-platform 1.7.0 — published feature-flags and emitters runtime subpaths; add legacy-package:goodvibes-terminal-shell 1.7.0; drop dev-link overrides
+- e9f844d6 feat(flags): align TUI toggle path with the platform live config->flag bridge
 - 3d1cb772 test(verification): behavior-verify the 28 flag-gated feature-knob settings; clear ledger floor
-- a714db76 chore: adopt repacked SDK dev tarballs 1.6.1 (HEAD 0665cadc)
+- a714db76 chore: adopt repacked platform dev tarballs 1.6.1 (HEAD 0665cadc)
 - b2dba275 chore: keep onboarding-wizard-steps and settings-modal-data within the 800-line budget
 - 7729ec19 Onboarding: guided coverage for every remaining feature as a unit
 - 4625c662 /flags: fold the flat dump into feature-unit-aware grouped output
 - 64dcf4cd Settings modal: present each feature flag as a unit (toggle + its config keys)
 - c7ad86c3 Fix inert hitl-ux-modes onboarding: enable gating flag with non-default hitlMode
 - dea4fa31 chore: keep runtime/services.ts within the 800-line architecture budget
-- 1ac1036e chore(sdk): reconcile generated artifacts and provider test for SDK 1.6.1
-- 43c84ff7 chore(sdk): wire StepUpService into RuntimeServices for SDK 1.6.1
-- 326772bd refactor(onboarding): source channel setup fields from the SDK schema, keep presentation local
+- 1ac1036e chore(platform): reconcile generated artifacts and provider test for platform 1.6.1
+- 43c84ff7 chore(platform): wire StepUpService into RuntimeServices for platform 1.6.1
+- 326772bd refactor(onboarding): source channel setup fields from the platform schema, keep presentation local
 - 50a41dab refactor(cli): rename the support-snapshot command to 'support-bundle' to end the 'bundle' collision
 - 5cb1b444 feat(workstream): support non-leaf best-of-N attempts and show held dependents
 - 6f8ebde2 feat(health): surface daemon runtime metrics and remaining quota in /health metrics
 - b1299979 feat(rewind): persist message-anchored rewind anchors across session resume
 - 572d52f2 feat(release): mirror platform binary packages to GitHub Packages + workflow structure gate
 - f3a34e00 feat(compaction): surface sectionsIncluded in the post-compaction receipt
-- be1f0fe2 chore: refresh the retired package scope tarball integrity for repacked SDK 1.6.1 dev state
-- 6f9e03cd feat: surface the new SDK asks/receipts/results (compaction, attribution, judgment, child failure)
+- be1f0fe2 chore: refresh the retired package scope tarball integrity for repacked platform 1.6.1 dev state
+- 6f9e03cd feat: surface the new platform asks/receipts/results (compaction, attribution, judgment, child failure)
 - 14185544 feat(context): bind context_accounting to the live Orchestrator
-- b8b76ea9 chore: reconcile goldens for the refreshed SDK dev-link tarballs
+- b8b76ea9 chore: reconcile goldens for the refreshed platform dev-link tarballs
 - b44f70d0 feat(plugin): add the capability-bundle marketplace surface to goodvibes plugin
 - 6613153b feat(relay): expose outbound relay reachability in the TUI
-- 6c7e3fbe chore: refresh dev-linked SDK tarball integrity (relay + capability-bundle content)
+- 6c7e3fbe chore: refresh dev-linked platform tarball integrity (relay + capability-bundle content)
 - 44d4dcd8 feat(permissions): wire the exec sandbox into the approval flow
 - 1df64126 feat(runtime): fold workspace registration into the first-open trust prompt
-- 7a447c78 chore: refresh dev-linked SDK tarballs for repacked 1.6.1 (workspace registration store, sandbox policy exports)
+- 7a447c78 chore: refresh dev-linked platform tarballs for repacked 1.6.1 (workspace registration store, sandbox policy exports)
 - 6a9ca59e feat(workstream): surface best-of-N attempts (plan validation + attempts subcommand + fleet badge)
 - 3eb500d1 feat(review): add per-hunk reject (revert) to /review via checkpoints.revertHunk
-- 9e81187d feat(rewind): swap the TUI-local rewind coordinator for the SDK UnifiedRewindService
-- e228188a chore: refresh dev-linked SDK tarballs for repacked 1.6.1 (rewind service, hunk revert, best-of-N attempts)
+- 9e81187d feat(rewind): swap the TUI-local rewind coordinator for the platform UnifiedRewindService
+- e228188a chore: refresh dev-linked platform tarballs for repacked 1.6.1 (rewind service, hunk revert, best-of-N attempts)
 - 00ba2ff5 feat: add the exec env-scrub allowlist setting, wired through registerAllTools
 - 0cb80635 feat: expose the per-command exec sandbox surface in settings and exec results
 - a6ef4a71 feat: apply temporal-window-only /recall files proposals for real
-- c4bc39b9 chore: refresh dev-linked SDK tarballs for repacked 1.6.1 (sandbox, scrub, temporal patch, learning config)
+- c4bc39b9 chore: refresh dev-linked platform tarballs for repacked 1.6.1 (sandbox, scrub, temporal patch, learning config)
 - b8c31445 feat(flags): /flags graduation — feature-flag graduation readiness report
 - 3742073e feat(rewind): unified message-anchored /rewind (files + conversation) with /undo and /redo
-- 13572e44 chore: refresh dev-linked SDK tarballs for repacked 1.6.1 (rewind + flag graduation + worktree config)
+- 13572e44 chore: refresh dev-linked platform tarballs for repacked 1.6.1 (rewind + flag graduation + worktree config)
 - 72cf6f78 memory: add the git-backed file projection surface (/recall files sync|review|apply) + temporal-status visibility
 - 697a9458 exec: render withheld_env in tool results, surface shipped credential-read rules in /permissions
 - e7293290 settings: add learning.consolidation category for the hoisted memory consolidation config
-- 0b7ae90b chore: refresh dev-linked SDK tarball integrity for repacked 1.6.1 content
+- 0b7ae90b chore: refresh dev-linked platform tarball integrity for repacked 1.6.1 content
 - 00986ade Add /cost attribution over cost.attribution.get, pre-launch quota consultation
 - ab27babc Expose worktree.setup.commands/carryOverGlobs, show setup state, add rerun command
-- 235b60f0 Drive /channel pair from the SDK's getBuiltinSetupSchema, add a real verify round-trip
-- 2c1831bf Refresh dev-linked SDK tarballs to the repacked 1.6.1 content
+- 235b60f0 Drive /channel pair from the platform's getBuiltinSetupSchema, add a real verify round-trip
+- 2c1831bf Refresh dev-linked platform tarballs to the repacked 1.6.1 content
 - c96580bf docs: regenerate command reference for the new /workstream item-edit subcommands
 - 6495cc23 workstream: journal drafts to disk so the plan-review gate survives a restart
 - 06e71816 workstream: editable plan-review gate — edit-item / remove-item / move-item
@@ -1116,7 +1116,7 @@ Updated: legacy-package:goodvibes-sdk and legacy-package:goodvibes-terminal-shel
 - 05f88c1b feat: add /principals command and /channel profiles subcommand
 - b9436292 feat: expose check-in config in settings + add /checkin command
 - d6f7f8d3 feat: add /ci command for CI-watch (status, watch, watches, unwatch)
-- 9ab191d5 chore: refresh local SDK 1.6.1 tarballs (initiative cluster surface)
+- 9ab191d5 chore: refresh local platform 1.6.1 tarballs (initiative cluster surface)
 - c44fff9f Add run-goodvibes composite action + CI self-test
 - 5e07b9e7 Stage Windows support: WSL2 documented, windows-x64 as non-gating beta
 - e6f2b32b Add platform binary packages (esbuild/biome pattern) for npm/pnpm installs
@@ -1126,19 +1126,19 @@ Updated: legacy-package:goodvibes-sdk and legacy-package:goodvibes-terminal-shel
 - ec214814 feat(runtime): per-workspace trust gate composed into the permission machinery
 - 46677c0d feat(input): fuzzy command palette over the command registry
 - 17bc7769 feat(docs): generate command reference from the registry with a drift gate
-- 1ad897d5 chore: refresh dev-link integrity + operator contract for repacked SDK 1.6.1 tarballs
+- 1ad897d5 chore: refresh dev-link integrity + operator contract for repacked platform 1.6.1 tarballs
 - 673bd32e Add comment-on-hunk review loop that steers comments to the session
 - d082f7bc Add /permissions provenance panel
 - d9847b14 Add doctor explain/routing/hooks diagnostician subcommands
-- e91e9b02 feat: adopt SDK session permission-mode, compaction-receipt, and concealed-input surfaces
+- e91e9b02 feat: adopt platform session permission-mode, compaction-receipt, and concealed-input surfaces
 - 3b0c470a feat(settings): surface C3a config keys — permissions.backgroundAgents and diagnostics.postEdit
-- 1d484a37 test: reconcile suite with SDK 1.6.1 surfaces (repo_map tool, fleet event domain, operator contract)
-- bb8424f6 chore: refresh dev-link integrity for repacked SDK 1.6.1 tarballs
+- 1d484a37 test: reconcile suite with platform 1.6.1 surfaces (repo_map tool, fleet event domain, operator contract)
+- bb8424f6 chore: refresh dev-link integrity for repacked platform 1.6.1 tarballs
 - d277d84c Add doctor exposure report and startup install self-check
-- 2de2cfcd Regenerate operator contract artifact for SDK 1.6.1 gateway catalog
+- 2de2cfcd Regenerate operator contract artifact for platform 1.6.1 gateway catalog
 - efe3e075 Add hooks validate and plugin init/validate CLI subcommands
-- 93312c5b Adopt goodvibes-terminal-shell package and SDK 1.6.1 surfaces
-- 21d67309 Dev-link goodvibes SDK 1.6.1 tarballs for local adoption work
+- 93312c5b Adopt goodvibes-terminal-shell package and platform 1.6.1 surfaces
+- 21d67309 Dev-link goodvibes platform 1.6.1 tarballs for local adoption work
 - 6f125cf0 Composer set: $EDITOR composition, # note capture, auto-titles, NL schedules
 - ab695150 Add /flags command surfacing every feature flag by state
 - 5ce19325 Add scriptable statusline driven by statusline.command config
@@ -1162,47 +1162,47 @@ Updated: legacy-package:goodvibes-sdk and legacy-package:goodvibes-terminal-shel
 
 ### Changes
 - c3a54b1b fix: clean terminal restore on exit; feat: /resume session picker
-- f29e97ff chore: pin legacy-package:goodvibes-sdk 1.6.1 — compact-and-retry on provider context rejections, learned context ceilings, fleet archive, deliver-once replays
+- f29e97ff chore: pin legacy-package:goodvibes-platform 1.6.1 — compact-and-retry on provider context rejections, learned context ceilings, fleet archive, deliver-once replays
 - d320ca15 feat: fleet archive view + learned context-limit display
 
 ## [1.12.0] — 2026-07-08
 
 ### Changes
-- 894099e9 chore: pin legacy-package:goodvibes-sdk 1.5.0 — model compaction warnings compact immediately; persistent per-model context windows
+- 894099e9 chore: pin legacy-package:goodvibes-platform 1.5.0 — model compaction warnings compact immediately; persistent per-model context windows
 - b89d0494 feat: /context window — view, set, or clear a custom context window for the current model
 
 ## [1.11.1] — 2026-07-08
 
 ### Changes
-- f3abc72b chore: pin legacy-package:goodvibes-sdk 1.4.1 — permission settings own command-class risk in exec
+- f3abc72b chore: pin legacy-package:goodvibes-platform 1.4.1 — permission settings own command-class risk in exec
 
 ## [1.11.0] — 2026-07-07
 
 ### Changes
-- b4a2155d chore: pin legacy-package:goodvibes-sdk 1.4.0 — the daemon gains server-side turn control
+- b4a2155d chore: pin legacy-package:goodvibes-platform 1.4.0 — the daemon gains server-side turn control
 
 ## [1.10.1] - 2026-07-07
 
 ### Fixed
 
-- README no longer states a stale hardcoded SDK version; it refers to the latest SDK.
+- README no longer states a stale hardcoded platform version; it refers to the latest platform.
 
 ## [1.10.0] — 2026-07-06
 
-Adopts `legacy-package:goodvibes-sdk` 1.3.0. The through-line is the shared engines the SDK now owns: the terminal no longer keeps its own copy of the text-to-speech pipeline or its own path to the memory store — it consumes the one the SDK ships, so the terminal, the desktop app, and the agent all speak the same way, resolve the same voice, and reach memory the same way. Ships against `legacy-package:goodvibes-sdk` 1.3.0.
+Adopts `legacy-package:goodvibes-platform` 1.3.0. The through-line is the shared engines the platform now owns: the terminal no longer keeps its own copy of the text-to-speech pipeline or its own path to the memory store — it consumes the one the platform ships, so the terminal, the desktop app, and the agent all speak the same way, resolve the same voice, and reach memory the same way. Ships against `legacy-package:goodvibes-platform` 1.3.0.
 
-### Shared text-to-speech engine, now sourced from the SDK
-- The TUI's local spoken-turn controller and sentence chunker were replaced by the SDK's shared voice engine (sentence chunking, request merging with bounded concurrency, retry-with-honest-skip, and drain-vs-interrupt semantics). Behavior is unchanged from what shipped in 1.9.2, but the pipeline is now the single copy shared with the agent and a future browser build rather than a hand-maintained terminal fork. The existing mpv/ffplay subprocess player stays exactly as it was, now plugged in as the engine's audio sink.
+### Shared text-to-speech engine, now sourced from the platform
+- The TUI's local spoken-turn controller and sentence chunker were replaced by the platform's shared voice engine (sentence chunking, request merging with bounded concurrency, retry-with-honest-skip, and drain-vs-interrupt semantics). Behavior is unchanged from what shipped in 1.9.2, but the pipeline is now the single copy shared with the agent and a future browser build rather than a hand-maintained terminal fork. The existing mpv/ffplay subprocess player stays exactly as it was, now plugged in as the engine's audio sink.
 
 ### Voice-provider request handling
 - Spoken output no longer bursts past the voice provider's concurrent-request allowance. A streaming answer used to fire one synthesis request per sentence, all at once, so a simple multi-sentence reply could hit `HTTP 429 concurrent_limit_exceeded` and lose spoken playback for the whole turn. Requests now queue and merge into a single request whenever a pipeline slot is free (bounded at two: the one playing plus one prefetch, merged text capped at 1,500 characters split on a word boundary), and a transient 429 / rate-limit / 5xx / network drop backs off and retries on an abortable timer instead of killing the turn. Time-to-first-audio is unchanged — the first safe boundary still flushes early.
 
 ### Memory over the daemon spine, with honest degrade
 - When the TUI adopts an external daemon, memory now reads and writes over the daemon's memory spine instead of opening the local store file, so it can no longer read a divergent local copy. The Memory modal, `/recall`'s browse/link/queue/export/import, and the per-turn passive knowledge injection all route through the spine's wire transport when a compatible daemon is adopted, and revert to local access honestly when the daemon is lost or runs embedded in-process.
-- A newer TUI against an older daemon that does not serve an extended memory operation now says so plainly. The wire transport disambiguates the two kinds of 404 by response code: a record-missing 404 carries `MEMORY_RECORD_NOT_FOUND` and folds to "not found," while a route-not-found 404 from an older daemon (or a bare legacy 404 with no code) is treated as "this daemon does not serve this operation" and surfaces a stated reason through `/recall`'s existing degraded-path message — never a silent "record gone." The TUI now imports the SDK's canonical classifier for this rather than carrying its own inlined copy.
+- A newer TUI against an older daemon that does not serve an extended memory operation now says so plainly. The wire transport disambiguates the two kinds of 404 by response code: a record-missing 404 carries `MEMORY_RECORD_NOT_FOUND` and folds to "not found," while a route-not-found 404 from an older daemon (or a bare legacy 404 with no code) is treated as "this daemon does not serve this operation" and surfaces a stated reason through `/recall`'s existing degraded-path message — never a silent "record gone." The TUI now imports the platform's canonical classifier for this rather than carrying its own inlined copy.
 
 ### One voice across every surface
-- The text-to-speech voice settings (`tts.*`) resolve through the SDK's shared, surface-independent config tier, so a voice chosen in the terminal, the desktop app, or the agent is the voice every surface uses. A surface that has never set a shared voice keeps its local setting, so existing setups are unchanged; a shared value simply wins once one is set.
+- The text-to-speech voice settings (`tts.*`) resolve through the platform's shared, surface-independent config tier, so a voice chosen in the terminal, the desktop app, or the agent is the voice every surface uses. A surface that has never set a shared voice keeps its local setting, so existing setups are unchanged; a shared value simply wins once one is set.
 
 ### Budget alert visible in /config
 - The session cost-budget threshold (`behavior.budgetAlertUsd`, set via the Cost panel's `b` key or `/cost budget <usd>`) is now a visible entry in `/config`'s Behavior settings, next to the existing `notifyOnBudgetBreach` gate. The value always persisted correctly on disk; it simply had no honest way to be inspected because it was never registered in the schema-driven settings surface. It now shows the real current threshold, following the same synthetic-entry pattern already used for `behavior.notifyAfterSeconds` and `tts.speed`.
@@ -1220,27 +1220,27 @@ Patch release fixing text-to-speech playback so spoken responses play start-to-f
 
 ## [1.9.1] — 2026-07-06
 
-Follow-up patch that completes the client-side credential-status adoption for the TUI. The 1.9.0 release pinned SDK 1.0.0 and unified memory but left the client-side credential-status read for a follow-up; this release lands it. Ships against legacy-package:goodvibes-sdk 1.0.0.
+Follow-up patch that completes the client-side credential-status adoption for the TUI. The 1.9.0 release pinned platform 1.0.0 and unified memory but left the client-side credential-status read for a follow-up; this release lands it. Ships against legacy-package:goodvibes-platform 1.0.0.
 
 ### Credential-status read as a daemon client
-- When the TUI acts as a client of an adopted external daemon (`HostServiceStatus` mode `external`), provider/model/secret STATUS is read from that daemon's `credentials.get` wire method instead of the TUI's own surfaceRoot store. The read carries only status metadata (key / configured / usable / source / secure) — never a secret value, mirroring the SDK's status-only wire contract. The env-only API-key posture and all secret value-reads that provider auth needs stay local and are untouched; only STATUS reads use the daemon path.
-- Honest degraded state, mirroring goodvibes-webui v1.0.1 `deriveCredentialAvailability` exactly: a 503 `CREDENTIAL_STORE_UNAVAILABLE` (matched by machine code), a `METHOD_NOT_FOUND` from an older daemon, or any transport failure resolves to a reason-carrying `available: false` — never a fabricated "configured", never a stale confident value. The TUI-hosted daemon continues to serve `credentials.get` automatically from its existing secrets manager (SDK auto-wiring), so no serve-side change was needed.
+- When the TUI acts as a client of an adopted external daemon (`HostServiceStatus` mode `external`), provider/model/secret STATUS is read from that daemon's `credentials.get` wire method instead of the TUI's own surfaceRoot store. The read carries only status metadata (key / configured / usable / source / secure) — never a secret value, mirroring the platform's status-only wire contract. The env-only API-key posture and all secret value-reads that provider auth needs stay local and are untouched; only STATUS reads use the daemon path.
+- Honest degraded state, mirroring goodvibes-webui v1.0.1 `deriveCredentialAvailability` exactly: a 503 `CREDENTIAL_STORE_UNAVAILABLE` (matched by machine code), a `METHOD_NOT_FOUND` from an older daemon, or any transport failure resolves to a reason-carrying `available: false` — never a fabricated "configured", never a stale confident value. The TUI-hosted daemon continues to serve `credentials.get` automatically from its existing secrets manager (platform auto-wiring), so no serve-side change was needed.
 
 ### Memory unification follow-up
 - The legacy per-project TUI memory store now actually folds into the home-scoped canonical store once at boot, after the canonical store initializes — making good on the behavior 1.9.0 described. The fold is id-keyed and idempotent (a re-run imports nothing new and never deletes the legacy file) and is strictly non-fatal: a fold error degrades to a warning and the canonical store serves on. The home-scoped store deliberately does not re-root with the working directory; only the code index and project index do.
 
 ## [1.7.0] — 2026-07-04
 
-The evolution release: six batched development cycles (internal 1.2.0–1.6.0, which were never published) land together as one public version. The through-line is a product that reports the truth about itself — reversible edits you can actually undo, a live fleet you can watch and steer, orchestration that runs the plan it showed you, memory that demonstrably enters the turns it claims to, and a panel surface cut down to the consoles that earn their place. Ships against legacy-package:goodvibes-sdk 0.38.0.
+The evolution release: six batched development cycles (internal 1.2.0–1.6.0, which were never published) land together as one public version. The through-line is a product that reports the truth about itself — reversible edits you can actually undo, a live fleet you can watch and steer, orchestration that runs the plan it showed you, memory that demonstrably enters the turns it claims to, and a panel surface cut down to the consoles that earn their place. Ships against legacy-package:goodvibes-platform 0.38.0.
 
 ### Reversibility and checkpoints
-- Workspace checkpoints with `/checkpoints`, `/checkpoint`, and `/rewind`: snapshot the working tree, list snapshots newest-first, and preview-then-restore files from any checkpoint (files only — conversation history is left untouched). Backed by the SDK's `WorkspaceCheckpointManager` and wired through TUI services, with guards so an unguarded checkpoint call can no longer surface as a silent unhandled rejection.
+- Workspace checkpoints with `/checkpoints`, `/checkpoint`, and `/rewind`: snapshot the working tree, list snapshots newest-first, and preview-then-restore files from any checkpoint (files only — conversation history is left untouched). Backed by the platform's `WorkspaceCheckpointManager` and wired through TUI services, with guards so an unguarded checkpoint call can no longer surface as a silent unhandled rejection.
 - Per-hunk accept/reject for multi-edit approval prompts: when one approval covers several hunks you accept or reject each individually, and the decision is honored end-to-end instead of being all-or-nothing.
-- `/test` runs the project test script and shows real pass/fail results, parsing both the SDK runner output and plain `bun test` output (per-test counts and the names of failing tests); the end state persists in the transcript instead of evaporating.
+- `/test` runs the project test script and shows real pass/fail results, parsing both the platform runner output and plain `bun test` output (per-test counts and the names of failing tests); the end state persists in the transcript instead of evaporating.
 - Manual `/compact` now hands the compaction subagent the real original task and the full agent roster, so the handoff summary is accurate.
 
 ### Fleet observability, session tabs, and steering
-- A live Fleet panel over the real SDK process/agent registry: a process tree with per-node live states, honest cost, id-anchored selection that survives list churn, and capability-gated interrupt/kill actions. It is the fast-access surface below the prompt and the home of `F2`, `Ctrl+O`, and the footer `[Enter]`.
+- A live Fleet panel over the real platform process/agent registry: a process tree with per-node live states, honest cost, id-anchored selection that survives list churn, and capability-gated interrupt/kill actions. It is the fast-access surface below the prompt and the home of `F2`, `Ctrl+O`, and the footer `[Enter]`.
 - Unfocused-user alerts that actually reach you when GoodVibes is in a background terminal: budget breach, agent/chain failure, awaiting-approval, and long-task notices, gated on real terminal-focus tracking (CSI 1004) with an honest "unknown" fallback.
 - Live transcript tabs over the conversation snapshot bridge: attach to a running agent, browse its transcript read-only (with reserved-notice honesty), detach without killing it, and see interrupted vs. killed as distinct states with a frozen elapsed clock.
 - A steering composer with a `queued` / `consumed` / `dropped` badge: send an instruction to a running agent and see honestly whether it was picked up, with TTL and ordering guards, and the consumed signal deferred until the steered turn actually succeeds.
@@ -1285,24 +1285,24 @@ The evolution release: six batched development cycles (internal 1.2.0–1.6.0, w
 - `Escape` cancel-first precedence and live git-init header refresh, so a directory becomes a recognized repo without a restart.
 
 ### Internal
-- SDK dependency 0.36.0 → 0.38.0 (through 0.37.0 / 0.37.1 / 0.37.2); foundation artifacts regenerated against the released SDK.
-- A release-blocking gate requires the SDK pin, the lockfile resolution, and the installed package to all agree, plus a source-import sweep that fails on any non-npm SDK import — so the local-SDK development overlay can never ship.
+- platform dependency 0.36.0 → 0.38.0 (through 0.37.0 / 0.37.1 / 0.37.2); foundation artifacts regenerated against the released platform.
+- A release-blocking gate requires the platform pin, the lockfile resolution, and the installed package to all agree, plus a source-import sweep that fails on any non-npm platform import — so the local-platform development overlay can never ship.
 - Test suite at 639 files green; coverage, performance, architecture, and eval-regression gates enforced on every cycle. Each wave was verified with the full gate block, a three-lens adversarial review, and a live tmux replay of its pillar scenarios.
 
 ## [1.1.0] — 2026-07-03
 
-The first cycle of the post-1.0 evolution effort: trust repairs. Every change closes a defect found by live dogfooding v1.0.0 where the product reported something other than the truth. Ships against legacy-package:goodvibes-sdk 0.36.0 (same effort, SDK side).
+The first cycle of the post-1.0 evolution effort: trust repairs. Every change closes a defect found by live dogfooding v1.0.0 where the product reported something other than the truth. Ships against legacy-package:goodvibes-platform 0.36.0 (same effort, platform side).
 
 ### Fixed
-- Failing commands are visible again: the SDK masked every command-level failure as "Error: Unknown error", so a red test suite was literally invisible to the model — it would honestly conclude "no failure observed" while your tests were failing. Exit code, stdout, and stderr now reach the model byte-faithfully, and long-output truncation keeps the tail (where test runners print failures) instead of the head. Verified live: the model reads a sabotaged test's actual assertion diff and fixes the right side.
+- Failing commands are visible again: the platform masked every command-level failure as "Error: Unknown error", so a red test suite was literally invisible to the model — it would honestly conclude "no failure observed" while your tests were failing. Exit code, stdout, and stderr now reach the model byte-faithfully, and long-output truncation keeps the tail (where test runners print failures) instead of the head. Verified live: the model reads a sabotaged test's actual assertion diff and fixes the right side.
 - Agent auto-commits are scoped: a WRFC chain used to `git add --all`, sweeping your unrelated dirty files into its commit with a truncated message. Commits now include only chain-touched files, with full accurate messages, under a new policy config (`off | scoped | all`, default scoped). Verified live with bait files.
 - Agent chains can no longer die silently: transport failures surface a reasoned failure state in the transcript and status strip, with one bounded automatic retry.
 - Panels work during turns: Ctrl+P / F2 / the status-strip Enter were dead exactly while agents ran — the Inspector was unreachable whenever there was something to inspect. Verified live mid-chain.
 - Panels no longer eat typed text: multi-character input routes to the composer instead of being silently consumed as single-letter panel hotkeys, and a visible focus indicator shows where keys go.
-- Streaming honesty: a stalled provider stream now shows a real stall/reconnect indicator (with attempt counts via the SDK's new STREAM_RETRY event) instead of cycling whimsical labels over dead air — and the indicator correctly stays quiet while a tool is executing.
+- Streaming honesty: a stalled provider stream now shows a real stall/reconnect indicator (with attempt counts via the platform's new STREAM_RETRY event) instead of cycling whimsical labels over dead air — and the indicator correctly stays quiet while a tool is executing.
 - Slash routing is deterministic: `/command` in an empty composer is always a command, never sent to the model as chat (previously state-dependent after overlay use, burning tokens on junk turns).
 - Per-agent stats are real: the Inspector showed Tools 0 / Tokens 0 / Cost $0.00 for agents that wrote hundreds of lines; agents (including WRFC owners, which aggregate their whole chain) now report true token/tool counts, and footer counters survive session resume.
-- Cost is honest: models missing from the old hardcoded ~16-model price table silently showed $0.00 everywhere; pricing now resolves through the SDK catalog with an explicit "unpriced" marker when unknown.
+- Cost is honest: models missing from the old hardcoded ~16-model price table silently showed $0.00 everywhere; pricing now resolves through the platform catalog with an explicit "unpriced" marker when unknown.
 - Indicator truth: the footer no longer shows `hitl:balanced` alongside DANGER MODE; the effective permission posture wins.
 - Renderer truth: subprocess stderr can no longer leak raw into the transcript and garble cells (`/diff` in a non-git dir now prints one honest sentence, not a fake diff); git repos are re-detected live after `git init` without a restart; cancelled-turn echo no longer mangles its first character.
 
@@ -1313,8 +1313,8 @@ The first cycle of the post-1.0 evolution effort: trust repairs. Every change cl
 - Wider, persistent Ctrl+C exit-confirmation notice.
 
 ### Internal
-- SDK dependency 0.35.0 → 0.36.0; foundation artifacts regenerated (new event contract entries).
-- Local-SDK overlay dev tooling (`scripts/sdk-dev.ts link|status|restore`) with release-blocking gates in release.ts and publish-check so a local SDK can never ship.
+- platform dependency 0.35.0 → 0.36.0; foundation artifacts regenerated (new event contract entries).
+- Local-platform overlay dev tooling (`scripts/engine-dev.ts link|status|restore`) with release-blocking gates in release.ts and publish-check so a local platform can never ship.
 - Verified three ways: full gate block, a 3-lens adversarial code review, and a live tmux scenario replay of the five previously-failing dogfood scenarios (all PASS).
 
 ## [1.0.0] — 2026-07-03
@@ -1370,7 +1370,7 @@ Panel navigation & UI/UX overhaul, plus the accumulated post-0.27.0 UX fixes.
 ### Changed
 - **Width-aware formatting** across panels: shared toolkit primitives (`fitDisplay`, table/tree/badge/meter helpers) replace hand-rolled `.slice()`/`.padEnd()`, so rows stay aligned across emoji, CJK, and other wide characters.
 - **Scroll-back**: you can scroll up during and after a turn; the view only auto-follows the tail when parked at the bottom.
-- **Auto-compaction is now owned entirely by the SDK** (`legacy-package:goodvibes-sdk` 0.35.0 `handlePostTurnContextMaintenance`). The redundant TUI-side trigger was removed to prevent double-compaction; manual `/compact` now builds a richer handoff context (running agents, WRFC chains, active plan, session lineage).
+- **Auto-compaction is now owned entirely by the platform** (`legacy-package:goodvibes-platform` 0.35.0 `handlePostTurnContextMaintenance`). The redundant TUI-side trigger was removed to prevent double-compaction; manual `/compact` now builds a richer handoff context (running agents, WRFC chains, active plan, session lineage).
 
 ### Fixed
 - Timer/async panels repaint while the main thread is idle instead of looking frozen (repaints gated on panel-active state).
@@ -1383,28 +1383,28 @@ Panel navigation & UI/UX overhaul, plus the accumulated post-0.27.0 UX fixes.
 
 ## [0.27.0] — 2026-06-30
 
-Full deep-review audit of the TUI (33 findings fixed, each reviewed to a score of 10) and adoption of `legacy-package:goodvibes-sdk` 0.35.0.
+Full deep-review audit of the TUI (33 findings fixed, each reviewed to a score of 10) and adoption of `legacy-package:goodvibes-platform` 0.35.0.
 
 ### Fixed
-- **Context window**: the footer meter, footer-height, context-inspector overlay, `/health`, `/guidance`, and the context visualizer now use the resolved `getContextWindowForModel` so every surface agrees; the pre-catalog fallback uses the SDK's family-aware `inferFallbackContextWindow` instead of a hardcoded 128k/32k.
-- **Compaction**: removed the TUI's redundant/racy post-turn auto-compact — the SDK Orchestrator's post-turn maintenance is now the sole, correctly-resolved path (the dead `context-auto-compact` module was deleted).
+- **Context window**: the footer meter, footer-height, context-inspector overlay, `/health`, `/guidance`, and the context visualizer now use the resolved `getContextWindowForModel` so every surface agrees; the pre-catalog fallback uses the platform's family-aware `inferFallbackContextWindow` instead of a hardcoded 128k/32k.
+- **Compaction**: removed the TUI's redundant/racy post-turn auto-compact — the platform Orchestrator's post-turn maintenance is now the sole, correctly-resolved path (the dead `context-auto-compact` module was deleted).
 - **Sub-agent panels**: the Agent Inspector, Agent Logs, Token Budget, and Context Visualizer panels now repaint live (`requestRender` + live window / `lastInputTokens` wired at their construction sites); Agent Logs repaints on `streamingContent` growth, not just JSONL file-size changes — fixing the frozen-panel and stale-inspector symptoms.
 - **Scroll / lifecycle**: scroll-up respects `scrollLocked` (no overwrite during a turn) and agrees with the renderer (no dead/snap-back when idle); the terminal is restored on `uncaughtException`/SIGTERM/SIGHUP/fatal startup; `exitApp` awaits shutdown before exit.
 - **WRFC**: panel resume covers `reviewing`/`fixing`/`awaiting_gates`; `rehydrate` re-imports interrupted chains; the panel subscribes to the new `WORKFLOW_SCORE_REGRESSION` event.
 - **Core**: journal replay preserves the session title/titleSource; transcript event-navigation indexing fixed; the streaming buffer survives a mid-stream terminal resize; journal seq-collision fixed; high-priority system messages now reach conversation delivery.
-- **Sub-agent firehose**: resolved at the source by adopting SDK 0.35.0 (agent progress no longer dumps raw streamed output into the one-line status slot).
-- **DRY**: standardized 53 error stringifications on the SDK `summarizeError`; consolidated three duration formatters onto `formatElapsed`; migrated 12 panel palettes to `extendPalette(DEFAULT_PANEL_PALETTE, …)` so themes propagate.
+- **Sub-agent firehose**: resolved at the source by adopting platform 0.35.0 (agent progress no longer dumps raw streamed output into the one-line status slot).
+- **DRY**: standardized 53 error stringifications on the platform `summarizeError`; consolidated three duration formatters onto `formatElapsed`; migrated 12 panel palettes to `extendPalette(DEFAULT_PANEL_PALETTE, …)` so themes propagate.
 
 ### Changed
-- Adopt `legacy-package:goodvibes-sdk` **0.35.0** — its own 55-finding audit remediation: tool-loop circuit-breaker fix, window-scaled compaction safety buffer, `configured_cap` context-window resolution, MCP orphan-restart fix, transport-middleware retry + SSE auth fixes, and the new `inferFallbackContextWindow` export.
+- Adopt `legacy-package:goodvibes-platform` **0.35.0** — its own 55-finding audit remediation: tool-loop circuit-breaker fix, window-scaled compaction safety buffer, `configured_cap` context-window resolution, MCP orphan-restart fix, transport-middleware retry + SSE auth fixes, and the new `inferFallbackContextWindow` export.
 
 ## [0.26.0] — 2026-06-21
 
 ### Changes
 - 8852a2f4 chore: set version baseline to published 0.25.0
-- 981adb46 feat(daemon): implement operator-method handlers against goodvibes-sdk 0.34.0 contracts
-- 97f74119 chore: upgrade legacy-package:goodvibes-sdk to 0.34.0
-- 6de2627a revert: remove daemon control-plane buildout — duplicated legacy-package:goodvibes-sdk 0.34.0
+- 981adb46 feat(daemon): implement operator-method handlers against goodvibes-platform 0.34.0 contracts
+- 97f74119 chore: upgrade legacy-package:goodvibes-platform to 0.34.0
+- 6de2627a revert: remove daemon control-plane buildout — duplicated legacy-package:goodvibes-platform 0.34.0
 
 ## [0.25.0] — 2026-06-21
 
@@ -1416,10 +1416,10 @@ Full deep-review audit of the TUI (33 findings fixed, each reviewed to a score o
 ## [0.24.1] — 2026-06-17
 
 ### Changes
-- 1813b36d test: align suite with goodvibes-sdk 0.33.38 behavior
-- 0ee3b615 chore: bump legacy-package:goodvibes-sdk to 0.33.38
+- 1813b36d test: align suite with goodvibes-platform 0.33.38 behavior
+- 0ee3b615 chore: bump legacy-package:goodvibes-platform to 0.33.38
 - 32a813e4 chore: untrack internal deep-dive notes (moved to .goodvibes/deepdives/)
-- c73a3fcb docs: refresh README — version badge 0.24.0, SDK-extracted tools, test count
+- c73a3fcb docs: refresh README — version badge 0.24.0, platform-extracted tools, test count
 - ca262d5e docs: handoff updated — 0.24.0 confirmed live on npm
 
 ## [0.24.0] — 2026-06-12
@@ -1454,7 +1454,7 @@ Third best-in-class program release: provider failover on the turn path, the con
 ### Features
 - Added turn-path provider failover with bounded same-turn retries: the fallback chain is walked with a per-turn visited set, duplicate user messages are prevented by a message-count snapshot and rollback, synthetic models are never failed into, and retries preserve the original content and options.
 - Added /compact preview and after-notice: a clearly labelled estimate before compaction and the real before/after message and token figures from the compaction event when it completes.
-- Added /compact-history: lists past compaction events; restore is list-only until the SDK exposes a snapshot/restore API, and the output says so plainly.
+- Added /compact-history: lists past compaction events; restore is list-only until the platform exposes a snapshot/restore API, and the output says so plainly.
 - Added /keep: pin text into session memory; pinned entries flow into the compaction handoff on both manual and auto-compact paths, with honest session-only wording (named /keep because /pin belongs to model favorites).
 - Added /channel: routes, delivery, status, and policy snapshots for the omnichannel substrate, with --json on every subcommand.
 - Added inbound event narration: GitHub, Slack, ntfy, and webhook events emit a transcript line naming the surface and event before agent dispatch, with self-narration guarded for companion and internal sources.
@@ -1480,7 +1480,7 @@ Second best-in-class program release: the backlog tail, the providers/failover t
 - Added settings reset-category and reset-all (Shift+R / Ctrl+Shift+R, confirm-gated, runtime-synced), schema-derived unknown-key warnings at load, restart hints from a typed key table, and width-honest footers proven at 80 and 120 columns.
 - Added wizard required-field gating: apply blocks with per-field messages and a focus jump to the first offender.
 - Added the provider optimizer enable switch: /provider optimizer on|off drives the live instance and persists; /provider route auto says honestly when the optimizer is off.
-- Added wizard security hardening: Cloudflare tunnel apply sets trustProxy with the residual risk named until SDK header validation ships; TLS plaintext hard-warn in the wizard and a startup banner; CORS guidance.
+- Added wizard security hardening: Cloudflare tunnel apply sets trustProxy with the residual risk named until platform header validation ships; TLS plaintext hard-warn in the wizard and a startup banner; CORS guidance.
 - Added context truth: auto-compact runs only when behavior.autoCompact is enabled (threshold from config, percent converted correctly), with a passive suggest-compact status hint and honest transcript notices.
 - Added tts.speed to settings, bridged end-to-end today (modal to synthesis call); explicit tts.* defaults with truthful modified markers.
 
@@ -1507,7 +1507,7 @@ First release of the best-in-class program: a full UX-first review of the codeba
 - Added a gist upload target for `/share` (`--upload/--copy/--open`) and a shell-completions generator.
 
 ### Fixes
-- Fixed the context meter: one SDK token estimator everywhere (three bespoke walkers removed), compact threshold drawn on the meter with color switching, and a percent-to-fraction config conversion that previously kept the marker off-screen.
+- Fixed the context meter: one platform token estimator everywhere (three bespoke walkers removed), compact threshold drawn on the meter with color switching, and a percent-to-fraction config conversion that previously kept the marker off-screen.
 - Fixed agent cost and token reporting: real per-agent usage replaces the fabricated tool-call estimate, with a single canonical model-pricing table shared by the cost tracker and share/export.
 - Fixed onboarding state durability: atomic writes with fsync, an advisory lockfile around acknowledgement writes, and version-gated reads that quarantine corrupt or unrecognized files.
 - Fixed session/team memory queue front-doors to be genuinely scope-filtered with honest descriptions.
@@ -1542,7 +1542,7 @@ First release of the best-in-class program: a full UX-first review of the codeba
 ## [0.20.0] — 2026-05-11
 
 ### Changes
-- Updated `legacy-package:goodvibes-sdk` to `0.33.30` for guest-side QEMU REPL execution and exec working-directory fixes.
+- Updated `legacy-package:goodvibes-platform` to `0.33.30` for guest-side QEMU REPL execution and exec working-directory fixes.
 - Added generated QEMU sandbox setup docs, runtime bootstrap scripts, cloud-init seed files, and guest runtime provisioning guidance.
 - Wired `sandbox.replJavaScriptCommand` through generated QEMU setup manifests so JavaScript-family REPL snippets use the guest Bun runtime.
 - Removed the obsolete `/sandbox qemu create-image` command in favor of the generated `create-image.sh` bootstrap workflow.
@@ -1576,17 +1576,17 @@ First release of the best-in-class program: a full UX-first review of the codeba
 ## [0.19.94] — 2026-05-11
 
 ### Changes
-- 391e015d chore: update SDK to 0.33.26
+- 391e015d chore: update platform to 0.33.26
 
 ## [0.19.93] — 2026-05-10
 
 ### Changes
-- ce29b1dd chore: update sdk to 0.33.25
+- ce29b1dd chore: update platform to 0.33.25
 
 ## [0.19.92] — 2026-05-10
 
 ### Changes
-- Updated `legacy-package:goodvibes-sdk` to `0.33.24` for the companion-chat
+- Updated `legacy-package:goodvibes-platform` to `0.33.24` for the companion-chat
   tool-loop finalization fix used by Home Assistant Assist conversations.
 
 ## [0.19.91] — 2026-05-10
@@ -1602,7 +1602,7 @@ First release of the best-in-class program: a full UX-first review of the codeba
 ## [0.19.89] — 2026-05-10
 
 ### Changes
-- 0849fa4b chore: update sdk to 0.33.23
+- 0849fa4b chore: update platform to 0.33.23
 
 ## [0.19.88] — 2026-05-10
 
@@ -1612,12 +1612,12 @@ First release of the best-in-class program: a full UX-first review of the codeba
 ## [0.19.87] — 2026-05-09
 
 ### Changes
-- e8f6269e fix: defer wrfc topology to sdk 0.33.22
+- e8f6269e fix: defer wrfc topology to platform 0.33.22
 
 ## [0.19.86] — 2026-05-09
 
 ### Changes
-- 79d0cb5f chore: update sdk to 0.33.21
+- 79d0cb5f chore: update platform to 0.33.21
 - 03e79135 fix process summary line budget
 - 6fdebda5 fix wrfc process modal hierarchy inference
 - 6d3eb4cf fix process modal agent hierarchy rendering
@@ -1640,12 +1640,12 @@ First release of the best-in-class program: a full UX-first review of the codeba
 ## [0.19.82] — 2026-05-09
 
 ### Changes
-- e13b0885 Update SDK and repair planning flow
+- e13b0885 Update platform and repair planning flow
 
 ## [0.19.81] — 2026-05-08
 
 ### Changes
-- 42dab2d7 Update SDK to 0.33.18
+- 42dab2d7 Update platform to 0.33.18
 
 ## [0.19.80] — 2026-05-08
 
@@ -1655,22 +1655,22 @@ First release of the best-in-class program: a full UX-first review of the codeba
 ## [0.19.79] — 2026-05-08
 
 ### Changes
-- bff5d1a7 Update SDK 0.33.17 and isolate HomeGraph knowledge
+- bff5d1a7 Update platform 0.33.17 and isolate HomeGraph knowledge
 
 ## [0.19.78] — 2026-05-08
 
 ### Changes
-- 8f989b6c Update SDK to 0.33.16
+- 8f989b6c Update platform to 0.33.16
 
 ## [0.19.77] — 2026-05-08
 
 ### Changes
-- e1b9d18d Update SDK to 0.33.15
+- e1b9d18d Update platform to 0.33.15
 
 ## [0.19.76] — 2026-05-08
 
 ### Changes
-- f541c42f Update SDK to 0.33.14
+- f541c42f Update platform to 0.33.14
 
 ## [0.19.75] — 2026-05-07
 
@@ -1680,33 +1680,33 @@ First release of the best-in-class program: a full UX-first review of the codeba
 ## [0.19.74] — 2026-05-07
 
 ### Changes
-- 817731ef chore: update goodvibes sdk to 0.33.12
+- 817731ef chore: update goodvibes platform to 0.33.12
 
 ## [0.19.73] — 2026-05-07
 
 ### Changes
-- 6cdfdad8 chore: update goodvibes sdk to 0.33.11
+- 6cdfdad8 chore: update goodvibes platform to 0.33.11
 
 ## [0.19.72] — 2026-05-07
 
 ### Changes
-- 103a367e chore: update goodvibes sdk to 0.33.10
+- 103a367e chore: update goodvibes platform to 0.33.10
 
 ## [0.19.71] — 2026-05-07
 
 ### Changes
-- f7dcf379 chore: update goodvibes sdk to 0.33.9
+- f7dcf379 chore: update goodvibes platform to 0.33.9
 
 ## [0.19.70] — 2026-05-07
 
 ### Changes
-- e53b2e6f chore: update goodvibes sdk to 0.33.8
-- 655c77a9 chore: update goodvibes sdk to 0.33.7
+- e53b2e6f chore: update goodvibes platform to 0.33.8
+- 655c77a9 chore: update goodvibes platform to 0.33.7
 
 ## [0.19.69] — 2026-05-07
 
 ### Changes
-- 4e8c1ec1 chore: update goodvibes sdk to 0.33.5
+- 4e8c1ec1 chore: update goodvibes platform to 0.33.5
 
 ## [0.19.68] — 2026-05-06
 
@@ -1811,48 +1811,48 @@ First release of the best-in-class program: a full UX-first review of the codeba
 ## [0.19.62] — 2026-05-05
 
 ### Changed
-- Recut the SDK 0.33.4 TUI migration release so the GitHub Release workflow owns npm publication and can finish green after `0.19.61` was already published manually.
+- Recut the platform 0.33.4 TUI migration release so the GitHub Release workflow owns npm publication and can finish green after `0.19.61` was already published manually.
 
 ---
 
 ## [0.19.61] — 2026-05-05
 
 ### Changed
-- Updated `legacy-package:goodvibes-sdk` to `0.28.22`.
-- Regenerated the operator contract artifacts for SDK 0.28.22.
-- Updated `legacy-package:goodvibes-sdk` and all split GoodVibes packages to `0.33.4`.
-- Migrated TUI imports to SDK public package/subpath seams after the SDK removed private `_internal` and catch-all platform exports.
-- Regenerated foundation/operator contract artifacts for the SDK 0.33 public contract shape.
+- Updated `legacy-package:goodvibes-platform` to `0.28.22`.
+- Regenerated the operator contract artifacts for platform 0.28.22.
+- Updated `legacy-package:goodvibes-platform` and all split GoodVibes packages to `0.33.4`.
+- Migrated TUI imports to platform public package/subpath seams after the platform removed private `_internal` and catch-all platform exports.
+- Regenerated foundation/operator contract artifacts for the platform 0.33 public contract shape.
 
 ### Verified
-- Verified the previously blocked `runtime/http-transport`, `runtime/realtime-transport`, and `release-gates/transport-parity` tests pass against SDK 0.33.4.
+- Verified the previously blocked `runtime/http-transport`, `runtime/realtime-transport`, and `release-gates/transport-parity` tests pass against platform 0.33.4.
 - Verified the full intended TUI test suite passes without quarantines or skipped migration failures: 480 test files passed, 0 failed.
-- Rebuilt production TUI and daemon binaries with SDK 0.33.4 and smoke-tested the compiled daemon binary.
-- Restarted the compiled daemon against the existing `.goodvibes/tui/control-plane/sessions.json` control-plane store and verified authenticated `/status` reports SDK 0.33.4 without session-normalization startup errors.
+- Rebuilt production TUI and daemon binaries with platform 0.33.4 and smoke-tested the compiled daemon binary.
+- Restarted the compiled daemon against the existing `.goodvibes/tui/control-plane/sessions.json` control-plane store and verified authenticated `/status` reports platform 0.33.4 without session-normalization startup errors.
 - Reran the TTS `STREAM_END` regression and verified provider-scoped `STREAM_END` does not end a spoken turn before the logical turn completes.
-- Rebuilt and relaunched the daemon with SDK 0.28.10, then retested Home Graph reindex coalescing, status responsiveness, TV feature Ask, base `knowledge.ask` with `knowledgeSpaceId: "homeassistant"`, generated pages, and map edge payloads against the live daemon.
-- Rebuilt and relaunched the daemon with SDK 0.28.11, verified reset `dryRun` is non-destructive against the live Home Graph space, and reran the full local test suite.
-- Rebuilt and relaunched the daemon with SDK 0.28.12, smoke-tested the compiled daemon binary, and coordinated the Home Assistant restart before live Home Graph validation.
-- Rebuilt and relaunched the daemon with SDK 0.28.13, smoke-tested the compiled daemon binary, and verified TTS spoken turns stay active through provider `STREAM_END` until the logical turn completes.
-- Live-tested SDK 0.28.13 Home Graph Ask/reindex/refinement: Ask now returns bounded current evidence with refinement task ids, and the coordinated Home Assistant follow-up showed background refinement can close the LG TV answer gaps; SDK follow-up is still needed for refinement-run budget failures, blocked retry-window tasks, and non-synthesized raw-snippet follow-up output.
-- Rebuilt and relaunched the daemon with SDK 0.28.14, smoke-tested the compiled daemon binary, and reran the TTS `STREAM_END` spoken-turn regression.
-- Coordinated the SDK 0.28.14 Home Assistant live pass: refinement runs now return immediately under budget, Ask/base Ask stay bounded, follow-up Ask synthesizes from repaired LG TV evidence, official LG sources appear in the repaired source set, and map/pages remain clean; one LG TV gap remains active with retryable/deferred repair state.
-- Rebuilt and relaunched the daemon with SDK 0.28.15, smoke-tested the compiled daemon binary, reran the TTS `STREAM_END` spoken-turn regression, and coordinated Home Assistant ownership of the live Home Graph route lane.
-- Coordinated the SDK 0.28.15 Home Assistant live pass: sync, reindex, refinement run, Ask, base Ask, and map stayed responsive; remaining SDK-side follow-up includes official-source answer preference, promoted typed facts, generated pages route reliability, and refinement limit accounting.
-- Rebuilt and relaunched the daemon with SDK 0.28.16, smoke-tested the compiled daemon binary, reran the TTS `STREAM_END` spoken-turn regression, and coordinated Home Assistant ownership of the live Home Graph route lane.
-- Coordinated the SDK 0.28.16 Home Assistant live pass: reset, sync, changed-only reindex, refinement run, pages, maps, and status checks stayed responsive; remaining SDK-side follow-up includes slow initial Home Graph Ask, weak first-answer synthesis with zero promoted facts, base knowledge Ask missing the official LG source, follow-up answers preferring secondary sources, and Home Graph map filters returning unchanged result counts.
-- Rebuilt and relaunched the daemon with SDK 0.28.17, smoke-tested the compiled daemon binary, reran the TTS `STREAM_END` spoken-turn regression, and ran the TUI-owned Home Graph evaluation before handing the route lane to Home Assistant.
-- Live-tested SDK 0.28.17 Home Graph reset/sync/reindex/refinement/Ask/pages/map behavior: destructive reset now deletes scoped generated artifacts, HA sync remains bounded, reindex coalesces overlapping calls, nested Home Assistant map filters narrow results, and base `knowledge.ask` now links concrete TV queries to the scoped LG Home Assistant device while leaving generic "the device" queries unlinked. Remaining SDK-side follow-up includes slow first Home Graph Ask, official LG source not driving the final/follow-up answer, top-level map filters being ignored, and generated page/follow-up prose still containing raw-snippet-style sections.
-- Rebuilt and relaunched the daemon with SDK 0.28.18, smoke-tested the compiled daemon binary, reran the TTS `STREAM_END` spoken-turn regression, and ran the TUI-owned Home Graph evaluation before handing the route lane to Home Assistant.
-- Live-tested SDK 0.28.18 Home Graph reset/sync/reindex/refinement/Ask/pages/map behavior: reset dry-run stayed non-destructive, destructive reset cleared scoped generated artifacts, HA sync returned in 5.4s, overlapping reindex coalesced, refinement/run stayed bounded, top-level and nested Home Assistant map filters both narrowed results with titled non-self-loop edges, and concrete TV asks linked only the real LG Home Assistant device while generic "the device" asks did not invent linked objects. Remaining SDK-side follow-up includes very slow first Home Graph Ask, base/follow-up answers still preferring secondary sources over the accepted official LG source, promoted facts missing subject/target metadata, generated pages missing subject/target/neighbors/relatedPages metadata and still rendering one raw-snippet-style LG page section, and generic base knowledge "device" asks returning noisy Home Assistant app facts.
-- Rebuilt and relaunched the daemon with SDK 0.28.19, smoke-tested the compiled daemon binary, reran the TTS `STREAM_END` spoken-turn regression, and ran the TUI-owned Home Graph evaluation before handing the route lane to Home Assistant.
-- Live-tested SDK 0.28.19 Home Graph reindex/refinement/Ask/pages/map behavior: changed-only reindex skipped missing generated-page artifacts without failures, broad refinement reported `requestedLimit: 500` and `effectiveLimit: 24`, Home Graph and base knowledge TV asks synthesized clean prose from official LG/vendor sources, concrete TV asks linked only the real LG Home Assistant device, returned facts now include top-level `subject`, `subjectIds`, `linkedObjectIds`, and `targetHints`, and generic "the device" asks return no unrelated Home Assistant app facts or gaps. Remaining SDK-side follow-up includes generated LG passport content still containing one raw/evidence-style section and page metadata still missing subject/target/neighbors/relatedPages fields.
-- Rebuilt and relaunched the daemon with SDK 0.28.20, smoke-tested the compiled daemon binary, reran the TTS `STREAM_END` spoken-turn regression, and ran the TUI-owned Home Graph evaluation before handing the route lane to Home Assistant.
-- Live-tested SDK 0.28.20 Home Graph reindex/refinement/Ask/pages/map behavior: overlapping reindex now exposes a coalesced bounded result, Home Graph and base knowledge TV asks continue to synthesize clean official/vendor-backed prose with only the real LG Home Assistant device linked, generic "the device" asks still return no unrelated facts or gaps, generated LG passports no longer match raw-evidence/direct-comparison/table-debris markers, and legitimate `2 x 10W`-style speaker specs remain present. Remaining SDK-side follow-up includes generated passport quality still containing low-value canonical fact text such as truncated marketing/spec fragments and page metadata still missing subject/target/neighbors/relatedPages fields.
-- Rebuilt and relaunched the daemon with SDK 0.28.21, smoke-tested the compiled daemon binary, reran the TTS `STREAM_END` spoken-turn regression, and ran the TUI-owned cold/warm Home Graph evaluation before handing the route lane to Home Assistant.
-- Live-tested SDK 0.28.21 Home Graph reset/sync/reindex/refinement/Ask/pages behavior: reset dry-run stayed non-destructive, destructive reset deleted 57 scoped artifacts, Home Assistant sync returned in 4.49s with status checks staying responsive, changed-only reindex finished in 592ms and skipped generated-page artifacts, concrete TV asks linked only the real LG Home Assistant device, generic "the device" asks returned no unrelated facts/gaps, warm Home Graph/base asks synthesized clean source-backed prose with 24 subject-linked facts, and `nextRepairAttemptAt` is present on blocked repair tasks. Remaining SDK-side follow-up includes slow cold asks, cold Home Graph Ask returning active repair metadata with 0 promoted facts before base Ask repairs the evidence, refinement/run exhausting its budget after 63.9s with `requestedLimit: 500` / `effectiveLimit: 24`, generated page metadata still missing subject/target/neighbors/relatedPages, and LG passport canonical facts still containing low-value truncated spec fragments despite no raw-evidence marker matches.
-- Rebuilt and relaunched the daemon with SDK 0.28.22, smoke-tested the compiled daemon binary, reran the TTS `STREAM_END` spoken-turn regression, and ran the TUI-owned focused warm Home Graph page-refresh validation before handing the route lane to Home Assistant.
-- Live-tested SDK 0.28.22 Home Graph Ask-to-page propagation: warm Home Graph Ask returned in 14.64s with status probes responsive, synthesized official/vendor-backed prose, linked only the real LG Home Assistant device, returned 12 subject-linked facts, and reported `pageRefreshRequested`/`pageRefreshed`; pages rendered 40 markdown pages in 103ms, the LG passport no longer shows `0 source(s)` or stale manual/source questions, preserves a `2 x 10W` speaker fact, and map sanity returned 95 titled non-self-loop edges in 27ms. Remaining SDK-side follow-up includes the LG passport still lacking explicit official LG source text, page metadata still missing subject/target/neighbors/relatedPages, and the passport still rendering low-value truncated canonical fact fragments such as HDMI quantity/table debris.
+- Rebuilt and relaunched the daemon with platform 0.28.10, then retested Home Graph reindex coalescing, status responsiveness, TV feature Ask, base `knowledge.ask` with `knowledgeSpaceId: "homeassistant"`, generated pages, and map edge payloads against the live daemon.
+- Rebuilt and relaunched the daemon with platform 0.28.11, verified reset `dryRun` is non-destructive against the live Home Graph space, and reran the full local test suite.
+- Rebuilt and relaunched the daemon with platform 0.28.12, smoke-tested the compiled daemon binary, and coordinated the Home Assistant restart before live Home Graph validation.
+- Rebuilt and relaunched the daemon with platform 0.28.13, smoke-tested the compiled daemon binary, and verified TTS spoken turns stay active through provider `STREAM_END` until the logical turn completes.
+- Live-tested platform 0.28.13 Home Graph Ask/reindex/refinement: Ask now returns bounded current evidence with refinement task ids, and the coordinated Home Assistant follow-up showed background refinement can close the LG TV answer gaps; platform follow-up is still needed for refinement-run budget failures, blocked retry-window tasks, and non-synthesized raw-snippet follow-up output.
+- Rebuilt and relaunched the daemon with platform 0.28.14, smoke-tested the compiled daemon binary, and reran the TTS `STREAM_END` spoken-turn regression.
+- Coordinated the platform 0.28.14 Home Assistant live pass: refinement runs now return immediately under budget, Ask/base Ask stay bounded, follow-up Ask synthesizes from repaired LG TV evidence, official LG sources appear in the repaired source set, and map/pages remain clean; one LG TV gap remains active with retryable/deferred repair state.
+- Rebuilt and relaunched the daemon with platform 0.28.15, smoke-tested the compiled daemon binary, reran the TTS `STREAM_END` spoken-turn regression, and coordinated Home Assistant ownership of the live Home Graph route lane.
+- Coordinated the platform 0.28.15 Home Assistant live pass: sync, reindex, refinement run, Ask, base Ask, and map stayed responsive; remaining platform-side follow-up includes official-source answer preference, promoted typed facts, generated pages route reliability, and refinement limit accounting.
+- Rebuilt and relaunched the daemon with platform 0.28.16, smoke-tested the compiled daemon binary, reran the TTS `STREAM_END` spoken-turn regression, and coordinated Home Assistant ownership of the live Home Graph route lane.
+- Coordinated the platform 0.28.16 Home Assistant live pass: reset, sync, changed-only reindex, refinement run, pages, maps, and status checks stayed responsive; remaining platform-side follow-up includes slow initial Home Graph Ask, weak first-answer synthesis with zero promoted facts, base knowledge Ask missing the official LG source, follow-up answers preferring secondary sources, and Home Graph map filters returning unchanged result counts.
+- Rebuilt and relaunched the daemon with platform 0.28.17, smoke-tested the compiled daemon binary, reran the TTS `STREAM_END` spoken-turn regression, and ran the TUI-owned Home Graph evaluation before handing the route lane to Home Assistant.
+- Live-tested platform 0.28.17 Home Graph reset/sync/reindex/refinement/Ask/pages/map behavior: destructive reset now deletes scoped generated artifacts, HA sync remains bounded, reindex coalesces overlapping calls, nested Home Assistant map filters narrow results, and base `knowledge.ask` now links concrete TV queries to the scoped LG Home Assistant device while leaving generic "the device" queries unlinked. Remaining platform-side follow-up includes slow first Home Graph Ask, official LG source not driving the final/follow-up answer, top-level map filters being ignored, and generated page/follow-up prose still containing raw-snippet-style sections.
+- Rebuilt and relaunched the daemon with platform 0.28.18, smoke-tested the compiled daemon binary, reran the TTS `STREAM_END` spoken-turn regression, and ran the TUI-owned Home Graph evaluation before handing the route lane to Home Assistant.
+- Live-tested platform 0.28.18 Home Graph reset/sync/reindex/refinement/Ask/pages/map behavior: reset dry-run stayed non-destructive, destructive reset cleared scoped generated artifacts, HA sync returned in 5.4s, overlapping reindex coalesced, refinement/run stayed bounded, top-level and nested Home Assistant map filters both narrowed results with titled non-self-loop edges, and concrete TV asks linked only the real LG Home Assistant device while generic "the device" asks did not invent linked objects. Remaining platform-side follow-up includes very slow first Home Graph Ask, base/follow-up answers still preferring secondary sources over the accepted official LG source, promoted facts missing subject/target metadata, generated pages missing subject/target/neighbors/relatedPages metadata and still rendering one raw-snippet-style LG page section, and generic base knowledge "device" asks returning noisy Home Assistant app facts.
+- Rebuilt and relaunched the daemon with platform 0.28.19, smoke-tested the compiled daemon binary, reran the TTS `STREAM_END` spoken-turn regression, and ran the TUI-owned Home Graph evaluation before handing the route lane to Home Assistant.
+- Live-tested platform 0.28.19 Home Graph reindex/refinement/Ask/pages/map behavior: changed-only reindex skipped missing generated-page artifacts without failures, broad refinement reported `requestedLimit: 500` and `effectiveLimit: 24`, Home Graph and base knowledge TV asks synthesized clean prose from official LG/vendor sources, concrete TV asks linked only the real LG Home Assistant device, returned facts now include top-level `subject`, `subjectIds`, `linkedObjectIds`, and `targetHints`, and generic "the device" asks return no unrelated Home Assistant app facts or gaps. Remaining platform-side follow-up includes generated LG passport content still containing one raw/evidence-style section and page metadata still missing subject/target/neighbors/relatedPages fields.
+- Rebuilt and relaunched the daemon with platform 0.28.20, smoke-tested the compiled daemon binary, reran the TTS `STREAM_END` spoken-turn regression, and ran the TUI-owned Home Graph evaluation before handing the route lane to Home Assistant.
+- Live-tested platform 0.28.20 Home Graph reindex/refinement/Ask/pages/map behavior: overlapping reindex now exposes a coalesced bounded result, Home Graph and base knowledge TV asks continue to synthesize clean official/vendor-backed prose with only the real LG Home Assistant device linked, generic "the device" asks still return no unrelated facts or gaps, generated LG passports no longer match raw-evidence/direct-comparison/table-debris markers, and legitimate `2 x 10W`-style speaker specs remain present. Remaining platform-side follow-up includes generated passport quality still containing low-value canonical fact text such as truncated marketing/spec fragments and page metadata still missing subject/target/neighbors/relatedPages fields.
+- Rebuilt and relaunched the daemon with platform 0.28.21, smoke-tested the compiled daemon binary, reran the TTS `STREAM_END` spoken-turn regression, and ran the TUI-owned cold/warm Home Graph evaluation before handing the route lane to Home Assistant.
+- Live-tested platform 0.28.21 Home Graph reset/sync/reindex/refinement/Ask/pages behavior: reset dry-run stayed non-destructive, destructive reset deleted 57 scoped artifacts, Home Assistant sync returned in 4.49s with status checks staying responsive, changed-only reindex finished in 592ms and skipped generated-page artifacts, concrete TV asks linked only the real LG Home Assistant device, generic "the device" asks returned no unrelated facts/gaps, warm Home Graph/base asks synthesized clean source-backed prose with 24 subject-linked facts, and `nextRepairAttemptAt` is present on blocked repair tasks. Remaining platform-side follow-up includes slow cold asks, cold Home Graph Ask returning active repair metadata with 0 promoted facts before base Ask repairs the evidence, refinement/run exhausting its budget after 63.9s with `requestedLimit: 500` / `effectiveLimit: 24`, generated page metadata still missing subject/target/neighbors/relatedPages, and LG passport canonical facts still containing low-value truncated spec fragments despite no raw-evidence marker matches.
+- Rebuilt and relaunched the daemon with platform 0.28.22, smoke-tested the compiled daemon binary, reran the TTS `STREAM_END` spoken-turn regression, and ran the TUI-owned focused warm Home Graph page-refresh validation before handing the route lane to Home Assistant.
+- Live-tested platform 0.28.22 Home Graph Ask-to-page propagation: warm Home Graph Ask returned in 14.64s with status probes responsive, synthesized official/vendor-backed prose, linked only the real LG Home Assistant device, returned 12 subject-linked facts, and reported `pageRefreshRequested`/`pageRefreshed`; pages rendered 40 markdown pages in 103ms, the LG passport no longer shows `0 source(s)` or stale manual/source questions, preserves a `2 x 10W` speaker fact, and map sanity returned 95 titled non-self-loop edges in 27ms. Remaining platform-side follow-up includes the LG passport still lacking explicit official LG source text, page metadata still missing subject/target/neighbors/relatedPages, and the passport still rendering low-value truncated canonical fact fragments such as HDMI quantity/table debris.
 
 ---
 
@@ -1866,11 +1866,11 @@ First release of the best-in-class program: a full UX-first review of the codeba
 ## [0.19.59] — 2026-05-01
 
 ### Changed
-- Updated `legacy-package:goodvibes-sdk` to `0.28.3`.
-- Picked up SDK Home Graph refinement coalescing so overlapping Refine/Reindex/Ask repair work should not stack and pin the daemon.
+- Updated `legacy-package:goodvibes-platform` to `0.28.3`.
+- Picked up platform Home Graph refinement coalescing so overlapping Refine/Reindex/Ask repair work should not stack and pin the daemon.
 
 ### Fixed
-- Picked up SDK preservation of Home Graph `linkedObjects` from repair-source metadata.
+- Picked up platform preservation of Home Graph `linkedObjects` from repair-source metadata.
 
 ---
 
@@ -1884,11 +1884,11 @@ First release of the best-in-class program: a full UX-first review of the codeba
 ## [0.19.57] — 2026-05-01
 
 ### Changed
-- Updated `legacy-package:goodvibes-sdk` to `0.28.2`.
-- Documented SDK `0.28.2` Home Graph refinement guardrails: runtime dist now defaults to 12 refinement gaps per run, caps broad runs at 24 gaps, and reopens historical `No semantic gap repairer is configured` tasks when the host repairer is wired.
+- Updated `legacy-package:goodvibes-platform` to `0.28.2`.
+- Documented platform `0.28.2` Home Graph refinement guardrails: runtime dist now defaults to 12 refinement gaps per run, caps broad runs at 24 gaps, and reopens historical `No semantic gap repairer is configured` tasks when the host repairer is wired.
 
 ### Fixed
-- Picked up SDK fixes for the stale published dist refinement guardrail bug and stale no-repairer task recovery.
+- Picked up platform fixes for the stale published dist refinement guardrail bug and stale no-repairer task recovery.
 
 ---
 
@@ -1902,31 +1902,31 @@ First release of the best-in-class program: a full UX-first review of the codeba
 ## [0.19.55] — 2026-05-01
 
 ### Changed
-- Updated `legacy-package:goodvibes-sdk` to `0.28.1`.
-- Documented SDK-owned Home Graph and base knowledge refinement budget behavior: Ask returns current evidence quickly with `refinementTaskIds`, reindex queues repair work instead of blocking, broad refinement runs cap effective work per run, and stale active tasks recover to retriable blocked state.
+- Updated `legacy-package:goodvibes-platform` to `0.28.1`.
+- Documented platform-owned Home Graph and base knowledge refinement budget behavior: Ask returns current evidence quickly with `refinementTaskIds`, reindex queues repair work instead of blocking, broad refinement runs cap effective work per run, and stale active tasks recover to retriable blocked state.
 
 ### Fixed
-- Picked up SDK Home Graph refinement fixes for async ask repair, capped broad refinement runs, stale searching/evaluating task recovery, and non-blocking reindex repair queueing.
+- Picked up platform Home Graph refinement fixes for async ask repair, capped broad refinement runs, stale searching/evaluating task recovery, and non-blocking reindex repair queueing.
 
 ## [0.19.54] — 2026-05-01
 
 ### Added
-- Added a TUI-owned Project Planning coordinator that detects explicit planning intent in normal terminal conversation, stores project-scoped planning state through the SDK, records open-question answers, and keeps daemon/non-TUI surfaces passive.
+- Added a TUI-owned Project Planning coordinator that detects explicit planning intent in normal terminal conversation, stores project-scoped planning state through the platform, records open-question answers, and keeps daemon/non-TUI surfaces passive.
 - Added the `Planning` panel for project readiness, next questions, gaps, task graph, verification gates, decisions, project language, and agent handoff metadata.
-- Added documentation for TUI project planning, project-scoped knowledge spaces, the Planning panel, and passive SDK route/operator boundaries.
-- Added `/knowledge ask <query>` to render the SDK-returned semantic answer, sources, facts, linked objects, gaps, confidence, and synthesized state without locally building snippets from search results.
+- Added documentation for TUI project planning, project-scoped knowledge spaces, the Planning panel, and passive platform route/operator boundaries.
+- Added `/knowledge ask <query>` to render the platform-returned semantic answer, sources, facts, linked objects, gaps, confidence, and synthesized state without locally building snippets from search results.
 
 ### Changed
-- Updated `legacy-package:goodvibes-sdk` to `0.28.0`.
-- Reworked `/plan` so it inspects/seeds SDK-backed project planning state and no longer injects a model-authored execution-plan prompt that claims agents will spawn automatically.
-- Wired the SDK semantic knowledge service into both base knowledge and Home Graph routes, using the SDK-owned bounded provider-backed semantic LLM wrapper with timeout, abort, concurrency, and capped broad-reindex LLM attempts.
-- Wired the SDK web-backed semantic gap repairer into the TUI/daemon runtime composition so Home Graph and base knowledge refinement can search, ingest, and repair gaps instead of reporting an unconfigured repairer.
-- Routed main provider/model, helper/tool/TTS model overrides, TTS provider/voice selection, secret-backed settings, MCP trust, subscriptions, feature flags, and all SDK config keys through the fullscreen `/config` workspace.
+- Updated `legacy-package:goodvibes-platform` to `0.28.0`.
+- Reworked `/plan` so it inspects/seeds platform-backed project planning state and no longer injects a model-authored execution-plan prompt that claims agents will spawn automatically.
+- Wired the platform semantic knowledge service into both base knowledge and Home Graph routes, using the platform-owned bounded provider-backed semantic LLM wrapper with timeout, abort, concurrency, and capped broad-reindex LLM attempts.
+- Wired the platform web-backed semantic gap repairer into the TUI/daemon runtime composition so Home Graph and base knowledge refinement can search, ingest, and repair gaps instead of reporting an unconfigured repairer.
+- Routed main provider/model, helper/tool/TTS model overrides, TTS provider/voice selection, secret-backed settings, MCP trust, subscriptions, feature flags, and all platform config keys through the fullscreen `/config` workspace.
 - Kept `/model`, `/provider`, and `/effort` as quick access model-selection commands while `/config` owns persistent settings.
-- Documented SDK 0.28.0 durable knowledge refinement routes, Home Graph readiness/refinement tasks/pages/map facets, daemon OpenAI-compatible `/v1/models` and `/v1/chat/completions`, and non-terminal provider-scoped `STREAM_END` semantics.
+- Documented platform 0.28.0 durable knowledge refinement routes, Home Graph readiness/refinement tasks/pages/map facets, daemon OpenAI-compatible `/v1/models` and `/v1/chat/completions`, and non-terminal provider-scoped `STREAM_END` semantics.
 
 ### Fixed
-- Picked up SDK Home Graph map, ask, PDF repair, reindex, generated-page, and shared semantic knowledge/wiki fixes through `0.27.8`, including SDK-owned knowledge/Home Graph map facets, Home Assistant map filters, trailing-slash/JSON POST map compatibility, tighter TV/media-player question scoping, repair-needed handling for garbled PDF extraction text, compressed PDF stream extraction, source auto-linking by Home Assistant identity/model, `GET /api/homeassistant/home-graph/pages`, base `POST /api/knowledge/ask`, semantic Home Graph answer fields, strict candidate filtering, cleaner deterministic fact filtering by query intent, tighter semantic evidence ranking, safer subject-term handling, generated semantic page/fact anchor suppression, deterministic-to-provider enrichment upgrades, feature/spec boilerplate suppression, generated page fact-quality filtering, semantic artifact exclusion from linked objects, non-blocking Home Graph answer synthesis while semantic enrichment continues in the background, truncated deterministic fragment filtering, and lower-value manual/accessory/service text filtering in feature/spec answer prompts.
+- Picked up platform Home Graph map, ask, PDF repair, reindex, generated-page, and shared semantic knowledge/wiki fixes through `0.27.8`, including platform-owned knowledge/Home Graph map facets, Home Assistant map filters, trailing-slash/JSON POST map compatibility, tighter TV/media-player question scoping, repair-needed handling for garbled PDF extraction text, compressed PDF stream extraction, source auto-linking by Home Assistant identity/model, `GET /api/homeassistant/home-graph/pages`, base `POST /api/knowledge/ask`, semantic Home Graph answer fields, strict candidate filtering, cleaner deterministic fact filtering by query intent, tighter semantic evidence ranking, safer subject-term handling, generated semantic page/fact anchor suppression, deterministic-to-provider enrichment upgrades, feature/spec boilerplate suppression, generated page fact-quality filtering, semantic artifact exclusion from linked objects, non-blocking Home Graph answer synthesis while semantic enrichment continues in the background, truncated deterministic fragment filtering, and lower-value manual/accessory/service text filtering in feature/spec answer prompts.
 - Kept `/tts` spoken turns active across provider-scoped `STREAM_END` events so tool-using or multi-step turns continue collecting assistant deltas until `TURN_COMPLETED`, `TURN_ERROR`, `TURN_CANCEL`, or `PREFLIGHT_FAIL`.
 
 ### Removed
@@ -1938,25 +1938,25 @@ First release of the best-in-class program: a full UX-first review of the codeba
 
 ### Added
 - Exposed generic knowledge issue review through `/knowledge review-issue <issueId> <accept|reject|resolve|reopen|edit|forget>`.
-- Documented SDK-owned generic knowledge issue review routes and operator method.
+- Documented platform-owned generic knowledge issue review routes and operator method.
 
 ### Changed
-- Updated `legacy-package:goodvibes-sdk` to `0.26.8`.
-- Documented SDK 0.26.8 Home Graph behavior for durable review decisions, generated issue resolved-state preservation, stricter Home Assistant quality rules, and pending Home Assistant integration documentation source candidates.
+- Updated `legacy-package:goodvibes-platform` to `0.26.8`.
+- Documented platform 0.26.8 Home Graph behavior for durable review decisions, generated issue resolved-state preservation, stricter Home Assistant quality rules, and pending Home Assistant integration documentation source candidates.
 
 ### Fixed
-- Picked up SDK Home Graph review persistence and generated issue refresh fixes.
+- Picked up platform Home Graph review persistence and generated issue refresh fixes.
 
 ---
 
 ## [0.19.52] — 2026-04-28
 
 ### Changed
-- Updated `legacy-package:goodvibes-sdk` to `0.26.7`.
-- Documented that Home Assistant Home Graph manuals and documents ingested before SDK `0.26.7` should be reingested or reindexed when deep manual detail search is needed.
+- Updated `legacy-package:goodvibes-platform` to `0.26.7`.
+- Documented that Home Assistant Home Graph manuals and documents ingested before platform `0.26.7` should be reingested or reindexed when deep manual detail search is needed.
 
 ### Fixed
-- Picked up SDK Home Graph ask timeout fixes from bounded lightweight Home Graph search.
+- Picked up platform Home Graph ask timeout fixes from bounded lightweight Home Graph search.
 - Picked up capped searchable extraction text for Home Graph manuals and documents so manual/document details are available to search without unbounded payloads.
 
 ---
@@ -1964,54 +1964,54 @@ First release of the best-in-class program: a full UX-first review of the codeba
 ## [0.19.51] — 2026-04-28
 
 ### Changed
-- Updated `legacy-package:goodvibes-sdk` to `0.26.6`.
+- Updated `legacy-package:goodvibes-platform` to `0.26.6`.
 - Embedded and standalone daemon hosts now wrap Bun request handlers so unexpected daemon/listener route exceptions return bounded JSON errors and are logged instead of printing raw stack/source output into the TUI terminal.
 
 ### Fixed
-- Picked up SDK Home Assistant Home Graph snapshot sync fixes for Home Assistant-native snake_case registry fields, incomplete registry objects, and JSON error responses from Home Graph admin routes.
+- Picked up platform Home Assistant Home Graph snapshot sync fixes for Home Assistant-native snake_case registry fields, incomplete registry objects, and JSON error responses from Home Graph admin routes.
 
 ---
 
 ## [0.19.50] — 2026-04-28
 
 ### Changed
-- Updated `legacy-package:goodvibes-sdk` to `0.26.5`.
-- TUI external-service inspection now uses SDK `daemonStatus` and `httpListenerStatus` startup modes to distinguish embedded services, verified external daemons, blocked ports, disabled services, and unavailable services.
+- Updated `legacy-package:goodvibes-platform` to `0.26.5`.
+- TUI external-service inspection now uses platform `daemonStatus` and `httpListenerStatus` startup modes to distinguish embedded services, verified external daemons, blocked ports, disabled services, and unavailable services.
 
 ### Fixed
 - Treats a verified external GoodVibes daemon on the configured host/port as active instead of reporting daemon activation failure during onboarding.
-- Reports SDK-provided blocked/unavailable startup reasons in onboarding runtime verification warnings.
+- Reports platform-provided blocked/unavailable startup reasons in onboarding runtime verification warnings.
 
 ---
 
 ## [0.19.49] — 2026-04-28
 
 ### Changed
-- Updated `legacy-package:goodvibes-sdk` to `0.26.4` for SDK-owned multipart/raw artifact uploads across artifact storage, knowledge ingest, and Home Assistant Home Graph ingest.
-- Exposed the SDK `storage.artifacts.maxBytes` setting through the normal storage configuration surface.
-- Regenerated foundation operator contract artifacts from the SDK 0.26.4 contract.
+- Updated `legacy-package:goodvibes-platform` to `0.26.4` for platform-owned multipart/raw artifact uploads across artifact storage, knowledge ingest, and Home Assistant Home Graph ingest.
+- Exposed the platform `storage.artifacts.maxBytes` setting through the normal storage configuration surface.
+- Regenerated foundation operator contract artifacts from the platform 0.26.4 contract.
 
 ### Fixed
-- Picked up SDK fixes for large multipart upload cap handling and oversized-upload rejection behavior.
-- Removed the temporary TUI upload-stream normalization shim after SDK 0.26.4 fixed Bun request-reader cleanup failures in raw artifact uploads.
+- Picked up platform fixes for large multipart upload cap handling and oversized-upload rejection behavior.
+- Removed the temporary TUI upload-stream normalization shim after platform 0.26.4 fixed Bun request-reader cleanup failures in raw artifact uploads.
 
 ---
 
 ## [0.19.48] — 2026-04-28
 
 ### Changed
-- Updated `legacy-package:goodvibes-sdk` to `0.26.1` for SDK-owned `goodvibes_context` and `goodvibes_settings` tools, shared harness-awareness prompt support, and Home Assistant automation tool alias support.
-- Adopted SDK 0.26.1 shared-session routing semantics where omitted message `kind` defaults to normal chat and `kind: "task"` is reserved for agent/WRFC continuations.
+- Updated `legacy-package:goodvibes-platform` to `0.26.1` for platform-owned `goodvibes_context` and `goodvibes_settings` tools, shared harness-awareness prompt support, and Home Assistant automation tool alias support.
+- Adopted platform 0.26.1 shared-session routing semantics where omitted message `kind` defaults to normal chat and `kind: "task"` is reserved for agent/WRFC continuations.
 
 ### Fixed
-- Picked up SDK fixes that prevent ordinary shared-session messages from accidentally binding to agent task handling.
+- Picked up platform fixes that prevent ordinary shared-session messages from accidentally binding to agent task handling.
 
 ---
 
 ## [0.19.47] — 2026-04-28
 
 ### Fixed
-- Moved Bun compile compatibility patching into `prebuild` so manual local compile flows patch SDK 0.26.0 transitive `css-tree` JSON loaders before `bun build --compile`.
+- Moved Bun compile compatibility patching into `prebuild` so manual local compile flows patch platform 0.26.0 transitive `css-tree` JSON loaders before `bun build --compile`.
 - Patched the remaining `mdn-data` JSON imports used by `css-tree/lib/data.js`, fixing compiled TUI startup from directories outside the source checkout.
 
 ---
@@ -2019,44 +2019,44 @@ First release of the best-in-class program: a full UX-first review of the codeba
 ## [0.19.46] — 2026-04-28
 
 ### Fixed
-- Patched the release binary build for SDK 0.26.0 dependencies that load `css-tree` JSON metadata through `createRequire`, allowing Bun-compiled daemon binaries to start successfully.
+- Patched the release binary build for platform 0.26.0 dependencies that load `css-tree` JSON metadata through `createRequire`, allowing Bun-compiled daemon binaries to start successfully.
 
 ---
 
 ## [0.19.45] — 2026-04-28
 
 ### Added
-- Documented SDK-owned Home Assistant Home Graph daemon routes for snapshot sync, graph browse, source-backed answers, issue review, device passports, room pages, packets, import/export, and source inventory.
-- Documented SDK-owned browser-local knowledge ingestion as an opt-in local-data import path exposed through `knowledge.ingest.browserHistory`.
+- Documented platform-owned Home Assistant Home Graph daemon routes for snapshot sync, graph browse, source-backed answers, issue review, device passports, room pages, packets, import/export, and source inventory.
+- Documented platform-owned browser-local knowledge ingestion as an opt-in local-data import path exposed through `knowledge.ingest.browserHistory`.
 
 ### Changed
-- Updated `legacy-package:goodvibes-sdk` to `0.26.0` for Home Assistant Home Graph support, browser-local knowledge ingestion, Readability-backed HTML extraction, and refreshed SDK docs/operator contracts.
-- Regenerated foundation operator contract artifacts from the SDK 0.26.0 contract.
+- Updated `legacy-package:goodvibes-platform` to `0.26.0` for Home Assistant Home Graph support, browser-local knowledge ingestion, Readability-backed HTML extraction, and refreshed platform docs/operator contracts.
+- Regenerated foundation operator contract artifacts from the platform 0.26.0 contract.
 
 ## [0.19.44] — 2026-04-27
 
 ### Changed
-- Updated `legacy-package:goodvibes-sdk` to `0.25.21` for SDK-owned Cloudflare hostname normalization and zone ownership checks.
-- Regenerated foundation operator contract artifacts from the SDK 0.25.21 contract.
+- Updated `legacy-package:goodvibes-platform` to `0.25.21` for platform-owned Cloudflare hostname normalization and zone ownership checks.
+- Regenerated foundation operator contract artifacts from the platform 0.25.21 contract.
 
 ### Fixed
-- Cloudflare provisioning now benefits from SDK normalization of stale placeholder hostnames like `daemon.example.com` and `goodvibes.example.com` into hostnames within the selected zone.
-- Cloudflare DNS and Zero Trust Access setup now benefits from SDK-side zone ownership checks before hostname requests are sent to Cloudflare.
+- Cloudflare provisioning now benefits from platform normalization of stale placeholder hostnames like `daemon.example.com` and `goodvibes.example.com` into hostnames within the selected zone.
+- Cloudflare DNS and Zero Trust Access setup now benefits from platform-side zone ownership checks before hostname requests are sent to Cloudflare.
 
 ## [0.19.43] — 2026-04-27
 
 ### Changed
-- Updated `legacy-package:goodvibes-sdk` to `0.25.20` for SDK-owned Cloudflare Durable Object migration idempotency and retry fixes.
-- Regenerated foundation operator contract artifacts from the SDK 0.25.20 contract.
+- Updated `legacy-package:goodvibes-platform` to `0.25.20` for platform-owned Cloudflare Durable Object migration idempotency and retry fixes.
+- Regenerated foundation operator contract artifacts from the platform 0.25.20 contract.
 
 ### Fixed
-- Cloudflare Worker provisioning now benefits from SDK recovery when an existing `GoodVibesCoordinator` Durable Object SQLite migration has already been applied.
+- Cloudflare Worker provisioning now benefits from platform recovery when an existing `GoodVibesCoordinator` Durable Object SQLite migration has already been applied.
 
 ## [0.19.42] — 2026-04-27
 
 ### Changed
-- Updated `legacy-package:goodvibes-sdk` to `0.25.19` for SDK-owned Cloudflare Workers provisioning fixes around existing workers.dev subdomains, Worker cron settings, and workers.dev route disable flows.
-- Regenerated foundation operator contract artifacts from the SDK 0.25.19 contract.
+- Updated `legacy-package:goodvibes-platform` to `0.25.19` for platform-owned Cloudflare Workers provisioning fixes around existing workers.dev subdomains, Worker cron settings, and workers.dev route disable flows.
+- Regenerated foundation operator contract artifacts from the platform 0.25.19 contract.
 
 ### Fixed
 - Home Assistant setup is now detected as an external onboarding surface even when configured values exist but `surfaces.homeassistant.enabled` is off.
@@ -2066,33 +2066,33 @@ First release of the best-in-class program: a full UX-first review of the codeba
 ## [0.19.41] — 2026-04-27
 
 ### Changed
-- Updated `legacy-package:goodvibes-sdk` to `0.25.18` for SDK-owned Cloudflare provisioning idempotency and recovery fixes.
+- Updated `legacy-package:goodvibes-platform` to `0.25.18` for platform-owned Cloudflare provisioning idempotency and recovery fixes.
 - Cloudflare setup now benefits from repeated-run reuse of existing Queues, queue consumers, KV namespaces, R2 buckets, Secrets Stores, Zero Trust Tunnels, Access resources, DNS CNAMEs, and workers.dev script routes.
 
 ## [0.19.40] — 2026-04-27
 
 ### Changed
-- Updated `legacy-package:goodvibes-sdk` to `0.25.17` for SDK-owned Cloudflare operational-token policy fixes.
+- Updated `legacy-package:goodvibes-platform` to `0.25.17` for platform-owned Cloudflare operational-token policy fixes.
 - Cloudflare setup now benefits from separate account, zone, and R2-bucket token policies, created-token policy verification before storing `CLOUDFLARE_API_TOKEN`, and improved R2 permission scope handling.
 
 ## [0.19.39] — 2026-04-27
 
 ### Changed
-- Updated `legacy-package:goodvibes-sdk` to `0.25.16` for SDK-owned Cloudflare operational-token creation fixes.
-- Cloudflare setup now benefits from SDK permission matching for Cloudflare `Write`/`Edit` naming variants and corrected resource scopes for R2, DNS, and Zero Trust Access token creation.
+- Updated `legacy-package:goodvibes-platform` to `0.25.16` for platform-owned Cloudflare operational-token creation fixes.
+- Cloudflare setup now benefits from platform permission matching for Cloudflare `Write`/`Edit` naming variants and corrected resource scopes for R2, DNS, and Zero Trust Access token creation.
 
 ## [0.19.38] — 2026-04-26
 
 ### Changed
-- Updated `legacy-package:goodvibes-sdk` to `0.25.15` for SDK-owned Cloudflare bootstrap-token permission-group resolution fixes.
+- Updated `legacy-package:goodvibes-platform` to `0.25.15` for platform-owned Cloudflare bootstrap-token permission-group resolution fixes.
 - Cloudflare bootstrap setup now benefits from filtered permission-group lookups for account and zone permissions such as Workers Scripts Write, Queues Write, Zone Read, DNS Write, and Workers KV Storage Write.
 
 ## [0.19.37] — 2026-04-26
 
 ### Changed
-- Updated `legacy-package:goodvibes-sdk` to `0.25.14` for SDK-owned Home Assistant isolated remote-chat sessions, route-binding cleanup, and Assist chat response contract fixes.
+- Updated `legacy-package:goodvibes-platform` to `0.25.14` for platform-owned Home Assistant isolated remote-chat sessions, route-binding cleanup, and Assist chat response contract fixes.
 - Home Assistant docs now state that Assist chat responses use `mode: "remote-chat"`, expose `assistant.text` / `assistant.speechText`, and do not include `agentId`.
-- Regenerated foundation operator contract artifacts from the SDK 0.25.14 contract.
+- Regenerated foundation operator contract artifacts from the platform 0.25.14 contract.
 
 ## [0.19.36] — 2026-04-26
 
@@ -2101,37 +2101,37 @@ First release of the best-in-class program: a full UX-first review of the codeba
 - Documentation now covers the authenticated Home Assistant Assist conversation routes: `GET /api/homeassistant/health`, `POST /api/homeassistant/conversation`, `POST /api/homeassistant/conversation/stream`, and `POST /api/homeassistant/conversation/cancel`.
 
 ### Changed
-- Updated `legacy-package:goodvibes-sdk` to `0.25.13` for direct non-WRFC Home Assistant ingress, daemon-owned remote sessions, Assist reply correlation metadata, and event-bus reply delivery fixes.
-- Regenerated foundation operator contract artifacts from the SDK 0.25.13 contract.
+- Updated `legacy-package:goodvibes-platform` to `0.25.13` for direct non-WRFC Home Assistant ingress, daemon-owned remote sessions, Assist reply correlation metadata, and event-bus reply delivery fixes.
+- Regenerated foundation operator contract artifacts from the platform 0.25.13 contract.
 
 ## [0.19.35] — 2026-04-26
 
 ### Added
 - Home Assistant is now exposed as an external onboarding/settings surface with auto-start control, instance URL, access token, webhook secret, route conversation, daemon device, and event type fields.
-- Cloudflare onboarding and `/cloudflare provision` now pass Tunnel token refs, Tunnel service URLs, Access app/service-token refs, and advanced KV/DO/R2/Secrets Store provisioning fields through to the SDK daemon routes.
+- Cloudflare onboarding and `/cloudflare provision` now pass Tunnel token refs, Tunnel service URLs, Access app/service-token refs, and advanced KV/DO/R2/Secrets Store provisioning fields through to the platform daemon routes.
 
 ### Changed
-- Updated `legacy-package:goodvibes-sdk` to `0.25.11` for Cloudflare token-creation fixes, Home Assistant companion surface contracts, and redacted auth-session fingerprints.
-- Local auth session listings now show SDK session fingerprints instead of assuming raw tokens are available; revoke-session accepts either a raw token or SDK fingerprint.
-- Regenerated foundation operator contract artifacts from the SDK 0.25.11 contract.
+- Updated `legacy-package:goodvibes-platform` to `0.25.11` for Cloudflare token-creation fixes, Home Assistant companion surface contracts, and redacted auth-session fingerprints.
+- Local auth session listings now show platform session fingerprints instead of assuming raw tokens are available; revoke-session accepts either a raw token or platform fingerprint.
+- Regenerated foundation operator contract artifacts from the platform 0.25.11 contract.
 
 ## [0.19.34] — 2026-04-26
 
 ### Added
 - Cloudflare onboarding support for optional Workers/Queues batch and remote daemon/control-plane provisioning.
 - `/cloudflare` (`/cf`) runtime command for status, token requirements, bootstrap-token creation, discovery, validation, provisioning, verification, disable, and setup entry.
-- Cloudflare settings category in `/settings`, including SDK `cloudflare.*` and `batch.*` keys.
+- Cloudflare settings category in `/settings`, including platform `cloudflare.*` and `batch.*` keys.
 - Documentation for Cloudflare token setup, daemon routes, onboarding fields, batch modes, and secret references.
 
 ### Changed
-- Updated `legacy-package:goodvibes-sdk` to `0.25.10` for SDK-owned Cloudflare daemon routes, token creation, discovery, validation, provisioning, and config persistence.
+- Updated `legacy-package:goodvibes-platform` to `0.25.10` for platform-owned Cloudflare daemon routes, token creation, discovery, validation, provisioning, and config persistence.
 - Onboarding Cloudflare provisioning failures are reported as warnings so local daemon usage is not blocked when optional Cloudflare setup needs follow-up.
 
 ## [0.19.33] — 2026-04-26
 
 ### Changed
 - `/config-tts` now opens an interactive TTS configuration modal instead of only printing provider and voice lists.
-- `/config-tts providers` and `/config-tts voices [provider]` open selectable provider/voice pickers in the TUI and persist the selected SDK config keys.
+- `/config-tts providers` and `/config-tts voices [provider]` open selectable provider/voice pickers in the TUI and persist the selected platform config keys.
 - `/config-tts llm` opens the model picker for a separate `/tts` response-model override; `/tts` still defaults to the current chat provider/model when no override is configured.
 
 ### Fixed
@@ -2148,24 +2148,24 @@ First release of the best-in-class program: a full UX-first review of the codeba
 - Documentation for live TTS usage, playback requirements, TTS config keys, and the new `POST /api/voice/tts/stream` daemon route.
 
 ### Changed
-- Updated `legacy-package:goodvibes-sdk` to `0.25.8` and regenerated foundation operator contract artifacts.
+- Updated `legacy-package:goodvibes-platform` to `0.25.8` and regenerated foundation operator contract artifacts.
 - Exposed provider auth route posture in CLI provider management output.
 - Updated onboarding wizard navigation with an `Apply & Continue To Next Section` action that saves wizard screen state without applying runtime settings before the final review/apply step.
 - Kept prompt borders visually inactive when keyboard focus moves to the process indicator.
 
 ### Fixed
-- Updated daemon/media route seam tests for the SDK streaming voice service contract.
+- Updated daemon/media route seam tests for the platform streaming voice service contract.
 - Added focused regression coverage for text chunking, player discovery, spoken-turn event correlation, and TTS command behavior.
 
 ## [0.19.31] — 2026-04-25
 
 ### Changes
-- 2508d632 chore: wire sdk service secret updates
+- 2508d632 chore: wire platform service secret updates
 
 ## [0.19.30] — 2026-04-25
 
 ### Changes
-- 4aeed7a9 chore: wire sdk ntfy origin correlation
+- 4aeed7a9 chore: wire platform ntfy origin correlation
 - 62b9efd4 docs: remove onboarding wizard WIP notice from README
 
 ## [0.19.29] — 2026-04-24
@@ -2182,7 +2182,7 @@ First release of the best-in-class program: a full UX-first review of the codeba
 ## [0.19.27] — 2026-04-24
 
 ### Changes
-- ac02372 chore: update goodvibes sdk to 0.25.1
+- ac02372 chore: update goodvibes platform to 0.25.1
 
 ## [0.19.26] — 2026-04-24
 
@@ -2199,7 +2199,7 @@ First release of the best-in-class program: a full UX-first review of the codeba
 
 ## [0.19.24] — 2026-04-22
 
-Four correctness and honesty fixes from an external architecture review. No SDK change (pinned at 0.23.2).
+Four correctness and honesty fixes from an external architecture review. No platform change (pinned at 0.23.2).
 
 ### Fixed
 
@@ -2215,20 +2215,20 @@ Four correctness and honesty fixes from an external architecture review. No SDK 
 
 ## [0.19.23] — 2026-04-22
 
-SDK 0.23.x constraint-propagation reconciliation. Surfaces the new per-chain constraint data across the WRFC panel, process modal, agent inspector, and agent detail modal; adds system-message notifications for constraint enumeration and violations; exposes the WRFC-injected `systemPromptAddendum` so operators can see the engineer addendum was applied.
+platform 0.23.x constraint-propagation reconciliation. Surfaces the new per-chain constraint data across the WRFC panel, process modal, agent inspector, and agent detail modal; adds system-message notifications for constraint enumeration and violations; exposes the WRFC-injected `systemPromptAddendum` so operators can see the engineer addendum was applied.
 
 ### Changed
 
-- **SDK dep bumped to `legacy-package:goodvibes-sdk@0.23.2`.** Picks up constraint-propagation additions from 0.23.0 (feature), the 0.23.1 cleanup (removed opt-in golden-prompt suite that was skipped by default), and the 0.23.2 docs bundle (the complete `docs/wrfc-constraint-propagation.md` + reference-runtime-events + observability + error-kinds + migration docs shipped with the feature). New types consumed by this TUI release: `Constraint` and `ConstraintFinding` from `platform/agents/completion-report`; three new fields on `WrfcChain` (`constraints`, `constraintsEnumerated`, `syntheticIssues`); `WORKFLOW_CONSTRAINTS_ENUMERATED` runtime event; optional constraint summary fields on `WORKFLOW_REVIEW_COMPLETED` (`constraintsSatisfied`, `constraintsTotal`, `unsatisfiedConstraintIds`) and `WORKFLOW_FIX_ATTEMPTED` (`targetConstraintIds`); optional `constraints?` on `EngineerReport`; optional `constraintFindings?` on `ReviewerReport`; `AgentRecord.systemPromptAddendum?`.
+- **platform dep bumped to `legacy-package:goodvibes-platform@0.23.2`.** Picks up constraint-propagation additions from 0.23.0 (feature), the 0.23.1 cleanup (removed opt-in golden-prompt suite that was skipped by default), and the 0.23.2 docs bundle (the complete `docs/wrfc-constraint-propagation.md` + reference-runtime-events + observability + error-kinds + migration docs shipped with the feature). New types consumed by this TUI release: `Constraint` and `ConstraintFinding` from `platform/agents/completion-report`; three new fields on `WrfcChain` (`constraints`, `constraintsEnumerated`, `syntheticIssues`); `WORKFLOW_CONSTRAINTS_ENUMERATED` runtime event; optional constraint summary fields on `WORKFLOW_REVIEW_COMPLETED` (`constraintsSatisfied`, `constraintsTotal`, `unsatisfiedConstraintIds`) and `WORKFLOW_FIX_ATTEMPTED` (`targetConstraintIds`); optional `constraints?` on `EngineerReport`; optional `constraintFindings?` on `ReviewerReport`; `AgentRecord.systemPromptAddendum?`.
 
 ### Added
 
 - **`WORKFLOW_CONSTRAINTS_ENUMERATED` system message** (`src/runtime/bootstrap-core.ts`). When an engineer agent enumerates one or more constraints, a low-priority `[WRFC] Engineer enumerated N constraint(s) for chain <chainId>` message is routed to the SystemMessagesPanel. Zero-constraint chains produce no message (backward-compatible).
-- **Constraint-violation system message on review failure** (`src/runtime/bootstrap-core.ts`). When `WORKFLOW_REVIEW_COMPLETED` fires with `passed: false` and `unsatisfiedConstraintIds` is non-empty, a high-priority `[WRFC] ✗ Chain <chainId>: N constraint violation(s) forced failure` message is emitted to both the main conversation and the SystemMessagesPanel. Complements the existing SDK-level score/threshold message.
+- **Constraint-violation system message on review failure** (`src/runtime/bootstrap-core.ts`). When `WORKFLOW_REVIEW_COMPLETED` fires with `passed: false` and `unsatisfiedConstraintIds` is non-empty, a high-priority `[WRFC] ✗ Chain <chainId>: N constraint violation(s) forced failure` message is emitted to both the main conversation and the SystemMessagesPanel. Complements the existing platform-level score/threshold message.
 - **`WORKFLOW_FIX_ATTEMPTED` constraint-targeting message** (`src/runtime/bootstrap-core.ts`). When a fix agent is spawned to address specific constraints (`targetConstraintIds` present), a low-priority `[WRFC] Fix #N targeting N constraint(s) on chain <chainId>` message is routed to the SystemMessagesPanel. Only fires when `targetConstraintIds` is non-empty.
 - **Constraint count in Fix agent process-modal label** (`src/renderer/process-modal.ts`). When a running fix agent's WRFC chain has constraints, the Background Processes modal label gains a compact `[Nc]` suffix (e.g. `[Fix #2] my task  (7.8 → 9.9/10)  [3c]`). Chains with zero constraints are unchanged.
 - **`systemPromptAddendum` indicator in Agent Inspector** (`src/panels/agent-inspector-panel.ts`). The per-agent summary line in the Inspector panel now includes an `Addendum yes` field when the selected agent's `AgentRecord.systemPromptAddendum` is set. This lets operators confirm that the WRFC constraint addendum was injected into the engineer's system prompt. Agents without an addendum are unchanged.
-- **Constraint data in Agent Detail modal** (`src/renderer/agent-detail-modal.ts`). The agent detail modal (opened from the Background Processes modal with Enter) now surfaces three additional SDK 0.23.x fields when available: (1) an `Addendum: yes` line when `AgentRecord.systemPromptAddendum` is set; (2) a `Constraints (N):` block listing each constraint id/text/source from the agent's WRFC chain; (3) a `Findings: N checked, N unsatisfied` summary from the reviewer's `constraintFindings`. An optional `wrfcController` dep was added to `AgentDetailModalDeps` — backward-compatible, existing callers without it continue working unchanged. Zero-constraint chains and agents not in a WRFC chain render byte-identically to pre-0.23.
+- **Constraint data in Agent Detail modal** (`src/renderer/agent-detail-modal.ts`). The agent detail modal (opened from the Background Processes modal with Enter) now surfaces three additional platform 0.23.x fields when available: (1) an `Addendum: yes` line when `AgentRecord.systemPromptAddendum` is set; (2) a `Constraints (N):` block listing each constraint id/text/source from the agent's WRFC chain; (3) a `Findings: N checked, N unsatisfied` summary from the reviewer's `constraintFindings`. An optional `wrfcController` dep was added to `AgentDetailModalDeps` — backward-compatible, existing callers without it continue working unchanged. Zero-constraint chains and agents not in a WRFC chain render byte-identically to pre-0.23.
 - **WRFC panel constraint badge** (`src/panels/wrfc-panel.ts`). Each chain row renders a compact `c:N/M` badge showing satisfied/total constraints when present, colored by aggregate state: green when all satisfied, red on any unsatisfied finding, grey when no findings yet, yellow for mixed verified/unverified. Omitted entirely for zero-constraint chains.
 - **WRFC panel expanded constraint detail** (`src/panels/wrfc-panel.ts`). Expanding a chain now shows per-constraint lines with a severity-tagged status marker: `[SAT]` (satisfied), `[UNS CRIT]` / `[UNS MAJOR]` / `[UNS MINOR]` (unsatisfied with severity), or `[UNV]` (unverified). Inherited constraints — those carried from a parent chain after gate-failure retry — are suffixed with ` *`. List caps at 10 with a `(+N more)` tail and respects the panel's `maxLines` budget.
 - **WRFC panel selected-chain summary** (`src/panels/wrfc-panel.ts`). The selected-chain summary row now shows `N sat / M total (K inherited)` when the focused chain has constraints, giving the operator at-a-glance status without expanding the row.
@@ -2249,8 +2249,8 @@ SDK 0.23.x constraint-propagation reconciliation. Surfaces the new per-chain con
 | Agent builtin panel registry | `src/panels/builtin/agent.ts` | Not applicable — registration only, no rendering |
 | Tasks panel | `src/panels/builtin/operations.ts` | Not applicable — no WRFC chain rendering |
 | Eval panel | `src/panels/eval-panel.ts` | Not applicable — eval suite scores, not WRFC constraint data |
-| UI events plumbing | `src/runtime/ui-events.ts` | Not applicable — re-exports SDK; `WorkflowEvent` union already includes new event |
-| Config command | `src/input/commands/config.ts` | Not applicable — no new SDK 0.23.0 config knobs |
+| UI events plumbing | `src/runtime/ui-events.ts` | Not applicable — re-exports platform; `WorkflowEvent` union already includes new event |
+| Config command | `src/input/commands/config.ts` | Not applicable — no new platform 0.23.0 config knobs |
 | Runtime services | `src/runtime/services.ts` | Not applicable — no new service instantiation required |
 | Bootstrap core | `src/runtime/bootstrap-core.ts` | Reconciled (see above) |
 | Docs | `docs/` | Not applicable — TUI docs have minimal WRFC prose; no legacy content to update |
@@ -2259,23 +2259,23 @@ SDK 0.23.x constraint-propagation reconciliation. Surfaces the new per-chain con
 
 ## [0.19.22] — 2026-04-21
 
-Hotfix release: regenerates foundation artifacts against SDK 0.22.0 after 0.19.21's release pipeline failed the `foundation artifacts gate` test. No consumer-facing feature changes beyond what 0.19.21 carried.
+Hotfix release: regenerates foundation artifacts against platform 0.22.0 after 0.19.21's release pipeline failed the `foundation artifacts gate` test. No consumer-facing feature changes beyond what 0.19.21 carried.
 
 ### Fixed
-- **`docs/foundation-artifacts/operator-contract.json` regenerated against SDK 0.22.0.** The 0.19.21 tag shipped with an artifact stamped `"version": "0.21.36"` while consuming SDK 0.22.0 — the `foundation artifacts gate` release-gates test detected this drift and failed the release workflow on the `Tests` step, blocking the npm publish. 0.19.22 contains the regenerated artifact (one-line version-stamp update) and ships cleanly.
+- **`docs/foundation-artifacts/operator-contract.json` regenerated against platform 0.22.0.** The 0.19.21 tag shipped with an artifact stamped `"version": "0.21.36"` while consuming platform 0.22.0 — the `foundation artifacts gate` release-gates test detected this drift and failed the release workflow on the `Tests` step, blocking the npm publish. 0.19.22 contains the regenerated artifact (one-line version-stamp update) and ships cleanly.
 - **CI: composite `./.github/actions/setup` action** shared across every `ci.yml` and `release.yml` job: pins Bun 1.3.10, restores `~/.bun/install/cache` via `actions/cache@v4`, runs `bun install`. Eliminates ~60 lines of duplicated setup boilerplate and gives every job a warm dep cache.
 
 ### Internal
-- Reconciliation sweep against SDK 0.22.0 confirmed no other TUI drift: typecheck clean, architecture check clean, 456/456 test files pass.
+- Reconciliation sweep against platform 0.22.0 confirmed no other TUI drift: typecheck clean, architecture check clean, 456/456 test files pass.
 
 ---
 
 ## [0.19.21] — 2026-04-21
 
-Maintenance release: SDK 0.22.0 bump + README/gitignore hygiene + test-timeout polish. **Did not publish** — the release workflow's foundation-artifacts gate detected stale artifact drift against SDK 0.22.0; see 0.19.22 for the shipped fix. No consumer-facing feature or behavior changes.
+Maintenance release: platform 0.22.0 bump + README/gitignore hygiene + test-timeout polish. **Did not publish** — the release workflow's foundation-artifacts gate detected stale artifact drift against platform 0.22.0; see 0.19.22 for the shipped fix. No consumer-facing feature or behavior changes.
 
 ### Changed
-- **SDK dep bumped to `legacy-package:goodvibes-sdk@0.22.0`.** Picks up the SDK's contract-artifact refresh pipeline, documentation audit, and test-suite cleanup. No TUI code paths change; the bump is source-compatible.
+- **platform dep bumped to `legacy-package:goodvibes-platform@0.22.0`.** Picks up the platform's contract-artifact refresh pipeline, documentation audit, and test-suite cleanup. No TUI code paths change; the bump is source-compatible.
 - **Active-early-development banner** added near the top of `README.md`. Signals that CLI flags, config keys, slash commands, key bindings, daemon routes, and on-disk layouts can change across patch releases pre-1.0; no legacy/compat shims; docs describe current behavior only. 1.0.0 is the stability freeze.
 
 ### Fixed
@@ -2290,53 +2290,53 @@ Maintenance release: SDK 0.22.0 bump + README/gitignore hygiene + test-timeout p
 ## [0.19.20] — 2026-04-21
 
 ### Changes
-- b587765 feat: consume SDK 0.21.36 (F3 prune helper + UAT Run 5 fixes)
-- 119da57 docs: UAT validation report — Run 5 against TUI 0.19.19 / SDK 0.21.35
+- b587765 feat: consume platform 0.21.36 (F3 prune helper + UAT Run 5 fixes)
+- 119da57 docs: UAT validation report — Run 5 against TUI 0.19.19 / platform 0.21.35
 
 ## [0.19.19] — 2026-04-21
 
 ### Changes
 - 476d9d7 docs: add UAT validation reports for runs 3 (0.19.12) and 4 (0.19.14)
-- 77f155d release: TUI 0.19.18 — SDK 0.21.35 (PERF-08 SSE backpressure + OBS-05/14 closeout)
+- 77f155d release: TUI 0.19.18 — platform 0.21.35 (PERF-08 SSE backpressure + OBS-05/14 closeout)
 - e213c30 fix: regen operator-contract artifact + plugin-system microtask flush
 - 27632c3 fix(tests): migrate remaining reverted test files for OBS-14 microtask dispatch
-- bfe0e62 release: TUI 0.19.17 — SDK 0.21.33 bump + OBS-14 microtask test migration
+- bfe0e62 release: TUI 0.19.17 — platform 0.21.33 bump + OBS-14 microtask test migration
 
 ## [0.19.18] - 2026-04-21
 
-SDK 0.21.27 → 0.21.35 upgrade. Captures all OBS-05, OBS-06, OBS-14, F3, QA-14, and PERF-08 consumer-side migrations; no 0.19.17 was ever published (tests failed in CI) — this release closes out all of that work.
+platform 0.21.27 → 0.21.35 upgrade. Captures all OBS-05, OBS-06, OBS-14, F3, QA-14, and PERF-08 consumer-side migrations; no 0.19.17 was ever published (tests failed in CI) — this release closes out all of that work.
 
 ### Changed
-- Upgraded `legacy-package:goodvibes-sdk` from 0.21.27 to 0.21.35. Panel and provider-routing cleanup, plus the SSE backpressure rebuild.
+- Upgraded `legacy-package:goodvibes-platform` from 0.21.27 to 0.21.35. Panel and provider-routing cleanup, plus the SSE backpressure rebuild.
 - `src/runtime/bootstrap.ts`: `getOrCreateCompanionToken('tui')` call migrated to the F3 signature `getOrCreateCompanionToken('tui', { daemonHomeDir })` with `daemonHomeDir` resolved from `services.homeDirectory`.
 - `src/panels/tool-inspector-panel.ts`:
   - TOOL_SUCCEEDED / TOOL_FAILED handlers simplified after OBS-05. Post-0.21.31 the `.result` field on these events is a `ToolResultSummary` (`{ kind, byteSize, preview? }`), not the raw tool result, so the prior `_policyAudit` extraction is no longer reachable from this event path. Dead lookup removed with an inline note pointing future readers at the approval broker / tool result store as the new channel for policy audit metadata.
   - `summarizeResult()` rewritten to read `preview` (string) with a `${kind} (${byteSize}B)` fallback. Previously read `.output` / `.error` from the raw result shape, which silently returned `undefined` for every post-OBS-05 event. Detail line "Summary" now renders correctly in the Tool Inspector again.
-- `docs/foundation-artifacts/operator-contract.json`: regenerated via `bun run foundation:artifacts` (SDK 0.21.35 bumped the embedded `product.version` string).
+- `docs/foundation-artifacts/operator-contract.json`: regenerated via `bun run foundation:artifacts` (platform 0.21.35 bumped the embedded `product.version` string).
 
 ### Fixed
-- **OBS-14 test migration** across 17 test files. SDK 0.21.32+ `RuntimeEventBus.emit(...)` dispatches listeners via `queueMicrotask`. Tests that emitted a bus event and asserted synchronously on subscriber-populated state now drain queued microtasks first. Injected a local `flushMicrotasks = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); }` helper in each affected file; converted sync test callbacks to `async () => {}` where needed, and inserted `await flushMicrotasks();` after bus-emitting calls before each dependent assertion. Wrapper emission helpers (`emitTurn`, `emitTask`, `emitAgentCompleted`, `emitAgentFailed`, `emitToolRuntimeEvent`) promoted to `async function(): Promise<void>` in test files that needed them; all callers awaited. Files touched: `src/test/core/event-replay.test.ts`, `streaming.test.ts`, `qol-features.test.ts`, `tool-result-reconciliation.test.ts`, `src/test/daemon/telemetry-routes.test.ts`, `src/test/agents/wrfc-controller.test.ts`, `src/test/integration/tool-execution.test.ts`, `src/test/plugins/plugin-system.test.ts`, `src/test/panels/workspace-migration.test.ts`, `src/test/panels/provider-health-panel.test.ts`, `src/test/runtime/ops/playbook-runtime-context.test.ts`, `src/test/runtime/forensics/forensics.test.ts`, `src/test/runtime/operator-client.test.ts`, `src/test/runtime/telemetry-api.test.ts`, `src/test/release-gates/policy-and-budget-evidence-gate.test.ts`, `src/test/release-gates/runtime-certification-gate.test.ts`, `src/test/runtime/emit-enforcement.test.ts`.
+- **OBS-14 test migration** across 17 test files. platform 0.21.32+ `RuntimeEventBus.emit(...)` dispatches listeners via `queueMicrotask`. Tests that emitted a bus event and asserted synchronously on subscriber-populated state now drain queued microtasks first. Injected a local `flushMicrotasks = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); }` helper in each affected file; converted sync test callbacks to `async () => {}` where needed, and inserted `await flushMicrotasks();` after bus-emitting calls before each dependent assertion. Wrapper emission helpers (`emitTurn`, `emitTask`, `emitAgentCompleted`, `emitAgentFailed`, `emitToolRuntimeEvent`) promoted to `async function(): Promise<void>` in test files that needed them; all callers awaited. Files touched: `src/test/core/event-replay.test.ts`, `streaming.test.ts`, `qol-features.test.ts`, `tool-result-reconciliation.test.ts`, `src/test/daemon/telemetry-routes.test.ts`, `src/test/agents/wrfc-controller.test.ts`, `src/test/integration/tool-execution.test.ts`, `src/test/plugins/plugin-system.test.ts`, `src/test/panels/workspace-migration.test.ts`, `src/test/panels/provider-health-panel.test.ts`, `src/test/runtime/ops/playbook-runtime-context.test.ts`, `src/test/runtime/forensics/forensics.test.ts`, `src/test/runtime/operator-client.test.ts`, `src/test/runtime/telemetry-api.test.ts`, `src/test/release-gates/policy-and-budget-evidence-gate.test.ts`, `src/test/release-gates/runtime-certification-gate.test.ts`, `src/test/runtime/emit-enforcement.test.ts`.
 - **OBS-05 tool result fixture** in `src/test/integration/tool-execution.test.ts`: TOOL_SUCCEEDED fixture constructs a `ToolResultSummary` shape (`{ kind: 'json', byteSize, preview }`) rather than the raw tool result.
-- **OBS-06 redaction import path** in `src/test/export/session-export.test.ts`: `redactSensitiveData` now imported from `legacy-package:goodvibes-sdk/platform/utils/redaction`.
-- **PERF-08 SSE backpressure** (via SDK): `src/test/control-plane/gateway-stream.test.ts` "replays recent events with ids and resumes after Last-Event-ID" now passes against SDK 0.21.35. Test additions: `flushMicrotasks` drains between `publishEvent`/`createEventStream`/`reader.read()` to let async dispatch settle; test timeout raised to 15s for headroom (completes in ~65ms with the SDK fix).
+- **OBS-06 redaction import path** in `src/test/export/session-export.test.ts`: `redactSensitiveData` now imported from `legacy-package:goodvibes-platform/platform/utils/redaction`.
+- **PERF-08 SSE backpressure** (via platform): `src/test/control-plane/gateway-stream.test.ts` "replays recent events with ids and resumes after Last-Event-ID" now passes against platform 0.21.35. Test additions: `flushMicrotasks` drains between `publishEvent`/`createEventStream`/`reader.read()` to let async dispatch settle; test timeout raised to 15s for headroom (completes in ~65ms with the platform fix).
 
 ### Notes
-- No 0.19.17 entry — 0.19.17 was committed and pushed but its Release CI never produced an npm artifact (tests failed on the microtask-dispatch regressions before the SDK 0.21.35 backpressure fix landed). 0.19.18 subsumes all of that work in a single ship.
+- No 0.19.17 entry — 0.19.17 was committed and pushed but its Release CI never produced an npm artifact (tests failed on the microtask-dispatch regressions before the platform 0.21.35 backpressure fix landed). 0.19.18 subsumes all of that work in a single ship.
 
 ---
 
 ## [0.19.16] - 2026-04-20
 
 ### Changed
-- Upgraded `legacy-package:goodvibes-sdk` to 0.21.27. Picks up three F-closures (all internal to the SDK; TUI requires zero active wiring):
+- Upgraded `legacy-package:goodvibes-platform` to 0.21.27. Picks up three F-closures (all internal to the platform; TUI requires zero active wiring):
   1. **F7 closed** — OTLP POST receivers implemented at `/api/v1/telemetry/otlp/v1/{logs,traces,metrics}`. JSON-only (`application/json`); protobuf returns 415. `ingestSink` wired to `TelemetryApiService` in daemon router (not null). Ingested records enter the ring buffer (~500 events) with `source: 'otlp-ingest'` and are observable on `GET /api/v1/telemetry/events`. Note: prior "by design" framing for this failure was incorrect — it was a missing implementation.
-  2. **F5b closed** — SDK runtime sqlite-vec resolver (`resolveSqliteVecPath()` in `memory-vector-store.js`) now detects the bundled-executable case (`import.meta.url.includes('$bunfs')`) and resolves the addon from `dirname(process.execPath)/lib/sqlite-vec-<os>-<arch>/vec0.<suffix>`. Completes the full chain with F5a (build-side `.so` copy to `dist/lib/`, landed TUI 0.19.12). Smoke-confirmed: `GET /api/memory/vector` returns 200.
+  2. **F5b closed** — platform runtime sqlite-vec resolver (`resolveSqliteVecPath()` in `memory-vector-store.js`) now detects the bundled-executable case (`import.meta.url.includes('$bunfs')`) and resolves the addon from `dirname(process.execPath)/lib/sqlite-vec-<os>-<arch>/vec0.<suffix>`. Completes the full chain with F5a (build-side `.so` copy to `dist/lib/`, landed TUI 0.19.12). Smoke-confirmed: `GET /api/memory/vector` returns 200.
   3. **F-PROV-009 closed** — `secretsResolutionSkipped: true` now actually emitted on `GET /api/providers` when `secretsManager` is null, plumbed end-to-end in 0.21.27. Prior 0.21.25 claim of this fix was incomplete.
 - TUI version bumped to 0.19.16.
-- Regenerated `docs/foundation-artifacts/operator-contract.json` — now includes `telemetry.otlp.logs`, `telemetry.otlp.metrics`, `telemetry.otlp.traces` method entries reflecting SDK 0.21.27 OTLP ingest surface.
+- Regenerated `docs/foundation-artifacts/operator-contract.json` — now includes `telemetry.otlp.logs`, `telemetry.otlp.metrics`, `telemetry.otlp.traces` method entries reflecting platform 0.21.27 OTLP ingest surface.
 
 ### Fixed
-- `src/test/daemon/telemetry-routes.test.ts`: added `ingestSink: null` to both `createDaemonTelemetryRouteHandlers` invocations to satisfy the new required-but-nullable `TelemetryRouteContext.ingestSink` field introduced in SDK 0.21.27.
+- `src/test/daemon/telemetry-routes.test.ts`: added `ingestSink: null` to both `createDaemonTelemetryRouteHandlers` invocations to satisfy the new required-but-nullable `TelemetryRouteContext.ingestSink` field introduced in platform 0.21.27.
 
 ---
 
@@ -2351,12 +2351,12 @@ SDK 0.21.27 → 0.21.35 upgrade. Captures all OBS-05, OBS-06, OBS-14, F3, QA-14,
 ## [0.19.14] - 2026-04-20
 
 ### Changed
-- Upgraded `legacy-package:goodvibes-sdk` to 0.21.26. Picks up: (1) **F16b end-to-end fix** — daemon facade now derives `resolveDefaultProviderModel` internally from `providerRegistry.getCurrentModel()`; TUI requires zero active wiring; companion-chat session creation auto-resolves current provider/model or returns `400 NO_MODEL_CONFIGURED`; (2) **scheduler.capacity in method catalog** — `scheduler.capacity` descriptor added to `builtinGatewayRuntimeMethodDescriptors`; now appears in regenerated `operator-contract.json`; (3) **CI flake fixed** — `cache-invariants.test.ts` rewritten to synchronous emit pattern (no TUI impact).
+- Upgraded `legacy-package:goodvibes-platform` to 0.21.26. Picks up: (1) **F16b end-to-end fix** — daemon facade now derives `resolveDefaultProviderModel` internally from `providerRegistry.getCurrentModel()`; TUI requires zero active wiring; companion-chat session creation auto-resolves current provider/model or returns `400 NO_MODEL_CONFIGURED`; (2) **scheduler.capacity in method catalog** — `scheduler.capacity` descriptor added to `builtinGatewayRuntimeMethodDescriptors`; now appears in regenerated `operator-contract.json`; (3) **CI flake fixed** — `cache-invariants.test.ts` rewritten to synchronous emit pattern (no TUI impact).
 - TUI version bumped to 0.19.14.
-- Regenerated `docs/foundation-artifacts/operator-contract.json` — now includes `scheduler.capacity` method entry reflecting SDK 0.21.26 builtin catalog.
+- Regenerated `docs/foundation-artifacts/operator-contract.json` — now includes `scheduler.capacity` method entry reflecting platform 0.21.26 builtin catalog.
 
 ### Fixed
-- **F16b** — Marked resolved in SDK 0.21.26 / TUI 0.19.14. Daemon facade derives the provider/model resolver internally; no TUI wiring required. `.goodvibes/memory/failures.json` flipped from `partially-resolved` to `resolved`.
+- **F16b** — Marked resolved in platform 0.21.26 / TUI 0.19.14. Daemon facade derives the provider/model resolver internally; no TUI wiring required.
 - **build.ts hardening** — `scripts/build.ts`: native `.so` missing from `node_modules/` now throws `Error` (hard fail) instead of emitting `console.warn` and continuing. Prevents silent builds that produce non-functional binaries. Descriptive error includes the expected source path and the platform package name. Belt-and-suspenders smoke-test hard-fail at `scripts/post-build-smoke.ts:87-90` retained.
 
 ---
@@ -2364,16 +2364,15 @@ SDK 0.21.27 → 0.21.35 upgrade. Captures all OBS-05, OBS-06, OBS-14, F3, QA-14,
 ## [0.19.13] - 2026-04-20
 
 ### Changed
-- Upgraded `legacy-package:goodvibes-sdk` to 0.21.25 (0.21.24 was CI-orphaned; 0.21.25 is the actual release). Picks up: (1) F16b — `resolveDefaultProviderModel` callback hook added to companion-chat-routes session-create handler (router plumbing pending, see below); (2) F17 — `POST /inputs/:iid/cancel` on non-queued state now returns `409 CANCEL_NOT_ALLOWED`; (3) F19 — `PATCH /api/channels/policies/:surface` handler restored; (4) F-PROV-009 — `secretsResolutionSkipped:true` on provider response when secrets store unavailable; (5) `GET /api/runtime/scheduler` capacity observability endpoint added.
+- Upgraded `legacy-package:goodvibes-platform` to 0.21.25 (0.21.24 was CI-orphaned; 0.21.25 is the actual release). Picks up: (1) F16b — `resolveDefaultProviderModel` callback hook added to companion-chat-routes session-create handler (router plumbing pending, see below); (2) F17 — `POST /inputs/:iid/cancel` on non-queued state now returns `409 CANCEL_NOT_ALLOWED`; (3) F19 — `PATCH /api/channels/policies/:surface` handler restored; (4) F-PROV-009 — `secretsResolutionSkipped:true` on provider response when secrets store unavailable; (5) `GET /api/runtime/scheduler` capacity observability endpoint added.
 - TUI version bumped to 0.19.13.
 
 ### Fixed
 - **F18** — `docs/uat/UAT-PLAN.md` UAT-WATCH-001 corrected: watcher creation body uses `label` field (not `name`). Steps now show `{"label":"<name>","kind":"poll","intervalMs":60000}` and note that the watcher `id` is derived from the `label` value. F18 note added to the test case.
-- **Failure tracker** — `.goodvibes/memory/failures.json` updated: F17, F19, F-PROV-009 marked resolved in SDK 0.21.25; F18 marked resolved in TUI 0.19.13; F16b marked partially-resolved (SDK hook merged, router plumbing incomplete — TUI wiring blocked pending SDK 0.21.26+); F5 already resolved in TUI 0.19.12.
-- **Foundation artifacts** — `docs/foundation-artifacts/operator-contract.json` regenerated to reflect SDK 0.21.25 (version field updated from 0.21.23 to 0.21.25).
+- **Foundation artifacts** — `docs/foundation-artifacts/operator-contract.json` regenerated to reflect platform 0.21.25 (version field updated from 0.21.23 to 0.21.25).
 
 ### Notes
-- **F16b wiring status**: SDK 0.21.25 added `resolveDefaultProviderModel` only to the companion-chat-routes handler. `DaemonHttpRouter` (router.js) does not yet thread this field from `DaemonHttpRouterContext` to `dispatchCompanionChatRoutes`. TUI cannot wire this without SDK completing the router context plumbing. No TUI code change is required until SDK exposes the hook in a public API surface (expected in a future SDK release).
+- **F16b wiring status**: platform 0.21.25 added `resolveDefaultProviderModel` only to the companion-chat-routes handler. `DaemonHttpRouter` (router.js) does not yet thread this field from `DaemonHttpRouterContext` to `dispatchCompanionChatRoutes`. TUI cannot wire this without platform completing the router context plumbing. No TUI code change is required until platform exposes the hook in a public API surface (expected in a future platform release).
 - **F5 build fix**: Already implemented in TUI 0.19.12 (`scripts/build.ts` + `scripts/post-build-smoke.ts`). The sqlite-vec native addon is copied to `dist/lib/sqlite-vec-linux-x64/vec0.so` at build time and the smoke test hard-fails if the file is absent.
 
 ---
@@ -2390,25 +2389,25 @@ SDK 0.21.27 → 0.21.35 upgrade. Captures all OBS-05, OBS-06, OBS-14, F3, QA-14,
 ## [0.19.11] - 2026-04-19
 
 ### Changed
-- Upgraded `legacy-package:goodvibes-sdk` to 0.21.23. Picks up: (1) runtime default config includes `runtime.companionChatLimiter.perSessionLimit: 10`, closing the "section 'runtime' does not exist" regression that caused 29 assertions across 9 test files to fail; (2) `buildOperatorContract` now consumes catalog via `toMethodContract`/`toEventContract` projectors, populating `methods`, `events`, and `coverage` from the live catalog rather than a static baked contract; (3) `RuntimeEventDomain` includes `'workspace'` domain (27 total) sourced from generated file; (4) browser tests guard with `skipIf(typeof window === 'undefined')`.
+- Upgraded `legacy-package:goodvibes-platform` to 0.21.23. Picks up: (1) runtime default config includes `runtime.companionChatLimiter.perSessionLimit: 10`, closing the "section 'runtime' does not exist" regression that caused 29 assertions across 9 test files to fail; (2) `buildOperatorContract` now consumes catalog via `toMethodContract`/`toEventContract` projectors, populating `methods`, `events`, and `coverage` from the live catalog rather than a static baked contract; (3) `RuntimeEventDomain` includes `'workspace'` domain (27 total) sourced from generated file; (4) browser tests guard with `skipIf(typeof window === 'undefined')`.
 
 ### Fixed
-- `method-catalog.test.ts` `buildOperatorContract` assertion restored to strict form: `contract.operator.events` now asserts `toHaveLength(catalog.listEvents().length)` (was loosened to `toBeGreaterThan(0)` during SDK 0.21.20–0.21.21 regression). Failure tracker entry `sdk-buildoperatorcontract-regression-0-21-20` closed (`resolved_in: legacy-package:goodvibes-sdk@0.21.22`, `resolved_by_sdk_version: 0.21.23`).
-- All 29 previously-failing assertions across 9 test files caused by missing `runtime` section in SDK default config are now green (fixed by SDK 0.21.23 runtime default config inclusion).
-- Regenerated foundation artifacts to reflect SDK 0.21.23 operator contract (30 events, 27 domains, includes `workspace` domain). Full test suite: 7490 pass / 0 fail.
+- `method-catalog.test.ts` `buildOperatorContract` assertion restored to strict form: `contract.operator.events` now asserts `toHaveLength(catalog.listEvents().length)` (was loosened to `toBeGreaterThan(0)` during platform 0.21.20–0.21.21 regression). Failure tracker entry `platform-buildoperatorcontract-regression-0-21-20` closed (`resolved_in: legacy-package:goodvibes-platform@0.21.22`, `resolved_by_sdk_version: 0.21.23`).
+- All 29 previously-failing assertions across 9 test files caused by missing `runtime` section in platform default config are now green (fixed by platform 0.21.23 runtime default config inclusion).
+- Regenerated foundation artifacts to reflect platform 0.21.23 operator contract (30 events, 27 domains, includes `workspace` domain). Full test suite: 7490 pass / 0 fail.
 
-### Changed (SDK 0.21.21)
-- Upgraded `legacy-package:goodvibes-sdk` to 0.21.21. Picks up `rerootStores(newWorkingDir: string): Promise<void>` on `RuntimeServices` (workspace swap support), `WorkspaceEvent` domain in `AnyRuntimeEvent` and `DomainEventMap`, F3 companion token `daemonHomeDir` option for global (non-workspace-scoped) token storage at `~/.goodvibes/daemon/operator-tokens.json`, and state tool well-known keys `runtime.workingDir` / `daemon.homeDir`.
+### Changed (platform 0.21.21)
+- Upgraded `legacy-package:goodvibes-platform` to 0.21.21. Picks up `rerootStores(newWorkingDir: string): Promise<void>` on `RuntimeServices` (workspace swap support), `WorkspaceEvent` domain in `AnyRuntimeEvent` and `DomainEventMap`, F3 companion token `daemonHomeDir` option for global (non-workspace-scoped) token storage at `~/.goodvibes/daemon/operator-tokens.json`, and state tool well-known keys `runtime.workingDir` / `daemon.homeDir`.
 - F3: `getOrCreateCompanionToken` / `regenerateCompanionToken` calls in `src/daemon/cli.ts` and `src/panels/builtin/session.ts` now pass `daemonHomeDir: join(homeDirectory, '.goodvibes', 'daemon')` to use the new global token path (was workspace-scoped).
 - Implemented `rerootStores` in `src/runtime/services.ts`: delegates to `memoryStore.reroot(newMemoryDbPath)` and `projectIndex.reroot(newWorkingDir)` so `WorkspaceSwapManager` can migrate path-bound stores on workspace swap without a process restart.
 
 ### Fixed
-- `EventEnvelope` cast in `policy-and-budget-evidence-gate.test.ts`, `runtime-certification-gate.test.ts`, and `forensics.test.ts`: SDK 0.21.21 added `WorkspaceEvent` to `AnyRuntimeEvent`, widening `Parameters<RuntimeEventBus['emit']>[1]` beyond what the domain-specific `emit('turn', ...)` overload accepts. Fixed by casting through `createEventEnvelope(payload['type'] as TurnEvent['type'], payload as TurnEvent, ...)` (and `TaskEvent` for `emitTask`), which produces a precisely-typed envelope without `as unknown as`.
+- `EventEnvelope` cast in `policy-and-budget-evidence-gate.test.ts`, `runtime-certification-gate.test.ts`, and `forensics.test.ts`: platform 0.21.21 added `WorkspaceEvent` to `AnyRuntimeEvent`, widening `Parameters<RuntimeEventBus['emit']>[1]` beyond what the domain-specific `emit('turn', ...)` overload accepts. Fixed by casting through `createEventEnvelope(payload['type'] as TurnEvent['type'], payload as TurnEvent, ...)` (and `TaskEvent` for `emitTask`), which produces a precisely-typed envelope without `as unknown as`.
 - `method-catalog.test.ts`: comment updated — `buildOperatorContract` regression (`void catalog;` at operator-contract.js:119) is still present in 0.21.21; loosened assertion remains.
-- Foundation artifacts: `docs/foundation-artifacts/operator-contract.json` regenerated via `bun run foundation:artifacts` to reflect SDK 0.21.21 operator contract.
+- Foundation artifacts: `docs/foundation-artifacts/operator-contract.json` regenerated via `bun run foundation:artifacts` to reflect platform 0.21.21 operator contract.
 
 ### Changed
-- Upgraded `legacy-package:goodvibes-sdk` to 0.21.20. Picks up `swapManager: WorkspaceSwapManagerLike | null` field in `DaemonSystemRouteContext`; test mocks updated accordingly.
+- Upgraded `legacy-package:goodvibes-platform` to 0.21.20. Picks up `swapManager: WorkspaceSwapManagerLike | null` field in `DaemonSystemRouteContext`; test mocks updated accordingly.
 - `build:daemon:*` convenience scripts in `package.json` now delegate to `scripts/build.ts` (with `--target daemon-<platform>` aliases) so daemon-only builds include `--external sqlite-vec` flags and native addon copy. Previously these scripts bypassed the build script and omitted externalization.
 - Added `--daemon-home=<path>` and `--working-dir=<path>` CLI flags to `src/cli-flags.ts` and `src/daemon/cli.ts`. Flags set `GOODVIBES_DAEMON_HOME` and `GOODVIBES_WORKING_DIR` env vars before directory resolution, enabling per-launch home and workspace overrides without env var pre-flight.
 - Added `smoke:daemon` script (`scripts/post-build-smoke.ts`) that spawns the linux-x64 daemon binary, polls `/api/health`, curls `/api/memory/vector`, and asserts no sqlite-vec error in the response or stderr. Exits 0/1. Wired into `.github/workflows/release.yml` after the linux-x64 binary build step.
@@ -2417,33 +2416,33 @@ SDK 0.21.27 → 0.21.35 upgrade. Captures all OBS-05, OBS-06, OBS-14, F3, QA-14,
 - **smoke** — `scripts/post-build-smoke.ts` port contract corrected: ConfigManager reads port from `homeDir/.goodvibes/tui/settings.json` (not `GOODVIBES_CONTROL_PLANE_PORT` env var). Smoke test now writes a tmp settings.json with port 47921 and passes `GOODVIBES_DAEMON_HOME` to the daemon process. Health check readiness tightened to `status === 200 || status === 401` (drops loose `< 500`).
 - **M-3** — `src/cli-flags.ts` `--help` text now documents flag precedence explicitly: `flag > env var > system default`.
 - **M-4** — `.github/workflows/release.yml` inline build step replaced with `bun run scripts/build.ts --target ${{ matrix.target }}` to eliminate ~35-line duplication with `scripts/build.ts`. Redundant darwin case block in the shell `case` statement removed.
-- **M-5 (scope)** — `README.md` version badge updated to 0.19.10 to match `package.json`. `docs/foundation-artifacts/operator-contract.json` regenerated as a side-effect of SDK 0.21.20 bump (no TUI logic change).
+- **M-5 (scope)** — `README.md` version badge updated to 0.19.10 to match `package.json`. `docs/foundation-artifacts/operator-contract.json` regenerated as a side-effect of platform 0.21.20 bump (no TUI logic change).
 - **M-5 (qr)** — `src/renderer/qr-renderer.ts`: top quiet band changed from a full-height space row to a half-height lower-block row (`▄` with fg = QR background, no bg override). Saves one terminal row of vertical space without disturbing finder-pattern alignment.
 - **C-3** — Added `src/test/cli-flags.test.ts` with 9 tests covering `--daemon-home`, `--working-dir`, precedence semantics, combined parsing, help text content, and existing flag regression.
 - **W-x (test)** — `standalone-routes.test.ts`: corrected 4 test assertions that used wrong API shapes (`GET /api/companion/chat/sessions` list route does not exist; `POST` returns `{sessionId, createdAt}` not `{id}`; `GET /api/providers/current` returns `{model, configured}` not `{currentModel, provider}`; replaced non-existent `GET /api/sessions/:id/events` with verified `GET /api/sessions`). Replaced WebSocket control-plane test with correct HTTP `GET /api/control-plane` (the route is HTTP, not WS).
-- **W-x (types)** — `daemon-route-seams.test.ts`: added `swapManager: null` to `DaemonSystemRouteContext` mock to satisfy SDK 0.21.20 type addition.
-- **Foundation artifacts gate** — regenerated `docs/foundation-artifacts/operator-contract.json` after SDK bump (was pinned to 0.21.16).
+- **W-x (types)** — `daemon-route-seams.test.ts`: added `swapManager: null` to `DaemonSystemRouteContext` mock to satisfy platform 0.21.20 type addition.
+- **Foundation artifacts gate** — regenerated `docs/foundation-artifacts/operator-contract.json` after platform bump (was pinned to 0.21.16).
 
 ---
 
-<!-- Prior [UNRELEASED] content from SDK 0.21.18 cycle merged below -->
+<!-- Prior [UNRELEASED] content from platform 0.21.18 cycle merged below -->
 
-### Changed (SDK 0.21.18)
-- Upgraded `legacy-package:goodvibes-sdk` to 0.21.18. Picks up `DaemonApiRouteExtension` type on `dispatchDaemonApiRoutes`; `providers` and `turn` are confirmed in `DEFAULT_DOMAINS` for all daemon postures.
+### Changed (platform 0.21.18)
+- Upgraded `legacy-package:goodvibes-platform` to 0.21.18. Picks up `DaemonApiRouteExtension` type on `dispatchDaemonApiRoutes`; `providers` and `turn` are confirmed in `DEFAULT_DOMAINS` for all daemon postures.
 
 ### Fixed
 - **F2** — Standalone daemon (`goodvibes-daemon-*`) now loads persisted providers from disk at startup via `loadPersistedProviders()` and registers them with `ProviderRegistry`. A background LAN scan runs on startup and merges discovered servers into the registry. Provider count on a fresh standalone daemon is now non-zero when providers have been previously discovered.
 - **F5** — Both TUI and daemon binaries are now compiled with `--external sqlite-vec --external sqlite-vec-<platform>` so the native addon is not embedded (Bun compile cannot embed `.so`/`.dylib`). The native addon is copied to `dist/lib/<platform-package>/` alongside the binary. GitHub release workflow updated to include `dist/lib/` in uploaded artifacts.
 - **F11** — Documented that `.goodvibes/memory/` is workspace-scoped and only created when `runtime_state` tool is invoked in `mode: memory` during an orchestrator session. Not a bug for TUI-only workspaces.
-- **F12** — Documented that `DELETE /api/companion/chat/sessions/:id` is an audit-friendly soft-close returning `{status:"closed"}`; session record remains readable. This is intentional SDK behavior, not a bug.
+- **F12** — Documented that `DELETE /api/companion/chat/sessions/:id` is an audit-friendly soft-close returning `{status:"closed"}`; session record remains readable. This is intentional platform behavior, not a bug.
 - **F13** — Documented that companion-chat messages use `{content}` (not `{body}`) because `CompanionChatMessage` is a pure-text interface distinct from `SharedSessionMessage`. Both field names are intentional and reflect different message schemas.
-- **F14** — Confirmed `providers` and `turn` are in `DEFAULT_DOMAINS` at SDK level for both daemon postures. UAT Run 2 discrepancy traced to explicit `?domains=` query param in test client, not a bug in the daemon.
-- **F15** — Documented that `CompanionChatRateLimiter` is wired correctly (10/min per session, 30/min per client by default). Rate limit is not reachable via sequential HTTP due to test RTT. Concurrent `Promise.all` approach documented in UAT-VALIDATION.md. SDK gap for env-based threshold override tracked in decisions.md.
+- **F14** — Confirmed `providers` and `turn` are in `DEFAULT_DOMAINS` at platform level for both daemon postures. UAT Run 2 discrepancy traced to explicit `?domains=` query param in test client, not a bug in the daemon.
+- **F15** — Documented that `CompanionChatRateLimiter` is wired correctly (10/min per session, 30/min per client by default). Rate limit is not reachable via sequential HTTP due to test RTT. Concurrent `Promise.all` approach documented in UAT-VALIDATION.md. platform gap for env-based threshold override tracked in decisions.md.
 
 ## [0.19.10] - 2026-04-19
 
 ### Changed
-- Upgraded `legacy-package:goodvibes-sdk` to 0.21.16. Picks up the discovered-provider configuration fix: network-discovered providers (LM Studio, Ollama, vLLM, llama.cpp, TGI, LocalAI) are now reported as configured by `GET /api/providers` and accepted by `PATCH /api/providers/current` without a fake API-key requirement.
+- Upgraded `legacy-package:goodvibes-platform` to 0.21.16. Picks up the discovered-provider configuration fix: network-discovered providers (LM Studio, Ollama, vLLM, llama.cpp, TGI, LocalAI) are now reported as configured by `GET /api/providers` and accepted by `PATCH /api/providers/current` without a fake API-key requirement.
 
 ### Fixed
 - `PATCH /api/providers/current` with a discovered provider's registryKey (e.g. `"LM Studio (192.168.0.85):qwen3.6-35b-a3b@q2_k_xl"`) no longer returns `PROVIDER_NOT_CONFIGURED` with a placeholder `<API key for X>` message. The daemon accepts the switch and the turn uses the discovered provider.
@@ -2451,22 +2450,22 @@ SDK 0.21.27 → 0.21.35 upgrade. Captures all OBS-05, OBS-06, OBS-14, F3, QA-14,
 ## [0.19.9] - 2026-04-19
 
 ### Fixed
-- Regenerated `docs/foundation-artifacts/operator-contract.json` after the 0.19.8 SDK bump; the foundation-artifacts-gate test failed on the 0.19.8 CI because the JSON was not regenerated. 0.19.8 tag has no npm artifact; 0.19.9 supersedes.
+- Regenerated `docs/foundation-artifacts/operator-contract.json` after the 0.19.8 platform bump; the foundation-artifacts-gate test failed on the 0.19.8 CI because the JSON was not regenerated. 0.19.8 tag has no npm artifact; 0.19.9 supersedes.
 ## [0.19.8] - 2026-04-19
 
 ### Changed
-- Upgraded `legacy-package:goodvibes-sdk` from 0.21.10 to 0.21.15. Carries the companion main-chat routing fix: `POST /api/sessions/:id/messages` with `kind: 'message'` now short-circuits the daemon's WRFC engineer-chain fall-through. The TUI wires `orchestrator.handleUserInput()` into the `COMPANION_MESSAGE_RECEIVED` runtime bus subscriber, so companion main-chat sends fire a real LLM turn via the same entry point as the TUI input box. Turn `STREAM_DELTA` / `TURN_COMPLETED` events stream back to both TUI and companion SSE.
+- Upgraded `legacy-package:goodvibes-platform` from 0.21.10 to 0.21.15. Carries the companion main-chat routing fix: `POST /api/sessions/:id/messages` with `kind: 'message'` now short-circuits the daemon's WRFC engineer-chain fall-through. The TUI wires `orchestrator.handleUserInput()` into the `COMPANION_MESSAGE_RECEIVED` runtime bus subscriber, so companion main-chat sends fire a real LLM turn via the same entry point as the TUI input box. Turn `STREAM_DELTA` / `TURN_COMPLETED` events stream back to both TUI and companion SSE.
 
 ### Fixed
 - Companion main-chat no longer produces engineer-agent acknowledgement boilerplate ("Update noted", "WRFC chain has passed all gates"). The message is received by the daemon, persisted, rendered in the TUI, and answered by a normal chat turn.
 ## [0.19.7] - 2026-04-18
 
 ### Changed
-- Bumped `legacy-package:goodvibes-sdk` from 0.21.10 to 0.21.12.
+- Bumped `legacy-package:goodvibes-platform` from 0.21.10 to 0.21.12.
 
 ### Investigation: No TUI-side changes required
 
-SDK 0.21.12 ships three additive changes to the daemon:
+platform 0.21.12 ships three additive changes to the daemon:
 
 1. **`kind: 'message'` at `POST /api/sessions/:id/messages`** now calls `sessionBroker.submitMessage()` (previously called `appendCompanionMessage` + `publishConversationFollowup` only). A real turn is started and the full agent event chain (TURN_STARTED, STREAM_DELTA, TURN_COMPLETED) streams back.
 
@@ -2476,35 +2475,35 @@ SDK 0.21.12 ships three additive changes to the daemon:
 
 4. **`'turn'` added to `DEFAULT_DOMAINS`** in the control-plane gateway — turn events are now auto-delivered to all SSE subscribers.
 
-Investigation of the TUI's `COMPANION_MESSAGE_RECEIVED` subscription in `src/runtime/bootstrap-core.ts` found **no double-render risk**: SDK 0.21.12 emits `COMPANION_MESSAGE_RECEIVED` _before_ calling `submitMessage`, so the user message is shown once (via the existing subscription), and the AI response streams in via the existing `uiServices.events.turns` path. These are distinct content on distinct code paths. No deduplication needed.
+Investigation of the TUI's `COMPANION_MESSAGE_RECEIVED` subscription in `src/runtime/bootstrap-core.ts` found **no double-render risk**: platform 0.21.12 emits `COMPANION_MESSAGE_RECEIVED` _before_ calling `submitMessage`, so the user message is shown once (via the existing subscription), and the AI response streams in via the existing `uiServices.events.turns` path. These are distinct content on distinct code paths. No deduplication needed.
 
 The `'turn'` addition to `DEFAULT_DOMAINS` affects external SSE subscribers (companion app). The TUI consumes turn events in-process via the runtime bus — unaffected.
 
-Updated `docs/foundation-artifacts/operator-contract.json` SDK version field to `0.21.12`.
+Updated `docs/foundation-artifacts/operator-contract.json` platform version field to `0.21.12`.
 
 ---
 
 ## [0.19.6] - 2026-04-18
 
 ### Fixed
-- Bumped `legacy-package:goodvibes-sdk` to 0.21.10 (up from 0.21.8 which was pinned by mistake in 0.19.5). 0.19.5 subscribed to the `COMPANION_MESSAGE_RECEIVED` runtime event but remained on an SDK version that didn't emit it, so the "companion main-chat messages render in TUI" fix from 0.19.5 didn't actually work. 0.19.6 corrects the dep so the subscription is live against an SDK that emits the event. Removed the `as Parameters<typeof runtimeBus.on>[0]` type cast that was hiding the version gap.
+- Bumped `legacy-package:goodvibes-platform` to 0.21.10 (up from 0.21.8 which was pinned by mistake in 0.19.5). 0.19.5 subscribed to the `COMPANION_MESSAGE_RECEIVED` runtime event but remained on a platform version that didn't emit it, so the "companion main-chat messages render in TUI" fix from 0.19.5 didn't actually work. 0.19.6 corrects the dep so the subscription is live against a platform that emits the event. Removed the `as Parameters<typeof runtimeBus.on>[0]` type cast that was hiding the version gap.
 
 ---
 
 ## [0.19.5] - 2026-04-18
 
 ### Fixed
-- Companion-app messages sent via POST `/api/sessions/:id/messages` (kind `message`) are now rendered in the TUI conversation view immediately upon receipt. Previously the 202 was acknowledged and the message was persisted (SDK 0.21.9), but the TUI conversation never displayed it. The fix subscribes to the new `COMPANION_MESSAGE_RECEIVED` runtime bus event (emitted by the daemon's HTTP router after persistence, added in SDK 0.21.10) and calls `conversation.addUserMessage()` to surface the message inline.
+- Companion-app messages sent via POST `/api/sessions/:id/messages` (kind `message`) are now rendered in the TUI conversation view immediately upon receipt. Previously the 202 was acknowledged and the message was persisted (platform 0.21.9), but the TUI conversation never displayed it. The fix subscribes to the new `COMPANION_MESSAGE_RECEIVED` runtime bus event (emitted by the daemon's HTTP router after persistence, added in platform 0.21.10) and calls `conversation.addUserMessage()` to surface the message inline.
 
 ### Changed
-- SDK dependency remains `legacy-package:goodvibes-sdk@0.21.8` (published); the `COMPANION_MESSAGE_RECEIVED` event type is cast at the call-site until SDK 0.21.10 is available on npm.
+- platform dependency remains `legacy-package:goodvibes-platform@0.21.8` (published); the `COMPANION_MESSAGE_RECEIVED` event type is cast at the call-site until platform 0.21.10 is available on npm.
 
 ---
 
 ## [0.19.4] - 2026-04-18
 
 ### Changed
-- Upgraded `legacy-package:goodvibes-sdk` from 0.21.6 to 0.21.8. This carries the **bare-model-id fix** (0.21.7): the companion-chat adapter now correctly passes the bare model id (e.g. `"mercury-2"`) to provider `.chat()` calls instead of the compound registry key (e.g. `"inception:mercury-2"`). Upstream compat APIs (InceptionLabs, Venice, Cerebras, Groq, etc.) only accept bare ids. Resolves `400 invalid_request_error` reported by companion apps.
+- Upgraded `legacy-package:goodvibes-platform` from 0.21.6 to 0.21.8. This carries the **bare-model-id fix** (0.21.7): the companion-chat adapter now correctly passes the bare model id (e.g. `"mercury-2"`) to provider `.chat()` calls instead of the compound registry key (e.g. `"inception:mercury-2"`). Upstream compat APIs (InceptionLabs, Venice, Cerebras, Groq, etc.) only accept bare ids. Resolves `400 invalid_request_error` reported by companion apps.
 - Also includes 0.21.8's internal rename nit fix (cosmetic only).
 
 ## [0.19.3] - 2026-04-18
@@ -2525,7 +2524,7 @@ Updated `docs/foundation-artifacts/operator-contract.json` SDK version field to 
 ### Fixed
 - Daemon test: `channel account APIs expose surface auth and secret posture` — corrected
   `GET /api/providers` assertions from legacy `providerId` field to current `id` field
-  (SDK 0.21.x provider-routes.ts renamed the field). The subscription-oauth auth routes
+  (platform 0.21.x provider-routes.ts renamed the field). The subscription-oauth auth routes
   assertion was dropped from the list endpoint (it only exists on per-provider snapshots).
 - Model picker now correctly surfaces `configuredVia='secrets'` tier as `[key]` badge
   (previously all secrets-manager-keyed providers were collapsed to `[env]`). Secrets are
@@ -2537,7 +2536,7 @@ Updated `docs/foundation-artifacts/operator-contract.json` SDK version field to 
 ## [0.19.1] — 2026-04-17
 
 ### Changed
-- Upgraded `legacy-package:goodvibes-sdk` from 0.21.1 to 0.21.6 — includes secrets-tier
+- Upgraded `legacy-package:goodvibes-platform` from 0.21.1 to 0.21.6 — includes secrets-tier
   `configuredVia` discriminator, HTTP `/api/providers` + `/api/providers/current` (GET/PATCH),
   reactive `model.changed` SSE event, `BUILTIN_LABEL_MAP` brand-accurate provider labels,
   and clean unconfigured-provider errors instead of silent 401 pass-through.
@@ -2553,7 +2552,7 @@ Updated `docs/foundation-artifacts/operator-contract.json` SDK version field to 
 
 ### Fixed
 - **Venice-picking diagnosis**: the silent 401 Venice fallback was caused by the
-  pre-0.21.2 SDK passing unconfigured-provider requests through to the upstream API
+  pre-0.21.2 platform passing unconfigured-provider requests through to the upstream API
   unchanged. As of 0.21.2 (included in 0.21.6), `createCompanionProviderAdapter` now
   checks `provider.isConfigured()` before `provider.chat()` and yields a structured
   error immediately. The in-registry fallback to first-selectable-model (which may
@@ -2569,7 +2568,7 @@ Updated `docs/foundation-artifacts/operator-contract.json` SDK version field to 
 ## [0.19.0] — 2026-04-18
 
 ### Changed
-- Upgraded `legacy-package:goodvibes-sdk` from 0.19.6 to 0.21.1 (soak-period release).
+- Upgraded `legacy-package:goodvibes-platform` from 0.19.6 to 0.21.1 (soak-period release).
   TUI adaptations required:
   1. `docs/foundation-artifacts/operator-contract.json` — regenerated to match
      updated `buildOperatorContract()` output (`peer-contract.json`, knowledge
@@ -2594,14 +2593,14 @@ Updated `docs/foundation-artifacts/operator-contract.json` SDK version field to 
   `SubscriptionEntry` type definitions out of the settings-modal module.
 
 ### Security
-- Postinstall patcher from `legacy-package:goodvibes-sdk@0.21.1` mitigates three
+- Postinstall patcher from `legacy-package:goodvibes-platform@0.21.1` mitigates three
   minimatch ReDoS advisories in the consumer install tree.
 - Added `overrides: { minimatch: ^10.2.5 }` to TUI's own `package.json`
   so `npm audit` reports clean for the TUI install tree independently.
 
 ### Fixed
 - Foundation artifacts gate now passes: `operator-contract.json` updated to
-  match SDK 0.21.1 `buildOperatorContract()` canonical output.
+  match platform 0.21.1 `buildOperatorContract()` canonical output.
 
 ---
 
@@ -2828,8 +2827,8 @@ The 0.18.18 review scored 9.76/10 with three dimensions below 10 (Error Handling
 
 ### Dependencies
 
-- Bumped `legacy-package:goodvibes-sdk` 0.18.36 → 0.18.37, picking up: `sharedDaemonToken`/`sharedHttpListenerToken` factory options on `startHostServices`, bootstrap credential drift detection that warns when `auth-bootstrap.txt` falls out of sync with `auth-users.json`
-- Regenerated `docs/foundation-artifacts/*` against SDK 0.18.37
+- Bumped `legacy-package:goodvibes-platform` 0.18.36 → 0.18.37, picking up: `sharedDaemonToken`/`sharedHttpListenerToken` factory options on `startHostServices`, bootstrap credential drift detection that warns when `auth-bootstrap.txt` falls out of sync with `auth-users.json`
+- Regenerated `docs/foundation-artifacts/*` against platform 0.18.37
 
 ### Tests
 
@@ -2851,8 +2850,8 @@ The 0.18.18 review scored 9.76/10 with three dimensions below 10 (Error Handling
 
 ### Dependencies
 
-- Bumped `legacy-package:goodvibes-sdk` 0.18.33 → 0.18.36, picking up: daemon shutdown symmetry, event bus iteration fix, atomic session writes, rate limiter TTL + LRU + sweep, `fetchWithTimeout` helper, restored port honoring in `resolveHostBinding` for `local`/`network` hostModes, and restored constructor-injected port/host in `resolveDaemonFacadeRuntime`
-- Regenerated `docs/foundation-artifacts/*` against the new SDK
+- Bumped `legacy-package:goodvibes-platform` 0.18.33 → 0.18.36, picking up: daemon shutdown symmetry, event bus iteration fix, atomic session writes, rate limiter TTL + LRU + sweep, `fetchWithTimeout` helper, restored port honoring in `resolveHostBinding` for `local`/`network` hostModes, and restored constructor-injected port/host in `resolveDaemonFacadeRuntime`
+- Regenerated `docs/foundation-artifacts/*` against the new platform
 
 ### Tests & Checks
 
@@ -2875,20 +2874,20 @@ The 0.18.18 review scored 9.76/10 with three dimensions below 10 (Error Handling
   - `src/runtime/diagnostics/panels/agents.ts`, `events.ts`, `health.ts`, `tasks.ts`, `tool-calls.ts`
   - `src/runtime/store/helpers/reducers.ts` (barrel) and 4 sub-reducers
   - `src/runtime/store/domains/permissions.ts`, `conversation.ts`
-- Updated `src/runtime/diagnostics/panels/index.ts` to re-export deleted panels from SDK
+- Updated `src/runtime/diagnostics/panels/index.ts` to re-export deleted panels from platform
 
 ### Config Re-export Shim Inlining (Tier 3 item 18)
 
-- Deleted `src/config/service-registry.ts` and `src/config/subscription-providers.ts` (1-line SDK re-exports)
-- Updated 29 call sites to import directly from `legacy-package:goodvibes-sdk/platform/config/*`
+- Deleted `src/config/service-registry.ts` and `src/config/subscription-providers.ts` (1-line platform re-exports)
+- Updated 29 call sites to import directly from `legacy-package:goodvibes-platform/platform/config/*`
 
-### SDK Consolidation — UI Read Models (Tier 3 items 19-20)
+### platform Consolidation — UI Read Models (Tier 3 items 19-20)
 
-- Converted 9 TUI mirror files to 1-line SDK re-exports (preserving all call-site import paths):
+- Converted 9 TUI mirror files to 1-line platform re-exports (preserving all call-site import paths):
   - `ui-events.ts`, `ui-service-queries.ts`, `ui-read-model-helpers.ts`
   - `ui-read-models-observability.ts` and 4 observability sub-files (maintenance, options, remote, security, system)
 - Skipped (TUI-specific divergence): `ui-services.ts` (uses TUI `SecretsManager` subclass), `ui-read-models.ts` (depends on TUI `RuntimeServices`)
-- panel-resources drift: TUI version (119 lines) uses `panel-health-monitor.ts`; SDK version (152 lines) uses `component-health-monitor.js` — different monitor interfaces, TUI-specific binding kept
+- panel-resources drift: TUI version (119 lines) uses `panel-health-monitor.ts`; platform version (152 lines) uses `component-health-monitor.js` — different monitor interfaces, TUI-specific binding kept
 
 ---
 
@@ -2925,16 +2924,16 @@ The 0.18.18 review scored 9.76/10 with three dimensions below 10 (Error Handling
 - Supports `r` to regenerate token (invalidates old one) and `c` to copy token to clipboard
 - Daemon standalone mode (`goodvibes-daemon`) now prints QR + connection info to stdout on startup
 - Companion tokens persist to `.goodvibes/tui/companion-token.json` with `gv_` prefix
-- Built on SDK 0.18.30 pairing module
+- Built on platform 0.18.30 pairing module
 
 ### Health Monitoring Rename
 
-- Renamed `panelHealthMonitor` to `componentHealthMonitor` across 20 files to align with SDK 0.18.29's generic naming
+- Renamed `panelHealthMonitor` to `componentHealthMonitor` across 20 files to align with platform 0.18.29's generic naming
 - Deprecated `Panel*` type aliases preserved for backward compatibility
 
-### SDK 0.18.30 Update
+### platform 0.18.30 Update
 
-- Updated to `legacy-package:goodvibes-sdk@0.18.30`
+- Updated to `legacy-package:goodvibes-platform@0.18.30`
 - Consumes new pairing module, `tools.llmEnabled` config, and all 0.18.29 boundary cleanup
 
 ### Verification
@@ -2943,67 +2942,67 @@ The 0.18.18 review scored 9.76/10 with three dimensions below 10 (Error Handling
 
 ## [0.18.13] — 2026-04-16
 
-### SDK/TUI Boundary Separation
+### platform/TUI Boundary Separation
 
-Major cleanup of the SDK/TUI boundary. The TUI is now a thin rendering/input/wiring layer built on `legacy-package:goodvibes-sdk@0.18.29`. Thousands of lines of duplicated, forked, and dead code have been removed and replaced with SDK imports.
+Major cleanup of the platform/TUI boundary. The TUI is now a thin rendering/input/wiring layer built on `legacy-package:goodvibes-platform@0.18.29`. Thousands of lines of duplicated, forked, and dead code have been removed and replaced with platform imports.
 
 #### Dead Code Removed
 
 - Deleted 4 dead daemon files that nothing imported (`facade.ts`, `facade-composition.ts`, `surface-policy.ts`, `types.ts`) — 1,291 lines removed
-- Deleted 2 dead UI read-model files (`ui-read-models-core.ts`, `ui-read-models-operations.ts`) — the barrel already delegates to SDK
+- Deleted 2 dead UI read-model files (`ui-read-models-core.ts`, `ui-read-models-operations.ts`) — the barrel already delegates to platform
 
-#### Forks Replaced with SDK Imports
+#### Forks Replaced with platform Imports
 
-- Replaced `src/core/orchestrator.ts` (736 lines) with a 3-line re-export from SDK — the SDK's Orchestrator already includes `getSpinner()`
-- Replaced `src/plugins/loader.ts` (305 lines) with re-exports from SDK — the SDK now supports `additionalDirectories` and `entryDefault` options
-- Replaced `src/tools/index.ts` (187 lines) with re-export of SDK's `registerAllTools`
-- Replaced `src/config/subscription-providers.ts` (128 lines) with `export *` from SDK
-- Replaced `src/config/index.ts` API key functions with re-exports from SDK's new `config/api-keys.ts`
-- Replaced `src/permissions/prompt.ts` type definitions with imports from SDK — kept `PermissionPromptUI` class (TUI-specific rendering)
-- Replaced 4 store/runtime duplicate files with SDK re-exports (conversation domain, permissions domain, conversation reducers, lifecycle reducers)
+- Replaced `src/core/orchestrator.ts` (736 lines) with a 3-line re-export from platform — the platform's Orchestrator already includes `getSpinner()`
+- Replaced `src/plugins/loader.ts` (305 lines) with re-exports from platform — the platform now supports `additionalDirectories` and `entryDefault` options
+- Replaced `src/tools/index.ts` (187 lines) with re-export of platform's `registerAllTools`
+- Replaced `src/config/subscription-providers.ts` (128 lines) with `export *` from platform
+- Replaced `src/config/index.ts` API key functions with re-exports from platform's new `config/api-keys.ts`
+- Replaced `src/permissions/prompt.ts` type definitions with imports from platform — kept `PermissionPromptUI` class (TUI-specific rendering)
+- Replaced 4 store/runtime duplicate files with platform re-exports (conversation domain, permissions domain, conversation reducers, lifecycle reducers)
 
 #### ConversationManager Refactored
 
-- Refactored `src/core/conversation.ts` from a 776-line standalone class to a ~450-line subclass extending SDK's `ConversationManager`
-- Removed all duplicated message management methods (CRUD, branching, persistence, compaction, undo/redo) — now inherited from SDK
+- Refactored `src/core/conversation.ts` from a 776-line standalone class to a ~450-line subclass extending platform's `ConversationManager`
+- Removed all duplicated message management methods (CRUD, branching, persistence, compaction, undo/redo) — now inherited from platform
 - Defined `TuiBlockMeta extends BlockMeta` with rendering fields (`blockIndex`, `startLine`, `lineCount`, `collapseKey`)
 - Kept all TUI-specific rendering methods (history buffer, block registry, collapse state, display navigation)
 
 #### Health Monitoring Renamed
 
-- Renamed `panelHealthMonitor` to `componentHealthMonitor` throughout the TUI to align with SDK 0.18.29's generic naming
+- Renamed `panelHealthMonitor` to `componentHealthMonitor` throughout the TUI to align with platform 0.18.29's generic naming
 - Updated 20 files across runtime, panels, diagnostics, bootstrap, and tests
 - Added deprecated `Panel*` type aliases for backward compatibility
 
-#### RuntimeState Aligned with SDK
+#### RuntimeState Aligned with platform
 
-- Updated `store/state.ts` to use SDK's `surfacePerf: SurfacePerfDomainState` instead of `uiPerf: UiPerfDomainState`
-- Updated `store/selectors/index.ts` to match SDK's selector shape
-- Health monitoring perf files rewritten as SDK re-export shims
+- Updated `store/state.ts` to use platform's `surfacePerf: SurfacePerfDomainState` instead of `uiPerf: UiPerfDomainState`
+- Updated `store/selectors/index.ts` to match platform's selector shape
+- Health monitoring perf files rewritten as platform re-export shims
 
 #### Clipboard Split
 
 - Created `src/utils/clipboard.ts` with TUI-specific OSC 52 `copyToClipboard` function
-- Platform clipboard paste functions remain in SDK
+- Platform clipboard paste functions remain in platform
 
 ### Verification
 
 - Full typecheck passes: `bun x tsc --noEmit` — 0 errors
-- Updated to `legacy-package:goodvibes-sdk@0.18.29`
+- Updated to `legacy-package:goodvibes-platform@0.18.29`
 
 ## [0.18.12] — 2026-04-15
 
-### SDK `0.18.28` Session-Persistence Boundary Fix
+### platform `0.18.28` Session-Persistence Boundary Fix
 
-- Updated `goodvibes-tui` to consume the published canonical SDK line at `legacy-package:goodvibes-sdk@0.18.28`
-- Pulled in the SDK fix that threads `surfaceRoot` through the last-session pointer and crash-recovery helpers instead of silently falling back to the shared `.goodvibes/...` tree
-- This closes the remaining TUI session-storage boundary leak that could still split a TUI-owned session across `.goodvibes/tui/...` and the unscoped shared root even after the broader SDK cutover
+- Updated `goodvibes-tui` to consume the published canonical platform line at `legacy-package:goodvibes-platform@0.18.28`
+- Pulled in the platform fix that threads `surfaceRoot` through the last-session pointer and crash-recovery helpers instead of silently falling back to the shared `.goodvibes/...` tree
+- This closes the remaining TUI session-storage boundary leak that could still split a TUI-owned session across `.goodvibes/tui/...` and the unscoped shared root even after the broader platform cutover
 
 ### TUI Validation Tail Cleanup
 
 - Moved the remaining session, template, picker, plugin, bootstrap-service, and related test temp roots onto the repo-local `.test-tmp/...` path instead of `os.tmpdir()`, removing the local quota failures that were still breaking the TUI validation pass
 - Updated the shell-control cutover gate to assert against the current TUI production surfaces and the intentional removal of old local platform files instead of reading deleted pre-cutover paths
-- Removed the stale typed-emission allowlist entry for `src/runtime/health/effect-handlers.ts` after that file was deleted during the SDK cutover, so the enforcement gate now reflects the live tree again
+- Removed the stale typed-emission allowlist entry for `src/runtime/health/effect-handlers.ts` after that file was deleted during the platform cutover, so the enforcement gate now reflects the live tree again
 
 ### Verification
 
@@ -3011,25 +3010,25 @@ Major cleanup of the SDK/TUI boundary. The TUI is now a thin rendering/input/wir
 - Full test runner passes: `bun run test` (`437` files passed / `0` failed)
 - Architecture gate passes: `bun run architecture:check`
 - Build passes: `bun run build`
-- Targeted cutover regression band passes against the published SDK `0.18.28`
+- Targeted cutover regression band passes against the published platform `0.18.28`
 
 ## [0.18.11] — 2026-04-15
 
 ### Version Boundary Cleanup
 
-- Fixed the TUI foundation artifact export path so `docs/foundation-artifacts/operator-contract.json` is now built through the TUI contract wrapper instead of the raw SDK builder
-- That keeps the checked-in operator artifact on the TUI product version instead of leaking the SDK package version into TUI-owned release artifacts
-- Updated the release gate to enforce the same boundary, so future foundation artifact checks compare against the TUI contract surface instead of silently accepting SDK-version drift
+- Fixed the TUI foundation artifact export path so `docs/foundation-artifacts/operator-contract.json` is now built through the TUI contract wrapper instead of the raw platform builder
+- That keeps the checked-in operator artifact on the TUI product version instead of leaking the platform package version into TUI-owned release artifacts
+- Updated the release gate to enforce the same boundary, so future foundation artifact checks compare against the TUI contract surface instead of silently accepting platform-version drift
 - Moved the TUI version-surface sync and foundation-artifact generation behind a shared workspace lock so `prebuild`, artifact export, and package staging cannot race each other over release-owned files
 - Made `publish:package` resync those surfaces before staging, so tarballs are built from the current TUI product version and current foundation artifacts instead of whatever happened to be on disk first
 - Updated the release build job to run the same surface sync before compiling binaries, so fresh CI checkouts cannot embed stale contract/version files into release assets
 
-### SDK `0.18.26` Update
+### platform `0.18.26` Update
 
-- Updated `goodvibes-tui` to consume `legacy-package:goodvibes-sdk@0.18.26`
-- Pulled in the SDK fix that syncs the baked runtime version fallback from the package version and adds a workspace lock around build and staging so concurrent validate/release flows stop racing over `dist`
-- This removes the stale embedded `0.18.14` SDK fallback string from rebuilt downstream binaries and closes the recurring pack/release race that was still showing up during SDK release validation
-- Rebuilt the TUI against that SDK patch and confirmed the startup header now shows `v0.18.11` while the stale `0.18.14` leak is gone from the compiled binary
+- Updated `goodvibes-tui` to consume `legacy-package:goodvibes-platform@0.18.26`
+- Pulled in the platform fix that syncs the baked runtime version fallback from the package version and adds a workspace lock around build and staging so concurrent validate/release flows stop racing over `dist`
+- This removes the stale embedded `0.18.14` platform fallback string from rebuilt downstream binaries and closes the recurring pack/release race that was still showing up during platform release validation
+- Rebuilt the TUI against that platform patch and confirmed the startup header now shows `v0.18.11` while the stale `0.18.14` leak is gone from the compiled binary
 
 ### Verification
 
@@ -3049,17 +3048,17 @@ Major cleanup of the SDK/TUI boundary. The TUI is now a thin rendering/input/wir
 
 ## [0.18.10] — 2026-04-15
 
-### SDK `0.18.25` Startup Crash Fix
+### platform `0.18.25` Startup Crash Fix
 
-- Updated `goodvibes-tui` to consume the published canonical SDK line at `legacy-package:goodvibes-sdk@0.18.25`
-- Pulled in the SDK fix that removes startup-time top-level `@ast-grep/napi` imports from shared structural-find and `ast_pattern` edit paths
+- Updated `goodvibes-tui` to consume the published canonical platform line at `legacy-package:goodvibes-platform@0.18.25`
+- Pulled in the platform fix that removes startup-time top-level `@ast-grep/napi` imports from shared structural-find and `ast_pattern` edit paths
 - Closed the compiled-binary startup regression where `./dist/goodvibes` could crash before any AST-backed tool was used simply because the full tool surface is registered during host boot
 
 ### Compiled Binary Revalidation
 
-- Rebuilt the compiled TUI entrypoint against the published `0.18.25` SDK package instead of local SDK source
+- Rebuilt the compiled TUI entrypoint against the published `0.18.25` platform package instead of local platform source
 - Verified that `bun run build` followed by `./dist/goodvibes` now reaches a live running TUI session instead of dying during module initialization
-- Kept the fix at the SDK boundary rather than adding a TUI-local workaround, so package consumers and future hosts get the same corrected startup behavior
+- Kept the fix at the platform boundary rather than adding a TUI-local workaround, so package consumers and future hosts get the same corrected startup behavior
 
 ### Verification
 
@@ -3078,25 +3077,25 @@ Major cleanup of the SDK/TUI boundary. The TUI is now a thin rendering/input/wir
 
 ## [0.18.9] — 2026-04-15
 
-### SDK `0.18.24` Host-Boundary Cutover
+### platform `0.18.24` Host-Boundary Cutover
 
-- Updated `goodvibes-tui` to consume the published canonical SDK line at `legacy-package:goodvibes-sdk@0.18.24`
-- Fixed the TUI host/runtime boundary so SDK-owned services receive explicit TUI configuration instead of inheriting shared defaults
-- Passed TUI-owned ecosystem catalog roots into SDK marketplace, skills, integration, and product surfaces so curated catalogs and receipts stay under `.goodvibes/tui/ecosystem/...`
+- Updated `goodvibes-tui` to consume the published canonical platform line at `legacy-package:goodvibes-platform@0.18.24`
+- Fixed the TUI host/runtime boundary so platform-owned services receive explicit TUI configuration instead of inheriting shared defaults
+- Passed TUI-owned ecosystem catalog roots into platform marketplace, skills, integration, and product surfaces so curated catalogs and receipts stay under `.goodvibes/tui/ecosystem/...`
 - Passed `surfaceRoot: 'tui'` into the daemon service manager and `defaultSurfaceKind: 'tui'` into automation runtime setup so service files and automation target semantics stay product-owned
-- Allowed the TUI runtime host to inject its own `localUserAuthManager` instead of letting the SDK bootstrap local auth storage implicitly
+- Allowed the TUI runtime host to inject its own `localUserAuthManager` instead of letting the platform bootstrap local auth storage implicitly
 
 ### Removed Remaining Local Ecosystem Duplication
 
 - Removed the dead local `src/runtime/ecosystem/catalog.ts` implementation from the TUI
-- Kept the TUI on package imports for ecosystem catalog/recommendation behavior instead of carrying a second local implementation beside the SDK
+- Kept the TUI on package imports for ecosystem catalog/recommendation behavior instead of carrying a second local implementation beside the platform
 - Fixed the marketplace panel test and the built-in marketplace panel factory so they both use the same explicit TUI catalog-root wiring as the command/runtime host
 
 ### Foundation And Release-Path Corrections
 
-- Regenerated checked-in foundation artifacts after the SDK `0.18.24` control-plane and contract updates so the TUI release gates stay aligned with the canonical runtime builders
+- Regenerated checked-in foundation artifacts after the platform `0.18.24` control-plane and contract updates so the TUI release gates stay aligned with the canonical runtime builders
 - Cleared the remaining temp-root failure in the marketplace panel test by moving it onto the repo-local `.tmp-tests` path
-- Revalidated the TUI end to end after the SDK boundary fixes instead of shipping on targeted checks alone
+- Revalidated the TUI end to end after the platform boundary fixes instead of shipping on targeted checks alone
 
 ### Verification
 
@@ -3114,24 +3113,24 @@ Major cleanup of the SDK/TUI boundary. The TUI is now a thin rendering/input/wir
 
 ## [0.18.8] — 2026-04-15
 
-### Canonical SDK Cutover Completion
+### Canonical platform Cutover Completion
 
-- Switched the TUI to the canonical published SDK line at `legacy-package:goodvibes-sdk@0.18.21`
-- Removed the remaining local REPL and sandbox runtime implementations from the TUI and routed those flows through SDK-owned package imports instead
-- Rewired command, MCP, panel, and runtime call sites that were still holding local platform copies so the TUI now consumes the shared SDK surface instead of carrying duplicate implementations
+- Switched the TUI to the canonical published platform line at `legacy-package:goodvibes-platform@0.18.21`
+- Removed the remaining local REPL and sandbox runtime implementations from the TUI and routed those flows through platform-owned package imports instead
+- Rewired command, MCP, panel, and runtime call sites that were still holding local platform copies so the TUI now consumes the shared platform surface instead of carrying duplicate implementations
 
 ### TUI-Owned Configuration Boundary Fixes
 
-- Kept product-owned storage and runtime identity at `.goodvibes/tui/...` by making the TUI pass explicit host configuration into SDK-owned services instead of inheriting SDK defaults
+- Kept product-owned storage and runtime identity at `.goodvibes/tui/...` by making the TUI pass explicit host configuration into platform-owned services instead of inheriting platform defaults
 - Wired cross-session task graphs to the TUI-owned path under `.goodvibes/tui/sessions/task-graph.json`
-- Instantiated the team and worklist tools with explicit `surfaceRoot: 'tui'` host configuration instead of relying on SDK defaults
+- Instantiated the team and worklist tools with explicit `surfaceRoot: 'tui'` host configuration instead of relying on platform defaults
 - Aligned language-override and secret-store tests with the real TUI-owned configuration boundary
 
 ### Release-Path And Test Hardening
 
 - Added per-file repo-local temp roots in `scripts/run-tests.ts` so the full TUI test suite no longer collides on shared temp filesystems
 - Reworked tests that still wrote to `/tmp` or shared temp roots so they now use the active temp root or an explicit external directory when validating escape behavior
-- Fixed the intelligence test helper to lazily initialize its runtime singletons, eliminating the module-init cycle that surfaced after the SDK cutover
+- Fixed the intelligence test helper to lazily initialize its runtime singletons, eliminating the module-init cycle that surfaced after the platform cutover
 - Improved the Skills panel detail path rendering so long skill origins keep the useful suffix visible instead of clipping away the selected file
 
 ### Verification
@@ -3262,16 +3261,16 @@ Superseded before successful public registry release. The bundled-binary tarball
   - macOS arm64
 - Added `SHA256SUMS.txt` checksums for the published release binaries
 
-### Canonical SDK Cutover
+### Canonical platform Cutover
 
-- Switched `goodvibes-tui` from the temporary beta line to the canonical `legacy-package:goodvibes-sdk@0.18.14` package and rewired imports to the canonical SDK entrypoints
-- Removed the duplicated local platform implementation that had already been extracted into the SDK, including large portions of contracts, daemon route handlers, runtime transports, state/runtime helpers, tools, utilities, and other shared platform code
-- Cut the remaining local state-inspector implementation over to the SDK-owned surface so the TUI now consumes the shared runtime inspection code instead of carrying its own duplicate copy
+- Switched `goodvibes-tui` from the temporary beta line to the canonical `legacy-package:goodvibes-platform@0.18.14` package and rewired imports to the canonical platform entrypoints
+- Removed the duplicated local platform implementation that had already been extracted into the platform, including large portions of contracts, daemon route handlers, runtime transports, state/runtime helpers, tools, utilities, and other shared platform code
+- Cut the remaining local state-inspector implementation over to the platform-owned surface so the TUI now consumes the shared runtime inspection code instead of carrying its own duplicate copy
 
 ### CI And Release Path Fixes
 
-- Fixed the TUI eval gate to use the SDK-backed eval baseline, formatting, and scorecard exports after the platform extraction removed the old local files
-- Fixed the TUI performance gate to build CI snapshots against the SDK-backed `surfacePerf` domain shape instead of the pre-extraction local `uiPerf` shape
+- Fixed the TUI eval gate to use the platform-backed eval baseline, formatting, and scorecard exports after the platform extraction removed the old local files
+- Fixed the TUI performance gate to build CI snapshots against the platform-backed `surfacePerf` domain shape instead of the pre-extraction local `uiPerf` shape
 - Fixed the architecture check so it tolerates removed migration targets on clean checkouts instead of crashing when extracted directories no longer exist
 - Fixed the package publish path so release packaging stages vendored binaries deterministically instead of depending on install-time binary download behavior
 - Fixed the release workflow to publish both npmjs and GitHub Packages distributions from the same bundled-binary package shape
@@ -3294,12 +3293,12 @@ Superseded before successful public registry release. The bundled-binary tarball
 
 ## [0.18.3] — 2026-04-14
 
-### SDK-Ready Transport And Contract Seams
+### platform-Ready Transport And Contract Seams
 
 - Added source-owned foundation contract types plus generated typed operator, peer, and runtime-event client maps so remote clients consume stable typed daemon surfaces instead of inferring them from route behavior
 - Split the runtime transport layer into explicit HTTP auth/retry/json, SSE/reconnect, direct-client, contract-route, operator remote-client, peer remote-client, and runtime/domain-event modules instead of leaving those concerns in a few broad transport files
 - Expanded runtime event domain metadata, distributed runtime contracts, and shared event-envelope wiring so remote clients and future companion surfaces can subscribe to named domains with stable payload semantics
-- Fixed the extracted HTTP JSON transport so explicit `Authorization` and `Content-Type` headers are preserved through request construction, keeping remote operator and peer clients aligned with their contract tests and downstream SDK copies
+- Fixed the extracted HTTP JSON transport so explicit `Authorization` and `Content-Type` headers are preserved through request construction, keeping remote operator and peer clients aligned with their contract tests and downstream platform copies
 
 ### Daemon Route Extraction And Artifact Hardening
 
@@ -3371,10 +3370,10 @@ Superseded before successful public registry release. The bundled-binary tarball
 - Added a first-class telemetry API with snapshot, events, errors, traces, metrics, SSE streaming, and OTLP-shaped export documents, with safe-by-default redaction and elevated raw access controls
 - Normalized the daemon’s dynamic JSON error responses around the same structured error surface so external consumers can reason about failures without string-matching ad hoc messages
 
-### SDK-Facing Control-Plane Contract Hardening
+### platform-Facing Control-Plane Contract Hardening
 
-- Added typed telemetry DTOs to the operator contract, method catalog, and checked-in foundation artifacts so future SDK generators can consume stable telemetry schemas rather than infer them from route behavior
-- Added public current-principal/auth-introspection endpoints and transport support so SDK consumers can inspect effective auth mode, scopes, and operator identity through the same contract surface they use for product APIs
+- Added typed telemetry DTOs to the operator contract, method catalog, and checked-in foundation artifacts so future platform generators can consume stable telemetry schemas rather than infer them from route behavior
+- Added public current-principal/auth-introspection endpoints and transport support so platform consumers can inspect effective auth mode, scopes, and operator identity through the same contract surface they use for product APIs
 - Extended release-gate and transport coverage around the new telemetry and control-plane auth surfaces so the contract stays frozen as the server and foundation layers evolve
 
 ### Verification
@@ -3424,7 +3423,7 @@ Superseded before successful public registry release. The bundled-binary tarball
 ### Explicit Intent Surfaces For Sessions, Routing, And Execution
 
 - Added explicit shared-session intent modeling for `submit`, `steer`, and `follow-up` flows, including durable input records, lifecycle-state tracking, correlation and causation IDs, explicit cancellation, and stable operator-surface semantics instead of inferring continuation behavior from session forwarding alone
-- Extended the operator/session and daemon runtime surfaces so session message submission, explicit steering, deferred follow-up, and spawned continuation work all carry one typed routing model with stable lifecycle events that are suitable for future SDK extraction
+- Extended the operator/session and daemon runtime surfaces so session message submission, explicit steering, deferred follow-up, and spawned continuation work all carry one typed routing model with stable lifecycle events that are suitable for future platform extraction
 - Added explicit execution-intent propagation across automation runs, task spawning, and agent records so risk class, approval posture, network policy, and filesystem policy travel through the runtime as deliberate semantics instead of implicit internal assumptions
 
 ### Explicit Route, Artifact, Knowledge, And Provider Intent
@@ -3452,13 +3451,13 @@ Superseded before successful public registry release. The bundled-binary tarball
 ### Canonical Foundation Artifacts And Consumer Examples
 
 - Added a checked-in foundation artifact export flow with canonical operator-contract, peer-contract, knowledge GraphQL, and knowledge SQL outputs under `docs/foundation-artifacts`, plus a release gate that keeps those artifacts in sync with the runtime builders
-- Added minimal in-process and HTTP reference consumers under `examples/reference-operator-client` and `examples/reference-http-client` so future SDK and shell work can validate the intended builder-facing programming model against real code instead of repo-local knowledge
+- Added minimal in-process and HTTP reference consumers under `examples/reference-operator-client` and `examples/reference-http-client` so future platform and shell work can validate the intended builder-facing programming model against real code instead of repo-local knowledge
 - Exposed canonical knowledge SQL and GraphQL export helpers from the knowledge foundation surface so the current repo can lock those shapes intentionally before extraction
 
 ### Transport Parity And Future Package Boundary Enforcement
 
 - Added a transport parity release gate that exercises shared operator and peer workflows plus event delivery across direct, HTTP, and realtime transports, and fixed HTTP session fetch behavior so transport consumers see the same session shape as the in-process path
-- Expanded architecture enforcement to simulate future `foundation`, `server`, and shell package boundaries by blocking shell or daemon imports from the stable in-process consumer surfaces that will carry into the SDK monorepo
+- Expanded architecture enforcement to simulate future `foundation`, `server`, and shell package boundaries by blocking shell or daemon imports from the stable in-process consumer surfaces that will carry into the platform monorepo
 - Updated TypeScript project coverage and docs indexing so the checked-in examples and foundation artifacts are part of the normal release verification path
 
 ### Server Adapter Cleanup
@@ -3527,7 +3526,7 @@ Superseded before successful public registry release. The bundled-binary tarball
 
 ## [0.16.0] — 2026-04-12
 
-### V1 Architecture Hardening And SDK Readiness
+### V1 Architecture Hardening And platform Readiness
 
 - Replaced ambient runtime ownership with an explicit app-scoped `RuntimeServices` graph built at bootstrap and threaded through the daemon, control-plane, command surfaces, panels, automation runtime, knowledge runtime, and shell integrations
 - Removed retired cross-boundary singleton/global shortcuts, including the old adaptive-planner and plan-manager instance modules, runtime integration-context fallbacks, and other ambient access patterns that blocked clean service ownership
@@ -3623,7 +3622,7 @@ Superseded before successful public registry release. The bundled-binary tarball
 - Added a shared channel reply pipeline that normalizes assistant text, reasoning, tool lifecycle, plan updates, approvals, command output, patches, compaction, and model selection into consistent Slack, Discord, ntfy, webhook, and web/operator delivery behavior
 - Added channel-owned setup, doctor, repair, secret-target, lifecycle migration, and allowlist edit/resolve contracts and moved more channel posture logic out of bespoke daemon handlers
 - Added built-in Telegram, Google Chat, Signal, WhatsApp, and iMessage channel adapters/plugins with setup metadata, doctor checks, target resolution, and provider-side setup guidance
-- Added provider-owned runtime metadata and plugin SDK breadth for auth posture, repair hints, model normalization/suppression, usage/cost reporting, embeddings posture, and stream/reasoning/cache policy reporting
+- Added provider-owned runtime metadata and plugin platform breadth for auth posture, repair hints, model normalization/suppression, usage/cost reporting, embeddings posture, and stream/reasoning/cache policy reporting
 - Added provider-backed memory embeddings for OpenAI, OpenAI-compatible and LM Studio, Ollama, Gemini, and Mistral plus sqlite-vec-safe async rebuild/reindex flows and memory doctor diagnostics
 - Added the provider-backed `web_search` domain and tool with DuckDuckGo Lite + Instant Answer as the default no-key provider plus Brave, Exa, Firecrawl, SearXNG, and Tavily adapters, normalized result shaping, verbosity control, and bounded evidence attachment through `fetch`
 - Added a durable artifact/attachment store for arbitrary files with remote URI ingest, SSRF-aware host blocking, MIME/size validation, retention metadata, structured attachment publication, and attachment-aware daemon/control-plane delivery
@@ -3646,10 +3645,10 @@ Superseded before successful public registry release. The bundled-binary tarball
 
 ## [0.15.5] — 2026-04-10
 
-### Automation Gateway Runtime: SDK, Voice, Media, Memory, And Runtime Contracts
+### Automation Gateway Runtime: platform, Voice, Media, Memory, And Runtime Contracts
 
 - Added a first-class control-plane gateway method catalog with typed method descriptors, builtin method discovery, plugin method registration, HTTP method listing/invocation routes, and WebSocket `methodId` invocation support for remote clients
-- Added plugin SDK contribution hooks for gateway methods, channel plugins, delivery strategies, memory embedding providers, voice providers, and media providers, with unload cleanup wired through the active registries
+- Added plugin platform contribution hooks for gateway methods, channel plugins, delivery strategies, memory embedding providers, voice providers, and media providers, with unload cleanup wired through the active registries
 - Added TS-only voice provider contracts and daemon APIs for status, provider discovery, voice listing, TTS synthesis requests, STT transcription requests, and realtime voice session negotiation without adding native mic/audio dependencies
 - Added TS-only media provider contracts and daemon APIs for provider discovery, media analysis, transforms, and generation so web or companion clients can supply captured attachments while the TUI owns orchestration and policy
 - Added memory embedding provider registration, a deterministic hashed fallback embedding provider, sqlite-vec vector normalization, memory vector rebuild/default-provider APIs, and a memory doctor report for provider/vector-store health
@@ -3658,7 +3657,7 @@ Superseded before successful public registry release. The bundled-binary tarball
 
 ### Verification
 
-- Added regression coverage for gateway method catalog dispatch, plugin SDK extension cleanup, voice/media provider registries, memory embedding provider behavior, automation heartbeat wake queuing, daemon API routes, and WebSocket gateway method invocation
+- Added regression coverage for gateway method catalog dispatch, plugin platform extension cleanup, voice/media provider registries, memory embedding provider behavior, automation heartbeat wake queuing, daemon API routes, and WebSocket gateway method invocation
 - Typecheck passes: `bunx tsc --noEmit -p tsconfig.json`
 - Build passes: `bun run build`
 - Full test runner passes: `bun test` (`6888 pass, 0 fail`)
@@ -4110,7 +4109,7 @@ Full implementation of the post-v3 runtime blueprint across 9 phases, ~52,000 li
 ### OTel Export Reliability (Tier 6)
 - ExportQueue with bounded ring buffer — telemetry spans are never lost under export backpressure
 - OtlpExporter with batch export: spans are batched and exported on flush or queue threshold
-- Combined with the lightweight tracer/meter from Tier 4: full OTel-compatible pipeline with no SDK dependency
+- Combined with the lightweight tracer/meter from Tier 4: full OTel-compatible pipeline with no platform dependency
 
 ### Ops Playbooks (Tier 6)
 - 5 machine-readable runbooks covering provider outage, memory pressure, plugin crash, MCP disconnect, and compaction failure
@@ -4146,7 +4145,7 @@ Full implementation of the post-v3 runtime blueprint across 9 phases, ~52,000 li
 - Schema freshness tracking: detects and re-fetches stale tool schemas without full reconnect
 
 ### OTel Foundation (Tier 4)
-- Lightweight tracer and meter implementing OTel-compatible interfaces — no OTel SDK dependency
+- Lightweight tracer and meter implementing OTel-compatible interfaces — no OTel platform dependency
 - Turn spans, tool spans, and LLM request spans with structured attributes
 - Local JSON lines ledger exporter for offline telemetry review
 

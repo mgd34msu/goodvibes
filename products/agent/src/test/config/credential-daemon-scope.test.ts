@@ -20,9 +20,9 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { ConfigManager, SecretsManager as SdkSecretsManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { CalendarTokenStore } from '@goodvibes-jev/engine/sdk/platform/calendar';
-import type { FeedFetcher } from '@goodvibes-jev/engine/sdk/platform/calendar';
+import { ConfigManager, SecretsManager as PlatformSecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { CalendarTokenStore } from '@goodvibes-jev/engine/platform/platform/calendar';
+import type { FeedFetcher } from '@goodvibes-jev/engine/platform/platform/calendar';
 import { SecretsManager } from '../../config/secrets.ts';
 import { defaultSecretBackedScope, persistSecretBackedConfigValue, buildGoodVibesSecretKey } from '../../config/secret-config.ts';
 import {
@@ -71,7 +71,7 @@ describe('a credential captured in the agent survives the agent closing', () => 
    * root, sharing only the machine home. Nothing about the agent's own
    * directories is visible to it.
    */
-  let daemonReader: SdkSecretsManager;
+  let daemonReader: PlatformSecretsManager;
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(resolve(process.cwd(), '..'), 'gv-credscope-test-'));
@@ -82,7 +82,7 @@ describe('a credential captured in the agent survives the agent closing', () => 
     mkdirSync(agentProjectRoot, { recursive: true });
     mkdirSync(otherProjectRoot, { recursive: true });
     agentSecrets = new SecretsManager({ projectRoot: agentProjectRoot, globalHome: machineHome });
-    daemonReader = new SdkSecretsManager({
+    daemonReader = new PlatformSecretsManager({
       projectRoot: otherProjectRoot,
       globalHome: machineHome,
       surfaceRoot: 'a-surface-the-agent-never-writes-to',
@@ -161,7 +161,7 @@ describe('a credential captured in the agent survives the agent closing', () => 
 
   test('the calendar OAuth refresh token is readable when only the daemon is left', async () => {
     // Built exactly as `/calendar connect google` builds it, then the REAL
-    // writer, the SDK's token store, is pointed at the very slice the service
+    // writer, the platform's token store, is pointed at the very slice the service
     // hands its connector. The store calls set(key, value) with no scope of its
     // own, which is the whole reason the slice has to decide.
     const service = new CalendarOAuthService({
@@ -270,7 +270,7 @@ describe('a credential captured in the agent survives the agent closing', () => 
  * The scope each path ASKS the store for.
  *
  * The end-to-end tests above prove the credential is reachable. They cannot
- * prove which of two things made it reachable, because at this SDK version the
+ * prove which of two things made it reachable, because at this platform version the
  * store relocates daemon-owned names by itself: a call site that asks for
  * 'user' and one that asks for 'daemon' produce the same file on disk. These
  * tests read the request instead, with a recording store in place of the real
@@ -386,7 +386,7 @@ describe('credential scope decisions', () => {
     expect(isDaemonNeededSecretKey('GOODVIBES_CALENDAR_MICROSOFT_TOKENS')).toBe(true);
   });
 
-  test('the names the SDK already derives are recognised without being restated here', () => {
+  test('the names the platform already derives are recognised without being restated here', () => {
     expect(isDaemonNeededSecretKey('GOODVIBES_EMAIL_PASSWORD_REF')).toBe(true);
     expect(isDaemonNeededSecretKey('GOODVIBES_SURFACES_TELEGRAM_BOT_TOKEN')).toBe(true);
     expect(isDaemonNeededSecretKey('GOODVIBES_CALENDAR_GOOGLE_CLIENT_SECRET_REF')).toBe(true);

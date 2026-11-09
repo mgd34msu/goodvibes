@@ -1,4 +1,4 @@
-import { center, getDisplayWidth, truncateDisplay } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { center, getDisplayWidth, truncateDisplay } from '@goodvibes-jev/engine/platform/platform/utils';
 const ART_LINES = [
     ' ██████╗    ██████╗    ██████╗   ██████╗   ██╗   ██╗  ██╗  ██████╗   ███████╗  ███████╗',
     '██╔════╝   ██╔═══██╗  ██╔═══██╗  ██╔══██╗  ██║   ██║  ██║  ██╔══██╗  ██╔════╝  ██╔════╝',

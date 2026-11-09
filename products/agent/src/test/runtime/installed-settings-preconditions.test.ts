@@ -2,9 +2,9 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { createSettingsPreconditionHandler, createDaemonSystemRouteHandlers } from '@goodvibes-jev/engine/daemon-sdk';
-import { createDaemonConfigClient } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { createSettingsPreconditionHandler, createDaemonSystemRouteHandlers } from '@goodvibes-jev/engine/daemon-api';
+import { createDaemonConfigClient } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { createAgentDaemonVerbCaller } from '../../runtime/client/daemon-verbs.ts';
 import { connectedHostOperatorTokenPath } from '../../runtime/connected-host-auth.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';

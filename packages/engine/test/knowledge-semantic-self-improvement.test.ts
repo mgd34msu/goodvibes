@@ -3,7 +3,7 @@ import { gapAssessmentFixture, intrinsicAssessmentFixture, answerGapAssessmentFi
 import { seedHomeAssistantObservation } from './_helpers/homegraph-observation-fixtures.js';
 import { seedKnowledgeResearchTask, useSemanticActivationFixtures } from './_helpers/knowledge-semantic-activation-fixtures.js';
 import { describe, expect, test } from 'bun:test';
-import { KnowledgeSourceQualityHeldError } from '../sdk/src/platform/knowledge/source-quality.js';
+import { KnowledgeSourceQualityHeldError } from '../platform/src/platform/knowledge/source-quality.js';
 import {
   createProviderBackedKnowledgeSemanticLlm,
   createWebKnowledgeGapRepairer,
@@ -11,7 +11,7 @@ import {
   KnowledgeSemanticService,
   homeAssistantKnowledgeSpaceId,
   knowledgeSpaceMetadata,
-} from '../sdk/src/platform/knowledge/index.js';
+} from '../platform/src/platform/knowledge/index.js';
 import {
   BoilerplateAnswerLlm,
   FakeKnowledgeLlm,

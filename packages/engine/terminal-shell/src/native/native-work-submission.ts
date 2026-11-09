@@ -1,5 +1,5 @@
-import type { WorkLedgerReadSnapshot } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger';
-import type { OperatorNativeWorkSubmissionClient, NativeWorkSubmissionRequest, NativeWorkSubmissionReceipt } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-submission-client';
+import type { WorkLedgerReadSnapshot } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
+import type { OperatorNativeWorkSubmissionClient, NativeWorkSubmissionRequest, NativeWorkSubmissionReceipt } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-submission-client';
 import { NATIVE_SUBMISSION_MAX_BYTES, NativeWorkSourceError, readNativeWorkSourceFile, validateNativeWorkSource, type NativeWorkSource } from './native-work-submission-source.js';
 import type { NativeSubmissionJournalBinding, NativeSubmissionJournalRecord, NativeWorkSubmissionJournal } from './native-work-submission-journal.js';
 

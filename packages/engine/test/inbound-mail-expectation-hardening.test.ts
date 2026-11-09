@@ -33,8 +33,8 @@ import {
   VerificationExpectationBook,
   isRegistrableServiceDomain,
   validatePersistedExpectation,
-} from '../sdk/src/platform/google/verification-expectations.ts';
-import { deliveredRecipientFromAliasMailbox } from '../sdk/src/platform/google/delivery-evidence.ts';
+} from '../platform/src/platform/google/verification-expectations.ts';
+import { deliveredRecipientFromAliasMailbox } from '../platform/src/platform/google/delivery-evidence.ts';
 
 const NOW = new Date('2026-07-28T12:00:00.000Z');
 const NOW_MS = NOW.getTime();

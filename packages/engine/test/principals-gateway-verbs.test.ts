@@ -8,9 +8,9 @@
  * principal, and an identity cannot be silently stolen from another principal.
  */
 import { describe, expect, test } from 'bun:test';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { registerPrincipalsGatewayMethods } from '../sdk/src/platform/control-plane/routes/principals.ts';
-import { PrincipalRegistry, PrincipalStore, UNKNOWN_PRINCIPAL_ID } from '../sdk/src/platform/principals/index.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { registerPrincipalsGatewayMethods } from '../platform/src/platform/control-plane/routes/principals.ts';
+import { PrincipalRegistry, PrincipalStore, UNKNOWN_PRINCIPAL_ID } from '../platform/src/platform/principals/index.ts';
 
 function makeCatalog(): GatewayMethodCatalog {
   const catalog = new GatewayMethodCatalog();

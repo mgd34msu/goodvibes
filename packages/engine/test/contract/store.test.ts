@@ -7,7 +7,7 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, linkSync, symlinkSync, readdirSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ContractEvent } from '../../sdk/src/events/contract.js';
+import type { ContractEvent } from '../../platform/src/events/contract.js';
 import {
   CONTRACT_QUARANTINE_MAX_AGE_MS,
   CURRENT_CONTRACT_SCHEMA_VERSION,
@@ -22,9 +22,9 @@ import {
   serializeContract,
   type Contract,
   type ContractSnapshotRejection,
-} from '../../sdk/src/platform/contract/index.js';
+} from '../../platform/src/platform/contract/index.js';
 import { makeContract } from './fixtures.js';
-import { quarantineCorruptFile } from '../../sdk/src/platform/utils/atomic-json-store.js';
+import { quarantineCorruptFile } from '../../platform/src/platform/utils/atomic-json-store.js';
 
 const DAY = 24 * 60 * 60 * 1000;
 const roots: string[] = [];

@@ -23,16 +23,16 @@ import { join } from 'node:path';
 import {
   decideExecContainment,
   type ExecContainmentRequirement,
-} from '../sdk/src/platform/tools/exec/containment.ts';
+} from '../platform/src/platform/tools/exec/containment.ts';
 import {
   decideOwnerTerminalAccess,
   PLATFORM_TMUX_SESSION_PREFIX,
   type OwnerTerminalGuard,
-} from '../sdk/src/platform/tools/exec/owner-terminal-guard.ts';
-import type { ExecSandboxPlan } from '../sdk/src/platform/tools/exec/sandbox.ts';
-import { createExecTool } from '../sdk/src/platform/tools/exec/index.ts';
-import { ProcessManager } from '../sdk/src/platform/tools/shared/process-manager.ts';
-import { OverflowHandler } from '../sdk/src/platform/tools/shared/overflow.ts';
+} from '../platform/src/platform/tools/exec/owner-terminal-guard.ts';
+import type { ExecSandboxPlan } from '../platform/src/platform/tools/exec/sandbox.ts';
+import { createExecTool } from '../platform/src/platform/tools/exec/index.ts';
+import { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.ts';
+import { OverflowHandler } from '../platform/src/platform/tools/shared/overflow.ts';
 import { EXEC_GATE_TABLE } from './_helpers/gate-readings.ts';
 import { useToolReadings } from './_helpers/tool-readings.ts';
 

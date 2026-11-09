@@ -15,11 +15,11 @@ import { tmpdir } from 'os';
 import { SettingsModal } from '../../input/settings-modal.ts';
 import { handleSettingsModalToken } from '../../input/handler-modal-routes.ts';
 import { renderSettingsModal } from '../../renderer/settings-modal.ts';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { ServiceRegistry } from '@goodvibes-jev/engine/sdk/platform/config';
-import { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
+import { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
-import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
+import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
 import { SecretsManager } from '../../config/secrets.ts';
 import { linesToText } from '../setup.ts';
 

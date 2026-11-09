@@ -18,15 +18,15 @@
  *
  * ── Why a refused stream is a value, not a throw ──────────────────────────
  *
- * The same reasoning the SDK's approval-update watcher records: a stream can be
+ * The same reasoning the platform's approval-update watcher records: a stream can be
  * refused (no daemon, a 401, a proxy that will not hold a connection), and the
  * caller must still be able to act on the session over the verbs. `watch`
  * resolves to null instead of throwing, and the caller says so honestly rather
  * than pretending the conversation ended.
  */
 import { openServerSentEventStream } from '@/runtime/index.ts';
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
-import type { HostedSessionUpdatePayload } from '@goodvibes-jev/engine/sdk/platform/hosted-sessions';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { HostedSessionUpdatePayload } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
 
 /** The domains a hosted session's whole story arrives on. */
 export const HOSTED_SESSION_STREAM_DOMAINS = ['turn', 'tools', 'session'] as const;

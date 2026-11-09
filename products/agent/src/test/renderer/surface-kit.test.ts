@@ -5,8 +5,8 @@
  * stamp-over.
  */
 import { describe, expect, test } from 'bun:test';
-import { createEmptyLine, createStyledCell, type Line } from '@goodvibes-jev/engine/sdk/platform/types';
-import { ansiToHex, mixHex } from '@goodvibes-jev/engine/sdk/platform/presentation';
+import { createEmptyLine, createStyledCell, type Line } from '@goodvibes-jev/engine/platform/platform/types';
+import { ansiToHex, mixHex } from '@goodvibes-jev/engine/platform/platform/presentation';
 import { beginModal, finishModal, modalGeometry, searchRow, standardModalWidth } from '../../renderer/surface-kit.ts';
 import { drawList, drawRow, type KitRow } from '../../renderer/surface-kit-list.ts';
 import { composeLayers, type CellGrid } from '../../renderer/surface-compose.ts';

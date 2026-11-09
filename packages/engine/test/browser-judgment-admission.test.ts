@@ -7,13 +7,13 @@ import {
   BrowserJudgmentError,
   browserJudgmentRefusal,
   type BrowserJudgmentErrorCode,
-} from '../daemon-sdk/src/browser-judgment-contract.js';
+} from '../daemon-api/src/browser-judgment-contract.js';
 import {
   captureBrowserJudgmentJson,
   judgmentRecord,
   judgmentText,
   parseBrowserJudgmentRequest,
-} from '../daemon-sdk/src/browser-judgment-validation.js';
+} from '../daemon-api/src/browser-judgment-validation.js';
 
 // Synthetic protocol fixtures only: no daemon, provider, credential, or live proof.
 const REQUEST_ID = '12345678-1234-4234-9234-123456789abc';

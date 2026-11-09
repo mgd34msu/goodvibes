@@ -1,10 +1,10 @@
-import type { GatePresetName } from '@goodvibes-jev/engine/sdk/platform/gate/presets';
+import type { GatePresetName } from '@goodvibes-jev/engine/platform/platform/gate/presets';
 import { createNativeHostFetch } from './native-host-fetch.js';
 import { createNativeHostedTurnClient } from './native-hosted-turn.js';
 import { isNativePairedPrincipal } from './native-paired-principal.js';
-import { createOperatorNativeWorkExecutionClient } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
-import { createOperatorSdk, type OperatorRemoteClient } from '@goodvibes-jev/engine/operator-sdk';
-import { createOperatorNativeConversationIntakeClient } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
+import { createOperatorNativeWorkExecutionClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
+import { createOperatorApiClient, type OperatorRemoteClient } from '@goodvibes-jev/engine/operator-client';
+import { createOperatorNativeConversationIntakeClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 import type { NativeSubmissionHost } from './native-work-submission-host.js';
 import type { NativeConversationIntakeBinding } from './native-conversation-intake.js';
 export function createNativeConversationIntakeBinding(host: NativeSubmissionHost, projectId: string, current: () => boolean = () => true, options: {
@@ -20,7 +20,7 @@ export function createNativeConversationIntakeBinding(host: NativeSubmissionHost
         const available = () => current() && (!disposed || args[0] === 'workLedger.intake.get');
         if (!available())
             throw new Error('Native intake host selection changed');
-        const operator = createOperatorSdk({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: createNativeHostFetch({ current: available }) });
+        const operator = createOperatorApiClient({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: createNativeHostFetch({ current: available }) });
         try {
             // A prior principal read cannot authorize a later private-pairing call.
             // This also fences retained permits that outlive the initial binding.

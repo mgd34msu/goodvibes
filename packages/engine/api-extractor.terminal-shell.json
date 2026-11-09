@@ -15,23 +15,23 @@
         // one package whose exports name source files, so the same declaration
         // files are named here.
         "paths": {
-          "@goodvibes-jev/engine/sdk/browser/agent": [
-            "./sdk/dist/browser-agent.d.ts"
+          "@goodvibes-jev/engine/platform/browser/agent": [
+            "./platform/dist/browser-agent.d.ts"
           ],
-          "@goodvibes-jev/engine/sdk/browser/homeassistant": [
-            "./sdk/dist/browser-homeassistant.d.ts"
+          "@goodvibes-jev/engine/platform/browser/homeassistant": [
+            "./platform/dist/browser-homeassistant.d.ts"
           ],
-          "@goodvibes-jev/engine/sdk/browser/knowledge": [
-            "./sdk/dist/browser-knowledge.d.ts"
+          "@goodvibes-jev/engine/platform/browser/knowledge": [
+            "./platform/dist/browser-knowledge.d.ts"
           ],
-          "@goodvibes-jev/engine/sdk/contracts/node": [
-            "./sdk/dist/contracts-node.d.ts"
+          "@goodvibes-jev/engine/platform/contracts/node": [
+            "./platform/dist/contracts-node.d.ts"
           ],
-          "@goodvibes-jev/engine/sdk/platform/runtime/fleet/observed": [
-            "./sdk/dist/platform/runtime/fleet/observed/source.d.ts"
+          "@goodvibes-jev/engine/platform/platform/runtime/fleet/observed": [
+            "./platform/dist/platform/runtime/fleet/observed/source.d.ts"
           ],
-          "@goodvibes-jev/engine/sdk/sql-js": [
-            "./sdk/dist/platform/types/sql-js.d.ts"
+          "@goodvibes-jev/engine/platform/sql-js": [
+            "./platform/dist/platform/types/sql-js.d.ts"
           ],
           "@goodvibes-jev/engine/contracts": [
             "./contracts/dist/index.d.ts"
@@ -40,12 +40,12 @@
             "./contracts/dist/*.d.ts",
             "./contracts/dist/*/index.d.ts"
           ],
-          "@goodvibes-jev/engine/daemon-sdk": [
-            "./daemon-sdk/dist/index.d.ts"
+          "@goodvibes-jev/engine/daemon-api": [
+            "./daemon-api/dist/index.d.ts"
           ],
-          "@goodvibes-jev/engine/daemon-sdk/*": [
-            "./daemon-sdk/dist/*.d.ts",
-            "./daemon-sdk/dist/*/index.d.ts"
+          "@goodvibes-jev/engine/daemon-api/*": [
+            "./daemon-api/dist/*.d.ts",
+            "./daemon-api/dist/*/index.d.ts"
           ],
           "@goodvibes-jev/engine/errors": [
             "./errors/dist/index.d.ts"
@@ -54,26 +54,26 @@
             "./errors/dist/*.d.ts",
             "./errors/dist/*/index.d.ts"
           ],
-          "@goodvibes-jev/engine/operator-sdk": [
-            "./operator-sdk/dist/index.d.ts"
+          "@goodvibes-jev/engine/operator-client": [
+            "./operator-client/dist/index.d.ts"
           ],
-          "@goodvibes-jev/engine/operator-sdk/*": [
-            "./operator-sdk/dist/*.d.ts",
-            "./operator-sdk/dist/*/index.d.ts"
+          "@goodvibes-jev/engine/operator-client/*": [
+            "./operator-client/dist/*.d.ts",
+            "./operator-client/dist/*/index.d.ts"
           ],
-          "@goodvibes-jev/engine/peer-sdk": [
-            "./peer-sdk/dist/index.d.ts"
+          "@goodvibes-jev/engine/peer-client": [
+            "./peer-client/dist/index.d.ts"
           ],
-          "@goodvibes-jev/engine/peer-sdk/*": [
-            "./peer-sdk/dist/*.d.ts",
-            "./peer-sdk/dist/*/index.d.ts"
+          "@goodvibes-jev/engine/peer-client/*": [
+            "./peer-client/dist/*.d.ts",
+            "./peer-client/dist/*/index.d.ts"
           ],
-          "@goodvibes-jev/engine/sdk": [
-            "./sdk/dist/index.d.ts"
+          "@goodvibes-jev/engine/platform": [
+            "./platform/dist/index.d.ts"
           ],
-          "@goodvibes-jev/engine/sdk/*": [
-            "./sdk/dist/*.d.ts",
-            "./sdk/dist/*/index.d.ts"
+          "@goodvibes-jev/engine/platform/*": [
+            "./platform/dist/*.d.ts",
+            "./platform/dist/*/index.d.ts"
           ],
           "@goodvibes-jev/engine/terminal-shell": [
             "./terminal-shell/dist/index.d.ts"

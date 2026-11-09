@@ -70,16 +70,16 @@ import { HistorySearch } from '../../input/input-history.ts';
 import { renderSelectionModalOverlay } from '../../renderer/selection-modal-overlay.ts';
 import { SelectionModal } from '../../input/selection-modal.ts';
 import { buildFirstOpenItems } from '../../cli/tui-startup.ts';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { SecretsManager } from '../../config/secrets.ts';
-import { ServiceRegistry } from '@goodvibes-jev/engine/sdk/platform/config';
-import { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
+import { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
-import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
-import { SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
-import { ProfileManager } from '@goodvibes-jev/engine/sdk/platform/profiles';
-import type { ProcessNode } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
+import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
+import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
+import { ProfileManager } from '@goodvibes-jev/engine/platform/platform/profiles';
+import type { ProcessNode } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import { AgentsModal, type FleetActionCallbacks } from '../../input/agents-modal.ts';
 import { SurfaceModalHost } from '../../input/surface-modal-host.ts';
 import { confirmThrough } from '../../input/confirm-dialog.ts';
@@ -91,8 +91,8 @@ import type { SemanticDiff } from '../../renderer/semantic-diff.ts';
 import { NotificationsModal } from '../../input/notifications-modal.ts';
 import { NotificationFeed } from '../../views/notifications-feed.ts';
 import { MaskedEntryModal } from '../../input/masked-entry-modal.ts';
-import { setModelPricingResolver, type ResolvedModelPricing } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import { setModelPricingResolver, type ResolvedModelPricing } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import { buildFleetSnapshot, createStaticFleetReadModel } from '../../views/fleet-read-model.ts';
 import { ConfigModal } from '../../input/config-modal.ts';
 import { renderConfigModal } from '../../renderer/config-modal.ts';
@@ -100,7 +100,7 @@ import type { ConfigModalView } from '../../input/config-modal-types.ts';
 import { statusGlyph, toneStyle, pad, postureLine, kv } from '../../views/modals/modal-surface-helpers.ts';
 import { activeTokens, setActiveThemeMode, setActiveThemeName } from '../../renderer/theme.ts';
 import { PermissionPromptUI } from '../../permissions/prompt.ts';
-import type { PermissionRequest } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import type { PermissionRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { resolveApprovalRequester } from '../../permissions/hunk-selection.ts';
 import { CommandPalette, buildPaletteEntries, resetPaletteUsageForTests } from '../../input/command-palette.ts';
 import { ConfirmDialog } from '../../input/confirm-dialog.ts';
@@ -112,8 +112,8 @@ import { renderFilePickerOverlay } from '../../renderer/file-picker-overlay.ts';
 import { FilePickerModal } from '../../input/file-picker.ts';
 import { renderModelWorkspace } from '../../renderer/model-workspace.ts';
 import { ModelPickerModal } from '../../input/model-picker.ts';
-import type { ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { createEmptyLine as emptyLine, type Cell, type Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
+import { createEmptyLine as emptyLine, type Cell, type Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { makeTestSurface } from '../helpers/session-surface.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { frameFromLayer, frameFromLayers } from '../helpers/surface-frame.ts';
@@ -1744,8 +1744,8 @@ describe('golden-frames : chrome light/dark flip (ux/light-chrome)', () => {
 // When the sandbox-aware exec gate turns an auto-allow into an ask because the
 // boundary-safe command still needs host access, the approval card renders a
 // dedicated "Sandbox : wants network …" row. The escalation strings are the
-// gate's annotation (verbatim from the SDK policy in production); hardcoded here
-// so the golden tests the RENDERER, not the SDK policy wording.
+// gate's annotation (verbatim from the platform policy in production); hardcoded here
+// so the golden tests the RENDERER, not the platform policy wording.
 // ---------------------------------------------------------------------------
 
 function renderSandboxEscalationPromptSurface(): Line[] {
@@ -1779,9 +1779,9 @@ describe('golden-frames : permission prompt: exec sandbox escalation', () => {
 
 // ---------------------------------------------------------------------------
 // Non-foreground approval attribution, the generic "Requested by: …" row for
-// asks the SDK's approval broker attributes to an origin other than the
+// asks the platform's approval broker attributes to an origin other than the
 // foreground turn loop (see PermissionAttribution). Two new origins as of the
-// 1.6.1 SDK: an MCP server's elicitation request, and a sandbox brokering a
+// 1.6.1 platform: an MCP server's elicitation request, and a sandbox brokering a
 // host-access escalation THROUGH the shared approval broker (distinct from
 // the dedicated "Sandbox : wants …" row above, which is the TUI's own local
 // exec-gate escalation UI, not a broker-routed ask).

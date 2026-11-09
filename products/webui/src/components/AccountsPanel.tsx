@@ -3,7 +3,7 @@
  * ProvidersView's bare `<DataBlock title="Account Snapshot" .../>` raw JSON
  * dump with the TUI-parity depth the brief calls for (accounts.snapshot's
  * ProviderAccountSnapshot: per-provider active route, auth freshness, usage
- * windows, issues, recommended actions, packages/sdk/src/platform/runtime/
+ * windows, issues, recommended actions, packages/engine/platform/src/platform/runtime/
  * provider-accounts/registry.ts, verified against source).
  *
  * Read-only display: the underlying accounts.snapshot() query and its

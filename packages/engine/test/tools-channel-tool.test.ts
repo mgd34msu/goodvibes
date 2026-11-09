@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { ChannelPluginRegistry } from '@goodvibes-jev/engine/sdk/platform/channels';
-import { createChannelTool } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ChannelPluginRegistry } from '@goodvibes-jev/engine/platform/platform/channels';
+import { createChannelTool } from '@goodvibes-jev/engine/platform/platform/tools';
 
 describe('channel tool', () => {
   test('lists channel capabilities and accounts from the active registry', async () => {

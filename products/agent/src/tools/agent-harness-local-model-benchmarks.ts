@@ -1,12 +1,12 @@
-import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
-import { declaredClassicModelStack } from '@goodvibes-jev/engine/sdk/platform/routing';
+import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
+import { declaredClassicModelStack } from '@goodvibes-jev/engine/platform/platform/routing';
 import { types as nodeTypes } from 'node:util';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { prepareJudgmentResult } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { localBenchmarkPrompt, localBenchmarkPromptPolicy, routingRegistry } from '@goodvibes-jev/engine/sdk/platform/routing';
-import { assertProjectionCurrent, ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
+import { localBenchmarkPrompt, localBenchmarkPromptPolicy, routingRegistry } from '@goodvibes-jev/engine/platform/platform/routing';
+import { assertProjectionCurrent, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
-import type { ArtifactDescriptor, ArtifactRecord } from '@goodvibes-jev/engine/sdk/platform/artifacts';
+import type { ArtifactDescriptor, ArtifactRecord } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { localStackFor } from './agent-harness-local-model-endpoints.ts';
 import type { LocalModelBenchmarkEvidence, LocalModelBenchmarkPlan, LocalModelBenchmarkRouteLatency, LocalModelBenchmarkWinner, LocalModelRecipe, ArtifactListLike } from './agent-harness-model-routing-types.ts';

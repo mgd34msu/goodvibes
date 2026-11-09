@@ -4,7 +4,7 @@
  *
  * ## The class this file closes
  *
- * `operator-sdk/src/client-core.ts` validates every response it
+ * `operator-client/src/client-core.ts` validates every response it
  * receives against the method's `outputSchema` from the generated contract, and
  * every one of those schemas carries `additionalProperties: false`. A handler
  * that answers with one property the schema does not declare therefore does not
@@ -53,15 +53,15 @@ import { join } from 'node:path';
 // would be a way to miss one.
 import { OPERATOR_CONTRACT } from '../contracts/src/generated/operator-contract.ts';
 import { firstJsonSchemaFailure } from '../transport-http/src/client-plumbing.ts';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { registerOwnerProfileGatewayMethods } from '../sdk/src/platform/control-plane/routes/owner-profile.ts';
-import { registerOccasionsGatewayMethods } from '../sdk/src/platform/control-plane/routes/occasions.ts';
-import { registerRuntimeMetricsGatewayMethods } from '../sdk/src/platform/control-plane/routes/runtime-metrics.ts';
-import { OwnerProfileStore } from '../sdk/src/platform/owner-profile/index.ts';
-import { OccasionStateStore } from '../sdk/src/platform/occasions/state-store.ts';
-import { OccasionsService } from '../sdk/src/platform/occasions/service.ts';
-import { OCCASIONS_DEFAULTS } from '../sdk/src/platform/occasions/policy.ts';
-import { resetProcessUntrustedContentLedgerForTests } from '../sdk/src/platform/security/untrusted-content.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { registerOwnerProfileGatewayMethods } from '../platform/src/platform/control-plane/routes/owner-profile.ts';
+import { registerOccasionsGatewayMethods } from '../platform/src/platform/control-plane/routes/occasions.ts';
+import { registerRuntimeMetricsGatewayMethods } from '../platform/src/platform/control-plane/routes/runtime-metrics.ts';
+import { OwnerProfileStore } from '../platform/src/platform/owner-profile/index.ts';
+import { OccasionStateStore } from '../platform/src/platform/occasions/state-store.ts';
+import { OccasionsService } from '../platform/src/platform/occasions/service.ts';
+import { OCCASIONS_DEFAULTS } from '../platform/src/platform/occasions/policy.ts';
+import { resetProcessUntrustedContentLedgerForTests } from '../platform/src/platform/security/untrusted-content.ts';
 
 // Profile writes ask the content-derivation reading whenever the process
 // ledger holds untrusted text; another test file's reads must not reach these.

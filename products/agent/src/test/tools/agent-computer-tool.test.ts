@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { ToolInputProjectionError, ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/sdk/platform/security';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
+import { ToolInputProjectionError, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { CommandContext, CommandRegistry } from '../../input/command-registry.ts';
 import { createAgentComputerTool, registerAgentComputerTool } from '../../tools/agent-computer-tool.ts';
 import { bindAgentResearchSourceOwner } from '../../agent/protected-research-report.ts';

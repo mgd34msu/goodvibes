@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   buildInstallResultLines,
   isDaemonServiceSubcommand,
@@ -183,8 +183,8 @@ describe('resolveInstalledDaemonBinary', () => {
 });
 
 /**
- * Coverage for the CLI dispatch onto the SDK's REAL wired
- * `PlatformServiceManager` (rewired here after the SDK deleted the old
+ * Coverage for the CLI dispatch onto the platform's REAL wired
+ * `PlatformServiceManager` (rewired here after the platform deleted the old
  * systemd-only `systemd-user-service.ts` shim this module used to call).
  *
  * `service.platform` is forced to 'systemd' via config override so these tests
@@ -196,7 +196,7 @@ describe('resolveInstalledDaemonBinary', () => {
  * `~/.config/systemd/user` entry or invokes a real `systemctl` binary.
  *
  * `baseInput` supplies that injected runner by DEFAULT (see `stubSystemctl`).
- * Omitting it used to fall through to the SDK's real `spawnSync('systemctl',
+ * Omitting it used to fall through to the platform's real `spawnSync('systemctl',
  * ['--user', 'is-active', …])`, which made `service-status` results depend on
  * whether the developer running the suite happened to have goodvibes.service
  * active, the whole file now answers every probe from an injected stub.
@@ -225,7 +225,7 @@ describe('runDaemonServiceCli (systemd path, real PlatformServiceManager, stubbe
 
   /**
    * The default injected systemctl: records every dispatch and answers the
-   * SDK's read-only `is-active` liveness probe from `isActive` (default: the
+   * platform's read-only `is-active` liveness probe from `isActive` (default: the
    * unit is NOT active) instead of from the host's systemd.
    */
   function stubSystemctl(options: { readonly isActive?: boolean } = {}): { runner: ManagedServiceActionRunner; calls: string[][] } {
@@ -273,7 +273,7 @@ describe('runDaemonServiceCli (systemd path, real PlatformServiceManager, stubbe
     expect(contents).not.toContain('--port');
     // install() only writes the file; install-service also calls start() to
     // preserve the old shim's "install implies enabled + running" behavior.
-    // The SDK's status() now also issues read-only `is-active` probes, and
+    // The platform's status() now also issues read-only `is-active` probes, and
     // install() enforces the unit's survival contract via loginctl
     // (show-user probe, enable-linger when lingering is off), filter both
     // out of the mutating action check and pin the linger calls' shape.
@@ -281,7 +281,7 @@ describe('runDaemonServiceCli (systemd path, real PlatformServiceManager, stubbe
     for (const call of lingerCalls) {
       expect(['show-user', 'enable-linger']).toContain(call[1]!);
     }
-    // `systemctl --version` is the SDK's read-only capability probe.
+    // `systemctl --version` is the platform's read-only capability probe.
     const actions = calls.filter((c) => !c.includes('is-active') && !c.includes('--version') && c[0] !== 'loginctl');
     expect(actions).toEqual([['systemctl', '--user', 'enable', '--now', 'goodvibes.service']]);
     for (const probe of calls.filter((c) => c.includes('is-active'))) {
@@ -347,8 +347,8 @@ describe('runDaemonServiceCli (systemd path, real PlatformServiceManager, stubbe
     expect(result.status.running).toBe(false);
     // An earlier finding: the old wording asserted HOW `running` was computed
     // ("only reflects processes this tool started directly"), true for the
-    // pid-file-only check this (currently linked) SDK build still uses, but
-    // stale once the parallel SDK batch makes status().running query systemd
+    // pid-file-only check this (currently linked) platform build still uses, but
+    // stale once the parallel platform batch makes status().running query systemd
     // honestly via `is-active`. The caveat now just offers the escape hatch
     // without asserting a mechanism, so it stays true either way.
     expect(result.lines.some((line) => line.includes('verify directly'))).toBe(true);
@@ -580,7 +580,7 @@ describe('runDaemonServiceCli: install-script unit detection', () => {
 
       expect(result.ok).toBe(true);
       expect(result.lines.join('\n')).not.toContain('goodvibes-daemon.service');
-      // The legacy unit must never be probed; the SDK's status() may issue
+      // The legacy unit must never be probed; the platform's status() may issue
       // read-only is-active probes for the NEW unit through the same runner.
       expect(calls.some((c) => c.includes('goodvibes-daemon.service'))).toBe(false);
     });
@@ -858,7 +858,7 @@ describe('runDaemonServiceCli: migrate-service', () => {
    * A host whose `service.serviceName` config key is set to the legacy
    * unit's own literal name (`goodvibes-daemon`) makes `PlatformServiceManager`
    * resolve install()/uninstall()'s mutation PATH to the exact legacy unit
-   * path (the SDK's `resolveServiceName()` reads that config key ahead of the
+   * path (the platform's `resolveServiceName()` reads that config key ahead of the
    * `defaultServiceName` this module passes, never consulting
    * `definitionOverride.name`). Without a pre-flight guard, `install()` would
    * overwrite the legacy unit file and a failed-health rollback
@@ -1547,7 +1547,7 @@ describe('canonical unit content parity: installer and product agree, endpoint c
       // The path deliberately includes the old false-positive PID text 13500.
       const productArgs = productExec.replace('ExecStart=', '').split(/\s+/).slice(1);
       // The flag's value is the daemon's STATE directory, not the home above
-      // it: that is what the SDK's goodvibes-home resolves it as, and what
+      // it: that is what the platform's goodvibes-home resolves it as, and what
       // holds operator-tokens.json and the daemon tier's settings.json.
       assertDaemonHomeOnly(productArgs, join(dir, '.goodvibes', 'daemon'));
 

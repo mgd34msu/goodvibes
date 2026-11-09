@@ -3,7 +3,7 @@
  *
  * docs/owner-profile.md §12.1 makes this registration mandatory rather than cosmetic in
  * the TUI and the agent, where a namespace with no matching category is silently dropped.
- * This webui derives its groups from the SDK schema with no hand-maintained category list,
+ * This webui derives its groups from the platform schema with no hand-maintained category list,
  * so it cannot drop the domain, but without the CATEGORY_LABELS entry the group would
  * render as a Title-Cased "Profile", which collides in the reader's mind with
  * platform/profiles' saved display/provider presets. This pins the label and that every

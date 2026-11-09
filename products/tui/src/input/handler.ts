@@ -12,8 +12,8 @@ import { resolveFooterTarget } from '../renderer/footer-targets.ts';
 import { SurfacePointer } from './surface-pointer.ts';
 import 'node:fs';
 import 'node:path';
-import { InputTokenizer, type InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
-import { createOAuthLocalListener } from '@goodvibes-jev/engine/sdk/platform/config';
+import { InputTokenizer, type InputToken } from '@goodvibes-jev/engine/platform/platform/core';
+import { createOAuthLocalListener } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   clearModalStackForHandler,
   cleanupMarkerRegistryForHandler,
@@ -56,8 +56,8 @@ import {
   verifyOnboardingRuntimePostureForHandler,
 } from './handler-onboarding.ts';
 import type { OnboardingRuntimePosture } from './handler-types.ts';
-import '@goodvibes-jev/engine/sdk/platform/config';
-import '@goodvibes-jev/engine/sdk/platform/utils';
+import '@goodvibes-jev/engine/platform/platform/config';
+import '@goodvibes-jev/engine/platform/platform/utils';
 import '@/runtime/index.ts';
 import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
 import type { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';

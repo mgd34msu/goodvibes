@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import type { ArtifactDescriptor } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { agentArtifactEffectGuard, captureAgentArtifactSource } from './agent-artifact-effect.ts';
 import { DEFAULT_LIST_LIMIT, MAX_FRESHNESS_ARTIFACT_SCAN, MAX_LIST_LIMIT, REVIEW_PACKET_PRESET_SCHEMA, auditPresetFreshness, buildPresetRecord, clamp, compactText, defaultPacketSummary, isPresetArtifact, packetFromMetadata, parseMode, parsePresetBody, presetCreateInput, readMetadataString, readNumber, readString, sourceArtifactId, type AgentReviewPacketPresetArtifactStore, type AgentReviewPacketPresetsToolArgs, type LoadedReviewPacketPreset, type ReviewPacketFreshnessAudit, type ReviewPacketPresetPacket, type ReviewPacketPresetRecord } from './agent-review-packet-presets-core.ts';
 function formatPacketLines(packet: ReviewPacketPresetPacket): readonly string[] {

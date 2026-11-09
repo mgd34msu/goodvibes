@@ -29,7 +29,7 @@ import {
   type TerminalPalette,
 } from '../../renderer/terminal-palette.ts';
 import { activeTheme, resolveTheme, setActiveThemeMode } from '../../renderer/theme.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { configGetStub } from '../helpers/config-manager-stub.ts';
 
 afterEach(() => {

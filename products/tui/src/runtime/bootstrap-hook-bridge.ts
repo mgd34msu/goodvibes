@@ -1,20 +1,20 @@
 import { publishResumedSession } from '@goodvibes-jev/engine/terminal-shell/session-resume-publication';
 import { activeTokens } from '../renderer/theme.ts';
 import type { ConversationManager } from '../core/conversation';
-import type { HookDispatcher } from '@goodvibes-jev/engine/sdk/platform/hooks';
+import type { HookDispatcher } from '@goodvibes-jev/engine/platform/platform/hooks';
 import type { MutableRuntimeState } from '@/runtime/index.ts';
 import '@/runtime/index.ts';
 import type { RuntimeEventBus } from '@/runtime/index.ts';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { emitSessionResumed } from '@/runtime/index.ts';
-import '@goodvibes-jev/engine/sdk/platform/config';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import '@/runtime/index.ts';
-import type { SharedSessionBroker } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import type { SessionSpineClient } from '@goodvibes-jev/engine/sdk/platform/runtime/session-spine';
-import type { SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
-import type { ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { SharedSessionBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import type { SessionSpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
+import type { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
+import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { resumeSessionCore } from '../core/session-resume-core.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
 
@@ -27,7 +27,7 @@ export interface ResumeSessionOptions {
   readonly cancelPendingRecovery?: () => boolean;
   readonly sharedSessionBroker: Pick<SharedSessionBroker, 'reopenSession'>;
   /** Fire-and-forget daemon-spine mirror. Reopen (not register) is the
-   * ONLY resume-time verb, see the SDK session-spine client.ts header doc. */
+   * ONLY resume-time verb, see the platform session-spine client.ts header doc. */
   readonly sessionSpine: Pick<SessionSpineClient, 'reopen'>;
   readonly project: string;
   readonly writeLastSessionPointer: (sessionId: string) => void;

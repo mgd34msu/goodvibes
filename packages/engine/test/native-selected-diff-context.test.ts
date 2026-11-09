@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { captureNativeSelectedDiffContext, nativeSelectedDiffSelectorSchema, selectNativeDiffHunk, NATIVE_SELECTED_DIFF_MAX_BYTES, NATIVE_SELECTED_DIFF_SOURCE_MAX_BYTES } from '../sdk/src/platform/workflow/work-ledger/native-diff-context.js';
-import { canonicalNativeConversationContinuation, captureNativeConversationContinuation } from '../sdk/src/platform/workflow/work-ledger/native-continuation-context.js';
-import { nativeConversationIntakeCaptureRequestSchema } from '../sdk/src/platform/workflow/work-ledger/native-intake-wire.js';
+import { captureNativeSelectedDiffContext, nativeSelectedDiffSelectorSchema, selectNativeDiffHunk, NATIVE_SELECTED_DIFF_MAX_BYTES, NATIVE_SELECTED_DIFF_SOURCE_MAX_BYTES } from '../platform/src/platform/workflow/work-ledger/native-diff-context.js';
+import { canonicalNativeConversationContinuation, captureNativeConversationContinuation } from '../platform/src/platform/workflow/work-ledger/native-continuation-context.js';
+import { nativeConversationIntakeCaptureRequestSchema } from '../platform/src/platform/workflow/work-ledger/native-intake-wire.js';
 
 const headers = 'diff --git a/source.ts b/source.ts\nindex 1234567..abcdef0 100644\n--- a/source.ts\n+++ b/source.ts\n';
 const hunk = '@@ -1,2 +1,2 @@ source\n--- original header-looking body\n+++ replacement header-looking body\n context\n';

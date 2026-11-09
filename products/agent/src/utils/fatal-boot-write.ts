@@ -4,14 +4,14 @@
  * This file imports `node:fs` and nothing more, deliberately, because
  * `bin/goodvibes-agent.ts` routes through it and that shim must keep working
  * on a real npm install. This package declares NO runtime dependencies,
- * `@goodvibes-jev/engine/sdk` is a devDependency and reaches an installed user
+ * `@goodvibes-jev/engine/platform` is a devDependency and reaches an installed user
  * only inlined inside the bundled `dist/package/main.js`, so any module the
- * shim imports that statically reaches the SDK would fail to resolve on the
+ * shim imports that statically reaches the platform would fail to resolve on the
  * exact installs the shim exists to explain.
  *
- * The SDK-dependent half this file does not carry, `reportFatalBootFailure`,
- * previously mirrored locally in `utils/fatal-boot-report.ts`, is the SDK's
- * own `@goodvibes-jev/engine/sdk/platform/daemon` export, which adopted this
+ * The platform-dependent half this file does not carry, `reportFatalBootFailure`,
+ * previously mirrored locally in `utils/fatal-boot-report.ts`, is the platform's
+ * own `@goodvibes-jev/engine/platform/platform/daemon` export, which adopted this
  * file's own byte-accepting write loop as the shared implementation. Every
  * non-`bin/` caller of `writeFatalLine`/`writeExitingStdoutLine` imports them
  * from here directly.
@@ -26,13 +26,13 @@ const STDERR_FD = 2;
 /**
  * Write `line` to `fd`, looping until every byte is accepted.
  *
- * The loop is a deliberate local difference from the SDK's copy, which issues
+ * The loop is a deliberate local difference from the platform's copy, which issues
  * one `writeSync` because it only ever carries a short fatal line. This repo
  * also routes `--help`, `--version`, completion scripts and the whole `status`
  * render through these functions, and a single `writeSync` of several kilobytes
  * into a pipe can return a short count, which would truncate the output rather
  * than silence it, a quieter version of the same defect. Keep the loop when the
- * SDK export is adopted, or move it upstream.
+ * platform export is adopted, or move it upstream.
  */
 function writeLineToFd(fd: number, line: string): void {
   try {

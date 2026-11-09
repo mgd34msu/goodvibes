@@ -1,4 +1,4 @@
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import { withModalState as withState, type ModalTokenSnapshot } from './modal-input-routes.js';
 export type ModalTokenResult = ReturnType<typeof withState>;
 export type CommonModalRoutingState = ModalTokenSnapshot &

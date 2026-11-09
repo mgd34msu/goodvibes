@@ -5,12 +5,12 @@ import { join } from 'node:path';
 import { bindJudgmentPortAuthority, captureJudgmentPort, installJudgmentPort, readFailure } from '@goodvibes-jev/engine/errors';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { SecretsManager } from '../sdk/src/platform/config/secrets.ts';
-import { createJudgmentSourceLifetime } from '../sdk/src/platform/runtime/judgment-source-lifetime.ts';
-import { createAsyncDisposalScope } from '../sdk/src/platform/runtime/disposal.ts';
-import { composeJudgment } from '../sdk/src/platform/runtime/judgment-services.ts';
-import { acquireCrossProcessLock } from '../sdk/src/platform/workspace/checkpoint/cross-process-lock.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { SecretsManager } from '../platform/src/platform/config/secrets.ts';
+import { createJudgmentSourceLifetime } from '../platform/src/platform/runtime/judgment-source-lifetime.ts';
+import { createAsyncDisposalScope } from '../platform/src/platform/runtime/disposal.ts';
+import { composeJudgment } from '../platform/src/platform/runtime/judgment-services.ts';
+import { acquireCrossProcessLock } from '../platform/src/platform/workspace/checkpoint/cross-process-lock.ts';
 
 const readMessage = (message = 'cached') => readFailure({ message: `Synthetic failure ${message}` }, 'fixture');
 const turn = () => new Promise<void>(resolve => setTimeout(resolve, 0));

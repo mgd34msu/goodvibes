@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { prepareLegacyWorkLedgerMigration, projectLegacyImportWorks, type WorkLedgerEvent, type WorkLedgerReadEvent, type WorkLedgerReadSnapshot } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger';
+import { prepareLegacyWorkLedgerMigration, projectLegacyImportWorks, type WorkLedgerEvent, type WorkLedgerReadEvent, type WorkLedgerReadSnapshot } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 import { createNativeWorkLedgerModalSurface } from '../../../views/modals/native-work-ledger-modal.ts';
 import { ConfigModal } from '../../../input/config-modal.ts';
 import { handleConfigModalToken } from '../../../input/handler-modal-routes.ts';

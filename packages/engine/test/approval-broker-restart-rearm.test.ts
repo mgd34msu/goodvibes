@@ -20,9 +20,9 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { waitFor } from './_helpers/test-timeout.js';
-import { ApprovalBroker } from '../sdk/src/platform/control-plane/approval-broker.js';
-import type { SharedApprovalStatus } from '../sdk/src/platform/control-plane/approval-broker.js';
-import type { PermissionPromptRequest } from '../sdk/src/platform/permissions/prompt.js';
+import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-broker.js';
+import type { SharedApprovalStatus } from '../platform/src/platform/control-plane/approval-broker.js';
+import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.js';
 
 function request(callId: string, args: Record<string, unknown> = { merchant: 'shop.example' }): PermissionPromptRequest {
   return {

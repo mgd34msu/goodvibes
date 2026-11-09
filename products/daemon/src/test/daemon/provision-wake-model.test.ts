@@ -12,7 +12,7 @@ import { rmSync } from 'node:fs';
 import {
   resolveManagedVoiceRoot,
   wakeProvisionStatus,
-} from '@goodvibes-jev/engine/sdk/platform/voice';
+} from '@goodvibes-jev/engine/platform/platform/voice';
 import { runProvisionWakeModelCommand } from '../../daemon/provision-wake-model.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 
@@ -29,7 +29,7 @@ describe('goodvibes-daemon provision-wake-model', () => {
         // The REAL policy, with only the network replaced, the thing being trusted
         // is the policy's never-throw contract, so it is not stubbed out.
         provisionAtInstall: async (options) => {
-          const { provisionWakeWordModelsAtInstall } = await import('@goodvibes-jev/engine/sdk/platform/voice');
+          const { provisionWakeWordModelsAtInstall } = await import('@goodvibes-jev/engine/platform/platform/voice');
           return provisionWakeWordModelsAtInstall({ ...options, fetchImpl: offlineFetch });
         },
       });
@@ -52,7 +52,7 @@ describe('goodvibes-daemon provision-wake-model', () => {
         homeDirectory: home,
         env: {},
         provisionAtInstall: async (options) => {
-          const { provisionWakeWordModelsAtInstall } = await import('@goodvibes-jev/engine/sdk/platform/voice');
+          const { provisionWakeWordModelsAtInstall } = await import('@goodvibes-jev/engine/platform/platform/voice');
           return provisionWakeWordModelsAtInstall({ ...options, fetchImpl: offlineFetch });
         },
       });
@@ -77,7 +77,7 @@ describe('goodvibes-daemon provision-wake-model', () => {
           };
         },
       });
-      // Not a hand-written join: the one SDK derivation, which is what makes an
+      // Not a hand-written join: the one platform derivation, which is what makes an
       // install-time download and a boot-time status read agree about a directory.
       expect(seen).toBe(resolveManagedVoiceRoot(home));
     } finally {
@@ -99,7 +99,7 @@ describe('goodvibes-daemon provision-wake-model', () => {
         homeDirectory: home,
         env: { GOODVIBES_SKIP_WAKE_MODEL_DOWNLOAD: '1' },
         provisionAtInstall: async (options) => {
-          const { provisionWakeWordModelsAtInstall } = await import('@goodvibes-jev/engine/sdk/platform/voice');
+          const { provisionWakeWordModelsAtInstall } = await import('@goodvibes-jev/engine/platform/platform/voice');
           return provisionWakeWordModelsAtInstall({
             ...options,
             fetchImpl: (async () => { throw new Error('must not fetch'); }) as unknown as typeof fetch,

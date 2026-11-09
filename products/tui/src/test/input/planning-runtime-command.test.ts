@@ -8,7 +8,7 @@ import {
   KnowledgeStore,
   ProjectPlanningService,
   type ProjectPlanningState,
-} from '@goodvibes-jev/engine/sdk/platform/knowledge';
+} from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { KillRing } from '../../input/kill-ring.ts';
 import { recordedPlanningGoalPort } from '../helpers/planning-goal-reading.ts';

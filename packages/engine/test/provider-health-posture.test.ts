@@ -2,9 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import {
   buildProviderHealthDomainSummaries, buildAccountPosture, buildSyntheticAuthRoutes,
   routePriority, isRouteUsable, type ProviderHealthDomainInputs, type ProviderRuntimeAuthMetadata,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/provider-health';
-import type { ProviderRuntimeSnapshot } from '../sdk/src/platform/providers/runtime-snapshot.ts';
-import type { ProviderAuthRouteDescriptor } from '../sdk/src/platform/providers/interface.ts';
+} from '@goodvibes-jev/engine/platform/platform/runtime/provider-health';
+import type { ProviderRuntimeSnapshot } from '../platform/src/platform/providers/runtime-snapshot.ts';
+import type { ProviderAuthRouteDescriptor } from '../platform/src/platform/providers/interface.ts';
 import { bundleBrowserEntrypoint } from './_helpers/browser-bundle.ts';
 
 function inputs(): ProviderHealthDomainInputs {
@@ -138,7 +138,7 @@ test('public consumer bundles for browsers and its emitted functions execute wit
   const dir = mkdtempSync(join(root, 'provider-health-browser-'));
   try {
     const entry = join(dir, 'consumer.ts');
-    writeFileSync(entry, `import { buildAccountPosture, buildProviderHealthDomainSummaries } from '@goodvibes-jev/engine/sdk/platform/runtime/provider-health';\nglobalThis.__providerHealthProbe = { buildAccountPosture, buildProviderHealthDomainSummaries };`);
+    writeFileSync(entry, `import { buildAccountPosture, buildProviderHealthDomainSummaries } from '@goodvibes-jev/engine/platform/platform/runtime/provider-health';\nglobalThis.__providerHealthProbe = { buildAccountPosture, buildProviderHealthDomainSummaries };`);
     const code = await bundleBrowserEntrypoint(entry, { conditions: ['bun'] });
     expect(code).not.toMatch(/(?:from|require\()\s*['"](?:node:|bun:)/);
     const consumer: { __providerHealthProbe?: { buildAccountPosture: typeof buildAccountPosture; buildProviderHealthDomainSummaries: typeof buildProviderHealthDomainSummaries } } = {};

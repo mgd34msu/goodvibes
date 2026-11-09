@@ -20,9 +20,9 @@
  */
 import { readFileSync } from 'node:fs';
 import { extname } from 'node:path';
-import { encodeWavPcm16 } from '@goodvibes-jev/engine/sdk/platform/voice';
-import type { WakeActivationSound } from '@goodvibes-jev/engine/sdk/platform/voice';
-import type { VoiceAudioChunk } from '@goodvibes-jev/engine/sdk/platform/voice';
+import { encodeWavPcm16 } from '@goodvibes-jev/engine/platform/platform/voice';
+import type { WakeActivationSound } from '@goodvibes-jev/engine/platform/platform/voice';
+import type { VoiceAudioChunk } from '@goodvibes-jev/engine/platform/platform/voice';
 import type { StreamingAudioPlayer } from './player.js';
 /** Sample rate of the synthesised chime. 16 kHz is plenty for two short tones. */
 const CHIME_SAMPLE_RATE = 16000;
@@ -77,7 +77,7 @@ export interface ActivationSoundPlayerDeps {
  * sound that fails to play must not delay or cancel that.
  *
  * `settings.activationSound` arrives already resolved against surface capability
- *, the SDK downgrades `custom` to `chime` on a surface that cannot read a local
+ *, the platform downgrades `custom` to `chime` on a surface that cannot read a local
  * file, and this surface can, so `custom` here means a real path.
  */
 export function playActivationSound(sound: WakeActivationSound, deps: ActivationSoundPlayerDeps, noticePrefix = '[Voice]'): void {

@@ -1,7 +1,7 @@
 /**
  * Platform adapter behavioral contract tests.
  *
- * Covers the shared utility layer in packages/sdk/src/platform/adapters/helpers.ts
+ * Covers the shared utility layer in packages/platform/src/platform/adapters/helpers.ts
  * and the cross-cutting behavioral invariants every surface adapter must satisfy:
  *
  *   - Token extraction (bearer + custom header)
@@ -23,11 +23,11 @@ import {
   constantTimeEquals,
   readBearerOrHeaderToken,
   verifySha256HmacSignature,
-} from '../sdk/src/platform/adapters/helpers.js';
-import { parseJsonRecord } from '../sdk/src/platform/adapters/helpers.js';
-import { handleNtfySurfacePayload } from '../sdk/src/platform/adapters/ntfy/index.js';
-import type { SurfaceAdapterContext } from '../sdk/src/platform/adapters/types.js';
-import type { ChannelPolicyDecision } from '../sdk/src/platform/channels/types.js';
+} from '../platform/src/platform/adapters/helpers.js';
+import { parseJsonRecord } from '../platform/src/platform/adapters/helpers.js';
+import { handleNtfySurfacePayload } from '../platform/src/platform/adapters/ntfy/index.js';
+import type { SurfaceAdapterContext } from '../platform/src/platform/adapters/types.js';
+import type { ChannelPolicyDecision } from '../platform/src/platform/channels/types.js';
 
 // ---------------------------------------------------------------------------
 // Minimal SurfaceAdapterContext stub, only the fields used by the paths under
@@ -273,14 +273,14 @@ describe('constantTimeEquals', () => {
 describe('handleNtfySurfacePayload: delivery echo', () => {
   test('acknowledges a GoodVibes self-echo without queuing', async () => {
     const ctx = makePassingContext();
-    // isGoodVibesNtfyDeliveryEcho checks for headers['X-Goodvibes-Origin'] === 'goodvibes-sdk'
-    // or tags.includes('goodvibes-sdk-outbound'). Use the header path to stay
+    // isGoodVibesNtfyDeliveryEcho checks for headers['X-Goodvibes-Origin'] === 'goodvibes-platform'
+    // or tags.includes('goodvibes-platform-outbound'). Use the header path to stay
     // independent of the outbound-tag constant value.
     const echoMessage: Record<string, unknown> = {
       event: 'message',
       topic: 'goodvibes',
       message: 'echo-test',
-      headers: { 'X-Goodvibes-Origin': 'goodvibes-sdk' },
+      headers: { 'X-Goodvibes-Origin': 'goodvibes-platform' },
     };
     const res = await handleNtfySurfacePayload(echoMessage, ctx);
     expect(res.status).toBe(200);
@@ -332,7 +332,7 @@ describe('handleNtfySurfacePayload: authorization', () => {
     // the default agent topic. We use a matching topic to get past the
     // unknown-topic gate and hit the authorizeSurfaceIngress check.
     const { GOODVIBES_NTFY_AGENT_TOPIC } = await import(
-      '../sdk/src/platform/integrations/ntfy.js'
+      '../platform/src/platform/integrations/ntfy.js'
     );
     const res = await handleNtfySurfacePayload(
       { topic: GOODVIBES_NTFY_AGENT_TOPIC, message: 'hello' },

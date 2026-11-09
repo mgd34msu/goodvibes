@@ -3,7 +3,7 @@
  * and readable in the settings workspace.
  *
  * The paired-phone feature is configured entirely through config keys, so a key
- * that exists in the SDK schema but never surfaces in this app is a feature the
+ * that exists in the platform schema but never surfaces in this app is a feature the
  * owner cannot actually configure. This pins three things: every device key is
  * routed into a group, that group carries a real human label rather than a raw
  * namespace, and every key carries a written purpose long enough to be a

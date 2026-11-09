@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { inboxSurface, surfaceIdFor } from '@goodvibes-jev/engine/sdk/platform/cluster';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { inboxSurface, surfaceIdFor } from '@goodvibes-jev/engine/platform/platform/cluster';
 import { createClusterComposition, inboxPollerGate } from '../../runtime/cluster-composition.js';
 import { startClusterServices } from '../../runtime/cluster-group-composition.js';
 import type { ShellPathService } from '../../runtime/index.js';

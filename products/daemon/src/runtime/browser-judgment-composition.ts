@@ -1,11 +1,11 @@
 import { endpointKind, HOSTED_BASE_URL, validEndpointURL } from '@goodvibes-jev/judgment';
-import { BrowserJudgmentError } from '@goodvibes-jev/engine/daemon-sdk';
-import { captureJudgmentFallbackSettings, CONFIG_SCHEMA, type ConfigManager, type SecretsManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { SECRET_BEARING_CONFIG_PATHS } from '@goodvibes-jev/engine/sdk/platform/judgment-browser/catalogs';
-import type { ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { createWebuiBrowserJudgment, type BrowserJudgmentRoute } from '@goodvibes-jev/engine/sdk/platform/judgment-browser';
-import { createJudgmentSourceLifetime, type JudgmentServices } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { BrowserJudgmentError } from '@goodvibes-jev/engine/daemon-api';
+import { captureJudgmentFallbackSettings, CONFIG_SCHEMA, type ConfigManager, type SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { SECRET_BEARING_CONFIG_PATHS } from '@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs';
+import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { createWebuiBrowserJudgment, type BrowserJudgmentRoute } from '@goodvibes-jev/engine/platform/platform/judgment-browser';
+import { createJudgmentSourceLifetime, type JudgmentServices } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 
 const text = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
 

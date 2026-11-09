@@ -30,7 +30,7 @@ function factCount(request: PermissionRequest): number {
   return PermissionPromptUI.promptFacts(request).length;
 }
 
-describe('PermissionPromptUI attribution rendering (SDK 1.6.1 PermissionAttribution union)', () => {
+describe('PermissionPromptUI attribution rendering (platform 1.6.1 PermissionAttribution union)', () => {
   test('no attribution (foreground ask): no "Asked by" row, one fewer fact than an attributed ask', () => {
     const request = baseRequest();
     expect(renderedText(request)).not.toContain('Asked by');

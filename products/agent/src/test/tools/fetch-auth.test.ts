@@ -4,10 +4,10 @@
  * Kept in a separate file to avoid growing fetch.test.ts further.
  */
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
-import { createFetchTool } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { ServiceRegistry } from '@goodvibes-jev/engine/sdk/platform/config';
+import { createFetchTool } from '@goodvibes-jev/engine/platform/platform/tools';
+import { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
 import { SecretsManager } from '../../config/secrets.ts';
-import { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';

@@ -9,7 +9,7 @@
  */
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Dialog } from '../ui/Dialog';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { readConfigPath } from '../../lib/settings-model';
 import { formatError } from '../../lib/errors';
@@ -31,14 +31,14 @@ export function ModelPricesModal({ open, onClose, initialModelKey }: ModelPrices
   const { toast } = useToast();
   const config = useQuery({
     queryKey: queryKeys.config,
-    queryFn: () => sdk.operator.config.get(),
+    queryFn: () => platformClient.operator.config.get(),
     enabled: open,
     retry: false,
   });
 
   async function commit(next: Record<string, unknown>): Promise<void> {
     try {
-      await sdk.operator.config.set('pricing.modelPrices', next);
+      await platformClient.operator.config.set('pricing.modelPrices', next);
     } catch (error) {
       toast({ title: 'Failed to save model prices', description: formatError(error), tone: 'danger' });
       throw error;

@@ -2,7 +2,7 @@
  * Compaction history text tests.
  *
  * Validates:
- *  1. History text lists compaction events from SDK log.
+ *  1. History text lists compaction events from platform log.
  *  2. Empty session returns a "no compactions" message.
  *  3. Restore-unavailability notice is always present.
  *  4. History is listed most-recent-first.
@@ -16,7 +16,7 @@ import { scoreCompactionRun } from '../../renderer/compaction-quality.ts';
 import { useCompactionQualityPort } from '../helpers/compaction-quality-port.ts';
 
 useCompactionQualityPort();
-import type { CompactionEvent } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { CompactionEvent } from '@goodvibes-jev/engine/platform/platform/core';
 
 // ---------------------------------------------------------------------------
 // buildCompactionHistoryText

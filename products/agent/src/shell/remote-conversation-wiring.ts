@@ -17,7 +17,7 @@ import { nativeConversationIntakeLines, type NativeConversationIntakeActions, ty
 import { createRemoteConversationRouter, sameNativeRemoteConnection, type ConnectedHostResolution } from '../runtime/client/remote-conversation.ts';
 import { mirrorHostedSessionToStore, recoverUnmirroredHostedSessions, type HostedAttachReply } from '../runtime/client/hosted-session-mirror.ts';
 import { persistConversation } from '@/runtime/index.ts';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { BootstrapContext } from '../runtime/bootstrap.ts';
 import type { HostedSessionFrame, HostedTurnCompletion } from '../runtime/client/hosted-frame-render.ts';
 import { bridgeHostedFrameOntoRuntimeBus } from '../runtime/client/hosted-turn-bus-bridge.ts';

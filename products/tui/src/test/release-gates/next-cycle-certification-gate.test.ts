@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test';
 
-import type { AgentRecord } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { buildKnowledgeInjectionPrompt } from '@goodvibes-jev/engine/sdk/platform/state';
+import type { AgentRecord } from '@goodvibes-jev/engine/platform/platform/tools';
+import { buildKnowledgeInjectionPrompt } from '@goodvibes-jev/engine/platform/platform/state';
 import { buildMcpAttackPathReview } from '@/runtime/index.ts';
 import { handleRemoteCancelCommand } from '../../input/commands/remote-runtime.ts';
 

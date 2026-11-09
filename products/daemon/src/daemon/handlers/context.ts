@@ -1,6 +1,6 @@
-import type { ConfigManager, DaemonCredentialStore } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager, DaemonCredentialStore } from '@goodvibes-jev/engine/platform/platform/config';
 import type { GatewayMethodCatalog } from './contracts.js';
-import type { NativeMutationHost } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import type { NativeMutationHost } from '@goodvibes-jev/engine/platform/platform/control-plane';
 
 export interface HandlerLogger {
   info(message: string, meta?: unknown): void;

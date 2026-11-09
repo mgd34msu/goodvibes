@@ -8,13 +8,13 @@ import {
   AtomicWriteDurabilityError,
   confirmFileDurable,
   writeJsonFileAtomic,
-} from '@goodvibes-jev/engine/sdk/platform/state/durable-file-io';
+} from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
 import {
   NATIVE_SUBMISSION_JOURNAL_MAX_BYTES,
   NativeWorkSubmissionJournal,
   type NativeSubmissionJournalBinding,
 } from '../../runtime/native-work-submission-journal.ts';
-import type { NativeWorkSubmissionRequest } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-submission-client';
+import type { NativeWorkSubmissionRequest } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-submission-client';
 
 const binding: NativeSubmissionJournalBinding = {
   endpoint: 'http://127.0.0.1:7777', projectId: 'fixture-project', workspace: '/fixture-workspace', principalId: 'fixture-principal',
@@ -220,7 +220,7 @@ test('strict lock acquisition failure prevents reading or writing state', async 
 
 test('strict dead-owner lock recovery after a process crash retains the original request', async () => fixture(async path => {
   await new NativeWorkSubmissionJournal(path).save(binding, command, null);
-  const durableModule = import.meta.resolve('@goodvibes-jev/engine/sdk/platform/state/durable-file-io');
+  const durableModule = import.meta.resolve('@goodvibes-jev/engine/platform/platform/state/durable-file-io');
   const child = Bun.spawnSync([process.execPath, '--eval', `
     import { writeSync } from 'node:fs';
     import { acquireCrossProcessLock } from ${JSON.stringify(durableModule.startsWith('file:') ? durableModule : pathToFileURL(durableModule).href)};

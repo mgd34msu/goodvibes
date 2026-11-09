@@ -1,12 +1,12 @@
-import { PREVIOUS_FILE_SUFFIX } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
-import { detectInstallKind, type InstallKind } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { PREVIOUS_FILE_SUFFIX } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import { detectInstallKind, type InstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import {
   compareVersions,
   suiteUpdateRequiresRecovery,
   normalizeVersion,
   resolveLatestReleaseTag,
   type UpdateFetchLike,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+} from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 export interface ReleaseUpdateCheck {
   readonly latestTag: string;
   readonly isCurrent: boolean;
@@ -186,7 +186,7 @@ export function createSelfUpdateCommand<Context extends { print(message: string)
   };
 }
 
-export { retainSuiteUpdateConfiguration, type SuiteUpdateConfigurationSource } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+export { retainSuiteUpdateConfiguration, type SuiteUpdateConfigurationSource } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 /** Shared terminal report for the actual products/directories the suite changed. */
 export function formatSuiteUpdateReport(result: {
   readonly version: string; readonly programs: readonly string[];

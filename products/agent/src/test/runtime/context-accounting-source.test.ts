@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { ContextAccountingHolder, createContextAccountingTool } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ContextAccountingHolder, createContextAccountingTool } from '@goodvibes-jev/engine/platform/platform/tools';
 import { RuntimeEventBus, createEventEnvelope } from '@/runtime/index.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { bindOrchestratorContextAccounting } from '../../runtime/context-accounting-source.ts';
@@ -29,7 +29,7 @@ function fakeOrchestrator(turnInjections: unknown[] = []) {
   };
 }
 
-describe('bindOrchestratorContextAccounting (SDK 1.6.1 context_accounting tool)', () => {
+describe('bindOrchestratorContextAccounting (platform 1.6.1 context_accounting tool)', () => {
   test('unbound holder: the context_accounting tool reports the honest "no live session context" message', async () => {
     const holder = new ContextAccountingHolder();
     const tool = createContextAccountingTool(holder);

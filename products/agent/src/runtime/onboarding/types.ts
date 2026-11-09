@@ -70,7 +70,7 @@ export type {
 import type { ConfigManager, ConfigKey } from '../../config/index.ts';
 import type { SecretsManager } from '../../config/secrets.ts';
 import type { LegacyFeatureConfigKey } from '../feature-enablement.ts';
-import type { UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
+import type { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
 import type { ShellPathService } from '@/runtime/index.ts';
 import type { LocalAuthInspectionQuery, ServiceInspectionQuery, SubscriptionAccessQuery } from '@/runtime/index.ts';
 import type { AgentBehaviorDiscoverySnapshot } from '../../agent/behavior-discovery-summary.ts';

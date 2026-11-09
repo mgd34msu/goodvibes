@@ -40,7 +40,7 @@ describe('findRecentFallbackReason', () => {
     expect(findRecentFallbackReason(log, 'openai', 'google', NOW)).toBeNull();
   });
   test('matches entries recorded as registry keys, not just bare provider ids', () => {
-    // The SDK's agent-orchestrator fallback records provider-qualified route
+    // The platform's agent-orchestrator fallback records provider-qualified route
     // labels in this same log. Reading only the bare form is what printed
     // "(reason unknown)" for a failover whose reason was sitting right there.
     const keyed: FallbackTransitionLike[] = [

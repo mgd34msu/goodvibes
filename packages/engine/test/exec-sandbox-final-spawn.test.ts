@@ -2,12 +2,12 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createExecTool } from '../sdk/src/platform/tools/exec/runtime.ts';
-import { withExternalOperationSource } from '../sdk/src/platform/permissions/external-operation-scope.ts';
-import { brokerSandboxEscalation, resolveExecSandboxPlan, detectSandboxAvailability, probeSandboxHost, type SandboxEscalationPermit } from '../sdk/src/platform/tools/exec/sandbox.ts';
-import { detectPtyAvailability, probePtyHost } from '../sdk/src/platform/tools/exec/interactive.ts';
-import { ProcessManager } from '../sdk/src/platform/tools/shared/process-manager.ts';
-import { OverflowHandler } from '../sdk/src/platform/tools/shared/overflow.ts';
+import { createExecTool } from '../platform/src/platform/tools/exec/runtime.ts';
+import { withExternalOperationSource } from '../platform/src/platform/permissions/external-operation-scope.ts';
+import { brokerSandboxEscalation, resolveExecSandboxPlan, detectSandboxAvailability, probeSandboxHost, type SandboxEscalationPermit } from '../platform/src/platform/tools/exec/sandbox.ts';
+import { detectPtyAvailability, probePtyHost } from '../platform/src/platform/tools/exec/interactive.ts';
+import { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.ts';
+import { OverflowHandler } from '../platform/src/platform/tools/shared/overflow.ts';
 import { useToolReadings } from './_helpers/tool-readings.ts';
 
 const command = 'printf owned-final-spawn';

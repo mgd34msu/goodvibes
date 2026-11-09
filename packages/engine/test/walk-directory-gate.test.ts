@@ -3,9 +3,9 @@ import { mkdtempSync, mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { DirectoryWalk, walkDir, type WalkDirOptions } from '../sdk/src/platform/utils/walk-dir.ts';
-import { collectGlobFiles, findNestedGitignoreFiles } from '../sdk/src/platform/tools/find/shared.ts';
-import { collectTextFiles } from '../sdk/src/platform/tools/analyze/shared.ts';
+import { DirectoryWalk, walkDir, type WalkDirOptions } from '../platform/src/platform/utils/walk-dir.ts';
+import { collectGlobFiles, findNestedGitignoreFiles } from '../platform/src/platform/tools/find/shared.ts';
+import { collectTextFiles } from '../platform/src/platform/tools/analyze/shared.ts';
 
 const roots: string[] = [];
 afterEach(() => { for (const path of roots.splice(0)) rmSync(path, { recursive: true, force: true }); });

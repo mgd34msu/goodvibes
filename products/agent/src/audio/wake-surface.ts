@@ -10,7 +10,7 @@
  *
  * A constant with no dependencies belongs where anything can reach it.
  */
-import type { WakeSurface } from '@goodvibes-jev/engine/sdk/platform/voice';
+import type { WakeSurface } from '@goodvibes-jev/engine/platform/platform/voice';
 
 /** The `voice.wake.surfaces.*` row this surface listens on. */
 export const AGENT_WAKE_SURFACE: WakeSurface = 'agent';

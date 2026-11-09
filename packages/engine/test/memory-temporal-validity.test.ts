@@ -12,8 +12,8 @@ import {
   runHonestMemorySearch,
   selectKnowledgeForTaskScored,
   type MemoryRecord,
-} from '../sdk/src/platform/state/index.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
+} from '../platform/src/platform/state/index.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { useMemoryReadings } from './_helpers/memory-readings.ts';
 
 // Memory search and knowledge ranking read through the judgment port; the fake answers them.

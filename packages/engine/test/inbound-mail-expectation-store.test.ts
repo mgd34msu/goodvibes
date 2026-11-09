@@ -20,11 +20,11 @@ import {
   VerificationExpectationBook,
   validatePersistedExpectation,
   type VerificationExpectation,
-} from '../sdk/src/platform/google/verification-expectations.ts';
+} from '../platform/src/platform/google/verification-expectations.ts';
 import {
   PersistedExpectationStore,
   type ExpectationSweepReport,
-} from '../sdk/src/platform/email/inbound/expectation-store.ts';
+} from '../platform/src/platform/email/inbound/expectation-store.ts';
 
 const T0 = new Date('2026-07-27T12:00:00.000Z');
 function at(offsetMs: number): Date {

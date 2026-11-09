@@ -3,12 +3,12 @@ import { projectBootstrapShellCommandOptions } from '@goodvibes-jev/engine/termi
 import { createNativeWorkLedgerHost, registerNativeWorkLedgerCommand } from './native-work-ledger-host.ts';
 import { registerTuiLegacyImportCommands } from '../input/commands/legacy-work-ledger-import-runtime.ts';
 import 'node:path';
-import { readBudgetAlertUsd, BUDGET_ALERT_USD_DEFAULT } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { readBudgetAlertUsd, BUDGET_ALERT_USD_DEFAULT } from '@goodvibes-jev/engine/platform/platform/providers';
 import { refreshMemoryRecallSnapshot } from './orchestrator-core-services.ts';
 import type { ConversationManager } from '../core/conversation';
 import { hydrateConversationUsage } from '../core/conversation-usage.ts';
-import type { Orchestrator } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { Orchestrator } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { RuntimeEventBus } from '@/runtime/index.ts';
 import type { MutableRuntimeState } from '@/runtime/index.ts';
 import type { RuntimeStore } from './store/index.ts';
@@ -20,26 +20,26 @@ import { registerBuiltinCommands } from '../input/commands.ts';
 import { InputHistory } from '../input/input-history.ts';
 import { GitStatusProvider } from '../renderer/git-status.ts';
 import type { GitHeaderInfo } from '../renderer/git-status.ts';
-import type { PermissionRequestHandler } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import type { PermissionRequestHandler } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { createShellViews, type ShellViews } from '../views/builtin-views.ts';
-import { WorkspaceRegistrationManager } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { WorkspaceRegistrationManager } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { createSystemMessageRouter, type SystemMessageRouter } from '../core/system-message-router.ts';
-import { getConfigSnapshot } from '@goodvibes-jev/engine/sdk/platform/config';
+import { getConfigSnapshot } from '@goodvibes-jev/engine/platform/platform/config';
 import { createBootstrapCommandContext } from './bootstrap-command-context.ts';
 import { createResumeSessionHandler } from './bootstrap-hook-bridge.ts';
 import { confirmLiveResume } from './session-resume-liveness-confirm.ts';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { loadBootstrapSystemPrompt } from '@/runtime/index.ts';
 import { createShellPlanRuntime, createShellRemoteCommandService } from '@/runtime/index.ts';
 import { createRuntimeFoundationClients } from '@/runtime/index.ts';
-import type { ControlPlaneRecentEvent } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { ControlPlaneRecentEvent } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { ForensicsRegistry } from '@/runtime/index.ts';
 import type { PolicyRuntimeState } from '@/runtime/index.ts';
 import type { TaskManager } from '@/runtime/index.ts';
 import type { UiRuntimeServices } from './ui-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
-import type { SessionSpineClient } from '@goodvibes-jev/engine/sdk/platform/runtime/session-spine';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { SessionSpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
 
 export interface BootstrapShellState {
   readonly commandRegistry: CommandRegistry;
@@ -104,7 +104,7 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
 
   // after any resume seam replays historical messages into `conversation`,
   // the freshly-constructed `orchestrator` still has its zeroed default usage
-  // (SDK gap, Orchestrator.usage is never persisted/reseeded). Recompute it
+  // (platform gap, Orchestrator.usage is never persisted/reseeded). Recompute it
   // from the replayed history so the footer doesn't show Input: 0 post-resume.
   const hydrateSessionUsage = (): void => {
     hydrateConversationUsage(conversation, orchestrator);

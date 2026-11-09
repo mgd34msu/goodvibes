@@ -39,9 +39,9 @@ import { join } from 'node:path';
 import {
   InboundExpectationRegistry,
   type ExpectationExpiryReport,
-} from '../sdk/src/platform/email/inbound/expectation-registry.ts';
-import { PersistedExpectationStore } from '../sdk/src/platform/email/inbound/expectation-store.ts';
-import { VerificationExpectationBook } from '../sdk/src/platform/google/verification-expectations.ts';
+} from '../platform/src/platform/email/inbound/expectation-registry.ts';
+import { PersistedExpectationStore } from '../platform/src/platform/email/inbound/expectation-store.ts';
+import { VerificationExpectationBook } from '../platform/src/platform/google/verification-expectations.ts';
 
 const T0 = Date.parse('2026-07-28T09:00:00.000Z');
 const WINDOW_MS = 15 * 60_000;

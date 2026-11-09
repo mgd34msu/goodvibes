@@ -24,10 +24,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { DaemonServer } from '../sdk/src/platform/daemon/facade.ts';
-import { HttpListener } from '../sdk/src/platform/daemon/http-listener.ts';
-import { UserAuthManager } from '../sdk/src/platform/security/user-auth.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { DaemonServer } from '../platform/src/platform/daemon/facade.ts';
+import { HttpListener } from '../platform/src/platform/daemon/http-listener.ts';
+import { UserAuthManager } from '../platform/src/platform/security/user-auth.ts';
 
 /**
  * Modules whose repeating work is started by a CONSTRUCTOR, so it exists before

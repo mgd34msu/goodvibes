@@ -9,7 +9,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFile, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { ProcessManager } from '../sdk/src/platform/tools/shared/process-manager.js';
+import { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.js';
 import { waitFor } from './_helpers/test-timeout.js';
 import { useToolReadings } from './_helpers/tool-readings.ts';
 

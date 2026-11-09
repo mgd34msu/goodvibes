@@ -3,9 +3,9 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConversationManager, type ConversationMessageSnapshot } from '../sdk/src/platform/core/conversation.js';
-import { sumConversationUsage } from '../sdk/src/platform/core/orchestrator-usage.js';
-import { SessionManager } from '../sdk/src/platform/sessions/manager.js';
+import { ConversationManager, type ConversationMessageSnapshot } from '../platform/src/platform/core/conversation.js';
+import { sumConversationUsage } from '../platform/src/platform/core/orchestrator-usage.js';
+import { SessionManager } from '../platform/src/platform/sessions/manager.js';
 
 function persisted(messages: object[]): ConversationMessageSnapshot[] {
   const dir = mkdtempSync(join(tmpdir(), 'conversation-usage-'));

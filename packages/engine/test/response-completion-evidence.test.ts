@@ -1,8 +1,8 @@
 import { expect, spyOn, test } from 'bun:test';
-import { CompletionEvidenceProjection } from '../sdk/src/platform/core/response-completion-evidence.js';
-import { passesLuhn } from '../sdk/src/platform/security/card-shapes.js';
-import { snapshotJudgmentEvidence } from '../sdk/src/platform/gate/judgment-input.js';
-import { COMPLETION_EVIDENCE_CHARACTERS, CompletionEvidenceBudgetError } from '../sdk/src/platform/core/response-completion-budget.js';
+import { CompletionEvidenceProjection } from '../platform/src/platform/core/response-completion-evidence.js';
+import { passesLuhn } from '../platform/src/platform/security/card-shapes.js';
+import { snapshotJudgmentEvidence } from '../platform/src/platform/gate/judgment-input.js';
+import { COMPLETION_EVIDENCE_CHARACTERS, CompletionEvidenceBudgetError } from '../platform/src/platform/core/response-completion-budget.js';
 
 function checkedNumber(prefix: string): string {
   return Array.from({ length: 10 }, (_, digit) => prefix + digit).find(passesLuhn)!;

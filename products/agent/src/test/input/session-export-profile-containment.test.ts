@@ -15,8 +15,8 @@
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
-import { registerProfileRedactionValues } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
+import { registerProfileRedactionValues } from '@goodvibes-jev/engine/platform/platform/utils';
+import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { handleSessionWorkflowCommand } from '../../input/commands/session-workflow.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';

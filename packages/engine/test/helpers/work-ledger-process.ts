@@ -1,5 +1,5 @@
 import * as fs from 'node:fs';
-import type { WorkLedgerCommand, WorkLedgerEvent, WorkLedgerResult, WorkLedgerSnapshot, WorkLedgerState } from '../../sdk/src/platform/workflow/work-ledger/types.js';
+import type { WorkLedgerCommand, WorkLedgerEvent, WorkLedgerResult, WorkLedgerSnapshot, WorkLedgerState } from '../../platform/src/platform/workflow/work-ledger/types.js';
 
 export interface WorkLedgerProcessInput {
   readonly dbPath: string;
@@ -55,9 +55,9 @@ if (input.hold) {
 }
 
 // Load production code after the child-local publication hook is installed.
-const { KnowledgeStore } = await import('../../sdk/src/platform/knowledge/store.js');
-const { createWorkLedger } = await import('../../sdk/src/platform/workflow/work-ledger/service.js');
-const { workLedgerStateSchema } = await import('../../sdk/src/platform/workflow/work-ledger/types.js');
+const { KnowledgeStore } = await import('../../platform/src/platform/knowledge/store.js');
+const { createWorkLedger } = await import('../../platform/src/platform/workflow/work-ledger/service.js');
+const { workLedgerStateSchema } = await import('../../platform/src/platform/workflow/work-ledger/types.js');
 const store = new KnowledgeStore({ dbPath: input.dbPath });
 const storage = await store.openWorkLedgerStorage(input.projectId);
 let nextId = 0;

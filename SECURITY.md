@@ -112,7 +112,7 @@ bundling, not a remediation an application root reproduces.
 
 Report security issues privately via GitHub private vulnerability reporting:
 
-- **GitHub private vulnerability reporting**: Use the [Security tab](https://github.com/mgd34msu/goodvibes-sdk/security/advisories/new) on this repository
+- **GitHub private vulnerability reporting**: Use the [Security tab](https://github.com/mgd34msu/goodvibes-platform/security/advisories/new) on this repository
 
 Include:
 - A description of the vulnerability

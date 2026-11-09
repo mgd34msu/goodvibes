@@ -2,10 +2,10 @@ import { createRequire } from 'node:module';
 import { types as nodeTypes } from 'node:util';
 import { closeSync, constants, fchmodSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readSync, type BigIntStats } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { captureExistingDirectory } from '@goodvibes-jev/engine/sdk/platform/state/durable-file-io';
+import { captureExistingDirectory } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
 import { array, boolean, enum as enumSchema, literal, number, strictObject, string, union } from 'zod/v4';
 import { drainOwned, parseJevDecision, type JevDecision } from '@goodvibes-jev/judgment/decisions';
-import { ledgerEventSchema, workLedgerCommandSchema, type WorkLedgerCommand, type WorkLedgerResult } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger';
+import { ledgerEventSchema, workLedgerCommandSchema, type WorkLedgerCommand, type WorkLedgerResult } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 
 export type LegacyImportCommand = Extract<WorkLedgerCommand, { type: 'import_legacy' }>;
 export interface LegacyImportBinding {

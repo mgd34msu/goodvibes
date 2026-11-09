@@ -4,8 +4,8 @@ import {
   correlatePurchaseMail,
   senderRegistrableDomain,
   extractConfirmationFacts,
-} from '../sdk/src/platform/payments/order-correlation.js';
-import type { PurchaseRecord } from '../sdk/src/platform/payments/purchase-record.js';
+} from '../platform/src/platform/payments/order-correlation.js';
+import type { PurchaseRecord } from '../platform/src/platform/payments/purchase-record.js';
 import { usePaymentsReadings, withPaymentsReadings } from './helpers/payments-readings.ts';
 
 const readings = usePaymentsReadings();

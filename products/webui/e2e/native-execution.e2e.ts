@@ -1,6 +1,6 @@
 /** Real Chromium + durable IndexedDB + exact production native graph HTTP captures. */
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { nativeWorkExecutionSnapshotSchema } from "@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client";
+import { nativeWorkExecutionSnapshotSchema } from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client";
 import { expectNoHorizontalScroll } from "./support/app";
 import {
   installNativeExecutionDaemon,

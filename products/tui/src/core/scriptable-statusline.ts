@@ -14,7 +14,7 @@
  * status area does not show stale text.
  */
 
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { readStatuslineSettings, STATUSLINE_DEFAULT_TIMEOUT_MS, type StatuslineSettings } from '../config/tui-extension-settings.ts';
 
 /** Runs the shell command and resolves its raw stdout, or throws on failure/timeout. */

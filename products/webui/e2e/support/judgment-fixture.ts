@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { parseBrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-sdk';
+import { parseBrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-api';
 
 /** Explicit synthetic readings, never a lexical scorer or live provider. */
 export async function installPaletteReading(page: Page, commandId: string, outcome: 'act' | 'confirm' | 'escalate' = 'act', beforeReply?: () => Promise<void>): Promise<void> {

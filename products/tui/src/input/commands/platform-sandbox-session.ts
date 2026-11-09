@@ -1,7 +1,7 @@
 import type { CommandContext } from '../command-registry.ts';
-import { inspectSandboxSessionArtifact, listSandboxProfiles, renderSandboxSessions } from '@goodvibes-jev/engine/sdk/platform/runtime/sandbox';
+import { inspectSandboxSessionArtifact, listSandboxProfiles, renderSandboxSessions } from '@goodvibes-jev/engine/platform/platform/runtime/sandbox';
 import { requireShellPaths } from './runtime-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 const SANDBOX_PROFILE_IDS = [
   'eval-js',

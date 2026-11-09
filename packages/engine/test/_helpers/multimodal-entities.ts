@@ -1,5 +1,5 @@
-import type { ArtifactDescriptor, ArtifactKind } from '../../sdk/src/platform/artifacts/types.js';
-import { MultimodalService } from '../../sdk/src/platform/multimodal/service.js';
+import type { ArtifactDescriptor, ArtifactKind } from '../../platform/src/platform/artifacts/types.js';
+import { MultimodalService } from '../../platform/src/platform/multimodal/service.js';
 
 export function multimodalFixture(kind: ArtifactKind = 'image', text = 'receipt receipt receipt AI EU') {
   const records = new Map<string, ArtifactDescriptor>();

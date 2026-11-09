@@ -2,8 +2,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, test } from 'bun:test';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { reviewKnowledgeIssue } from '../sdk/src/platform/knowledge/review.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { reviewKnowledgeIssue } from '../platform/src/platform/knowledge/review.js';
 
 const tmpRoots: string[] = [];
 

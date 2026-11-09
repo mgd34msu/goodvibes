@@ -4,14 +4,14 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { rm } from 'node:fs/promises';
-import { InboxCursorStore } from '../sdk/src/platform/intake/cursor-store.ts';
-import { InboundPoller } from '../sdk/src/platform/intake/poller.ts';
+import { InboxCursorStore } from '../platform/src/platform/intake/cursor-store.ts';
+import { InboundPoller } from '../platform/src/platform/intake/poller.ts';
 import type {
   InboundChannelItem,
   InboundProviderAdapter,
   ProviderPollOptions,
   ProviderPollResult,
-} from '../sdk/src/platform/intake/provider-adapter.ts';
+} from '../platform/src/platform/intake/provider-adapter.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const logger = {

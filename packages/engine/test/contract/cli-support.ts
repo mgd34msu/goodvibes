@@ -3,19 +3,19 @@
  * behaviour each test scripts, the process io, and the opened runner the bin
  * would hand the CLI.
  */
-import type { ContractEvent } from '../../sdk/src/events/contract.js';
+import type { ContractEvent } from '../../platform/src/events/contract.js';
 import type {
   ContractCliDeps,
   ContractCliIo,
   ContractCliRunner,
   ContractSessionDriver,
   OpenedContractRunner,
-} from '../../sdk/src/platform/contract/cli.js';
-import type { OwnerReplyOutcome } from '../../sdk/src/platform/contract/escalation.js';
-import type { ResumeReport } from '../../sdk/src/platform/contract/resume.js';
-import type { StartedContract } from '../../sdk/src/platform/contract/runner.js';
-import type { Contract, ContractView, Escalation, StartContractInput, UnitCheck } from '../../sdk/src/platform/contract/types.js';
-import type { AgentRecord } from '../../sdk/src/platform/tools/agent/index.js';
+} from '../../platform/src/platform/contract/cli.js';
+import type { OwnerReplyOutcome } from '../../platform/src/platform/contract/escalation.js';
+import type { ResumeReport } from '../../platform/src/platform/contract/resume.js';
+import type { StartedContract } from '../../platform/src/platform/contract/runner.js';
+import type { Contract, ContractView, Escalation, StartContractInput, UnitCheck } from '../../platform/src/platform/contract/types.js';
+import type { AgentRecord } from '../../platform/src/platform/tools/agent/index.js';
 import { makeContract } from './fixtures.js';
 
 export const PROJECT = '/work/project';

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
+import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { handleSessionWorkflowCommand } from '../../input/commands/session-workflow.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
@@ -315,11 +315,14 @@ describe('session workflow command', () => {
         const meta = sm.getMeta('unsaved-active-session');
         expect(meta?.saveSource).toBe('user');
         expect(meta?.title).toBe('Renamed Title');
+        expect(meta?.titleSource).toBe('user');
+        expect(sm.load('unsaved-active-session').messages).toContainEqual(expect.objectContaining({ role: 'user', content: 'hello' }));
 
         // Raw-disk proof.
         const filePath = `${tmpDir}/.goodvibes/agent/sessions/unsaved-active-session.jsonl`;
         expect(existsSync(filePath)).toBe(true);
         expect(readMetaRaw(filePath).saveSource).toBe('user');
+        expect(readMetaRaw(filePath)).toMatchObject({ title: 'Renamed Title', titleSource: 'user', model: 'gpt-5.4', provider: 'openai' });
       } finally {
         rmSync(tmpDir, { recursive: true, force: true });
       }

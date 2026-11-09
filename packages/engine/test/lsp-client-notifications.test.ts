@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { LspClient } from '../sdk/src/platform/intelligence/lsp/client.js';
+import { LspClient } from '../platform/src/platform/intelligence/lsp/client.js';
 
 function dispatch(client: LspClient, payload: unknown): void {
   (client as unknown as { _dispatchMessage(body: string): void })._dispatchMessage(JSON.stringify(payload));

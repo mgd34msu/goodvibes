@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
-import { ImapClient, parseFetchResponse, decodeHeader, imapDate, type ImapConnector, type ImapSocket } from '../sdk/src/platform/intake/providers/imap-client.js';
+import { ImapClient, parseFetchResponse, decodeHeader, imapDate, type ImapConnector, type ImapSocket } from '../platform/src/platform/intake/providers/imap-client.js';
 
 const DUMMY_PASSWORD = 'owned-fixture-password';
 class MemorySocket extends EventEmitter implements ImapSocket {

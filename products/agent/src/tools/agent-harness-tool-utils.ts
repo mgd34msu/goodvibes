@@ -1,5 +1,5 @@
 import type { AgentHarnessToolArgs } from './agent-harness-tool-types.ts';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { harnessCatalogInvocationAuthority } from './agent-harness-catalog-ingress.ts';
 
 export function readString(value: unknown): string {

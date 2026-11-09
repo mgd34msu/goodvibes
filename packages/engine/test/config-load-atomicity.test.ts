@@ -2,8 +2,8 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { DEFAULT_CONFIG } from '../sdk/src/platform/config/schema.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { DEFAULT_CONFIG } from '../platform/src/platform/config/schema.js';
 import { applyRuntimeConfigValue } from '../terminal-shell/src/cli-config-overrides.js';
 
 const roots: string[] = [];

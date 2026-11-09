@@ -3,9 +3,9 @@
  * daemon process, not mocks.
  *
  * WHY A SEPARATE LANE: the default `bun test` unit lane is hermetic (happy-dom + in-page
- * mocks) and must stay that way. This lane boots a real daemon from the local SDK dev-link
+ * mocks) and must stay that way. This lane boots a real daemon from the local engine dev-link
  * (bootDaemon: isolated home, ephemeral loopback port, bearer-token auth), points the
- * webui's actual SDK client (src/lib/goodvibes.ts) at it, and drives a minimal session
+ * webui's actual engine client (src/lib/goodvibes.ts) at it, and drives a minimal session
  * round-trip end to end, proving the real request/response and Server-Sent-Event paths
  * work against a genuine daemon. It is wired as `bun run test:live`, NOT under the default
  * test glob, so the unit lane never spawns a process.
@@ -20,7 +20,7 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { bootDaemon, type BootedDaemon } from '@goodvibes-jev/engine/sdk/daemon';
+import { bootDaemon, type BootedDaemon } from '@goodvibes-jev/engine/platform/daemon';
 import { installTestTempRoot, sweepStaleRunRoots } from './test-temp-root';
 import { requireSessionCloseReceipt } from './live-daemon-lifecycle';
 
@@ -85,12 +85,12 @@ function sessionsFrom(value: unknown): Record<string, unknown>[] {
  * two creations can no longer strand the first one.
  *
  * ROOTING A REAL-DAEMON SCRATCH TREE INSIDE THE CHECKOUT IS NOT FREE, and was
- * checked rather than assumed. goodvibes-sdk's own repo hit a real bug from the
+ * checked rather than assumed. goodvibes's own repo hit a real bug from the
  * same move: a tool walked upward from an in-repo test fixture looking for
  * `tsconfig.json`, found the REAL repo's tsconfig sitting above it instead of
  * finding none, and corrupted that test's expectations. Why that cannot happen
  * here:
- *   - ConfigManager (@goodvibes-jev/engine/sdk dist/platform/config/manager.js)
+ *   - ConfigManager (@goodvibes-jev/engine/platform dist/platform/config/manager.js)
  *     builds settings.json paths by joining directly under the given
  *     workingDir/homeDirectory. It never walks upward.
  *   - Nothing in bootDaemon's construction/start path (dist/platform/daemon/
@@ -183,27 +183,27 @@ async function main(): Promise<void> {
     daemon = await bootDaemon({ homeDirectory: home, workingDir: work, port: 0, token: TOKEN });
     log(`daemon up at ${daemon.url}`);
 
-    // Point the webui's SDK client at the real daemon, THEN import it (it reads the base URL
-    // at module evaluation). A loopback http origin is a secure context, so the SDK transport
+    // Point the webui's engine client at the real daemon, THEN import it (it reads the base URL
+    // at module evaluation). A loopback http origin is a secure context, so the engine transport
     // guard does not fire.
     process.env.VITE_GOODVIBES_BASE_URL = daemon.url;
-    const { sdk } = await import('../src/lib/goodvibes');
+    const { engine } = await import('../src/lib/goodvibes');
     const { SESSION_UPDATE_WIRE_EVENT } = await import('../src/lib/sessions-union');
-    await sdk.auth.setToken(TOKEN);
+    await engine.auth.setToken(TOKEN);
 
     // 1) A real authenticated request/response round-trip through the webui client.
     log('control.status round-trip…');
-    const status = await sdk.operator.control.status();
+    const status = await engine.operator.control.status();
     assert.ok(status && typeof status === 'object', 'control.status returned a snapshot object');
 
     // 2) A real mutating round-trip: create a session, then read it back from the list.
     log('creating a session…');
-    const created = await sdk.operator.invoke('sessions.create', { title: SESSION_TITLE });
+    const created = await engine.operator.invoke('sessions.create', { title: SESSION_TITLE });
     const createdId = sessionId(created);
     assert.ok(createdId, 'sessions.create returned a session id');
 
     log('listing sessions and asserting the new one is present…');
-    const listed = await sdk.operator.invoke('sessions.list', {});
+    const listed = await engine.operator.invoke('sessions.list', {});
     const found = sessionsFrom(listed).some((entry) => sessionId(entry) === createdId);
     assert.ok(found, `the created session (${createdId}) appears in the real daemon's session list`);
 
@@ -214,8 +214,8 @@ async function main(): Promise<void> {
     await requireSessionCloseReceipt({
       sessionId: createdId,
       eventName: SESSION_UPDATE_WIRE_EVENT,
-      close: () => sdk.operator.invoke('sessions.close', { sessionId: createdId }),
-      open: (handlers) => sdk.streams.open(
+      close: () => engine.operator.invoke('sessions.close', { sessionId: createdId }),
+      open: (handlers) => engine.streams.open(
         '/api/control-plane/events?domains=session',
         handlers,
         { reconnect: { enabled: false, baseDelayMs: 0, maxDelayMs: 0, backoffFactor: 1, maxAttempts: 0 } },

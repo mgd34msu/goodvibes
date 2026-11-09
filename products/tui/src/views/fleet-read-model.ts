@@ -1,26 +1,26 @@
 // ---------------------------------------------------------------------------
 // fleet-read-model.ts
 //
-// (Agents modal tree), pure, testable read-model over the SDK's live
-// process registry (@goodvibes-jev/engine/sdk/platform/runtime/fleet, landed on
-// SDK main as). No rendering dependency: this module owns the
+// (Agents modal tree), pure, testable read-model over the platform's live
+// process registry (@goodvibes-jev/engine/platform/platform/runtime/fleet, landed on
+// platform main as). No rendering dependency: this module owns the
 // flat ProcessNode[] -> tree transformation, the honest cost/token
 // aggregates, and the state->glyph/tone mapping that the Agents modal renders.
 //
 // Design notes:
-//   - The brief predates the real SDK API and sketched a bespoke
+//   - The brief predates the real platform API and sketched a bespoke
 //     FleetRegistryNode/FleetRegistry adapter pair. The real
 //     createProcessRegistry() ProcessNode already carries elapsedMs,
 //     usage, costUsd, costState, and currentActivity directly, so no
 //     adapter layer is needed here, this module consumes ProcessNode
 //     straight from the registry and only owns the tree-walk + aggregate
-//     + presentation-mapping logic the SDK does not provide.
+//     + presentation-mapping logic the platform does not provide.
 //   - Tree-walk shape (connectors, cycle guard, leftover pass) is ported
 //     from renderer/process-modal.ts's appendAgentSubtree/
 //     appendAgentGroupEntries, generalized from AgentRecord to ProcessNode
 //     and ordered by startedAt (ProcessNode
 //     has no role concept, parentId alone expresses the hierarchy, and the
-//     SDK guarantees every parentId either resolves or the node is a root).
+//     platform guarantees every parentId either resolves or the node is a root).
 //   - Cost/token honesty mirrors agent-inspector-shared.ts's
 //     hasReportedUsage convention: an all-zero-but-present usage object is
 //     treated as "no data" (never a fabricated 0/$0.00), and aggregates are
@@ -38,7 +38,7 @@ import type {
   ProcessState,
   ProcessUsage,
   SteerResult,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
+} from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import type { RuntimeEventBus } from '@/runtime/index.ts';
 
 // ---------------------------------------------------------------------------
@@ -81,14 +81,14 @@ export interface FleetSnapshot {
 
 export type FleetStateTone = 'active' | 'success' | 'failure' | 'warn' | 'muted';
 
-// Design ruling: this is a DIFFERENT table from the SDK presentation
-// contract's STATE_GLYPHS (@goodvibes-jev/engine/sdk/platform/presentation), that
+// Design ruling: this is a DIFFERENT table from the platform presentation
+// contract's STATE_GLYPHS (@goodvibes-jev/engine/platform/platform/presentation), that
 // one is a 4-state semantic alias (good/warn/bad/info) shared by the TUI and
 // agent renderers; this one is a 12-state ProcessNode taxonomy specific to the
 // Agents modal tree (thinking/executing-tool/awaiting-approval/streaming/
 // stalled/retrying/done/failed/killed/interrupted/idle/queued/paused), and no
 // other surface (checked: the agent has no Agents modal renderer) consumes it
-// today. Per the presentation-parity brief, a table only moves to the SDK
+// today. Per the presentation-parity brief, a table only moves to the platform
 // contract when 2+ surfaces need it, this one stays TUI-renderer-local.
 const STATE_GLYPHS: Record<ProcessState, string> = {
   thinking: '◔',
@@ -107,7 +107,7 @@ const STATE_GLYPHS: Record<ProcessState, string> = {
   interrupted: '◌',
   idle: '·',
   queued: '…',
-  // SDK behavior: schedules/triggers/automation jobs report 'paused' when
+  // platform behavior: schedules/triggers/automation jobs report 'paused' when
   // disabled (previously mislabeled 'killed'). NOT terminal, resumable via
   // ProcessRegistry.resume() (the full pause/resume UI lives in
   // fleet-stop.ts). '❚' verified free against every other glyph in this table.
@@ -166,7 +166,7 @@ const KIND_TAGS: Record<ProcessKind, string> = {
   'code-index': 'index',
   // A hosted third-party coding agent (Claude Code / Codex / opencode) spawned
   // over ACP (adapters/acp-host.ts). A plain leaf row, steer/stop/attention
-  // ride on its node capabilities and the SDK's needsAttention projection, so
+  // ride on its node capabilities and the platform's needsAttention projection, so
   // this glyph/label is the only read-model special-casing it needs.
   'acp-agent': 'acp',
   // An externally-launched foreign coding agent (Claude Code / Codex / opencode)
@@ -203,7 +203,7 @@ export function isBlockedOnUserState(state: ProcessState): boolean {
 }
 
 /**
- * The node's waiting-on-human classification, preferring the SDK's canonical
+ * The node's waiting-on-human classification, preferring the platform's canonical
  * `needsAttention` projection (reason 'approval' | 'input', broader than the
  * awaiting-approval state alone: it also covers a session waiting on user
  * input). Falls back to the state-derived mapping for registries that predate
@@ -267,7 +267,7 @@ export function fleetStallMarker(node: ProcessNode): string | null {
 /**
  * True when a ProcessUsage carries real reported token data rather than
  * being present-but-all-zero. Mirrors hasReportedUsage() in
- * agent-inspector-shared.ts, applied to the SDK's ProcessUsage shape.
+ * agent-inspector-shared.ts, applied to the platform's ProcessUsage shape.
  */
 export function hasFleetUsage(usage: ProcessUsage | undefined): usage is ProcessUsage {
   if (!usage) return false;
@@ -368,7 +368,7 @@ function appendSubtree(
  * each top-level process family renders without a connector to its
  * unrelated siblings); connectors appear starting at depth 1. Defensive
  * cycle guard: a self-referencing or looping parentId chain is walked once
- * via the leftover pass below rather than recursing forever (the SDK
+ * via the leftover pass below rather than recursing forever (the platform
  * guarantees every parentId resolves or the node is a root, so this is
  * belt-and-suspenders, not a supported shape).
  */
@@ -554,7 +554,7 @@ export type FleetRegistryLike = Pick<ProcessRegistry, 'query' | 'subscribe' | 'i
   & Partial<Pick<ArchivableProcessRegistry, 'archive' | 'archiveFinished' | 'unarchive' | 'listArchived'>>;
 
 /**
- * Create a live FleetReadModel backed by the SDK's ProcessRegistry.
+ * Create a live FleetReadModel backed by the platform's ProcessRegistry.
  * `runtimeBus` is optional (narrowed to just `onDomain`), without it,
  * `subscribeConsumed` degrades to a no-op, same shape as the registry's own
  * messageBus-optional degrade for steer()/steerable.

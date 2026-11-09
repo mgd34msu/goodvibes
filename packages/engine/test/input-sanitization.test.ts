@@ -4,11 +4,11 @@ import {
   extractOperatorAuthToken,
   isOperatorAdmin,
   OPERATOR_SESSION_COOKIE_NAME,
-} from '../sdk/src/platform/security/index.js';
+} from '../platform/src/platform/security/index.js';
 import {
   buildExpiredOperatorSessionCookie,
   buildOperatorSessionCookie,
-} from '../sdk/src/platform/security/http-auth.js';
+} from '../platform/src/platform/security/http-auth.js';
 
 describe('platform/security: http-auth smoke', () => {
   test('OPERATOR_SESSION_COOKIE_NAME is a non-empty string', () => {

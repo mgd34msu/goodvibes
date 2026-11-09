@@ -11,7 +11,7 @@
  * server as changed.
  */
 import { describe, expect, test } from 'bun:test';
-import { McpPermissionManager } from '../sdk/src/platform/runtime/mcp/permissions.js';
+import { McpPermissionManager } from '../platform/src/platform/runtime/mcp/permissions.js';
 
 function register(
   manager: McpPermissionManager,

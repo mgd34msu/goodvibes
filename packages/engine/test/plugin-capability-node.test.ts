@@ -14,7 +14,7 @@ test('plugin stream ownership preserves native Node byte and iterator behavior',
     const transpiler = new Bun.Transpiler({ loader: 'ts', target: 'node' });
     writeFileSync(join(root, 'package.json'), '{"type":"module"}\n');
     for (const name of ['plugins/owned-capabilities', 'plugins/in-flight', 'utils/file-mutation']) {
-      const source = readFileSync(new URL(`../sdk/src/platform/${name}.ts`, import.meta.url), 'utf8');
+      const source = readFileSync(new URL(`../platform/src/platform/${name}.ts`, import.meta.url), 'utf8');
       const output = join(root, `${name}.js`);
       mkdirSync(dirname(output), { recursive: true });
       writeFileSync(output, transpiler.transformSync(source));

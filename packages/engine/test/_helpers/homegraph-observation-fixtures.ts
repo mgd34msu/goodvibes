@@ -1,6 +1,6 @@
-import type { KnowledgeStore } from '../../sdk/src/platform/knowledge/store.js';
-import type { KnowledgeNodeUpsertInput } from '../../sdk/src/platform/knowledge/types.js';
-import { upsertObservedKnowledgeNode } from '../../sdk/src/platform/knowledge/store-node-observation.js';
+import type { KnowledgeStore } from '../../platform/src/platform/knowledge/store.js';
+import type { KnowledgeNodeUpsertInput } from '../../platform/src/platform/knowledge/types.js';
+import { upsertObservedKnowledgeNode } from '../../platform/src/platform/knowledge/store-node-observation.js';
 
 /** A declared synthetic Home Assistant observation, never a synthesized fact or operator review. */
 export function seedHomeAssistantObservation(store: KnowledgeStore, input: KnowledgeNodeUpsertInput) {

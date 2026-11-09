@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
-import type { AudioCaptureError, AudioCaptureRequest, CaptureChildProcess } from '@goodvibes-jev/engine/sdk/platform/voice/capture';
+import type { AudioCaptureError, AudioCaptureRequest, CaptureChildProcess } from '@goodvibes-jev/engine/platform/platform/voice/capture';
 import { createTuiCaptureOpener } from '../../audio/capture.ts';
 
 const previous: Array<JudgmentPort | undefined> = [];

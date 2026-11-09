@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { handleHistorySearchToken } from '../../input/handler-ui-state.ts';
 import { HistorySearch } from '../../input/input-history.ts';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 
 function makeKey(logicalName: string, opts: { ctrl?: boolean } = {}): InputToken {
   return {

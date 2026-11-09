@@ -19,11 +19,11 @@ import {
   shapeContract,
   withOwnerWritingDecision,
   type ContractPlannerDeps,
-} from '../../sdk/src/platform/contract/planner.js';
-import { NoRouteError } from '../../sdk/src/platform/routing/route-planner.js';
-import { parseContractPlan, unitToolContract } from '../../sdk/src/platform/contract/plan-schema.js';
-import type { ContractEvent } from '../../sdk/src/events/contract.js';
-import type { Contract } from '../../sdk/src/platform/contract/index.js';
+} from '../../platform/src/platform/contract/planner.js';
+import { NoRouteError } from '../../platform/src/platform/routing/route-planner.js';
+import { parseContractPlan, unitToolContract } from '../../platform/src/platform/contract/plan-schema.js';
+import type { ContractEvent } from '../../platform/src/events/contract.js';
+import type { Contract } from '../../platform/src/platform/contract/index.js';
 import { makeContract } from './fixtures.js';
 import {
   ASK,
@@ -423,7 +423,7 @@ describe('planContract: failure, with no single-item fallback', () => {
   });
 
   test('the planner never reaches the heuristic decomposition or a single-item proposal', () => {
-    const source = readFileSync(join(import.meta.dir, '../../sdk/src/platform/contract/planner.ts'), 'utf8');
+    const source = readFileSync(join(import.meta.dir, '../../platform/src/platform/contract/planner.ts'), 'utf8');
     const imports = source.match(/^import[\s\S]*?from '[^']+';$/gm)!.join('\n');
     expect(imports).toContain('DecompositionRunner,');
     for (const name of ['decomposeGoal', 'singleItemProposal', 'assemblePlanProposal', 'AdaptivePlanner']) expect(imports).not.toContain(name);

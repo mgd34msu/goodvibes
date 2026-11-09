@@ -4,8 +4,8 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { currentFileObservations } from '../../sdk/src/platform/contract/current-file-observations.js';
-import { captureContractInput } from '../../sdk/src/platform/contract/input-snapshot.js';
+import { currentFileObservations } from '../../platform/src/platform/contract/current-file-observations.js';
+import { captureContractInput } from '../../platform/src/platform/contract/input-snapshot.js';
 
 test('ambiguous and escaping observation paths are refused before filesystem lookup', () => {
   const lookup = spyOn(fs, 'lstatSync');

@@ -5,8 +5,8 @@
  * built only with a relay-backed `fetchImpl`, works unchanged over the relay.
  * A real Bun relay server, a real daemon-side registration terminating the E2E
  * channel and replaying tunneled requests against the mock-daemon fixtures, and
- * the real `createOperatorSdk` client on the far side. Nothing about the typed
- * client is relay-aware, it just calls `sdk.approvals.list()` and gets the
+ * the real `createOperatorApiClient` client on the far side. Nothing about the typed
+ * client is relay-aware, it just calls `platform.approvals.list()` and gets the
  * daemon's answer back through the encrypted tunnel.
  */
 import { afterAll, describe, expect, test } from 'bun:test';
@@ -16,9 +16,9 @@ import {
   createBunRelayServer,
   createRelayDaemonRegistration,
   RELAY_VIA_HEADER,
-} from '../daemon-sdk/src/index.js';
+} from '../daemon-api/src/index.js';
 import { createRelayClient } from '../transport-realtime/src/relay-transport.js';
-import { createOperatorSdk } from '../operator-sdk/src/client.js';
+import { createOperatorApiClient } from '../operator-client/src/client.js';
 import { generateRelayIdentity, relayIdentityPublicKeyBase64Url } from '../transport-core/src/relay/index.js';
 
 const silent = { info: () => {}, warn: () => {}, error: () => {} };
@@ -52,7 +52,7 @@ async function standUpDaemon(rid: string, dispatch: (req: Request) => Promise<Re
 }
 
 describe('typed operator client over the relay', () => {
-  test('sdk.approvals.list() round-trips through the encrypted tunnel', async () => {
+  test('platform.approvals.list() round-trips through the encrypted tunnel', async () => {
     const mock = createMockDaemon(getOperatorContract());
     const expected = mock.answerHttp('GET', '/api/approvals');
     expect(expected).not.toBeNull();
@@ -75,8 +75,8 @@ describe('typed operator client over the relay', () => {
     const client = createRelayClient({ pairing });
     await client.connect();
 
-    const sdk = createOperatorSdk({ baseUrl: 'https://relay.invalid', fetchImpl: client.fetch, authToken: 'operator-token-xyz' });
-    const result = await sdk.approvals.list();
+    const platformClient = createOperatorApiClient({ baseUrl: 'https://relay.invalid', fetchImpl: client.fetch, authToken: 'operator-token-xyz' });
+    const result = await platformClient.approvals.list();
 
     expect(result).toEqual(expected!.body as typeof result);
     // The tunneled request carried the operator's auth token (invisible to the

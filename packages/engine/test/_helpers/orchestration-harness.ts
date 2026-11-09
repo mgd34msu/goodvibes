@@ -5,17 +5,17 @@
  * exercise the SAME event contract the engine actually listens on (phase-runner.ts's awaitAgentTermination -> runtimeBus.onDomain
  * ('agents', ...)).
  */
-import { RuntimeEventBus } from '../../sdk/src/platform/runtime/events/index.js';
+import { RuntimeEventBus } from '../../platform/src/platform/runtime/events/index.js';
 import {
   emitAgentCancelled,
   emitAgentCompleted,
   emitAgentFailed,
-} from '../../sdk/src/platform/runtime/emitters/agents.js';
-import type { AgentRecord } from '../../sdk/src/platform/tools/agent/manager.js';
-import type { AgentInput } from '../../sdk/src/platform/tools/agent/schema.js';
-import type { PhaseRunnerAgentManagerLike, WorktreeOps } from '../../sdk/src/platform/orchestration/index.js';
-import type { CommitWorkingTreeResult } from '../../sdk/src/platform/agents/worktree.js';
-import type { ConfigManager } from '../../sdk/src/platform/config/index.js';
+} from '../../platform/src/platform/runtime/emitters/agents.js';
+import type { AgentRecord } from '../../platform/src/platform/tools/agent/manager.js';
+import type { AgentInput } from '../../platform/src/platform/tools/agent/schema.js';
+import type { PhaseRunnerAgentManagerLike, WorktreeOps } from '../../platform/src/platform/orchestration/index.js';
+import type { CommitWorkingTreeResult } from '../../platform/src/platform/agents/worktree.js';
+import type { ConfigManager } from '../../platform/src/platform/config/index.js';
 
 /** Drain the microtask queue fully (RuntimeEventBus + Promise chains use queueMicrotask). */
 export async function flushMicrotasks(rounds = 12): Promise<void> {

@@ -8,8 +8,8 @@ import { correctedContractScene } from './contract-correction-scene.ts';
  * appendConversationMessages path. Times are fixed so frames are deterministic.
  */
 
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { ToolCall } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
 import type { AgentLaneInfo, CallTiming, WorkTreeSources } from '../../core/work-tree-sources.ts';
 
 type Message = ConversationMessageSnapshot;

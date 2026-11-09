@@ -1,8 +1,8 @@
 import { beforeEach, afterEach, describe, expect, test } from 'bun:test';
 import { chmodSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ManagedServiceStatus } from '@goodvibes-jev/engine/sdk/platform/daemon';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ManagedServiceStatus } from '@goodvibes-jev/engine/platform/platform/daemon';
 import {
   buildCliServicePosture,
   createPlatformServiceManager,
@@ -283,7 +283,7 @@ describe('CLI service posture', () => {
   test('posture honors a legacy on-disk danger.daemon=false through the removal migration', async () => {
     // The deprecated danger.daemon alias was removed from the schema (see
     // docs/decisions/2026-07-05-daemon-by-default.md). A user's existing
-    // explicit off-switch on disk is preserved by the SDK's config migration
+    // explicit off-switch on disk is preserved by the platform's config migration
     // (ConfigManager.load -> migrateDangerDaemonAlias), which rewrites it onto
     // daemon.enabled=false BEFORE this posture read, it is no longer
     // reachable via ConfigManager.setDynamic('danger.daemon', ...) at runtime

@@ -30,17 +30,17 @@ import {
   type ExecInteractionRuntime,
   type ExecPromptAsk,
   type PtyAvailability,
-} from '../sdk/src/platform/tools/exec/interactive.ts';
+} from '../platform/src/platform/tools/exec/interactive.ts';
 import {
   buildBwrapArgv,
   detectSandboxAvailability,
   probeSandboxHost,
-} from '../sdk/src/platform/tools/exec/sandbox.ts';
-import { buildExecPromptAnswerHandler } from '../sdk/src/platform/runtime/permissions/exec-prompt-wiring.ts';
-import type { PermissionPromptRequest } from '../sdk/src/platform/permissions/prompt.ts';
-import { createExecTool } from '../sdk/src/platform/tools/exec/runtime.ts';
-import { ProcessManager } from '../sdk/src/platform/tools/shared/process-manager.ts';
-import { OverflowHandler } from '../sdk/src/platform/tools/shared/overflow.ts';
+} from '../platform/src/platform/tools/exec/sandbox.ts';
+import { buildExecPromptAnswerHandler } from '../platform/src/platform/runtime/permissions/exec-prompt-wiring.ts';
+import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.ts';
+import { createExecTool } from '../platform/src/platform/tools/exec/runtime.ts';
+import { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.ts';
+import { OverflowHandler } from '../platform/src/platform/tools/shared/overflow.ts';
 import { useToolReadings } from './_helpers/tool-readings.ts';
 import { createExecContainmentProof, execContainmentRequired, skipExecContainment, EXEC_CONTAINMENT_REQUIRED_ENV } from './_helpers/exec-containment-proof.ts';
 

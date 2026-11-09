@@ -1,4 +1,4 @@
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import { isTextBackspace } from './delete-key-policy.js';
 interface SearchableModal {
   readonly active: boolean;

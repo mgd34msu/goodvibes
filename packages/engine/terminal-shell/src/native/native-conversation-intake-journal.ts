@@ -1,8 +1,8 @@
-import { nativeWorkExecutionIdentitySchema } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
+import { nativeWorkExecutionIdentitySchema } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
 import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readSync, type Stats } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { acquireCrossProcessLock, confirmFileDurable, writeJsonFileAtomic, } from '@goodvibes-jev/engine/sdk/platform/state/durable-file-io';
-import { nativeConversationIntakeCaptureRequestSchema, nativeConversationIntakeSourceRefSchema, type NativeConversationIntakeSourceRef, type NativeConversationIntakeCaptureRequest, } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
+import { acquireCrossProcessLock, confirmFileDurable, writeJsonFileAtomic, } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
+import { nativeConversationIntakeCaptureRequestSchema, nativeConversationIntakeSourceRefSchema, type NativeConversationIntakeSourceRef, type NativeConversationIntakeCaptureRequest, } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 export const NATIVE_INTAKE_JOURNAL_MAX_RECORDS = 16;
 export const NATIVE_INTAKE_JOURNAL_MAX_BYTES = 2 * 1024 * 1024;
 /** The principal must come from this connection's live verified auth.current. */

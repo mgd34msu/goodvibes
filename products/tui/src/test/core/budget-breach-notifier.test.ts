@@ -13,8 +13,8 @@ import { makeTestWebhookNotifier } from '../helpers/notification-transport.ts';
  */
 import { describe, test, expect, mock, afterEach } from 'bun:test';
 import { createBudgetBreachNotifier } from '../../core/budget-breach-notifier.ts';
-import { setPricingSource } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { FocusTracker } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { setPricingSource } from '@goodvibes-jev/engine/platform/platform/providers';
+import { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 
 // A model with a known, real price so calcSessionCost produces a real breach.
 const PRICED_MODEL = 'claude-sonnet-4-6'; // present in cost-utils.ts STATIC_FALLBACK_PRICING

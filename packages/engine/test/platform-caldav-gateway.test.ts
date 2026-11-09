@@ -15,20 +15,20 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { createCalDavCalendarGatewayService } from '../sdk/src/platform/calendar/caldav-gateway-service.ts';
+import { createCalDavCalendarGatewayService } from '../platform/src/platform/calendar/caldav-gateway-service.ts';
 import {
   createCalDavSecretPort,
   parseCollectionMap,
   toRelativeHref,
-} from '../sdk/src/platform/calendar/caldav-gateway-config.ts';
-import { parseICS } from '../sdk/src/platform/calendar/caldav-ics.ts';
-import { generateICS, foldLine } from '../sdk/src/platform/calendar/caldav-ics-generate.ts';
-import { GatewayVerbError } from '../sdk/src/platform/control-plane/routes/gateway-verb-error.ts';
+} from '../platform/src/platform/calendar/caldav-gateway-config.ts';
+import { parseICS } from '../platform/src/platform/calendar/caldav-ics.ts';
+import { generateICS, foldLine } from '../platform/src/platform/calendar/caldav-ics-generate.ts';
+import { GatewayVerbError } from '../platform/src/platform/control-plane/routes/gateway-verb-error.ts';
 import type {
   CalDavHttpPort,
   CalDavHttpRequest,
   CalDavHttpResponse,
-} from '../sdk/src/platform/google/caldav-client.ts';
+} from '../platform/src/platform/google/caldav-client.ts';
 
 // ---------------------------------------------------------------------------
 // Fakes

@@ -11,8 +11,8 @@
 
 import { performance } from 'node:perf_hooks';
 import { Compositor } from '../src/renderer/compositor.ts';
-import { createEmptyLine } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import { createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 
 /** Frame bench configuration, change here to update both gate and test. */
 export const FRAME_BENCH_CONFIG = {

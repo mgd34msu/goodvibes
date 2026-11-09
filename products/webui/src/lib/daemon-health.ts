@@ -1,6 +1,6 @@
 /**
  * Daemon health types and pure helper functions.
- * Derives state from data already exposed by the SDK / queries.
+ * Derives state from data already exposed by the platform / queries.
  * No `any`. No side effects.
  */
 import type { ClientCompatibilityVerdict } from './client-compatibility';
@@ -69,7 +69,7 @@ export interface DaemonHealth {
    * This build vs. the daemon's most recently observed client-build floor
    * (X-Goodvibes-Client-Floor, see lib/client-compatibility.ts). Null until at least
    * one response has been observed; a daemon that never sends the header (every
-   * currently-shipped one, at this SDK pin) leaves this null forever, which is honest,
+   * currently-shipped one, at this platform pin) leaves this null forever, which is honest,
    * there is nothing yet to report, not a clean bill of health.
    */
   compatibility: ClientCompatibilityVerdict | null;

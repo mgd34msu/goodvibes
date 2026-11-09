@@ -46,7 +46,7 @@ export function sweepStaleTmpDirs(root: string, prefix: string, maxAgeMs: number
       if (!entry.isDirectory() || entry.isSymbolicLink() || existsSync(join(path, '.git'))
         || existsSync(join(path, '.retain')) || existsSync(join(path, '.keep-proof-output'))
         || (options.preserveMarker !== undefined && existsSync(join(path, options.preserveMarker)))) return undefined;
-      if (prefix === 'goodvibes-sdk-testrun-' || prefix === 'goodvibes-test-heartbeat-') {
+      if (prefix === 'goodvibes-testrun-' || prefix === 'goodvibes-test-heartbeat-') {
         const owner = JSON.parse(readFileSync(join(path, '.goodvibes-test-owner.json'), 'utf8')) as { version?: number; pid?: number; dev?: number; ino?: number };
         if (owner.version !== 1 || !Number.isSafeInteger(owner.pid) || owner.pid! <= 0 || owner.dev !== entry.dev || owner.ino !== entry.ino) return undefined;
         try { process.kill(owner.pid!, 0); return undefined; } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') return undefined; }

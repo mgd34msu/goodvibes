@@ -12,7 +12,7 @@ import type { createBlockContentActions } from './block-content-actions.js';
 import type { TerminalConversationManager } from './terminal-conversation.js';
 import type { InfiniteBuffer } from './conversation-history.js';
 import type { SelectionManager } from './text-selection.js';
-import type { BookmarkManager } from '@goodvibes-jev/engine/sdk/platform/bookmarks';
+import type { BookmarkManager } from '@goodvibes-jev/engine/platform/platform/bookmarks';
 import { activeTokens } from './renderer/theme.js';
 import type { handleEscape } from './modal-stack.js';
 export interface HandlerContentHost extends PasteRegistryState {

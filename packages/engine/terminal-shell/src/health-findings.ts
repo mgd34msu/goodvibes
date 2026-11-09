@@ -1,5 +1,5 @@
 import { drainSnapshotReads } from './onboarding-snapshot-reads.js';
-import type { ServiceRegistry } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
 /** Shared deterministic health findings; products supply labels and repair authority. */
 export async function collectServiceReadiness(
   registry: Pick<ServiceRegistry, 'getAll' | 'inspect'>,

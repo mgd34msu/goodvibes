@@ -22,7 +22,7 @@ import {
   TerminalBackgroundProbe,
 } from '../../renderer/terminal-bg-probe.ts';
 import { activeTheme, resolveTheme, setActiveThemeMode } from '../../renderer/theme.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { configGetStub } from '../helpers/config-manager-stub.ts';
 
 // The probe forcing tests mutate global active mode, always restore to dark so

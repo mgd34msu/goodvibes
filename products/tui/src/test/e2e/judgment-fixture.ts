@@ -1,4 +1,4 @@
-import { fieldKind, redactionCredential, residualCredential } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { fieldKind, redactionCredential, residualCredential } from '@goodvibes-jev/engine/platform/platform/utils';
 import nativeRoute from '../fixtures/e2e-judgments/native-route.json';
 import nativeTurn from '../fixtures/e2e-judgments/native-turn.json';
 import modelIdentity from '../fixtures/e2e-judgments/model-identity.json';

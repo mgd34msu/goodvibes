@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort } from '@goodvibes-jev/judgment/testing';
-import { StyleReplyReadingError } from '@goodvibes-jev/engine/sdk/platform/email';
-import { withDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { StyleReplyReadingError } from '@goodvibes-jev/engine/platform/platform/email';
+import { withDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { runPersonalOpsStyleDraft, STYLE_DRAFT_RECORD_ID } from '../../tools/agent-harness-personal-ops-style-draft.ts';
 import { cleanupResearchScreeningFixtures, exactSensitiveSpans, researchScreeningFixture } from '../helpers/research-screening.ts';
 

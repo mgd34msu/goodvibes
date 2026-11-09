@@ -4,12 +4,12 @@ import { cycleSettingChoice, adjustedSettingValue } from '@goodvibes-jev/engine/
 import { TerminalSettingsModalState } from '@goodvibes-jev/engine/terminal-shell/settings-modal-state';
 import { moveSettingsSelection, selectSettingsTarget } from '@goodvibes-jev/engine/terminal-shell/settings-navigation';
 import { hasActiveExecutionMode, readExecutionMode, refreshExecutionMode, setExecutionMode } from '../permissions/execution-mode.ts';
-import { postalConfigKey, readConfigSettingForDisplay } from '@goodvibes-jev/engine/sdk/platform/config';
+import { postalConfigKey, readConfigSettingForDisplay } from '@goodvibes-jev/engine/platform/platform/config';
 /** SettingsModal state for the /settings and /config fullscreen workspace. */
 
 import type { ModelPickerTarget } from './model-picker.ts';
-import type { ConfigManager, ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager, ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import type { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { isAgentHostSettingKey } from '../config/host-settings.ts';
 import { getAgentSettingsSchema, type AgentSettingKey } from '../config/settings-catalog.ts';
 import { getResolvedSettingLookup } from '@/runtime/index.ts';
@@ -18,7 +18,7 @@ import { isSecretConfigKey } from '../config/secret-config.ts';
 import { agentDaemonConfigClient } from '../config/daemon-config-routing.ts';
 import { routeSettingWriteToConnectedHost } from './settings-modal-daemon-writes.ts';
 import { modelPickerLaunchForKey, parseNumberEditBuffer } from './settings-modal-behavior.ts';
-import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/sdk/platform/payments';
+import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/platform/platform/payments';
 import { setSecretBackedSettingValue, type SettingsSecretsManager } from './settings-modal-secrets.ts';
 import { buildSubscriptionEntries } from './settings-modal-subscriptions.ts';
 import { buildMcpEntries } from './settings-modal-mcp-entries.ts';
@@ -28,9 +28,9 @@ import type { FeatureFlagManager } from '@/runtime/index.ts';
 import type { FlagState } from '@/runtime/index.ts';
 import '@/runtime/index.ts';
 import { resolveFeatureEnablementWrite } from '../runtime/feature-enablement.ts';
-import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import {
   SETTINGS_CATEGORIES,
   SETTINGS_CATEGORY_GROUPS,
@@ -907,7 +907,7 @@ export class SettingsModal extends TerminalSettingsModalState<
         this.lastSettingEffectMessage = result?.message ?? null;
         this._refreshAllEntries();
       }
-      // The SDK's own trade-off wording, shown at the moment of selection, not
+      // The platform's own trade-off wording, shown at the moment of selection, not
       // authored here, and never shown against the 'stored' default.
       if (key === 'payments.cvvHandling' && value === 'prompt') {
         this.lastSettingEffectMessage = CVV_PROMPT_TRADEOFF_WARNING;

@@ -22,7 +22,7 @@
  * shape.
  */
 
-import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/sdk/contracts';
+import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
 import type { AuthoritySurface } from '../trust/untrusted-content.ts';
 
 /** Every write takes one. Only `owner-direct` is accepted by the daemon (§7 layer 1). */
@@ -38,10 +38,10 @@ export const PROFILE_AUTHORITIES: readonly ProfileAuthority[] = [
 ];
 
 /**
- * `ProfileAuthority` above already IS the SDK's own type, `AuthoritySurface`,
+ * `ProfileAuthority` above already IS the platform's own type, `AuthoritySurface`,
  * imported through `trust/untrusted-content.ts`'s re-export, so there is no
  * local copy of the union to drift. `PROFILE_AUTHORITIES`, the runtime array
- * of its members, is a different question: the SDK
+ * of its members, is a different question: the platform
  * (`platform/security/untrusted-content.ts`) exports `AuthoritySurface` as a
  * type only. It has no runtime array enumerating that type's members, only
  * functions that take one already-known surface (`surfaceTrustTier`,
@@ -52,7 +52,7 @@ export const PROFILE_AUTHORITIES: readonly ProfileAuthority[] = [
  * necessity, not by choice.
  *
  * What compiles in its place: a switch over every literal, checked against
- * `ProfileAuthority` with an `assertNever` default. If the SDK's
+ * `ProfileAuthority` with an `assertNever` default. If the platform's
  * `AuthoritySurface` ever gains or loses a member, this file fails to compile
  * until the switch (and `PROFILE_AUTHORITIES` alongside it) is updated to
  * match, instead of the array silently going stale, the exact drift class

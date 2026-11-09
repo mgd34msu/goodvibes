@@ -76,7 +76,7 @@ export interface LoadedWakeModel {
   readonly fromCache: boolean;
 }
 
-/** Reads one chunk. The web UI passes `sdk.operator.voice.wake.model`. */
+/** Reads one chunk. The web UI passes `platform.operator.voice.wake.model`. */
 export type WakeModelChunkReader = (input: {
   component: WakeModelComponent;
   offset: number;

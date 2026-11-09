@@ -2,18 +2,18 @@ import { createCliSecretsCommand } from '@goodvibes-jev/engine/terminal-shell/cl
 import { createCliWorkspaceCommands } from '@goodvibes-jev/engine/terminal-shell/cli-workspace-commands';
 import { createCliSubscriptionView } from '@goodvibes-jev/engine/terminal-shell/cli-subscription-view';
 import type { RuntimeServices } from '../runtime/services.ts';
-import '@goodvibes-jev/engine/sdk/platform/sessions';
+import '@goodvibes-jev/engine/platform/platform/sessions';
 import 'node:fs';
 import 'node:path';
 import { SecretsManager } from '../config/secrets.ts';
 import { credentialWriteScopeWasRelocated, resolveCredentialDeleteScope, resolveCredentialWriteScope } from '../config/credential-scope.ts';
-import '@goodvibes-jev/engine/sdk/platform/config';
-import '@goodvibes-jev/engine/sdk/platform/config';
+import '@goodvibes-jev/engine/platform/platform/config';
+import '@goodvibes-jev/engine/platform/platform/config';
 
-import '@goodvibes-jev/engine/sdk/platform/config';
+import '@goodvibes-jev/engine/platform/platform/config';
 import '@/runtime/index.ts';
-import { buildCompanionConnectionInfo, encodeConnectionPayload, formatConnectionBlock } from '@goodvibes-jev/engine/sdk/platform/pairing';
-import { generateQrMatrix, renderQrToString } from '@goodvibes-jev/engine/sdk/platform/pairing';
+import { buildCompanionConnectionInfo, encodeConnectionPayload, formatConnectionBlock } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { generateQrMatrix, renderQrToString } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { resolveRuntimeEndpointBinding } from './endpoints.ts';
 import type { CliCommandRuntime } from './management.ts';
 import { urlHostForBindHost, withRuntimeServices } from './management.ts';

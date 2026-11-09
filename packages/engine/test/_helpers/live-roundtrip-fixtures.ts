@@ -1,12 +1,12 @@
 import {
   createDaemonControlRouteHandlers,
   dispatchDaemonApiRoutes,
-} from '../../daemon-sdk/src/index.js';
+} from '../../daemon-api/src/index.js';
 import {
-  createGoodVibesSdk,
+  createGoodVibesPlatform,
   createMemoryTokenStore,
-} from '../../sdk/src/index.js';
-import sdkPackage from '../../package.json' with { type: 'json' };
+} from '../../platform/src/index.js';
+import enginePackage from '../../package.json' with { type: 'json' };
 
 const activeServers: Array<{ stop: () => void }> = [];
 
@@ -34,7 +34,7 @@ export function createRoundtripServer(): ReturnType<typeof Bun.serve> {
 
       const handlers = createDaemonControlRouteHandlers({
         authToken: null,
-        version: sdkPackage.version,
+        version: enginePackage.version,
         sessionCookieName: 'goodvibes_session',
         controlPlaneGateway: {
           getSnapshot: () => ({
@@ -176,9 +176,9 @@ export function createRoundtripServer(): ReturnType<typeof Bun.serve> {
   return server;
 }
 
-export function createRoundtripSdk(server: ReturnType<typeof Bun.serve>) {
+export function createRoundtripPlatform(server: ReturnType<typeof Bun.serve>) {
   const tokenStore = createMemoryTokenStore();
-  const sdk = createGoodVibesSdk({
+  const platformClient = createGoodVibesPlatform({
     baseUrl: server.url.origin,
     tokenStore,
     realtime: {
@@ -187,5 +187,5 @@ export function createRoundtripSdk(server: ReturnType<typeof Bun.serve>) {
       },
     },
   });
-  return { sdk, tokenStore };
+  return { platformClient, tokenStore };
 }

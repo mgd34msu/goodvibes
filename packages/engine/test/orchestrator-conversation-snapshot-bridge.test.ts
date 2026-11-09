@@ -1,5 +1,5 @@
 /**
- * Conversation-snapshot bridge wiring (SDK side).
+ * Conversation-snapshot bridge wiring (platform side).
  *
  * agent-manager-conversation-snapshot.test.ts proves AgentManager's bridge
  * API in isolation. These tests prove the two real call sites actually use
@@ -19,21 +19,21 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, mkdirSync, rmSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AgentOrchestrator } from '../sdk/src/platform/agents/orchestrator.js';
-import { AgentMessageBus } from '../sdk/src/platform/agents/message-bus.js';
+import { AgentOrchestrator } from '../platform/src/platform/agents/orchestrator.js';
+import { AgentMessageBus } from '../platform/src/platform/agents/message-bus.js';
 import {
   runAgentTask,
   type AgentOrchestratorRunContext,
-} from '../sdk/src/platform/agents/orchestrator-runner.js';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.js';
-import type { AgentRecord } from '../sdk/src/platform/tools/agent/manager.js';
-import type { LLMProvider } from '../sdk/src/platform/providers/interface.js';
-import type { ConversationMessageSnapshot } from '../sdk/src/platform/core/conversation.js';
-import type { FeatureFlagManager } from '../sdk/src/platform/runtime/feature-flags/manager.js';
+} from '../platform/src/platform/agents/orchestrator-runner.js';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.js';
+import type { AgentRecord } from '../platform/src/platform/tools/agent/manager.js';
+import type { LLMProvider } from '../platform/src/platform/providers/interface.js';
+import type { ConversationMessageSnapshot } from '../platform/src/platform/core/conversation.js';
+import type { FeatureFlagManager } from '../platform/src/platform/runtime/feature-flags/manager.js';
 import { useFailureReadings } from './_helpers/failure-readings.ts';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import type { ChatRequest } from '../sdk/src/platform/providers/interface.js';
+import type { ChatRequest } from '../platform/src/platform/providers/interface.js';
 
 // The runner reads a failed chat's error to decide on a context-window,
 // network or rate-limit retry; this generic failure reads as none of them.
@@ -387,8 +387,8 @@ test('native requests without prior context preserve the ordinary provider promp
 
 
 test('native private context is revalidated at the provider post-backoff fence with no second transmission', async () => {
-  const { withRetry } = await import('../sdk/src/platform/utils/retry.js');
-  const { AppError } = await import('../sdk/src/platform/types/errors.js');
+  const { withRetry } = await import('../platform/src/platform/utils/retry.js');
+  const { AppError } = await import('../platform/src/platform/types/errors.js');
   const dir = mkdtempSync(join(tmpdir(), 'native-private-context-retry-'));
   try {
     let valid = true; let sends = 0; let fences = 0;

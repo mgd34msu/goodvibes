@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
 import * as endpoint from '../../runtime/client/operator-endpoint.ts';
-import * as pairing from '@goodvibes-jev/engine/sdk/platform/pairing';
+import * as pairing from '@goodvibes-jev/engine/platform/platform/pairing';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { getSharedHostedSessionFeed, resetSharedHostedSessionFeed } from '../../views/hosted-session-feed.ts';
 const guardedFetch=globalThis.fetch;
@@ -8,7 +8,7 @@ const attached=new Set<string>();const calls:string[]=[];let failDetach=false;le
 const record=(id:string)=>({id,workspaceRoot:'/synthetic/work',title:id,status:'idle',detachPolicy:'survive',effectiveDetachPolicy:'survive',attachedClients:attached.has(id)?['synthetic']:[],createdAt:1,updatedAt:1,turnCount:0,messageCount:0,restoredFromDisk:false,contractIds:[]});
 const verbs={probe:()=>({available:false,reason:'synthetic'}),async invoke(method:string,input:{sessionId:string}){const id=input.sessionId;calls.push(`${method}:${id}`);if(method==='sessions.hosted.attach'){attached.add(id);return {session:record(id),history:[]};}if(method==='sessions.hosted.detach'){if(failDetach) throw new Error('synthetic refusal');attached.delete(id);return {session:record(id)};}throw new Error(`unexpected ${method}`);}};
 mock.module('../../runtime/client/operator-endpoint.ts',()=>({...endpoint,createDaemonVerbCaller:()=>verbs,resolveControlPlaneBaseUrl:()=> 'http://synthetic.invalid',resolveDaemonStateDirectory:()=>'/synthetic/daemon'}));
-mock.module('@goodvibes-jev/engine/sdk/platform/pairing',()=>({...pairing,getOrCreateCompanionToken:()=>({token:'synthetic-local-fixture'})}));
+mock.module('@goodvibes-jev/engine/platform/platform/pairing',()=>({...pairing,getOrCreateCompanionToken:()=>({token:'synthetic-local-fixture'})}));
 const {registerHostedRuntimeCommands}=await import('../../input/commands/hosted-runtime.ts');
 let registry:CommandRegistry;
 const context=():CommandContext=>({platform:{configManager:{}},workspace:{shellPaths:{homeDirectory:'/synthetic',workingDirectory:'/synthetic/work'}},print:(s:string)=>output.push(s),openAgents:()=>{}} as unknown as CommandContext);

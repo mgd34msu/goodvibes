@@ -1,4 +1,4 @@
-import { withDecisionModelPolicy } from '../../sdk/src/platform/runtime/decision-policy.ts';
+import { withDecisionModelPolicy } from '../../platform/src/platform/runtime/decision-policy.ts';
 import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
 /**
  * The contract runner end to end (docs/design/contract-runner.md sections 2.2,
@@ -17,10 +17,10 @@ import { readingsOf, SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/j
 import { choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { ASK as PARALLEL_ASK, validPlan } from './plan-support.js';
 import { installJudgmentPort, judgmentPort } from '@goodvibes-jev/engine/errors';
-import type { DecompositionRunner } from '../../sdk/src/platform/core/plan-decomposition.js';
-import { acquireSharedTree, sharedTreeWaiters } from '../../sdk/src/platform/contract/index.js';
-import { emitAgentCompleted, emitAgentFailed } from '../../sdk/src/platform/runtime/emitters/agents.js';
-import { captureContractInput } from '../../sdk/src/platform/contract/input-snapshot.ts';
+import type { DecompositionRunner } from '../../platform/src/platform/core/plan-decomposition.js';
+import { acquireSharedTree, sharedTreeWaiters } from '../../platform/src/platform/contract/index.js';
+import { emitAgentCompleted, emitAgentFailed } from '../../platform/src/platform/runtime/emitters/agents.js';
+import { captureContractInput } from '../../platform/src/platform/contract/input-snapshot.ts';
 import {
   eventsOf,
   makeHarness,

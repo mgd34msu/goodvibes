@@ -1,5 +1,5 @@
 import { describe, expect, test, afterEach } from 'bun:test';
-import type { ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
 import { ModelPickerModal } from '../../input/model-picker.ts';
 import { renderModelWorkspace } from '../../renderer/model-workspace.ts';
 import { _resetHardwareProfileCache, _setHardwareProfileForTest } from '../../core/hardware-profile.ts';

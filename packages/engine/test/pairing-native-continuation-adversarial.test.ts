@@ -2,8 +2,8 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { PairingTokenManager, PairingTokenStoreBusyError, type NativeContinuationAuthority } from '../sdk/src/platform/pairing/pairing-token-store.js';
-import * as atomic from '../sdk/src/platform/utils/atomic-json-store.js';
+import { PairingTokenManager, PairingTokenStoreBusyError, type NativeContinuationAuthority } from '../platform/src/platform/pairing/pairing-token-store.js';
+import * as atomic from '../platform/src/platform/utils/atomic-json-store.js';
 
 function ownerLockPath(file: string): string { return join(dirname(file), '.pairing-owner-locks', `${basename(file)}.lock`); }
 

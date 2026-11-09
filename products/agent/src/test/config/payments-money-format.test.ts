@@ -1,11 +1,11 @@
 /**
- * Tests for money-field detection: SDK 2.0.5 removed the `Cents` suffix and
+ * Tests for money-field detection: platform 2.0.5 removed the `Cents` suffix and
  * the minor-unit storage, so the only thing left for this repo to get right
  * is identifying a money field from the schema's `unit: 'money'` mark rather
  * than the key's name.
  */
 import { describe, test, expect } from 'bun:test';
-import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/sdk/platform/config';
+import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
 import { isMoneyConfigKey } from '../../config/payments-money-format.ts';
 
 function settingFor(key: string) {

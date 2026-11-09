@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, test } from 'bun:test';
-import { resetMetrics } from '../sdk/src/platform/runtime/metrics.js';
+import { resetMetrics } from '../platform/src/platform/runtime/metrics.js';
 import { trackDisposables } from './_helpers/disposables.ts';
 import { stopListenerTimers } from './_helpers/listener-teardown.ts';
 
@@ -22,27 +22,27 @@ describe('auth events', () => {
   });
 
   test('authSuccessTotal and authFailureTotal counters are exported from metrics', async () => {
-    const mod = await import('../sdk/src/platform/runtime/metrics.js');
+    const mod = await import('../platform/src/platform/runtime/metrics.js');
     expect(mod.authSuccessTotal).not.toBeNull(); // presence-only: counter exported
     expect(mod.authFailureTotal).not.toBeNull(); // presence-only: counter exported
   });
 
   test('authSuccessTotal counter supports add()', async () => {
-    const { authSuccessTotal } = await import('../sdk/src/platform/runtime/metrics.js');
+    const { authSuccessTotal } = await import('../platform/src/platform/runtime/metrics.js');
     const before = authSuccessTotal.value();
     authSuccessTotal.add(1);
     expect(authSuccessTotal.value()).toBe(before + 1);
   });
 
   test('authFailureTotal counter supports add()', async () => {
-    const { authFailureTotal } = await import('../sdk/src/platform/runtime/metrics.js');
+    const { authFailureTotal } = await import('../platform/src/platform/runtime/metrics.js');
     const before = authFailureTotal.value();
     authFailureTotal.add(1);
     expect(authFailureTotal.value()).toBe(before + 1);
   });
 
   test('counter value() returns 0 for unknown labels', async () => {
-    const { authSuccessTotal } = await import('../sdk/src/platform/runtime/metrics.js');
+    const { authSuccessTotal } = await import('../platform/src/platform/runtime/metrics.js');
     // An unlabeled key that was never set returns 0
     expect(authSuccessTotal.value({ auth_method: 'never-used-label-xyz' })).toBe(0);
   });
@@ -62,10 +62,10 @@ describe('auth counter wiring: login path', () => {
   });
 
   test('bad login credentials increment authFailureTotal', async () => {
-    const { authFailureTotal } = await import('../sdk/src/platform/runtime/metrics.js');
-    const { HttpListener } = await import('../sdk/src/platform/daemon/http-listener.js');
-    const { UserAuthManager } = await import('../sdk/src/platform/security/user-auth.js');
-    const { ConfigManager } = await import('../sdk/src/platform/config/manager.js');
+    const { authFailureTotal } = await import('../platform/src/platform/runtime/metrics.js');
+    const { HttpListener } = await import('../platform/src/platform/daemon/http-listener.js');
+    const { UserAuthManager } = await import('../platform/src/platform/security/user-auth.js');
+    const { ConfigManager } = await import('../platform/src/platform/config/manager.js');
 
     const dir = mkdtempSync(join(tmpdir(), '-auth-'));
     tmpRoots.push(dir);
@@ -94,10 +94,10 @@ describe('auth counter wiring: login path', () => {
   });
 
   test('successful login increments authSuccessTotal', async () => {
-    const { authSuccessTotal } = await import('../sdk/src/platform/runtime/metrics.js');
-    const { HttpListener } = await import('../sdk/src/platform/daemon/http-listener.js');
-    const { UserAuthManager } = await import('../sdk/src/platform/security/user-auth.js');
-    const { ConfigManager } = await import('../sdk/src/platform/config/manager.js');
+    const { authSuccessTotal } = await import('../platform/src/platform/runtime/metrics.js');
+    const { HttpListener } = await import('../platform/src/platform/daemon/http-listener.js');
+    const { UserAuthManager } = await import('../platform/src/platform/security/user-auth.js');
+    const { ConfigManager } = await import('../platform/src/platform/config/manager.js');
 
     const dir = mkdtempSync(join(tmpdir(), '-auth-'));
     tmpRoots.push(dir);

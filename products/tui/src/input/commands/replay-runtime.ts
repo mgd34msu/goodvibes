@@ -1,5 +1,5 @@
 import type { CommandRegistry } from '../command-registry.ts';
-import { handleReplayCommand } from '@goodvibes-jev/engine/sdk/platform/core';
+import { handleReplayCommand } from '@goodvibes-jev/engine/platform/platform/core';
 import { requireReplayEngine } from './runtime-services.ts';
 
 export function registerReplayRuntimeCommands(registry: CommandRegistry): void {

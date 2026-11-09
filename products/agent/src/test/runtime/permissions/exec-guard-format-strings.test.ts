@@ -11,8 +11,8 @@ import {
   decideByPreset,
   GATE_PRESETS,
   readToolCall,
-} from '@goodvibes-jev/engine/sdk/platform/gate';
-import { guardExecCommand } from '@goodvibes-jev/engine/sdk/platform/tools';
+} from '@goodvibes-jev/engine/platform/platform/gate';
+import { guardExecCommand } from '@goodvibes-jev/engine/platform/platform/tools';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { parseCommandAST, evaluateCommandAST } from '@/runtime/index.ts';
 

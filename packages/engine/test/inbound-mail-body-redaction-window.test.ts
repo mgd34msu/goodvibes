@@ -20,8 +20,8 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { InboundMailStore } from '../sdk/src/platform/email/inbound/record-store.ts';
-import { detectCardShapes } from '../sdk/src/platform/security/card-shapes.ts';
+import { InboundMailStore } from '../platform/src/platform/email/inbound/record-store.ts';
+import { detectCardShapes } from '../platform/src/platform/security/card-shapes.ts';
 import { useSecurityReadings } from './helpers/security-readings.ts';
 
 useSecurityReadings();

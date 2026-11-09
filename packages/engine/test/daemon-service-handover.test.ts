@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import type { spawn } from 'node:child_process';
-import { createServiceCommandRunner, observeServiceCommand } from '../sdk/src/platform/daemon/service-handover.ts';
+import { createServiceCommandRunner, observeServiceCommand } from '../platform/src/platform/daemon/service-handover.ts';
 
 describe('observed service command runner (synthetic children only)', () => {
   function fake() {

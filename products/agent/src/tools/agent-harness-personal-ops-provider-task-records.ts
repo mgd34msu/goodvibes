@@ -1,6 +1,6 @@
 import { captureCatalogMethods, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { assertPersonalOpsDataCurrent, capturePersonalOpsData, protectPersonalOpsData } from './agent-harness-personal-ops-source.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { modelReadingServicePath } from './agent-harness-model-reading-source.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
@@ -10,7 +10,7 @@ import { safeRecordIdPart } from './agent-harness-personal-ops-records.ts';
 import type { PersonalOpsFollowUpRoute, PersonalOpsLiveRecord, PersonalOpsRecordFreshness } from './agent-harness-personal-ops-types.ts';
 
 type ProviderTaskLane = 'tasks' | 'reminders';
-type ProviderReadModelSourceKind = Extract<PersonalOpsRecordFreshness['source'], 'daemon-read-model' | 'sdk-read-model'>;
+type ProviderReadModelSourceKind = Extract<PersonalOpsRecordFreshness['source'], 'daemon-read-model' | 'platform-read-model'>;
 
 interface ProviderTaskSource {
   readonly path: string;
@@ -84,7 +84,7 @@ function sources(context: CommandContext, lane: ProviderTaskLane): readonly Prov
     { path: 'context.platform.readModels.providerTasks', kind: 'daemon-read-model' as const },
     { path: 'context.platform.readModels.taskProviders.tasks', kind: 'daemon-read-model' as const },
     { path: 'context.platform.personalOps.tasks', kind: 'daemon-read-model' as const },
-    { path: 'context.clients.operator.personalOps.tasks', kind: 'sdk-read-model' as const },
+    { path: 'context.clients.operator.personalOps.tasks', kind: 'platform-read-model' as const },
   ] : [
     { path: 'context.platform.readModels.personalOps.reminders', kind: 'daemon-read-model' as const },
     { path: 'context.platform.readModels.personalOps.reminderRecords', kind: 'daemon-read-model' as const },
@@ -92,7 +92,7 @@ function sources(context: CommandContext, lane: ProviderTaskLane): readonly Prov
     { path: 'context.platform.readModels.reminders', kind: 'daemon-read-model' as const },
     { path: 'context.platform.readModels.schedules.reminders', kind: 'daemon-read-model' as const },
     { path: 'context.platform.personalOps.reminders', kind: 'daemon-read-model' as const },
-    { path: 'context.clients.operator.personalOps.reminders', kind: 'sdk-read-model' as const },
+    { path: 'context.clients.operator.personalOps.reminders', kind: 'platform-read-model' as const },
   ];
   return paths.map(entry => ({ ...entry, source: modelReadingServicePath(context, entry.path.split('.').slice(1)) }));
 }
@@ -176,7 +176,7 @@ function freshness(source: ProviderTaskSource, readRoute: string, currentAt: str
     ...(Object.keys(sampleInput).length > 0 ? { sampleInput } : {}),
     policy: readRoute
       ? 'The provider published a current task/reminder record plus a bounded read route. Run it only for a user-requested refresh; mutations remain separate confirmed follow-up routes.'
-      : 'The provider published current task/reminder state through a daemon or SDK read model. Inspect it as read-only; mutations require explicit published routes.',
+      : 'The provider published current task/reminder state through a daemon or platform read model. Inspect it as read-only; mutations require explicit published routes.',
   };
 }
 

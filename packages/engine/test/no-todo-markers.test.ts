@@ -90,7 +90,7 @@ test('ordinary marker prose needs a settled no, and absent or stale observations
 });
 
 test('the original unfinished-code fixture retains its source and exact literal exemption', () => {
-  const source = readFileSync(new URL('../sdk/src/platform/contract/batteries/unit-quality.ts', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../platform/src/platform/contract/batteries/unit-quality.ts', import.meta.url), 'utf8');
   expect(source).toContain('+  // Reading from the store is not implemented.');
   expect(texts(source).some(text => text.includes('+  // Reading from the store is not implemented.'))).toBe(false);
 });

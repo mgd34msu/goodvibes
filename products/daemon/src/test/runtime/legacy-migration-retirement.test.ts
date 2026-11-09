@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import type { PlatformServiceManager } from '@goodvibes-jev/engine/sdk/platform/daemon';
+import type { PlatformServiceManager } from '@goodvibes-jev/engine/platform/platform/daemon';
 import { runLegacyDaemonMigration, type ManagedServiceActionRunner } from '../../runtime/legacy-daemon-migration.js';
 
 function fixture(failAction: string, status: number | null | undefined) {

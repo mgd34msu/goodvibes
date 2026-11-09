@@ -2,9 +2,9 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import {
   ToolFormatTelemetry,
   classifyToolFormatOutcome,
-} from '../sdk/src/platform/runtime/telemetry/tool-format-telemetry.js';
-import { resetMetrics, snapshotMetrics } from '../sdk/src/platform/runtime/metrics.js';
-import { toolFormatTelemetry } from '../sdk/src/platform/runtime/telemetry/tool-format-telemetry.js';
+} from '../platform/src/platform/runtime/telemetry/tool-format-telemetry.js';
+import { resetMetrics, snapshotMetrics } from '../platform/src/platform/runtime/metrics.js';
+import { toolFormatTelemetry } from '../platform/src/platform/runtime/telemetry/tool-format-telemetry.js';
 
 describe('classifyToolFormatOutcome', () => {
   test('edit no-match, ambiguous, conflict, and generic failures', () => {

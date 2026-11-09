@@ -1,16 +1,16 @@
-import { createBrowserProvisionIo } from '../sdk/src/platform/browser/browser-provision-io.js';
+import { createBrowserProvisionIo } from '../platform/src/platform/browser/browser-provision-io.js';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { bindJudgmentPortAuthority, installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { createBrowserGatewayHandlers, type BrowserGatewayService } from '../sdk/src/platform/control-plane/routes/browser.js';
+import { createBrowserGatewayHandlers, type BrowserGatewayService } from '../platform/src/platform/control-plane/routes/browser.js';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
-import { BrowserProvisionReadingError, missingLibrary, networkBlocked, programNotInstalled } from '../sdk/src/platform/browser/browser-failure-reading.js';
-import { ensureBrowserBinary } from '../sdk/src/platform/browser/browser-provisioning.js';
-import { BrowserSessionManager } from '../sdk/src/platform/browser/browser-sessions.js';
-import { BrowserEngine } from '../sdk/src/platform/browser/browser-engine.js';
-import type { BrowserProvisionIo, CommandOutcome } from '../sdk/src/platform/browser/browser-types.js';
+import { BrowserProvisionReadingError, missingLibrary, networkBlocked, programNotInstalled } from '../platform/src/platform/browser/browser-failure-reading.js';
+import { ensureBrowserBinary } from '../platform/src/platform/browser/browser-provisioning.js';
+import { BrowserSessionManager } from '../platform/src/platform/browser/browser-sessions.js';
+import { BrowserEngine } from '../platform/src/platform/browser/browser-engine.js';
+import type { BrowserProvisionIo, CommandOutcome } from '../platform/src/platform/browser/browser-types.js';
 import { tmpdir } from 'node:os';
 
 let previous: ReturnType<typeof installJudgmentPort>;

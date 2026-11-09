@@ -1,8 +1,8 @@
-import { withDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { withDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { cleanupResearchScreeningFixtures, ordinaryResearchOwner } from '../helpers/research-screening.ts';
 

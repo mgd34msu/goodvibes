@@ -61,7 +61,7 @@ function installScopedFetch(
 
 describe('provider chat onRetry wiring', () => {
   test('AnthropicCompatProvider.chat calls onRetry once on a 503 then succeeds', async () => {
-    const { AnthropicCompatProvider } = await import('../sdk/src/platform/providers/anthropic-compat.js');
+    const { AnthropicCompatProvider } = await import('../platform/src/platform/providers/anthropic-compat.js');
 
     const BASE_URL = 'https://example.invalid/v1';
     const fetched = installScopedFetch(BASE_URL, (attempt) =>
@@ -99,7 +99,7 @@ describe('provider chat onRetry wiring', () => {
   });
 
   test('AnthropicCompatProvider.chat does not call onRetry on a non-retryable 400', async () => {
-    const { AnthropicCompatProvider } = await import('../sdk/src/platform/providers/anthropic-compat.js');
+    const { AnthropicCompatProvider } = await import('../platform/src/platform/providers/anthropic-compat.js');
 
     const BASE_URL = 'https://example.invalid/v1';
     const fetched = installScopedFetch(BASE_URL, () => new Response('bad request', { status: 400 }));
@@ -127,7 +127,7 @@ describe('provider chat onRetry wiring', () => {
 
 
 test('Anthropic-compatible transport revalidates after scheduled retry and refuses revoked context', async () => {
-  const { AnthropicCompatProvider } = await import('../sdk/src/platform/providers/anthropic-compat.js');
+  const { AnthropicCompatProvider } = await import('../platform/src/platform/providers/anthropic-compat.js');
   const baseURL = 'https://context-fence.invalid/v1'; let valid = true; let fences = 0;
   const fetched = installScopedFetch(baseURL, () => new Response('retry me', { status: 503 }));
   const provider = new AnthropicCompatProvider({ name: 'fenced-compat', baseURL, apiKey: 'test-key', defaultModel: 'claude-test', models: ['claude-test'], retryConfig: { initialDelayMs: 0, maxDelayMs: 0 } });
@@ -137,11 +137,11 @@ test('Anthropic-compatible transport revalidates after scheduled retry and refus
   expect(fetched.count()).toBe(1); expect(fences).toBe(3);
 });
 
-test('direct SDK and Codex transport refuse the first attempt before creating a client or fetch', async () => {
-  const { AnthropicSdkProvider } = await import('../sdk/src/platform/providers/anthropic-sdk-provider.js');
-  const { chatWithOpenAICodex } = await import('../sdk/src/platform/providers/openai-codex.js');
+test('direct platform and Codex transport refuse the first attempt before creating a client or fetch', async () => {
+  const { AnthropicMessagesProvider } = await import('../platform/src/platform/providers/anthropic-messages-provider.js');
+  const { chatWithOpenAICodex } = await import('../platform/src/platform/providers/openai-codex.js');
   let clients = 0; const fetched = installScopedFetch('https://', () => new Response('unexpected', { status: 400 }));
-  const provider = new AnthropicSdkProvider({ name: 'fenced-sdk', label: 'Fenced SDK', defaultModel: 'claude-test', models: ['claude-test'],
+  const provider = new AnthropicMessagesProvider({ name: 'fenced-sdk', label: 'Fenced platform', defaultModel: 'claude-test', models: ['claude-test'],
     createClient() { clients++; throw new Error('Unexpected client'); }, auth: { mode: 'api-key', configured: true, detail: 'test' }, streamProtocol: 'anthropic-sdk-stream' });
   const request = { model: 'claude-test', messages: [{ role: 'user' as const, content: 'Current task' }], beforeAttempt() { throw new Error('Native context revoked'); } };
   await expect(provider.chat(request)).rejects.toThrow('Native context revoked');

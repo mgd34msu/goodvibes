@@ -13,7 +13,7 @@
  * ones do. Everything that toasts stays in the feed, which /notifications
  * shows in full.
  */
-import type { NotificationFeedEntry, NotificationFeed } from '@goodvibes-jev/engine/sdk/platform/runtime/notification-feed';
+import type { NotificationFeedEntry, NotificationFeed } from '@goodvibes-jev/engine/platform/platform/runtime/notification-feed';
 import type { ToastSpec, ToastTone } from './surface-kit-parts.js';
 /** How long a toast stays up. */
 const TOAST_DURATION_MS = 5000;

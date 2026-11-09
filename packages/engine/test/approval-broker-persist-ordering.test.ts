@@ -26,10 +26,10 @@ import {
   readOnDisk,
   type ControllableStore,
 } from './_helpers/controllable-store.js';
-import { StoreWriteQueue } from '../sdk/src/platform/state/store-write-queue.js';
-import { ApprovalBroker } from '../sdk/src/platform/control-plane/approval-broker.js';
-import type { SharedApprovalRecord } from '../sdk/src/platform/control-plane/approval-broker.js';
-import type { PermissionPromptRequest } from '../sdk/src/platform/permissions/prompt.js';
+import { StoreWriteQueue } from '../platform/src/platform/state/store-write-queue.js';
+import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-broker.js';
+import type { SharedApprovalRecord } from '../platform/src/platform/control-plane/approval-broker.js';
+import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.js';
 
 /**
  * `merchant` varies per call because `requestApproval` COALESCES asks that

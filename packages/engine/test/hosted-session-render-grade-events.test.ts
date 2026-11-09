@@ -21,14 +21,14 @@ import {
   ControlPlaneGateway,
   DEFAULT_DOMAINS,
   RENDER_GRADE_SESSION_DOMAINS,
-} from '@goodvibes-jev/engine/sdk/platform/control-plane';
+} from '@goodvibes-jev/engine/platform/platform/control-plane';
 import {
   emitStreamDelta,
   emitToolReceived,
   emitToolSucceeded,
   emitLlmResponseReceived,
   emitTurnCompleted,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/emitters';
+} from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
 import { RuntimeEventBus } from './_helpers/runtime-seam.ts';
 
 const HOSTED_SESSION_ID = 'hosted-11111111-2222-3333-4444-555555555555';

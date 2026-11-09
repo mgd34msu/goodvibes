@@ -2,10 +2,10 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { ToolRegistry, assertCurrentToolEffect } from '../sdk/src/platform/tools/registry.ts';
-import { PermissionManager, type PermissionConfigReader } from '../sdk/src/platform/permissions/manager.ts';
-import { DEFAULT_CONFIG } from '../sdk/src/platform/config/index.ts';
-import { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.ts';
+import { ToolRegistry, assertCurrentToolEffect } from '../platform/src/platform/tools/registry.ts';
+import { PermissionManager, type PermissionConfigReader } from '../platform/src/platform/permissions/manager.ts';
+import { DEFAULT_CONFIG } from '../platform/src/platform/config/index.ts';
+import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
 import { forgetGateReadings, gateReadingsPort, READ_ONLY } from './_helpers/gate-readings.ts';
 
 const NAME = 'sync_authority_fixture';

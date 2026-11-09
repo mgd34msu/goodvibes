@@ -35,9 +35,9 @@ import {
   localStorePathForKey,
   readRoutedConfigValue,
   type ClientOwnedStore,
-} from '../sdk/src/platform/tools/goodvibes-runtime/config-routing.ts';
-import { migrateDaemonOwnedConfig } from '../sdk/src/platform/config/daemon-config-migration.ts';
-import { applyDaemonConnectedHostSplitMigrationPass } from '../sdk/src/platform/config/manager-migration-passes.ts';
+} from '../platform/src/platform/tools/goodvibes-runtime/config-routing.ts';
+import { migrateDaemonOwnedConfig } from '../platform/src/platform/config/daemon-config-migration.ts';
+import { applyDaemonConnectedHostSplitMigrationPass } from '../platform/src/platform/config/manager-migration-passes.ts';
 
 /** A client-owned key, the exact one the lost session was about. */
 const CLIENT_KEY = 'voice.wake.enabled';

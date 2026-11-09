@@ -22,15 +22,15 @@ const ROOT = resolve(import.meta.dir, '../..');
 
 /** Packages whose dist/index.js should be newer than src/index.ts. */
 const MONITORED_PACKAGES = [
-  'sdk',
+  'platform',
   'errors',
   'contracts',
   'transport-core',
   'transport-http',
   'transport-realtime',
-  'operator-sdk',
-  'peer-sdk',
-  'daemon-sdk',
+  'operator-client',
+  'peer-client',
+  'daemon-api',
 ];
 
 const stalePackages: string[] = [];

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { SandboxSessionRegistry } from '@/runtime/index.ts';
 import { createLocalAuthModalSurface } from '../../views/modals/local-auth-modal.ts';
 import { createSandboxModalSurface } from '../../views/modals/sandbox-modal.ts';

@@ -19,9 +19,9 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createTaskTool } from '../sdk/src/platform/tools/task/index.js';
-import { CrossSessionTaskRegistry } from '../sdk/src/platform/sessions/orchestration/index.js';
-import { LEGACY_TASK_NAMESPACE } from '../sdk/src/platform/sessions/orchestration/types.js';
+import { createTaskTool } from '../platform/src/platform/tools/task/index.js';
+import { CrossSessionTaskRegistry } from '../platform/src/platform/sessions/orchestration/index.js';
+import { LEGACY_TASK_NAMESPACE } from '../platform/src/platform/sessions/orchestration/types.js';
 
 function makeRegistry(): CrossSessionTaskRegistry {
   const dir = mkdtempSync(join(tmpdir(), 'gv-task-binding-'));

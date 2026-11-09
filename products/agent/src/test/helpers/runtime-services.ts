@@ -12,24 +12,24 @@ import { beforeEach } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { ArchetypeLoader } from '@goodvibes-jev/engine/sdk/platform/agents';
-import { AgentMessageBus } from '@goodvibes-jev/engine/sdk/platform/agents';
-import { AgentOrchestrator } from '@goodvibes-jev/engine/sdk/platform/agents';
-import { AutomationManager } from '@goodvibes-jev/engine/sdk/platform/automation';
-import { ChannelPolicyManager } from '@goodvibes-jev/engine/sdk/platform/channels';
-import { RouteBindingManager } from '@goodvibes-jev/engine/sdk/platform/channels';
-import { ToolLLM } from '@goodvibes-jev/engine/sdk/platform/config';
-import { ApprovalBroker } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { SharedSessionBroker } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { GitService } from '@goodvibes-jev/engine/sdk/platform/git';
-import type { HookDispatcher } from '@goodvibes-jev/engine/sdk/platform/hooks';
-import type { HookWorkbench } from '@goodvibes-jev/engine/sdk/platform/hooks';
-import { CodeIntelligence } from '@goodvibes-jev/engine/sdk/platform/intelligence';
-import { LspService } from '@goodvibes-jev/engine/sdk/platform/intelligence';
-import { TreeSitterService } from '@goodvibes-jev/engine/sdk/platform/intelligence';
-import { MediaProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/media';
-import { PluginManager } from '@goodvibes-jev/engine/sdk/platform/plugins';
+import { ArchetypeLoader } from '@goodvibes-jev/engine/platform/platform/agents';
+import { AgentMessageBus } from '@goodvibes-jev/engine/platform/platform/agents';
+import { AgentOrchestrator } from '@goodvibes-jev/engine/platform/platform/agents';
+import { AutomationManager } from '@goodvibes-jev/engine/platform/platform/automation';
+import { ChannelPolicyManager } from '@goodvibes-jev/engine/platform/platform/channels';
+import { RouteBindingManager } from '@goodvibes-jev/engine/platform/platform/channels';
+import { ToolLLM } from '@goodvibes-jev/engine/platform/platform/config';
+import { ApprovalBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { SharedSessionBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { GitService } from '@goodvibes-jev/engine/platform/platform/git';
+import type { HookDispatcher } from '@goodvibes-jev/engine/platform/platform/hooks';
+import type { HookWorkbench } from '@goodvibes-jev/engine/platform/platform/hooks';
+import { CodeIntelligence } from '@goodvibes-jev/engine/platform/platform/intelligence';
+import { LspService } from '@goodvibes-jev/engine/platform/platform/intelligence';
+import { TreeSitterService } from '@goodvibes-jev/engine/platform/platform/intelligence';
+import { MediaProviderRegistry } from '@goodvibes-jev/engine/platform/platform/media';
+import { PluginManager } from '@goodvibes-jev/engine/platform/platform/plugins';
 import { createFeatureFlagManager, type FeatureFlagManager } from '@/runtime/index.ts';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { RemoteRunnerRegistry } from '@/runtime/index.ts';
@@ -37,19 +37,19 @@ import { RemoteSupervisor } from '@/runtime/index.ts';
 import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
 import { createShellPathService } from '@/runtime/index.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
-import { TaskScheduler } from '@goodvibes-jev/engine/sdk/platform/scheduler';
-import { SpawnTokenManager } from '@goodvibes-jev/engine/sdk/platform/security';
-import { FileUndoManager } from '@goodvibes-jev/engine/sdk/platform/state';
-import { MemoryEmbeddingProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/state';
-import { ModeManager } from '@goodvibes-jev/engine/sdk/platform/state';
-import { ProjectIndex } from '@goodvibes-jev/engine/sdk/platform/state';
-import { AgentManager, type AgentExecutor } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { AutoHealer } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { ProcessManager } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { ScheduleManager, TriggerManager, WorkflowManager } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { VoiceProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/voice';
-import { WebSearchProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/web-search';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { TaskScheduler } from '@goodvibes-jev/engine/platform/platform/scheduler';
+import { SpawnTokenManager } from '@goodvibes-jev/engine/platform/platform/security';
+import { FileUndoManager } from '@goodvibes-jev/engine/platform/platform/state';
+import { MemoryEmbeddingProviderRegistry } from '@goodvibes-jev/engine/platform/platform/state';
+import { ModeManager } from '@goodvibes-jev/engine/platform/platform/state';
+import { ProjectIndex } from '@goodvibes-jev/engine/platform/platform/state';
+import { AgentManager, type AgentExecutor } from '@goodvibes-jev/engine/platform/platform/tools';
+import { AutoHealer } from '@goodvibes-jev/engine/platform/platform/tools';
+import { ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
+import { ScheduleManager, TriggerManager, WorkflowManager } from '@goodvibes-jev/engine/platform/platform/tools';
+import { VoiceProviderRegistry } from '@goodvibes-jev/engine/platform/platform/voice';
+import { WebSearchProviderRegistry } from '@goodvibes-jev/engine/platform/platform/web-search';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { installAgentDaemonCredentialsClient } from '../../config/daemon-credential-routing.ts';
 import { installAgentDaemonConfigClient } from '../../config/daemon-config-routing.ts';
 import { makeLongLivedProjectTempDir } from './project-temp.ts';
@@ -127,7 +127,7 @@ function nextRuntimeRoots(): { workingDir: string; configDir: string } {
 
 /**
  * Make a test workspace its own git toplevel. The temp roots live under the
- * repo checkout (.test-tmp/), and the SDK's WorkspaceCheckpointManager prefers
+ * repo checkout (.test-tmp/), and the platform's WorkspaceCheckpointManager prefers
  * the ENCLOSING git repo's top level, without this boundary every test
  * runtime resolves to the checkout itself and they all share one
  * <repo>/.goodvibes/checkpoints/git side store, racing on git's config lock

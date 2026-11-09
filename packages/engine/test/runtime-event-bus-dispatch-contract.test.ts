@@ -11,7 +11,7 @@
  * these assertions.
  */
 import { describe, expect, test } from 'bun:test';
-import { RuntimeEventBus, createEventEnvelope } from '../sdk/src/platform/runtime/events/index.js';
+import { RuntimeEventBus, createEventEnvelope } from '../platform/src/platform/runtime/events/index.js';
 
 async function flushMicrotasks(rounds = 8): Promise<void> {
   for (let i = 0; i < rounds; i++) await Promise.resolve();

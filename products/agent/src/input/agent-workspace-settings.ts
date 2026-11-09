@@ -1,10 +1,10 @@
-import { postalConfigKey, readConfigSettingForDisplay, observeImportFile, assertImportFileCurrent, isSecretBearingConfigKey, type SubscriptionImportEntry } from '@goodvibes-jev/engine/sdk/platform/config';
-import { captureStrictJudgmentJson, judgmentInputCardProblem, snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { containsIssuerCredential } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { postalConfigKey, readConfigSettingForDisplay, observeImportFile, assertImportFileCurrent, isSecretBearingConfigKey, type SubscriptionImportEntry } from '@goodvibes-jev/engine/platform/platform/config';
+import { captureStrictJudgmentJson, judgmentInputCardProblem, snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { containsIssuerCredential } from '@goodvibes-jev/engine/platform/platform/utils';
 import { existsSync, readFileSync } from 'node:fs';
 import { getAgentSettingsSchema, readAgentSettingValue, type AgentConfigSetting } from '../config/settings-catalog.ts';
-import type { PendingSubscriptionLogin, ProviderSubscription } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { PendingSubscriptionLogin, ProviderSubscription } from '@goodvibes-jev/engine/platform/platform/config';
 import { bindSettingSchemaDescriptors, setHarnessSetting } from '../agent/harness-control.ts';
 import { captureCatalogMethods } from '../tools/agent-harness-catalog-ranking.ts';
 import { applyThemeModeSettingChange, applyThemeNameSettingChange, THEME_MODE_CONFIG_KEY, THEME_NAME_CONFIG_KEY } from '../renderer/theme-mode-config.ts';
@@ -481,7 +481,7 @@ export async function applyAgentWorkspaceSettingValue(
   }
   if (setting.key === THEME_MODE_CONFIG_KEY) {
     try {
-      // display.themeMode is a real CONFIG_SCHEMA entry now (SDK 2.0+), so
+      // display.themeMode is a real CONFIG_SCHEMA entry now (platform 2.0+), so
       // this branch is no longer working around a missing schema key, the
       // direct setDynamic write below is the same round-trip every other
       // client-owned key would get, and this key isn't daemon-owned or

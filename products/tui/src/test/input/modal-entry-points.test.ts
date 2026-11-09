@@ -5,8 +5,8 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { ProcessNode } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ProcessNode } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
 import { AgentsModal, type FleetActionCallbacks } from '../../input/agents-modal.ts';
 import { SurfaceModalHost } from '../../input/surface-modal-host.ts';

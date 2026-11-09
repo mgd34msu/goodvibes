@@ -5,8 +5,8 @@ import {
   DEFAULT_DECISION_ROUTER_SETTINGS,
   type DecisionRouterSettings,
   type DecisionRouterCategory,
-} from "@goodvibes-jev/engine/sdk/browser/decision-router";
-import { sdk } from "../../lib/goodvibes";
+} from "@goodvibes-jev/engine/platform/browser/decision-router";
+import { client as platformClient } from "../../lib/goodvibes";
 import {
   modelOptionsForProvider,
   providerOptionsFromResponse,
@@ -25,7 +25,7 @@ export function DecisionRouterEditor({
   readonly value: unknown;
   readonly onCommit: (next: DecisionRouterSettings) => Promise<void>;
 }) {
-  const catalog = useQuery({ queryKey: ["models"], queryFn: () => sdk.operator.models.list() });
+  const catalog = useQuery({ queryKey: ["models"], queryFn: () => platformClient.operator.models.list() });
   const providers = providerOptionsFromResponse(catalog.data).filter(
     (provider) => provider.id !== "decision-router"
   );

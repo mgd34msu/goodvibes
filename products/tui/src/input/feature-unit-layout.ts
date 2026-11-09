@@ -4,8 +4,8 @@
  * key, with the feature's name and full description attached) immediately
  * followed by the settings keys that tune it.
  *
- * Grouping metadata is sourced entirely from the SDK's FEATURE_SETTINGS
- * surface (the single source of truth, completeness test-guarded SDK-side):
+ * Grouping metadata is sourced entirely from the platform's FEATURE_SETTINGS
+ * surface (the single source of truth, completeness test-guarded platform-side):
  * `domain` is the top-level settings namespace the feature lives in, the
  * enablement binding carries the real option shape (boolean switch, enum mode
  * choices, or a constant capability), and `settings` lists every key that
@@ -19,9 +19,9 @@
  * description, and state, all reading the same underlying key.
  */
 
-import { FEATURE_SETTINGS } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
-import type { FeatureSetting } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
-import type { ConfigSetting } from '@goodvibes-jev/engine/sdk/platform/config';
+import { FEATURE_SETTINGS } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import type { FeatureSetting } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import type { ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
 import { getConfigSchemaSetting } from '@goodvibes-jev/engine/terminal-shell';
 import type { FlagEntry, SettingEntry, SettingsCategory } from './settings-modal-types.ts';
 

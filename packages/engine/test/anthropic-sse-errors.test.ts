@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { createAnthropicSSEState, readAnthropicSSEStream } from '../sdk/src/platform/providers/anthropic-sse-assembler.js';
-import { ProviderError } from '../sdk/src/platform/types/errors.js';
+import { createAnthropicSSEState, readAnthropicSSEStream } from '../platform/src/platform/providers/anthropic-sse-assembler.js';
+import { ProviderError } from '../platform/src/platform/types/errors.js';
 
 const text = { type: 'content_block_delta', delta: { type: 'text_delta', text: 'partial' } };
 function stream(events: unknown[]) {

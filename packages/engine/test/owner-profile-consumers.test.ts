@@ -1,4 +1,4 @@
-import { PostalAddressHeldError } from '../sdk/src/platform/config/postal-address.ts';
+import { PostalAddressHeldError } from '../platform/src/platform/config/postal-address.ts';
 /**
  * owner-profile-consumers.test.ts, docs/owner-profile.md §13.
  *
@@ -24,13 +24,13 @@ import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { clearAtRestCredentialReadings, readAtRestCredentialSpans, redactAtRestLine } from '../sdk/src/platform/runtime/at-rest-persistence.ts';
-import type { OwnerProfileStoreOptions } from '../sdk/src/platform/owner-profile/store-types.ts';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { isUnsetConfigValue, resolveWithProfileFallback } from '../sdk/src/platform/config/profile-fallback.ts';
-import { DAEMON_OWNED_CONFIG_PREFIXES } from '../sdk/src/platform/config/config-ownership.ts';
-import { CONFIG_SCHEMA, DEFAULT_CONFIG } from '../sdk/src/platform/config/schema.ts';
-import { OwnerProfileStore } from '../sdk/src/platform/owner-profile/index.ts';
+import { clearAtRestCredentialReadings, readAtRestCredentialSpans, redactAtRestLine } from '../platform/src/platform/runtime/at-rest-persistence.ts';
+import type { OwnerProfileStoreOptions } from '../platform/src/platform/owner-profile/store-types.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { isUnsetConfigValue, resolveWithProfileFallback } from '../platform/src/platform/config/profile-fallback.ts';
+import { DAEMON_OWNED_CONFIG_PREFIXES } from '../platform/src/platform/config/config-ownership.ts';
+import { CONFIG_SCHEMA, DEFAULT_CONFIG } from '../platform/src/platform/config/schema.ts';
+import { OwnerProfileStore } from '../platform/src/platform/owner-profile/index.ts';
 import {
   CONSUMER_FALLBACKS,
   closedTierRedactionValues,
@@ -38,18 +38,18 @@ import {
   installOwnerProfileConsumers,
   profileFallbackStatus,
   splitPostalAddress,
-} from '../sdk/src/platform/owner-profile/consumers.ts';
+} from '../platform/src/platform/owner-profile/consumers.ts';
 import {
   registerSignupBaseAddressFallback,
   resolveSignupBaseAddress,
-} from '../sdk/src/platform/google/account-registry.ts';
+} from '../platform/src/platform/google/account-registry.ts';
 import {
   OWNER_ADDRESS_CONFIG_KEYS,
   resolveOwnerAddresses,
-} from '../sdk/src/platform/security/owner-identity.ts';
-import { registerProfileRedactionValues } from '../sdk/src/platform/utils/redaction.ts';
-import { registerOpenTierContextBlock } from '../sdk/src/platform/owner-profile/context-block.ts';
-import { resetProcessUntrustedContentLedgerForTests } from '../sdk/src/platform/security/untrusted-content.ts';
+} from '../platform/src/platform/security/owner-identity.ts';
+import { registerProfileRedactionValues } from '../platform/src/platform/utils/redaction.ts';
+import { registerOpenTierContextBlock } from '../platform/src/platform/owner-profile/context-block.ts';
+import { resetProcessUntrustedContentLedgerForTests } from '../platform/src/platform/security/untrusted-content.ts';
 
 // Profile writes ask the content-derivation reading whenever the process
 // ledger holds untrusted text; another test file's reads must not reach these.

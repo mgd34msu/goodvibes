@@ -8,8 +8,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { JudgmentError, SqliteDecisionLog } from '@goodvibes-jev/judgment';
-import { hasContractPlanConsumer } from '../../sdk/src/platform/tools/agent/contract-binding.js';
-import { buildFixGroup, validateFixPlan, type ContractRouteSelector, type Criterion, type FixBrief } from '../../sdk/src/platform/contract/index.js';
+import { hasContractPlanConsumer } from '../../platform/src/platform/tools/agent/contract-binding.js';
+import { buildFixGroup, validateFixPlan, type ContractRouteSelector, type Criterion, type FixBrief } from '../../platform/src/platform/contract/index.js';
 import { plannerOutput, type AnswerContext, type DraftPlan } from './plan-support.js';
 import { eventsOf, makeHarness, oneUnitPlan, startContract, waitFor, type AgentScript, type Harness } from './runner-support.js';
 import { makeGroup, makeUnit } from './fixtures.js';

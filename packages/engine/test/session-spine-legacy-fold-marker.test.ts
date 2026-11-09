@@ -24,7 +24,7 @@ import { randomUUID } from 'node:crypto';
 import {
   foldLegacySpineStore,
   type SessionSpineRecord,
-} from '../sdk/src/platform/runtime/session-spine/index.ts';
+} from '../platform/src/platform/runtime/session-spine/index.ts';
 
 interface CapturedLog {
   readonly level: 'debug' | 'info' | 'warn';

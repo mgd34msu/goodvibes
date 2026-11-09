@@ -2,8 +2,8 @@ import { expect, test } from 'bun:test';
 import { createSystemOnePort, JudgmentError, noul, DEFAULT_MODEL, SqliteDecisionLog, withDecisionLog, type JsonValue, type JudgmentRequest, type Questions,
 } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { decideAutonomous, type AutonomousDecisionInput } from '../sdk/src/platform/gate/autonomous-decision.js';
-import { decideAutonomousTool } from '../sdk/src/platform/permissions/autonomous.js';
+import { decideAutonomous, type AutonomousDecisionInput } from '../platform/src/platform/gate/autonomous-decision.js';
+import { decideAutonomousTool } from '../platform/src/platform/permissions/autonomous.js';
 const binding = { sourceId: 'source', inputRevision: 'input-1', actionId: 'action', actionRevision: 'action-1', authorityId: 'actor', authorityRevision: 'authority-1', scopeId: 'project', scopeRevision: 'scope-1',
 };
 function input(port: AutonomousDecisionInput['port']): AutonomousDecisionInput {

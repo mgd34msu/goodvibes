@@ -8,7 +8,7 @@ import type { AgentWorkspaceVoiceMediaProviderStatus } from '../input/agent-work
 import type { CommandContext } from '../input/command-registry.ts';
 import { certifiedDeviceLiveRecords, deviceLiveReadModelSnapshot } from './agent-harness-device-live-read-models.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
-import { resolveWakeRuntimeSettings } from '@goodvibes-jev/engine/sdk/platform/voice/wake/runtime';
+import { resolveWakeRuntimeSettings } from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
 import { agentWakeCapabilities } from '../core/wake-provision-status.ts';
 
 export interface AgentHarnessMediaArgs {
@@ -128,7 +128,7 @@ async function buildVoiceInteractionWorkflows(
   options.assertCurrent?.();
   const wakeRecords = await certifiedDeviceLiveRecords(liveDevice, 'wake-and-speak', ['wake word', 'always listening'], options);
   options.assertCurrent?.();
-  // The one reader for every `voice.wake.*` row (SDK settings.ts), so this posture
+  // The one reader for every `voice.wake.*` row (platform settings.ts), so this posture
   // reports the same resolution the capture host itself consults, including which
   // rows refuse to start it, instead of re-deriving it from raw config reads.
   //
@@ -167,7 +167,7 @@ async function buildVoiceInteractionWorkflows(
       status: pushToTalkReady ? 'ready' : pushToTalkAttention ? 'attention' : 'setup-needed',
       userOutcome: 'Speak a short prompt when the local voice surface and speech-input provider are ready.',
       summary: pushToTalkReady
-        ? pushToTalkRecords.length > 0 ? 'The SDK/daemon published a certified push-to-talk route with permission-scoped microphone evidence.' : 'Voice surface, spoken-turn runtime, and a ready STT/realtime provider are available.'
+        ? pushToTalkRecords.length > 0 ? 'The platform/daemon published a certified push-to-talk route with permission-scoped microphone evidence.' : 'Voice surface, spoken-turn runtime, and a ready STT/realtime provider are available.'
         : pushToTalkAttention
           ? 'Some voice input pieces are present, but the full push-to-talk route is not ready.'
           : 'Voice input needs the voice surface plus a ready STT or realtime provider.',
@@ -196,7 +196,7 @@ async function buildVoiceInteractionWorkflows(
       status: transcriptionReady ? 'ready' : transcriptionAttention ? 'attention' : 'setup-needed',
       userOutcome: 'Transcribe an audio note only when a speech-to-text provider and runtime route are both present.',
       summary: transcriptionReady
-        ? transcriptionRecords.length > 0 ? 'The SDK/daemon published a certified voice memo transcription route.' : 'Speech-to-text provider and voiceService.transcribe are available.'
+        ? transcriptionRecords.length > 0 ? 'The platform/daemon published a certified voice memo transcription route.' : 'Speech-to-text provider and voiceService.transcribe are available.'
         : transcriptionAttention
           ? 'A speech-to-text provider or runtime route is present, but transcription is not fully ready.'
           : 'No ready speech-to-text transcription route is available.',
@@ -223,7 +223,7 @@ async function buildVoiceInteractionWorkflows(
       status: spokenReady ? 'ready' : spokenAttention ? 'attention' : 'setup-needed',
       userOutcome: 'Play an assistant answer aloud with a predictable TTS provider and voice.',
       summary: spokenReady
-        ? spokenResponseRecords.length > 0 ? 'The SDK/daemon published a certified spoken-response route.' : 'Spoken-turn runtime, selected TTS provider, and voice setting are ready.'
+        ? spokenResponseRecords.length > 0 ? 'The platform/daemon published a certified spoken-response route.' : 'Spoken-turn runtime, selected TTS provider, and voice setting are ready.'
         : spokenAttention
           ? 'Spoken-turn runtime and provider are ready, but the exact voice is not configured.'
           : 'Spoken responses need a ready selected TTS provider and runtime spoken-turn route.',
@@ -300,7 +300,7 @@ async function buildVoiceInteractionWorkflows(
         companionWakePublishedByCurrentAgentContract: wakeRecords.length > 0,
         ...(wakeRecords.length > 0 ? { certifiedLiveRecords: wakeRecords.slice(0, 5) } : {}),
       },
-      policy: 'On this host, always-listening capture runs only while both voice.wake.enabled and voice.wake.surfaces.agent are on, and holds a visible listening row for as long as it does. Agent does not claim always-listening behavior on a paired device without an explicit permission-scoped runtime contract and certified SDK/daemon receipt evidence.',
+      policy: 'On this host, always-listening capture runs only while both voice.wake.enabled and voice.wake.surfaces.agent are on, and holds a visible listening row for as long as it does. Agent does not claim always-listening behavior on a paired device without an explicit permission-scoped runtime contract and certified platform/daemon receipt evidence.',
     },
   ];
 }

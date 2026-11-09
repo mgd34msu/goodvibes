@@ -1,4 +1,4 @@
-import { GoodVibesSdkError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes-jev/engine/errors';
 
 export function createUuidV4(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -8,7 +8,7 @@ export function createUuidV4(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
     crypto.getRandomValues(bytes);
   } else {
-    throw new GoodVibesSdkError('Secure random UUID generation is unavailable in this runtime.', {
+    throw new GoodVibesError('Secure random UUID generation is unavailable in this runtime.', {
       category: 'config',
       source: 'transport',
       recoverable: false,

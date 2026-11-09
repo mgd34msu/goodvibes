@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { computeSingleEdit } from '../sdk/src/platform/tools/edit/match.ts';
+import { computeSingleEdit } from '../platform/src/platform/tools/edit/match.ts';
 let previous: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previous = installJudgmentPort(undefined); });
 afterEach(() => installJudgmentPort(previous));

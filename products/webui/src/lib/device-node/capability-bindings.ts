@@ -1,7 +1,7 @@
 /**
  * capability-bindings.ts, what this web app can actually do on a phone.
  *
- * The SDK's device capability contract says WHAT a capability is; this file is
+ * The platform's device capability contract says WHAT a capability is; this file is
  * the web platform's binding for each one, getUserMedia for the cameras,
  * getDisplayMedia for the screen, geolocation for location, the async clipboard
  * for clipboard, Notification/window.open/vibrate for device commands.
@@ -18,7 +18,7 @@
  * that would fail when pressed.
  */
 
-/** Capability ids this binding implements, mirroring the SDK contract's ids. */
+/** Capability ids this binding implements, mirroring the platform contract's ids. */
 export type WebNodeCapabilityId =
   | 'device.camera.rear.capture'
   | 'device.camera.front.capture'

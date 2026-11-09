@@ -3,10 +3,10 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { applyVerifiedUpdate, inspectDaemonNativeInstallation, realUpdateFileIo, resolveDaemonNativeTargets, rollbackKeptPrevious,
-  UpdateTransactionError, type UpdateFetchLike } from '../sdk/src/platform/runtime/self-update.ts';
-import { performDaemonHandover, DAEMON_REPO_RELEASES_LATEST_URL, daemonReleaseDownloadBaseUrl } from '../sdk/src/platform/runtime/client/daemon-handover.ts';
-import { applyDaemonReleaseFeedMigrationPass } from '../sdk/src/platform/config/manager-migration-passes.ts';
-import { DAEMON_RELEASES_LATEST_URL, migrateLegacyDaemonReleaseFeed } from '../sdk/src/platform/config/schema-domain-update.ts';
+  UpdateTransactionError, type UpdateFetchLike } from '../platform/src/platform/runtime/self-update.ts';
+import { performDaemonHandover, DAEMON_REPO_RELEASES_LATEST_URL, daemonReleaseDownloadBaseUrl } from '../platform/src/platform/runtime/client/daemon-handover.ts';
+import { applyDaemonReleaseFeedMigrationPass } from '../platform/src/platform/config/manager-migration-passes.ts';
+import { DAEMON_RELEASES_LATEST_URL, migrateLegacyDaemonReleaseFeed } from '../platform/src/platform/config/schema-domain-update.ts';
 import { nativeCohortFixture } from './_helpers/daemon-native-cohort.ts';
 
 const roots: string[] = [];

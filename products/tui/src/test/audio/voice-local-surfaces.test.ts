@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { VoiceProviderRegistry, ensureBuiltinVoiceProviders } from '@goodvibes-jev/engine/sdk/platform/voice';
+import { VoiceProviderRegistry, ensureBuiltinVoiceProviders } from '@goodvibes-jev/engine/platform/platform/voice';
 import { buildSettingGroups } from '../../input/settings-modal-data.ts';
 import { createTestManagers } from '../helpers/test-managers.ts';
 import { formatCostAttributionSection, type CostAttributionResult } from '../../input/commands/cost-attribution-format.ts';

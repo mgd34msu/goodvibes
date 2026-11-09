@@ -16,9 +16,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { GitHubCopilotProvider } from '../sdk/src/platform/providers/github-copilot.js';
-import { GeminiProvider } from '../sdk/src/platform/providers/gemini.js';
-import { forgetProviderCacheReadings } from '../sdk/src/platform/routing/provider-cache-readings.js';
+import { GitHubCopilotProvider } from '../platform/src/platform/providers/github-copilot.js';
+import { GeminiProvider } from '../platform/src/platform/providers/gemini.js';
+import { forgetProviderCacheReadings } from '../platform/src/platform/routing/provider-cache-readings.js';
 import { decisionPort } from './helpers/decision-port.ts';
 
 let dir: string;

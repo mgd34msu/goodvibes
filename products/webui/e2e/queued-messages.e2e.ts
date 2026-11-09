@@ -1,5 +1,5 @@
 /**
- * Queued messages (SDK 1.8.0's interaction-wins round), a message posted
+ * Queued messages (platform 1.8.0's interaction-wins round), a message posted
  * while another turn is running sits queued until that turn ends. This
  * proves QueuedMessagesPanel end to end against the stateful chat mock:
  * listing, inline edit, and delete, all reaching the real wire verbs

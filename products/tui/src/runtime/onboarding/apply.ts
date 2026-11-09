@@ -14,9 +14,9 @@ import { createOnboardingFileHelpers, type RollbackAction } from '@goodvibes-jev
 const { isPlainObject, readJsonObject, writeJsonObject, setNestedValue, restoreFile, snapshotFileRollback, runRollbacks } =
   createOnboardingFileHelpers();
 import { existsSync, readFileSync } from 'node:fs';
-import '@goodvibes-jev/engine/sdk/platform/config';
-import '@goodvibes-jev/engine/sdk/platform/config';
-import '@goodvibes-jev/engine/sdk/platform/config';
+import '@goodvibes-jev/engine/platform/platform/config';
+import '@goodvibes-jev/engine/platform/platform/config';
+import '@goodvibes-jev/engine/platform/platform/config';
 import { getOnboardingRuntimeStatePath, readOnboardingRuntimeState, writeOnboardingAcknowledgementState } from './state.ts';
 import { verifyOnboardingRequest } from './verify.ts';
 import type {
@@ -26,7 +26,7 @@ import type {
   OnboardingApplyOperation,
   OnboardingApplyRequest,
 } from './types.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 interface BootstrapCredential {
   readonly username: string;

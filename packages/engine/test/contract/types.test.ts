@@ -23,7 +23,7 @@ import {
   type Contract,
   type ContractGroup,
   type ContractUnit,
-} from '../../sdk/src/platform/contract/index.js';
+} from '../../platform/src/platform/contract/index.js';
 
 type Table = Readonly<Record<string, readonly string[]>>;
 

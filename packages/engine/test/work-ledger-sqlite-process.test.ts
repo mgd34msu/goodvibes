@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { WorkLedgerCommand, WorkLedgerState } from '../sdk/src/platform/workflow/work-ledger/types.js';
+import type { WorkLedgerCommand, WorkLedgerState } from '../platform/src/platform/workflow/work-ledger/types.js';
 import type { WorkLedgerProcessInput, WorkLedgerProcessOutput } from './helpers/work-ledger-process.js';
 
 const fixture = new URL('./helpers/work-ledger-process.ts', import.meta.url).pathname;

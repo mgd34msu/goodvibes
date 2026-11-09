@@ -17,9 +17,9 @@ import {
   enableTailscaleServe,
   TailscaleServeReceiptStore,
   type TailscaleCommandRunner,
-} from '../sdk/src/platform/remote-access/tailscale.ts';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { registerTailscaleGatewayMethods } from '../sdk/src/platform/control-plane/routes/tailscale.ts';
+} from '../platform/src/platform/remote-access/tailscale.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { registerTailscaleGatewayMethods } from '../platform/src/platform/control-plane/routes/tailscale.ts';
 
 interface Call { command: string; args: readonly string[]; }
 

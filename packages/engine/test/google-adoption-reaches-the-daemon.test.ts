@@ -30,8 +30,8 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import { rmSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { SecretsManager } from '../sdk/src/platform/config/secrets.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { SecretsManager } from '../platform/src/platform/config/secrets.ts';
 import {
   adoptExistingGoogleCredentials,
   detectGoogleSetupState,
@@ -39,14 +39,14 @@ import {
   ensureGoogleConfigDefaults,
   GOOGLE_CONFIG_KEYS,
   GOOGLE_SECRET_KEYS,
-} from '../sdk/src/platform/google/index.ts';
-import { ensureEmailConfigDefaults } from '../sdk/src/platform/email/index.ts';
-import type { GoogleConfigPort, GoogleSecretPort } from '../sdk/src/platform/google/types.ts';
+} from '../platform/src/platform/google/index.ts';
+import { ensureEmailConfigDefaults } from '../platform/src/platform/email/index.ts';
+import type { GoogleConfigPort, GoogleSecretPort } from '../platform/src/platform/google/types.ts';
 // GoogleFilePort is declared by credential-adoption.ts, not types.ts, and
 // reaches consumers through the barrel above. Importing it from types.ts
 // resolved to nothing, which also left `path` implicitly `any` at the two
 // method bodies below.
-import type { GoogleFilePort } from '../sdk/src/platform/google/credential-adoption.ts';
+import type { GoogleFilePort } from '../platform/src/platform/google/credential-adoption.ts';
 import { readFileSync, existsSync } from 'node:fs';
 
 /**

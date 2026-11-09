@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { VERSION } from '../../version.ts';
-import '@goodvibes-jev/engine/sdk/platform/config';
+import '@goodvibes-jev/engine/platform/platform/config';
 import { handleLocalAuthCommand } from './local-auth-runtime.ts';
 import { registerUpdateCommand } from './update-runtime.ts';
 import '@/runtime/index.ts';

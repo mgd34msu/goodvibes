@@ -1,8 +1,8 @@
 import { existsSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import type { ContentPart, ProviderApi } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { formatModelDiscoveryReport } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { resolveAndValidatePath, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { ContentPart, ProviderApi } from '@goodvibes-jev/engine/platform/platform/providers';
+import { formatModelDiscoveryReport } from '@goodvibes-jev/engine/platform/platform/providers';
+import { resolveAndValidatePath, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { TerminalSlashCommand } from './command-registry.js';
 import type { TerminalConversationManager } from './terminal-conversation.js';
 export interface LocalCommandContext {

@@ -9,13 +9,13 @@
  * a wrong token rather than a malformed reference.
  */
 import { describe, expect, test } from 'bun:test';
-import { normalizeSecretRef } from '../sdk/src/platform/config/secret-refs.ts';
+import { normalizeSecretRef } from '../platform/src/platform/config/secret-refs.ts';
 import {
   describeMalformedSecretRef,
   looksLikeSecretRef,
   resolveSecretInput,
-} from '../sdk/src/platform/config/secret-ref-refusal.ts';
-import { secretReferenceFor } from '../sdk/src/platform/config/plaintext-credential-sweep.ts';
+} from '../platform/src/platform/config/secret-ref-refusal.ts';
+import { secretReferenceFor } from '../platform/src/platform/config/plaintext-credential-sweep.ts';
 
 const NEVER_RESOLVES = { resolveLocalSecret: async () => null };
 

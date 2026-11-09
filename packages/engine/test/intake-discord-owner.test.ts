@@ -1,12 +1,12 @@
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { acquireDiscordInboxIdentity } from '../sdk/src/platform/intake/providers/discord-identity.ts';
-import { VERSION } from '../sdk/src/platform/version.js';
+import { acquireDiscordInboxIdentity } from '../platform/src/platform/intake/providers/discord-identity.ts';
+import { VERSION } from '../platform/src/platform/version.js';
 import { screeningAnswers } from './_helpers/screening-answers.js';
 import { afterEach, expect, test } from 'bun:test';
 import { Client } from 'undici/index.js';
-import { createDiscordInboxOwner, type DiscordInboxOwnerOptions } from '../sdk/src/platform/intake/providers/discord-owner.ts';
-import { createDiscordInboxHttpOwner } from '../sdk/src/platform/intake/providers/discord-http.ts';
-import { digestSender } from '../sdk/src/platform/intake/text-normalization.ts';
+import { createDiscordInboxOwner, type DiscordInboxOwnerOptions } from '../platform/src/platform/intake/providers/discord-owner.ts';
+import { createDiscordInboxHttpOwner } from '../platform/src/platform/intake/providers/discord-http.ts';
+import { digestSender } from '../platform/src/platform/intake/text-normalization.ts';
 
 let identityDirectory: string | undefined;
 const cleanups: Array<() => unknown | Promise<unknown>> = [];

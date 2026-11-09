@@ -5,10 +5,10 @@ import 'node:fs';
 import 'node:fs/promises';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 
-import { extractText } from '@goodvibes-jev/engine/sdk/platform/export';
+import { extractText } from '@goodvibes-jev/engine/platform/platform/export';
 import { requireSessionManager, requireShellPaths } from './runtime-services.ts';
 import { sessionCommand } from './session.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import './confirmation.ts';
 import { readConversationMessageSnapshots } from '../../core/conversation-message-snapshot.ts';
 

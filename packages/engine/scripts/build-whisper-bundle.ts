@@ -1,7 +1,7 @@
 /**
  * build-whisper-bundle.ts, reproducibly build the goodvibes whisper.cpp
  * engine bundle whose pin lives in
- * sdk/src/platform/voice/provisioning/manifest.ts (WHISPER_ENGINES).
+ * engine/src/platform/voice/provisioning/manifest.ts (WHISPER_ENGINES).
  *
  * whisper.cpp publishes no official prebuilt binaries, so goodvibes builds
  * them: pinned source tag, static ggml (BUILD_SHARED_LIBS=OFF), portable
@@ -62,7 +62,7 @@ const version = arg('version', '1.8.2');
 const outDir = resolve(arg('out', '.tmp/whisper-bundle'));
 // The single append-only release tag that hosts every voice engine asset.
 const tag = arg('tag', 'voice-runtimes-v1');
-const releaseRepo = arg('repo', 'mgd34msu/goodvibes-sdk');
+const releaseRepo = arg('repo', 'mgd34msu/goodvibes');
 const platform = platformKey();
 
 for (const tool of ['cmake', 'tar', 'curl', 'gzip']) {

@@ -1,8 +1,8 @@
 /**
  * generate-config-ownership.test.ts: the generator renders a module whose exports
  * are the snapshot it was given (proven by importing what it rendered), reads a
- * non-empty snapshot from the installed SDK, and writes the artifact only when its
- * content changes. The checked-in artifact is compared with the SDK in
+ * non-empty snapshot from the installed engine, and writes the artifact only when its
+ * content changes. The checked-in artifact is compared with the engine in
  * src/lib/config-ownership.test.ts, not here.
  */
 import { describe, expect, test } from 'bun:test';
@@ -36,7 +36,7 @@ describe('generate-config-ownership', () => {
     }
   });
 
-  test('the snapshot read from the installed SDK carries every table, none empty', () => {
+  test('the snapshot read from the installed engine carries every table, none empty', () => {
     const snapshot = loadOwnershipSnapshot();
     expect(snapshot.prefixes.length).toBeGreaterThan(0);
     expect(snapshot.keys.length).toBeGreaterThan(0);

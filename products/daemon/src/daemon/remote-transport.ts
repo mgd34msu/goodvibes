@@ -1,5 +1,5 @@
 /** Selected-command network ownership; never install or mutate global trust. */
-import { applyOutboundTlsToFetchInit } from '@goodvibes-jev/engine/sdk/platform/runtime/transport';
+import { applyOutboundTlsToFetchInit } from '@goodvibes-jev/engine/platform/platform/runtime/transport';
 import type { DaemonWebSocketFactory } from '@goodvibes-jev/engine/terminal-shell';
 import type { RemoteCommandDeps } from './status-command.js';
 

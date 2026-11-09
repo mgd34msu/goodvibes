@@ -1,7 +1,7 @@
 import {
   nativeWorkExecutionIdentitySchema,
   type NativeWorkExecutionIdentity,
-} from "@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client";
+} from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client";
 import type { NativeIntakeBrowserBinding } from "./native-intake-journal";
 
 /** Identity only, never a bearer, grant, receipt, or authorization to execute. */

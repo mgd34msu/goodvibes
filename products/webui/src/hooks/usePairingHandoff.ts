@@ -1,6 +1,6 @@
 /**
  * usePairingHandoff, turn a `#pair=<token>` fragment into a signed-in session,
- * and, when the link is a hand-off bundle (SDK 1.8.0's pairing.handoff.create,
+ * and, when the link is a hand-off bundle (platform 1.8.0's pairing.handoff.create,
  * `#pair=<token>&offers=…`), surface the offer set for a caller to drive
  * (see PairingHandoffOffers, which calls pairing.handoff.complete).
  *
@@ -17,7 +17,7 @@
  *      the app can render the accept/decline UI. A plain `#pair=<token>` link
  *      (no offers) behaves exactly as before: `offers` stays [].
  *   4. also reads this device's own TLS/capability posture (pairing.posture.get,
- *      SDK 1.8.0's LAN-http posture work) for `window.location.origin` and, when
+ *      platform 1.8.0's LAN-http posture work) for `window.location.origin` and, when
  *      it carries the one honest plain-http-on-LAN notice line, publishes it via
  *      `postureNotice`, verbatim daemon wording, rendered ONCE by the caller
  *      (App.tsx) and cleared via `dismissPostureNotice`, never re-shown on this
@@ -38,7 +38,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { sdk, setExplicitAuthToken } from '../lib/goodvibes';
+import { client as platformClient, setExplicitAuthToken } from '../lib/goodvibes';
 import { parsePairingOffersFromHash, parsePairingTokenFromHash, stripPairingFragment, type PairingOfferKind } from '../lib/pairing';
 
 export type PairingStatus = 'idle' | 'pending' | 'error';
@@ -130,7 +130,7 @@ export function usePairingHandoff(): PairingHandoff {
       // never blocks or errors the hand-off, it just means no notice line shows.
       try {
         const origin = typeof window !== 'undefined' ? window.location.origin : undefined;
-        const { posture } = await sdk.operator.pairing.posture.get(origin);
+        const { posture } = await platformClient.operator.pairing.posture.get(origin);
         if (posture.notice) setPostureNotice(posture.notice);
       } catch {
         // Swallowed, see above.

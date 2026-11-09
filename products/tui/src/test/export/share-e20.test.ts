@@ -1,7 +1,7 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { redactSensitiveDataAsync } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { redactSensitiveDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
 import {
   resolveGithubToken,
   GistUploadTarget,

@@ -5,9 +5,9 @@
  * when the bot is addressed answered a message addressed to a colleague.
  */
 import { describe, expect, test } from 'bun:test';
-import { handleSlackSurfacePayload } from '../sdk/src/platform/adapters/slack/index.js';
-import { handleDiscordGatewayDispatchPayload } from '../sdk/src/platform/adapters/discord/index.js';
-import type { SurfaceAdapterContext } from '../sdk/src/platform/adapters/index.js';
+import { handleSlackSurfacePayload } from '../platform/src/platform/adapters/slack/index.js';
+import { handleDiscordGatewayDispatchPayload } from '../platform/src/platform/adapters/discord/index.js';
+import type { SurfaceAdapterContext } from '../platform/src/platform/adapters/index.js';
 
 /** A context that records the ingress input and stops there (the policy refuses). */
 function capturingContext(config: Record<string, unknown> = {}) {

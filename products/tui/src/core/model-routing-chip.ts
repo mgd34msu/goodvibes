@@ -4,8 +4,8 @@
  *
  * Driven by the provider registry's `MODEL_CHANGED` runtime event (fired on
  * every setCurrentModel, user command, automatic capability route, or
- * SDK-internal downgrade). The chip's job is the OTHERWISE-SILENT changes: the
- * SDK-internal auto-route/downgrade paths call setCurrentModel with no TUI-side
+ * platform-internal downgrade). The chip's job is the OTHERWISE-SILENT changes: the
+ * platform-internal auto-route/downgrade paths call setCurrentModel with no TUI-side
  * narration of their own.
  *
  * Division of labour with the failover path: the optimizer-gated failover in
@@ -19,7 +19,7 @@
  *   2. a change that correlates to a transition in the optimizer's fallback
  *      log → the log's own reason is quoted, because the reason IS known. The
  *      log is shared: the TUI's failover records provider ids ("abacusai"),
- *      the SDK's agent-orchestrator fallback records registry keys
+ *      the platform's agent-orchestrator fallback records registry keys
  *      ("abacusai:route-llm"), and a match on either form counts. Reading only
  *      one form is what made a real, explained failover print
  *      "(reason unknown)";
@@ -27,7 +27,7 @@
  *      explanation is still reported, just honestly marked as unexplained.
  */
 
-/** The subset of a FallbackTransition this module reads (structural, SDK-agnostic). */
+/** The subset of a FallbackTransition this module reads (structural, platform-agnostic). */
 export interface FallbackTransitionLike {
   readonly from: string;
   readonly to: string;

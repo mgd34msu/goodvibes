@@ -6,7 +6,7 @@ import { ForensicsCollector } from './_helpers/runtime-seam.ts';
 import { ForensicsRegistry } from './_helpers/runtime-seam.ts';
 import { PhasedToolExecutor } from './_helpers/runtime-seam.ts';
 import type { ToolRuntimeContext } from './_helpers/runtime-seam.ts';
-import type { Tool, ToolCall } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Tool, ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
 import { useFailureReadings } from './_helpers/failure-readings.ts';
 
 // Drain queued microtasks so bus.emit() listeners (async dispatch) run before assertions.

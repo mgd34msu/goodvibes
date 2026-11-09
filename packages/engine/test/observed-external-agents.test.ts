@@ -21,32 +21,32 @@ import {
   type ObservedRawProcess,
   type ProcessTableReader,
   type TmuxPaneReader,
-} from '../sdk/src/platform/runtime/fleet/observed/detect.js';
+} from '../platform/src/platform/runtime/fleet/observed/detect.js';
 import {
   ObservedAgentSource,
   type ObservedAgentRow,
   type TmuxCommandRunner,
-} from '../sdk/src/platform/runtime/fleet/observed/source.js';
+} from '../platform/src/platform/runtime/fleet/observed/source.js';
 import {
   adaptObservedAgent,
   observedNodeId,
   steerObservedNode,
-} from '../sdk/src/platform/runtime/fleet/adapters/observed.js';
-import { createProcessRegistry } from '../sdk/src/platform/runtime/fleet/index.js';
-import type { ProcessRegistryDeps, RegistryTimers } from '../sdk/src/platform/runtime/fleet/registry.js';
+} from '../platform/src/platform/runtime/fleet/adapters/observed.js';
+import { createProcessRegistry } from '../platform/src/platform/runtime/fleet/index.js';
+import type { ProcessRegistryDeps, RegistryTimers } from '../platform/src/platform/runtime/fleet/registry.js';
 import {
   fleetCapacityProbeFrom,
   makeRuntimeFleetProbe,
-} from '../sdk/src/platform/runtime/orchestration/fleet-count.js';
-import { createFleetObservedSteerHandler } from '../sdk/src/platform/control-plane/routes/fleet.js';
-import type { AgentManager, AgentRecord } from '../sdk/src/platform/tools/agent/manager.js';
-import type { ProcessManager } from '../sdk/src/platform/tools/shared/process-manager.js';
-import type { WatcherRegistry } from '../sdk/src/platform/watchers/registry.js';
+} from '../platform/src/platform/runtime/orchestration/fleet-count.js';
+import { createFleetObservedSteerHandler } from '../platform/src/platform/control-plane/routes/fleet.js';
+import type { AgentManager, AgentRecord } from '../platform/src/platform/tools/agent/manager.js';
+import type { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.js';
+import type { WatcherRegistry } from '../platform/src/platform/watchers/registry.js';
 import type {
   ScheduleManager,
   TriggerManager,
   WorkflowManager,
-} from '../sdk/src/platform/tools/workflow/index.js';
+} from '../platform/src/platform/tools/workflow/index.js';
 
 const T0 = 1_750_000_000_000;
 

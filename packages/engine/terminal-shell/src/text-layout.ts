@@ -2,12 +2,12 @@
  * text-layout.ts, column-arithmetic helpers for laying text out in a
  * fixed-width terminal.
  *
- * Both helpers measure in DISPLAY cells, not code units: the SDK's
+ * Both helpers measure in DISPLAY cells, not code units: the platform's
  * `getDisplayWidth` accounts for wide (CJK/emoji) glyphs and zero-width
  * sequences, so a line that fits by `.length` can still overflow the column
  * budget. Everything here goes through it.
  */
-import { getDisplayWidth, truncateDisplay, wrapText } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { getDisplayWidth, truncateDisplay, wrapText } from '@goodvibes-jev/engine/platform/platform/utils';
 
 /**
  * Wrap `text` to `width` display columns, prefixing every line after the first

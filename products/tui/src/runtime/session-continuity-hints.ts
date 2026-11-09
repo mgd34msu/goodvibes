@@ -1,4 +1,4 @@
-import type { SessionContinuityHints } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import type { SessionContinuityHints } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 /**
  * session-continuity-hints, the recovery snapshot's continuity summary.
  *

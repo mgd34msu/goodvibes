@@ -1,4 +1,4 @@
-import { type Line, createStyledCell } from '@goodvibes-jev/engine/sdk/platform/types';
+import { type Line, createStyledCell } from '@goodvibes-jev/engine/platform/platform/types';
 import { UIFactory } from './ui-factory.ts';
 import { getDisplayWidth } from '../utils/terminal-width.ts';
 import { activeTokens } from './theme.ts';

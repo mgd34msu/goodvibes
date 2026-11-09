@@ -2,7 +2,7 @@
 
 > Consumer surface map. For internal runtime boundary details see [Runtime Boundary Model](./runtime-surfaces.md).
 
-The `@goodvibes-jev/engine/sdk` package has companion-safe client surfaces and
+The `@goodvibes-jev/engine/platform` package has companion-safe client surfaces and
 Bun-only daemon/platform surfaces.
 
 See also: [Public surface reference](./public-surface.md), the canonical list of every
@@ -33,7 +33,7 @@ This surface makes direct use of Bun runtime APIs, including `Bun.spawn`, `Bun.f
 The companion surface provides auth, transport (HTTP/SSE/WebSocket), runtime events, contracts, errors, observer hooks, and the optional Cloudflare Worker bridge for daemon batch queue/tick integration. It is intentionally runtime-neutral: no Bun globals, no `node:*` imports. Cloudflare account/Queue/Worker provisioning is a daemon route concern under `/api/cloudflare/*`, not companion-side service logic.
 
 Imported via:
-- package root (`@goodvibes-jev/engine/sdk`): default daemon-connected client facade
+- package root (`@goodvibes-jev/engine/platform`): default daemon-connected client facade
 - `./react-native`: React Native (Hermes)
 - `./browser`: browser environments
 - `./browser/knowledge`, `./browser/homeassistant`, `./browser/agent`: scoped browser companion clients (base knowledge/wiki, Home Assistant panels, and the Agent-owned knowledge environment)

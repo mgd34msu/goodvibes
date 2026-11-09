@@ -2,23 +2,23 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { TelegramBotApi } from '../sdk/src/platform/channels/telegram/api.js';
-import { TelegramIngressSupervisor } from '../sdk/src/platform/channels/telegram/ingress.js';
-import { BuiltinChannelRuntime } from '../sdk/src/platform/channels/builtin-runtime.js';
-import { ChannelPluginRegistry } from '../sdk/src/platform/channels/plugin-registry.js';
-import { PaymentReplyInbox } from '../sdk/src/platform/payments/reply-inbox.js';
-import { channelBackedPaymentNotifier } from '../sdk/src/platform/payments/host/notifier.js';
-import { tryResolvePaymentReplyFromChannel } from '../sdk/src/platform/daemon/payment-reply.js';
-import type { SurfaceAdapterContext } from '../sdk/src/platform/adapters/types.js';
-import type { ChannelIngressPolicyInput, ChannelPolicyDecision } from '../sdk/src/platform/channels/types.js';
+import { TelegramBotApi } from '../platform/src/platform/channels/telegram/api.js';
+import { TelegramIngressSupervisor } from '../platform/src/platform/channels/telegram/ingress.js';
+import { BuiltinChannelRuntime } from '../platform/src/platform/channels/builtin-runtime.js';
+import { ChannelPluginRegistry } from '../platform/src/platform/channels/plugin-registry.js';
+import { PaymentReplyInbox } from '../platform/src/platform/payments/reply-inbox.js';
+import { channelBackedPaymentNotifier } from '../platform/src/platform/payments/host/notifier.js';
+import { tryResolvePaymentReplyFromChannel } from '../platform/src/platform/daemon/payment-reply.js';
+import type { SurfaceAdapterContext } from '../platform/src/platform/adapters/types.js';
+import type { ChannelIngressPolicyInput, ChannelPolicyDecision } from '../platform/src/platform/channels/types.js';
 import { withPaymentsReadings } from './helpers/payments-readings.ts';
-import { SecretsManager } from '../sdk/src/platform/config/secrets.js';
-import { ServiceRegistry } from '../sdk/src/platform/config/service-registry.js';
+import { SecretsManager } from '../platform/src/platform/config/secrets.js';
+import { ServiceRegistry } from '../platform/src/platform/config/service-registry.js';
 import {
   createTelegramSourceAccountOwner,
   type TelegramSourceAccountHandle,
   type TelegramSourceAccountOwner,
-} from '../sdk/src/platform/channels/telegram/source-account.js';
+} from '../platform/src/platform/channels/telegram/source-account.js';
 
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });

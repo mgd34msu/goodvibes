@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { AgentCalendarRegistry } from '../../agent/calendar-registry.ts';
 import { parseIcs } from '../../agent/ics-calendar.ts';
-import { parseIcs as parseIcsHonest } from '@goodvibes-jev/engine/sdk/platform/calendar';
+import { parseIcs as parseIcsHonest } from '@goodvibes-jev/engine/platform/platform/calendar';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { parseAgentLocalLibraryArgs } from './agent-local-library-args.ts';
 import { requireShellPaths } from './runtime-services.ts';
@@ -174,7 +174,7 @@ export async function runCalendarRuntimeCommand(args: readonly string[], ctx: Co
         return;
       }
       const { imported, skipped, secretSkipped } = registry.importIcs(content);
-      // Honest recurrence/skip report from the SDK reader: events the local store
+      // Honest recurrence/skip report from the platform reader: events the local store
       // could not use, and recurring events whose RRULE this build does not fully
       // expand (imported as a single seed, never silently dropped or mis-expanded).
       const honest = parseIcsHonest(content);

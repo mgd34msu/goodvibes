@@ -3,7 +3,7 @@ import { expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { captureContractInput, assertContractInputOwner } from '../../sdk/src/platform/contract/input-snapshot.js';
+import { captureContractInput, assertContractInputOwner } from '../../platform/src/platform/contract/input-snapshot.js';
 import { makeRepo } from './runner-support.js';
 import { git } from './steps-support.js';
 

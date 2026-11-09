@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { FeatureAnnouncementStore } from '@goodvibes-jev/engine/sdk/platform/runtime/feature-announcements';
-import type { MemoryConsolidationRunReceipt } from '@goodvibes-jev/engine/sdk/platform/state';
-import { formatConsolidationReceipt } from '@goodvibes-jev/engine/sdk/platform/state';
+import { FeatureAnnouncementStore } from '@goodvibes-jev/engine/platform/platform/runtime/feature-announcements';
+import type { MemoryConsolidationRunReceipt } from '@goodvibes-jev/engine/platform/platform/state';
+import { formatConsolidationReceipt } from '@goodvibes-jev/engine/platform/platform/state';
 import { consumeDaemonAttachNotices } from '../../runtime/daemon-attach-notices.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { AsyncDisposalError, createAsyncDisposalScope } from '../sdk/src/platform/runtime/async-disposal.js';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { AsyncDisposalError, createAsyncDisposalScope } from '../platform/src/platform/runtime/async-disposal.js';
 
 let restore: () => void;
 let warnings: number;

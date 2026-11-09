@@ -1,9 +1,9 @@
 import { captureTranscriptSource, readTranscriptIndex, transcriptReadingCanceled, TRANSCRIPT_UNAVAILABLE } from './transcript-reading.js';
 import type { ComposerStateInput, ComposerState } from './composer-state.js';
-import type { TranscriptEventKind } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { ConversationManager, TranscriptReadingOptions } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { TranscriptEventKind } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ConversationManager, TranscriptReadingOptions } from '@goodvibes-jev/engine/platform/platform/core';
 import type { TranscriptCommandContext } from './transcript-reading.js';
-import type { UiSessionSnapshot } from '@goodvibes-jev/engine/sdk/platform/runtime/ui';
+import type { UiSessionSnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
 type RuntimeTranscriptConversation = Pick<ConversationManager, 'getMessageSnapshot' | 'getTranscriptEventIndex' | 'getMessageCount'> & {
   nextTranscriptEventLine(currentLine: number, kind?: TranscriptEventKind | 'all', options?: TranscriptReadingOptions): Promise<number>;
   prevTranscriptEventLine(currentLine: number, kind?: TranscriptEventKind | 'all', options?: TranscriptReadingOptions): Promise<number>;

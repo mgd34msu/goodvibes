@@ -2,12 +2,12 @@ import { describe, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { loadPersistedProviders, type DiscoveredServer } from '../sdk/src/platform/discovery/scanner.js';
-import { capturePersistedProviders } from '../sdk/src/platform/discovery/persisted-cache.js';
-import { ProviderRegistry } from '../sdk/src/platform/providers/registry.js';
-import { OpenAICompatProvider } from '../sdk/src/platform/providers/openai-compat.js';
-import { createProviderApi, type ProviderApiDependencies } from '../sdk/src/platform/providers/provider-api.js';
-import { logger } from '../sdk/src/platform/utils/logger.js';
+import { loadPersistedProviders, type DiscoveredServer } from '../platform/src/platform/discovery/scanner.js';
+import { capturePersistedProviders } from '../platform/src/platform/discovery/persisted-cache.js';
+import { ProviderRegistry } from '../platform/src/platform/providers/registry.js';
+import { OpenAICompatProvider } from '../platform/src/platform/providers/openai-compat.js';
+import { createProviderApi, type ProviderApiDependencies } from '../platform/src/platform/providers/provider-api.js';
+import { logger } from '../platform/src/platform/utils/logger.js';
 
 const server: DiscoveredServer = {
   name: 'Saved fixture', host: '192.0.2.42', port: 1234,

@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import type { Question } from '@goodvibes-jev/judgment';
-import { ArtifactStore } from '../sdk/src/platform/artifacts/store.ts';
-import { inferArtifactKind } from '../sdk/src/platform/artifacts/types.ts';
+import { ArtifactStore } from '../platform/src/platform/artifacts/store.ts';
+import { inferArtifactKind } from '../platform/src/platform/artifacts/types.ts';
 
 async function withKind<T>(chosen: string, confidence: number, body: (asked: () => number) => Promise<T>): Promise<T> {
   const fake = fakePort((_name: string, question: Question) => choiceAnswer(question, chosen, confidence));

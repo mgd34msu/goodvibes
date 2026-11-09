@@ -13,8 +13,8 @@
 
 import { describe, expect, test } from 'bun:test';
 
-import { buildErrorResponseBody } from '../daemon-sdk/src/error-response.js';
-import { GoodVibesSdkError } from '../errors/dist/index.js';
+import { buildErrorResponseBody } from '../daemon-api/src/error-response.js';
+import { GoodVibesError } from '../errors/dist/index.js';
 
 describe('error envelope hint provenance', () => {
   test('a gateway verb refusal with a 400 gets no borrowed LLM hint', () => {
@@ -71,7 +71,7 @@ describe('error envelope hint provenance', () => {
   });
 
   test('non-model hints are unaffected: a transport network error still gets its hint', () => {
-    const err = new GoodVibesSdkError('connection refused', {
+    const err = new GoodVibesError('connection refused', {
       category: 'network',
       source: 'transport',
     });

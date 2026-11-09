@@ -4,7 +4,7 @@ import {
   isPlanMode, nextPermissionMode, normalizePermissionMode, parsePermissionMode,
   PERMISSION_MODE_CYCLE, permissionModeLabel, permissionModeTone, presetForMode,
   SESSION_GATE_PRESET_NAMES, togglePlanMode,
-} from '../sdk/src/platform/gate/presets.ts';
+} from '../platform/src/platform/gate/presets.ts';
 
 describe('shared execution modes', () => {
   test('the execution cycle contains exactly owner safety, Jev safety and YOLO', () => {

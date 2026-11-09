@@ -1,5 +1,5 @@
 /**
- * Consolidation proposals and runs, memory.consolidation.receipts (SDK 1.8.0). Covers
+ * Consolidation proposals and runs, memory.consolidation.receipts (platform 1.8.0). Covers
  * every honest state (pending, unavailable via 404 and 501, genuinely empty, pending
  * proposals present, resolved runs with no pending proposals) in isolation. The jump to
  * the review queue rows is covered in src/views/library/ReviewTab.test.tsx (the proposals
@@ -16,7 +16,7 @@ let receiptsImpl: () => Promise<unknown> = () => Promise.resolve({ receipts: [],
 mock.module('../../lib/goodvibes', () => ({
   getCurrentAuth: () => Promise.resolve({}),
   invokeMethod: () => Promise.resolve({}),
-  sdk: {
+  client: {
     operator: {
       memory: {
         consolidation: {

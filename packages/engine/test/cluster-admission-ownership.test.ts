@@ -1,12 +1,12 @@
 /** Real admission/crypto ownership regressions, authored and UNRUN. */
 import { expect, test } from 'bun:test';
-import { GroupAdmissionService, type AdmissionHost } from '../sdk/src/platform/cluster/group-admissions.ts';
-import { FakeClusterClock } from '../sdk/src/platform/cluster/clock.ts';
-import { deriveJoinSalt, deriveJoinVerifier, generateNodeKeyMaterial } from '../sdk/src/platform/cluster/group-crypto.ts';
-import { createGroupKeyMaterial, type GroupKeyMaterial } from '../sdk/src/platform/cluster/group-store.ts';
-import { admitMember, createGroupStateDocument, type GroupStateDocument } from '../sdk/src/platform/cluster/group-state.ts';
-import { encodeIdentityClassMessage, encodeJoinClassMessage, GROUP_MESSAGE_TYPES, sealGrant } from '../sdk/src/platform/cluster/group-membership.ts';
-import { readUnverifiedEnvelope } from '../sdk/src/platform/cluster/protocol-envelope.ts';
+import { GroupAdmissionService, type AdmissionHost } from '../platform/src/platform/cluster/group-admissions.ts';
+import { FakeClusterClock } from '../platform/src/platform/cluster/clock.ts';
+import { deriveJoinSalt, deriveJoinVerifier, generateNodeKeyMaterial } from '../platform/src/platform/cluster/group-crypto.ts';
+import { createGroupKeyMaterial, type GroupKeyMaterial } from '../platform/src/platform/cluster/group-store.ts';
+import { admitMember, createGroupStateDocument, type GroupStateDocument } from '../platform/src/platform/cluster/group-state.ts';
+import { encodeIdentityClassMessage, encodeJoinClassMessage, GROUP_MESSAGE_TYPES, sealGrant } from '../platform/src/platform/cluster/group-membership.ts';
+import { readUnverifiedEnvelope } from '../platform/src/platform/cluster/protocol-envelope.ts';
 const groupId = 'gTESTTESTTESTTEST', joinKey = 'fixture passphrase with sufficient entropy';
 const logger = { debug() {}, info() {}, warn() {}, error() {} };
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }

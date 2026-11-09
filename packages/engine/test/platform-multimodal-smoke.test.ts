@@ -1,6 +1,6 @@
 
 import { describe, expect, test } from 'bun:test';
-import { MultimodalService } from '../sdk/src/platform/multimodal/service.js';
+import { MultimodalService } from '../platform/src/platform/multimodal/service.js';
 
 /** Minimal stub for MediaProviderRegistry, returns empty provider list. */
 function makeMediaProviders() {
@@ -72,7 +72,7 @@ describe('platform/multimodal: behavior smoke', () => {
 import { afterEach, spyOn } from 'bun:test';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort, captureJudgmentPort } from '../errors/src/index.js';
-import { entityCentrality, rankMultimodalEntities } from '../sdk/src/platform/multimodal/entity-centrality.js';
+import { entityCentrality, rankMultimodalEntities } from '../platform/src/platform/multimodal/entity-centrality.js';
 import { multimodalFixture } from './_helpers/multimodal-entities.js';
 
 let previousPort: ReturnType<typeof installJudgmentPort>;
@@ -209,7 +209,7 @@ test('video retains keyframe and audio ownership and complete text', async () =>
 });
 
 test('Office admission reads late XML text and refuses expansion bombs before a judgment', async () => {
-  const { readKnowledgeArtifactJudgmentSource } = await import('../sdk/src/platform/knowledge/extractors.js');
+  const { readKnowledgeArtifactJudgmentSource } = await import('../platform/src/platform/knowledge/extractors.js');
   const { default: JSZip } = await import('jszip');
   const fake = centralPort(); usePort(fake.port);
   const descriptor = { id: 'office', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', filename: 'source.xlsx' };
@@ -264,7 +264,7 @@ test('missing and over-budget video sources hold instead of dropping evidence', 
 });
 
 test('Office entity corpus includes unsampled sheets and slides as decoded source terms', async () => {
-  const { readKnowledgeArtifactJudgmentSource } = await import('../sdk/src/platform/knowledge/extractors.js');
+  const { readKnowledgeArtifactJudgmentSource } = await import('../platform/src/platform/knowledge/extractors.js');
   const { default: JSZip } = await import('jszip');
   const zip = new JSZip();
   zip.file('xl/worksheets/sheet4.xml', '<worksheet><row><c><t>&#65;&#73;</t></c></row></worksheet>');

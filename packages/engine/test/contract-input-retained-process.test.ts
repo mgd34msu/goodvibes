@@ -8,12 +8,12 @@ import {
   captureContractInput,
   contractInputPath,
   materializeContractInput,
-} from '../sdk/src/platform/contract/input-snapshot.js';
+} from '../platform/src/platform/contract/input-snapshot.js';
 import {
   createContractInputAuthority,
   revokeContractInputAuthority,
-} from '../sdk/src/platform/contract/input-authority.js';
-import type { Contract } from '../sdk/src/platform/contract/types.js';
+} from '../platform/src/platform/contract/input-authority.js';
+import type { Contract } from '../platform/src/platform/contract/types.js';
 
 for (const kind of ['snapshot', 'member'] as const) {
   test(`retained ${kind} remains protected in a fresh ordinary Agent process`, async () => {

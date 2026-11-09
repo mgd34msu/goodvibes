@@ -19,10 +19,10 @@
 import { describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { redactSensitiveDataAsync, redactionCredential } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { redactSensitiveDataAsync, redactionCredential } from '@goodvibes-jev/engine/platform/platform/utils';
 import { isDeepStrictEqual } from 'node:util';
-import { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import type { GatewayMethodInvocation } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import type { GatewayMethodInvocation } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import {
   createOccasionsGatewayInvoke,
   occasionsRouteLabel,

@@ -9,7 +9,7 @@
 import { useState, type SyntheticEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, GitBranch, ListTodo, Plus, Search, Server } from 'lucide-react';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import type { SessionsHostedCreateInput } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { hostedSessionFromResult } from '../../lib/hosted-sessions';
@@ -38,7 +38,7 @@ function TaskForm({ onDone }: { onDone: () => void }) {
   const { toast } = useToast();
   const [task, setTask] = useState('');
   const create = useMutation({
-    mutationFn: () => sdk.operator.tasks.create({ task: task.trim() }),
+    mutationFn: () => platformClient.operator.tasks.create({ task: task.trim() }),
     onSuccess: async () => {
       setTask('');
       await queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
@@ -82,7 +82,7 @@ function HostedForm({ onDone }: { onDone: (key?: string) => void }) {
   const [title, setTitle] = useState('');
   const [detachPolicy, setDetachPolicy] = useState<'' | 'kill' | 'survive'>('');
   const create = useMutation({
-    mutationFn: (input: SessionsHostedCreateInput) => sdk.operator.sessions.hosted.create(input),
+    mutationFn: (input: SessionsHostedCreateInput) => platformClient.operator.sessions.hosted.create(input),
     onSuccess: (result) => {
       const session = hostedSessionFromResult(result);
       void queryClient.invalidateQueries({ queryKey: queryKeys.hostedSessionsAll });
@@ -145,7 +145,7 @@ function CiWatchForm({ onDone }: { onDone: (key?: string) => void }) {
   const [deliveryChannel, setDeliveryChannel] = useState('');
   const [triggerFixSession, setTriggerFixSession] = useState(false);
   const create = useMutation({
-    mutationFn: () => sdk.operator.ci.watches.create({
+    mutationFn: () => platformClient.operator.ci.watches.create({
       repo: repo.trim(),
       ...(ref.trim() ? { ref: ref.trim() } : {}),
       ...(prNumber.trim() ? { prNumber: Number(prNumber.trim()) } : {}),
@@ -200,7 +200,7 @@ function CiStatusForm() {
   const [prNumber, setPrNumber] = useState('');
   const [report, setReport] = useState<CiReport | null>(null);
   const check = useMutation({
-    mutationFn: () => sdk.operator.ci.status({
+    mutationFn: () => platformClient.operator.ci.status({
       repo: repo.trim(),
       ...(ref.trim() ? { ref: ref.trim() } : {}),
       ...(prNumber.trim() ? { prNumber: Number(prNumber.trim()) } : {}),

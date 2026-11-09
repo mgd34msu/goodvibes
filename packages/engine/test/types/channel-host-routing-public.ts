@@ -1,7 +1,7 @@
 /** Public host routing types remain aligned with the existing wire contract. */
 import type { OperatorMethodOutputMap } from '@goodvibes-jev/engine/contracts';
-import { RouteStore, createRoutingResolver, createInboxRouteResolver, toRouteListItem, type RoutingChannelRoute } from '@goodvibes-jev/engine/sdk/platform/channels';
-import type { RouteResolver } from '@goodvibes-jev/engine/sdk/platform/intake';
+import { RouteStore, createRoutingResolver, createInboxRouteResolver, toRouteListItem, type RoutingChannelRoute } from '@goodvibes-jev/engine/platform/platform/channels';
+import type { RouteResolver } from '@goodvibes-jev/engine/platform/platform/intake';
 
 declare const store: RouteStore;
 declare const route: RoutingChannelRoute;

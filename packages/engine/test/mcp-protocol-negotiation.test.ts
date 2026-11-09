@@ -8,10 +8,10 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { McpClient } from '../sdk/src/platform/mcp/client.js';
-import { createMcpTool } from '../sdk/src/platform/tools/mcp/index.js';
-import type { McpRegistry } from '../sdk/src/platform/mcp/registry.js';
-import { MCP_STATELESS_REVISION } from '../sdk/src/platform/mcp/protocol.js';
+import { McpClient } from '../platform/src/platform/mcp/client.js';
+import { createMcpTool } from '../platform/src/platform/tools/mcp/index.js';
+import type { McpRegistry } from '../platform/src/platform/mcp/registry.js';
+import { MCP_STATELESS_REVISION } from '../platform/src/platform/mcp/protocol.js';
 
 const scratch = mkdtempSync(join(tmpdir(), 'gv-mcp-negotiation-'));
 const serverScript = join(scratch, 'mock-mcp-server.ts');
@@ -199,7 +199,7 @@ describe('MCP stdio protocol negotiation', () => {
     expect(echo.args).toEqual({ value: 'hello' });
     const meta = echo.meta as Record<string, unknown>;
     expect(meta['io.modelcontextprotocol/protocolVersion']).toBe(MCP_STATELESS_REVISION);
-    expect((meta['io.modelcontextprotocol/clientInfo'] as Record<string, unknown>).name).toBe('goodvibes-sdk');
+    expect((meta['io.modelcontextprotocol/clientInfo'] as Record<string, unknown>).name).toBe('goodvibes-platform');
     expect(meta['io.modelcontextprotocol/clientCapabilities']).toEqual({});
   });
 

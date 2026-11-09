@@ -2,13 +2,13 @@ import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { ProtectedPaymentRequests } from '../sdk/src/platform/payments/host/protected-requests.js';
-import { captureCheckoutWindowCheckpoint } from '../sdk/src/platform/payments/checkout-window-checkpoint.js';
+import { ProtectedPaymentRequests } from '../platform/src/platform/payments/host/protected-requests.js';
+import { captureCheckoutWindowCheckpoint } from '../platform/src/platform/payments/checkout-window-checkpoint.js';
 import { protectedPaymentRequest } from './helpers/protected-payment-request.js';
 import { protectedPaymentWindow } from './helpers/protected-payment-window.js';
-import { createNativeDataWriteOwner, assertNativeReaderCompatible, nativeReaderCapabilities, NATIVE_READER_REQUIREMENT_FILE } from '../sdk/src/platform/runtime/native-reader-compatibility.js';
-import { realUpdateFileIo } from '../sdk/src/platform/runtime/self-update.js';
-import { extractCheckout } from '../sdk/src/platform/payments/checkout-extraction.js';
+import { createNativeDataWriteOwner, assertNativeReaderCompatible, nativeReaderCapabilities, NATIVE_READER_REQUIREMENT_FILE } from '../platform/src/platform/runtime/native-reader-compatibility.js';
+import { realUpdateFileIo } from '../platform/src/platform/runtime/self-update.js';
+import { extractCheckout } from '../platform/src/platform/payments/checkout-extraction.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

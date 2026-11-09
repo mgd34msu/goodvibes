@@ -1,9 +1,9 @@
-import { activateClassicFallback, decisionOrClassic, isClassicOperation } from '@goodvibes-jev/engine/sdk/platform/runtime';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { activateClassicFallback, decisionOrClassic, isClassicOperation } from '@goodvibes-jev/engine/platform/platform/runtime';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { types as nodeTypes } from 'node:util';
 import { redactText } from '@goodvibes-jev/engine/terminal-shell';
 import { captureJudgmentPort, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
-import { assertProjectionCurrent } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { assertProjectionCurrent } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 import { captureModelReadModelData, captureModelProviderReadingFacts, MODEL_PROVIDER_READING_FACT_FIELDS, captureModelReadingInput, captureModelReadingSnapshotGuard, assertModelReadingInputCurrent, modelReadingServicePath, withModelReadingSource, type ModelReadingOptions } from './agent-harness-model-reading-source.ts';
 import { protectPersonalOpsData } from './agent-harness-personal-ops-source.ts';
@@ -531,7 +531,7 @@ async function localServingDiagnosticsIndex(context: CommandContext, options: Mo
       sourcePaths: [...sourcePaths],
       recordCount: records.length,
       missingSignals,
-      policy: 'Agent reads local serving diagnostics only from SDK/daemon read models. It does not probe local servers until the user confirms models action:"smoke".',
+      policy: 'Agent reads local serving diagnostics only from platform/daemon read models. It does not probe local servers until the user confirms models action:"smoke".',
     },
   };
 }

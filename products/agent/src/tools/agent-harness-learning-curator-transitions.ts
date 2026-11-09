@@ -1,6 +1,6 @@
-import type { MemoryPreparedAdd } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import type { MemoryAddOptions, MemoryRecord } from '@goodvibes-jev/engine/sdk/platform/state';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { MemoryPreparedAdd } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import type { MemoryAddOptions, MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { AgentPersonaCreateInput, AgentPersonaUpdateInput, AgentPersonaRecord, AgentPersonaSnapshot } from '../agent/persona-registry.ts';
 import { normalizeAgentSkillRequirements, type AgentSkillCreateInput, type AgentSkillUpdateInput, type AgentSkillRecord, type AgentSkillSnapshot } from '../agent/skill-registry.ts';
 import type { AgentRoutineCreateInput, AgentRoutineUpdateInput, AgentRoutineRecord, AgentRoutineSnapshot } from '../agent/routine-registry.ts';

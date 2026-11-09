@@ -10,7 +10,7 @@ import { readFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'nod
 import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { judgmentSourceFiles } from '../scripts/judgment-sources.ts';
-import { registry as contractRegistry } from '../sdk/src/platform/contract/judgment-registry.ts';
+import { registry as contractRegistry } from '../platform/src/platform/contract/judgment-registry.ts';
 
 const header = { version: 1, description: 'test', accuracyFloor: 0.8 };
 
@@ -330,7 +330,7 @@ describe('registered use', () => {
   });
 
   test('the native settlement adapter forwards registered checks without defining an inline decision', () => {
-    const path = resolve(import.meta.dir, '../sdk/src/platform/workflow/work-ledger/native-execution-verifier.ts');
+    const path = resolve(import.meta.dir, '../platform/src/platform/workflow/work-ledger/native-execution-verifier.ts');
     const source = readFileSync(path, 'utf8');
     const names = new Set(contractRegistry.list().map((decision) => decision.name));
     expect(sourceFindings(path, source, names)).toEqual([]);
@@ -340,7 +340,7 @@ describe('registered use', () => {
   test('the actual composed contract decisions are clean only with every real registration', () => {
     const names = new Set(contractRegistry.list().map((decision) => decision.name));
     for (const filename of ['unit-judge', 'group-judge', 'deliverable-judge', 'final-answer-review', 'goal-obligations', 'source-citation-purpose', 'plan-coverage', 'unit-shape']) {
-      const path = resolve(import.meta.dir, `../sdk/src/platform/contract/batteries/${filename}.ts`);
+      const path = resolve(import.meta.dir, `../platform/src/platform/contract/batteries/${filename}.ts`);
       const source = readFileSync(path, 'utf8');
       expect(sourceFindings(path, source, names)).toEqual([]);
       expect(sourceFindings(path, source, new Set())).not.toEqual([]);
@@ -351,9 +351,9 @@ describe('registered use', () => {
 describe('workspace judgment source discovery', () => {
   test('covers products, TSX and engine scripts while excluding generated output and fixtures', () => {
     const root = mkdtempSync(resolve(tmpdir(), 'judgment-source-scope-'));
-    const included = ['packages/engine/sdk/src/reader.ts', 'packages/engine/scripts/check.ts',
+    const included = ['packages/engine/platform/src/reader.ts', 'packages/engine/scripts/check.ts',
       'products/daemon/src/start.ts', 'products/agent/src/read.ts', 'products/tui/src/view.ts', 'products/webui/src/view.tsx'];
-    const excluded = ['packages/engine/sdk/dist/reader.ts', 'packages/engine/test/reader.test.ts',
+    const excluded = ['packages/engine/platform/dist/reader.ts', 'packages/engine/test/reader.test.ts',
       'packages/engine/scripts/fixtures/negative.ts', 'products/webui/src/view.test.tsx',
       'products/webui/e2e/reader.ts', 'products/agent/src/test/reader.ts', 'products/tui/node_modules/example/index.ts'];
     try {

@@ -4,9 +4,9 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { WEBUI_METHOD_ROUTES } from '@goodvibes-jev/engine/contracts/generated/webui-facade';
-import { nativeConversationIntakeLookupResultSchema, selectNativeDiffHunk, type NativeConversationIntakeCaptureRequest, type NativeSelectedDiffSelector } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
-import { nativeHostedTurnLookupSchema } from '@goodvibes-jev/engine/sdk/platform/hosted-sessions/native-turn-client';
-import { nativeWorkExecutionSnapshotSchema } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
+import { nativeConversationIntakeLookupResultSchema, selectNativeDiffHunk, type NativeConversationIntakeCaptureRequest, type NativeSelectedDiffSelector } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
+import { nativeHostedTurnLookupSchema } from '@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client';
+import { nativeWorkExecutionSnapshotSchema } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
 import { createNativeIntakeExecutionHttpFixture } from '../helpers/native-intake-execution-http-fixture.js';
 import { intakeBarrier } from '../helpers/native-intake-http-fixture.js';
 

@@ -2,10 +2,10 @@ import { expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { withDecisionLog, SqliteDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { settingsHazard } from '../sdk/src/platform/gate/batteries/settings-hazard.ts';
-import { readSettingsWriteEvidence } from '../sdk/src/platform/gate/policy/settings-write-evidence.ts';
-import { validateSettingsToolInvocationForAgentPolicy, wrapSettingsToolForAgentPolicy } from '../sdk/src/platform/gate/policy/settings-write-policy.ts';
-import type { Tool } from '../sdk/src/platform/types/tools.ts';
+import { settingsHazard } from '../platform/src/platform/gate/batteries/settings-hazard.ts';
+import { readSettingsWriteEvidence } from '../platform/src/platform/gate/policy/settings-write-evidence.ts';
+import { validateSettingsToolInvocationForAgentPolicy, wrapSettingsToolForAgentPolicy } from '../platform/src/platform/gate/policy/settings-write-policy.ts';
+import type { Tool } from '../platform/src/platform/types/tools.ts';
 
 const fixture = { mode: 'set', key: 'behavior.autoApprove', value: true, explicitUserRequest: 'turn on auto approve' };
 const answer = (probability: number, hazard = 'approval-gate', confidence = 0.95) => fakePort((name, question) => name === 'hazard'

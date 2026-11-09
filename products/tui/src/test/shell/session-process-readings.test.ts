@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
-import type { ProcessManager } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import { SessionViews } from '../../shell/session-views.ts';
 import { makeProcessOutputReadingFixture } from '../helpers/process-output-reading.ts';
 
@@ -21,7 +21,7 @@ function setup() {
   views.push(view); view.open({ kind: 'process', id: 'owned-process' }); view.poll();
   return { view, renders: () => renders, replaceArrays() { if (record) record.stdout = ['new output\n']; }, remove() { record = undefined; } };
 }
-const text = (lines: readonly import('@goodvibes-jev/engine/sdk/platform/types').Line[]) => lines.map(line => line.map(cell => cell.char).join('')).join('\n');
+const text = (lines: readonly import('@goodvibes-jev/engine/platform/platform/types').Line[]) => lines.map(line => line.map(cell => cell.char).join('')).join('\n');
 
 describe('process session reading lifecycle', () => {
   test('actual asynchronous observations repaint cached rows and the port header without paint requests', async () => {

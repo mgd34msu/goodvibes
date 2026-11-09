@@ -105,7 +105,7 @@ describe('build-binaries run', () => {
 // ---------------------------------------------------------------------------
 
 /**
- * The SDK declares thirty packages under `optionalDependencies` and reaches
+ * The platform declares thirty packages under `optionalDependencies` and reaches
  * every one of them through a dynamic import, so a running process without one
  * reports that feature unavailable and carries on. bun resolves a dynamic
  * import at BUNDLE time exactly as it resolves a static one, so before this the
@@ -115,8 +115,8 @@ describe('build-binaries run', () => {
  */
 const manifests: DependencyManifest[] = [
   {
-    name: '@goodvibes-jev/engine/sdk',
-    path: 'node_modules/@goodvibes-jev/engine/sdk/package.json',
+    name: '@goodvibes-jev/engine/platform',
+    path: 'node_modules/@goodvibes-jev/engine/platform/package.json',
     required: ['zustand'],
     optional: ['jsdom', '@mozilla/readability', 'openai'],
   },
@@ -253,7 +253,7 @@ describe('build-binaries dependency manifest reading', () => {
  *
  * Before the screen existed the same source failed at bundle time with
  * `Could not resolve: "…"` and produced no binary. The point of the change is
- * that it now produces one, and the lazy runtime resolution the SDK gained is
+ * that it now produces one, and the lazy runtime resolution the platform gained is
  * what reports the feature unavailable instead.
  *
  * The absent package is a name that does not exist anywhere, so nothing in

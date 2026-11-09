@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { createContext, runInContext } from 'node:vm';
-import { renderControlPlaneGatewayWebUi } from '../sdk/src/platform/control-plane/gateway-web-ui.js';
+import { renderControlPlaneGatewayWebUi } from '../platform/src/platform/control-plane/gateway-web-ui.js';
 
 test('the rendered page uses browser fetch for its stream and mutations', async () => {
   const requests: { url: string; method: string }[] = [];

@@ -11,7 +11,7 @@
  * relay protocol (the production wiring in later commits mirrors this).
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { createBunRelayServer } from '../daemon-sdk/src/relay-server-entry.js';
+import { createBunRelayServer } from '../daemon-api/src/relay-server-entry.js';
 import {
   decodeControlFrame,
   encodeControlFrame,

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
-import { InputTokenizer } from '@goodvibes-jev/engine/sdk/platform/core';
+import { InputTokenizer } from '@goodvibes-jev/engine/platform/platform/core';
 import { CommandRegistry, isDirectOwnerCommandContext, type CommandContext } from '../../input/command-registry.ts';
 import { registerHostPairingCommands } from '../../input/commands/host-pairing.ts';
 import { HostPairingController } from '../../shell/host-pairing-controller.ts';

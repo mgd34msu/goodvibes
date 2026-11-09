@@ -32,7 +32,7 @@ function stagedChecks(files: readonly string[], failingGate = ''): { checks: str
 }
 
 const sourceScopes = [
-  'packages/engine/sdk/src/index.ts',
+  'packages/engine/platform/src/index.ts',
   'packages/engine/package.json',
   'products/daemon/src/cli/parser.ts',
   'products/tui/src/components/fixture.tsx',

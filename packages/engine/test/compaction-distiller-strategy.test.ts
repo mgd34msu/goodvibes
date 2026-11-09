@@ -13,15 +13,15 @@ import {
   compactConversation,
   resolveCompactionStrategy,
   type ConversationCompactionHost,
-} from '../sdk/src/platform/core/conversation-compaction.js';
+} from '../platform/src/platform/core/conversation-compaction.js';
 import {
   distillConversation,
   DistillerUnavailableError,
-} from '../sdk/src/platform/core/distiller-compaction.js';
-import { REINJECT_INSTRUCTIONS_START } from '../sdk/src/platform/core/compaction-sections.js';
-import type { CompactionContext } from '../sdk/src/platform/core/compaction-types.js';
-import type { ProviderRegistry } from '../sdk/src/platform/providers/registry.js';
-import type { ProviderMessage } from '../sdk/src/platform/providers/interface.js';
+} from '../platform/src/platform/core/distiller-compaction.js';
+import { REINJECT_INSTRUCTIONS_START } from '../platform/src/platform/core/compaction-sections.js';
+import type { CompactionContext } from '../platform/src/platform/core/compaction-types.js';
+import type { ProviderRegistry } from '../platform/src/platform/providers/registry.js';
+import type { ProviderMessage } from '../platform/src/platform/providers/interface.js';
 import { useCompactionQuality } from './_helpers/compaction-quality.ts';
 
 // A registry whose provider.chat returns a fixed brief, the distiller's fresh

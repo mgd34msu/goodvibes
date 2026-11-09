@@ -1,7 +1,7 @@
 /**
  * embed-session-quickstart.ts
  *
- * SDK Embedding API 1.0, embed a GoodVibes session in another application:
+ * platform Embedding API 1.0, embed a GoodVibes session in another application:
  * create a session against a workspace, inject a permission callback, subscribe
  * to typed events, send input, and shut down. Compile-checked by
  * `examples/typecheck`; not executed here (it would boot a real daemon).
@@ -12,7 +12,7 @@ import {
   type PermissionPromptRequest,
   type PermissionPromptDecision,
   type AnyRuntimeEvent,
-} from '@goodvibes-jev/engine/sdk/embed';
+} from '@goodvibes-jev/engine/platform/embed';
 
 async function main(): Promise<void> {
   // 1. Create a session against a workspace. The permission callback is the

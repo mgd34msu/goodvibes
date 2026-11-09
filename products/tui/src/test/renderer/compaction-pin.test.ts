@@ -9,15 +9,15 @@
  *  5. SessionMemoryStore semantics: in-memory, session-scoped.
  */
 import { describe, test, expect } from 'bun:test';
-import { SessionMemoryStore } from '@goodvibes-jev/engine/sdk/platform/core';
+import { SessionMemoryStore } from '@goodvibes-jev/engine/platform/platform/core';
 import {
   buildCompactionPreview,
   buildCompactionAfterNotice,
   buildPinUsageText,
   buildPinSuccessText,
 } from '../../renderer/compaction-preview.ts';
-import type { CompactionEvent } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { ProviderMessage } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { CompactionEvent } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ProviderMessage } from '@goodvibes-jev/engine/platform/platform/providers';
 
 function makeMsg(role: 'user' | 'assistant', content: string): ProviderMessage {
   return { role, content };

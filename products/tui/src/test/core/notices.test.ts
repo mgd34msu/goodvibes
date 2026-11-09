@@ -11,7 +11,7 @@ import { bridgeNotificationFeedToToasts, ToastCenter } from '../../renderer/toas
 import { renderToasts } from '../../renderer/surface-kit-parts.ts';
 import { renderNotificationsModal } from '../../renderer/notifications-modal.ts';
 import { appendConversationMessages, type ConversationRenderContext } from '../../core/conversation-rendering.ts';
-import { createEmptyLine, type Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import { createEmptyLine, type Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { frameFromLayer } from '../helpers/surface-frame.ts';
 
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';

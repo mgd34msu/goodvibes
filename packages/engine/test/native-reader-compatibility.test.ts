@@ -4,13 +4,13 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createNativeDataWriteOwner, assertNativeReaderCompatible, nativeReaderCapabilities, parseNativeReaderCapabilities, NativeDataCompatibilityError,
-  NATIVE_READER_REQUIREMENT_FILE, type AdmittedNativeDataPublisher } from '../sdk/src/platform/runtime/native-reader-compatibility.js';
-import { applyVerifiedUpdate, realUpdateFileIo, resolveDaemonNativeTargets, sha256, UpdateTransactionError, type UpdateFetchLike } from '../sdk/src/platform/runtime/self-update.js';
-import { DurableBudgetLedger, PaymentBudgetUnavailableError } from '../sdk/src/platform/payments/host/budget-store.js';
-import { BudgetLedger, type BudgetLimits } from '../sdk/src/platform/payments/budget.js';
-import { tryAcquireCrossProcessLock } from '../sdk/src/platform/workspace/checkpoint/cross-process-lock.js';
+  NATIVE_READER_REQUIREMENT_FILE, type AdmittedNativeDataPublisher } from '../platform/src/platform/runtime/native-reader-compatibility.js';
+import { applyVerifiedUpdate, realUpdateFileIo, resolveDaemonNativeTargets, sha256, UpdateTransactionError, type UpdateFetchLike } from '../platform/src/platform/runtime/self-update.js';
+import { DurableBudgetLedger, PaymentBudgetUnavailableError } from '../platform/src/platform/payments/host/budget-store.js';
+import { BudgetLedger, type BudgetLimits } from '../platform/src/platform/payments/budget.js';
+import { tryAcquireCrossProcessLock } from '../platform/src/platform/workspace/checkpoint/cross-process-lock.js';
 import { nativeCohortFixture, nativeMemoryIo } from './_helpers/daemon-native-cohort.js';
-import { TelegramOffsetStore } from '../sdk/src/platform/channels/telegram/offset-store.js';
+import { TelegramOffsetStore } from '../platform/src/platform/channels/telegram/offset-store.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

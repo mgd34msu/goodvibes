@@ -3,8 +3,8 @@ import * as childProcess from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { resolveContractGitPlacement } from '../../sdk/src/platform/contract/git-placement.js';
-import { DurableContractAdmissions, type DurableContractRequest } from '../../sdk/src/platform/contract/durable-admission.js';
+import { resolveContractGitPlacement } from '../../platform/src/platform/contract/git-placement.js';
+import { DurableContractAdmissions, type DurableContractRequest } from '../../platform/src/platform/contract/durable-admission.js';
 import { makeHarness, makeRepo, type Harness } from './runner-support.js';
 
 const roots: string[] = [];

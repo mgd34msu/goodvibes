@@ -3,10 +3,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
-import { BrowserEngine } from '../sdk/src/platform/browser/browser-engine.js';
-import { BrowserSessionError, BrowserSessionManager } from '../sdk/src/platform/browser/browser-sessions.js';
-import { DRIVER_VERSION } from '../sdk/src/platform/browser/browser-provision-io.js';
-import type { BrowserProvisionIo } from '../sdk/src/platform/browser/browser-types.js';
+import { BrowserEngine } from '../platform/src/platform/browser/browser-engine.js';
+import { BrowserSessionError, BrowserSessionManager } from '../platform/src/platform/browser/browser-sessions.js';
+import { DRIVER_VERSION } from '../platform/src/platform/browser/browser-provision-io.js';
+import type { BrowserProvisionIo } from '../platform/src/platform/browser/browser-types.js';
 import { withTestTimeout } from './_helpers/test-timeout.js';
 
 function deferred() {

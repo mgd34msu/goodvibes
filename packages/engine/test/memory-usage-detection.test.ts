@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { detectReferencedMemoryIds } from '../sdk/src/platform/state/index.js';
+import { detectReferencedMemoryIds } from '../platform/src/platform/state/index.js';
 import { useMemoryReadings } from './_helpers/memory-readings.ts';
 
 /**

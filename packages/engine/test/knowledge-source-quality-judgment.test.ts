@@ -1,11 +1,11 @@
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.ts';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { isKnowledgeSourceQualityFailure, createKnowledgePageSourceReader, isUsefulKnowledgePageSource, knowledgePageSourceWeight, rankKnowledgePageSources, KnowledgeSourceQualityHeldError } from '../sdk/src/platform/knowledge/source-quality.js';
-import type { KnowledgeSourceRecord } from '../sdk/src/platform/knowledge/types.js';
+import { isKnowledgeSourceQualityFailure, createKnowledgePageSourceReader, isUsefulKnowledgePageSource, knowledgePageSourceWeight, rankKnowledgePageSources, KnowledgeSourceQualityHeldError } from '../platform/src/platform/knowledge/source-quality.js';
+import type { KnowledgeSourceRecord } from '../platform/src/platform/knowledge/types.js';
 let previous: JudgmentPort | undefined;
 beforeEach(() => { previous = installJudgmentPort(undefined); });
 afterEach(() => { installJudgmentPort(previous); });

@@ -30,10 +30,10 @@ import {
   parseIcs,
   type EventDateTime,
   type FeedFetchResult,
-} from '../sdk/src/platform/calendar/index.ts';
+} from '../platform/src/platform/calendar/index.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const CALENDAR_DIR = resolve(__dirname, '../sdk/src/platform/calendar');
+const CALENDAR_DIR = resolve(__dirname, '../platform/src/platform/calendar');
 
 // --- fixtures ---------------------------------------------------------------
 

@@ -3,10 +3,10 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { currentFileObservations } from '../../sdk/src/platform/contract/current-file-observations.ts';
-import { contractWithStoredReviewObservations, retainOriginalReviewDescriptors, reviewedFileFromObservation, reviewedFileVersionState } from '../../sdk/src/platform/contract/review-file-observations.ts';
-import { ContractStore, contractPath, deserializeContract, serializeContract } from '../../sdk/src/platform/contract/store.ts';
-import type { ContractUnit, UnitCheck } from '../../sdk/src/platform/contract/types.ts';
+import { currentFileObservations } from '../../platform/src/platform/contract/current-file-observations.ts';
+import { contractWithStoredReviewObservations, retainOriginalReviewDescriptors, reviewedFileFromObservation, reviewedFileVersionState } from '../../platform/src/platform/contract/review-file-observations.ts';
+import { ContractStore, contractPath, deserializeContract, serializeContract } from '../../platform/src/platform/contract/store.ts';
+import type { ContractUnit, UnitCheck } from '../../platform/src/platform/contract/types.ts';
 import { makeContract, makeUnit } from './fixtures.ts';
 
 function fixture() {

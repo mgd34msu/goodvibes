@@ -21,7 +21,7 @@
  * same asymmetry runs backwards too: asked to confirm the value, the agent
  * reads its own store, finds it blank, and reports the setting as not set.
  *
- * Ownership itself is defined ONCE, in the SDK (`config-ownership.ts`). Nothing
+ * Ownership itself is defined ONCE, in the platform (`config-ownership.ts`). Nothing
  * in this repo re-derives it, `isDaemonOwnedConfigKey` / `configKeyScope` are
  * re-exported here so callers (including the settings policy guard) share one
  * table rather than maintaining a parallel one that will drift.
@@ -44,11 +44,11 @@ import {
   type EffectiveConfigView,
   type LocalConfigReader,
   type LocalConfigWriter,
-} from '@goodvibes-jev/engine/sdk/platform/config';
-import type { DaemonConfigClient } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
-import { readOperatorTokenFile, resolveDaemonHomeDir } from '@goodvibes-jev/engine/sdk/platform/workspace';
+} from '@goodvibes-jev/engine/platform/platform/config';
+import type { DaemonConfigClient } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import { readOperatorTokenFile, resolveDaemonHomeDir } from '@goodvibes-jev/engine/platform/platform/workspace';
 import { join } from 'node:path';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 
 export {
   configKeyScope,
@@ -166,7 +166,7 @@ export function buildAgentConfigRouting(options: AgentConfigRoutingOptions = {})
     token,
     // Where the daemon listens is DERIVED from its own control-plane binding,
     // never from a stored base-URL string (which drifts on port, scheme and
-    // host, see the SDK's control-plane-base-url.ts). This is also what makes
+    // host, see the platform's control-plane-base-url.ts). This is also what makes
     // a foreground daemon discoverable: it writes no detached-daemon record, so
     // without this a live daemon looked absent and daemon-owned writes went to
     // the local file while it was running.

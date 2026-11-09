@@ -4,7 +4,7 @@
  * The settings workspace must answer "what does this feature do" at every
  * feature row without leaving the product: under the cursor, the FULL
  * behavior description and the feature's real option shape render from the
- * SDK's FEATURE_SETTINGS schema. Long documentation SCROLLS (PgUp/PgDn) with
+ * platform's FEATURE_SETTINGS schema. Long documentation SCROLLS (PgUp/PgDn) with
  * honest more-above/below markers, it is never clipped.
  *
  * These tests render real frames at 80×24 and at 60 columns, reconstruct the
@@ -17,9 +17,9 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { ConfigManager, ServiceRegistry, SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { FEATURE_SETTINGS, bindFeatureSettingsBridge, deriveFeatureStates } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
-import type { FeatureSetting } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
+import { ConfigManager, ServiceRegistry, SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { FEATURE_SETTINGS, bindFeatureSettingsBridge, deriveFeatureStates } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import type { FeatureSetting } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
 import { SecretsManager } from '../../config/secrets.ts';

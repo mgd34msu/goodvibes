@@ -1,9 +1,9 @@
 import { collectToolCallOutcomes, collectCompletedToolCallIds } from '../../core/conversation-render-context.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
-import type { AgentManager } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { ContractView } from '@goodvibes-jev/engine/sdk/platform/contract';
+import type { AgentManager } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
 import { ConversationManager } from '../../core/conversation.ts';
 import { wireWorkTree } from '../../core/work-tree-wiring.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';

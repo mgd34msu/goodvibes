@@ -1,4 +1,4 @@
-import { memoryRecordTemporalStatus, type MemoryRecord } from '@goodvibes-jev/engine/sdk/platform/state';
+import { memoryRecordTemporalStatus, type MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
 import type { AgentNoteRecord } from '../agent/note-registry.ts';
 import type { AgentPersonaRecord } from '../agent/persona-registry.ts';
 import { formatAgentRecordOrigin } from '../agent/record-labels.ts';

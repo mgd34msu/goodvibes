@@ -2,8 +2,8 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { join } from 'path';
 import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
-import { HookDispatcher } from '../sdk/src/platform/hooks/dispatcher.js';
-import { logger } from '../sdk/src/platform/utils/logger.js';
+import { HookDispatcher } from '../platform/src/platform/hooks/dispatcher.js';
+import { logger } from '../platform/src/platform/utils/logger.js';
 
 /**
  * Missing hooks.json is the normal state for most installs, loadFromFile

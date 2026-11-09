@@ -10,7 +10,7 @@
  * The claim store is module-scoped precisely so both routes share it.
  */
 import { describe, expect, test } from 'bun:test';
-import { InboundMessageDedup, inboundDedupKey } from '../sdk/src/platform/adapters/inbound-dedup.ts';
+import { InboundMessageDedup, inboundDedupKey } from '../platform/src/platform/adapters/inbound-dedup.ts';
 
 describe('InboundMessageDedup', () => {
   test('the first delivery is claimed and the second is not', () => {

@@ -19,7 +19,7 @@ import {
   type CiJob,
   type CiStatusSource,
   type FixSessionBrief,
-} from '../sdk/src/platform/ci-watch/index.ts';
+} from '../platform/src/platform/ci-watch/index.ts';
 
 function job(name: string, conclusion: string | null): CiJob {
   return { name, status: conclusion === null ? 'in_progress' : 'completed', conclusion };

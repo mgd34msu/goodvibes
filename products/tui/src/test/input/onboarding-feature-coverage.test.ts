@@ -2,7 +2,7 @@
  * Onboarding feature coverage + cross-surface consistency.
  *
  * Guarantees:
- *  - every SDK capability is REACHABLE in onboarding (as a surface
+ *  - every platform capability is REACHABLE in onboarding (as a surface
  *    side-effect, the HITL experience step, or a guided feature unit);
  *  - enabling a guided feature writes its real enablement settings key
  *    together with its config, there is no separate flag namespace;
@@ -12,11 +12,11 @@
  *  - every onboarding feature id names a real FEATURE_SETTINGS capability.
  */
 import { describe, test, expect } from 'bun:test';
-import { FEATURE_SETTINGS } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
-import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/sdk/platform/config';
+import { FEATURE_SETTINGS } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
 import { featureEnablementWrite, getFeatureSetting, isFeatureValueEnabled } from '@goodvibes-jev/engine/terminal-shell';
 import { OnboardingWizardController } from '../../input/onboarding/onboarding-wizard.ts';
-import { getServerSurfaceFeatureFlags } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { getServerSurfaceFeatureFlags } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { EXTERNAL_SURFACE_SPECS } from '../../input/onboarding/onboarding-wizard-external-surfaces.ts';
 import {
   FEATURE_ONBOARDING_SECTIONS,

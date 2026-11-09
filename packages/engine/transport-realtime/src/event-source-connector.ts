@@ -26,7 +26,7 @@ import {
   type RuntimeEventDomain,
   type RuntimeEventRecord,
 } from '@goodvibes-jev/engine/contracts';
-import { GoodVibesSdkError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes-jev/engine/errors';
 import {
   buildUrl,
   normalizeAuthToken,
@@ -105,7 +105,7 @@ export function createEventSourceConnector<TEvent extends RuntimeEventRecord = R
           // drop the frame instead of delivering an unvalidated envelope to typed consumers.
           const parsed = SerializedEventEnvelopeSchema.safeParse(payload);
           if (!parsed.success) {
-            const validationError = new GoodVibesSdkError('SSE runtime event payload failed schema validation.', {
+            const validationError = new GoodVibesError('SSE runtime event payload failed schema validation.', {
               category: 'protocol',
               source: 'transport',
               recoverable: true,

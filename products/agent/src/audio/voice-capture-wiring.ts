@@ -15,10 +15,10 @@ import { createVoiceCapturePorts, wireTerminalWakeCapture } from '@goodvibes-jev
  * which is what keeps this file out of the shell-UI layers.
  */
 
-import '@goodvibes-jev/engine/sdk/platform/utils';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { VoiceProviderRegistry, VoiceService } from '@goodvibes-jev/engine/sdk/platform/voice';
-import type { AudioInputDeviceEnumerator } from '@goodvibes-jev/engine/sdk/platform/voice/capture';
+import '@goodvibes-jev/engine/platform/platform/utils';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { VoiceProviderRegistry, VoiceService } from '@goodvibes-jev/engine/platform/platform/voice';
+import type { AudioInputDeviceEnumerator } from '@goodvibes-jev/engine/platform/platform/voice/capture';
 import type { VoiceCaptureIndicatorState } from '../core/voice-capture-status.ts';
 import { createAgentCaptureOpener } from './capture.ts';
 import { playActivationSound } from './activation-sound.ts';
@@ -27,7 +27,7 @@ import type { StreamingAudioPlayer } from './player.ts';
 import { createVoiceSttGateway } from '../core/voice-stt-gateway.ts';
 import { startWakeRuntime, wireWakeRuntime } from './wake-runtime.ts';
 import { createInputDeviceEnumerator } from './input-devices.ts';
-import type { DaemonVerbCaller } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 
 export interface VoiceCaptureWiringDeps {
   readonly configManager: ConfigManager;
@@ -39,7 +39,7 @@ export interface VoiceCaptureWiringDeps {
   readonly managedVoiceRoot: string;
   /** A directory this surface owns for the extracted onnxruntime assets. */
   readonly assetDirectory: string;
-  /** Names retained clips so the SDK's sweeper can reap them when the session ends. */
+  /** Names retained clips so the platform's sweeper can reap them when the session ends. */
   readonly sessionId: string;
   /** Writes recognised text into the composer. */
   readonly writeDraft: (text: string) => void;

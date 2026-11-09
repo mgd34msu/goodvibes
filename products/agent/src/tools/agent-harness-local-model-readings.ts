@@ -1,16 +1,16 @@
-import { decisionOrClassic, isClassicOperation } from '@goodvibes-jev/engine/sdk/platform/runtime';
-import { declaredClassicModelStack, declaredClassicBoolean, declaredClassicServingStatus, declaredClassicResourcePressure } from '@goodvibes-jev/engine/sdk/platform/routing';
+import { decisionOrClassic, isClassicOperation } from '@goodvibes-jev/engine/platform/platform/runtime';
+import { declaredClassicModelStack, declaredClassicBoolean, declaredClassicServingStatus, declaredClassicResourcePressure } from '@goodvibes-jev/engine/platform/platform/routing';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { gateJudgmentRegistry, prepareJudgmentResult } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { localServerIdentity, localServerIdentityPolicy, localServingStatus, localServingStatusPolicy, localResourcePressure, localResourcePressurePolicy, localServingSchemaStatus, localServingSchemaStatusPolicy, routingRegistry } from '@goodvibes-jev/engine/sdk/platform/routing';
-import { assertProjectionCurrent, booleanValue, booleanValuePolicy, ToolInputProjectionError, type NativeDecisionPolicy } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { gateJudgmentRegistry, prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
+import { localServerIdentity, localServerIdentityPolicy, localServingStatus, localServingStatusPolicy, localResourcePressure, localResourcePressurePolicy, localServingSchemaStatus, localServingSchemaStatusPolicy, routingRegistry } from '@goodvibes-jev/engine/platform/platform/routing';
+import { assertProjectionCurrent, booleanValue, booleanValuePolicy, ToolInputProjectionError, type NativeDecisionPolicy } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 import { captureModelReadingInput, captureModelReadingSnapshotGuard, withModelReadingSource, type ModelReadingOptions } from './agent-harness-model-reading-source.ts';
 import { personalOpsEntry } from './agent-harness-personal-ops-source.ts';
 import type { LocalModelServerServingDiagnostics } from './agent-harness-model-routing-types.ts';
 
-export type { ClassicModelStack as LocalModelStack } from '@goodvibes-jev/engine/sdk/platform/routing';
-import type { ClassicModelStack as LocalModelStack } from '@goodvibes-jev/engine/sdk/platform/routing';
+export type { ClassicModelStack as LocalModelStack } from '@goodvibes-jev/engine/platform/platform/routing';
+import type { ClassicModelStack as LocalModelStack } from '@goodvibes-jev/engine/platform/platform/routing';
 
 function localReadingOptions(options: ModelReadingOptions): ModelReadingOptions {
   const optionsCurrent = captureCatalogMethods(options, ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent']);

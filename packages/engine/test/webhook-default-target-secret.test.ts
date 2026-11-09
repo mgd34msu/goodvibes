@@ -6,10 +6,10 @@
  * reference, so the webhook delivery strategy resolves it before posting.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { createWebhookDeliveryStrategy } from '../sdk/src/platform/channels/delivery/strategies-core.js';
-import { isSecretBearingConfigKey } from '../sdk/src/platform/config/secret-bearing-config-keys.js';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import type { ArtifactStore } from '../sdk/src/platform/artifacts/index.js';
+import { createWebhookDeliveryStrategy } from '../platform/src/platform/channels/delivery/strategies-core.js';
+import { isSecretBearingConfigKey } from '../platform/src/platform/config/secret-bearing-config-keys.js';
+import type { ConfigManager } from '../platform/src/platform/config/manager.js';
+import type { ArtifactStore } from '../platform/src/platform/artifacts/index.js';
 
 const originalFetch = globalThis.fetch;
 afterEach(() => {

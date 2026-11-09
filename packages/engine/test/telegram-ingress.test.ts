@@ -15,10 +15,10 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { TelegramIngressSupervisor, describeWebhookUrlProblem } from '../sdk/src/platform/channels/telegram/ingress.ts';
-import { TelegramApiError, TelegramBotApi } from '../sdk/src/platform/channels/telegram/api.ts';
-import { TelegramOffsetStore } from '../sdk/src/platform/channels/telegram/offset-store.ts';
-import { PaymentReplyHistoryError } from '../sdk/src/platform/payments/reply-history.js';
+import { TelegramIngressSupervisor, describeWebhookUrlProblem } from '../platform/src/platform/channels/telegram/ingress.ts';
+import { TelegramApiError, TelegramBotApi } from '../platform/src/platform/channels/telegram/api.ts';
+import { TelegramOffsetStore } from '../platform/src/platform/channels/telegram/offset-store.ts';
+import { PaymentReplyHistoryError } from '../platform/src/platform/payments/reply-history.js';
 
 // ── fakes ───────────────────────────────────────────────────────────────────
 

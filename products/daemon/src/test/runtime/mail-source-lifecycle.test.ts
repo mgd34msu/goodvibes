@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { readEmailConfig } from '@goodvibes-jev/engine/sdk/platform/email';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { readEmailConfig } from '@goodvibes-jev/engine/platform/platform/email';
 import { composeMailDeps } from '../../runtime/mail-composition.ts';
 import { makeOwnedTempDir } from '../helpers/owned-temp.ts';
 

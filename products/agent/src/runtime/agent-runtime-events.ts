@@ -1,10 +1,10 @@
-import type { GateEvent } from '@goodvibes-jev/engine/sdk/events';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ContractRunner } from '@goodvibes-jev/engine/sdk/platform/contract';
-import { registerContractRuntimeEvents, type HostRuntimeMessageRouter } from '@goodvibes-jev/engine/sdk/platform/runtime/bootstrap';
-import type { ConversationFollowUpItem } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { AgentManager, ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { GateEvent } from '@goodvibes-jev/engine/platform/events';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ContractRunner } from '@goodvibes-jev/engine/platform/platform/contract';
+import { registerContractRuntimeEvents, type HostRuntimeMessageRouter } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+import type { ConversationFollowUpItem } from '@goodvibes-jev/engine/platform/platform/core';
+import type { AgentManager, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import type {
   AgentEvent,
   CompactionEvent,
@@ -59,13 +59,13 @@ interface ChildFailureEnvelopeLike {
 }
 
 /**
- * Fetches the structured child-failure envelope the SDK's own `agent` tool
- * attaches to its `status` action result (SDK 1.6.1, child-failure
+ * Fetches the structured child-failure envelope the platform's own `agent` tool
+ * attaches to its `status` action result (platform 1.6.1, child-failure
  * envelopes on the agent tool's status/get/wait results) and renders it as a
  * compact suffix: `reason: <code>, phase: <phase>[, N turns completed][, note]`.
  * Goes through `toolRegistry.execute`, the SAME tool the model calls,
  * rather than re-deriving the classification locally: `classifyChildFailureReason`
- * and `describeChildPhase` are internal to the SDK's tool module, not part of
+ * and `describeChildPhase` are internal to the platform's tool module, not part of
  * its public API, so calling the tool is the only faithful way to surface
  * the real classification instead of guessing at it. Read-only, no side
  * effects (see ToolRegistry.execute's own doc comment); returns null on any
@@ -121,8 +121,8 @@ export function registerAgentRuntimeEvents(options: AgentRuntimeEventBridgeOptio
   unsubs.push(runtimeBus.onDomain('compaction', (env) => {
     domainDispatch.dispatchCompactionEvent(env.payload);
   }));
-  // The mandatory post-compaction receipt (SDK 1.6.1, emitted after every
-  // automatic and manual compaction path, see the SDK's own doc comment on
+  // The mandatory post-compaction receipt (platform 1.6.1, emitted after every
+  // automatic and manual compaction path, see the platform's own doc comment on
   // emitCompactionReceipt) is the one compaction signal a user should never
   // miss: system-message-router.ts's own tiering doc already names
   // "compaction events" as 'high' priority (conversation + activity feed),
@@ -191,7 +191,7 @@ export function registerAgentRuntimeEvents(options: AgentRuntimeEventBridgeOptio
       const durationSeconds = record.completedAt !== undefined ? Math.round((record.completedAt - record.startedAt) / 1000) : 0;
       const taskSnippet = formatAgentTask(record.task);
 
-      // The typed turn-budget-exhaustion outcome (SDK 1.8.0, agents/turn-budget.ts):
+      // The typed turn-budget-exhaustion outcome (platform 1.8.0, agents/turn-budget.ts):
       // record.failureReason === 'max_turns' plus record.turnBudget (the applied
       // limit and which input set it, default / spawn-override / policy-bound)
       // are stamped on the record at the source, never derived from regex-matching
@@ -216,7 +216,7 @@ export function registerAgentRuntimeEvents(options: AgentRuntimeEventBridgeOptio
         return;
       }
 
-      // Compact child-failure envelope enrichment (SDK 1.6.1), fetched via
+      // Compact child-failure envelope enrichment (platform 1.6.1), fetched via
       // the SAME 'agent' tool the model calls, then appended to the base
       // message. Deferred (async) rather than blocking this handler; no test
       // or downstream consumer depends on this message landing synchronously

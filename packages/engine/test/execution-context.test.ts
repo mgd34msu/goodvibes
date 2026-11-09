@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
-import { captureProjectionArgs } from '../sdk/src/platform/tools/input-projection.ts';
-import { snapshotJudgmentInput } from '../sdk/src/platform/gate/judgment-input.ts';
-import { currentExecutionMode, currentExecutionModeOwner, isInvocationAdmitted, isYoloExecution, withExecutionMode, withExecutionModeOwner } from '../sdk/src/platform/gate/execution-context.ts';
+import { captureProjectionArgs } from '../platform/src/platform/tools/input-projection.ts';
+import { snapshotJudgmentInput } from '../platform/src/platform/gate/judgment-input.ts';
+import { currentExecutionMode, currentExecutionModeOwner, isInvocationAdmitted, isYoloExecution, withExecutionMode, withExecutionModeOwner } from '../platform/src/platform/gate/execution-context.ts';
 
 test('simultaneous invocations retain their own mode across asynchronous work', async () => {
   let release: () => void = () => {};

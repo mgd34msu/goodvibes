@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { buildAdapters, clearAdapterRegistry, POLL_CADENCE_MS, registerAdapterFactory, registeredProviderIds, type AdapterContext, type InboundProviderAdapter } from '../sdk/src/platform/intake/provider-adapter.ts';
+import { buildAdapters, clearAdapterRegistry, POLL_CADENCE_MS, registerAdapterFactory, registeredProviderIds, type AdapterContext, type InboundProviderAdapter } from '../platform/src/platform/intake/provider-adapter.ts';
 
 const context: AdapterContext = {
   credentials: { resolveRef: async () => null, resolveConfigSecret: async () => null },

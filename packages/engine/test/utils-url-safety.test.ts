@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { validatePublicWebhookUrl } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { postToPublicWebhook } from '../sdk/src/platform/utils/url-safety.ts';
-import type { HostResolver } from '../sdk/src/platform/tools/fetch/pinned-request.ts';
+import { validatePublicWebhookUrl } from '@goodvibes-jev/engine/platform/platform/utils';
+import { postToPublicWebhook } from '../platform/src/platform/utils/url-safety.ts';
+import type { HostResolver } from '../platform/src/platform/tools/fetch/pinned-request.ts';
 
 describe('validatePublicWebhookUrl', () => {
   test('accepts normalized public https webhook URLs', () => {

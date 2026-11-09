@@ -17,13 +17,13 @@
   "references": [
     { "path": "./contracts" },
     { "path": "./errors" },
-    { "path": "./daemon-sdk" },
+    { "path": "./daemon-api" },
     { "path": "./transport-core" },
     { "path": "./transport-http" },
     { "path": "./transport-realtime" },
-    { "path": "./operator-sdk" },
-    { "path": "./peer-sdk" },
-    { "path": "./sdk" },
+    { "path": "./operator-client" },
+    { "path": "./peer-client" },
+    { "path": "./platform" },
     { "path": "./terminal-shell" }
   ]
 }

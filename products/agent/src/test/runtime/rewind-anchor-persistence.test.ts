@@ -7,7 +7,7 @@
  * is still a rewind target after a resume, and the sweep that reclaims dead
  * sidecars never touches the ones a live session still needs.
  *
- * Driven through the real SDK seams (persist / restore / reap over a real
+ * Driven through the real platform seams (persist / restore / reap over a real
  * SessionSurface on a temp root), because a sidecar that is written and never
  * read back is not a capability.
  */
@@ -23,7 +23,7 @@ import {
   resolveTurnAnchor,
   restoreTurnAnchors,
   summarizeTurnLabel,
-} from '@goodvibes-jev/engine/sdk/platform/rewind';
+} from '@goodvibes-jev/engine/platform/platform/rewind';
 import { createSessionSurface } from '@/runtime/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';

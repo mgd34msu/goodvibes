@@ -8,7 +8,7 @@
  */
 
 import { formatDuration } from './modal-utils.ts';
-import type { ProcessManager } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import { activeTokens } from './theme.ts';
 import { beginModal, drawWrapped, finishModal, scrollCountText, type KitHint, type SurfaceLayer } from './surface-kit.ts';
 import { drawList, type KitRow } from './surface-kit-list.ts';

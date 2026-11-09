@@ -1,6 +1,6 @@
 import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { CommandContext } from '../input/command-registry.ts';
 import { nativeSettingsCommandMutation } from '../input/commands/operator-runtime.ts';
 import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';

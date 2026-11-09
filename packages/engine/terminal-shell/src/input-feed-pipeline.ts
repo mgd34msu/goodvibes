@@ -1,5 +1,5 @@
 /** Own input dispatch order and snapshot write-back once, with typed product route ports. */
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { InfiniteBuffer } from './conversation-history.js';
 import type { FeedContextMutableInit } from './input-feed-context.js';
 import { handleSessionViewToken, type SessionViewControls } from './session-view-input.js';

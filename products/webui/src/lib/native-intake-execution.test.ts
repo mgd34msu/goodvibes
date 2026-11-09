@@ -1,4 +1,4 @@
-/** Actual browser HTTP facade + SDK validators, replaying unchanged production daemon response bytes. */
+/** Actual browser HTTP facade + platform validators, replaying unchanged production daemon response bytes. */
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { getClientLifetime, tokenStore } from "./client-lifetime";
@@ -8,8 +8,8 @@ import type {
   NativeExecutionBrowserJournal,
   NativeExecutionBrowserRecord,
 } from "./native-execution-journal";
-import type { NativeConversationIntakeCaptureRequest } from "@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client";
-import type { NativeWorkExecutionRequest } from "@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client";
+import type { NativeConversationIntakeCaptureRequest } from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client";
+import type { NativeWorkExecutionRequest } from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client";
 
 interface Wire {
   status: number;

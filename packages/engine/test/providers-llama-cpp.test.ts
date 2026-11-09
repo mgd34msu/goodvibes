@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
-import type { ChatResponse, LLMProvider } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { LlamaCppProvider } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ChatResponse, LLMProvider } from '@goodvibes-jev/engine/platform/platform/providers';
+import { LlamaCppProvider } from '@goodvibes-jev/engine/platform/platform/providers';
 
 describe('LlamaCppProvider', () => {
   beforeEach(() => {

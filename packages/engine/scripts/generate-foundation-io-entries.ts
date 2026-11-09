@@ -31,9 +31,9 @@ import { assertCoversMethodIds, descriptorSchemas, parseMethodIds } from './foun
 import { renderType } from './foundation-io-render.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SDK_ROOT = resolve(__dirname, '..');
-const FOUNDATION_TYPES_PATH = resolve(SDK_ROOT, 'contracts/src/generated/foundation-client-types.ts');
-const METHOD_IDS_PATH = resolve(SDK_ROOT, 'contracts/src/generated/operator-method-ids.ts');
+const ENGINE_ROOT = resolve(__dirname, '..');
+const FOUNDATION_TYPES_PATH = resolve(ENGINE_ROOT, 'contracts/src/generated/foundation-client-types.ts');
+const METHOD_IDS_PATH = resolve(ENGINE_ROOT, 'contracts/src/generated/operator-method-ids.ts');
 
 /** Replace the body of one `export interface <name> { ... }` block. */
 function replaceMapBody(fileText: string, mapName: string, body: string): string {

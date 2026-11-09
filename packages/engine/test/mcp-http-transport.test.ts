@@ -4,13 +4,13 @@
  * fallback, dual-era negotiation, and x-mcp-header parameter mirroring.
  */
 import { afterAll, describe, expect, test } from 'bun:test';
-import { McpClient } from '../sdk/src/platform/mcp/client.js';
+import { McpClient } from '../platform/src/platform/mcp/client.js';
 import {
   buildParamHeaders,
   collectHeaderAnnotations,
   encodeHeaderValue,
-} from '../sdk/src/platform/mcp/http-headers.js';
-import { MCP_STATELESS_REVISION } from '../sdk/src/platform/mcp/protocol.js';
+} from '../platform/src/platform/mcp/http-headers.js';
+import { MCP_STATELESS_REVISION } from '../platform/src/platform/mcp/protocol.js';
 
 interface SeenRequest {
   method: string;

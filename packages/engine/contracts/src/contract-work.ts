@@ -5,8 +5,8 @@
  * Surfaces and partner apps that do not embed the runner dispatch, poll,
  * cancel and fetch contract work through an adapter with these four methods.
  * Two implementations exist: the in-process hosted adapter
- * (sdk platform/hosted-sessions/contract-work-adapter.ts) and the operator
- * adapter over the `contracts.*` methods (operator-sdk
+ * (platform/src/platform/hosted-sessions/contract-work-adapter.ts) and the operator
+ * adapter over the `contracts.*` methods (operator-client
  * contract-work-adapter.ts). The types and the mapping from a contract to a
  * snapshot or result live here, in the wire contracts package both reach, so
  * the two adapters report a contract the same way.

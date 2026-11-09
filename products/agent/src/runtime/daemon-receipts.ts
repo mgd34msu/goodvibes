@@ -8,13 +8,13 @@
  * destructive at the daemon (served exactly once to the consuming reader), so
  * whichever read consumes them must render them or they are lost. The agent's
  * consuming reader is a single `?receipts=consume` read issued once per attach
- * (createSessionSpineReceiptConsumer, SDK platform/runtime/session-spine,
+ * (createSessionSpineReceiptConsumer, platform platform/runtime/session-spine,
  * wired through services.consumeDaemonReceipts); the frequent liveness
  * keepalive probe stays plain and never touches receipts. Every consumed
  * payload is pushed here.
  *
  * The parsing helper (extractSessionSpineReceipts) and the DaemonReceipt type
- * now live in the SDK (this file's own copy was a byte-identical mirror).
+ * now live in the platform (this file's own copy was a byte-identical mirror).
  * What stays agent-local is this buffering
  * feed: it delivers receipts captured before the renderer exists (the first
  * consuming read can fire during boot, before the render sink attaches),
@@ -23,7 +23,7 @@
  * presentation, not transport.
  */
 
-import type { DaemonReceipt } from '@goodvibes-jev/engine/sdk/platform/daemon/receipts';
+import type { DaemonReceipt } from '@goodvibes-jev/engine/platform/platform/daemon/receipts';
 
 export type { DaemonReceipt };
 

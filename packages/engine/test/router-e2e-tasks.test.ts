@@ -14,7 +14,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { dispatchTaskRoutes } from '../daemon-sdk/src/tasks.js';
+import { dispatchTaskRoutes } from '../daemon-api/src/tasks.js';
 import { makeDefaultDaemonHandlerStub } from './_helpers/daemon-stub-handlers.js';
 import { makeRequest } from './_helpers/router-requests.js';
 

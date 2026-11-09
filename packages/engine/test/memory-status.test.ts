@@ -8,7 +8,7 @@ import {
   memoryPressureLevel,
   type MemoryGovernorSnapshotResult,
   type MemoryPressurePayload,
-} from '../sdk/src/platform/runtime/memory/status.ts';
+} from '../platform/src/platform/runtime/memory/status.ts';
 
 function snapshot(overrides: Partial<MemoryGovernorSnapshotResult> = {}): MemoryGovernorSnapshotResult {
   return {

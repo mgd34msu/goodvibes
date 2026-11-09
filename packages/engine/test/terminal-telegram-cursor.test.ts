@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { createTerminalCommandRegistry } from '../terminal-shell/src/command-registry.js';
 import { SelectionModal, type OpenSelection } from '../terminal-shell/src/selection-modal.js';
 import { attachSelectionModalQueue, type SelectionModalCallback } from '../terminal-shell/src/selection-modal-queue.js';

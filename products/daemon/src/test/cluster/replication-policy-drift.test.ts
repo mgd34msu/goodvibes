@@ -2,19 +2,19 @@
 // replication-policy-drift.test.ts, the two halves of one derivation.
 //
 // Cluster config replication decides WHICH credential belongs to a replicated
-// setting by deriving the secret-store name from the config path. The SDK has
+// setting by deriving the secret-store name from the config path. The platform has
 // its own copy of that derivation (`replicatedSecretKeyFor`), and this
 // repository has another (`buildGoodVibesSecretKey` in src/config/secret-config.ts).
 //
 // Two copies of a rule is a rule that drifts. If they ever disagree, a
 // credential either fails to replicate, a machine wins a surface it cannot
-// serve, or a secret nobody intended to share is selected by a name the SDK
+// serve, or a secret nobody intended to share is selected by a name the platform
 // derived and this repository did not. This pins them together.
 //
 // ── Why this test exists ──────────────────────────────────────────────────
 //
 // This repository carries its own byte-for-byte copy of secret-config.ts and
-// had ZERO tests over it, so nothing pinned it against the SDK's copy on the
+// had ZERO tests over it, so nothing pinned it against the platform's copy on the
 // side that actually does the replicating.
 // ---------------------------------------------------------------------------
 
@@ -24,7 +24,7 @@ import {
   isReplicatedSecretKey,
   listReplicatedConfigPaths,
   replicatedSecretKeyFor,
-} from '@goodvibes-jev/engine/sdk/platform/cluster';
+} from '@goodvibes-jev/engine/platform/platform/cluster';
 import { buildGoodVibesSecretKey, SECRET_CONFIG_KEYS } from '../../config/secret-config.ts';
 
 describe('the secret-name derivation', () => {
@@ -32,7 +32,7 @@ describe('the secret-name derivation', () => {
     const paths = listReplicatedConfigPaths();
     expect(paths.length).toBeGreaterThan(0);
     for (const path of paths) {
-      expect(replicatedSecretKeyFor(path), `${path} derives a different secret name in the SDK`)
+      expect(replicatedSecretKeyFor(path), `${path} derives a different secret name in the platform`)
         .toBe(buildGoodVibesSecretKey(path));
     }
   });
@@ -50,7 +50,7 @@ describe('the secret-name derivation', () => {
     // a name this daemon never looks up.
     expect(SECRET_CONFIG_KEYS.size).toBeGreaterThan(0);
     for (const key of SECRET_CONFIG_KEYS) {
-      expect(replicatedSecretKeyFor(key), `${key} derives a different secret name in the SDK`)
+      expect(replicatedSecretKeyFor(key), `${key} derives a different secret name in the platform`)
         .toBe(buildGoodVibesSecretKey(key));
     }
   });

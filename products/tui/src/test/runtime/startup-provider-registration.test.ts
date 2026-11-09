@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { DiscoveredServer } from '@goodvibes-jev/engine/sdk/platform/discovery';
-import type { BackgroundProviderDiscoveryOptions } from '@goodvibes-jev/engine/sdk/platform/runtime/bootstrap';
+import type { DiscoveredServer } from '@goodvibes-jev/engine/platform/platform/discovery';
+import type { BackgroundProviderDiscoveryOptions } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 import { registerStartupProviders } from '../../runtime/startup-provider-registration.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 

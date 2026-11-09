@@ -2,11 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { executeSymbolsQuery } from '../sdk/src/platform/tools/find/symbols.ts';
+import { executeSymbolsQuery } from '../platform/src/platform/tools/find/symbols.ts';
 import {
   extractOutline,
   extractSymbols,
-} from '../sdk/src/platform/tools/read/text.ts';
+} from '../platform/src/platform/tools/read/text.ts';
 
 function tempDir(): string {
   const dir = join(tmpdir(), `gv-find-symbols-${Date.now()}-${crypto.randomUUID()}`);

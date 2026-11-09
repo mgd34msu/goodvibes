@@ -1,8 +1,8 @@
 import { afterEach, expect, mock, test } from 'bun:test';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
-import { WEBUI_CODE_LANGUAGES } from '@goodvibes-jev/engine/sdk/platform/judgment-browser/catalogs';
-import type { BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-sdk';
+import { WEBUI_CODE_LANGUAGES } from '@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs';
+import type { BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-api';
 import { invalidateClientLifetime } from '../lib/client-lifetime';
 
 type Request = BrowserJudgmentRequest<'webui.code.language'>;

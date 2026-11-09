@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { RouteStore } from '../sdk/src/platform/channels/host-routing/route-store.ts';
-import { HandlerSqliteStore } from '../sdk/src/platform/state/daemon-handler-sqlite-store.ts';
+import { RouteStore } from '../platform/src/platform/channels/host-routing/route-store.ts';
+import { HandlerSqliteStore } from '../platform/src/platform/state/daemon-handler-sqlite-store.ts';
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;

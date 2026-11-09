@@ -1,10 +1,10 @@
 import * as crypto from 'node:crypto';
-import { PermissionManager, type PermissionConfigReader } from '../sdk/src/platform/permissions/manager.js';
-import { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.js';
-import { judgmentInputBoundary } from '../sdk/src/platform/gate/boundary.js';
-import { createContractInputAuthority, authorizeContractInputPath, withContractInputAuthority } from '../sdk/src/platform/contract/input-authority.js';
-import { defaultRepositoryMap } from '../sdk/src/platform/contract/planner.js';
-import type { Contract } from '../sdk/src/platform/contract/types.js';
+import { PermissionManager, type PermissionConfigReader } from '../platform/src/platform/permissions/manager.js';
+import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.js';
+import { judgmentInputBoundary } from '../platform/src/platform/gate/boundary.js';
+import { createContractInputAuthority, authorizeContractInputPath, withContractInputAuthority } from '../platform/src/platform/contract/input-authority.js';
+import { defaultRepositoryMap } from '../platform/src/platform/contract/planner.js';
+import type { Contract } from '../platform/src/platform/contract/types.js';
 import { useGateReadings } from './_helpers/gate-readings.js';
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
@@ -12,7 +12,7 @@ import { chmodSync, closeSync, openSync, ftruncateSync, existsSync, lstatSync, m
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deflateSync } from 'node:zlib';
-import { assertContractInputObjects, assertContractInputOwner, assertContractInputView, createContractInputViewAssertion, captureContractInput, contractInputPath, isContractInputSnapshot, materializeContractInput, initializeContractMemberWorktree } from '../sdk/src/platform/contract/input-snapshot.js';
+import { assertContractInputObjects, assertContractInputOwner, assertContractInputView, createContractInputViewAssertion, captureContractInput, contractInputPath, isContractInputSnapshot, materializeContractInput, initializeContractMemberWorktree } from '../platform/src/platform/contract/input-snapshot.js';
 
 useGateReadings();
 const roots: string[] = [];
@@ -87,7 +87,7 @@ describe('local frozen contract input', () => {
     await assertContractInputOwner(restored); await assertContractInputView(restored);
     const receiptPath = join(root, '.goodvibes/version-one-receipt.json');
     writeFileSync(receiptPath, JSON.stringify(restored));
-    const source = new URL('../sdk/src/platform/contract/input-snapshot.ts', import.meta.url).href;
+    const source = new URL('../platform/src/platform/contract/input-snapshot.ts', import.meta.url).href;
     const child = Bun.spawn([process.execPath, '--eval', `
       import { assertContractInputOwner, assertContractInputView, isContractInputSnapshot } from ${JSON.stringify(source)};
       const receipt = JSON.parse(await Bun.file(process.argv[1]).text());
@@ -243,11 +243,11 @@ describe('local frozen contract input', () => {
 
 
 test('denied captured source exports stay withheld from the repository map', async () => {
-  const { defaultRepositoryMap } = await import('../sdk/src/platform/contract/planner.js');
-  const { createContractInputAuthority, withContractInputAuthority } = await import('../sdk/src/platform/contract/input-authority.js');
+  const { defaultRepositoryMap } = await import('../platform/src/platform/contract/planner.js');
+  const { createContractInputAuthority, withContractInputAuthority } = await import('../platform/src/platform/contract/input-authority.js');
   const root = repo(); writeFileSync(join(root, 'secret.ts'), 'export const SYNTHETIC_PRIVATE_EXPORT = 123;\n');
   const snapshot = await captureContractInput(root); const frozen = await view(root, snapshot);
-  const authority = await createContractInputAuthority({ projectRoot: root, inputSnapshot: snapshot } as import('../sdk/src/platform/contract/types.js').Contract, frozen);
+  const authority = await createContractInputAuthority({ projectRoot: root, inputSnapshot: snapshot } as import('../platform/src/platform/contract/types.js').Contract, frozen);
   const checked: string[] = [];
   const map = await withContractInputAuthority(authority, () => defaultRepositoryMap(frozen, async (path) => { checked.push(path); return !path.endsWith('/secret.ts'); }));
   expect(checked.some((path) => path === join(frozen, 'secret.ts'))).toBe(true);
@@ -255,7 +255,7 @@ test('denied captured source exports stay withheld from the repository map', asy
 });
 
 test('raw member initializer preserves captured bytes and runs neither smudge nor checkout/reference hooks', async () => {
-  const { IsolatedWorktree } = await import('../sdk/src/platform/agents/worktree.js');
+  const { IsolatedWorktree } = await import('../platform/src/platform/agents/worktree.js');
   const root = repo();
   writeFileSync(join(root, '.gitattributes'), '*.ts filter=marker\n');
   git(root, 'config', 'filter.marker.smudge', 'touch FILTER_RAN; cat');
@@ -293,7 +293,7 @@ test('an index replaced during capture holds even if the logical staged entries 
 });
 
 test('redirected runtime storage is held before materialization', async () => {
-  const { prepareContractInputParent } = await import('../sdk/src/platform/contract/input-snapshot.js');
+  const { prepareContractInputParent } = await import('../platform/src/platform/contract/input-snapshot.js');
   const root = repo(); const outside = mkdtempSync(join(tmpdir(), 'contract-input-outside-')); roots.push(outside);
   symlinkSync(outside, join(root, '.goodvibes'));
   const snapshot = await captureContractInput(root);

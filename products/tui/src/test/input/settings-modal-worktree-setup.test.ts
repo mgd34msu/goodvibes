@@ -7,8 +7,8 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ConfigManager as ConfigManagerType } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager as ConfigManagerType } from '@goodvibes-jev/engine/platform/platform/config';
 import { buildSettingGroups } from '../../input/settings-modal-data.ts';
 import { applySettingValue } from '../../input/settings-modal-mutations.ts';
 import {
@@ -55,13 +55,13 @@ describe('worktree.setup.* synthetic settings', () => {
 
   test('reflects a value the config store already holds for the key', () => {
     // A stub stands in here rather than a real ConfigManager purely to isolate
-    // the read-mapping logic from any on-disk store state. (The SDK now
+    // the read-mapping logic from any on-disk store state. (The platform now
     // registers the `worktree` section in DEFAULT_CONFIG, so a real
     // ConfigManager reads/writes these keys without throwing, covered by the
     // two "real ConfigManager" tests below.)
-    // worktree.setup.* keys are not in the SDK's ConfigKey union (see
+    // worktree.setup.* keys are not in the platform's ConfigKey union (see
     // worktree-setup-config.ts's header comment), the real ConfigManager
-    // itself reads them "via a cast" per the SDK's own documented convention,
+    // itself reads them "via a cast" per the platform's own documented convention,
     // so this stub mirrors that same cast rather than fabricating a scalar
     // ConfigValue branch that doesn't exist for these array-shaped keys.
     const stub: Pick<ConfigManagerType, 'get'> = {
@@ -79,13 +79,13 @@ describe('worktree.setup.* synthetic settings', () => {
     expect(readWorktreeSetupList(stub, WORKTREE_SETUP_CARRY_OVER_GLOBS_CONFIG_KEY)).toEqual([]);
   });
 
-  test('a real ConfigManager reads the worktree section the SDK now registers, without crashing', () => {
-    // The SDK's DEFAULT_CONFIG registers the `worktree` section (setup.commands
+  test('a real ConfigManager reads the worktree section the platform now registers, without crashing', () => {
+    // The platform's DEFAULT_CONFIG registers the `worktree` section (setup.commands
     // and setup.carryOverGlobs, both empty lists) as of this repack, so
     // configManager.get no longer throws for these keys on a fresh store, it
     // returns the registered empty default. The synthetic-entry builder (and
     // its defensive try/catch, now belt-and-suspenders) reflects that default.
-    // worktree.setup.commands has no branch in the SDK's ConfigValue mapped
+    // worktree.setup.commands has no branch in the platform's ConfigValue mapped
     // type (it's an array-shaped key read "via a cast", not a scalar
     // ConfigKey, see worktree-setup-config.ts). Widen through `unknown`
     // before comparing, same as the production readWorktreeSetupList() does.
@@ -96,7 +96,7 @@ describe('worktree.setup.* synthetic settings', () => {
     expect(entry.isDefault).toBe(true);
   });
 
-  test('a real ConfigManager writes the worktree section the SDK now registers (applySettingValue)', () => {
+  test('a real ConfigManager writes the worktree section the platform now registers (applySettingValue)', () => {
     // Write-side counterpart: setDynamic succeeds now that the section exists in
     // DEFAULT_CONFIG, so applySettingValue reports a real change and never the
     // "Save failed" message the pre-registration gap used to force.

@@ -6,8 +6,8 @@
  * JSON, so this proves the notice is grounded in the actual on-disk shapes.
  */
 import { describe, expect, test } from 'bun:test';
-import { SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
-import { writeLastSessionPointer } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
+import { writeLastSessionPointer } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { contractFixture } from '../helpers/contract-work-tree-fixtures.ts';
 import { announceResumeState, type ResumeNoticeDeps } from '@/runtime/resume-notice.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';

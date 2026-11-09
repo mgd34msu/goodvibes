@@ -3,10 +3,10 @@
  * ConfigManager.resolvePath('runtime.*') never throws "section 'runtime' does not exist".
  */
 import { describe, expect, test } from 'bun:test';
-import { CONFIG_SCHEMA, DEFAULT_CONFIG } from '../sdk/src/platform/config/schema.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { DEFAULT_MEMORY_CONSOLIDATION_CONFIG } from '../sdk/src/platform/state/memory-consolidation-config.js';
-import { resolveMemoryConsolidationConfig } from '../sdk/src/platform/state/memory-consolidation-config.js';
+import { CONFIG_SCHEMA, DEFAULT_CONFIG } from '../platform/src/platform/config/schema.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { DEFAULT_MEMORY_CONSOLIDATION_CONFIG } from '../platform/src/platform/state/memory-consolidation-config.js';
+import { resolveMemoryConsolidationConfig } from '../platform/src/platform/state/memory-consolidation-config.js';
 import { tmpdir } from 'os';
 import { mkdirSync } from 'fs';
 import { join } from 'path';

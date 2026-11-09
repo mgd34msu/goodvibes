@@ -30,7 +30,7 @@ export function runtimePortDiagnostic(
     if (status.mode === 'incompatible') {
       // A GoodVibes daemon IS on the port, but it speaks an incompatible wire
       // version, so this TUI neither adopted it nor started a competing daemon.
-      // status.reason already names the port and both versions (SDK side).
+      // status.reason already names the port and both versions (platform side).
       const version = status.version ? ` version ${status.version}` : '';
       return `A GoodVibes service${version} is running at ${status.baseUrl} but is not wire-compatible with this TUI, so it was not adopted.${reason}`;
     }
@@ -42,7 +42,7 @@ export function runtimePortDiagnostic(
     // function reads either endpoint's status (see getRuntimeEndpointStatus):
     // the daemon status can never carry it in this product (adoptOnly is
     // hardcoded, see bootstrap.ts), but the HTTP listener's status legitimately
-    // does, since the SDK always reports its in-process listener as 'embedded'.
+    // does, since the platform always reports its in-process listener as 'embedded'.
     return `An embedded GoodVibes service is running at ${status.baseUrl}.`;
   }
   if (portInUse) {
@@ -99,7 +99,7 @@ export function formatRuntimeActiveSuccessMessage(
     const version = status.version ? ` version ${status.version}` : '';
     return `${label} is already running as a verified external GoodVibes service at ${status.baseUrl}${version}.`;
   }
-  // Reachable for httpListener (the SDK always reports its in-process listener
+  // Reachable for httpListener (the platform always reports its in-process listener
   // as 'embedded'); a daemon status never carries this mode in this product.
   if (status?.mode === 'embedded') {
     return `${label} is running as an embedded service at ${status.baseUrl}.`;

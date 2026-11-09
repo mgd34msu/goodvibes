@@ -22,12 +22,12 @@
  */
 
 import { readFile } from 'node:fs/promises';
-import type { ContractView } from '@goodvibes-jev/engine/sdk/platform/contract';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ProcessNode, SteerResult } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ProcessNode, SteerResult } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import type { SurfaceModal, SurfaceModalHost } from './surface-modal-host.ts';
 import type { KitHint, SurfaceLayer } from '../renderer/surface-kit.ts';
 import type { KitRow } from '../renderer/surface-kit-list.ts';
@@ -667,7 +667,7 @@ export class AgentsModal implements SurfaceModal {
         descendants.add(row.node.id);
         return true;
       });
-      // The SDK contract fleet adapter publishes its ContractView as raw. Remote/pruned rows may omit it.
+      // The platform contract fleet adapter publishes its ContractView as raw. Remote/pruned rows may omit it.
       const contract = live?.kind === 'contract' ? live.raw as ContractView | undefined : undefined;
       return renderFleetContractSummary(members, width, live === null || isTerminalProcessState(live.state), contract);
     }

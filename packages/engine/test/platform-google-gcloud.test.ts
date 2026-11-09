@@ -4,7 +4,7 @@
  * payloads, no real gcloud, no real network, no real Google account.
  */
 import { describe, expect, test } from 'bun:test';
-import type { GoogleCommandPort, GoogleCommandResult } from '../sdk/src/platform/google/types.ts';
+import type { GoogleCommandPort, GoogleCommandResult } from '../platform/src/platform/google/types.ts';
 import {
   checkAuthenticated,
   detectGcloud,
@@ -13,7 +13,7 @@ import {
   installGcloud,
   listProjects,
   selectOrCreateProject,
-} from '../sdk/src/platform/google/gcloud.ts';
+} from '../platform/src/platform/google/gcloud.ts';
 
 const HOME = '/home/test-user';
 const FALLBACK_GCLOUD = `${HOME}/google-cloud-sdk/bin/gcloud`;

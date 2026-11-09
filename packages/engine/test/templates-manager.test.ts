@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { rmSync, existsSync } from 'fs';
-import { TemplateManager, parseTemplateArgs } from '@goodvibes-jev/engine/sdk/platform/templates';
+import { TemplateManager, parseTemplateArgs } from '@goodvibes-jev/engine/platform/platform/templates';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 /** Create an isolated temp directory for each test run. */

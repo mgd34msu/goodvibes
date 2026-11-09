@@ -1,4 +1,4 @@
-import { fieldKind, redactionCredential, residualCredential } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { fieldKind, redactionCredential, residualCredential } from '@goodvibes-jev/engine/platform/platform/utils';
 import { expect, test } from 'bun:test';
 import { e2eJudgmentAnswers, startE2EJudgments } from '../e2e/judgment-fixture.ts';
 import route from '../fixtures/e2e-judgments/native-route.json';

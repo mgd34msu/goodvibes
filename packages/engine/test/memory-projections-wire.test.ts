@@ -10,10 +10,10 @@ import { describe, expect, test } from 'bun:test';
 import {
   listMemoryProjections,
   getMemoryProjection,
-} from '../sdk/src/platform/state/memory-file-projection.ts';
-import type { MemoryRecord } from '../sdk/src/platform/state/memory-store.ts';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { registerMemoryProjectionsGatewayMethods } from '../sdk/src/platform/control-plane/routes/memory-projections.ts';
+} from '../platform/src/platform/state/memory-file-projection.ts';
+import type { MemoryRecord } from '../platform/src/platform/state/memory-store.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { registerMemoryProjectionsGatewayMethods } from '../platform/src/platform/control-plane/routes/memory-projections.ts';
 
 const NOW = 2_000_000_000_000;
 

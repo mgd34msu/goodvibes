@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
-import { ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
+import { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import {
   createBuiltinImageUnderstandingProvider,
   createLocalImageUnderstandingProvider,
   createOpenAIImageUnderstandingProvider,
-} from '@goodvibes-jev/engine/sdk/platform/media';
-import type { LLMProvider, ProviderMessage, ProviderRuntimeMetadataDeps } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { ModelDefinition, ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
+} from '@goodvibes-jev/engine/platform/platform/media';
+import type { LLMProvider, ProviderMessage, ProviderRuntimeMetadataDeps } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { ModelDefinition, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 type ImageModelRegistry = Pick<ProviderRegistry, 'describeRuntime' | 'getCurrentModel' | 'getForModel' | 'listModels'>;

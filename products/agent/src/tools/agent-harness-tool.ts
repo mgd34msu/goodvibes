@@ -3,16 +3,16 @@ import { captureAgentToolDefinition } from './tool-definition-compaction.ts';
 import { resolveSetupSmokeNativeEvidence } from './agent-setup-smoke-reference.ts';
 import { captureTranscriptSource } from '../input/commands/transcript-reading.ts';
 import { createPreferredSettingsProjector, executeAdmittedPreferredSettings } from './agent-settings-admission.ts';
-import { assertCurrentToolExecution, ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { assertCurrentToolExecution, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { catalogReadingOptions, modelReadingOptions, modelReadingServicePath, withModelReadingContext } from './agent-harness-model-reading-source.ts';
 import { processClassificationOptions } from './agent-harness-process-launch.ts';
 import { createProcessInputProjector } from './agent-process-ingress.ts';
 import { createHarnessCatalogInputProjector, isHarnessCatalogQuery, protectHarnessCatalogTool, harnessCatalogExecutionGuard, harnessCatalogInvocationAuthority, retainHarnessCatalogCurrent } from './agent-harness-catalog-ingress.ts';
 import { createPersonalOpsInputProjector } from './agent-personal-ops-ingress.ts';
 import { createAgentHarnessResearchProjector, protectAgentHarnessResearchTool } from './agent-research-ingress.ts';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
 import { agentOrchestrationCatalogStatus, agentOrchestrationSummary, describeAgentOrchestrationAgent } from './agent-harness-agent-orchestration.ts';
 import { autonomyIntakeSummary } from './agent-harness-autonomy-intake.ts';
@@ -114,7 +114,7 @@ function detailedHarnessModelAccessGuide(): Record<string, string> {
     agentOrchestration: 'List mode:"agent_orchestration" for managed plan and closeout cards; keep local todos with agent_work_plan; the owner can submit original source with /work submit-file <JSON-path> (no execution); inspect mode:"agent_orchestration_agent"; spawn/message/wait/cancel stay on first-class agent.',
     modelRouting: 'Prefer models action:"status|local|route|smoke" for model choice, local cookbook, route inspection, and admitted local server checks. Lower-level mode:"model_routing", mode:"model_route", and mode:"run_local_model_smoke" remain available; changes stay visible.',
     executionPosture: 'Prefer execution action:"status|route"; use computer action:"plan" for browser, screenshot, or desktop-control route planning; use local read/edit/exec when current workspace is sufficient, delegation for isolation/parallel/remote.',
-    backgroundProcesses: 'Use execution action:"processes|process|capabilities" to inspect tracked local commands and process parity, terminal background:true to start visible tracked commands, and process action:list|poll|log|wait|kill|write to manage them. Lower-level background_* modes remain for compatibility. process action:"capabilities" probes SDK/daemon interactive contracts; write requires native managed stdin and current recorded effect admission; PTY/sudo stay typed-contract or foreground-only boundaries.',
+    backgroundProcesses: 'Use execution action:"processes|process|capabilities" to inspect tracked local commands and process parity, terminal background:true to start visible tracked commands, and process action:list|poll|log|wait|kill|write to manage them. Lower-level background_* modes remain for compatibility. process action:"capabilities" probes platform/daemon interactive contracts; write requires native managed stdin and current recorded effect admission; PTY/sudo stay typed-contract or foreground-only boundaries.',
     executionHistory: 'Prefer execution action:"history|record" for activity cards and records; use returned verification, supervision, and recovery routes.',
     fileRecovery: 'Prefer execution action:"recovery"; apply local file undo/redo snapshots with mode:"run_file_recovery" and current recorded effect admission.',
     personalOps: 'Prefer personal_ops action:"briefing|status|queue|intake|lane|read"; lower-level modes personal_ops_briefing/personal_ops/personal_ops_queue/personal_ops_intake/personal_ops_lane/run_personal_ops_read remain available for harness inspection.',

@@ -16,8 +16,8 @@ import {
   redactSecretsFromMessage,
   refreshAccessToken,
   type GoogleFetchPort,
-} from '../sdk/src/platform/google/oauth-loopback.ts';
-import { startLoopbackListener } from '../sdk/src/platform/google/node.ts';
+} from '../platform/src/platform/google/oauth-loopback.ts';
+import { startLoopbackListener } from '../platform/src/platform/google/node.ts';
 
 describe('generatePkcePair', () => {
   test('produces a code challenge that is the base64url SHA-256 digest of the verifier', () => {

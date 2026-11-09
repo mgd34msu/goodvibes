@@ -1,7 +1,7 @@
 /** Root-owned, least-capability mail and explicit tagging constructors. */
-import { EmailService } from '@goodvibes-jev/engine/sdk/platform/email';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { createInactiveInboxRetentionOwner, INBOX_ITEM_TTL_MS, INBOX_ITEM_CAP, type InactiveInboxRetentionOwner, type OwnedInboxTagging } from '@goodvibes-jev/engine/sdk/platform/intake';
+import { EmailService } from '@goodvibes-jev/engine/platform/platform/email';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { createInactiveInboxRetentionOwner, INBOX_ITEM_TTL_MS, INBOX_ITEM_CAP, type InactiveInboxRetentionOwner, type OwnedInboxTagging } from '@goodvibes-jev/engine/platform/platform/intake';
 import { composeMailDeps } from './mail-composition.js';
 import { createDaemonTriageTaggingFactory, type DaemonTriagePermissionHost, type DaemonTriageTaggingRequest } from './tagged-inbox-composition.js';
 import type { SecretsManager } from '../config/secrets.js';

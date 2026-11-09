@@ -1,12 +1,12 @@
 import { afterEach, expect, test } from 'bun:test';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { emitOpsContextWarning } from '../sdk/src/platform/runtime/emitters/ops.js';
-import { emitTurnCompleted, emitTurnError, emitTurnSubmitted } from '../sdk/src/platform/runtime/emitters/turn.js';
-import { emitToolExecuting, emitToolSucceeded } from '../sdk/src/platform/runtime/emitters/tools.js';
-import { createRuntimeStore } from '../sdk/src/platform/runtime/store/index.js';
-import { TelemetryApiService } from '../sdk/src/platform/runtime/telemetry/api.js';
-import { TelemetryTraceIdentities } from '../sdk/src/platform/runtime/telemetry/trace-identities.js';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { emitOpsContextWarning } from '../platform/src/platform/runtime/emitters/ops.js';
+import { emitTurnCompleted, emitTurnError, emitTurnSubmitted } from '../platform/src/platform/runtime/emitters/turn.js';
+import { emitToolExecuting, emitToolSucceeded } from '../platform/src/platform/runtime/emitters/tools.js';
+import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.js';
+import { TelemetryApiService } from '../platform/src/platform/runtime/telemetry/api.js';
+import { TelemetryTraceIdentities } from '../platform/src/platform/runtime/telemetry/trace-identities.js';
 
 const services: TelemetryApiService[] = [];
 afterEach(() => { for (const service of services.splice(0)) service.dispose(); });

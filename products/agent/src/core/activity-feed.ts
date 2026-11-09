@@ -1,4 +1,4 @@
-import { prepareSystemMessagePresentation } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
+import { prepareSystemMessagePresentation } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 /**
  * ActivityFeed, the single ambient record of what the assistant has been doing.
  *

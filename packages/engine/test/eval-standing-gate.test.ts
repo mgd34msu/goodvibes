@@ -17,7 +17,7 @@ import {
   captureBaseline,
   loadBaseline,
   writeBaseline,
-} from '../sdk/src/platform/runtime/eval/index.ts';
+} from '../platform/src/platform/runtime/eval/index.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

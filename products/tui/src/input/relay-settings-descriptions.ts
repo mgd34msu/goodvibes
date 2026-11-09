@@ -3,14 +3,14 @@
  * the `relay.*` CONFIG_SCHEMA descriptions shown in /config and the settings
  * modal.
  *
- * `relay.*` is a real SDK CONFIG_SCHEMA domain (schema-domain-runtime.ts),
+ * `relay.*` is a real platform CONFIG_SCHEMA domain (schema-domain-runtime.ts),
  * the settings-modal-data.ts CONFIG_SCHEMA loop already surfaces it once
  * `relay` is listed in SETTINGS_CATEGORIES (see settings-modal-types.ts). The
- * SDK's own descriptions explain WHAT each key does but not the trust
+ * platform's own descriptions explain WHAT each key does but not the trust
  * boundary the outbound relay path crosses; this enrichment appends that
- * honestly, once, without duplicating or overriding the SDK's wording. Entries
+ * honestly, once, without duplicating or overriding the platform's wording. Entries
  * are shallow-cloned (never mutating the shared `ConfigSetting` objects the
- * SDK exports from CONFIG_SCHEMA) so re-running this on the same groups map
+ * platform exports from CONFIG_SCHEMA) so re-running this on the same groups map
  * is idempotent.
  */
 

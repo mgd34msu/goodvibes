@@ -1,11 +1,11 @@
 import { afterEach, expect, test } from 'bun:test';
 import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { preserveDeclaredReadReceipts, readPrivateReceiptArchives, readNativePrivateReceiptArchives, verifyPrivateReceiptPreservation } from '../../sdk/src/platform/contract/private-read-receipts.js';
-import { newContractId, type ContractView } from '../../sdk/src/platform/contract/types.js';
+import { preserveDeclaredReadReceipts, readPrivateReceiptArchives, readNativePrivateReceiptArchives, verifyPrivateReceiptPreservation } from '../../platform/src/platform/contract/private-read-receipts.js';
+import { newContractId, type ContractView } from '../../platform/src/platform/contract/types.js';
 import { makeRepo } from './runner-support.js';
 import { git } from './steps-support.js';
-import { judgeEvidence, qualityState } from '../../sdk/src/platform/contract/evidence.js';
+import { judgeEvidence, qualityState } from '../../platform/src/platform/contract/evidence.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

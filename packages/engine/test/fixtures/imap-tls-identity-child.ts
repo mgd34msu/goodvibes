@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import type { Socket } from 'node:net';
 import { createServer } from 'node:tls';
-import { EmailService } from '../../sdk/src/platform/email/email-service.ts';
-import { nodeEmailTransport } from '../../sdk/src/platform/email/node.ts';
+import { EmailService } from '../../platform/src/platform/email/email-service.ts';
+import { nodeEmailTransport } from '../../platform/src/platform/email/node.ts';
 import { testDescribeSenderClaim } from '../_helpers/platform-email-fixtures.ts';
 
 // All endpoints, credentials and certificates are synthetic and owned. This

@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
 import type { Socket } from 'node:net';
-import { EmailService, type EmailServiceDeps } from '../sdk/src/platform/email/email-service.js';
-import { EmailReplySubjectSourceOwner } from '../sdk/src/platform/email/reply-subject-source.js';
-import { createSurfaceEmailConfigReader, createSurfaceEmailInboxConfigReader, withSurfaceEmailConfig } from '../sdk/src/platform/email/surface-config.js';
+import { EmailService, type EmailServiceDeps } from '../platform/src/platform/email/email-service.js';
+import { EmailReplySubjectSourceOwner } from '../platform/src/platform/email/reply-subject-source.js';
+import { createSurfaceEmailConfigReader, createSurfaceEmailInboxConfigReader, withSurfaceEmailConfig } from '../platform/src/platform/email/surface-config.js';
 import { testDescribeSenderClaim, throwingEmailTransport } from './_helpers/platform-email-fixtures.js';
 import { SnapshotSocket } from './_helpers/mail-inbox-snapshot.js';
 

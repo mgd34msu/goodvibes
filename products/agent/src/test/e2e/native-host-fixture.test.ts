@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createNativeConversationIntakeBinding } from '../../runtime/native-conversation-intake-host.ts';
-import { readNativeConversationTurnPermit, revalidateNativeConversationTurnPermit } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
+import { readNativeConversationTurnPermit, revalidateNativeConversationTurnPermit } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 import { makeHome, removeHome, startStubModel } from './harness.ts';
 import { startE2ENativeHost } from './native-host-fixture.ts';
 

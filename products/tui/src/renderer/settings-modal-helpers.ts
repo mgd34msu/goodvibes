@@ -32,7 +32,7 @@ export const CATEGORY_INFO: Record<SettingsCategory, string> = {
   contract:
     'Contract execution: commit policy, quality-gate timeout, acceptance stakes, correction limits, concurrency, isolation, and transport recovery bounds.',
   judgment:
-    'Judgment service endpoint, API key source, model version, and per-attempt timeout. Empty endpoint and model settings use the SDK environment fallbacks; key source selects where the key is read, never the key itself.',
+    'Judgment service endpoint, API key source, model version, and per-attempt timeout. Empty endpoint and model settings use the platform environment fallbacks; key source selects where the key is read, never the key itself.',
   planner:
     "How /workstream decomposes a goal into work items: agent-driven decomposition (with heuristic fallback) or the forced heuristic path, plus the planning agent's turn, token, and wall-clock bounds.",
   wrfc: 'Work-review-fix-cycle thresholds, retry limits, and automatic commit behavior.',
@@ -181,7 +181,7 @@ const SETTING_LABELS: Partial<Record<string, string>> = {
   'behavior.staleContextWarnings': SHARED_SETTING_LABELS['behavior.staleContextWarnings'],
   // Blocked-too-long escalation: a fleet node waiting on a human gets a device
   // push once the grace elapses (regardless of an attached surface), then bounded
-  // reminders. Real numeric option shapes come from the SDK schema's ranges.
+  // reminders. Real numeric option shapes come from the platform schema's ranges.
   'notifications.blockedEscalationGraceMs': 'Blocked-Too-Long Grace (ms)',
   'notifications.blockedEscalationFollowUpMs': 'Blocked Reminder Interval (ms)',
   'notifications.blockedEscalationMaxFollowUps': 'Blocked Reminder Limit',

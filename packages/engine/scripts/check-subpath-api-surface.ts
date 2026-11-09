@@ -14,8 +14,8 @@
  *     `./platform/email`, `./platform/google`, `./platform/config`,
  *     `./platform/cluster`, `./platform/devices` and `./platform/channels`.
  *
- * `etc/goodvibes-sdk.api.md` contains no occurrence of `EmailInboxListResult`,
- * `EmailSummary` or `ImapMessageDetail`, because `sdk/src/index.ts`
+ * `etc/goodvibes.api.md` contains no occurrence of `EmailInboxListResult`,
+ * `EmailSummary` or `ImapMessageDetail`, because `platform/src/index.ts`
  * is the CLIENT surface and re-exports none of `platform/**`. Running the
  * extractor after changing the email module produces no diff at all.
  *
@@ -61,7 +61,7 @@
  * ## Which packages it covers
  *
  * Every package in TRACKED_PACKAGES below, each with its own committed snapshot
- * under `etc/`. `sdk` is the reason the gate exists, and
+ * under `etc/`. `engine` is the reason the gate exists, and
  * `terminal-shell` is here because it is the other package consumers
  * import directly: it publishes three entry points (`.`, `./conformance`,
  * `./terminal-output-guard`) and had nothing watching them, so a change to its
@@ -89,7 +89,7 @@ import {
 } from './subpath-api-surface-rule.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SDK_ROOT = resolve(__dirname, '..');
+const ENGINE_ROOT = resolve(__dirname, '..');
 
 /**
  * A package whose published subpath surface is recorded and gated.
@@ -108,16 +108,16 @@ interface TrackedPackage {
 
 const TRACKED_PACKAGES: readonly TrackedPackage[] = [
   {
-    name: '@goodvibes-jev/engine/sdk',
-    subpath: 'sdk',
-    dir: resolve(SDK_ROOT, 'sdk'),
-    snapshot: resolve(SDK_ROOT, 'etc', 'subpath-api-surface.json'),
+    name: '@goodvibes-jev/engine/platform',
+    subpath: 'platform',
+    dir: resolve(ENGINE_ROOT, 'platform'),
+    snapshot: resolve(ENGINE_ROOT, 'etc', 'subpath-api-surface.json'),
   },
   {
     name: '@goodvibes-jev/engine/terminal-shell',
     subpath: 'terminal-shell',
-    dir: resolve(SDK_ROOT, 'terminal-shell'),
-    snapshot: resolve(SDK_ROOT, 'etc', 'subpath-api-surface-terminal-shell.json'),
+    dir: resolve(ENGINE_ROOT, 'terminal-shell'),
+    snapshot: resolve(ENGINE_ROOT, 'etc', 'subpath-api-surface-terminal-shell.json'),
   },
 ];
 
@@ -132,7 +132,7 @@ function fail(message: string): never {
  * under <pkg>/dist, as before. JSON artifacts stay string-valued assets.
  */
 function packageManifest(pkg: TrackedPackage): ExportManifest {
-  const engine = readManifest(join(SDK_ROOT, 'package.json'));
+  const engine = readManifest(join(ENGINE_ROOT, 'package.json'));
   return { exports: subpackageExports(engine.exports, pkg.subpath) };
 }
 
@@ -159,12 +159,12 @@ function entryPointsFor(pkg: TrackedPackage): ReadonlyMap<string, string> {
  * recorded surface is the declared one whatever the resolver's conditions.
  */
 function engineDeclarationPaths(): Record<string, string[]> {
-  const engine = readManifest(join(SDK_ROOT, 'package.json'));
+  const engine = readManifest(join(ENGINE_ROOT, 'package.json'));
   const paths: Record<string, string[]> = {};
   for (const [key, value] of Object.entries(engine.exports)) {
     const types = exportCondition(value, 'types');
     if (types === undefined) continue;
-    paths[`@goodvibes-jev/engine/${key.slice(2)}`] = [resolve(SDK_ROOT, types)];
+    paths[`@goodvibes-jev/engine/${key.slice(2)}`] = [resolve(ENGINE_ROOT, types)];
   }
   return paths;
 }
@@ -206,7 +206,7 @@ function record(pkg: TrackedPackage): void {
   const snapshot = snapshotFor(pkg, entryPoints);
   writeFileSync(pkg.snapshot, render(snapshot));
   console.log(
-    `subpath-api-surface: wrote ${relative(SDK_ROOT, pkg.snapshot)}`
+    `subpath-api-surface: wrote ${relative(ENGINE_ROOT, pkg.snapshot)}`
     + `, ${pkg.name}, ${entryPoints.size} subpaths,`
     + ` ${Object.values(snapshot).reduce((n, e) => n + e.length, 0)} exports.`,
   );
@@ -222,7 +222,7 @@ function check(pkg: TrackedPackage): void {
     committedText = readFileSync(pkg.snapshot, 'utf8');
   } catch {
     fail(
-      `subpath-api-surface FAILED (${pkg.name}): ${relative(SDK_ROOT, pkg.snapshot)} is missing.\n`
+      `subpath-api-surface FAILED (${pkg.name}): ${relative(ENGINE_ROOT, pkg.snapshot)} is missing.\n`
       + 'Fix: bun run api:subpath',
     );
   }

@@ -1,8 +1,8 @@
 /**
  * memory-consolidation-proposals.ts
  *
- * Adopts the SDK's memory.consolidation.receipts verb SHAPE (receipts +
- * pendingProposals, see the SDK's daemon-sdk/src/integration-routes.ts
+ * Adopts the platform's memory.consolidation.receipts verb SHAPE (receipts +
+ * pendingProposals, see the platform's daemon-api/src/integration-routes.ts
  * getMemoryConsolidationReceipts handler) for this repo's memory-review
  * surface, WITHOUT going over the wire: this runtime IS the consolidation
  * scheduler's owner (services.memoryConsolidationScheduler, constructed in
@@ -15,9 +15,9 @@
  * handleRecallReview in input/commands/recall-review.ts) rather than adding a
  * second, parallel review mechanism.
  */
-import type { MemoryConsolidationProposal, MemoryConsolidationRunReceipt } from '@goodvibes-jev/engine/sdk/platform/state';
+import type { MemoryConsolidationProposal, MemoryConsolidationRunReceipt } from '@goodvibes-jev/engine/platform/platform/state';
 
-/** The narrow scheduler slice this module needs, mirrors the SDK's memoryConsolidation route dependency shape. */
+/** The narrow scheduler slice this module needs, mirrors the platform's memoryConsolidation route dependency shape. */
 export interface ConsolidationReceiptSource {
   listReceipts(): readonly MemoryConsolidationRunReceipt[];
 }
@@ -25,7 +25,7 @@ export interface ConsolidationReceiptSource {
 /**
  * Every proposal carried by the retained receipt ring (bounded, see
  * MemoryConsolidationScheduler's RECEIPT_RING_SIZE), newest-receipt-last, in
- * the SAME order the SDK's memory.consolidation.receipts verb returns them
+ * the SAME order the platform's memory.consolidation.receipts verb returns them
  * (receipts.flatMap(r => r.proposed)), kept identical on purpose so a
  * consumer of either surface sees the same list.
  */

@@ -12,11 +12,11 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { executeFetchInput } from '../sdk/src/platform/tools/fetch/index.js';
-import { classifyHostTrustTier } from '../sdk/src/platform/tools/fetch/trust-tiers.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { buildLocalhostFetchApproval } from '../sdk/src/platform/runtime/permissions/localhost-fetch-approval.js';
-import type { PermissionPromptDecision, PermissionPromptRequest } from '../sdk/src/platform/permissions/prompt.js';
+import { executeFetchInput } from '../platform/src/platform/tools/fetch/index.js';
+import { classifyHostTrustTier } from '../platform/src/platform/tools/fetch/trust-tiers.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { buildLocalhostFetchApproval } from '../platform/src/platform/runtime/permissions/localhost-fetch-approval.js';
+import type { PermissionPromptDecision, PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.js';
 
 const tmpRoots: string[] = [];
 const servers: Array<{ stop: (force?: boolean) => void }> = [];

@@ -31,12 +31,12 @@ import {
   resolveWatcherSettings,
   type MailboxReader,
   type MailboxWire,
-} from '../sdk/src/platform/email/inbound/index.ts';
+} from '../platform/src/platform/email/inbound/index.ts';
 import type {
   ImapEnvelope,
   ImapEnvelopeBatch,
   ImapFetchProblem,
-} from '../sdk/src/platform/email/imap-client.ts';
+} from '../platform/src/platform/email/imap-client.ts';
 import {
   RecordingObserver,
   RecordingSink,

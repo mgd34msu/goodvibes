@@ -27,8 +27,8 @@ mock.module('node:fs', () => ({
   },
 }));
 
-const { KnowledgeStore } = await import('../../sdk/src/platform/knowledge/store.js');
-const { createWorkLedger } = await import('../../sdk/src/platform/workflow/work-ledger/service.js');
+const { KnowledgeStore } = await import('../../platform/src/platform/knowledge/store.js');
+const { createWorkLedger } = await import('../../platform/src/platform/workflow/work-ledger/service.js');
 const command = { type: 'create', requestId: 'durable', expectedRevision: 0, title: 'Durable', goal: 'Persist every ancestor', criteria: ['Ancestry durable'] };
 const attempts: string[] = [];
 let owner: InstanceType<typeof KnowledgeStore> | undefined;

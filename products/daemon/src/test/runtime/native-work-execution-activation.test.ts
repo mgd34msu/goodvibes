@@ -6,27 +6,27 @@ import { spawnSync } from 'node:child_process';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer, scoreAnswer } from '@goodvibes-jev/judgment/testing';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { KnowledgeStore } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import { createClientRuntimeServices } from '@goodvibes-jev/engine/sdk/platform/runtime/client-services';
-import { AgentOrchestrator } from '@goodvibes-jev/engine/sdk/platform/agents';
-import { AgentManager, type AgentRecord } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { RuntimeEventBus } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
-import { createRuntimeStore } from '@goodvibes-jev/engine/sdk/platform/runtime/store';
-import { BenchmarkStore, ProviderRegistry, type ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { LLMProvider, ChatRequest, ChatResponse } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { createWorkLedger, createLocalWorkLedgerReadBinding } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger';
-import { PairingTokenManager } from '@goodvibes-jev/engine/sdk/platform/pairing';
-import { registerNativeWorkExecutionGatewayMethods, registerWorkLedgerGatewayMethods } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { createOperatorSdk } from '@goodvibes-jev/engine/operator-sdk';
-import { createOperatorNativeWorkExecutionClient } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
-import { registerInboxSurface } from '@goodvibes-jev/engine/sdk/platform/intake';
-import { WorkspaceRegistrationStore } from '@goodvibes-jev/engine/sdk/platform/workspace';
-import { NativeWorkExecutionError, type NativePairedExecutionAuthority } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { KnowledgeStore } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { createClientRuntimeServices } from '@goodvibes-jev/engine/platform/platform/runtime/client-services';
+import { AgentOrchestrator } from '@goodvibes-jev/engine/platform/platform/agents';
+import { AgentManager, type AgentRecord } from '@goodvibes-jev/engine/platform/platform/tools';
+import { RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
+import { BenchmarkStore, ProviderRegistry, type ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { LLMProvider, ChatRequest, ChatResponse } from '@goodvibes-jev/engine/platform/platform/providers';
+import { createWorkLedger, createLocalWorkLedgerReadBinding } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
+import { PairingTokenManager } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { registerNativeWorkExecutionGatewayMethods, registerWorkLedgerGatewayMethods } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
+import { createOperatorNativeWorkExecutionClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
+import { registerInboxSurface } from '@goodvibes-jev/engine/platform/platform/intake';
+import { WorkspaceRegistrationStore } from '@goodvibes-jev/engine/platform/platform/workspace';
+import { NativeWorkExecutionError, type NativePairedExecutionAuthority } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution';
 import { createDaemonNativeWorkExecutionActivation } from '../../runtime/native-work-execution-activation.js';
 import * as nativeComposition from '../../runtime/native-work-execution-composition.js';
 import * as activationComposition from '../../runtime/native-work-execution-activation.js';
-import * as runtimeComposition from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import * as runtimeComposition from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 import { startDaemonFixture } from '../../testing/daemon-fixture.js';
 
@@ -177,7 +177,7 @@ test('authenticated daemon HTTP handler acquires the real native graph and compl
     f = await fixture(daemon.services.pairingTokens);
     let acquisitions = 0;
     registerNativeWorkExecutionGatewayMethods(daemon.services.gatewayMethods, { projectId: 'project', acquire: () => { acquisitions++; return f!.activation.acquire(); } });
-    const client = createOperatorNativeWorkExecutionClient(createOperatorSdk({ baseUrl: daemon.baseUrl, authToken: f.paired.token, retry: { maxAttempts: 1 } }), 'project');
+    const client = createOperatorNativeWorkExecutionClient(createOperatorApiClient({ baseUrl: daemon.baseUrl, authToken: f.paired.token, retry: { maxAttempts: 1 } }), 'project');
     const identity = { workId: f.target.workId, attemptId: f.target.attemptId,
       expectedRevision: { work: f.target.workRevision, criteria: f.target.criteriaRevision, attempt: f.target.attemptRevision } };
     const started = await client.start(identity); if (started.kind !== 'execution') throw new Error('Expected admitted HTTP execution'); expect(started.receipt?.contractId).toBeTruthy();
@@ -227,7 +227,7 @@ for (const lostAcknowledgment of [false, true]) test(`authenticated cold daemon 
     registerNativeWorkExecutionGatewayMethods(daemon.services.gatewayMethods, { projectId: 'project', acquire: f.activation.acquire });
     const identity = { workId: f.target.workId, attemptId: f.target.attemptId,
       expectedRevision: { work: f.target.workRevision, criteria: f.target.criteriaRevision, attempt: f.target.attemptRevision } };
-    const clientFor = () => createOperatorNativeWorkExecutionClient(createOperatorSdk({ baseUrl: daemon.baseUrl, authToken: f!.paired.token, retry: { maxAttempts: 1 } }), 'project');
+    const clientFor = () => createOperatorNativeWorkExecutionClient(createOperatorApiClient({ baseUrl: daemon.baseUrl, authToken: f!.paired.token, retry: { maxAttempts: 1 } }), 'project');
     const initial = clientFor(); await initial.start(identity);
     const storage = await f.options.knowledgeStore.openNativeWorkExecutionStorage('project');
     const deadline = Date.now() + 10000;
@@ -579,7 +579,7 @@ test('real authenticated daemon pending cancellation joins initial Jev and never
     const original = f.options.judgmentPort;
     f.options.judgmentPort = { ...original, async ask(request) { entered(); await gate; return original.ask(request); } };
     registerNativeWorkExecutionGatewayMethods(daemon.services.gatewayMethods, { projectId: 'project', acquire: f.activation.acquire });
-    const client = createOperatorNativeWorkExecutionClient(createOperatorSdk({ baseUrl: daemon.baseUrl, authToken: f.paired.token, retry: { maxAttempts: 1 } }), 'project');
+    const client = createOperatorNativeWorkExecutionClient(createOperatorApiClient({ baseUrl: daemon.baseUrl, authToken: f.paired.token, retry: { maxAttempts: 1 } }), 'project');
     const identity = { workId: f.target.workId, attemptId: f.target.attemptId,
       expectedRevision: { work: f.target.workRevision, criteria: f.target.criteriaRevision, attempt: f.target.attemptRevision } };
     const start = client.start(identity); await ready;

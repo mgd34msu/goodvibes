@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { appendConversationMessages } from '../../core/conversation-rendering.ts';
-import { COMPACTION_HANDOFF_HEADER } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import { COMPACTION_HANDOFF_HEADER } from '@goodvibes-jev/engine/platform/platform/core';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { lineToString } from '../setup.ts';
 
 // ---------------------------------------------------------------------------

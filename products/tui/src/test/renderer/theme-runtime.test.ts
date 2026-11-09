@@ -21,12 +21,12 @@ import { beginModal, finishModal } from '../../renderer/surface-kit.ts';
 import { activeTokens } from '../../renderer/theme.ts';
 import { renderMarkdown } from '../../renderer/markdown.ts';
 import { addConversationSplashScreen } from '../../core/conversation-rendering.ts';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import {
   coerceThemeModeSetting,
   resolveConfiguredThemeMode,
 } from '../../renderer/theme-mode-config.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 
 // Always restore the shared default so later tests (and the golden suite in
 // sibling files) see dark.
@@ -181,7 +181,7 @@ describe('theme-mode config', () => {
   test('resolveConfiguredThemeMode reads the key and defaults to auto', () => {
     // `get` is cast through `unknown` straight to ConfigManager's own method
     // type (rather than reconstructed as an independent generic signature):
-    // the SDK's ConfigValue mapped type is a very large discriminated union,
+    // the platform's ConfigValue mapped type is a very large discriminated union,
     // and asking the compiler to structurally verify a freshly-written
     // generic signature against it here risks TS's "excessive stack depth"
     // recursion limit (TS2321), a compiler limitation, not a real type

@@ -2,7 +2,7 @@
  * Notification dispatch, the production wiring that finally gives the
  * panel_only notification target a live producer.
  *
- * The SDK's NotificationRouter decides where each domain notification goes
+ * The platform's NotificationRouter decides where each domain notification goes
  * (conversation / status_bar / panel_only) and collapses bursts and batches.
  * Nothing in the running app routed real notifications before this: the
  * panel_only feed (views/notifications-feed.ts) and the notifications modal existed with no
@@ -12,18 +12,18 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { createNotificationRouter, type NotificationRouter } from '@goodvibes-jev/engine/sdk/platform/runtime/ui';
+import { createNotificationRouter, type NotificationRouter } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
 import type { Notification, RoutingDecision, RuntimeEventBus, RuntimeEventDomain } from '@/runtime/index.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { getSharedNotificationFeed, type NotificationFeed } from '../views/notifications-feed.ts';
 import { publishNotice, type NoticeSink } from '../core/notices.ts';
-import { memoryPressureLine, memoryPressureLevel, type MemoryPressurePayload } from '@goodvibes-jev/engine/sdk/platform/runtime/memory';
-import { runtimeEventKey } from '@goodvibes-jev/engine/sdk/platform/runtime/bootstrap';
+import { memoryPressureLine, memoryPressureLevel, type MemoryPressurePayload } from '@goodvibes-jev/engine/platform/platform/runtime/memory';
+import { runtimeEventKey } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 
 export interface NotificationDispatcher {
   /**
    * Route a notification; a panel_only (or burst-collapsed) decision lands in
-   * the feed. `eventKey` names the runtime event it came from (the SDK's
+   * the feed. `eventKey` names the runtime event it came from (the platform's
    * runtimeEventKey), so the feed keeps one entry when the same event also
    * arrives as a conversation notice. Returns the decision.
    */
@@ -60,7 +60,7 @@ export interface PersonFacingEvent {
  * with the plain title each one shows. Everything else on the bridged domains
  * (stream deltas, progress ticks, gate results, state changes, queue and start
  * events) is internal traffic and never enters the history: this table is an
- * allowlist, so a new SDK event type stays out until someone names it here.
+ * allowlist, so a new platform event type stays out until someone names it here.
  */
 export const PERSON_FACING_EVENTS: Readonly<Record<string, PersonFacingEvent>> = {
   // agents

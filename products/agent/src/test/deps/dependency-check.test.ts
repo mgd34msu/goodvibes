@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { DRIVER_VERSION, loadDriverModule, resolveDriver } from '@goodvibes-jev/engine/sdk/platform/browser';
+import { DRIVER_VERSION, loadDriverModule, resolveDriver } from '@goodvibes-jev/engine/platform/platform/browser';
 
 async function expectImportable(specifier: string): Promise<void> {
   expect(await import(specifier)).toEqual(expect.any(Object));
@@ -15,9 +15,9 @@ describe('dependency surface', () => {
 
   test('runtime import entrypoints used by the product resolve from installed dependencies', async () => {
     for (const specifier of [
-      '@goodvibes-jev/engine/sdk/platform/config',
-      '@goodvibes-jev/engine/sdk/platform/daemon',
-      '@goodvibes-jev/engine/sdk/platform/security',
+      '@goodvibes-jev/engine/platform/platform/config',
+      '@goodvibes-jev/engine/platform/platform/daemon',
+      '@goodvibes-jev/engine/platform/platform/security',
       'sql.js',
       'sqlite-vec',
       'typescript',

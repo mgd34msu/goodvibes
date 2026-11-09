@@ -5,13 +5,13 @@ import { drainOwned } from '@goodvibes-jev/judgment/decisions';
  * Restored notices enter history without another toast.
  */
 import { readNoticeSeverity, type NoticeSeverityReading } from './notice-severity.js';
-import { prepareSystemMessagePresentation } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
+import { prepareSystemMessagePresentation } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { decisionOrClassic } from '@goodvibes-jev/engine/sdk/platform/runtime';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { decisionOrClassic } from '@goodvibes-jev/engine/platform/platform/runtime';
+import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import { JudgmentAuthorityRetiredError, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { runtimeEventOfNotice, type RuntimeEventProvenance } from '@goodvibes-jev/engine/sdk/platform/runtime/bootstrap';
-import type { NotificationFeed } from '@goodvibes-jev/engine/sdk/platform/runtime/notification-feed';
+import { runtimeEventOfNotice, type RuntimeEventProvenance } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+import type { NotificationFeed } from '@goodvibes-jev/engine/platform/platform/runtime/notification-feed';
 /** Receives every system notice added to (or restored into) the conversation. */
 export type NoticeSink = (
   content: string,

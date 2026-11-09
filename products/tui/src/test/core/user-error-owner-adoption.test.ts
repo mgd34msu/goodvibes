@@ -230,7 +230,7 @@ test('an external model change aborts an already-entered native retry admission'
   const native = await heldNativeRetry(); reader({ publicLines: ['failed'] });
   await preparePublicErrorText(['failed']);
   let outcome: Promise<unknown> | undefined;
-  // A real turn hold signal is needed to own post-entry SDK cancellation.
+  // A real turn hold signal is needed to own post-entry platform cancellation.
   const controller = new AbortController(); let live = true;
   const f = fixture({ beginFailoverNotice: () => ({ signal: controller.signal, isCurrent: () => live,
     finish: () => {}, cancel: () => { live = false; controller.abort(); }, cancelTurn: () => { live = false; controller.abort(); } }),

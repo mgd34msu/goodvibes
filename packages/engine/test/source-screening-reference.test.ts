@@ -1,9 +1,9 @@
 import { screeningAnswers } from './_helpers/screening-answers.js';
 import { afterEach, expect, test } from 'bun:test';
-import { createProtectedSourceOwner } from '../sdk/src/platform/security/source-screening/owner.js';
+import { createProtectedSourceOwner } from '../platform/src/platform/security/source-screening/owner.js';
 import type { ProtectedSourceOwnerOptions, ResearchReferenceScreeningReceipt, ProtectedSource, ProtectedResearchReference, SourceScreeningReceipt,
-} from '../sdk/src/platform/security/source-screening/types.js';
-import type { ResearchReferenceOperation } from '../sdk/src/platform/security/source-screening/types.js';
+} from '../platform/src/platform/security/source-screening/types.js';
+import type { ResearchReferenceOperation } from '../platform/src/platform/security/source-screening/types.js';
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });

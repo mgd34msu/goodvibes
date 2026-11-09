@@ -2,27 +2,27 @@
 /**
  * generate-config-schema.ts
  *
- * Snapshots the two SDK data tables the settings surface renders from, the
+ * Snapshots the two engine data tables the settings surface renders from, the
  * typed config schema and the per-feature settings metadata, into one
  * checked-in, browser-safe TS module:
  *
  *   src/lib/generated/config-schema.ts
  *
- * Why a generator (mirrors scripts/generate-presentation-tokens.ts): the SDK's
- * `@goodvibes-jev/engine/sdk/platform/config` barrel re-exports CONFIG_SCHEMA but
+ * Why a generator (mirrors scripts/generate-presentation-tokens.ts): the engine's
+ * `@goodvibes-jev/engine/platform/platform/config` barrel re-exports CONFIG_SCHEMA but
  * ALSO pulls SecretsManager, OAuth listeners, google-auth, etc., node-only code
  * that must never enter the browser Vite bundle. Snapshotting the pure data at
  * build time keeps those heavy barrels out of the bundle entirely; the browser
  * imports only the emitted literal.
  *
  * Data sources:
- *   - CONFIG_SCHEMA, from the exported `@goodvibes-jev/engine/sdk/platform/config`
+ *   - CONFIG_SCHEMA, from the exported `@goodvibes-jev/engine/platform/platform/config`
  *     subpath (types / enums / defaults / descriptions / validation hints per
  *     key). The `validate` closures are dropped (not serialisable); the daemon's
  *     config.set is the authoritative validator, and `validationHint` carries the
  *     human-readable constraint into the UI.
- *   - FEATURE_SETTINGS, from the SDK's public
- *     `@goodvibes-jev/engine/sdk/platform/runtime/feature-flags` subpath export:
+ *   - FEATURE_SETTINGS, from the engine's public
+ *     `@goodvibes-jev/engine/platform/platform/runtime/feature-flags` subpath export:
  *     every platform capability as a first-class domain setting (name, real
  *     description, domain, enablement shape, owned settings keys, restart
  *     requirement, stock default). There is no separate enablement namespace,
@@ -39,8 +39,8 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/sdk/platform/config';
-import { FEATURE_SETTINGS } from '@goodvibes-jev/engine/sdk/platform/runtime/feature-flags';
+import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
+import { FEATURE_SETTINGS } from '@goodvibes-jev/engine/platform/platform/runtime/feature-flags';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
@@ -61,7 +61,7 @@ export interface ConfigSchemaEntrySnapshot {
   /**
    * What kind of quantity a `number` key holds, when that changes how a value
    * is read or shown. `'money'` marks a key holding a plain amount of
-   * `payments.currency`, written the way a person says it (SDK 2.0.5's
+   * `payments.currency`, written the way a person says it (engine 2.0.5's
    * money-value.ts), the mark a surface asks the SCHEMA for instead of
    * pattern-matching the key's NAME, which is exactly what tied every
    * consumer to a naming scheme and broke them all when the names changed.
@@ -89,7 +89,7 @@ export interface ConfigSchemaSnapshot {
   readonly features: FeatureSettingSnapshot[];
 }
 
-/** Read the real schema + feature-settings tables from the installed SDK. */
+/** Read the real schema + feature-settings tables from the installed engine. */
 export async function loadSchemaSnapshot(): Promise<ConfigSchemaSnapshot> {
   const entries: ConfigSchemaEntrySnapshot[] = CONFIG_SCHEMA.filter(s => !s.deprecated).map((s) => ({
     key: s.key,
@@ -129,7 +129,7 @@ const GENERATED_BANNER = [
   "@goodvibes-jev/engine: CONFIG_SCHEMA (platform/config) plus the per-feature",
   'settings metadata (FEATURE_SETTINGS, platform/runtime/feature-flags).',
   '',
-  'This is a build-time snapshot so the browser bundle never imports the SDK',
+  'This is a build-time snapshot so the browser bundle never imports the engine',
   "config barrel (which drags SecretsManager / OAuth / google-auth, node-only).",
   '',
   'Regenerate: `bun run config-schema:generate`.',

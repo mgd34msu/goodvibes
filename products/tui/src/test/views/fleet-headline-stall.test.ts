@@ -10,7 +10,7 @@ import { contractFixture } from '../helpers/contract-work-tree-fixtures.ts';
 // ---------------------------------------------------------------------------
 
 import { describe, expect, test } from 'bun:test';
-import type { ProcessNode } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
+import type { ProcessNode } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import {
   buildFleetSnapshot,
   fleetAttentionText,

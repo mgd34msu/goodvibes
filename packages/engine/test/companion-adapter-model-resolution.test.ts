@@ -1,4 +1,4 @@
-import { DecisionRouterProvider } from '../sdk/src/platform/providers/decision-router.js';
+import { DecisionRouterProvider } from '../platform/src/platform/providers/decision-router.js';
 import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 /**
  * companion-adapter-model-resolution.test.ts
@@ -8,13 +8,13 @@ import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/test
  */
 
 import { describe, expect, test } from 'bun:test';
-import { createCompanionProviderAdapter } from '../sdk/src/platform/daemon/facade-composition.js';
-import { CATALOG_PROVIDER_NAME_ALIASES } from '../sdk/src/platform/providers/builtin-registry.js';
-import { findModelDefinition, findModelDefinitionForProvider } from '../sdk/src/platform/providers/registry-models.js';
-import type { ProviderRegistry } from '../sdk/src/platform/providers/registry.js';
-import type { ModelDefinition } from '../sdk/src/platform/providers/registry-types.js';
-import type { LLMProvider, ChatRequest, ChatResponse } from '../sdk/src/platform/providers/interface.js';
-import type { ToolDefinition } from '../sdk/src/platform/types/tools.js';
+import { createCompanionProviderAdapter } from '../platform/src/platform/daemon/facade-composition.js';
+import { CATALOG_PROVIDER_NAME_ALIASES } from '../platform/src/platform/providers/builtin-registry.js';
+import { findModelDefinition, findModelDefinitionForProvider } from '../platform/src/platform/providers/registry-models.js';
+import type { ProviderRegistry } from '../platform/src/platform/providers/registry.js';
+import type { ModelDefinition } from '../platform/src/platform/providers/registry-types.js';
+import type { LLMProvider, ChatRequest, ChatResponse } from '../platform/src/platform/providers/interface.js';
+import type { ToolDefinition } from '../platform/src/platform/types/tools.js';
 
 // ---------------------------------------------------------------------------
 // Test helpers

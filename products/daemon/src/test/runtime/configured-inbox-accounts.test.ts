@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test';
-import { ConfigManager, createDaemonCredentialStore } from '@goodvibes-jev/engine/sdk/platform/config';
-import { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import { ConfigManager, createDaemonCredentialStore } from '@goodvibes-jev/engine/platform/platform/config';
+import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { HandlerContext } from '../../daemon/handlers/context.js';
 import type { DaemonInboxControls, DaemonInboxFactory } from '../../runtime/daemon-handler-composition.js';
 import { createReacquiringDaemonInboxSourceFactory, selectConfiguredSlackInboxAccount, selectConfiguredEmailInboxAccount, selectConfiguredDiscordInboxAccount } from '../../runtime/configured-inbox-accounts.js';
-import { createOwnedInboxSource, type OwnedInboxSource, type OwnedInboxRead } from '@goodvibes-jev/engine/sdk/platform/intake';
+import { createOwnedInboxSource, type OwnedInboxSource, type OwnedInboxRead } from '@goodvibes-jev/engine/platform/platform/intake';
 import type { DaemonInboxSourceFactory } from '../../runtime/multiowner-inbox-composition.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 

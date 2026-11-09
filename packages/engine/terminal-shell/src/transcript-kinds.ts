@@ -1,4 +1,4 @@
-import type { TranscriptEventKind } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { TranscriptEventKind } from '@goodvibes-jev/engine/platform/platform/core';
 export function parseTranscriptKind(raw: string | undefined): TranscriptEventKind | 'all' {
   const normalized = (raw ?? 'all').toLowerCase().replace(/-/g, '_');
   const allowed = new Set<TranscriptEventKind | 'all'>([

@@ -8,7 +8,7 @@ import {
   searchSettingEntries,
 } from '../../input/settings-modal-data.ts';
 import type { SettingEntry } from '../../input/settings-modal-types.ts';
-import type { ConfigSetting } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -296,11 +296,11 @@ import { mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { SettingsModal } from '../../input/settings-modal.ts';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { ServiceRegistry } from '@goodvibes-jev/engine/sdk/platform/config';
-import { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
+import { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
-import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
+import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
 import { SecretsManager } from '../../config/secrets.ts';
 
 d2('SettingsModal search integration', () => {

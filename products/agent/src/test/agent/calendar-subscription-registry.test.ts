@@ -1,7 +1,7 @@
 /**
  * Calendar subscription registry tests.
  *
- * Exercises the agent-side registry that wraps the SDK's platform/calendar
+ * Exercises the agent-side registry that wraps the platform's platform/calendar
  * SubscriptionStore: real JSON persistence to a tmp store, an in-memory secret
  * store for the feed URL, and a FAKE fetcher, no real network is ever touched.
  * Asserts the honest surface: subscribe caches events + stores the URL as a
@@ -11,7 +11,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type { FeedFetcher, FeedFetchResult } from '@goodvibes-jev/engine/sdk/platform/calendar';
+import type { FeedFetcher, FeedFetchResult } from '@goodvibes-jev/engine/platform/platform/calendar';
 import { CalendarSubscriptionRegistry, type SubscriptionSecretStore } from '../../agent/calendar-subscription-registry.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 

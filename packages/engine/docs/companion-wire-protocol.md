@@ -1,14 +1,14 @@
 # Companion wire protocol (native clients)
 
-Native Kotlin (Android) and Swift (iOS) companion apps talk to the GoodVibes daemon directly over the same HTTP and WebSocket contract the TypeScript SDK uses. This page is the shared wire reference for both platforms; the platform guides ([Android](./android-integration.md), [iOS](./ios-integration.md)) cover only what differs (secure storage and HTTP client).
+Native Kotlin (Android) and Swift (iOS) companion apps talk to the GoodVibes daemon directly over the same HTTP and WebSocket contract the TypeScript platform uses. This page is the shared wire reference for both platforms; the platform guides ([Android](./android-integration.md), [iOS](./ios-integration.md)) cover only what differs (secure storage and HTTP client).
 
-If your app is React Native or Expo based, do not implement this protocol yourself. Use [`@goodvibes-jev/engine/sdk/react-native`](./react-native-integration.md) or [`@goodvibes-jev/engine/sdk/expo`](./expo-integration.md), which implement it for you.
+If your app is React Native or Expo based, do not implement this protocol yourself. Use [`@goodvibes-jev/engine/platform/react-native`](./react-native-integration.md) or [`@goodvibes-jev/engine/platform/expo`](./expo-integration.md), which implement it for you.
 
 ## Source of truth
 
 - Surface and export references: [Runtime surfaces](./surfaces.md), [Exports](./exports.md), [Public surface](./public-surface.md), [Entry point guide](./packages.md)
 - Contract artifacts in this repo: `packages/engine/contracts/artifacts/operator-contract.json` and `packages/engine/contracts/artifacts/peer-contract.json`
-- The same artifacts ship on the `@goodvibes-jev/engine/sdk/contracts/operator-contract.json` and `@goodvibes-jev/engine/sdk/contracts/peer-contract.json` subpaths.
+- The same artifacts ship on the `@goodvibes-jev/engine/platform/contracts/operator-contract.json` and `@goodvibes-jev/engine/platform/contracts/peer-contract.json` subpaths.
 
 ## Auth
 
@@ -32,7 +32,7 @@ Send an auth frame as the first message, then receive runtime-event frames for t
 { "type": "auth", "token": "<bearer-token>", "domains": ["<domain>"] }
 ```
 
-When W3C trace propagation is enabled, the SDK also adds optional `traceparent` and `tracestate` fields to this frame.
+When W3C trace propagation is enabled, the platform also adds optional `traceparent` and `tracestate` fields to this frame.
 
 ## Method calls (HTTP)
 

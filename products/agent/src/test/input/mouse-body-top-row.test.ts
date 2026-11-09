@@ -3,7 +3,7 @@
 // on the main screen (main.ts sets bodyTopRow each frame).
 
 import { describe, expect, test } from 'bun:test';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import { handleMouseToken, type MouseRouteState } from '../../input/handler-feed-routes.ts';
 
 function state(bodyTopRow: number, starts: number[]): MouseRouteState {

@@ -1,7 +1,7 @@
 import type {
   KnowledgeRefinementTaskRecord,
   KnowledgeSemanticSelfImproveResult,
-} from '@goodvibes-jev/engine/sdk/platform/knowledge';
+} from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 

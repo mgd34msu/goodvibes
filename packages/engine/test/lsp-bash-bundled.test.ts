@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 
-import { LspService } from '../sdk/src/platform/intelligence/lsp/service.ts';
-import { createShellPathService } from '../sdk/src/platform/runtime/shell-paths.ts';
+import { LspService } from '../platform/src/platform/intelligence/lsp/service.ts';
+import { createShellPathService } from '../platform/src/platform/runtime/shell-paths.ts';
 
 describe('bundled Bash LSP', () => {
   test('the native Node runtime preserves nested formatting defaults and validates ShellCheck diagnostics', () => {
@@ -47,7 +47,7 @@ describe('bundled Bash LSP', () => {
     }
   });
 
-  test('resolves and starts bash-language-server from the SDK package install', async () => {
+  test('resolves and starts bash-language-server from the platform package install', async () => {
     const root = mkdtempSync(join(tmpdir(), 'gv-bash-lsp-'));
     const paths = createShellPathService({ workingDirectory: root, homeDirectory: root });
     const service = new LspService(paths);

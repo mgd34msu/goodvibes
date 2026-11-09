@@ -139,7 +139,7 @@ function walkSourceFiles(dir: string): string[] {
 
 const SCAN_ROOTS = [
   // The old packages/* are the engine's top-level package directories.
-  ...['contracts', 'daemon-sdk', 'errors', 'operator-sdk', 'peer-sdk', 'sdk', 'terminal-shell',
+  ...['contracts', 'daemon-api', 'errors', 'operator-client', 'peer-client', 'platform', 'terminal-shell',
     'toolchain', 'transport-core', 'transport-http', 'transport-realtime'].map((pkg) => resolve(REPO_ROOT, pkg)),
   resolve(REPO_ROOT, 'scripts'),
   resolve(REPO_ROOT, 'test'),

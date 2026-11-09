@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { GoodVibesSdkError } from '@goodvibes-jev/engine/sdk';
+import { GoodVibesError } from '@goodvibes-jev/engine/platform';
 import {
   formatQuotaSnapshotLine,
   renderMetricMap,
@@ -35,7 +35,7 @@ describe('renderMetricMap', () => {
 describe('telemetryScopeRefusalLine', () => {
   test('names the missing read:telemetry scope on 401/403 (never zeros)', () => {
     for (const status of [401, 403]) {
-      const line = telemetryScopeRefusalLine(new GoodVibesSdkError('nope', { status }), 'runtime metrics');
+      const line = telemetryScopeRefusalLine(new GoodVibesError('nope', { status }), 'runtime metrics');
       expect(line).toContain('read:telemetry');
       expect(line).toContain(String(status));
       expect(line).not.toMatch(/\b0\b/);
@@ -43,7 +43,7 @@ describe('telemetryScopeRefusalLine', () => {
   });
 
   test('returns null for non-scope errors so the caller renders the generic message', () => {
-    expect(telemetryScopeRefusalLine(new GoodVibesSdkError('boom', { status: 500 }), 'runtime metrics')).toBeNull();
+    expect(telemetryScopeRefusalLine(new GoodVibesError('boom', { status: 500 }), 'runtime metrics')).toBeNull();
     expect(telemetryScopeRefusalLine(new Error('plain'), 'runtime metrics')).toBeNull();
   });
 });

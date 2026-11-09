@@ -4,9 +4,9 @@ import { join } from 'node:path';
 import { CommandRegistry } from '../../input/command-registry.ts';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { registerBuiltinCommands } from '../../input/commands.ts';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { listHookPointContracts } from '@goodvibes-jev/engine/sdk/platform/hooks';
-import { HookWorkbench } from '@goodvibes-jev/engine/sdk/platform/hooks';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { listHookPointContracts } from '@goodvibes-jev/engine/platform/platform/hooks';
+import { HookWorkbench } from '@goodvibes-jev/engine/platform/platform/hooks';
 import { createRuntimeHookApi } from '@/runtime/index.ts';
 import {
   getTestHookDispatcher,

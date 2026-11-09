@@ -1,8 +1,8 @@
 import { expect, spyOn, test } from 'bun:test';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { prepareKnowledgeScopeSelection } from '../sdk/src/platform/knowledge/scope-selection.js';
-import { renderHomeGraphMap } from '../sdk/src/platform/knowledge/home-graph/rendering.js';
-import { renderHomeGraphState } from '../sdk/src/platform/knowledge/home-graph/state.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { prepareKnowledgeScopeSelection } from '../platform/src/platform/knowledge/scope-selection.js';
+import { renderHomeGraphMap } from '../platform/src/platform/knowledge/home-graph/rendering.js';
+import { renderHomeGraphState } from '../platform/src/platform/knowledge/home-graph/state.js';
 import { useKnowledgeAnswerReadings } from './_helpers/knowledge-answer-readings.js';
 import { createHomeGraphService, useHomeGraphFixtures } from './_helpers/homegraph-service-fixtures.js';
 

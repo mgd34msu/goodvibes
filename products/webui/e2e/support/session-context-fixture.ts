@@ -1,4 +1,4 @@
-/** Engine-owned runtime controls → real HTTP captures → production browser SDK. */
+/** Engine-owned runtime controls → real HTTP captures → production browser platform. */
 import { readFileSync } from 'node:fs';
 import type { Page, Route } from '@playwright/test';
 import type { OperatorMethodOutput } from '@goodvibes-jev/engine/contracts';

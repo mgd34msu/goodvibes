@@ -14,9 +14,9 @@ import { describe, expect, test, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { UserAuthManager } from '../sdk/src/platform/security/user-auth.js';
-import { HttpListener } from '../sdk/src/platform/daemon/http-listener.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
+import { UserAuthManager } from '../platform/src/platform/security/user-auth.js';
+import { HttpListener } from '../platform/src/platform/daemon/http-listener.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
 
 function tempDir(suffix: string): string {
   const d = join(tmpdir(), `gv-login-rate-${suffix}-${Date.now()}`);

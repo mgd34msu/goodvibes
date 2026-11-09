@@ -1,8 +1,8 @@
-import type { BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-sdk';
+import type { BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-api';
 import type { OperatorMethodOutput } from '@goodvibes-jev/engine/contracts';
-import { WEBUI_BUILTIN_COMMANDS, WEBUI_COMMAND_CATALOG_VERSION } from '@goodvibes-jev/engine/sdk/platform/judgment-browser/catalogs';
+import { WEBUI_BUILTIN_COMMANDS, WEBUI_COMMAND_CATALOG_VERSION } from '@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs';
 import { readBrowserDecisionPolicy, runBrowserJudgment } from './goodvibes';
-import { classicCommandIndices, DecisionModelsDisabledError } from '@goodvibes-jev/engine/sdk/browser/decision-policy';
+import { classicCommandIndices, DecisionModelsDisabledError } from '@goodvibes-jev/engine/platform/browser/decision-policy';
 import { getCommandRegistryRevision, getCommands, type CommandDef } from './commands';
 import { randomUuid } from './uuid';
 import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime } from './client-lifetime';

@@ -228,7 +228,7 @@ export async function buildSetupPlan(
       status: sudoPosture.setupStatus,
       priority: 66,
       blocksAutonomy: false,
-      reason: 'Privilege escalation must stay explicit, visible, and user-supervised; background sudo prompts, stdin password writes, and raw password display are blocked until the SDK/daemon publishes safe mediation.',
+      reason: 'Privilege escalation must stay explicit, visible, and user-supervised; background sudo prompts, stdin password writes, and raw password display are blocked until the platform/daemon publishes safe mediation.',
       nextAction: sudoPosture.nextAction,
       userRoute: 'Agent Workspace -> Work & Approvals -> Process capabilities',
       modelRoute: sudoPosture.setupRoute,

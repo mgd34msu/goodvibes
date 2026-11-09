@@ -8,31 +8,31 @@ import {
   extractTarGzEntry,
   extractTarGzTree,
   readTarGzEntries,
-} from '../sdk/src/platform/browser/browser-driver-archive.js';
+} from '../platform/src/platform/browser/browser-driver-archive.js';
 import {
   driverRemediation,
   shippedDriverPath,
-} from '../sdk/src/platform/browser/browser-driver-remediation.js';
+} from '../platform/src/platform/browser/browser-driver-remediation.js';
 import type {
   BrowserDriverInstallKind,
   BrowserDriverInstallProfile,
-} from '../sdk/src/platform/browser/browser-driver-remediation.js';
+} from '../platform/src/platform/browser/browser-driver-remediation.js';
 import {
   DRIVER_REQUIRED_FILES,
   driverSearchDirectories,
   findDriverDirectory,
   managedDriverRoot,
-} from '../sdk/src/platform/browser/browser-provision-io.js';
+} from '../platform/src/platform/browser/browser-provision-io.js';
 import {
   describeProvisionWork,
   ensureBrowserBinary,
   installRuntimeCandidates,
   installRuntimeCandidatesFor,
-} from '../sdk/src/platform/browser/browser-provisioning.js';
+} from '../platform/src/platform/browser/browser-provisioning.js';
 import type {
   BrowserProvisionIo,
   CommandOutcome,
-} from '../sdk/src/platform/browser/browser-types.js';
+} from '../platform/src/platform/browser/browser-types.js';
 
 /**
  * The browser-driver failure that shipped once, pinned so it cannot ship again.
@@ -49,7 +49,7 @@ import type {
  *
  * The half of that story that is about ONE product's release assets, its
  * archive manifest, its capability probe, its install-kind detector, stays
- * with that product, because the SDK ships no release and has no installer.
+ * with that product, because the platform ships no release and has no installer.
  * What is here is the platform half: the archive reader, the resolver, the
  * install-runtime candidates, self-provisioning, and the SHAPE of a remediation
  * message against a product-supplied install profile.
@@ -275,7 +275,7 @@ describe('the browser install step on a machine with no interpreter', () => {
  *
  * The agent's version of these tests asserted its own release asset names and
  * its own `bun add -g @goodvibes-jev/agent`. Those are facts about a
- * product, and the SDK has none, so the profile is supplied here and what is
+ * product, and the platform has none, so the profile is supplied here and what is
  * asserted is that each install kind is answered with ITS OWN fix and never
  * another's, which is the defect these tests exist for.
  */

@@ -1,11 +1,11 @@
 import { afterEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError } from '@goodvibes-jev/judgment';
-import { createBrowserCheckoutDriverFactory, type CheckoutBrowserEngine } from '../sdk/src/platform/payments/browser-checkout-driver.js';
-import { CheckoutQuoteChanged, CheckoutSubmitRefused, type CheckoutTerms } from '../sdk/src/platform/payments/checkout-page.js';
-import { StaleElementError } from '../sdk/src/platform/browser/browser-snapshot.js';
-import { CardMaterialRedactor } from '../sdk/src/platform/payments/card-redaction.js';
-import { parseCurrencyCode } from '../sdk/src/platform/payments/types.js';
+import { createBrowserCheckoutDriverFactory, type CheckoutBrowserEngine } from '../platform/src/platform/payments/browser-checkout-driver.js';
+import { CheckoutQuoteChanged, CheckoutSubmitRefused, type CheckoutTerms } from '../platform/src/platform/payments/checkout-page.js';
+import { StaleElementError } from '../platform/src/platform/browser/browser-snapshot.js';
+import { CardMaterialRedactor } from '../platform/src/platform/payments/card-redaction.js';
+import { parseCurrencyCode } from '../platform/src/platform/payments/types.js';
 import { paymentsPort } from './helpers/payments-readings.ts';
 
 const restores: (() => void)[] = [], releases: (() => void)[] = [], pending: Promise<unknown>[] = [];

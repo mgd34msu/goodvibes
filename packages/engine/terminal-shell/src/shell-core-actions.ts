@@ -1,5 +1,5 @@
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ProviderRegistry, ProviderApi } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ProviderRegistry, ProviderApi } from '@goodvibes-jev/engine/platform/platform/providers';
 import {
   describeEffortForModel,
   describeServingEffort,
@@ -9,8 +9,8 @@ import {
   resolveRequestedEffortForServingModel,
   servingEffortForLevel,
   toEffortModel,
-} from '@goodvibes-jev/engine/sdk/platform/providers/reasoning-effort-surface';
-import { summarizeError, logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+} from '@goodvibes-jev/engine/platform/platform/providers/reasoning-effort-surface';
+import { summarizeError, logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { OpenSelection } from './selection-modal.js';
 import type { TerminalSlashCommand } from './command-registry.js';
 import type { KeyCombo } from './keybindings.js';

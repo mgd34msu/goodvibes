@@ -2,7 +2,7 @@
 import { isNativeConversationTurnReady, nativeConversationTurnInputOptions } from '@goodvibes-jev/engine/terminal-shell/native-ingress';
 import { readShellFrameFacts, createShellSubmissionPorts } from '@goodvibes-jev/engine/terminal-shell/shell-frame-facts';
 import { join } from 'node:path';
-import { sanitizeSessionName } from '@goodvibes-jev/engine/sdk/platform/sessions';
+import { sanitizeSessionName } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { createHerdrSessionReporter } from '@goodvibes-jev/engine/terminal-shell';
 import { ScheduleReadingLifetime } from './input/commands/schedule-reading-lifetime.ts';
 import { wireHostPairingShell } from './shell/host-pairing-shell.ts';
@@ -12,22 +12,22 @@ import type { NativeConversationIntakeState } from './runtime/native-conversatio
 import { captureNativeConversationInput, type ProductInputContext } from './runtime/native-conversation-input.ts';
 import { dispatchNativeConversationTurn } from './runtime/native-conversation-ingress.ts';
 import { readTuiConfigValue, subscribeTuiConfigValue } from './config/host-settings.ts';
-import { resolveGoodVibesDaemonHome, resolveGoodVibesHome } from '@goodvibes-jev/engine/sdk/platform/config';
+import { resolveGoodVibesDaemonHome, resolveGoodVibesHome } from '@goodvibes-jev/engine/platform/platform/config';
 import './renderer/compositor.ts';
 
 import { UIFactory } from './renderer/ui-factory.ts';
 import { resolveThrobberActivity } from './renderer/throbber.ts';
 import { SPINNER_FRAMES } from './renderer/ui-primitives.ts';
 import { ActivityAnimation } from './core/activity-animation.ts';
-import '@goodvibes-jev/engine/sdk/platform/core';
+import '@goodvibes-jev/engine/platform/platform/core';
 import { InputHandler } from './input/handler.ts';
 import '@goodvibes-jev/engine/terminal-shell';
-import type { ContentPart } from '@goodvibes-jev/engine/sdk/platform/providers';
-import '@goodvibes-jev/engine/sdk/platform/tools';
-import '@goodvibes-jev/engine/sdk/platform/tools';
-import '@goodvibes-jev/engine/sdk/platform/state';
-import '@goodvibes-jev/engine/sdk/platform/permissions';
-import '@goodvibes-jev/engine/sdk/platform/acp';
+import type { ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
+import '@goodvibes-jev/engine/platform/platform/tools';
+import '@goodvibes-jev/engine/platform/platform/tools';
+import '@goodvibes-jev/engine/platform/platform/state';
+import '@goodvibes-jev/engine/platform/platform/permissions';
+import '@goodvibes-jev/engine/platform/platform/acp';
 import { PermissionPromptUI, buildPendingPermissionExtras } from './permissions/prompt.ts';
 import {
   handleBrokerApprovalChange,
@@ -42,9 +42,9 @@ import { requestedEffortLevel } from './providers/reasoning-effort-surface.ts';
 import { wireWorkTree } from './core/work-tree-wiring.ts';
 import { createSessionContractViews } from './core/session-contract-views.ts';
 import './input/commands.ts';
-import '@goodvibes-jev/engine/sdk/platform/tools';
+import '@goodvibes-jev/engine/platform/platform/tools';
 import './input/input-history.ts';
-import { describeContextWindowSource } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { describeContextWindowSource } from '@goodvibes-jev/engine/platform/platform/providers';
 import './renderer/git-status.ts';
 
 import { createShellLayout } from './renderer/layout-engine.ts';
@@ -54,12 +54,12 @@ import { TranscriptScroll } from './shell/transcript-scroll.ts';
 import { formatStatusReport } from './shell/status-report.ts';
 import { voiceCaptureDescription } from './renderer/voice-capture-chip.ts';
 import { voiceCaptureRowVisible } from './core/voice-capture-status.ts';
-import { resolveWebSurfaceUrl } from '@goodvibes-jev/engine/sdk/platform/runtime/feature-announcements';
+import { resolveWebSurfaceUrl } from '@goodvibes-jev/engine/platform/platform/runtime/feature-announcements';
 import { createFailoverTurnState, resolveActiveModelDisplay } from './core/active-model-identity.ts';
 import { computePromptContentWidth } from './renderer/prompt-content-width.ts';
 import { buildConversationViewport, centerViewportContent } from './renderer/conversation-layout.ts';
 import { applyConversationOverlays, buildConversationLayers } from './renderer/conversation-overlays.ts';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { bootstrapRuntime } from './runtime/bootstrap.ts';
 import type { BootstrapContext } from './runtime/bootstrap.ts';
 import { selfUpdateAtLaunch } from './cli/launch-auto-update.ts';
@@ -81,7 +81,7 @@ import {
 import { wireShellUiOpeners } from './shell/ui-openers.ts';
 import { deriveComposerState } from './core/composer-state.ts';
 import { resolveFoldedBookmarkLine } from './core/bookmark-navigation.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { prepareShellCliRuntime } from './cli/entrypoint.ts';
 import { applyInitialTuiCliState, reportFatalStartupError } from './cli/tui-startup.ts';
 import { applyConfiguredHitlMode, applyTerminalRuntimeConfigDefaults } from '@goodvibes-jev/engine/terminal-shell';
@@ -97,7 +97,7 @@ import { wireStreamEventMetrics, type WireStreamEventMetricsResult } from './cor
 import { createStreamMetrics, type StreamMetrics } from './core/stream-metrics.ts';
 import { wireTurnEventHandlers } from './core/turn-event-wiring.ts';
 import { resolveContextStatusHint } from './renderer/context-status-hint.ts';
-import { isEffectiveDangerMode } from '@goodvibes-jev/engine/sdk/platform/config';
+import { isEffectiveDangerMode } from '@goodvibes-jev/engine/platform/platform/config';
 import { applyComposerCapture, applyAtModelDirective } from './input/composer-capture.ts';
 import { makeComposerEditorOpener, makeFileEditorOpener } from './input/composer-editor.ts';
 import { evaluateSessionMaintenance } from '@/runtime/index.ts';
@@ -1225,7 +1225,7 @@ async function main() {
       render();
       return false;
     }
-    // Roll back to pre-submission count, then re-submit. SDK gap, no retry-in-place (see handoff).
+    // Roll back to pre-submission count, then re-submit. platform gap, no retry-in-place (see handoff).
     // The rollback erases the failed turn's transcript, the failover notice included, which is how
     // that notice used to vanish before anyone could read it. The caller hands it over instead, and
     // it is posted here: after the rollback, above the prompt it explains.

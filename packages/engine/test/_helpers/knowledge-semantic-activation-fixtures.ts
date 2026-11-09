@@ -1,8 +1,8 @@
 import { semanticRepairSentenceKinds } from './repair-profile-fixture-readings.js';
 import { beforeEach } from 'bun:test';
-import type { KnowledgeStore } from '../../sdk/src/platform/knowledge/store.js';
-import type { KnowledgeNodeUpsertInput } from '../../sdk/src/platform/knowledge/types.js';
-import { upsertObservedKnowledgeNode } from '../../sdk/src/platform/knowledge/store-node-observation.js';
+import type { KnowledgeStore } from '../../platform/src/platform/knowledge/store.js';
+import type { KnowledgeNodeUpsertInput } from '../../platform/src/platform/knowledge/types.js';
+import { upsertObservedKnowledgeNode } from '../../platform/src/platform/knowledge/store-node-observation.js';
 import type { useKnowledgeAnswerReadings } from './knowledge-answer-readings.js';
 
 /** Explicit plumbing for the authored synthetic manuals/provider outputs in the four semantic suites. */

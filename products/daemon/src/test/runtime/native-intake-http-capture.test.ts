@@ -5,7 +5,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { firstJsonSchemaFailure } from '@goodvibes-jev/engine/transport-http';
 import operatorContract from '@goodvibes-jev/engine/contracts/operator-contract.json' with { type: 'json' };
-import { nativeConversationIntakeLookupResultSchema, type NativeConversationIntakeCaptureRequest } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
+import { nativeConversationIntakeLookupResultSchema, type NativeConversationIntakeCaptureRequest } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 import { createNativeIntakeHttpFixture, fullInputProposal, intakeBarrier, type NativeIntakeHttpWire } from '../helpers/native-intake-http-fixture.js';
 
 // HTML textareas expose LF line endings; the existing native-conversation test

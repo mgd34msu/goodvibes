@@ -3,7 +3,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, renameSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ArtifactStore, acquireArtifactPublication, tryAcquireArtifactPublication } from '../sdk/src/platform/artifacts/store.ts';
+import { ArtifactStore, acquireArtifactPublication, tryAcquireArtifactPublication } from '../platform/src/platform/artifacts/store.ts';
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function root() { const directory = mkdtempSync(join(tmpdir(), 'artifact-publisher-')); roots.push(directory); return directory; }
@@ -35,7 +35,7 @@ test('original parent retirement cannot release through a replacement alias', as
 test('current metadata inventory is classification only, and old unknown shapes are retained', async () => {
   const directory = root(), store = new ArtifactStore({ rootDir: directory });
   const older = await store.create({ kind: 'document', mimeType: 'text/markdown', text: 'older', retentionMs: 0, metadata: { generatedKnowledgePage: true, generatedProjection: true } });
-  const { inspectGeneratedArtifactCleanupCandidates } = await import('../sdk/src/platform/artifacts/store.ts');
+  const { inspectGeneratedArtifactCleanupCandidates } = await import('../platform/src/platform/artifacts/store.ts');
   const inventory = inspectGeneratedArtifactCleanupCandidates(store); expect(inventory.candidates).toHaveLength(0); expect(inventory.preserved).toBe(1); expect(store.getRecord(older.id)).not.toBeNull();
 });
 

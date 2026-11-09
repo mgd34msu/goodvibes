@@ -24,7 +24,7 @@ import { join, resolve } from 'node:path';
 import {
   resolveGoodVibesDaemonHome,
   resolveGoodVibesHome,
-} from '@goodvibes-jev/engine/sdk/platform/config';
+} from '@goodvibes-jev/engine/platform/platform/config';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 const projectRoot = resolve(join(import.meta.dir, '..', '..', '..'));
@@ -36,9 +36,9 @@ const projectRoot = resolve(join(import.meta.dir, '..', '..', '..'));
  * Prints the store path it wrote so the parent can assert where it landed.
  */
 const CHILD_SCRIPT = `
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { SecretsManager } from '${projectRoot}/src/config/secrets.ts';
-import { resolveGoodVibesDaemonHome, resolveGoodVibesHome } from '@goodvibes-jev/engine/sdk/platform/config';
+import { resolveGoodVibesDaemonHome, resolveGoodVibesHome } from '@goodvibes-jev/engine/platform/platform/config';
 
 const homeDirectory = resolveGoodVibesHome();
 const daemonHomeDirectory = resolveGoodVibesDaemonHome(homeDirectory);

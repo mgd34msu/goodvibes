@@ -2,8 +2,8 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { AtomicWriteDurabilityError, confirmFileDurable, writeJsonFileAtomic } from '../sdk/src/platform/utils/atomic-json-store.js';
-import { PairingTokenManager } from '../sdk/src/platform/pairing/pairing-token-store.js';
+import { AtomicWriteDurabilityError, confirmFileDurable, writeJsonFileAtomic } from '../platform/src/platform/utils/atomic-json-store.js';
+import { PairingTokenManager } from '../platform/src/platform/pairing/pairing-token-store.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });

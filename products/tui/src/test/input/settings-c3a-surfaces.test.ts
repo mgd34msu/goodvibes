@@ -8,7 +8,7 @@ import { describe, test, expect, afterEach } from 'bun:test';
 import { mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { buildSettingGroups } from '../../input/settings-modal-data.ts';
 
 const dirs: string[] = [];

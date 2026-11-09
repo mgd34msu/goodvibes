@@ -7,7 +7,7 @@
  * without a model of its own reads it.
  */
 import { expect, test } from 'bun:test';
-import { lazyCurrentModel } from '../sdk/src/platform/agents/orchestrator-runner.ts';
+import { lazyCurrentModel } from '../platform/src/platform/agents/orchestrator-runner.ts';
 
 test('the default model is not looked up until it is read, and then once', () => {
   let lookups = 0;

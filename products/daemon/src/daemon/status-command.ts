@@ -24,7 +24,7 @@
  * NOTHING HERE DECIDES WHAT AN ANSWER MEANS. A sub-question that fails is one
  * line saying it failed; only an unreachable daemon is a failed command.
  */
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   resolveRemoteDaemonTarget,
   type DaemonFetch,

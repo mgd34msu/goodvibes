@@ -4,8 +4,8 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { Client } from 'undici/index.js';
-import { createDiscordInboxOwner, type InboxListOutput } from '@goodvibes-jev/engine/sdk/platform/intake';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { createDiscordInboxOwner, type InboxListOutput } from '@goodvibes-jev/engine/platform/platform/intake';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { SecretsManager } from '../../config/secrets.js';
 import { createProductionDaemonInboxFactory } from '../../runtime/production-inbox-composition.js';
 import { startGatewayFixture } from '../helpers/gateway-route-fixture.js';
@@ -110,7 +110,7 @@ test('a pending managed-alias replacement cannot release old Discord rows before
   await f.daemon.services.secretsManager.set(key, `goodvibes://secrets/goodvibes/${alias}`);
   await f.inbox();
   const record = (await f.daemon.services.secretsManager.listDetailed()).find(row => row.key === alias)!;
-  const { acquireCrossProcessLock } = await import('@goodvibes-jev/engine/sdk/platform/state/durable-file-io');
+  const { acquireCrossProcessLock } = await import('@goodvibes-jev/engine/platform/platform/state/durable-file-io');
   const release = await acquireCrossProcessLock(`${record.path!}.mutation.lock`, { strictOwnership: true });
   const pending = f.daemon.services.secretsManager.set(alias, 'synthetic-discord-replacement');
   try { expect((await f.daemon.fetch('/api/channels/inbox')).status).toBe(503); }

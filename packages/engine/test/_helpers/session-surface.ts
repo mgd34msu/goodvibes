@@ -6,7 +6,7 @@
  * its own scope can pass while the real reader and writer disagree.
  */
 import { utimesSync } from 'node:fs';
-import { createSessionSurface, type SessionSurface } from '../../sdk/src/platform/runtime/session-surface.ts';
+import { createSessionSurface, type SessionSurface } from '../../platform/src/platform/runtime/session-surface.ts';
 
 /** The scope these tests write under; any non-empty segment exercises the same paths. */
 export const TEST_SURFACE_ROOT = 'test-surface';
@@ -22,7 +22,7 @@ export function makeTestSurface(dir: string, homeDir: string = dir): SessionSurf
 /**
  * Stamp a recovery snapshot far enough in the past that the boot offer treats
  * it as an abandoned crash rather than as a file a live process is still
- * rewriting. The SDK skips any snapshot refreshed inside its live-refresh
+ * rewriting. The platform skips any snapshot refreshed inside its live-refresh
  * window, so a test that needs a snapshot OFFERED has to age it first, a file
  * written this instant genuinely does look like live state, which is exactly
  * the rule that stops a still-running older build's snapshot being re-offered

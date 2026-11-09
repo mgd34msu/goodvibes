@@ -1,10 +1,10 @@
 import { afterEach, expect, test } from 'bun:test';
 import { JudgmentError, type JudgmentPort, type JudgmentRequest, type Questions } from '@goodvibes-jev/judgment';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { emptyJudgmentUsage, readUnmetSeverities } from '../../sdk/src/platform/contract/check.js';
-import { nativeSourceCriteria } from '../../sdk/src/platform/contract/native-source.js';
-import type { NativeContractServices } from '../../sdk/src/platform/contract/native-decisions.js';
-import type { NativeContractSource } from '../../sdk/src/platform/contract/types.js';
+import { emptyJudgmentUsage, readUnmetSeverities } from '../../platform/src/platform/contract/check.js';
+import { nativeSourceCriteria } from '../../platform/src/platform/contract/native-source.js';
+import type { NativeContractServices } from '../../platform/src/platform/contract/native-decisions.js';
+import type { NativeContractSource } from '../../platform/src/platform/contract/types.js';
 import { checkPort } from './check-port.js';
 import { makeContract, makeCriterion, makeUnit } from './fixtures.js';
 

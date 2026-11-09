@@ -26,9 +26,9 @@ import type { JudgmentPort } from '@goodvibes-jev/judgment';
  * fixed one.
  */
 import { describe, expect, test } from 'bun:test';
-import { ChannelReplyPipeline } from '../sdk/src/platform/channels/reply-pipeline.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { emitAgentCompleted, emitAgentProgress } from '../sdk/src/platform/runtime/emitters/agents.js';
+import { ChannelReplyPipeline } from '../platform/src/platform/channels/reply-pipeline.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { emitAgentCompleted, emitAgentProgress } from '../platform/src/platform/runtime/emitters/agents.js';
 import { withTestTimeout } from './_helpers/test-timeout.js';
 
 const DISPATCH_MS = 60;

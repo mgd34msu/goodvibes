@@ -3,12 +3,12 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { getConfiguredSystemPrompt } from '../sdk/src/platform/config/index.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { getConfiguredSystemPrompt } from '../platform/src/platform/config/index.ts';
 import {
   announceIngestionNotice,
   unreadableSettingsFileNotice,
-} from '../sdk/src/platform/config/settings-ingestion.ts';
+} from '../platform/src/platform/config/settings-ingestion.ts';
 
 function tempDir(label: string): string {
   return join(tmpdir(), `gv-${label}-${randomUUID()}`);
@@ -108,7 +108,7 @@ describe('ConfigManager persistence', () => {
     // deleted since setting it. Propagating the read failure takes down whatever
     // is booting over an optional preference, so it reads back as undefined and
     // says so at debug level. This is the behaviour the terminal app's copy of
-    // this helper already had; the SDK adopted it when that copy was deleted.
+    // this helper already had; the platform adopted it when that copy was deleted.
     const configDir = tempDir('missing-system-prompt');
     mkdirSync(configDir, { recursive: true });
     const manager = new ConfigManager({

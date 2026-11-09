@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { memoryProviderSelect, routingRegistry } from '@goodvibes-jev/engine/sdk/platform/routing';
+import { memoryProviderSelect, routingRegistry } from '@goodvibes-jev/engine/platform/platform/routing';
 import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { STAKES_BANDS, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { externalMemoryLiveProviderRecords, externalMemoryReceiptEvidence } from '../../tools/agent-harness-memory-external-providers.ts';

@@ -1,6 +1,6 @@
 import { expect, spyOn, test } from 'bun:test';
-import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { registerInboxSurface } from '@goodvibes-jev/engine/sdk/platform/intake';
+import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { registerInboxSurface } from '@goodvibes-jev/engine/platform/platform/intake';
 import { runStatusCommand, runUpdateCommand } from '../../daemon/status-command.js';
 import { runSessionsCommand } from '../../daemon/sessions-command.js';
 import { startDaemonFixture, type DaemonFixture } from '../../testing/daemon-fixture.js';

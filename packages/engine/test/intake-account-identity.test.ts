@@ -4,12 +4,12 @@ import * as crypto from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { acquireAccountInboxIdentity, acquireOwnedTriageIdentity, resolveAccountInboxIdentity,
-  type AccountInboxIdentity, type AccountInboxIdentityInput } from '../sdk/src/platform/intake/providers/account-identity.js';
-import { InboxCursorStore } from '../sdk/src/platform/intake/cursor-store.js';
-import { SqliteTriageStore } from '../sdk/src/platform/intake/triage/store.js';
-import { inboxTriage, TRIAGE_MODEL } from '../sdk/src/platform/intake/triage/battery.js';
-import { createNativeDataWriteOwner, assertNativeReaderCompatible, nativeReaderCapabilities } from '../sdk/src/platform/runtime/native-reader-compatibility.js';
-import { realUpdateFileIo } from '../sdk/src/platform/runtime/self-update.js';
+  type AccountInboxIdentity, type AccountInboxIdentityInput } from '../platform/src/platform/intake/providers/account-identity.js';
+import { InboxCursorStore } from '../platform/src/platform/intake/cursor-store.js';
+import { SqliteTriageStore } from '../platform/src/platform/intake/triage/store.js';
+import { inboxTriage, TRIAGE_MODEL } from '../platform/src/platform/intake/triage/battery.js';
+import { createNativeDataWriteOwner, assertNativeReaderCompatible, nativeReaderCapabilities } from '../platform/src/platform/runtime/native-reader-compatibility.js';
+import { realUpdateFileIo } from '../platform/src/platform/runtime/self-update.js';
 import { makeProjectTempDir } from './_helpers/project-temp.js';
 const cleanup: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });

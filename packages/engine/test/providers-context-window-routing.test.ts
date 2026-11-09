@@ -7,9 +7,9 @@
 import { afterEach, describe, test, expect } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { ModelLimitsService } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { resolveContextWindow } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
+import { ModelLimitsService } from '@goodvibes-jev/engine/platform/platform/providers';
+import { resolveContextWindow } from '@goodvibes-jev/engine/platform/platform/providers';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 // ---------------------------------------------------------------------------

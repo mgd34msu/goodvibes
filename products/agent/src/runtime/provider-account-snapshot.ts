@@ -1,4 +1,4 @@
-import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/sdk/platform/config';
+import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/platform/platform/config';
 import type {
   ProviderAccountInspectionQuery,
 } from '@/runtime/index.ts';

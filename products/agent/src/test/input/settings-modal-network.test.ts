@@ -8,13 +8,13 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { SettingsModal, SETTINGS_CATEGORIES, isAgentHiddenSettingKey } from '../../input/settings-modal.ts';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { SecretsManager } from '../../config/secrets.ts';
-import { ServiceRegistry } from '@goodvibes-jev/engine/sdk/platform/config';
-import { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
+import { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
-import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
+import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
 import { renderSettingsModal } from '../../renderer/settings-modal.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
@@ -177,7 +177,7 @@ describe('SettingsModal: Agent service-hosting boundaries', () => {
   // The deprecated danger.daemon alias (and the settings-modal override-note
   // machinery it drove, SettingEntry.overrideNote, buildSettingOverrideNote)
   // was removed from the schema; see
-  // docs/decisions/2026-07-05-daemon-by-default.md in the SDK. daemon.enabled
+  // docs/decisions/2026-07-05-daemon-by-default.md in the platform. daemon.enabled
   // is now the single source of truth for this setting, so there is no longer
   // a precedence case for the modal to explain.
 });

@@ -2,7 +2,7 @@ import { usePresentationReadings } from '../helpers/presentation-readings.ts';
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { ConversationManager } from '../../core/conversation';
 import { appendConversationMessages, isNavigableSystemContent, type ConversationRenderContext } from '../../core/conversation-rendering.ts';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 
 type ConversationManagerTestAccess = {
   messages: Array<{ role: string; content: string; reasoningContent?: string }>;

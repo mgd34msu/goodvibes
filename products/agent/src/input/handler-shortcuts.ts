@@ -2,7 +2,7 @@ import {
   handleGlobalShortcutToken as routeShortcut,
   type GlobalShortcutState,
 } from '@goodvibes-jev/engine/terminal-shell/global-shortcuts';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { CommandContext } from './command-registry.ts';
 export type { PromptEdit } from '@goodvibes-jev/engine/terminal-shell/global-shortcuts';
 export type GlobalShortcutRouteState = GlobalShortcutState & {

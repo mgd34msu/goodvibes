@@ -25,8 +25,8 @@ import {
 } from '../helpers/liveness.ts';
 import { frameFromLayer } from '../helpers/surface-frame.ts';
 import { activeTokens } from '../../renderer/theme.ts';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { MemoryRecord } from '@goodvibes-jev/engine/sdk/platform/state';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
+import type { MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
 
 /** The kit marks the selected row with the gradient and dark bold text (selectedListItemText). */
 function selectionRow(frame: Line[]): number {

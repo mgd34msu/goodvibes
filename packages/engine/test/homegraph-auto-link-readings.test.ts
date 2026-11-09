@@ -1,5 +1,5 @@
-import { homeGraphDocumentKind, homeGraphDocumentSubject } from '../sdk/src/platform/knowledge/home-graph/auto-link/battery.js';
-import { assertJudgmentInput, JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.js';
+import { homeGraphDocumentKind, homeGraphDocumentSubject } from '../platform/src/platform/knowledge/home-graph/auto-link/battery.js';
+import { assertJudgmentInput, JudgmentInputError } from '../platform/src/platform/gate/judgment-input.js';
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -7,13 +7,13 @@ import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { ArtifactStore } from '../sdk/src/platform/artifacts/index.js';
-import { runHomeGraphSnapshotSync } from '../sdk/src/platform/knowledge/home-graph/sync.js';
-import { HomeGraphService } from '../sdk/src/platform/knowledge/home-graph/service.js';
-import { autoLinkExistingHomeGraphSources } from '../sdk/src/platform/knowledge/home-graph/extraction.js';
-import { autoLinkHomeGraphSource, autoLinkHomeGraphSources } from '../sdk/src/platform/knowledge/home-graph/auto-link.js';
-import { readHomeGraphState } from '../sdk/src/platform/knowledge/home-graph/state.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
+import { ArtifactStore } from '../platform/src/platform/artifacts/index.js';
+import { runHomeGraphSnapshotSync } from '../platform/src/platform/knowledge/home-graph/sync.js';
+import { HomeGraphService } from '../platform/src/platform/knowledge/home-graph/service.js';
+import { autoLinkExistingHomeGraphSources } from '../platform/src/platform/knowledge/home-graph/extraction.js';
+import { autoLinkHomeGraphSource, autoLinkHomeGraphSources } from '../platform/src/platform/knowledge/home-graph/auto-link.js';
+import { readHomeGraphState } from '../platform/src/platform/knowledge/home-graph/state.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { seedHomeAssistantObservation } from './_helpers/homegraph-observation-fixtures.js';
 
 const spaceId = 'homeassistant:link-readings', installationId = 'link-readings';

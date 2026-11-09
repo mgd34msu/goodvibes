@@ -24,9 +24,9 @@ import {
   judgmentEvalScenarios,
   loggedReadings,
   outcomeShift,
-} from '../sdk/src/platform/observe/index.ts';
-import { EvalRunner } from '../sdk/src/platform/runtime/eval/runner.ts';
-import { judgmentQualityScore } from '../sdk/src/platform/runtime/eval/scorecard.ts';
+} from '../platform/src/platform/observe/index.ts';
+import { EvalRunner } from '../platform/src/platform/runtime/eval/runner.ts';
+import { judgmentQualityScore } from '../platform/src/platform/runtime/eval/scorecard.ts';
 
 const urgency = defineBattery({
   name: 'test.observe.urgency',

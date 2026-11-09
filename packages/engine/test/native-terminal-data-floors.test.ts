@@ -3,13 +3,13 @@ import { expect, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Database } from 'bun:sqlite';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { admitInstalledClientDataWriter, installedReaderCommand } from '../sdk/src/platform/runtime/installed-client-data-writer.js';
-import { assertStagedClientReaderCompatible } from '../sdk/src/platform/runtime/client-reader-update.js';
-import { clientReaderAsset, type ClientReaderArtifact, type ClientReaderPackage } from '../sdk/src/platform/runtime/client-reader-artifact.js';
-import { createNativeDataWriteOwner, nativeReaderCapabilities, NATIVE_READER_REQUIREMENT_FILE } from '../sdk/src/platform/runtime/native-reader-compatibility.js';
-import { realUpdateFileIo, rollbackKeptPrevious, sha256 } from '../sdk/src/platform/runtime/self-update.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { admitInstalledClientDataWriter, installedReaderCommand } from '../platform/src/platform/runtime/installed-client-data-writer.js';
+import { assertStagedClientReaderCompatible } from '../platform/src/platform/runtime/client-reader-update.js';
+import { clientReaderAsset, type ClientReaderArtifact, type ClientReaderPackage } from '../platform/src/platform/runtime/client-reader-artifact.js';
+import { createNativeDataWriteOwner, nativeReaderCapabilities, NATIVE_READER_REQUIREMENT_FILE } from '../platform/src/platform/runtime/native-reader-compatibility.js';
+import { realUpdateFileIo, rollbackKeptPrevious, sha256 } from '../platform/src/platform/runtime/self-update.js';
 import { makeProjectTempDir } from './_helpers/project-temp.js';
 
 function fixture(product = 'goodvibes') {

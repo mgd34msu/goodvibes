@@ -16,7 +16,7 @@ let _gitCeilingSet = false;
  * `git rev-parse --show-toplevel` (or similar discovery) from a
  * makeProjectTempDir path, expecting a plain non-repo directory, would
  * silently walk up and resolve to this project's own repo root instead.
- * That is not hypothetical: @goodvibes-jev/engine/sdk's WorkspaceCheckpointManager
+ * That is not hypothetical: @goodvibes-jev/engine/platform's WorkspaceCheckpointManager
  * does exactly this by default (`preferGitRoot`), and it changed which root a
  * `.test-tmp`-rooted test guard evaluated.
  *

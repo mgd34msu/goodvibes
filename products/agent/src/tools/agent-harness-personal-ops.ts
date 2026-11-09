@@ -1,13 +1,13 @@
-import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { runPersonalOpsStyleDraft, STYLE_DRAFT_RECORD_ID } from './agent-harness-personal-ops-style-draft.ts';
 import { buildAgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace-snapshot.ts';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import { captureCatalogData, captureCatalogMethods, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { harnessCatalogInvocationAuthority } from './agent-harness-catalog-ingress.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { isAgentMcpCallRouteInstalled } from './agent-mcp-call-route.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { LANE_IDS, QUEUE_CAPABILITIES, type AgentHarnessPersonalOpsArgs, type McpToolSchema, type PersonalOpsBriefingStatus, type PersonalOpsLane, type PersonalOpsLaneId, type PersonalOpsLaneResolution, type PersonalOpsLiveRecord, type PersonalOpsReadRunResult, type PersonalOpsStatus, type PersonalOpsWorkflowStatus } from './agent-harness-personal-ops-types.ts';
@@ -281,7 +281,7 @@ async function ownedPersonalOpsSummary(context: CommandContext, args: AgentHarne
       attention: workflows.filter((workflow) => workflow.status === 'attention').length,
       needsSetup: workflows.filter((workflow) => workflow.status === 'needs-setup').length,
     },
-    policy: 'Personal Ops unifies inbox, agenda, notes, tasks, reminders, routines, and delivery. Lanes include live records when Agent owns them, daemon/SDK provider read-model queue records when published, and schema-derived connector operation records when MCP schemas are available. Missing email/calendar connectors, messages, and events are reported as setup/data gaps, not faked.',
+    policy: 'Personal Ops unifies inbox, agenda, notes, tasks, reminders, routines, and delivery. Lanes include live records when Agent owns them, daemon/platform provider read-model queue records when published, and schema-derived connector operation records when MCP schemas are available. Missing email/calendar connectors, messages, and events are reported as setup/data gaps, not faked.',
     nextActions: nextActions(lanes),
   };
 }
@@ -433,7 +433,7 @@ async function ownedPersonalOpsQueueSummary(context: CommandContext, args: Agent
         'Run personal_ops action:"intake" for the user request to find a safe connector route.',
         'Set up an inbox or calendar connector before promising fresh queue state.',
       ],
-    policy: 'Personal Ops queue is read-only. It aggregates existing saved review artifacts, connector read-route records, and daemon/SDK provider read-model records; it does not execute MCP tools, read live provider data beyond already-published read models, send messages, edit calendar events, create reminders, or mutate artifacts.',
+    policy: 'Personal Ops queue is read-only. It aggregates existing saved review artifacts, connector read-route records, and daemon/platform provider read-model records; it does not execute MCP tools, read live provider data beyond already-published read models, send messages, edit calendar events, create reminders, or mutate artifacts.',
   };
 }
 

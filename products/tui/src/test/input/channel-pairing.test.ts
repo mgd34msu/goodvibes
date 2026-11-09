@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
-import { getBuiltinSetupSchema } from '@goodvibes-jev/engine/sdk/platform/channels';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { getBuiltinSetupSchema } from '@goodvibes-jev/engine/platform/platform/channels';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { runChannelPairing } from '../../input/commands/channel-pairing.ts';
 
@@ -28,7 +28,7 @@ function makeCtx() {
 }
 
 describe('/channel pair', () => {
-  it('lists adapters from the SDK setup schema (not a hand-maintained list)', async () => {
+  it('lists adapters from the platform setup schema (not a hand-maintained list)', async () => {
     const { ctx, text } = makeCtx();
     await runChannelPairing([], ctx);
     expect(text()).toContain('Channel adapters');

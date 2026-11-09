@@ -25,7 +25,7 @@
  * (handler-modal-stack.ts), whose view step goes back up one level and never
  * cancels anything.
  */
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import { isTextBackspace } from './delete-key-policy.js';
 /** What the route can do to the session views (shell/session-views.ts). */
 export interface SessionViewControls {

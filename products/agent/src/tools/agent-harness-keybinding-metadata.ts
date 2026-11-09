@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, renameSync } from 'node:fs';
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { writeStoreJson } from '@/utils/store-file.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogData, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { readHarnessBoolean } from './agent-harness-boolean-reading.ts';
 import type { Ranked } from '@goodvibes-jev/judgment';

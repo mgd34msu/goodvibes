@@ -13,7 +13,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import type { CanonicalModel } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { CanonicalModel } from '@goodvibes-jev/engine/platform/platform/providers';
 import { buildSyntheticChainEntries } from '../../cli/management.ts';
 
 // Alias for test readability, same function, real implementation.

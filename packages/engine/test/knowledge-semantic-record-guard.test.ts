@@ -2,10 +2,10 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { copyFileSync, mkdtempSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { upsertObservedKnowledgeNode } from '../sdk/src/platform/knowledge/store-node-observation.js';
-import { createSemanticWriteGuard } from '../sdk/src/platform/knowledge/semantic/primary-source-plan.js';
-import { KnowledgeSourceQualityHeldError } from '../sdk/src/platform/knowledge/source-quality.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { upsertObservedKnowledgeNode } from '../platform/src/platform/knowledge/store-node-observation.js';
+import { createSemanticWriteGuard } from '../platform/src/platform/knowledge/semantic/primary-source-plan.js';
+import { KnowledgeSourceQualityHeldError } from '../platform/src/platform/knowledge/source-quality.js';
 
 const stores: KnowledgeStore[] = [], roots: string[] = [];
 afterEach(async () => {

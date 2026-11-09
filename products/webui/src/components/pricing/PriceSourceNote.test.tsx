@@ -20,7 +20,7 @@ import type { WireCostSource } from '../../lib/cost-source';
 mock.module('../../lib/goodvibes', () => ({
   getCurrentAuth: () => null,
   invokeMethod: () => Promise.resolve({}),
-  sdk: {
+  client: {
     operator: {
       config: {
         get: () => Promise.resolve({}),

@@ -20,11 +20,11 @@ import {
   describeSelection,
   selectionCandidates,
   type AttemptSelectionRecord,
-} from '../../sdk/src/platform/contract/index.js';
+} from '../../platform/src/platform/contract/index.js';
 import { estimateTokens } from '@goodvibes-jev/judgment';
-import { GatewayMethodCatalog } from '../../sdk/src/platform/control-plane/method-catalog.ts';
-import { createFleetAttemptsJudgeHandler, type FleetAttemptsController } from '../../sdk/src/platform/control-plane/routes/fleet.ts';
-import { createAttemptsCoordinator, emptyWorkItemUsage, type WorkItem, type WorkItemSpec, type Workstream } from '../../sdk/src/platform/orchestration/index.js';
+import { GatewayMethodCatalog } from '../../platform/src/platform/control-plane/method-catalog.ts';
+import { createFleetAttemptsJudgeHandler, type FleetAttemptsController } from '../../platform/src/platform/control-plane/routes/fleet.ts';
+import { createAttemptsCoordinator, emptyWorkItemUsage, type WorkItem, type WorkItemSpec, type Workstream } from '../../platform/src/platform/orchestration/index.js';
 import type { AnswerContext } from './plan-support.js';
 import { eventsOf, makeHarness, oneUnitPlan, startContract, waitFor, type AgentScript, type Harness } from './runner-support.js';
 

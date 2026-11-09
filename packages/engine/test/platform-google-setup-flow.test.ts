@@ -16,23 +16,23 @@ import {
   REQUIRED_SERVICES,
   stepSpec,
   stepsForPath,
-} from '../sdk/src/platform/google/setup-plan.ts';
+} from '../platform/src/platform/google/setup-plan.ts';
 import {
   renderGoogleSetupReport,
   runGoogleSetupFlow,
   type GoogleStepRunner,
   type GoogleStepRunnerResult,
-} from '../sdk/src/platform/google/setup-flow.ts';
+} from '../platform/src/platform/google/setup-flow.ts';
 import {
   renderGoogleSetupRunbook,
   RUNBOOK_RELATIVE_PATH,
-} from '../sdk/src/platform/google/setup-runbook.ts';
+} from '../platform/src/platform/google/setup-runbook.ts';
 import type {
   GoogleProgressPort,
   GoogleSetupStepSpec,
   GoogleStepId,
   GoogleStepResult,
-} from '../sdk/src/platform/google/types.ts';
+} from '../platform/src/platform/google/types.ts';
 
 function recordingProgress(): {
   readonly port: GoogleProgressPort;
@@ -399,7 +399,7 @@ describe('rendering a report', () => {
 // The public executor must report failed semantic observations as failures,
 // never claim sign-in or continue to a later mutation.
 test('an unavailable Google page reading halts setup before later effects', async () => {
-  const { buildGoogleSetupRunners } = await import('../sdk/src/platform/google/setup-actions.ts');
+  const { buildGoogleSetupRunners } = await import('../platform/src/platform/google/setup-actions.ts');
   const { installJudgmentPort } = await import('@goodvibes-jev/engine/errors');
   const previous = installJudgmentPort(undefined);
   let writes = 0;

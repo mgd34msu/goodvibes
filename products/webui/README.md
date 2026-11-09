@@ -27,7 +27,7 @@ the development server below is for source work.
 
 Install dependencies from the monorepo root and build the workspace with
 `bun run build`. This product uses only declared `@goodvibes-jev/engine` exports;
-its production browser build consumes compiled engine artifacts. Standalone SDK
+its production browser build consumes compiled engine artifacts. Standalone platform
 overlays and independent package pins are not supported.
 
 From `products/webui`:

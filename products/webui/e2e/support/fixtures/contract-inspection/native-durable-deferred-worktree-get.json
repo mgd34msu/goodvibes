@@ -26,7 +26,7 @@
         ]
       },
       "origin": "turn",
-      "projectRoot": "/tmp/goodvibes-sdk-testrun-2-1ed65473/contract-runner-cuyh9d",
+      "projectRoot": "/tmp/goodvibes-platform-testrun-2-1ed65473/contract-runner-cuyh9d",
       "sessionId": "inspection-schema"
     },
     "key": {
@@ -42,7 +42,7 @@
     "execution": {
       "isolation": "worktree",
       "branch": "contract/57415cdd",
-      "worktreePath": "/tmp/goodvibes-sdk-testrun-2-1ed65473/contract-runner-cuyh9d/.goodvibes/.worktrees/contract/57415cdd",
+      "worktreePath": "/tmp/goodvibes-platform-testrun-2-1ed65473/contract-runner-cuyh9d/.goodvibes/.worktrees/contract/57415cdd",
       "baseBranch": "main"
     }
   },
@@ -52,10 +52,10 @@
   "origin": "turn",
   "ask": "Parser display request",
   "ownerAgentId": "agent-2ba82d20",
-  "projectRoot": "/tmp/goodvibes-sdk-testrun-2-1ed65473/contract-runner-cuyh9d",
+  "projectRoot": "/tmp/goodvibes-platform-testrun-2-1ed65473/contract-runner-cuyh9d",
   "isolation": "worktree",
   "branch": "contract/57415cdd",
-  "worktreePath": "/tmp/goodvibes-sdk-testrun-2-1ed65473/contract-runner-cuyh9d/.goodvibes/.worktrees/contract/57415cdd",
+  "worktreePath": "/tmp/goodvibes-platform-testrun-2-1ed65473/contract-runner-cuyh9d/.goodvibes/.worktrees/contract/57415cdd",
   "baseBranch": "main",
   "nativeSource": {
     "sourceId": "native-work",
@@ -159,9 +159,9 @@
   "inputSnapshot": {
     "version": 1,
     "id": "cklecatm-qmar-ossm-aktq-tqqeqbosdtrl",
-    "sourceRoot": "/tmp/goodvibes-sdk-testrun-2-1ed65473/contract-runner-cuyh9d",
+    "sourceRoot": "/tmp/goodvibes-platform-testrun-2-1ed65473/contract-runner-cuyh9d",
     "sourceIdentity": "39:8804",
-    "gitIdentity": "39:8805|/tmp/goodvibes-sdk-testrun-2-1ed65473/contract-runner-cuyh9d/.git|39:8805|/tmp/goodvibes-sdk-testrun-2-1ed65473/contract-runner-cuyh9d/.git|39:8805",
+    "gitIdentity": "39:8805|/tmp/goodvibes-platform-testrun-2-1ed65473/contract-runner-cuyh9d/.git|39:8805|/tmp/goodvibes-platform-testrun-2-1ed65473/contract-runner-cuyh9d/.git|39:8805",
     "ownerHead": "be6f726d27dcfe3655b0bd41a3e004d961d4849e",
     "ownerRef": "main",
     "indexFingerprint": "2083d4500dbbd99a37d66b58095065327c097368f5931fd75076615981c2aa52",

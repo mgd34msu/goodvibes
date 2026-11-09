@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test';
-import { getTierPromptSupplement, readTierPromptSupplement } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { ModelTier } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { getTierPromptSupplement, readTierPromptSupplement } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { ModelTier } from '@goodvibes-jev/engine/platform/platform/providers';
 
 describe('getTierPromptSupplement', () => {
   test('premium tier returns empty string', () => {

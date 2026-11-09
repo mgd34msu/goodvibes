@@ -1,4 +1,4 @@
-import { SuiteUpdateRecoveryError } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { SuiteUpdateRecoveryError } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { describe, expect, test } from 'bun:test';
 import {
   LAUNCH_UPDATED_FROM_ENV,

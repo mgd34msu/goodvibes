@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
-import { applySdkVendorMitigations } from '../scripts/release-shared.ts';
+import { applyPlatformVendorMitigations } from '../scripts/release-shared.ts';
 
 describe('packaged engine Bash dependencies', () => {
   test('projects the vendored runtime leaves while preserving engine versions', () => {
@@ -9,7 +9,7 @@ describe('packaged engine Bash dependencies', () => {
       dependencies: { zod: '4.4.3' },
       optionalDependencies: { 'web-tree-sitter': '0.26.8', unrelated: '1.0.0' },
     };
-    const staged = applySdkVendorMitigations(original);
+    const staged = applyPlatformVendorMitigations(original);
     expect(staged.dependencies?.zod).toBe('4.4.3');
     expect(staged.optionalDependencies?.['web-tree-sitter']).toBe('0.26.8');
     expect(staged.optionalDependencies?.unrelated).toBe('1.0.0');
@@ -24,8 +24,8 @@ describe('packaged engine Bash dependencies', () => {
   });
 
   test('rejects silent collisions instead of replacing engine dependencies', () => {
-    expect(() => applySdkVendorMitigations({ dependencies: { editorconfig: '0.0.0' } })).toThrow('conflicts with engine');
-    expect(() => applySdkVendorMitigations({ optionalDependencies: { 'glob-parent': '0.0.0' } })).toThrow('conflicts with engine');
-    expect(() => applySdkVendorMitigations({ dependencies: { editorconfig: '3.0.2' }, optionalDependencies: { editorconfig: '0.0.0' } })).toThrow('conflicts with engine');
+    expect(() => applyPlatformVendorMitigations({ dependencies: { editorconfig: '0.0.0' } })).toThrow('conflicts with engine');
+    expect(() => applyPlatformVendorMitigations({ optionalDependencies: { 'glob-parent': '0.0.0' } })).toThrow('conflicts with engine');
+    expect(() => applyPlatformVendorMitigations({ dependencies: { editorconfig: '3.0.2' }, optionalDependencies: { editorconfig: '0.0.0' } })).toThrow('conflicts with engine');
   });
 });

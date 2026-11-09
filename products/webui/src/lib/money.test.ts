@@ -141,7 +141,7 @@ describe('minorUnitsToMajorText: rejects a value it cannot represent honestly', 
   });
 });
 
-describe('minorUnitExponent: mirrors the SDK exponent table exactly', () => {
+describe('minorUnitExponent: mirrors the platform exponent table exactly', () => {
   test('defaults to 2 decimal places for an ordinary currency', () => {
     expect(minorUnitExponent('USD')).toBe(2);
     expect(minorUnitExponent('GBP')).toBe(2);

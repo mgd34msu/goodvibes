@@ -1,7 +1,7 @@
 import { createSecurityCommand } from '@goodvibes-jev/engine/terminal-shell/security-command';
 import type { CommandRegistry, CommandContext } from '../command-registry.ts';
 import '@/runtime/index.ts';
-import '@goodvibes-jev/engine/sdk/platform/config';
+import '@goodvibes-jev/engine/platform/platform/config';
 import { requireReadModels, requireSubscriptionManager, requireTokenAuditor } from './runtime-services.ts';
 
 export function registerSecurityRuntimeCommands(registry: CommandRegistry): void {

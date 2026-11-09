@@ -1,5 +1,5 @@
 /** Sticky command-key burst guard. Ordinary composer typing and modal input stay outside it. */
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 export const PASTE_FLOOD_WINDOW_MS = 120;
 export const PASTE_FLOOD_THRESHOLD = 8;
 

@@ -2,9 +2,9 @@
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CodeIndexStore } from '../../sdk/src/platform/state/code-index-store.js';
-import { MemoryEmbeddingProviderRegistry } from '../../sdk/src/platform/state/memory-embeddings.js';
-import { ConfigManager } from '../../sdk/src/platform/config/manager.js';
+import { CodeIndexStore } from '../../platform/src/platform/state/code-index-store.js';
+import { MemoryEmbeddingProviderRegistry } from '../../platform/src/platform/state/memory-embeddings.js';
+import { ConfigManager } from '../../platform/src/platform/config/manager.js';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 /** Real vector store and live file adapter, with only the provider and policy owner synthetic. */

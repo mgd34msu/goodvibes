@@ -1,4 +1,4 @@
-import type { PowerState } from '@goodvibes-jev/engine/sdk/platform/power';
+import type { PowerState } from '@goodvibes-jev/engine/platform/platform/power';
 
 /**
  * The composer power chip (see shell-surface.ts): it renders on the
@@ -6,7 +6,7 @@ import type { PowerState } from '@goodvibes-jev/engine/sdk/platform/power';
  * that is never dropped for lack of room, since both are safety-relevant and
  * must stay visible at once. Priority order for WHICH power note text to show: the owner
  * keep-awake toggle first (an ALWAYS-ON override the user set explicitly, and
- * per the SDK's own PowerManager doc comment the chip, not a timer, is the
+ * per the platform's own PowerManager doc comment the chip, not a timer, is the
  * safety mechanism while it's on), then the automatic work-hold ("held
  * because X"), real state names, never invented. Returns null when neither
  * applies (nothing to show).

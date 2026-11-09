@@ -4,7 +4,7 @@ import {
   captureJudgmentVolumeMonitorSettings,
   startJudgmentVolumeMonitor,
   type JudgmentVolumeAlert,
-} from '../sdk/src/platform/observe/judgment-volume-monitor.ts';
+} from '../platform/src/platform/observe/judgment-volume-monitor.ts';
 
 const settings = captureJudgmentVolumeMonitorSettings({
   budgets: [{ name: 'classification window', maxLogicalDecisions: 0 }],

@@ -3,7 +3,7 @@
  * `--disable`, `--hostname`/`--port`, and a front-end's own launch-time
  * settings defaults onto a live ConfigManager.
  */
-import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { featureEnablementWrite, getFeatureSetting } from './cli-feature-settings.js';
 import type { GoodVibesCliCommand, GoodVibesCliFlags } from './cli-types.js';
 import { RUNTIME_ENDPOINT_CONFIG_KEYS, hostModeForHostname } from './cli-endpoints.js';
@@ -44,7 +44,7 @@ export function applyRuntimeConfigDefault(configManager: ConfigManager, key: Con
 
 /**
  * Every front-end-side config default applied at startup, in one place.
- * Currently: show token speed ON (the SDK schema default is false).
+ * Currently: show token speed ON (the platform schema default is false).
  * The manager applies it below accepted persisted settings and invocation
  * overrides, independent of registration order. No disk read or write.
  */

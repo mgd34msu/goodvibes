@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { parseToolchainConfig, resolveSdkPinConfig, resolvePerJobGreenConfig, DEFAULT_SDK_PACKAGE } from '@goodvibes-jev/engine/toolchain';
+import { parseToolchainConfig, resolveEnginePinConfig, resolvePerJobGreenConfig, DEFAULT_ENGINE_PACKAGE } from '@goodvibes-jev/engine/toolchain';
 
 describe('toolchain config', () => {
   test('accepts an optional compile driver and rejects an empty path', () => {
@@ -18,9 +18,9 @@ describe('toolchain config', () => {
   test('rejects a non-object config', () => {
     expect(() => parseToolchainConfig('[]')).toThrow();
   });
-  test('resolveSdkPinConfig fills conventional defaults', () => {
-    const resolved = resolveSdkPinConfig(undefined);
-    expect(resolved.sdkPackage).toBe(DEFAULT_SDK_PACKAGE);
+  test('resolveEnginePinConfig fills conventional defaults', () => {
+    const resolved = resolveEnginePinConfig(undefined);
+    expect(resolved.enginePackage).toBe(DEFAULT_ENGINE_PACKAGE);
     expect(resolved.pinSource).toBe('dependencies');
     expect(resolved.lockfile).toBe('bun.lock');
     expect(resolved.overlayMarker).toContain('.local-sdk-overlay.json');
@@ -41,37 +41,37 @@ describe('toolchain config', () => {
     expect(custom.retryAttempts).toBe(3);
     expect(custom.retryDelayMs).toBe(100);
   });
-  test('a one-field sdkPin section parses: requiredness lives in resolveSdkPinConfig, not the schema', () => {
+  test('a one-field enginePin section parses: requiredness lives in resolveEnginePinConfig, not the schema', () => {
     const raw = JSON.stringify({
       packageName: '@goodvibes-jev/tui',
-      sdkPin: { pinSource: 'devDependencies' },
+      enginePin: { pinSource: 'devDependencies' },
     });
     const config = parseToolchainConfig(raw);
-    expect(Object.keys(config.sdkPin ?? {})).toEqual(['pinSource']);
-    expect(config.sdkPin?.pinSource).toBe('devDependencies');
-    const resolved = resolveSdkPinConfig(config.sdkPin);
+    expect(Object.keys(config.enginePin ?? {})).toEqual(['pinSource']);
+    expect(config.enginePin?.pinSource).toBe('devDependencies');
+    const resolved = resolveEnginePinConfig(config.enginePin);
     expect(resolved.pinSource).toBe('devDependencies');
-    expect(resolved.sdkPackage).toBe(DEFAULT_SDK_PACKAGE);
+    expect(resolved.enginePackage).toBe(DEFAULT_ENGINE_PACKAGE);
   });
   test('a perJobGreen section with only owner/repo parses: the rest defaults via resolvePerJobGreenConfig', () => {
     const raw = JSON.stringify({
       packageName: '@goodvibes-jev/tui',
-      perJobGreen: { owner: 'mgd34msu', repo: 'goodvibes-sdk' },
+      perJobGreen: { owner: 'mgd34msu', repo: 'goodvibes-platform' },
     });
     const config = parseToolchainConfig(raw);
     expect(Object.keys(config.perJobGreen ?? {}).sort()).toEqual(['owner', 'repo']);
     expect(config.perJobGreen?.owner).toBe('mgd34msu');
-    expect(config.perJobGreen?.repo).toBe('goodvibes-sdk');
+    expect(config.perJobGreen?.repo).toBe('goodvibes-platform');
     const resolved = resolvePerJobGreenConfig(config.perJobGreen as { owner: string; repo: string });
     expect(resolved.workflow).toBe('ci.yml');
     expect(resolved.retryAttempts).toBe(8);
   });
-  test('rejects a present-but-wrongly-typed optional sdkPin field, naming it', () => {
+  test('rejects a present-but-wrongly-typed optional enginePin field, naming it', () => {
     const raw = JSON.stringify({
       packageName: '@goodvibes-jev/tui',
-      sdkPin: { sourceRoots: 'src' },
+      enginePin: { sourceRoots: 'src' },
     });
-    expect(() => parseToolchainConfig(raw)).toThrow(/sdkPin\.sourceRoots/);
+    expect(() => parseToolchainConfig(raw)).toThrow(/enginePin\.sourceRoots/);
   });
   test('rejects a malformed nested section with a clear message naming the bad field', () => {
     const raw = JSON.stringify({
@@ -97,11 +97,11 @@ describe('toolchain config', () => {
   test('valid config parses to a deep-equal object, matching the old cast-through parser', () => {
     const full = {
       packageName: '@goodvibes-jev/tui',
-      sdkPin: {
-        sdkPackage: '@goodvibes-jev/engine/sdk',
+      enginePin: {
+        enginePackage: '@goodvibes-jev/engine/platform',
         pinSource: 'dependencies',
         lockfile: 'bun.lock',
-        overlayMarker: 'node_modules/@goodvibes-jev/engine/sdk/.local-sdk-overlay.json',
+        overlayMarker: 'node_modules/@goodvibes-jev/engine/platform/.local-sdk-overlay.json',
         sourceRoots: ['src'],
         enforceExportsMap: false,
       },

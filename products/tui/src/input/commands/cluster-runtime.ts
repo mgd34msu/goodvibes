@@ -11,7 +11,7 @@
  * it requires `--group` and `--key` and says so, which is exactly what the
  * shared caller already reports for any non-interactive invocation.
  */
-import { resolveDaemonHomeDir } from '@goodvibes-jev/engine/sdk/platform/workspace';
+import { resolveDaemonHomeDir } from '@goodvibes-jev/engine/platform/platform/workspace';
 import { runClusterCommand, CLUSTER_SUBCOMMANDS } from '@goodvibes-jev/engine/terminal-shell';
 import type { CommandRegistry } from '../command-registry.ts';
 

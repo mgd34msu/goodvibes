@@ -8,7 +8,7 @@ GoodVibes can optionally use Cloudflare Workers and Queues for batch-capable dae
 | `batch.queueBackend` | `local` | Queued work stays on the local backend |
 | `cloudflare.enabled` | `false` | The Cloudflare integration is off entirely |
 
-The TUI owns the user flow. The SDK daemon owns all Cloudflare API calls, token creation, validation, discovery, provisioning, verification, repair paths, and secret persistence. The TUI never calls Cloudflare APIs directly.
+The TUI owns the user flow. The platform daemon owns all Cloudflare API calls, token creation, validation, discovery, provisioning, verification, repair paths, and secret persistence. The TUI never calls Cloudflare APIs directly.
 
 ## Onboarding
 
@@ -28,7 +28,7 @@ Select `Use Cloudflare for batch or remote daemon work` on the first onboarding 
 The wizard supports these paths:
 
 - Save settings only: persist configuration and provision later.
-- Paste temporary bootstrap token: the SDK creates a narrower operational token, stores it in GoodVibes secrets, and does not persist the bootstrap token.
+- Paste temporary bootstrap token: the platform creates a narrower operational token, stores it in GoodVibes secrets, and does not persist the bootstrap token.
 - Read bootstrap token from environment: same as pasted bootstrap token, but the TUI reads the value from an environment variable in the current process.
 - Paste final operational token: the TUI stores it as `goodvibes://secrets/goodvibes/CLOUDFLARE_API_TOKEN`.
 - Use final token from environment: the TUI writes a `goodvibes://secrets/env/<ENV_NAME>` reference, usually `CLOUDFLARE_API_TOKEN`.
@@ -51,9 +51,9 @@ Use `/cloudflare` for runtime inspection and daemon actions:
 /cloudflare disable
 ```
 
-`/cloudflare setup` opens onboarding in edit mode. All other subcommands call SDK-owned daemon routes under local daemon admin/auth.
+`/cloudflare setup` opens onboarding in edit mode. All other subcommands call platform-owned daemon routes under local daemon admin/auth.
 
-`/cloudflare provision` accepts the same major SDK daemon fields the onboarding screen exposes, including `--tunnel-name`, `--tunnel-id`, `--tunnel-service-url`, `--tunnel-token-ref`, `--access-app-id`, `--access-service-token-id`, `--access-service-token-ref`, `--kv-namespace-name`, `--kv-namespace-id`, `--do-namespace-name`, `--do-namespace-id`, `--r2-bucket-name`, `--secrets-store-name`, `--secrets-store-id`, `--operator-token-ref`, and `--worker-client-token-ref`.
+`/cloudflare provision` accepts the same major platform daemon fields the onboarding screen exposes, including `--tunnel-name`, `--tunnel-id`, `--tunnel-service-url`, `--tunnel-token-ref`, `--access-app-id`, `--access-service-token-id`, `--access-service-token-ref`, `--kv-namespace-name`, `--kv-namespace-id`, `--do-namespace-name`, `--do-namespace-id`, `--r2-bucket-name`, `--secrets-store-name`, `--secrets-store-id`, `--operator-token-ref`, and `--worker-client-token-ref`.
 
 ## Daemon routes
 
@@ -94,4 +94,4 @@ goodvibes://secrets/goodvibes/CLOUDFLARE_TUNNEL_TOKEN
 goodvibes://secrets/goodvibes/CLOUDFLARE_ACCESS_SERVICE_TOKEN
 ```
 
-The SDK may also store generated Worker client, Tunnel, Access service, and daemon/operator token material as GoodVibes secret references when provisioning needs them.
+The platform may also store generated Worker client, Tunnel, Access service, and daemon/operator token material as GoodVibes secret references when provisioning needs them.

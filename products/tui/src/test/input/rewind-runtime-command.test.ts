@@ -13,7 +13,7 @@
 import { describe, expect, test, afterEach, beforeEach } from 'bun:test';
 import { rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/sdk/platform/workspace';
+import { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/platform/platform/workspace';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import {
   registerRewindRuntimeCommands,
@@ -21,7 +21,7 @@ import {
   redoLastRewind,
   resetRewindState,
 } from '../../input/commands/rewind-runtime.ts';
-import { recordTurnAnchor, clearTurnAnchors } from '@goodvibes-jev/engine/sdk/platform/rewind';
+import { recordTurnAnchor, clearTurnAnchors } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 const SESSION = 's-rewind';

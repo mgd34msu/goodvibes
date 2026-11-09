@@ -6,7 +6,7 @@
  * its own scope can pass while the real reader and writer disagree.
  */
 import { utimesSync } from 'node:fs';
-import { createSessionSurface, type SessionSurface } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { createSessionSurface, type SessionSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../../config/surface.ts';
 
 export function makeTestSurface(dir: string, homeDir: string = dir): SessionSurface {
@@ -20,7 +20,7 @@ export function makeTestSurface(dir: string, homeDir: string = dir): SessionSurf
 /**
  * Stamp a recovery snapshot far enough in the past that the boot offer treats
  * it as an abandoned crash rather than as a file a live process is still
- * rewriting. The SDK skips any snapshot refreshed inside its live-refresh
+ * rewriting. The platform skips any snapshot refreshed inside its live-refresh
  * window, so a test that needs a snapshot OFFERED has to age it first, a file
  * written this instant genuinely does look like live state, which is exactly
  * the rule that stops a still-running older build's snapshot being re-offered

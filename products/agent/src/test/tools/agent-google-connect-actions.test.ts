@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager, SecretsManager, secretReferenceFor } from '@goodvibes-jev/engine/sdk/platform/config';
-import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS, type LoopbackListener } from '@goodvibes-jev/engine/sdk/platform/google';
+import { ConfigManager, SecretsManager, secretReferenceFor } from '@goodvibes-jev/engine/platform/platform/config';
+import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS, type LoopbackListener } from '@goodvibes-jev/engine/platform/platform/google';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { executeAdmitted } from '../helpers/admitted-tool.ts';
 import { createAgentGoogleTool, agentGoogleInputProjector } from '../../tools/agent-google-tool.ts';

@@ -7,10 +7,10 @@ import {
   nativeConversationIntakeResultSchema, nativeConversationIntakeLookupResultSchema, nativeConversationIntakeWorkReceiptSchema,
   sameNativeConversationSource,
   type NativeConversationIntakeCaptureRequest, type NativeConversationIntakeWorkReceipt, type NativeConversationIntakeResult,
-} from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
-import { createOperatorRemoteClient, type OperatorRemoteClient } from '../operator-sdk/src/client-core.js';
+} from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
+import { createOperatorRemoteClient, type OperatorRemoteClient } from '../operator-client/src/client-core.js';
 import { getOperatorContract } from '@goodvibes-jev/engine/contracts';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
 import { createHttpTransport, firstJsonSchemaFailure } from '../transport-http/src/index.js';
 const projectId = 'conversation-project';
 const sourceRef = { version: 1 as const, inputId: 'input-1', sourceId: 'source-1', sourceRevision: 'revision-1', sessionId: 'session-1' };
@@ -101,11 +101,11 @@ describe('native conversation intake browser contract', () => {
     expect(nativeConversationIntakeWorkReceiptSchema.safeParse(reordered).success).toBe(false);
   });
   test('the explicit public client bundles for browsers without host or execution modules', async () => {
-    const bundled = await bundleBrowserEntrypoint(join(import.meta.dir, '../sdk/src/platform/workflow/work-ledger/native-intake-client.ts'));
+    const bundled = await bundleBrowserEntrypoint(join(import.meta.dir, '../platform/src/platform/workflow/work-ledger/native-intake-client.ts'));
     for (const symbol of ['createNativeConversationIntakeHost', 'captureJevDecisionContext', 'createNativeWorkExecutionHost', 'createWorkLedgerService']) expect(bundled).not.toContain(symbol);
     const manifest = JSON.parse(readFileSync(join(import.meta.dir, '../package.json'), 'utf8'));
-    expect(manifest.exports['./sdk/platform/workflow/work-ledger/native-intake-client']).toEqual({ bun: './sdk/src/platform/workflow/work-ledger/native-intake-client.ts', types: './sdk/dist/platform/workflow/work-ledger/native-intake-client.d.ts', import: './sdk/dist/platform/workflow/work-ledger/native-intake-client.js' });
-    for (const barrel of ['../sdk/src/platform/workflow/work-ledger/index.ts', '../operator-sdk/src/index.ts']) expect(readFileSync(join(import.meta.dir, barrel), 'utf8')).not.toContain('native-intake-client');
+    expect(manifest.exports['./platform/platform/workflow/work-ledger/native-intake-client']).toEqual({ bun: './platform/src/platform/workflow/work-ledger/native-intake-client.ts', types: './platform/dist/platform/workflow/work-ledger/native-intake-client.d.ts', import: './platform/dist/platform/workflow/work-ledger/native-intake-client.js' });
+    for (const barrel of ['../platform/src/platform/workflow/work-ledger/index.ts', '../operator-client/src/index.ts']) expect(readFileSync(join(import.meta.dir, barrel), 'utf8')).not.toContain('native-intake-client');
   });
 });
 

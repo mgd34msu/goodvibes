@@ -27,12 +27,12 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDecipheriv, createECDH, createHmac, randomBytes } from 'node:crypto';
-import { bootDaemon, type BootedDaemon } from '../sdk/src/platform/daemon/boot.ts';
+import { bootDaemon, type BootedDaemon } from '../platform/src/platform/daemon/boot.ts';
 import { seedBenchmarkCache } from './_helpers/benchmark-cache.ts';
-import type { PermissionPromptRequest } from '../sdk/src/platform/permissions/prompt.ts';
-import { SecretsManager } from '../sdk/src/platform/config/secrets.ts';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { VAPID_SECRET_KEY } from '../sdk/src/platform/push/index.ts';
+import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.ts';
+import { SecretsManager } from '../platform/src/platform/config/secrets.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { VAPID_SECRET_KEY } from '../platform/src/platform/push/index.ts';
 
 const TOKEN = 'web-push-token';
 let home: string;

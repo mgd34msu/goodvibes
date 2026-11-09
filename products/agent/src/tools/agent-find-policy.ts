@@ -4,4 +4,4 @@ export {
   wrapFindToolForAgentPolicy,
   validateFindToolInvocationForAgentPolicy,
   normalizeFindToolInvocationForAgentPolicy
-} from '@goodvibes-jev/engine/sdk/platform/gate/policy';
+} from '@goodvibes-jev/engine/platform/platform/gate/policy';

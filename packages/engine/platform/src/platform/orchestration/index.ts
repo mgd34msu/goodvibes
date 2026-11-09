@@ -1,0 +1,116 @@
+/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
+
+// ── Orchestration engine (see CHANGELOG 0.38.0) ─────────────────────────────
+// Curated named-export barrel (no `export *`), mirroring runtime/fleet/
+// index.ts's allowlist convention. TUI import path:
+// '@goodvibes-jev/engine/platform/platform/orchestration'.
+export type {
+  BudgetCeiling,
+  CommitExclusion,
+  GateOutcome,
+  ItemMergeState,
+  OrchestrationEvent,
+  OrchestrationEventListener,
+  Phase,
+  PhaseGateSpec,
+  PhaseKind,
+  PhaseResult,
+  PhaseRole,
+  PhaseSpec,
+  SerializedWorkItem,
+  SerializedWorkstream,
+  WorkItem,
+  WorkItemSpec,
+  WorkItemState,
+  WorkItemUsage,
+  Workstream,
+  WorkstreamIsolation,
+  WorkstreamProvenance,
+  WorkstreamSnapshot,
+  AttemptCandidate,
+  AttemptCandidateDiff,
+  AttemptJudge,
+  AttemptJudgeCandidate,
+  AttemptJudgeInput,
+  AttemptJudgeVerdict,
+  AttemptJudgment,
+  AttemptPickResult,
+  HeldMergeGroup,
+} from './types.js';
+export { CURRENT_WORKSTREAM_SCHEMA_VERSION, MAX_ATTEMPTS, emptyWorkItemUsage } from './types.js';
+
+export type { AttemptsCoordinator, AttemptsCoordinatorDeps } from './attempts.js';
+export { AttemptError, attemptItemId, createAttemptsCoordinator } from './attempts.js';
+
+export type { CreateWorkstreamInput, OrchestrationEngine, OrchestrationEngineDeps } from './engine.js';
+export { createOrchestrationEngine } from './engine.js';
+
+// The task graph (planned-fix groups), the dynamic-graph operations, and the
+// elastic pool.
+export { planTaskGraph, clusterOf, ELASTIC_PHASE_CAPACITY } from './task-graph.js';
+export type { ExtraEdges, GraphTask, TaskSeverity } from './task-graph.js';
+export { addDependencyEdge, addConflictSerializationEdges, buildGraphSnapshot, detectOrphans, remainingDepths, wouldCreateCycle } from './graph-dynamics.js';
+export type { DependencyGraph, GraphNode } from './graph-dynamics.js';
+export type { EdgeAddResult, WorkstreamGraphSnapshot, GraphNodeSnapshot, GraphEdgeSnapshot, PoolStateSnapshot } from './graph-dynamics.js';
+export { gateClaimAgainstFleet, isElastic, poolState, retirementEvent } from './elastic-pool.js';
+export type { FleetCapacityProbe, FleetCapacityFn } from './elastic-pool.js';
+
+export type { CancellationRegistry } from './cancellation.js';
+export { createCancellationRegistry } from './cancellation.js';
+
+export type { BudgetCheck } from './budget.js';
+export { checkBudget } from './budget.js';
+
+export {
+  deserializeWorkstream,
+  deserializeWorkstreamSnapshot,
+  listSnapshotWorkstreamIds,
+  loadWorkstreamSnapshot,
+  serializeWorkstream,
+  serializeWorkstreamSnapshot,
+  writeWorkstreamSnapshot,
+} from './persistence.js';
+
+export { approveAndLaunchProposal, draftFromProposal, fromPlanProposal } from './proposal-workstream.js';
+export type { ProposalLaunchInput } from './proposal-workstream.js';
+
+export type { PhaseRunnerAgentManagerLike, PhaseRunnerDeps, PhaseRunOutcome, WorktreeOps } from './phase-runner.js';
+export { runPhase } from './phase-runner.js';
+
+export type { DirtyLaunchSnapshot, DirtyPathState, ScopedCommitExclusion } from './dirty-guard.js';
+export { excludeUntouchedLaunchResidue, listDirtyTreePaths, snapshotDirtyTree } from './dirty-guard.js';
+
+export {
+  computeClaims,
+  dependencyStatus,
+  firstPhase,
+  nextPhaseAfter,
+  phaseById,
+  sortedPhases,
+} from './scheduler.js';
+export type { DependencyStatus, PhaseClaim } from './scheduler.js';
+
+export { createWorkstreamServices } from './workstream-services.js';
+export type { WorkstreamCommandService, WorkstreamServices, WorkstreamServicesDeps } from './workstream-services.js';
+export type { WorkstreamDraft, WorkstreamDraftProvenance } from './workstream-draft-types.js';
+export {
+  editItemBrief,
+  moveItemInSpec,
+  removeItemFromSpec,
+  resolveItemIndex,
+} from './workstream-draft-edits.js';
+export type { DraftEditResult } from './workstream-draft-edits.js';
+export {
+  createWorkstreamDraftStore,
+  formatWorkstreamDraftReclaim,
+  WORKSTREAM_DRAFT_CAP,
+  WORKSTREAM_DRAFT_SWEEP_INTERVAL_MS,
+  WORKSTREAM_DRAFT_TTL_MS,
+} from './workstream-draft-store.js';
+export type {
+  WorkstreamDraftReclaim,
+  WorkstreamDraftStore,
+  WorkstreamDraftStoreOptions,
+} from './workstream-draft-store.js';
+export { validateAttempts } from './workstream-attempts-validation.js';
+export type { AttemptsValidation } from './workstream-attempts-validation.js';

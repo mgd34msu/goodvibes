@@ -6,11 +6,11 @@ import { join } from 'node:path';
 import { firstJsonSchemaFailure } from '@goodvibes-jev/engine/transport-http';
 import operatorContract from '@goodvibes-jev/engine/contracts/operator-contract.json' with { type: 'json' };
 import type { OperatorMethodOutput } from '@goodvibes-jev/engine/contracts';
-import { SharedSessionBroker } from '../sdk/src/platform/control-plane/session-broker.js';
-import type { RouteBindingManager } from '../sdk/src/platform/channels/index.js';
-import { createDaemonRuntimeSessionRouteHandlers } from '../daemon-sdk/src/runtime-session-routes.js';
-import type { DaemonRuntimeRouteContext } from '../daemon-sdk/src/runtime-route-types.js';
-import { dispatchSessionRoutes } from '../daemon-sdk/src/sessions.js';
+import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.js';
+import type { RouteBindingManager } from '../platform/src/platform/channels/index.js';
+import { createDaemonRuntimeSessionRouteHandlers } from '../daemon-api/src/runtime-session-routes.js';
+import type { DaemonRuntimeRouteContext } from '../daemon-api/src/runtime-route-types.js';
+import { dispatchSessionRoutes } from '../daemon-api/src/sessions.js';
 
 const SESSION_ID = 's-tui-idle';
 const BODY = 'Queue a cleanup pass for later';

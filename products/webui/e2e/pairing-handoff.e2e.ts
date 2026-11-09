@@ -1,5 +1,5 @@
 /**
- * Pairing hand-off bundle (pairing.handoff.*, SDK 1.8.0): a `#pair=<token>
+ * Pairing hand-off bundle (pairing.handoff.*, platform 1.8.0): a `#pair=<token>
  * &offers=…` link signs the device in (usePairingHandoff, already covered
  * elsewhere) AND surfaces its offer set for a one-pass accept/decline
  * (PairingHandoffOffers → pairing.handoff.complete). Both paths, at phone width:

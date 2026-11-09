@@ -1,5 +1,5 @@
 import { describe, expect, setSystemTime, test } from 'bun:test';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { AgentResearchRunRegistry, researchRunReportLine, researchRunStorePath } from '../../agent/research-run-registry.ts';

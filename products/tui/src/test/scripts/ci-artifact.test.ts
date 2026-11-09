@@ -5,7 +5,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, s
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { recordTuiCiArtifact, verifyTuiCiArtifact, type TuiArtifactSource } from '../../../scripts/ci-artifact.ts';
-import { nativeReaderCapabilities } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { nativeReaderCapabilities } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 
 const source: TuiArtifactSource = { sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40), headCommit: 'c'.repeat(40) };
 async function fixture(run: (root: string) => Promise<void>) {

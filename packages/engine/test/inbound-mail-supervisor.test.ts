@@ -32,14 +32,14 @@ import {
   PersistedExpectationStore,
   type InboundMailSourceFactory,
   type InboundMailSupervisorDeps,
-} from '../sdk/src/platform/email/inbound/index.ts';
-import { createEmailInboundStatusHandler } from '../sdk/src/platform/control-plane/routes/email-inbound-status.ts';
-import type { InboundMailSource, SourceLatency } from '../sdk/src/platform/email/inbound/source.ts';
+} from '../platform/src/platform/email/inbound/index.ts';
+import { createEmailInboundStatusHandler } from '../platform/src/platform/control-plane/routes/email-inbound-status.ts';
+import type { InboundMailSource, SourceLatency } from '../platform/src/platform/email/inbound/source.ts';
 import type {
   InboundCapabilityVerdict,
   InboundMailObserver,
-} from '../sdk/src/platform/email/inbound/ports.ts';
-import type { VerificationExpectation } from '../sdk/src/platform/google/verification-expectations.ts';
+} from '../platform/src/platform/email/inbound/ports.ts';
+import type { VerificationExpectation } from '../platform/src/platform/google/verification-expectations.ts';
 
 const ACCOUNT = 'primary';
 const MAILBOX = 'INBOX';

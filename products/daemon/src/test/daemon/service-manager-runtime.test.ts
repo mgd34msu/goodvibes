@@ -4,8 +4,8 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { PlatformServiceManager } from '@goodvibes-jev/engine/sdk/platform/daemon';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { PlatformServiceManager } from '@goodvibes-jev/engine/platform/platform/daemon';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../../config/surface.js';
 import { buildManagedDaemonServiceManager } from '../../runtime/legacy-daemon-migration.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';

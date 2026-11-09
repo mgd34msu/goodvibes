@@ -1,9 +1,9 @@
 import { isDeepStrictEqual } from 'node:util';
-import { readFileObservation } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { readFileObservation } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ShellPathService } from '@/runtime/index.ts';
-import type { MemoryRegistry } from '@goodvibes-jev/engine/sdk/platform/state';
-import { MemorySpineClient, type MemoryAccess } from '@goodvibes-jev/engine/sdk/platform/runtime/memory-spine';
-import { assertCurrentToolEffect, assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector, type ToolExecuteOptions } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
+import { MemorySpineClient, type MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
+import { assertCurrentToolEffect, assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector, type ToolExecuteOptions } from '@goodvibes-jev/engine/platform/platform/tools';
 import { noteStorePath } from '../agent/note-registry.ts';
 import { personaStorePath } from '../agent/persona-registry.ts';
 import { routineStorePath } from '../agent/routine-registry.ts';

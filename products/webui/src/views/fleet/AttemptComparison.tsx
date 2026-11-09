@@ -12,7 +12,7 @@
 import { useMemo, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { Trophy } from 'lucide-react';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import type { FleetAttemptGroup, FleetAttemptCandidate, FleetAttemptJudgment } from '../../lib/goodvibes';
 import { formatError, isConflictError, isMethodNotInvokableError } from '../../lib/errors';
 import { parseUnifiedDiff } from '../../lib/unified-diff';
@@ -53,7 +53,7 @@ export function AttemptComparison({ open, group, onClose, onPicked }: AttemptCom
   const [conflict, setConflict] = useState<string | null>(null);
 
   const judge = useMutation({
-    mutationFn: () => sdk.operator.fleet.attempts.judge(group.groupId),
+    mutationFn: () => platformClient.operator.fleet.attempts.judge(group.groupId),
     onSuccess: (result) => {
       setJudgment(result);
       if (result.proposedWinnerItemId) setSelectedId(result.proposedWinnerItemId);
@@ -66,7 +66,7 @@ export function AttemptComparison({ open, group, onClose, onPicked }: AttemptCom
     // false applied (e.g. the group went stale between confirm and this call) is
     // NOT treated as a completed merge: onSuccess only closes the modal when the
     // daemon actually applied it.
-    mutationFn: (winnerItemId: string) => sdk.operator.fleet.attempts.pick(group.groupId, winnerItemId),
+    mutationFn: (winnerItemId: string) => platformClient.operator.fleet.attempts.pick(group.groupId, winnerItemId),
     onSuccess: (result) => {
       if (!result.applied) {
         setConflict('The daemon did not apply this pick. The group may no longer be ready. Refresh the fleet and try again.');

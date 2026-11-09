@@ -1,4 +1,4 @@
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.ts';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { decisionModelPolicyState, DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
 /** Deterministic qualification of actual callers; not live Jev calibration. */
@@ -6,12 +6,12 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { gateSurfaceSpawn, resolveOriginBinding, startAgreedWork, type ConversationGateDeps } from '../sdk/src/platform/daemon/surface-conversation-gate.js';
-import { tryResolveWorkProposalReplyFromChannel } from '../sdk/src/platform/daemon/work-proposal-reply.js';
-import { WorkProposalStore } from '../sdk/src/platform/agents/work-proposal-store.js';
-import { DaemonSurfaceActionHelper } from '../sdk/src/platform/daemon/surface-actions.js';
-import type { ChannelPolicyDecision } from '../sdk/src/platform/channels/index.js';
-import type { ChannelIngressPolicyInput } from '../sdk/src/platform/channels/index.js';
+import { gateSurfaceSpawn, resolveOriginBinding, startAgreedWork, type ConversationGateDeps } from '../platform/src/platform/daemon/surface-conversation-gate.js';
+import { tryResolveWorkProposalReplyFromChannel } from '../platform/src/platform/daemon/work-proposal-reply.js';
+import { WorkProposalStore } from '../platform/src/platform/agents/work-proposal-store.js';
+import { DaemonSurfaceActionHelper } from '../platform/src/platform/daemon/surface-actions.js';
+import type { ChannelPolicyDecision } from '../platform/src/platform/channels/index.js';
+import type { ChannelIngressPolicyInput } from '../platform/src/platform/channels/index.js';
 
 let previous: ReturnType<typeof installJudgmentPort>;
 let log: SqliteDecisionLog;

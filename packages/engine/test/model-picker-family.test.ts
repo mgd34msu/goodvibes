@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { ModelFamilyReadings } from '../sdk/src/platform/providers/model-family.ts';
-import { installCatalogModelFacts } from '../sdk/src/platform/providers/model-catalog-facts.ts';
-import type { CatalogModel } from '../sdk/src/platform/providers/model-catalog.ts';
+import { ModelFamilyReadings } from '../platform/src/platform/providers/model-family.ts';
+import { installCatalogModelFacts } from '../platform/src/platform/providers/model-catalog-facts.ts';
+import type { CatalogModel } from '../platform/src/platform/providers/model-catalog.ts';
 
 const model = (id: string, provider = 'gateway') => ({ registryKey: `${provider}:${id}`, id, displayName: id, provider });
 const catalog = (id: string, family?: string, providerId = 'gateway'): CatalogModel => ({

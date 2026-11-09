@@ -1,7 +1,7 @@
-import { SecretWriteCommittedError } from '@goodvibes-jev/engine/sdk/platform/config';
+import { SecretWriteCommittedError } from '@goodvibes-jev/engine/platform/platform/config';
 /** Exact setup writes consume an observation once and retain independent request authority. */
-import type { ConfigManager, SecretsManager, ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
-import { GoogleSetupWriteCommittedError, type GoogleConfigPort, type GoogleSecretPort } from '@goodvibes-jev/engine/sdk/platform/google';
+import type { ConfigManager, SecretsManager, ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import { GoogleSetupWriteCommittedError, type GoogleConfigPort, type GoogleSecretPort } from '@goodvibes-jev/engine/platform/platform/google';
 
 export function googleSetupWritePorts(config: ConfigManager, secrets: SecretsManager,
   configPort: GoogleConfigPort, secretPort: GoogleSecretPort, assertRequest: () => void,

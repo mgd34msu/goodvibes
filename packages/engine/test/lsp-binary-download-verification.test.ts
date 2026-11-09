@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ensureBinary } from '../sdk/src/platform/intelligence/lsp/binary-downloader.js';
+import { ensureBinary } from '../platform/src/platform/intelligence/lsp/binary-downloader.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const originalFetch = globalThis.fetch;

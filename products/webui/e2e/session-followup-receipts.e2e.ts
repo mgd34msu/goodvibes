@@ -1,4 +1,4 @@
-/** Real daemon route bytes, real browser SDK/composer, phone and desktop. */
+/** Real daemon route bytes, real browser platform/composer, phone and desktop. */
 import { expect, test, type Page } from '@playwright/test';
 import { expectNoHorizontalScroll, expectTappable } from './support/app';
 import { installFollowUpDaemon } from './support/session-followup-fixture';

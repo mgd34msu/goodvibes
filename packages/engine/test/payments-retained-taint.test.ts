@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { assessOutwardContent, assessRetainedOutwardContent, retainTaintEvidence, UntrustedContentLedger } from '../sdk/src/platform/security/untrusted-content.js';
-import { evaluatePaymentTaint, type OwnerOriginIntent } from '../sdk/src/platform/payments/taint-gate.js';
+import { assessOutwardContent, assessRetainedOutwardContent, retainTaintEvidence, UntrustedContentLedger } from '../platform/src/platform/security/untrusted-content.js';
+import { evaluatePaymentTaint, type OwnerOriginIntent } from '../platform/src/platform/payments/taint-gate.js';
 import { usePaymentsReadings } from './helpers/payments-readings.ts';
 
 const readings = usePaymentsReadings({ derives: () => false, boilerplate: () => false });

@@ -24,16 +24,16 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach } from 'bun:test';
-import { CONFIG_SCHEMA, DEFAULT_CONFIG, isValidConfigKey } from '../sdk/src/platform/config/schema.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { ConfigError } from '../sdk/src/platform/types/errors.js';
+import { CONFIG_SCHEMA, DEFAULT_CONFIG, isValidConfigKey } from '../platform/src/platform/config/schema.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { ConfigError } from '../platform/src/platform/types/errors.js';
 import {
   DAEMON_OWNED_NON_SCHEMA_CONFIG_PATHS,
   isDaemonOwnedConfigKey,
   isClientOwnedConfigKey,
   listDaemonOwnedConfigPaths,
-} from '../sdk/src/platform/config/config-ownership.js';
-import { isDeclaredSecretBearingConfigKey } from '../sdk/src/platform/config/secret-bearing-config-keys.js';
+} from '../platform/src/platform/config/config-ownership.js';
+import { isDeclaredSecretBearingConfigKey } from '../platform/src/platform/config/secret-bearing-config-keys.js';
 
 const tmpRoots: string[] = [];
 afterEach(() => {

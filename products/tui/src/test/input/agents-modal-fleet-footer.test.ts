@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { createProcessRegistry, type ProcessRegistryDeps } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
-import type { ContractView } from '@goodvibes-jev/engine/sdk/platform/contract';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import { createProcessRegistry, type ProcessRegistryDeps } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+import type { ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import { AgentsModal } from '../../input/agents-modal.ts';
 import { SurfaceModalHost } from '../../input/surface-modal-host.ts';
 import { confirmThrough } from '../../input/confirm-dialog.ts';

@@ -5,7 +5,7 @@ import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from '../_helpers/project-temp.js';
 import { DurableContractAdmissions, DurableContractAdmissionError, durableKeyHash, durableKeyIdentity, durablePayloadRevision,
-  freezeDurableKey, freezeDurableRequest, type DurableContractAdmission, type DurableContractKey } from '../../sdk/src/platform/contract/durable-admission.js';
+  freezeDurableKey, freezeDurableRequest, type DurableContractAdmission, type DurableContractKey } from '../../platform/src/platform/contract/durable-admission.js';
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 const rawKey = (): DurableContractKey => ({ workId: 'work /: % []', criteriaId: 'criteria shared by independent keys', criteriaRevision: 'revision1', attemptId: 'attempt1' });

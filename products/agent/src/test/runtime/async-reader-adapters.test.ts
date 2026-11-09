@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
-import type { MemoryRecord, MemoryRegistry, MemorySemanticSearchResult, MemoryUsageStatsStore } from '@goodvibes-jev/engine/sdk/platform/state';
+import type { MemoryRecord, MemoryRegistry, MemorySemanticSearchResult, MemoryUsageStatsStore } from '@goodvibes-jev/engine/platform/platform/state';
 import { buildReviewedMemoryPrompt } from '../../agent/memory-prompt.ts';
 import { composeRuntimePromptWithReceipt, type PromptContextReceiptDraft } from '../../agent/prompt-context-receipts.ts';
 import { deliverAgentChannelMessage } from '../../agent/channel-delivery.ts';

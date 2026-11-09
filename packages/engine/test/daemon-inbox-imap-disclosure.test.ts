@@ -1,10 +1,10 @@
 import { afterEach, expect, test } from 'bun:test';
 import { makeProjectTempDir } from './_helpers/project-temp.js';
-import { InboxCursorStore } from '../sdk/src/platform/intake/cursor-store.js';
-import { InboundPoller } from '../sdk/src/platform/intake/poller.js';
-import { aggregateInbox } from '../sdk/src/platform/intake/aggregator.js';
-import type { ImapUidCheckpoint, ProviderPollResult } from '../sdk/src/platform/intake/provider-adapter.js';
-import { CHANNEL_INBOX_PROVIDER_STATUS_SCHEMA } from '../sdk/src/platform/control-plane/operator-contract-schemas-channel-sync.js';
+import { InboxCursorStore } from '../platform/src/platform/intake/cursor-store.js';
+import { InboundPoller } from '../platform/src/platform/intake/poller.js';
+import { aggregateInbox } from '../platform/src/platform/intake/aggregator.js';
+import type { ImapUidCheckpoint, ProviderPollResult } from '../platform/src/platform/intake/provider-adapter.js';
+import { CHANNEL_INBOX_PROVIDER_STATUS_SCHEMA } from '../platform/src/platform/control-plane/operator-contract-schemas-channel-sync.js';
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });

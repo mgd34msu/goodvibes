@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { declaredTestRunner } from '../sdk/src/platform/utils/project-test-runner.js';
+import { declaredTestRunner } from '../platform/src/platform/utils/project-test-runner.js';
 
 test('declared scripts override unrelated installed runners and follow literal script delegation', () => {
   expect(declaredTestRunner({ scripts: { test: 'cross-env NODE_ENV=test pnpm run test:unit', 'test:unit': 'npx --no-install vitest run' }, devDependencies: { jest: '1' } })).toBe('vitest');

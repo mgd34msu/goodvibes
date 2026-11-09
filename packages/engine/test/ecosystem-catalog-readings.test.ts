@@ -22,10 +22,10 @@ import {
   searchEcosystemCatalog,
   upsertEcosystemCatalogEntry,
   type EcosystemCatalogEntry,
-} from '../sdk/src/platform/runtime/ecosystem/catalog.ts';
+} from '../platform/src/platform/runtime/ecosystem/catalog.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
-import { rankRecommendationCandidates } from '../sdk/src/platform/runtime/ecosystem/recommendations.js';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
+import { rankRecommendationCandidates } from '../platform/src/platform/runtime/ecosystem/recommendations.js';
 
 type SearchState = { readonly query: string; readonly entry: { readonly id: string } };
 type NoteState = { readonly name: string; readonly trustNotes: string };

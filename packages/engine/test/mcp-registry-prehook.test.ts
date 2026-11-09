@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
-import { McpRegistry } from '../sdk/src/platform/mcp/registry.js';
-import { SandboxSessionRegistry } from '../sdk/src/platform/runtime/sandbox/session-registry.js';
-import { MCP_STATELESS_REVISION } from '../sdk/src/platform/mcp/protocol.js';
+import { McpRegistry } from '../platform/src/platform/mcp/registry.js';
+import { SandboxSessionRegistry } from '../platform/src/platform/runtime/sandbox/session-registry.js';
+import { MCP_STATELESS_REVISION } from '../platform/src/platform/mcp/protocol.js';
 import { useGateReadings } from './_helpers/gate-readings.ts';
 
 useGateReadings();

@@ -12,7 +12,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type { FeedFetcher, FeedFetchResult } from '@goodvibes-jev/engine/sdk/platform/calendar';
+import type { FeedFetcher, FeedFetchResult } from '@goodvibes-jev/engine/platform/platform/calendar';
 import { CalendarSubscriptionRegistry, type SubscriptionSecretStore } from '../../agent/calendar-subscription-registry.ts';
 import {
   formatCalendarBootRefreshLine,

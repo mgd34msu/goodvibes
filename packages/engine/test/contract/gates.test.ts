@@ -7,9 +7,9 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { RuntimeEventBus } from '../../sdk/src/platform/runtime/events/index.js';
-import type { ContractEvent } from '../../sdk/src/events/index.js';
-import type { ContractConfigReader } from '../../sdk/src/platform/contract/config.js';
+import { RuntimeEventBus } from '../../platform/src/platform/runtime/events/index.js';
+import type { ContractEvent } from '../../platform/src/events/index.js';
+import type { ContractConfigReader } from '../../platform/src/platform/contract/config.js';
 import {
   executeGateCommand,
   failedGates,
@@ -17,7 +17,7 @@ import {
   loadPackageScripts,
   runContractGates,
   type QualityGate,
-} from '../../sdk/src/platform/contract/gates.js';
+} from '../../platform/src/platform/contract/gates.js';
 
 let dir: string;
 beforeEach(() => {

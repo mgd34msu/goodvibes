@@ -17,9 +17,9 @@ import {
   type WorkLedgerSnapshot,
   type WorkLedgerState,
   type WorkLedgerStorage,
-} from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger';
-import * as sdkRoot from '@goodvibes-jev/engine/sdk';
-import * as workflow from '@goodvibes-jev/engine/sdk/platform/workflow';
+} from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
+import * as engineCheckoutRoot from '@goodvibes-jev/engine/platform';
+import * as workflow from '@goodvibes-jev/engine/platform/platform/workflow';
 
 declare const storage: WorkLedgerStorage;
 declare const clock: WorkLedgerClock;
@@ -59,8 +59,8 @@ const forgedActor: WorkLedgerActor = identity;
 service.issueActor(identity);
 // @ts-expect-error Storage decisions are synchronous at the linearization point.
 storage.transaction(async () => decision);
-// @ts-expect-error The broad SDK root deliberately does not export this host seam.
-sdkRoot.createWorkLedger;
+// @ts-expect-error The broad platform root deliberately does not export this host seam.
+engineCheckoutRoot.createWorkLedger;
 // @ts-expect-error The existing workflow barrel remains a separate surface.
 workflow.createWorkLedger;
 
@@ -88,7 +88,7 @@ import {
   type WorkLedgerReadBinding,
   type WorkLedgerReadClient,
   type WorkLedgerReadSnapshot,
-} from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger';
+} from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 const readBinding: WorkLedgerReadBinding = createLocalWorkLedgerReadBinding({
   available: true, projectId: initial.projectId, actorId: 'reader', service, authority,
 });
@@ -110,6 +110,6 @@ if (readBinding.available) {
   });
 }
 // @ts-expect-error No broad root export for the local host binding seam.
-sdkRoot.createLocalWorkLedgerReadBinding;
+engineCheckoutRoot.createLocalWorkLedgerReadBinding;
 // @ts-expect-error No broad workflow export for the local host binding seam.
 workflow.createLocalWorkLedgerReadBinding;

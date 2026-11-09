@@ -26,8 +26,8 @@ import {
   InboundMailStore,
   type InboundMailRecordInput,
   type InboundMailStoreOptions,
-} from '../sdk/src/platform/email/inbound/record-store.ts';
-import { MAX_BODY_EXCERPT_CHARS } from '../sdk/src/platform/email/inbound/types.ts';
+} from '../platform/src/platform/email/inbound/record-store.ts';
+import { MAX_BODY_EXCERPT_CHARS } from '../platform/src/platform/email/inbound/types.ts';
 import { useSecurityReadings } from './helpers/security-readings.ts';
 
 useSecurityReadings();

@@ -1,8 +1,8 @@
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
-import { redactStructuredDataAsync } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { captureOwnedJson } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { redactStructuredDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { captureOwnedJson } from '@goodvibes-jev/engine/platform/platform/gate';
 import { inspectCatalogData, captureCatalogData, captureCatalogMethods, captureCatalogSnapshotGuard, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureModelReadingSnapshotGuard } from './agent-harness-model-reading-source.ts';
 import type { EntryType, JsonValue } from '@goodvibes-jev/judgment/decisions';
@@ -145,7 +145,7 @@ export function capturePersonalOpsSnapshot(value: unknown): {
   assertNormalizationOperations('invalid');
   const captured = capturePersonalOpsData(value);
   assertNormalizationOperations('invalid');
-  // Either the SDK's own capture or a completely frozen, already admitted DTO
+  // Either the platform's own capture or a completely frozen, already admitted DTO
   // can prove stable data identity. A frozen parent with mutable descendants
   // still requires a complete comparison at every boundary.
   let immutable = false;

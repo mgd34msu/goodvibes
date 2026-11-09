@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { firstJsonSchemaFailure } from '@goodvibes-jev/engine/transport-http';
 import { WEBUI_METHOD_ROUTES } from '@goodvibes-jev/engine/contracts/generated/webui-facade';
 import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/contracts';
-import { CONTRACTS_GET_OUTPUT_SCHEMA, CONTRACTS_LIST_OUTPUT_SCHEMA } from '../../sdk/src/platform/control-plane/operator-contract-schemas-contracts.js';
+import { CONTRACTS_GET_OUTPUT_SCHEMA, CONTRACTS_LIST_OUTPUT_SCHEMA } from '../../platform/src/platform/control-plane/operator-contract-schemas-contracts.js';
 import { makeHarness, oneUnitPlan, startContract, waitFor } from './runner-support.js';
 import { serveContractCancellation } from './cancellation-http-support.js';
 

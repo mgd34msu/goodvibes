@@ -14,7 +14,7 @@
  *     etc. so cloud-provider fit checks are never triggered.
  */
 
-import type { ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
 import {
   estimateModelBytes,
   fitAssessment,

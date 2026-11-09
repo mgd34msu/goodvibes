@@ -6,7 +6,7 @@
 // number`, so `Omit` and any `keyof`-driven mapped type silently degrade
 // against them: the omit collapses to the bare index signature, and a
 // required-keys mapped type yields `never`. Both shipped in production, in the
-// SDK's browser facade and in transport-http's client plumbing, where they
+// platform's browser facade and in transport-http's client plumbing, where they
 // looked like types in every report and hover while constraining nothing.
 //
 // These assertions fail if either helper regresses to a plain `Omit`/`keyof`.
@@ -15,7 +15,7 @@ import type {
   OmitNamed,
   OperatorMethodInput,
   RequiredNamedKeys,
-} from '@goodvibes-jev/engine/sdk/contracts';
+} from '@goodvibes-jev/engine/platform/contracts';
 
 // `automation.jobs.create` is an open envelope whose schema REQUIRES `prompt`.
 type JobsCreate = OperatorMethodInput<'automation.jobs.create'>;

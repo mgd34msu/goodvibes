@@ -1,4 +1,4 @@
-import type { ArtifactDescriptor, ArtifactContentRead } from '@goodvibes-jev/engine/sdk/platform/artifacts';
+import type { ArtifactDescriptor, ArtifactContentRead } from '@goodvibes-jev/engine/platform/platform/artifacts';
 
 export interface AgentHarnessModelRoutingArgs {
   readonly modelRouteId?: unknown;
@@ -108,7 +108,7 @@ export interface ModelProviderHealthSignal {
   readonly measuredRouteId?: string;
   readonly measuredProviderId?: string;
   readonly measurementRecordedAt?: string | null;
-  readonly sdkContract: {
+  readonly engineContract: {
     readonly providerHealthTypes: 'available';
     readonly importSurface: string;
     readonly note: string;

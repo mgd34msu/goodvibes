@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { GroupWireRouter, type ClusterTransport } from '../sdk/src/platform/cluster/index.js';
-import { encodeEnvelope, type ClusterKeyring } from '../sdk/src/platform/cluster/protocol-envelope.js';
+import { GroupWireRouter, type ClusterTransport } from '../platform/src/platform/cluster/index.js';
+import { encodeEnvelope, type ClusterKeyring } from '../platform/src/platform/cluster/protocol-envelope.js';
 function deferred() { let release!: () => void; const promise = new Promise<void>((r) => { release = r; }); return { promise, release: () => release() }; }
 async function turns() { for (let i = 0; i < 10; i++) await Promise.resolve(); }
 function fixture(startHook?: () => Promise<void>, stopHook?: () => Promise<void>) {

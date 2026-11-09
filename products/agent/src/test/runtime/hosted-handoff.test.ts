@@ -7,7 +7,7 @@
  * every one of them falls back to answering in this process.
  */
 import { describe, expect, test } from 'bun:test';
-import type { DaemonReachability, DaemonVerbCaller } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+import type { DaemonReachability, DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { ConnectedHostVerbError } from '../../runtime/client/daemon-verbs.ts';
 import {
   PROMOTION_DISABLED_REASON,

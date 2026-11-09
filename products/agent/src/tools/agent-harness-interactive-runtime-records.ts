@@ -1,6 +1,6 @@
-import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { types as nodeTypes } from 'node:util';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogData, captureCatalogMethods, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { capturePersonalOpsData, assertPersonalOpsDataCurrent } from './agent-harness-personal-ops-source.ts';
 import { captureNativeReadModelObservation } from './agent-harness-autonomy-live-records.ts';
@@ -235,7 +235,7 @@ async function certification(input: {
     ...(receiptId ? { receiptId: redactedPreview(receiptId, 96) } : {}),
     ...(hasRoute('receipt') ? { receiptRoute: input.routes.find((route) => route.id === 'receipt')?.modelRoute } : {}),
     missingSignals,
-    policy: 'Interactive runtime records certify release readiness only when the SDK or daemon publishes schema, durable id, publication guarantee, publisher/provenance, bounded output or receipt evidence, exact confirmed control routes, and no raw secret material.',
+    policy: 'Interactive runtime records certify release readiness only when the platform or daemon publishes schema, durable id, publication guarantee, publisher/provenance, bounded output or receipt evidence, exact confirmed control routes, and no raw secret material.',
   };
 }
 
@@ -275,7 +275,7 @@ const RUNTIME_SOURCE_PATHS: readonly (readonly string[])[] = [
   ['platform', 'readModels', 'execution', 'interactiveRuntime'], ['platform', 'readModels', 'execution', 'processRuntime'],
   ['platform', 'readModels', 'execution', 'ptySessions'], ['platform', 'readModels', 'execution', 'sudoMediation'],
   ['platform', 'readModels', 'computer', 'browserDesktopReceipts'], ['platform', 'readModels', 'browser', 'controlReceipts'],
-  ['clients', 'operatorSdk', 'execution', 'interactiveRuntime'], ['extensions', 'daemonRuntime', 'interactiveRuntime'],
+  ['clients', 'operatorApiClient', 'execution', 'interactiveRuntime'], ['extensions', 'daemonRuntime', 'interactiveRuntime'],
 ];
 
 interface RuntimeSourceSnapshot { readonly source: string; readonly snapshot: unknown }

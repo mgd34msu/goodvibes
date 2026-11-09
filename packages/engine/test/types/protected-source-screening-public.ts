@@ -4,9 +4,9 @@ import { createProtectedSourceOwner, createFramedResearchReferenceProjector, res
   type ProtectedSource, type SourceScreeningReceipt,
   type ProtectedResearchReference, type ResearchReferenceScreeningReceipt, type ResearchReferenceScreeningResult,
   type ResearchReferenceProjection, type ResearchReferenceOperation,
-} from '@goodvibes-jev/engine/sdk/platform/security';
-import { ToolRegistry, type ToolInputProjector, type ProjectedToolCall } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { createProtectedInboxMapper, type ProtectedInboxPreviewInput, type ProtectedInboxPreviewFields } from '@goodvibes-jev/engine/sdk/platform/intake';
+} from '@goodvibes-jev/engine/platform/platform/security';
+import { ToolRegistry, type ToolInputProjector, type ProjectedToolCall } from '@goodvibes-jev/engine/platform/platform/tools';
+import { createProtectedInboxMapper, type ProtectedInboxPreviewInput, type ProtectedInboxPreviewFields } from '@goodvibes-jev/engine/platform/platform/intake';
 declare const options: ProtectedSourceOwnerOptions;
 declare const hostedAuthority: HostedSourceScreeningAuthority;
 const hostedOptions: HostedProtectedSourceOwnerOptions = { kind: 'hosted', authority: hostedAuthority,
@@ -16,7 +16,7 @@ const hostedOwner = createProtectedSourceOwner(hostedOptions);
 const hostedAsLocal: HostedSourceScreeningAuthority = { ...hostedAuthority, retention: 'ephemeral-no-log' };
 const hostedWithDestination: HostedProtectedSourceOwnerOptions = {
   ...hostedOptions,
-  // @ts-expect-error Hosted destinations and models belong to the SDK composition.
+  // @ts-expect-error Hosted destinations and models belong to the platform composition.
   proposal: { endpoint: 'https://other.example', model: 'other' },
 };
 declare const input: ProtectedInboxPreviewInput;

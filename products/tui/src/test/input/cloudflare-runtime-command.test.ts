@@ -64,7 +64,7 @@ describe('Cloudflare runtime commands', () => {
           ok: true,
           components: (body as Record<string, unknown>).components,
           permissions: [{ component: 'dns', scope: 'zone', permission: 'DNS Edit', reason: 'custom hostname' }],
-          bootstrapToken: { requiredForSdkCreation: true, storeInGoodVibes: false, instructions: ['Create a temporary token.'] },
+          bootstrapToken: { requiredForPlatformCreation: true, storeInGoodVibes: false, instructions: ['Create a temporary token.'] },
         });
       }
       if (href.endsWith('/api/cloudflare/provision')) {
@@ -104,7 +104,7 @@ describe('Cloudflare runtime commands', () => {
     expect(requests).toHaveLength(0);
   });
 
-  test('/cloudflare requirements uses selected components through the daemon SDK route', async () => {
+  test('/cloudflare requirements uses selected components through the daemon route', async () => {
     const registry = new CommandRegistry();
     registerCloudflareRuntimeCommands(registry);
     const out: string[] = [];
@@ -121,7 +121,7 @@ describe('Cloudflare runtime commands', () => {
     expect(new Headers(requests[0]?.init?.headers).get('Authorization')).toMatch(/^Bearer /);
   });
 
-  test('/cloudflare provision sends batch mode and resource fields to the daemon SDK route', async () => {
+  test('/cloudflare provision sends batch mode and resource fields to the daemon route', async () => {
     const registry = new CommandRegistry();
     registerCloudflareRuntimeCommands(registry);
     const out: string[] = [];

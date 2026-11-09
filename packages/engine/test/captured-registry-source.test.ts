@@ -6,12 +6,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '../errors/src/index.js';
-import { captureContractInput, contractInputPath, materializeContractInput } from '../sdk/src/platform/contract/input-snapshot.js';
-import { assertContractInputReadAccess, createContractInputAuthority, revokeContractInputAuthority } from '../sdk/src/platform/contract/input-authority.js';
-import type { Contract } from '../sdk/src/platform/contract/types.js';
-import { admitCapturedRegistryContext } from '../sdk/src/platform/tools/registry-tool/captured-source.js';
-import { createRegistryTool, isCapturedRegistryTool } from '../sdk/src/platform/tools/registry-tool/index.js';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.js';
+import { captureContractInput, contractInputPath, materializeContractInput } from '../platform/src/platform/contract/input-snapshot.js';
+import { assertContractInputReadAccess, createContractInputAuthority, revokeContractInputAuthority } from '../platform/src/platform/contract/input-authority.js';
+import type { Contract } from '../platform/src/platform/contract/types.js';
+import { admitCapturedRegistryContext } from '../platform/src/platform/tools/registry-tool/captured-source.js';
+import { createRegistryTool, isCapturedRegistryTool } from '../platform/src/platform/tools/registry-tool/index.js';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.js';
 import { makeRepo } from './contract/runner-support.js';
 
 const cleanup: string[] = [];

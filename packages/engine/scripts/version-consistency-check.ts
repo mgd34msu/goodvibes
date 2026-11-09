@@ -9,7 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const SDK_ROOT = process.env.WORKSPACE_ROOT ?? resolve(import.meta.dir, '../../..');
+const ENGINE_ROOT = process.env.WORKSPACE_ROOT ?? resolve(import.meta.dir, '../../..');
 
 // One release identity covers the foundation, platform and every product.
 const DEFAULT_WORKSPACE_PACKAGES = [
@@ -44,13 +44,13 @@ function readVersion(pkgPath: string): string {
   return parsed.version;
 }
 
-const rootPkgPath = resolve(SDK_ROOT, 'package.json');
+const rootPkgPath = resolve(ENGINE_ROOT, 'package.json');
 const rootVersion = readVersion(rootPkgPath);
 
 const results: Array<{ path: string; name: string; version: string; ok: boolean }> = [];
 
 for (const pkg of WORKSPACE_PACKAGES) {
-  const pkgJsonPath = resolve(SDK_ROOT, pkg, 'package.json');
+  const pkgJsonPath = resolve(ENGINE_ROOT, pkg, 'package.json');
   const raw = readFileSync(pkgJsonPath, 'utf8');
   const parsed = JSON.parse(raw) as { version?: string; name?: string };
   const version = parsed.version ?? '(missing)';

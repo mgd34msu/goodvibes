@@ -1,5 +1,5 @@
 import type { CommandRegistry } from '../command-registry.ts';
-import { BUDGET_ALERT_USD_CONFIG_KEY } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { BUDGET_ALERT_USD_CONFIG_KEY } from '@goodvibes-jev/engine/platform/platform/providers';
 import { describeOperatorRpcError, getOperatorRpc } from './operator-rpc.ts';
 import {
   COST_ATTRIBUTION_OPTIONAL_DIMENSIONS,
@@ -72,7 +72,7 @@ export function registerCostRuntimeCommands(registry: CommandRegistry): void {
         const results: CostAttributionResult[] = [];
         try {
           for (const dimension of dimensions) {
-            results.push(await rpc.sdk.operator.invoke('cost.attribution.get', { window, dimension }));
+            results.push(await rpc.platformClient.operator.invoke('cost.attribution.get', { window, dimension }));
           }
         } catch (error) {
           ctx.print(`[cost attribution] round-trip request failed: ${describeOperatorRpcError(error)}`);

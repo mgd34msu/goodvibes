@@ -1,7 +1,7 @@
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import type { ErrorClass } from '@goodvibes-jev/engine/sdk/platform/routing';
-import { redactSensitiveDataAsync } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { ErrorClass } from '@goodvibes-jev/engine/platform/platform/routing';
+import { redactSensitiveDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { EntryType, Question } from '@goodvibes-jev/judgment';
 import { isDeepStrictEqual } from 'node:util';
 

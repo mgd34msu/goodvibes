@@ -8,7 +8,7 @@
  * InputHandler declares `implements InputHandlerLike`; no cycle is created
  * because this file imports only from leaf modules (no import from handler.ts).
  */
-import { type createOAuthLocalListener } from '@goodvibes-jev/engine/sdk/platform/config';
+import { type createOAuthLocalListener } from '@goodvibes-jev/engine/platform/platform/config';
 import type { OnboardingWizardController, OnboardingWizardAction } from './onboarding/onboarding-wizard.ts';
 import type { OnboardingWizardSnapshot, OpenOnboardingWizardOptions } from './handler-ui-state.ts';
 import type {

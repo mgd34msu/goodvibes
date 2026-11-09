@@ -2,7 +2,7 @@
  * feature-enablement.ts, explicit feature on/off requests over the dissolved
  * feature model.
  *
- * The SDK dissolved the feature-flag category: every capability is enabled
+ * The platform dissolved the feature-flag category: every capability is enabled
  * through a first-class settings key in its natural domain (FEATURE_SETTINGS
  * describes each feature's binding). This module turns an EXPLICIT
  * present-tense request, "enable feature X" from the CLI or an onboarding
@@ -13,7 +13,7 @@
  * - constant bindings have no separate off switch, so the request fails with
  *   the real settings keys to configure instead.
  *
- * This intentionally differs from the SDK's load-time MIGRATION of persisted
+ * This intentionally differs from the platform's load-time MIGRATION of persisted
  * legacy featureFlags entries (migrateLegacyFeatureToggles preserves
  * historical AND-of-both-switches ambiguity); an explicit request has no such
  * ambiguity, the operator wants the feature on or off now.
@@ -26,9 +26,9 @@ import {
   FEATURE_SETTINGS,
   deriveFeatureState,
   getFeatureSettingsBinding,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/state';
-import type { FeatureSetting } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
-import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/sdk/platform/config';
+} from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import type { FeatureSetting } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ConfigKey, ConfigManager, ConfigSetting } from '../config/index.ts';
 
 export type LegacyFeatureConfigKey = 'featureFlags' | `featureFlags.${string}`;

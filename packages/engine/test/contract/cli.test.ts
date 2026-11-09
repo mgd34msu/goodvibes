@@ -18,14 +18,14 @@ import {
   EXIT_USAGE,
   SESSION_CONTINUE_LINE,
   runContractCli,
-} from '../../sdk/src/platform/contract/cli.js';
-import { formatContractEvent } from '../../sdk/src/platform/contract/cli-render.js';
-import { submitSessionTurn } from '../../sdk/src/bin/contract-cli-host.js';
-import { RuntimeEventBus } from '../../sdk/src/platform/runtime/events/index.js';
-import { emitTurnError } from '../../sdk/src/platform/runtime/emitters/turn.js';
-import type { ResumeReport } from '../../sdk/src/platform/contract/resume.js';
-import { SurfaceHomeInUseError } from '../../sdk/src/platform/runtime/home-single-writer.js';
-import { resumeContracts } from '../../sdk/src/platform/runtime/contract-composition.js';
+} from '../../platform/src/platform/contract/cli.js';
+import { formatContractEvent } from '../../platform/src/platform/contract/cli-render.js';
+import { submitSessionTurn } from '../../platform/src/bin/contract-cli-host.js';
+import { RuntimeEventBus } from '../../platform/src/platform/runtime/events/index.js';
+import { emitTurnError } from '../../platform/src/platform/runtime/emitters/turn.js';
+import type { ResumeReport } from '../../platform/src/platform/contract/resume.js';
+import { SurfaceHomeInUseError } from '../../platform/src/platform/runtime/home-single-writer.js';
+import { resumeContracts } from '../../platform/src/platform/runtime/contract-composition.js';
 import { ALL_CONTRACT_EVENTS, CTR, SAMPLES } from './event-samples.js';
 import { CLI_SESSION, FakeIo, PROJECT, cliHarness, unitCheck, until } from './cli-support.js';
 import { makeContract, makeCriterion, makeUnit } from './fixtures.js';

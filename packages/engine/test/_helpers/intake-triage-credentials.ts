@@ -1,4 +1,4 @@
-import type { IntakeCredentialStore } from '../../sdk/src/platform/intake/context.js';
+import type { IntakeCredentialStore } from '../../platform/src/platform/intake/context.js';
 
 /** Mutable setup fixture only. Production consumers receive the read-only port. */
 export function triageCredentials(entries: Readonly<Record<string, string>> = {}) {

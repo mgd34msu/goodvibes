@@ -19,7 +19,7 @@
  *      the only thing that reaches these calls is the owner typing into his own settings
  *      page, no page content, no message body and no document composes them. The agent
  *      must NOT hardcode this; it can genuinely be handed a purported fact by an email or
- *      a web page, and has to state which so the SDK can refuse.
+ *      a web page, and has to state which so the platform can refuse.
  *   `surface: 'webui'` and `said: '(edited in settings)'`, §9.3's pair, which is what
  *      keeps the resulting line's provenance answerable.
  *
@@ -39,7 +39,7 @@
  * view on this surface.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { sdk } from '../lib/goodvibes';
+import { client as platformClient } from '../lib/goodvibes';
 import { queryKeys } from '../lib/queries';
 import {
   forgetTargetInput,
@@ -65,7 +65,7 @@ export function useOwnerProfileDocument() {
   return useQuery<ProfileDocument>({
     queryKey: queryKeys.ownerProfile,
     queryFn: async () => {
-      const document = readProfileDocument(await sdk.operator.profile.read());
+      const document = readProfileDocument(await platformClient.operator.profile.read());
       if (!document) throw new Error(MALFORMED_DOCUMENT);
       return document;
     },
@@ -78,7 +78,7 @@ export function useOwnerProfileStatus() {
   return useQuery<ProfileStatus>({
     queryKey: queryKeys.ownerProfileStatus,
     queryFn: async () => {
-      const status = readProfileStatus(await sdk.operator.profile.status());
+      const status = readProfileStatus(await platformClient.operator.profile.status());
       if (!status) throw new Error(MALFORMED_STATUS);
       return status;
     },
@@ -102,7 +102,7 @@ export function useOwnerProfileProvenance(fieldId: string | null) {
     queryKey: queryKeys.ownerProfileProvenance(fieldId ?? 'none'),
     queryFn: async () => {
       if (fieldId === null) throw new Error('No field was named, so there is no provenance to look up.');
-      const answer = readProfileProvenanceAnswer(await sdk.operator.profile.provenance(fieldId));
+      const answer = readProfileProvenanceAnswer(await platformClient.operator.profile.provenance(fieldId));
       if (!answer) throw new Error(MALFORMED_PROVENANCE);
       return answer;
     },
@@ -123,7 +123,7 @@ export function useSetOwnerProfileField() {
   const queryClient = useQueryClient();
   return useMutation<ProfileWriteOutcome | null, unknown, { fieldId: string; value: string }>({
     mutationFn: async ({ fieldId, value }) => readProfileWriteOutcome(
-      await sdk.operator.profile.set({
+      await platformClient.operator.profile.set({
         fieldId,
         value,
         surface: WEBUI_PROFILE_SURFACE,
@@ -140,7 +140,7 @@ export function useAppendOwnerProfileLine() {
   const queryClient = useQueryClient();
   return useMutation<ProfileWriteOutcome | null, unknown, { section: string; text: string }>({
     mutationFn: async ({ section, text }) => readProfileWriteOutcome(
-      await sdk.operator.profile.append({
+      await platformClient.operator.profile.append({
         section,
         text,
         surface: WEBUI_PROFILE_SURFACE,
@@ -163,7 +163,7 @@ export function useForgetOwnerProfile() {
   const queryClient = useQueryClient();
   return useMutation<ProfileWriteOutcome | null, unknown, ProfileTarget>({
     mutationFn: async (target) => readProfileWriteOutcome(
-      await sdk.operator.profile.forget({ ...forgetTargetInput(target), authority: WEBUI_PROFILE_AUTHORITY }),
+      await platformClient.operator.profile.forget({ ...forgetTargetInput(target), authority: WEBUI_PROFILE_AUTHORITY }),
     ),
     onSettled: async () => { await invalidateProfile(queryClient); },
   });
@@ -174,7 +174,7 @@ export function useUndoOwnerProfile() {
   const queryClient = useQueryClient();
   return useMutation<ProfileWriteOutcome | null, unknown, string>({
     mutationFn: async (fieldId) => readProfileWriteOutcome(
-      await sdk.operator.profile.undo({ fieldId, authority: WEBUI_PROFILE_AUTHORITY }),
+      await platformClient.operator.profile.undo({ fieldId, authority: WEBUI_PROFILE_AUTHORITY }),
     ),
     onSettled: async () => { await invalidateProfile(queryClient); },
   });

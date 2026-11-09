@@ -1,8 +1,8 @@
 /** Synthetic IMAP command fixture with explicit work/transport drainage. */
 import { EventEmitter } from 'node:events';
 import type { Socket } from 'node:net';
-import { EmailService, type EmailServiceDeps } from '../../sdk/src/platform/email/email-service.js';
-import { EmailReplySubjectSourceOwner } from '../../sdk/src/platform/email/reply-subject-source.js';
+import { EmailService, type EmailServiceDeps } from '../../platform/src/platform/email/email-service.js';
+import { EmailReplySubjectSourceOwner } from '../../platform/src/platform/email/reply-subject-source.js';
 import { testDescribeSenderClaim, throwingEmailTransport } from './platform-email-fixtures.js';
 import { deferred } from './mail-subject-source.js';
 

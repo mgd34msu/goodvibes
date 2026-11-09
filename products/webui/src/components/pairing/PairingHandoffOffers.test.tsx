@@ -21,7 +21,7 @@ let completeImpl: (input: unknown) => Promise<{ results: { kind: string; status:
   });
 
 mock.module('../../lib/goodvibes', () => ({
-  sdk: {
+  client: {
     operator: {
       pairing: {
         handoff: {

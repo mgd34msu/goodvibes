@@ -2,14 +2,14 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { repairToolCall } from '../sdk/src/platform/tools/auto-repair.ts';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.ts';
-import { wrapExecToolForAgentPolicy } from '../sdk/src/platform/gate/policy/tool-policy-guard.ts';
-import { executeToolCalls } from '../sdk/src/platform/core/orchestrator-tool-runtime.ts';
-import { ToolCallAbortRegistry } from '../sdk/src/platform/core/orchestrator-live-turn.ts';
-import type { PermissionManager } from '../sdk/src/platform/permissions/manager.ts';
-import type { Tool, ToolDefinition, ToolExecuteOptions } from '../sdk/src/platform/types/tools.ts';
-import { ToolError } from '../sdk/src/platform/types/errors.ts';
+import { repairToolCall } from '../platform/src/platform/tools/auto-repair.ts';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
+import { wrapExecToolForAgentPolicy } from '../platform/src/platform/gate/policy/tool-policy-guard.ts';
+import { executeToolCalls } from '../platform/src/platform/core/orchestrator-tool-runtime.ts';
+import { ToolCallAbortRegistry } from '../platform/src/platform/core/orchestrator-live-turn.ts';
+import type { PermissionManager } from '../platform/src/platform/permissions/manager.ts';
+import type { Tool, ToolDefinition, ToolExecuteOptions } from '../platform/src/platform/types/tools.ts';
+import { ToolError } from '../platform/src/platform/types/errors.ts';
 
 const SECRET_REASON = 'synthetic-private-cancellation-context';
 const SCHEMA: ToolDefinition = {

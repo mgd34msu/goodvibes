@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { Orchestrator } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { Orchestrator } from '@goodvibes-jev/engine/platform/platform/core';
 import type { JsonValue } from '@goodvibes-jev/judgment';
-import { ToolRegistry, ContextAccountingHolder, createContextAccountingTool } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolRegistry, ContextAccountingHolder, createContextAccountingTool } from '@goodvibes-jev/engine/platform/platform/tools';
 import { ConversationManager } from '../../core/conversation.ts';
 import { hydrateConversationUsage, isConversationUsageAvailable, isConversationContextAvailable } from '../../core/conversation-usage.ts';
 import { createBootstrapShell } from '../../runtime/bootstrap-shell.ts';
@@ -14,9 +14,9 @@ import { resumeSessionCore } from '../../core/session-resume-core.ts';
 import { createContextAccountingSource } from '../../runtime/context-accounting-source.ts';
 import { SessionPickerModal } from '../../input/session-picker-modal.ts';
 import { handleSessionPickerToken } from '../../input/handler-modal-routes.ts';
-import { clearTurnAnchors, getTurnAnchors, persistTurnAnchors, recordTurnAnchor } from '@goodvibes-jev/engine/sdk/platform/rewind';
+import { clearTurnAnchors, getTurnAnchors, persistTurnAnchors, recordTurnAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { saveWorkTreeFolds } from '../../core/work-tree-fold-store.ts';
-import { SessionSpineClient, TUI_SPINE_PARTICIPANT } from '@goodvibes-jev/engine/sdk/platform/runtime/session-spine';
+import { SessionSpineClient, TUI_SPINE_PARTICIPANT } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
 import { UsageModal } from '../../input/usage-modal.ts';
 import { layerTextBlock } from '../helpers/surface-frame.ts';
 import { withPublicErrorText } from '../helpers/user-error-reading.ts';
@@ -174,7 +174,7 @@ describe('real bootstrap usage restoration', () => {
     const picker = new SessionPickerModal(f.services.sessionManager);
     picker.open();
     picker.setQuery(target);
-    const enter = { type: 'key', name: 'enter', logicalName: 'enter', ctrl: false, shift: false, meta: false } satisfies import('@goodvibes-jev/engine/sdk/platform/core').InputToken;
+    const enter = { type: 'key', name: 'enter', logicalName: 'enter', ctrl: false, shift: false, meta: false } satisfies import('@goodvibes-jev/engine/platform/platform/core').InputToken;
     expect(handleSessionPickerToken({
       sessionPickerModal: picker, commandContext: f.shell.commandContext,
       requestRender: () => {}, handleEscape: () => picker.close(),

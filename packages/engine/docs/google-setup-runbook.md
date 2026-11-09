@@ -1,6 +1,6 @@
 # Connecting Gmail and Google Calendar
 
-> This file is generated from the SDK's Google setup plan (`packages/engine/sdk/src/platform/google/setup-plan.ts`). Do not edit it by hand. Edit the plan and regenerate, or the test that compares the two will fail. It exists so that when the automation cannot finish a step, there is a written route through the same work that cannot have drifted out of date.
+> This file is generated from the SDK's Google setup plan (`packages/engine/platform/src/platform/google/setup-plan.ts`). Do not edit it by hand. Edit the plan and regenerate, or the test that compares the two will fail. It exists so that when the automation cannot finish a step, there is a written route through the same work that cannot have drifted out of date.
 
 ## Just ask
 

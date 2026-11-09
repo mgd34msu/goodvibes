@@ -17,8 +17,8 @@ import { fromBase64Url, toBase64Url } from '@goodvibes-jev/engine/transport-core
 import {
   StepUpService,
   encodeAssertionHeader,
-} from '../sdk/src/platform/relay/step-up-service.ts';
-import type { StepUpAssertionEnvelope } from '../sdk/src/platform/relay/step-up-webauthn.ts';
+} from '../platform/src/platform/relay/step-up-service.ts';
+import type { StepUpAssertionEnvelope } from '../platform/src/platform/relay/step-up-webauthn.ts';
 
 const RP_ID = 'daemon.example';
 const ORIGIN = 'https://daemon.example';

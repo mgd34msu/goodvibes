@@ -1,10 +1,10 @@
-import { decisionOrClassic, isClassicOperation, selectClassicCatalog, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { decisionOrClassic, isClassicOperation, selectClassicCatalog, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { captureJudgmentPort, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
-import { prepareJudgmentResult } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { routingRegistry, atRestCredential, memoryCredentialState, memoryLiveStatus, memoryProviderSelect, memoryReceiptMember, memoryRouteRole, memorySchemaCertified } from '@goodvibes-jev/engine/sdk/platform/routing';
-import { findCredentialCandidates } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
+import { routingRegistry, atRestCredential, memoryCredentialState, memoryLiveStatus, memoryProviderSelect, memoryReceiptMember, memoryRouteRole, memorySchemaCertified } from '@goodvibes-jev/engine/platform/platform/routing';
+import { findCredentialCandidates } from '@goodvibes-jev/engine/platform/platform/utils';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogMethods, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { modelReadingServicePath, withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { capturePersonalOpsSnapshot, personalOpsEntry, personalOpsJson } from './agent-harness-personal-ops-source.ts';

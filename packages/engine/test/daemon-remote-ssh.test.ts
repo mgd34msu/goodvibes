@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
 import * as fsPromises from 'node:fs/promises';
 import { join, relative } from 'node:path';
-import { createSshBackend } from '../sdk/src/platform/runtime/remote/host/backends/ssh.ts';
-import type { Backend, BackendContext } from '../sdk/src/platform/runtime/remote/host/backends/types.ts';
-import type { PeerRecord, SshBackendConfig } from '../sdk/src/platform/runtime/remote/host/peer-registry.ts';
+import { createSshBackend } from '../platform/src/platform/runtime/remote/host/backends/ssh.ts';
+import type { Backend, BackendContext } from '../platform/src/platform/runtime/remote/host/backends/types.ts';
+import type { PeerRecord, SshBackendConfig } from '../platform/src/platform/runtime/remote/host/peer-registry.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const KEY = 'dummy-ssh-private-key-for-fixture';

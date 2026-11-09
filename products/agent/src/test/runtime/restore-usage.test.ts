@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { Orchestrator } from '@goodvibes-jev/engine/sdk/platform/core';
-import { ToolRegistry, ContextAccountingHolder, createContextAccountingTool } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { Orchestrator } from '@goodvibes-jev/engine/platform/platform/core';
+import { ToolRegistry, ContextAccountingHolder, createContextAccountingTool } from '@goodvibes-jev/engine/platform/platform/tools';
 import { ConversationManager } from '../../core/conversation.ts';
 import { hydrateConversationUsage, isConversationUsageAvailable, isConversationContextAvailable } from '../../core/conversation-usage.ts';
 import { createBootstrapShell } from '../../runtime/bootstrap-shell.ts';

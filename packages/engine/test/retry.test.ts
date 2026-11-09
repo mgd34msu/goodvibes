@@ -9,8 +9,8 @@ import { describe, expect, test } from 'bun:test';
  */
 describe('withRetry', () => {
   test('onRetry fires with (attempt, maxAttempts, delayMs, error) on a retryable error', async () => {
-    const { withRetry } = await import('../sdk/src/platform/utils/retry.js');
-    const { AppError } = await import('../sdk/src/platform/types/errors.js');
+    const { withRetry } = await import('../platform/src/platform/utils/retry.js');
+    const { AppError } = await import('../platform/src/platform/types/errors.js');
     const calls: Array<{ attempt: number; maxAttempts: number; delayMs: number; error: Error }> = [];
     let attempts = 0;
     const result = await withRetry(
@@ -33,8 +33,8 @@ describe('withRetry', () => {
   });
 
   test('does NOT call onRetry and rethrows immediately on a non-retryable error', async () => {
-    const { withRetry } = await import('../sdk/src/platform/utils/retry.js');
-    const { AppError } = await import('../sdk/src/platform/types/errors.js');
+    const { withRetry } = await import('../platform/src/platform/utils/retry.js');
+    const { AppError } = await import('../platform/src/platform/types/errors.js');
     let attempts = 0;
     let onRetryCalls = 0;
     const promise = withRetry(
@@ -51,8 +51,8 @@ describe('withRetry', () => {
   });
 
   test('fires onRetry maxRetries times before giving up', async () => {
-    const { withRetry } = await import('../sdk/src/platform/utils/retry.js');
-    const { AppError } = await import('../sdk/src/platform/types/errors.js');
+    const { withRetry } = await import('../platform/src/platform/utils/retry.js');
+    const { AppError } = await import('../platform/src/platform/types/errors.js');
     let attempts = 0;
     let onRetryCalls = 0;
     const promise = withRetry(
@@ -71,8 +71,8 @@ describe('withRetry', () => {
 
 
 test('beforeAttempt runs after backoff and denial never retries even a retryable-looking error', async () => {
-  const { withRetry } = await import('../sdk/src/platform/utils/retry.js');
-  const { AppError } = await import('../sdk/src/platform/types/errors.js');
+  const { withRetry } = await import('../platform/src/platform/utils/retry.js');
+  const { AppError } = await import('../platform/src/platform/types/errors.js');
   const order: string[] = []; let admitted = true; let sent = 0;
   const outcome = withRetry(async () => { order.push('send'); sent++; throw new AppError('transport', 'TRANSIENT', true); }, {
     initialDelayMs: 0, maxDelayMs: 0, maxRetries: 3,
@@ -83,7 +83,7 @@ test('beforeAttempt runs after backoff and denial never retries even a retryable
 });
 
 test('beforeAttempt rejection prevents the initial transport entirely', async () => {
-  const { withRetry } = await import('../sdk/src/platform/utils/retry.js'); let sent = 0;
+  const { withRetry } = await import('../platform/src/platform/utils/retry.js'); let sent = 0;
   await expect(withRetry(async () => { sent++; return 'unexpected'; }, { beforeAttempt() { throw new Error('stale source'); } })).rejects.toThrow('stale source');
   expect(sent).toBe(0);
 });

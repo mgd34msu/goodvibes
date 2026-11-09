@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { Client } from 'undici/index.js';
-import { createSlackInboxHttpOwner } from '../../sdk/src/platform/intake/providers/slack-http.ts';
+import { createSlackInboxHttpOwner } from '../../platform/src/platform/intake/providers/slack-http.ts';
 
 // Every endpoint and credential is synthetic and owned. Proxy/TLS mutations
 // live only in this canonical-network-guarded child; restoring process.env

@@ -8,7 +8,7 @@
  * a fixed terminal background so frames are deterministic.
  */
 
-import { createEmptyLine, type Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import { createEmptyLine, type Line } from '@goodvibes-jev/engine/platform/platform/types';
 import type { SurfaceLayer } from '../../renderer/surface-kit.ts';
 import { composeLayers, type CellGrid } from '../../renderer/surface-compose.ts';
 

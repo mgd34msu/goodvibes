@@ -21,7 +21,7 @@ import {
   CONFLICT_ESCALATION_ATTEMPTS,
   classifyTelegramConflict,
   type TelegramConflictAction,
-} from '../sdk/src/platform/channels/telegram/conflict-policy.ts';
+} from '../platform/src/platform/channels/telegram/conflict-policy.ts';
 
 const WEBHOOK_DESCRIPTION = "Conflict: can't use getUpdates method while webhook is active";
 const OTHER_CONSUMER_DESCRIPTION = 'Conflict: terminated by other getUpdates request; make sure that only one bot instance is running';

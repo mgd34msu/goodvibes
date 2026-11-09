@@ -4,8 +4,8 @@ import { join } from 'node:path';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { listHookPointContracts } from '@goodvibes-jev/engine/sdk/platform/hooks';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { listHookPointContracts } from '@goodvibes-jev/engine/platform/platform/hooks';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import {
   createRuntimeHookApi,
   createShellPathService,
@@ -61,7 +61,7 @@ function harness() {
   tools.register({
     definition: {
       name: 'inspect',
-      // A fresh description keeps the SDK's intentional description cache out
+      // A fresh description keeps the platform's intentional description cache out
       // of the timing proof without reaching into its private implementation.
       description: `Inspect fixture ${++toolSequence} before editing it.`,
       parameters: { type: 'object', properties: {} },
@@ -117,7 +117,7 @@ function harness() {
 }
 
 describe('async hook contract command', () => {
-  test('waits for the SDK filter before printing and reading managed entries', async () => {
+  test('waits for the platform filter before printing and reading managed entries', async () => {
     const env = harness();
     const gate = delayedPort((_name, _question, state) => noulAnswer(
       (state as { candidate: { pattern: string } }).candidate.pattern === 'Pre:tool:*' ? 0.95 : 0.02,
@@ -215,7 +215,7 @@ describe('async catalog commands', () => {
     ['skills', ['catalog-review', 'skill-fixture']],
   ] as const;
   for (const [command, args] of reviewCommands) {
-    test(`${command} ${args[0]} waits for the real SDK review`, async () => {
+    test(`${command} ${args[0]} waits for the real platform review`, async () => {
       const env = harness();
       const kind = command === 'skills' ? 'skill' : 'plugin';
       env.addEntry(kind, { trustNotes: 'Runs commands.', runtimeFit: { minAppVersion: '9999.0.0' } });
@@ -264,7 +264,7 @@ describe('async catalog commands', () => {
 
 describe('async tool verification command', () => {
   for (const args of [['verify', 'inspect'], ['verify-all'], ['contract', 'show', 'inspect']]) {
-    test(`${args.join(' ')} waits for the SDK result without executing the tool`, async () => {
+    test(`${args.join(' ')} waits for the platform result without executing the tool`, async () => {
       const env = harness();
       const gate = delayedPort(() => noulAnswer(0.02));
       const pending = env.run('tool', args);

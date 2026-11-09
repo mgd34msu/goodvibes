@@ -6,7 +6,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { openDaemonTimezonePicker } from '../../input/daemon-settings-actions.ts';
 import type { CommandContext } from '../../input/command-registry.ts';
 import type { SelectionItem, SelectionResult } from '../../input/selection-modal.ts';

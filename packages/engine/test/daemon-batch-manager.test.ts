@@ -4,11 +4,11 @@ import { useFailureReadings } from './_helpers/failure-readings.js';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { DEFAULT_CONFIG } from '../sdk/src/platform/config/schema.js';
-import { DaemonBatchManager, MAX_BATCH_SUBMIT_ATTEMPTS } from '../sdk/src/platform/batch/manager.js';
-import type { LLMProvider, ProviderBatchChatRequest, ProviderBatchResult } from '../sdk/src/platform/providers/interface.js';
-import type { ProviderRegistry } from '../sdk/src/platform/providers/registry.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { DEFAULT_CONFIG } from '../platform/src/platform/config/schema.js';
+import { DaemonBatchManager, MAX_BATCH_SUBMIT_ATTEMPTS } from '../platform/src/platform/batch/manager.js';
+import type { LLMProvider, ProviderBatchChatRequest, ProviderBatchResult } from '../platform/src/platform/providers/interface.js';
+import type { ProviderRegistry } from '../platform/src/platform/providers/registry.js';
 
 function makeConfigManager(): ConfigManager {
   const configDir = join(tmpdir(), `gv-batch-test-${Date.now()}-${crypto.randomUUID()}`);
@@ -193,7 +193,7 @@ describe('provider batch failures: whether another attempt could succeed', () =>
     expect((await manager.getJob(job.id))?.status).toBe('dead_lettered');
     const failureRequests = readings.requests.filter(request => typeof request.state === 'string');
     expect(failureRequests).toHaveLength(1);
-    expect(failureRequests[0]?.state).toBe('HTTP status: 429\nError code: SDK_HTTP_STATUS_ERROR\nError type: HttpStatusError\nMessage: HTTP 429: You exceeded your current quota, please check your plan');
+    expect(failureRequests[0]?.state).toBe('HTTP status: 429\nError code: ENGINE_HTTP_STATUS_ERROR\nError type: HttpStatusError\nMessage: HTTP 429: You exceeded your current quota, please check your plan');
   });
 
   test('wording with no status is read: a dropped connection is retried, an unsupported request is not', async () => {

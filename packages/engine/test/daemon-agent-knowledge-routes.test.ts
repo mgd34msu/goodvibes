@@ -3,12 +3,12 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'bun:test';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { DaemonServer } from '../sdk/src/platform/daemon/facade.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { createRuntimeServices } from '../sdk/src/platform/runtime/services.js';
-import { createRuntimeStore } from '../sdk/src/platform/runtime/store/index.js';
-import { GOODVIBES_AGENT_KNOWLEDGE_DB_FILE } from '../sdk/src/platform/knowledge/index.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { DaemonServer } from '../platform/src/platform/daemon/facade.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { createRuntimeServices } from '../platform/src/platform/runtime/services.js';
+import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.js';
+import { GOODVIBES_AGENT_KNOWLEDGE_DB_FILE } from '../platform/src/platform/knowledge/index.js';
 import { trackDisposables } from './_helpers/disposables.ts';
 
 /**
@@ -20,7 +20,8 @@ const disposables = trackDisposables();
 
 const tmpRoots: string[] = [];
 
-afterEach(() => {
+afterEach(async () => {
+  await disposables.flush();
   for (const root of tmpRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
@@ -66,7 +67,7 @@ describe('daemon Agent knowledge route wiring', () => {
       getConversationTitle: () => 'goodvibes test daemon',
       workingDir,
       homeDirectory,
-    }));
+    }), runtime => runtime.close());
 
     // Simulate an embedding host that updated DaemonServer before refreshing
     // its injected runtime-services object. The daemon must still create an
@@ -74,13 +75,7 @@ describe('daemon Agent knowledge route wiring', () => {
     // falling back to regular Knowledge/Wiki.
     delete (runtimeServices as { -readonly [K in keyof typeof runtimeServices]?: typeof runtimeServices[K] }).agentKnowledgeService;
 
-    // KNOWN SURVIVORS, the CompanionChatManager GC sweep and the batch
-    // manager tick this daemon builds. `DaemonServer.stop()` opens with
-    // `if (this.server === null) return`, so a daemon that was constructed and
-    // enabled but never bound a socket, which is exactly what this route test
-    // needs, has no reachable teardown at all. Closing them needs a
-    // construction-time teardown path on DaemonServer, in product code.
-    const daemon = new DaemonServer({ runtimeServices });
+    const daemon = disposables.add(new DaemonServer({ runtimeServices }), server => server.stop());
     daemon.enable({ daemon: true }, 'test-token');
 
     const status = await dispatch(daemon, '/api/goodvibes-agent/knowledge/status');
@@ -109,5 +104,10 @@ describe('daemon Agent knowledge route wiring', () => {
         agentKnowledgeService?: { readonly store?: { readonly storagePath?: string } };
       }).agentKnowledgeService?.store?.storagePath,
     ).toEndWith(GOODVIBES_AGENT_KNOWLEDGE_DB_FILE);
+
+    await daemon.stop();
+    // Listener shutdown must leave the composing host's graph usable. Its
+    // fleet still observes the same live trigger source until the host closes.
+    expect(() => runtimeServices.processRegistry.query()).not.toThrow();
   });
 });

@@ -1,12 +1,12 @@
-import type { NativeHostedTurnSnapshot } from '@goodvibes-jev/engine/sdk/platform/hosted-sessions/native-turn-client';
+import type { NativeHostedTurnSnapshot } from '@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client';
 import type { NativeHostedTurnClient } from '../../runtime/native-hosted-turn.ts';
-import type { OperatorNativeWorkExecutionClient, NativeWorkExecutionSnapshot } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
+import type { OperatorNativeWorkExecutionClient, NativeWorkExecutionSnapshot } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
 import { expect, test } from 'bun:test';
 import { NativeConversationIntakeControls, type NativeConversationIntakeSelection } from '../../runtime/native-conversation-intake.ts';
 import { captureNativeConversationInput } from '../../runtime/native-conversation-input.ts';
 import { routeNativeConversationInput } from '../../runtime/native-conversation-ingress.ts';
 import type { NativeIntakeJournalBinding, NativeIntakeJournalRecord, NativeIntakeExecutionIntent, NativeIntakeJournalOptions } from '../../runtime/native-conversation-intake-journal.ts';
-import type { NativeConversationIntakeCaptureRequest, NativeConversationIntakeResult, NativeConversationIntakeSourceRef, OperatorNativeConversationIntakeClient, NativeConversationTurnPermit } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
+import type { NativeConversationIntakeCaptureRequest, NativeConversationIntakeResult, NativeConversationIntakeSourceRef, OperatorNativeConversationIntakeClient, NativeConversationTurnPermit } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 
 const original = { text: '  Explain the answer\r\n界 e\u0301 😀  ', unsupportedSources: [] };
 function fixture() {

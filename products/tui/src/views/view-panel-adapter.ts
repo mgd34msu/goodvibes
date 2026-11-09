@@ -5,12 +5,12 @@
  * THE ONLY PLACE PANE VOCABULARY IS KEPT IN THE TUI. The terminal has no panes:
  * every view opens as a modal. The names here (ViewPanelAdapter, PanelManagerLike,
  * getTopPane/getBottomPane, NO_PANES, the `panels` field) are kept on purpose
- * because they are the SDK's contract, not TUI design:
- *   - the SDK's IntegrationHelperService serves the operator API verbs
+ * because they are the platform's contract, not TUI design:
+ *   - the platform's IntegrationHelperService serves the operator API verbs
  *     panels.list and panels.open (and the /api/panels/* HTTP routes) from the
  *     `panelManager` option, typed PanelManagerLike;
  *   - remote clients, the web UI and the daemon already speak those verb names.
- * Renaming them is an SDK and wire change, so the TUI keeps one adapter that
+ * Renaming them is a platform and wire change, so the TUI keeps one adapter that
  * satisfies the contract and translates it: panels.list lists the views a
  * remote client can open (Agents, Usage, Changes, Notifications, Sessions),
  * panels.open opens one as its modal, and both pane lists are always empty
@@ -20,7 +20,7 @@
 
 import type { IntegrationHelperService } from '@/runtime/index.ts';
 
-/** The SDK's panel-manager contract, as IntegrationHelperService takes it. */
+/** The platform's panel-manager contract, as IntegrationHelperService takes it. */
 type PanelManagerLike = ConstructorParameters<typeof IntegrationHelperService>[0]['panelManager'];
 type PanelPaneLike = ReturnType<PanelManagerLike['getTopPane']>;
 type PanelRegistrationLike = ReturnType<PanelManagerLike['getRegisteredTypes']>[number];

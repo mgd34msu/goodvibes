@@ -7,9 +7,9 @@ import {
   parseGoodVibesCli,
 } from '../cli/parser.ts';
 import { describeCliCommandPolicy } from './agent-harness-metadata.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogData, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import { shellSplit } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { shellSplit } from '@goodvibes-jev/engine/platform/platform/utils';
 
 export interface AgentHarnessCliArgs {
   readonly query?: unknown;

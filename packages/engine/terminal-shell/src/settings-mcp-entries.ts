@@ -1,4 +1,4 @@
-import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
+import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
 export function buildMcpEntries(mcpRegistry: Pick<McpRegistry, 'listServerSecurity'> | null): Array<Pick<ReturnType<McpRegistry['listServerSecurity']>[number], 'name' | 'connected' | 'role' | 'trustMode' | 'allowedPaths' | 'allowedHosts'>> {
   if (!mcpRegistry) return [];
   return mcpRegistry.listServerSecurity().map((entry) => ({

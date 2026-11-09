@@ -1,9 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { CodeIntelligence } from '@goodvibes-jev/engine/sdk/platform/intelligence';
-import type { DocumentSymbol } from '@goodvibes-jev/engine/sdk/platform/intelligence';
-import type { SymbolInfo } from '@goodvibes-jev/engine/sdk/platform/intelligence';
+import { CodeIntelligence } from '@goodvibes-jev/engine/platform/platform/intelligence';
+import type { DocumentSymbol } from '@goodvibes-jev/engine/platform/platform/intelligence';
+import type { SymbolInfo } from '@goodvibes-jev/engine/platform/platform/intelligence';
 import { openCommandView, requireReadModels, requireShellPaths } from './runtime-services.ts';
 
 function resolveTargetPath(pathArg: string, ctx: CommandContext): string {

@@ -42,8 +42,8 @@
  * constrained, rewriting these as real `operator.invoke` calls is a mechanical
  * edit and the coverage becomes end-to-end.
  */
-import type { OperatorMethodInput } from '@goodvibes-jev/engine/sdk/contracts';
-import { createBrowserKnowledgeSdk } from '@goodvibes-jev/engine/sdk/browser/knowledge';
+import type { OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
+import { createBrowserKnowledgePlatform } from '@goodvibes-jev/engine/platform/browser/knowledge';
 
 // ── Plain required fields ───────────────────────────────────────────────────
 
@@ -190,7 +190,7 @@ const spreadHidesExcessKey: OperatorMethodInput<'power.keepAwake.set'> = { enabl
 // invisible for as long as nothing downstream had anything left to check.
 
 async function verifyFacadeHelpersEnforce(): Promise<void> {
-  const knowledge = createBrowserKnowledgeSdk({ baseUrl: 'http://127.0.0.1:3210' });
+  const knowledge = createBrowserKnowledgePlatform({ baseUrl: 'http://127.0.0.1:3210' });
 
   // @ts-expect-error a message needs body, content or attachments
   await knowledge.chat.messages.create('session-1', {});

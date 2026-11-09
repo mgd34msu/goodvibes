@@ -37,7 +37,7 @@ import {
   surfaceIsUntrusted,
   surfaceTrustTier,
   type UntrustedSurface,
-} from '../sdk/src/platform/security/untrusted-content.ts';
+} from '../platform/src/platform/security/untrusted-content.ts';
 import {
   SubscriptionStore,
   calendarEventIngestText,
@@ -50,21 +50,21 @@ import {
   recordCalendarEventIngest,
   type CalendarUntrustedIngestRecorder,
   type FeedFetchResult,
-} from '../sdk/src/platform/calendar/index.ts';
-import { createCalDavCalendarGatewayService } from '../sdk/src/platform/calendar/caldav-gateway-service.ts';
-import { createCalDavSecretPort } from '../sdk/src/platform/calendar/caldav-gateway-config.ts';
-import { createDaemonCalendarGatewayService } from '../sdk/src/platform/control-plane/routes/calendar-composition.ts';
+} from '../platform/src/platform/calendar/index.ts';
+import { createCalDavCalendarGatewayService } from '../platform/src/platform/calendar/caldav-gateway-service.ts';
+import { createCalDavSecretPort } from '../platform/src/platform/calendar/caldav-gateway-config.ts';
+import { createDaemonCalendarGatewayService } from '../platform/src/platform/control-plane/routes/calendar-composition.ts';
 import type {
   CalDavHttpPort,
   CalDavHttpRequest,
   CalDavHttpResponse,
-} from '../sdk/src/platform/google/caldav-client.ts';
+} from '../platform/src/platform/google/caldav-client.ts';
 import { useSecurityReadings } from './helpers/security-readings.ts';
 
 useSecurityReadings();
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const CALENDAR_DIR = resolve(__dirname, '../sdk/src/platform/calendar');
+const CALENDAR_DIR = resolve(__dirname, '../platform/src/platform/calendar');
 
 // ---------------------------------------------------------------------------
 // Recording ledger, and the recorder shape the calendar package emits
@@ -750,7 +750,7 @@ describe('an invitation cannot compose an outward action', () => {
 // ---------------------------------------------------------------------------
 
 describe('no calendar module can initiate work', () => {
-  const PLATFORM_DIR = resolve(__dirname, '../sdk/src/platform');
+  const PLATFORM_DIR = resolve(__dirname, '../platform/src/platform');
 
   /**
    * Every module that handles calendar event content: the package itself, plus

@@ -3,9 +3,9 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { SecretsManager } from '../../config/secrets.ts';
-import { ServiceRegistry } from '@goodvibes-jev/engine/sdk/platform/config';
-import { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { Notifier } from '@goodvibes-jev/engine/sdk/platform/integrations';
+import { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
+import { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { Notifier } from '@goodvibes-jev/engine/platform/platform/integrations';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 describe('Notifier.fromConfig', () => {

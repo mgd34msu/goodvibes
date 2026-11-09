@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   normalizeCommand,
   normalizeCommandWithVerdicts,
-} from '../sdk/src/platform/runtime/permissions/normalization/index.js';
+} from '../platform/src/platform/runtime/permissions/normalization/index.js';
 
 describe('platform/runtime/permissions/normalization: smoke', () => {
   test('normalizeCommand returns an object with original and segments', () => {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import { createBrowserKnowledgeSdk } from '../sdk/dist/browser-knowledge.js';
+import { createBrowserKnowledgePlatform } from '../platform/dist/browser-knowledge.js';
 import { openRawServerSentEventStream } from '@goodvibes-jev/engine/transport-http';
 import type { FetchLike } from '@goodvibes-jev/engine/transport-core';
 
@@ -61,7 +61,7 @@ function nativeSource() {
     return pending;
   };
   const errors: unknown[] = [];
-  const sdk = createBrowserKnowledgeSdk({
+  const platformClient = createBrowserKnowledgePlatform({
     baseUrl: 'http://127.0.0.1:' + server.port,
     authToken: AUTH,
     fetch: fetchImpl,
@@ -98,7 +98,7 @@ function nativeSource() {
     };
     held.source.enqueue(new TextEncoder().encode('event: turn\ndata: ' + JSON.stringify(envelope) + '\n\n'));
   }
-  return { sdk, arrivals, requestSignals, settledRequests, errors, get, open, emitOwnedTurn };
+  return { platformClient, arrivals, requestSignals, settledRequests, errors, get, open, emitOwnedTurn };
 }
 
 afterEach(async () => {
@@ -107,7 +107,7 @@ afterEach(async () => {
 
 describe('scoped SSE owns initial acquisition and caller cancellation', () => {
   test('only the last listener aborts a held first response, and repeated old cleanup cannot retire the replacement', async () => {
-    const source = nativeSource(); const events = source.sdk.realtime.viaSse();
+    const source = nativeSource(); const events = source.platformClient.realtime.viaSse();
     const first = events.turn.onEnvelope('TURN_STARTED', () => {});
     const last = events.turn.onEnvelope('TURN_COMPLETED', () => {});
     cleanups.push(first, last);
@@ -131,10 +131,10 @@ describe('scoped SSE owns initial acquisition and caller cancellation', () => {
 
   test('caller cancellation aborts only its own held event bus while an unrelated subscription stays live', async () => {
     const source = nativeSource(); const owner = new AbortController();
-    const owned = source.sdk.realtime.viaSse({ signal: owner.signal });
+    const owned = source.platformClient.realtime.viaSse({ signal: owner.signal });
     cleanups.push(owned.turn.onEnvelope('TURN_STARTED', () => {}));
     await until(() => source.arrivals.length === 1, 'Caller-owned request did not arrive');
-    const unrelated = source.sdk.realtime.viaSse();
+    const unrelated = source.platformClient.realtime.viaSse();
     cleanups.push(unrelated.turn.onEnvelope('TURN_STARTED', () => {}));
     await until(() => source.arrivals.length === 2, 'Unrelated request did not arrive');
     owner.abort();
@@ -151,12 +151,12 @@ describe('scoped SSE owns initial acquisition and caller cancellation', () => {
     const removeOriginal = spyOn(original.signal, 'removeEventListener');
     cleanups.push(() => removeOriginal.mockRestore());
     const options = { signal: original.signal };
-    const events = source.sdk.realtime.viaSse(options);
+    const events = source.platformClient.realtime.viaSse(options);
     const closeOriginal = events.turn.onEnvelope('TURN_STARTED', () => {});
     cleanups.push(closeOriginal);
     await until(() => source.arrivals.length === 1, 'Original option-bound native source did not arrive');
     options.signal = unrelated.signal;
-    const current = source.sdk.realtime.viaSse({ signal: unrelated.signal });
+    const current = source.platformClient.realtime.viaSse({ signal: unrelated.signal });
     cleanups.push(current.turn.onEnvelope('TURN_STARTED', () => {}));
     await until(() => source.arrivals.length === 2, 'Unrelated native owner did not arrive');
     closeOriginal();
@@ -172,7 +172,7 @@ describe('scoped SSE owns initial acquisition and caller cancellation', () => {
 
   test('a callback that retires its owner prevents later callbacks from the same native frame', async () => {
     const source = nativeSource(); const owner = new AbortController(); const calls: string[] = [];
-    const events = source.sdk.realtime.viaSse({ signal: owner.signal });
+    const events = source.platformClient.realtime.viaSse({ signal: owner.signal });
     const first = events.turn.onEnvelope('TURN_SUBMITTED', () => { calls.push('first'); owner.abort(); });
     const second = events.turn.onEnvelope('TURN_SUBMITTED', () => calls.push('retired second'));
     cleanups.push(first, second);
@@ -181,7 +181,7 @@ describe('scoped SSE owns initial acquisition and caller cancellation', () => {
     await until(() => source.requestSignals[0]?.aborted === true && source.get(0).aborted,
       'The first native callback did not retire its own source');
     expect(calls).toEqual(['first']);
-    const replacement = source.sdk.realtime.viaSse();
+    const replacement = source.platformClient.realtime.viaSse();
     cleanups.push(replacement.turn.onEnvelope('TURN_SUBMITTED', () => calls.push('replacement')));
     await until(() => source.arrivals.length === 2, 'Replacement native event source did not arrive');
     source.open(1); first(); second(); source.emitOwnedTurn(1);
@@ -193,9 +193,9 @@ describe('scoped SSE owns initial acquisition and caller cancellation', () => {
 
   test('an already-aborted caller cannot start acquisition or interfere with a live independent owner', async () => {
     const source = nativeSource(); const owner = new AbortController(); owner.abort();
-    const cancelled = source.sdk.realtime.viaSse({ signal: owner.signal });
+    const cancelled = source.platformClient.realtime.viaSse({ signal: owner.signal });
     cleanups.push(cancelled.turn.onEnvelope('TURN_STARTED', () => {}));
-    const current = source.sdk.realtime.viaSse();
+    const current = source.platformClient.realtime.viaSse();
     cleanups.push(current.turn.onEnvelope('TURN_STARTED', () => {}));
     await until(() => source.arrivals.length === 1, 'Independent owner did not acquire its native source');
     expect(source.requestSignals).toHaveLength(1);

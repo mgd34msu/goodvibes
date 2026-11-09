@@ -2,9 +2,9 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PersistentStore } from '../sdk/src/platform/state/persistent-store.ts';
-import { WorkspaceRegistrationStore, withWorkspaceRegistrationWriteLockSync } from '../sdk/src/platform/workspace/registration/store.ts';
-import { foldLegacyWorkspaceRegister } from '../sdk/src/platform/workspace/registration/fold-legacy-register.ts';
+import { PersistentStore } from '../platform/src/platform/state/persistent-store.ts';
+import { WorkspaceRegistrationStore, withWorkspaceRegistrationWriteLockSync } from '../platform/src/platform/workspace/registration/store.ts';
+import { foldLegacyWorkspaceRegister } from '../platform/src/platform/workspace/registration/fold-legacy-register.ts';
 
 const fixtures: string[] = [];
 afterEach(() => { for (const path of fixtures.splice(0)) rmSync(path, { recursive: true, force: true }); });

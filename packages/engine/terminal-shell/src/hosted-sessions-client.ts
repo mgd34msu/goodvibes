@@ -25,7 +25,7 @@
  * ── Why the verbs go through DaemonVerbCaller ─────────────────────────────
  *
  * Every `sessions.hosted.*` verb is declared `transport: ['ws']` with no REST
- * path of its own, so `sdk.operator.invoke` refuses them before making a
+ * path of its own, so `platform.operator.invoke` refuses them before making a
  * request. `createDaemonVerbCaller` (operator-endpoint.ts) already handles that
  * exact class by falling through to the generic gateway route, which IS the
  * binding for a ws-declared verb reached over HTTP.
@@ -35,8 +35,8 @@ import type {
   HostedDetachPolicy,
   HostedSessionHistoryMessage,
   HostedSessionRecord,
-} from '@goodvibes-jev/engine/sdk/platform/hosted-sessions';
-import type { DaemonVerbCaller } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+} from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
+import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 export type { CreateHostedSessionInput, HostedDetachPolicy, HostedSessionHistoryMessage, HostedSessionRecord };
 /** What `sessions.hosted.attach` answers with: the record, and what was said so far. */
 export interface HostedSessionAttachment {

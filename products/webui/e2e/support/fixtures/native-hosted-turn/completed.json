@@ -114,7 +114,7 @@
   "attachment": {
     "session": {
       "id": "hosted-561b06cd-ea87-470b-8748-e3a6a94796ec",
-      "workspaceRoot": "/tmp/goodvibes-sdk-testrun-6-1d365368/native-intake-http-HcAIph/workspace",
+      "workspaceRoot": "/tmp/goodvibes-platform-testrun-6-1d365368/native-intake-http-HcAIph/workspace",
       "title": "Native conversation",
       "status": "idle",
       "detachPolicy": "survive",

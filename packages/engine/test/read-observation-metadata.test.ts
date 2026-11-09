@@ -1,7 +1,7 @@
 /** Source regressions; execution is deferred until coding is complete. */
 import { expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
-import { clipReadContent, observeReadContent, returnedReadRows, validatedReadContent } from '../sdk/src/platform/tools/read/observation.js';
+import { clipReadContent, observeReadContent, returnedReadRows, validatedReadContent } from '../platform/src/platform/tools/read/observation.js';
 
 test('fresh native line bookkeeping and repeated projection never hash returned text', () => {
   const hash = spyOn(crypto, 'createHash');

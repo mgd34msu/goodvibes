@@ -1,5 +1,5 @@
-import type { SessionEvent } from '@goodvibes-jev/engine/sdk/events/session';
-import type { OrchestratorUserInputOptions } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { SessionEvent } from '@goodvibes-jev/engine/platform/events/session';
+import type { OrchestratorUserInputOptions } from '@goodvibes-jev/engine/platform/platform/core';
 export type CompanionMessagePayload = Extract<SessionEvent, { type: 'COMPANION_MESSAGE_RECEIVED' }>;
 export function companionMessageToOrchestratorInputOptions(payload: CompanionMessagePayload): OrchestratorUserInputOptions {
   const metadata = payload.metadata;

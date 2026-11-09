@@ -1,16 +1,16 @@
-import { captureDecisionRouterSettings } from '@goodvibes-jev/engine/sdk/browser/decision-router';
+import { captureDecisionRouterSettings } from '@goodvibes-jev/engine/platform/browser/decision-router';
 import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { judgmentConfigFromSettings } from '../sdk/src/platform/runtime/judgment-services.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { judgmentConfigFromSettings } from '../platform/src/platform/runtime/judgment-services.js';
 import { openSettingsChoice, type SettingsChoiceAction } from '../terminal-shell/src/settings-choice-actions.js';
 import { SelectionModal, type OpenSelection } from '../terminal-shell/src/selection-modal.js';
 import { handleSelectionModalToken } from '../terminal-shell/src/modal-input-routes.js';
 import { DECISION_MODEL_PROFILES } from '@goodvibes-jev/judgment';
 import { openDecisionRouterSettings } from '../terminal-shell/src/decision-router-settings-actions.js';
-import type { ModelDefinition } from '../sdk/src/platform/providers/registry-types.js';
+import type { ModelDefinition } from '../platform/src/platform/providers/registry-types.js';
 import { createSettingsValueHelpers } from '../terminal-shell/src/renderer/settings-value-helpers.js';
 
 const owned: string[] = [];

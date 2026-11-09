@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigManager, type DaemonConfigPatch } from '../sdk/src/platform/config/manager.ts';
-import { setManagedSettingLock } from '../sdk/src/platform/runtime/settings/control-plane.ts';
+import { ConfigManager, type DaemonConfigPatch } from '../platform/src/platform/config/manager.ts';
+import { setManagedSettingLock } from '../platform/src/platform/runtime/settings/control-plane.ts';
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'daemon-config-batch-'));

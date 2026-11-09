@@ -1,4 +1,4 @@
-/** Real SessionDetail and SDK facade with synthetic HTTP only. */
+/** Real SessionDetail and platform facade with synthetic HTTP only. */
 import { afterEach, beforeEach, expect, mock, spyOn, test } from 'bun:test';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
@@ -9,7 +9,7 @@ import { unionSessionsFromListResponse } from '../../lib/sessions-union';
 import { ToastProvider } from '../../lib/toast';
 mock.module('../../hooks/useCompactionReceipts', () => ({ useCompactionReceipts: () => ({ receipts: [], latestCheck: null, connected: true, error: null }) }));
 const { SessionDetail } = await import('./SessionDetail');
-const { sdk } = await import('../../lib/goodvibes');
+const { client: platformClient } = await import('../../lib/goodvibes');
 const originalFetch = globalThis.fetch;
 const cleanups: (() => void)[] = [];
 beforeEach(async () => { await tokenStore.setToken('synthetic-account-A'); });
@@ -171,7 +171,7 @@ for (const change of ['abort', 'account', 'direct-storage'] as const) {
     const controller = new AbortController(); let finish!: (token: string) => void;
     const waiting = new Promise<string>(resolve => { finish = resolve; });
     const getter = spyOn(tokenStore, 'getToken').mockImplementationOnce(() => waiting);
-    const h = harness(); const result = sdk.operator.sessions.delete('old-session', controller.signal).catch(error => error as unknown);
+    const h = harness(); const result = platformClient.operator.sessions.delete('old-session', controller.signal).catch(error => error as unknown);
     await drain();
     if (change === 'abort') controller.abort(); else if (change === 'account') await tokenStore.setToken('synthetic-account-B'); else localStorage.setItem(WEBUI_TOKEN_STORE_KEY, 'synthetic-account-B');
     finish('synthetic-account-B'); expect(await result).toBeInstanceOf(DOMException); expect(h.writes()).toHaveLength(0); getter.mockRestore();

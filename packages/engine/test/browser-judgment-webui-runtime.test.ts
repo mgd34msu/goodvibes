@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { BrowserJudgmentError, type AuthenticatedPrincipal, type BrowserJudgmentRequest } from '../daemon-sdk/src/index.ts';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { createWebuiBrowserJudgment } from '../sdk/src/platform/judgment-browser/webui-runtime.ts';
-import { WEBUI_COMMAND_CATALOG_VERSION } from '../sdk/src/platform/judgment-browser/batteries/webui-command-catalog.ts';
+import { BrowserJudgmentError, type AuthenticatedPrincipal, type BrowserJudgmentRequest } from '../daemon-api/src/index.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { createWebuiBrowserJudgment } from '../platform/src/platform/judgment-browser/webui-runtime.ts';
+import { WEBUI_COMMAND_CATALOG_VERSION } from '../platform/src/platform/judgment-browser/batteries/webui-command-catalog.ts';
 
 const owner: AuthenticatedPrincipal = { principalId: 'synthetic-owner', principalKind: 'user', admin: false, scopes: ['write:judgment', 'read:sessions'] };
 const request = (candidates: BrowserJudgmentRequest<'webui.palette.command-rank'>['input']['candidates'] = [{ kind: 'builtin', commandId: 'nav.chat' }, { kind: 'chat', sessionId: 'fixture-chat' }]): BrowserJudgmentRequest<'webui.palette.command-rank'> => ({

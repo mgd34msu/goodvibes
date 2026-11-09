@@ -19,7 +19,7 @@ mock.module('../lib/goodvibes', () => ({
   DEFAULT_SSE_RECONNECT: { enabled: true, baseDelayMs: 1, maxDelayMs: 2, backoffFactor: 2, maxAttempts: 3 },
   getCurrentAuth: () => Promise.resolve({}),
   invokeMethod: () => Promise.resolve({}),
-  sdk: {
+  client: {
     streams: {
       open: (pathOrUrl: string, handlers: ServerSentEventHandlers) => {
         openCalls.push(pathOrUrl);

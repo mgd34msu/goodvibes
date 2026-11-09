@@ -14,9 +14,9 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { downloadVoiceModel } from '../sdk/src/platform/voice/model-download.ts';
-import { createLocalVoiceProvider } from '../sdk/src/platform/voice/providers/local.ts';
-import type { VoiceSynthesisRequest } from '../sdk/src/platform/voice/types.ts';
+import { downloadVoiceModel } from '../platform/src/platform/voice/model-download.ts';
+import { createLocalVoiceProvider } from '../platform/src/platform/voice/providers/local.ts';
+import type { VoiceSynthesisRequest } from '../platform/src/platform/voice/types.ts';
 
 function onnxBytes(n = 8192): Uint8Array {
   const b = new Uint8Array(n);

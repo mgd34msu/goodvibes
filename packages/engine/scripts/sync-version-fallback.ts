@@ -11,7 +11,7 @@ if (rootPackage.name !== 'goodvibes-jev' || typeof version !== 'string'
 }
 
 const targets = [
-  { path: join(root, 'sdk', 'src', 'platform', 'version.ts'), declaration: 'version' },
+  { path: join(root, 'platform', 'src', 'platform', 'version.ts'), declaration: 'version' },
   { path: join(repoRoot, 'products/daemon/src/version.ts'), declaration: '_version' },
   { path: join(repoRoot, 'products/tui/src/version.ts'), declaration: '_version' },
   { path: join(repoRoot, 'products/agent/src/version.ts'), declaration: '_version' },

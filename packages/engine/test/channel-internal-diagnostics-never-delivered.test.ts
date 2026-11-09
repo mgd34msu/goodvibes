@@ -21,18 +21,18 @@
  * that boundary on EVERY surface, because one renderer serves all of them.
  */
 import { describe, expect, test } from 'bun:test';
-import { ChannelReplyPipeline } from '../sdk/src/platform/channels/reply-pipeline.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { emitAgentCompleted, emitAgentProgress } from '../sdk/src/platform/runtime/emitters/agents.js';
-import { eventLine, normalizeChannelRenderEventFromRuntime } from '../sdk/src/platform/channels/reply-render.js';
-import { DEFAULT_POLICY } from '../sdk/src/platform/channels/reply-policy.js';
+import { ChannelReplyPipeline } from '../platform/src/platform/channels/reply-pipeline.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { emitAgentCompleted, emitAgentProgress } from '../platform/src/platform/runtime/emitters/agents.js';
+import { eventLine, normalizeChannelRenderEventFromRuntime } from '../platform/src/platform/channels/reply-render.js';
+import { DEFAULT_POLICY } from '../platform/src/platform/channels/reply-policy.js';
 import {
   defaultRenderAudienceForKind,
   isOwnerFacingRenderEvent,
-} from '../sdk/src/platform/channels/render-audience.js';
-import { summarizeToolArgs } from '../sdk/src/platform/agents/orchestrator-utils.js';
-import { setAgentProgress } from '../sdk/src/platform/agents/progress-audience.js';
-import type { ChannelRenderEvent, ChannelRenderEventKind, ChannelSurface } from '../sdk/src/platform/channels/types.js';
+} from '../platform/src/platform/channels/render-audience.js';
+import { summarizeToolArgs } from '../platform/src/platform/agents/orchestrator-utils.js';
+import { setAgentProgress } from '../platform/src/platform/agents/progress-audience.js';
+import type { ChannelRenderEvent, ChannelRenderEventKind, ChannelSurface } from '../platform/src/platform/channels/types.js';
 import { waitFor } from './_helpers/test-timeout.js';
 
 /** The exact lines the owner received. */

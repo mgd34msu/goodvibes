@@ -1,7 +1,7 @@
 /** Read-only native receipt admission shared by the source installer and launcher. */
 import { lstatSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, parse, resolve, sep } from 'node:path';
-import { assertDaemonNativePayloadBytes, compareVersions, parseDaemonCiArtifact, parseDaemonInstallationReceipt, type DaemonInstallationReceipt } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { assertDaemonNativePayloadBytes, compareVersions, parseDaemonCiArtifact, parseDaemonInstallationReceipt, type DaemonInstallationReceipt } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { daemonCiPayloads, daemonNativeHost, DAEMON_NATIVE_TARGETS, type DaemonNativeTarget, type DaemonArtifactSource, type DaemonCiArtifact } from './native-artifact.ts';
 const PACKAGE = '@goodvibes-jev/daemon';
 const RECEIPT = 'daemon-installation.json';

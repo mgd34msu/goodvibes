@@ -14,7 +14,7 @@
  * are small fills of their own and are not blocks.
  */
 
-import type { Cell, Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Cell, Line } from '@goodvibes-jev/engine/platform/platform/types';
 import type { SurfaceLayer } from '../../renderer/surface-kit.ts';
 import { activeTokens } from '../../renderer/theme.ts';
 

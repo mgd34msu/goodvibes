@@ -1,4 +1,4 @@
-import { effectivePermissionMode, isGatePresetName, type GatePresetName } from '@goodvibes-jev/engine/sdk/platform/gate/presets';
+import { effectivePermissionMode, isGatePresetName, type GatePresetName } from '@goodvibes-jev/engine/platform/platform/gate/presets';
 /**
  * remote-conversation.ts, running this surface's own conversation turns inside
  * the connected daemon.
@@ -37,7 +37,7 @@ import { effectivePermissionMode, isGatePresetName, type GatePresetName } from '
  *
  * ── What is deliberately NOT here ─────────────────────────────────────────
  *
- * No second SSE implementation. `openServerSentEventStream` is the SDK's, with
+ * No second SSE implementation. `openServerSentEventStream` is the platform's, with
  * its reconnect policy and auth handling already proven by the approvals
  * stream, and it is what this opens.
  *
@@ -51,7 +51,7 @@ import { effectivePermissionMode, isGatePresetName, type GatePresetName } from '
  * running is then dropped as post-terminal noise, on a turn that has already
  * been billed for.
  *
- * The SDK ships both halves of the answer, but they live on
+ * The platform ships both halves of the answer, but they live on
  * `createEventSourceConnector`, the runtime-event connector, which addresses
  * `/api/control-plane/events` and hands typed envelopes to a store. This router
  * addresses one session's own stream and renders it into a conversation, so it
@@ -74,14 +74,14 @@ import { effectivePermissionMode, isGatePresetName, type GatePresetName } from '
  */
 
 import { randomUUID } from 'node:crypto';
-import { nativeHostedTurnSnapshotSchema, type NativeHostedTurnSnapshot } from '@goodvibes-jev/engine/sdk/platform/hosted-sessions/native-turn-client';
-import { createOperatorSdk, type OperatorSdk } from '@goodvibes-jev/engine/operator-sdk';
+import { nativeHostedTurnSnapshotSchema, type NativeHostedTurnSnapshot } from '@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client';
+import { createOperatorApiClient, type OperatorApiClient } from '@goodvibes-jev/engine/operator-client';
 import type { OperatorMethodOutput } from '@goodvibes-jev/engine/contracts';
-import { transport } from '@goodvibes-jev/engine/sdk/platform/runtime';
-import { createTurnLifecycleGate, readTurnLifecycleFrame } from '@goodvibes-jev/engine/sdk/transport-realtime';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { DaemonVerbCaller } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { transport } from '@goodvibes-jev/engine/platform/platform/runtime';
+import { createTurnLifecycleGate, readTurnLifecycleFrame } from '@goodvibes-jev/engine/platform/transport-realtime';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { ConnectedHostVerbError, describeConnectedHostVerbError } from './daemon-verbs.ts';
 import {
   createHostedFrameRenderer,
@@ -166,7 +166,7 @@ export interface RemoteConversationRouterOptions {
   readonly onFrame?: ((frame: HostedSessionFrame) => void) | undefined;
   readonly onCancellationNotice?: ((message: string) => void) | undefined;
   /**
-   * Reconnect policy for the hosted event stream. Defaults to the SDK's, which
+   * Reconnect policy for the hosted event stream. Defaults to the platform's, which
    * retries with backoff, the right behaviour, because the turn is still
    * running on the daemon and a reconnect recovers the rest of it rather than
    * abandoning work that is still happening.
@@ -238,7 +238,7 @@ export function createRemoteConversationRouter(
   options: RemoteConversationRouterOptions,
 ): RemoteConversationRouter {
   interface WatchedTurn {
-    readonly operator: OperatorSdk;
+    readonly operator: OperatorApiClient;
     readonly correlationId: string;
     sessionId: string | null;
     turnId: string | null;
@@ -275,7 +275,7 @@ export function createRemoteConversationRouter(
   const refreshExecutionMode = async (): Promise<void> => {
     const owner = currentModeOwner();
     const revision = ++modeObservation;
-    const operator = createOperatorSdk({ baseUrl: owner.connection.baseUrl, authToken: owner.connection.token, fetchImpl: options.fetchImpl ?? globalThis.fetch });
+    const operator = createOperatorApiClient({ baseUrl: owner.connection.baseUrl, authToken: owner.connection.token, fetchImpl: options.fetchImpl ?? globalThis.fetch });
     try {
       const reply = await operator.invoke('sessions.permissionMode.get', { sessionId: owner.id });
       const current = currentModeOwner();
@@ -297,7 +297,7 @@ export function createRemoteConversationRouter(
     modeObservation++;
     hostedMode = undefined;
     options.requestRender();
-    const operator = createOperatorSdk({ baseUrl: owner.connection.baseUrl, authToken: owner.connection.token, fetchImpl: options.fetchImpl ?? globalThis.fetch });
+    const operator = createOperatorApiClient({ baseUrl: owner.connection.baseUrl, authToken: owner.connection.token, fetchImpl: options.fetchImpl ?? globalThis.fetch });
     try {
       const reply = await operator.invoke('sessions.permissionMode.set', { sessionId: owner.id, mode });
       const current = currentModeOwner();
@@ -430,7 +430,7 @@ export function createRemoteConversationRouter(
     const positionKey = turn.nativeKey ?? streamUrl;
     const terminalTypes = new Set(['TURN_CANCEL', 'TURN_COMPLETED', 'TURN_ERROR', 'PREFLIGHT_FAIL']);
     const close = await transport.openServerSentEventStream(options.fetchImpl ?? globalThis.fetch, streamUrl, {
-      // The SDK parses id: before dispatching its event. After terminal release
+      // The platform parses id: before dispatching its event. After terminal release
       // or replacement, buffered frames no longer advance this watch's cursor.
       onEventId: (id: string) => { if (isCurrentWatch()) streamPositions.set(positionKey, id); },
       onEvent: (_domain: string, payload: unknown) => {
@@ -528,9 +528,9 @@ export function createRemoteConversationRouter(
     }
     if (!options.workspaceRoot.startsWith('/')) return refuse('a hosted conversation needs an absolute workspace path and this process resolved '
       + `'${options.workspaceRoot}', so this turn ran here.`);
-    let operator: OperatorSdk;
+    let operator: OperatorApiClient;
     try {
-      operator = createOperatorSdk({ baseUrl: connection.baseUrl, authToken: connection.token, fetchImpl: options.fetchImpl ?? globalThis.fetch });
+      operator = createOperatorApiClient({ baseUrl: connection.baseUrl, authToken: connection.token, fetchImpl: options.fetchImpl ?? globalThis.fetch });
     } catch (error) {
       return refuse(`the connected host client could not be opened, so this turn ran here, ${describeConnectedHostVerbError(error)}`);
     }
@@ -659,7 +659,7 @@ export function createRemoteConversationRouter(
     }
     ++submissionGeneration;
     if (active) { active.submissionPending = false; abandon(active, 'This surface switched observations. The original remote outcome is unconfirmed; switching did not cancel it.'); }
-    const operator = createOperatorSdk({ baseUrl: connection.baseUrl, authToken: connection.token, fetchImpl: options.fetchImpl ?? globalThis.fetch });
+    const operator = createOperatorApiClient({ baseUrl: connection.baseUrl, authToken: connection.token, fetchImpl: options.fetchImpl ?? globalThis.fetch });
     const turn: WatchedTurn = {
       operator, correlationId: snapshot.correlationId, sessionId: snapshot.sessionId,
       turnId: nativeTurnIds.get(key) ?? null, renderer: null, closeStream: null, finished: false, submissionPending: false,

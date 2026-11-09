@@ -10,10 +10,10 @@ import {
   approveAndLaunchProposal,
   draftFromProposal,
   fromPlanProposal,
-} from '../sdk/src/platform/orchestration/proposal-workstream.js';
-import type { PlanProposal, WorkItem as ProposalWorkItem } from '../sdk/src/platform/core/plan-proposal.js';
-import type { ContractRunner, StartedContract } from '../sdk/src/platform/contract/runner.js';
-import type { StartFromPlanInput } from '../sdk/src/platform/contract/types.js';
+} from '../platform/src/platform/orchestration/proposal-workstream.js';
+import type { PlanProposal, WorkItem as ProposalWorkItem } from '../platform/src/platform/core/plan-proposal.js';
+import type { ContractRunner, StartedContract } from '../platform/src/platform/contract/runner.js';
+import type { StartFromPlanInput } from '../platform/src/platform/contract/types.js';
 
 function proposalItem(overrides: Partial<ProposalWorkItem> & { id: string; title: string; brief: string }): ProposalWorkItem {
   return {

@@ -1,9 +1,9 @@
 import { NativeWorkExecutionControls, type NativeWorkExecutionAction, type NativeWorkExecutionState } from './native-work-execution.js';
-import { createOperatorNativeWorkExecutionClient } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
-import type { WorkLedgerReadSnapshot } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger';
-import type { WorkLedgerReadEvent } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger';
-import { createOperatorWorkLedgerReadClient } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/operator-read-client';
-import type { OperatorRemoteClient } from '@goodvibes-jev/engine/operator-sdk';
+import { createOperatorNativeWorkExecutionClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
+import type { WorkLedgerReadSnapshot } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
+import type { WorkLedgerReadEvent } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
+import { createOperatorWorkLedgerReadClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/operator-read-client';
+import type { OperatorRemoteClient } from '@goodvibes-jev/engine/operator-client';
 
 import { projectWorkLedgerHistory, nextWorkLedgerCursor, type NativeWorkLedgerBinding } from './work-ledger-projection.js';
 

@@ -14,7 +14,7 @@
  * criterion's probability that it fails, anything else reads met.
  */
 import { SqliteDecisionLog } from '@goodvibes-jev/judgment';
-import type { NativeContractDecisionHost } from '../../sdk/src/platform/contract/native-decisions.js';
+import type { NativeContractDecisionHost } from '../../platform/src/platform/contract/native-decisions.js';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -22,15 +22,15 @@ import { dirname, join } from 'node:path';
 import { withDecisionLog, type DecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import type { ContractEvent } from '../../sdk/src/events/contract.js';
-import { AgentMessageBus } from '../../sdk/src/platform/agents/message-bus.js';
-import type { ConfigManager } from '../../sdk/src/platform/config/manager.js';
-import type { DecompositionRunner } from '../../sdk/src/platform/core/plan-decomposition.js';
-import { createOrchestrationEngine } from '../../sdk/src/platform/orchestration/engine.js';
-import { emitAgentCompleted, emitAgentFailed, emitAgentRunning } from '../../sdk/src/platform/runtime/emitters/agents.js';
-import { emitCommunicationConsumed } from '../../sdk/src/platform/runtime/emitters/communication.js';
-import { RuntimeEventBus } from '../../sdk/src/platform/runtime/events/index.js';
-import { AgentManager, type AgentRecord } from '../../sdk/src/platform/tools/agent/manager.js';
+import type { ContractEvent } from '../../platform/src/events/contract.js';
+import { AgentMessageBus } from '../../platform/src/platform/agents/message-bus.js';
+import type { ConfigManager } from '../../platform/src/platform/config/manager.js';
+import type { DecompositionRunner } from '../../platform/src/platform/core/plan-decomposition.js';
+import { createOrchestrationEngine } from '../../platform/src/platform/orchestration/engine.js';
+import { emitAgentCompleted, emitAgentFailed, emitAgentRunning } from '../../platform/src/platform/runtime/emitters/agents.js';
+import { emitCommunicationConsumed } from '../../platform/src/platform/runtime/emitters/communication.js';
+import { RuntimeEventBus } from '../../platform/src/platform/runtime/events/index.js';
+import { AgentManager, type AgentRecord } from '../../platform/src/platform/tools/agent/manager.js';
 import {
   ContractStore,
   createContractRunner,
@@ -43,7 +43,7 @@ import {
   type WorkPlanService,
   type ContractTurnRecord,
   type UnitRoute,
-} from '../../sdk/src/platform/contract/index.js';
+} from '../../platform/src/platform/contract/index.js';
 import { planningPort, plannerOutput, type AnswerContext, type DraftPlan } from './plan-support.js';
 
 export const ASK = 'Add a CSV parser module and wire it into the convert command.';

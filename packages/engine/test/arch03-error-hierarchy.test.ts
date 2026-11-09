@@ -2,7 +2,7 @@
  * Error hierarchy invariants.
  *
  * Verifies that every platform-layer error class:
- *   1. Passes instanceof GoodVibesSdkError (hierarchy is intact)
+ *   1. Passes instanceof GoodVibesError (hierarchy is intact)
  *   2. Passes instanceof Error (transitively, always)
  *   3. Exposes populated .code, .category, .source, .recoverable fields
  *
@@ -11,33 +11,33 @@
  */
 
 import { describe, it, expect } from 'bun:test';
-import { GoodVibesSdkError } from '../errors/src/index.js';
+import { GoodVibesError } from '../errors/src/index.js';
 import {
   AppError,
-} from '../sdk/src/platform/types/errors.js';
-import { ProviderNotFoundError } from '../sdk/src/platform/providers/provider-not-found-error.js';
-import { OpsIllegalActionError, OpsTargetNotFoundError } from '../sdk/src/platform/runtime/ops/control-plane.js';
-import { TaskTransitionError, TaskNotFoundError, TaskNotCancellableError } from '../sdk/src/platform/runtime/tasks/manager.js';
-import { VersionMismatchError } from '../sdk/src/platform/runtime/remote/transport-contract.js';
-import { DivergenceGateError } from '../sdk/src/platform/runtime/permissions/divergence-dashboard.js';
-import { SimulationEnforcementError } from '../sdk/src/platform/runtime/permissions/simulation.js';
-import { PolicySignatureError } from '../sdk/src/platform/runtime/permissions/policy-loader.js';
-import { DeliveryError } from '../sdk/src/platform/integrations/delivery.js';
+} from '../platform/src/platform/types/errors.js';
+import { ProviderNotFoundError } from '../platform/src/platform/providers/provider-not-found-error.js';
+import { OpsIllegalActionError, OpsTargetNotFoundError } from '../platform/src/platform/runtime/ops/control-plane.js';
+import { TaskTransitionError, TaskNotFoundError, TaskNotCancellableError } from '../platform/src/platform/runtime/tasks/manager.js';
+import { VersionMismatchError } from '../platform/src/platform/runtime/remote/transport-contract.js';
+import { DivergenceGateError } from '../platform/src/platform/runtime/permissions/divergence-dashboard.js';
+import { SimulationEnforcementError } from '../platform/src/platform/runtime/permissions/simulation.js';
+import { PolicySignatureError } from '../platform/src/platform/runtime/permissions/policy-loader.js';
+import { DeliveryError } from '../platform/src/platform/integrations/delivery.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 function assertHierarchy(err: unknown, label: string): void {
-  expect(err instanceof GoodVibesSdkError, `${label}: instanceof GoodVibesSdkError`).toBe(true);
+  expect(err instanceof GoodVibesError, `${label}: instanceof GoodVibesError`).toBe(true);
   expect(err instanceof Error, `${label}: instanceof Error`).toBe(true);
 }
 
-function assertFields(err: GoodVibesSdkError, label: string, expectCode = false): void {
+function assertFields(err: GoodVibesError, label: string, expectCode = false): void {
   if (expectCode) {
     expect(err.code, `${label}: .code is populated`).toEqual(expect.any(String));
   } else {
-    // code is optional on GoodVibesSdkError, just assert the field exists (string | undefined)
+    // code is optional on GoodVibesError, just assert the field exists (string | undefined)
     expect('code' in err, `${label}: .code field exists`).toBe(true);
   }
   expect(err.category, `${label}: .category is populated`).toEqual(expect.any(String));
@@ -51,7 +51,7 @@ function assertFields(err: GoodVibesSdkError, label: string, expectCode = false)
 // ---------------------------------------------------------------------------
 
 describe('AppError hierarchy', () => {
-  it('is instanceof GoodVibesSdkError and Error', () => {
+  it('is instanceof GoodVibesError and Error', () => {
     const err = new AppError('test message', 'TEST_CODE', false);
     assertHierarchy(err, 'AppError');
   });
@@ -79,7 +79,7 @@ describe('AppError hierarchy', () => {
 // ---------------------------------------------------------------------------
 
 describe('ProviderNotFoundError hierarchy', () => {
-  it('is instanceof GoodVibesSdkError and Error', () => {
+  it('is instanceof GoodVibesError and Error', () => {
     const err = new ProviderNotFoundError('anthropic', ['openai', 'gemini']);
     assertHierarchy(err, 'ProviderNotFoundError');
   });
@@ -99,7 +99,7 @@ describe('ProviderNotFoundError hierarchy', () => {
 // ---------------------------------------------------------------------------
 
 describe('OpsIllegalActionError hierarchy', () => {
-  it('is instanceof GoodVibesSdkError and Error', () => {
+  it('is instanceof GoodVibesError and Error', () => {
     const err = new OpsIllegalActionError('task-1', 'cancel', 'completed');
     assertHierarchy(err, 'OpsIllegalActionError');
   });
@@ -119,7 +119,7 @@ describe('OpsIllegalActionError hierarchy', () => {
 // ---------------------------------------------------------------------------
 
 describe('OpsTargetNotFoundError hierarchy', () => {
-  it('is instanceof GoodVibesSdkError and Error', () => {
+  it('is instanceof GoodVibesError and Error', () => {
     const err = new OpsTargetNotFoundError('task-1', 'task');
     assertHierarchy(err, 'OpsTargetNotFoundError');
   });
@@ -139,7 +139,7 @@ describe('OpsTargetNotFoundError hierarchy', () => {
 // ---------------------------------------------------------------------------
 
 describe('TaskTransitionError hierarchy', () => {
-  it('is instanceof GoodVibesSdkError and Error', () => {
+  it('is instanceof GoodVibesError and Error', () => {
     const err = new TaskTransitionError('task-1', 'completed', 'running');
     assertHierarchy(err, 'TaskTransitionError');
   });
@@ -159,7 +159,7 @@ describe('TaskTransitionError hierarchy', () => {
 // ---------------------------------------------------------------------------
 
 describe('TaskNotFoundError hierarchy', () => {
-  it('is instanceof GoodVibesSdkError and Error', () => {
+  it('is instanceof GoodVibesError and Error', () => {
     const err = new TaskNotFoundError('task-99');
     assertHierarchy(err, 'TaskNotFoundError');
   });
@@ -179,7 +179,7 @@ describe('TaskNotFoundError hierarchy', () => {
 // ---------------------------------------------------------------------------
 
 describe('TaskNotCancellableError hierarchy', () => {
-  it('is instanceof GoodVibesSdkError and Error', () => {
+  it('is instanceof GoodVibesError and Error', () => {
     const err = new TaskNotCancellableError('task-99');
     assertHierarchy(err, 'TaskNotCancellableError');
   });
@@ -202,7 +202,7 @@ describe('VersionMismatchError hierarchy', () => {
   const localVer = { major: 1, minor: 0, patch: 0, label: '1.0.0' } as const;
   const peerVer = { major: 2, minor: 0, patch: 0, label: '2.0.0' } as const;
 
-  it('is instanceof GoodVibesSdkError and Error', () => {
+  it('is instanceof GoodVibesError and Error', () => {
     const err = new VersionMismatchError('major_version_mismatch', localVer, peerVer, 'Major version mismatch');
     assertHierarchy(err, 'VersionMismatchError');
   });
@@ -232,7 +232,7 @@ describe('DivergenceGateError hierarchy', () => {
     message: 'Divergence rate exceeds threshold',
   };
 
-  it('is instanceof GoodVibesSdkError and Error', () => {
+  it('is instanceof GoodVibesError and Error', () => {
     const err = new DivergenceGateError('Gate blocked', gate);
     assertHierarchy(err, 'DivergenceGateError');
   });
@@ -252,7 +252,7 @@ describe('DivergenceGateError hierarchy', () => {
 // ---------------------------------------------------------------------------
 
 describe('SimulationEnforcementError hierarchy', () => {
-  it('is instanceof GoodVibesSdkError and Error', () => {
+  it('is instanceof GoodVibesError and Error', () => {
     const err = new SimulationEnforcementError('Enforcement failed', 0.9, 0.5);
     assertHierarchy(err, 'SimulationEnforcementError');
   });
@@ -272,7 +272,7 @@ describe('SimulationEnforcementError hierarchy', () => {
 // ---------------------------------------------------------------------------
 
 describe('PolicySignatureError hierarchy', () => {
-  it('is instanceof GoodVibesSdkError and Error', () => {
+  it('is instanceof GoodVibesError and Error', () => {
     const err = new PolicySignatureError('bundle-abc', 'invalid', 'Bundle signature invalid');
     assertHierarchy(err, 'PolicySignatureError');
   });
@@ -292,7 +292,7 @@ describe('PolicySignatureError hierarchy', () => {
 // ---------------------------------------------------------------------------
 
 describe('DeliveryError hierarchy', () => {
-  it('is instanceof GoodVibesSdkError and Error', () => {
+  it('is instanceof GoodVibesError and Error', () => {
     const err = new DeliveryError('Delivery failed', 'terminal', 500);
     assertHierarchy(err, 'DeliveryError');
   });

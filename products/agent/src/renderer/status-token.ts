@@ -11,7 +11,7 @@
 //   info  ○  (WHITE CIRCLE)
 // ---------------------------------------------------------------------------
 
-import type { Cell } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Cell } from '@goodvibes-jev/engine/platform/platform/types';
 import { DEFAULT_PANEL_PALETTE } from './polish.ts';
 import { getDisplayWidth } from '../utils/terminal-width.ts';
 import { type StatusState, STATE_GLYPHS } from './status-glyphs.ts';

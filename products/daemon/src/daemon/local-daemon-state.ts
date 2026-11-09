@@ -19,19 +19,19 @@
  * has no access to that box's filesystem, and these lines are reported as
  * unavailable rather than guessed at. See `describeLocalDaemonState`.
  *
- * The SDK owns the writers (`platform/daemon/lifecycle-marker.ts`,
+ * The platform owns the writers (`platform/daemon/lifecycle-marker.ts`,
  * `platform/daemon/receipts.ts`) and its readers are not exported from the
  * published package this repository pins, so the readers below are this
  * repository's own, bounded and content-validated the same way, and no more
- * trusting of the file than the SDK is. The shared-piece lane can re-point them
- * at the SDK's own readers once those are exported.
+ * trusting of the file than the platform is. The shared-piece lane can re-point them
+ * at the platform's own readers once those are exported.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-/** Mirrors the SDK's own clamp: a hand-edited counter is bounded, not trusted. */
+/** Mirrors the platform's own clamp: a hand-edited counter is bounded, not trusted. */
 const MAX_TRACKED_FAILED_STARTS = 32;
-/** Mirrors the SDK's own clamp on a persisted version string. */
+/** Mirrors the platform's own clamp on a persisted version string. */
 const MAX_TRACKED_VERSION_LENGTH = 64;
 /** Enough receipts to explain a restart; a status page is not a log viewer. */
 const MAX_REPORTED_RECEIPTS = 10;

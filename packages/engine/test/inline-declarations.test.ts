@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { inlineDeclarations, literalDeclarationValue } from '../sdk/src/platform/gate/inline-declarations.js';
+import { inlineDeclarations, literalDeclarationValue } from '../platform/src/platform/gate/inline-declarations.js';
 
 /** Frozen pre-change grammar: compatibility oracle for small syntax cases only. */
 function originalDeclarations(text: string, flags: boolean): { key: string; value: string }[] {

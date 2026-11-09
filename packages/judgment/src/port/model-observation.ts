@@ -33,19 +33,19 @@ function freezeData(value: unknown): void {
   }
   for (const node of freeze.reverse()) freezeObservation(node);
 }
-/** SDK-internal recorder admission only; not exported from package entrypoints.
+/** Foundation-internal recorder admission only; not exported from package entrypoints.
  * This proves immutable data ownership, never native model attribution. */
 export function recordImmutableJudgmentResult<T extends object>(result: T): T {
   if (!applyObservation(hasObservation, observations, [result])) { freezeData(result); applyObservation(addImmutable, immutableRecordedResults, [result]); }
   return result;
 }
-/** SDK-internal only. Called after actual native adapter envelope/model validation. */
+/** Foundation-internal only. Called after actual native adapter envelope/model validation. */
 export function recordNativeModelObservation<T extends object>(result: T, observation: JudgmentModelObservation): T {
   freezeData(result);
   applyObservation(setObservation, observations, [result, freezeObservation({ ...observation })]);
   return result;
 }
-/** SDK-internal log projection; never exported from a package entry point. */
+/** Foundation-internal log projection; never exported from a package entry point. */
 export function retainNativeModelObservation<T extends object>(source: unknown, result: T): T {
   const observation = observeJudgmentModel(source);
   if (!observation) return result;

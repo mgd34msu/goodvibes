@@ -1,11 +1,11 @@
 import { closeSync, existsSync, openSync, readSync, statSync, type Stats } from 'node:fs';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { resolveRuntimeEndpointBinding, type RuntimeEndpointBinding, type RuntimeEndpointId } from './cli-endpoints.js';
 import { classifyBindPosture, isNetworkFacing } from './cli-network-posture.js';
 import { redactText } from './cli-redaction.js';
-import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 export interface CliServiceRuntime {
   readonly configManager: ConfigManager;
   readonly workingDirectory: string;

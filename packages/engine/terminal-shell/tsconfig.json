@@ -20,10 +20,10 @@
       "path": "../contracts"
     },
     {
-      "path": "../sdk"
+      "path": "../platform"
     },
     {
-      "path": "../operator-sdk"
+      "path": "../operator-client"
     }
   ]
 }

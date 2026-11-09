@@ -4,8 +4,8 @@ import { resolve } from 'node:path';
 test('source and published policy entrypoints share Classic, Preferred fallback, refusal memory and revocation identity', async () => {
   // Keep the deliberately mixed imports inside a child so this regression does
   // not change the parent suite's installed observer or configuration source.
-  const source = resolve(import.meta.dir, '../sdk/src/platform/runtime/decision-policy.ts');
-  const built = resolve(import.meta.dir, '../sdk/dist/platform/runtime/decision-policy.js');
+  const source = resolve(import.meta.dir, '../platform/src/platform/runtime/decision-policy.ts');
+  const built = resolve(import.meta.dir, '../platform/dist/platform/runtime/decision-policy.js');
   const script = `
     import { strict as assert } from 'node:assert';
     import { JudgmentError } from '@goodvibes-jev/judgment';

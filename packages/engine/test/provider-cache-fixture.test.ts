@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { loadCatalogCache, isCatalogCacheStale, type CatalogModel } from '../sdk/src/platform/providers/model-catalog.ts';
-import { BenchmarkStore, type BenchmarkEntry } from '../sdk/src/platform/providers/model-benchmarks.ts';
+import { loadCatalogCache, isCatalogCacheStale, type CatalogModel } from '../platform/src/platform/providers/model-catalog.ts';
+import { BenchmarkStore, type BenchmarkEntry } from '../platform/src/platform/providers/model-benchmarks.ts';
 import { createProviderCacheFixture, getProviderCachePaths, writeModelCatalogCache, writeBenchmarksCache } from './_helpers/provider-cache.ts';
 import { seedBenchmarkCache, fixtureBenchmark } from './_helpers/benchmark-cache.ts';
 const fixtures: ReturnType<typeof createProviderCacheFixture>[] = [];

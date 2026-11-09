@@ -1,7 +1,7 @@
 /**
  * wake-runtime.ts, onnxruntime-web, adapted to the engine's session shape.
  *
- * The SDK's wake engine never imports an inference runtime. It declares the shape
+ * The platform's wake engine never imports an inference runtime. It declares the shape
  * of one (`WakeInferenceSession`) and the host supplies it, which is what lets the
  * same engine run in a daemon child process and in this tab. This file is that
  * supply on the browser side.
@@ -40,7 +40,7 @@
  * `crossOriginIsolated`, rather than left at the library default of "as many as
  * the system has", which on a non-isolated origin means a failed initialisation.
  */
-import type { WakeInferenceSession, WakeTensor } from '@goodvibes-jev/engine/sdk/platform/voice/wake/runtime';
+import type { WakeInferenceSession, WakeTensor } from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
 
 export type WakeBrowserBackend = 'wasm' | 'webgpu';
 

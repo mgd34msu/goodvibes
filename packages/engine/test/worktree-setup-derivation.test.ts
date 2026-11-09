@@ -12,7 +12,7 @@ import {
   resolveEffectiveWorktreeSetup,
   runWorktreeSetup,
   type DeriveSetupIo,
-} from '../sdk/src/platform/runtime/worktree/setup.ts';
+} from '../platform/src/platform/runtime/worktree/setup.ts';
 
 function io(files: readonly string[]): DeriveSetupIo {
   const set = new Set(files.map((f) => `/repo/${f}`));

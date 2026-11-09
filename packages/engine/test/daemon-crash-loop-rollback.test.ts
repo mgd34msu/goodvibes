@@ -26,14 +26,14 @@ import {
   recordDaemonStart,
   recordDaemonStartAttempt,
   type LifecycleMarkerIo,
-} from '../sdk/src/platform/daemon/lifecycle-marker.ts';
+} from '../platform/src/platform/daemon/lifecycle-marker.ts';
 import {
   CRASH_LOOP_FAILED_START_THRESHOLD,
   crashLoopRollbackReceipt,
   decideCrashLoopRollback,
-} from '../sdk/src/platform/daemon/boot-rollback.ts';
-import { DaemonLifecycleRuntime, type DaemonLifecycleRuntimeOptions } from '../sdk/src/platform/daemon/facade-lifecycle.ts';
-import { PREVIOUS_FILE_SUFFIX, NATIVE_READER_REQUIREMENT_FILE, nativeReaderCapabilities, type UpdateFileIo } from '../sdk/src/platform/runtime/self-update.ts';
+} from '../platform/src/platform/daemon/boot-rollback.ts';
+import { DaemonLifecycleRuntime, type DaemonLifecycleRuntimeOptions } from '../platform/src/platform/daemon/facade-lifecycle.ts';
+import { PREVIOUS_FILE_SUFFIX, NATIVE_READER_REQUIREMENT_FILE, nativeReaderCapabilities, type UpdateFileIo } from '../platform/src/platform/runtime/self-update.ts';
 import { fixtureStrings, nativeCohortFixture, nativeMemoryIo } from './_helpers/daemon-native-cohort.ts';
 
 const MARKER = '/state/daemon-lifecycle.json';
@@ -300,7 +300,7 @@ describe('crash-loop rollback at boot', () => {
     expect(h.runtime.onStarting()).toBe(matches);
     await h.runtime.drainHandovers();
     expect(h.files.get(EXEC_PATH)?.toString()).toBe(matches ? 'v1-previous-reader' : 'new-current-reader');
-    if (!matches) { expect(h.alerts.join('')).toContain('does not confirm support'); expect(h.exits).toEqual([]); h.runtime.onStopping(false); }
+    if (!matches) { expect(h.alerts.join('')).toContain('does not confirm support'); expect(h.exits).toEqual([]); await h.runtime.onStopping(false); }
   });
 
   for (const confirmed of [false, true]) test(`a numerically compatible previous build needs its actual reader profile (confirmed=${confirmed})`, async () => {
@@ -318,10 +318,10 @@ describe('crash-loop rollback at boot', () => {
     const installed = confirmed ? previous : current;
     for (const [path, bytes] of Object.entries(installed.installation(EXEC_PATH))) expect(h.files.get(path)).toEqual(bytes);
     expect(h.files.get(floor)?.toString()).toBe(contents);
-    if (!confirmed) { expect(h.alerts.join('')).toContain('does not confirm support'); expect(h.exits).toEqual([]); h.runtime.onStopping(false); }
+    if (!confirmed) { expect(h.alerts.join('')).toContain('does not confirm support'); expect(h.exits).toEqual([]); await h.runtime.onStopping(false); }
   });
 
-  test('a retained-data reader floor refuses an older healthy cohort and explains the actual reason', () => {
+  test('a retained-data reader floor refuses an older healthy cohort and explains the actual reason', async () => {
     const current = nativeCohortFixture({ version: '3.1.2', daemonBytes: 'current-reader' });
     const previous = nativeCohortFixture({ version: '3.1.1', daemonBytes: 'older-reader' });
     const floor = join(EXEC_PATH, '..', NATIVE_READER_REQUIREMENT_FILE);
@@ -336,7 +336,7 @@ describe('crash-loop rollback at boot', () => {
     expect(h.alerts.join('')).toContain('Saved application data requires GoodVibes 3.1.2');
     expect(h.stderr.join('')).toContain('Continuing the current build without a rollback');
     expect(h.receipts().some(row => row.text.includes('Automatic rollback refused'))).toBe(true);
-    h.runtime.onStopping(false);
+    await h.runtime.onStopping(false);
   });
 
   test('three failed starts restore files; failed adoption reports incomplete handover without successful exit', async () => {
@@ -375,7 +375,7 @@ describe('crash-loop rollback at boot', () => {
     expect(h.marker()?.rejectedVersion).toBe('2.0.0');
   });
 
-  test('a healthy boot in the middle resets the counter: no rollback', () => {
+  test('a healthy boot in the middle resets the counter: no rollback', async () => {
     const h = rollbackHarness({ artifact: ARTIFACT });
     expect(h.runtime.onStarting()).toBe(false);
     expect(h.runtime.onStarting()).toBe(false);
@@ -384,7 +384,7 @@ describe('crash-loop rollback at boot', () => {
     expect(h.runtime.onStarting()).toBe(false);
     expect(h.runtime.onStarting()).toBe(false);
     expect(h.files.get(EXEC_PATH)?.toString()).toBe('bad-build');
-    h.runtime.onStopping(false);
+    await h.runtime.onStopping(false);
   });
 
   test('damaged current bytes can restore the complete verified prior installation', async () => {
@@ -504,7 +504,7 @@ describe('the failed-start streak is scoped to the build it accuses', () => {
     expect(recordDaemonStartAttempt(MARKER, { io, now, version: '1.27.0' }).failedStarts).toBe(1);
   });
 
-  test('an in-process restart cycle is not a boot: a daemon that came up cannot accumulate failed starts', () => {
+  test('an in-process restart cycle is not a boot: a daemon that came up cannot accumulate failed starts', async () => {
     const h = rollbackHarness({ artifact: ARTIFACT });
     // This process boots and reaches a fully-started daemon.
     expect(h.runtime.onStarting()).toBe(false);
@@ -513,7 +513,7 @@ describe('the failed-start streak is scoped to the build it accuses', () => {
     // None of them is a boot that failed, so none of them counts toward the
     // crash-loop threshold and the binary on disk is never touched.
     for (let i = 0; i < 6; i++) {
-      h.runtime.onStopping(true);
+      await h.runtime.onStopping(true);
       expect(h.runtime.onStarting()).toBe(false);
       h.runtime.onStarted();
     }
@@ -524,7 +524,7 @@ describe('the failed-start streak is scoped to the build it accuses', () => {
     expect(h.receipts()).toHaveLength(0);
   });
 
-  test('a genuine crash is still reported once, on the first fully-started moment of the NEXT process', () => {
+  test('a genuine crash is still reported once, on the first fully-started moment of the NEXT process', async () => {
     const first = rollbackHarness({ artifact: ARTIFACT });
     first.runtime.onStarting();
     first.runtime.onStarted();
@@ -544,7 +544,7 @@ describe('the failed-start streak is scoped to the build it accuses', () => {
     expect(receipts).toHaveLength(1);
     expect(receipts[0]!.text).toStartWith('restarted after a crash at');
     // And it is reported once, not again on every restart cycle that follows.
-    next.runtime.onStopping(true);
+    await next.runtime.onStopping(true);
     next.runtime.onStarting();
     next.runtime.onStarted();
     expect(next.receipts()).toHaveLength(1);
@@ -714,6 +714,81 @@ for (const managerPlatform of ['manual', 'launchd'] as const) {
   });
 }
 
+
+for (const supervised of [false, true]) test(`rollback ${supervised ? 'restart' : 'adoption'} refuses a failed original stop without exposing its rejection`, async () => {
+  let inspected = 0, installs = 0, commands = 0;
+  const privateFailure = { get message() { inspected++; return 'private rollback owner credential'; },
+    toString() { inspected++; return 'private rollback owner credential'; } };
+  const h = rollbackHarness({ artifact: ARTIFACT, supervised, managerPlatform: 'systemd',
+    install: () => { installs++; return {}; }, runner: async () => { commands++; return { status: 'accepted' }; },
+    stopGracefully: async () => { throw privateFailure; },
+  });
+  for (let i = 0; i < 3; i++) expect(h.runtime.onStarting()).toBe(false);
+  expect(h.runtime.onStarting()).toBe(true); await h.runtime.drainHandovers();
+  expect(h.stops).toHaveLength(1); expect(installs).toBe(0); expect(commands).toBe(0); expect(h.exits).toEqual([]);
+  expect(h.files.get(EXEC_PATH)?.toString()).toBe('good-build'); expect(h.files.get(PREVIOUS_PATH)?.toString()).toBe('bad-build');
+  const receipts = h.receipts().map(row => row.text).join('');
+  expect(receipts).toContain('rolled back to the previously installed version');
+  expect(receipts).toContain('rollback handover incomplete (failed)'); expect(receipts).toContain('no service handover was requested');
+  expect(receipts).not.toContain('private rollback'); expect(h.stderr.join('')).not.toContain('private rollback'); expect(h.alerts.join('')).not.toContain('private rollback');
+  expect(inspected).toBe(0); expect(h.marker()?.rejectedVersion).toBe('2.0.0');
+  const marker = [...h.markerFs.files.entries()]; await h.runtime.onStopping(false, false, false);
+  expect([...h.markerFs.files.entries()]).toEqual(marker);
+});
+
+test('orderly cleanup before full host completion preserves each failed-start attempt across real lifecycle owners', async () => {
+  let previous: RollbackHarness | undefined;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const h = rollbackHarness({ artifact: ARTIFACT, ...(previous ? { marker: previous.markerFs, controlPlaneDir: previous.scratch } : {}) });
+    expect(h.runtime.onStarting()).toBe(false); expect(h.marker()?.failedStarts).toBe(attempt);
+    const original = [...h.markerFs.files.entries()];
+    // Listener/startup failure never called onStarted: even complete resource
+    // cleanup cannot claim that this daemon reached its full host readiness.
+    await h.runtime.onStopping(false);
+    expect([...h.markerFs.files.entries()]).toEqual(original); previous = h;
+  }
+  if (!previous) throw new Error('Expected actual failed-start marker');
+  const recovered = rollbackHarness({ artifact: ARTIFACT, marker: previous.markerFs, controlPlaneDir: previous.scratch });
+  expect(recovered.runtime.onStarting()).toBe(true); await recovered.runtime.drainHandovers();
+  expect(recovered.files.get(EXEC_PATH)?.toString()).toBe('good-build'); expect(recovered.marker()?.rejectedVersion).toBe('2.0.0');
+  expect(recovered.receipts().some(row => row.text.includes('failed to start 3 times in a row'))).toBe(true);
+  await recovered.runtime.onStopping(false);
+});
+
+test('closing a never-started lifecycle does not fabricate a clean marker', async () => {
+  const h = rollbackHarness({ artifact: ARTIFACT }); expect(h.markerFs.files.size).toBe(0);
+  await h.runtime.onStopping(false); expect(h.markerFs.files.size).toBe(0); expect(h.exits).toEqual([]);
+});
+
+test('incomplete owned cleanup fences lifecycle shutdown without replacing a running marker with clean-shutdown', async () => {
+  const h = rollbackHarness({ artifact: ARTIFACT }); expect(h.runtime.onStarting()).toBe(false); h.runtime.onStarted();
+  expect(h.marker()?.state).toBe('running'); const original = [...h.markerFs.files.entries()];
+  await h.runtime.onStopping(false, false, false);
+  expect([...h.markerFs.files.entries()]).toEqual(original); expect(h.marker()?.state).toBe('running');
+  expect(h.runtime.updateStatus().armed).toBe(false); expect(h.stops).toEqual([]); expect(h.exits).toEqual([]);
+});
+
+for (const rejected of [false, true]) test(`clean marker waits for the actual lifecycle handover drain (${rejected ? 'rejected' : 'completed'})`, async () => {
+  const h = rollbackHarness({ artifact: ARTIFACT }); expect(h.runtime.onStarting()).toBe(false); h.runtime.onStarted();
+  const original = [...h.markerFs.files.entries()]; expect(h.marker()?.state).toBe('running');
+  const retained = Promise.withResolvers<void>(), nativeDrain = h.runtime.drainHandovers.bind(h.runtime);
+  // Retain the real drain, then gate its public completion boundary. No private
+  // task flags or marker-write stub can make an unfinished owner look complete.
+  const drain = spyOn(h.runtime, 'drainHandovers').mockImplementation(async (forHandover) => {
+    await nativeDrain(forHandover); await retained.promise;
+  });
+  const closing = h.runtime.onStopping(false); void closing.catch(() => {});
+  try {
+    await Promise.resolve(); expect([...h.markerFs.files.entries()]).toEqual(original);
+    if (rejected) {
+      const failure = new Error('Retained handover failed'); retained.reject(failure);
+      await expect(closing).rejects.toBe(failure); expect([...h.markerFs.files.entries()]).toEqual(original);
+    } else {
+      retained.resolve(); await closing; expect(h.marker()?.state).toBe('clean-shutdown');
+      expect([...h.markerFs.files.entries()]).not.toEqual(original);
+    }
+  } finally { retained.resolve(); await closing.catch(() => {}); drain.mockRestore(); }
+});
 
 test('external close during rollback orderly stop fences all later commands', async () => {
   let release!: () => void;

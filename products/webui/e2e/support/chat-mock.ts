@@ -79,7 +79,7 @@ export interface ChatMockOptions {
    */
   assistantReplyMemoryRecordIds?: readonly string[];
   /**
-   * Seed for sessions.queuedMessages.list/edit/delete (SDK 1.8.0's
+   * Seed for sessions.queuedMessages.list/edit/delete (platform 1.8.0's
    * interaction-wins round), keyed by sessionId. Default {} (no session has any
    * queued messages).
    */
@@ -161,7 +161,7 @@ export async function installChatMockDaemon(page: Page, options: ChatMockOptions
     return reply;
   }
 
-  // The SDK's control.status helper and the settings modal use the direct
+  // The platform's control.status helper and the settings modal use the direct
   // GET /status and /config routes (not the invoke gateway), register them
   // here too or they escape to the proxy target.
   await page.route('**/status', async (route) => json(route, { ok: true, status: 'running' }));
@@ -284,7 +284,7 @@ export async function installChatMockDaemon(page: Page, options: ChatMockOptions
       return json(route, { messageId: userMsg.id });
     }
 
-    // sessions.toolCalls.cancel (SDK 1.8.0's interaction-wins round), stop one
+    // sessions.toolCalls.cancel (platform 1.8.0's interaction-wins round), stop one
     // running tool call mid-flight; the turn continues (this mock never ends it).
     const toolCallCancelMatch = path.match(/^\/api\/sessions\/([^/]+)\/tool-calls\/([^/]+)\/cancel$/);
     if (method === 'POST' && toolCallCancelMatch) {
@@ -294,7 +294,7 @@ export async function installChatMockDaemon(page: Page, options: ChatMockOptions
       return json(route, { sessionId, callId, cancelled: true });
     }
 
-    // sessions.queuedMessages.list/edit/delete (SDK 1.8.0's interaction-wins round).
+    // sessions.queuedMessages.list/edit/delete (platform 1.8.0's interaction-wins round).
     const queuedMessageItemMatch = path.match(/^\/api\/sessions\/([^/]+)\/queued-messages\/([^/]+)$/);
     if (queuedMessageItemMatch) {
       const sessionId = decodeURIComponent(queuedMessageItemMatch[1]);
@@ -442,7 +442,7 @@ export async function installChatMockDaemon(page: Page, options: ChatMockOptions
     const invokeMatch = path.match(/^\/api\/control-plane\/methods\/([^/]+)\/invoke$/);
     if (method === 'POST' && invokeMatch) {
       const methodId = decodeURIComponent(invokeMatch[1]);
-      // pairing.posture.get (SDK 1.8.0), computed from the SAME algorithm the real
+      // pairing.posture.get (platform 1.8.0), computed from the SAME algorithm the real
       // daemon runs, keyed off the caller's own origin (useOriginPosture/
       // usePairingHandoff always pass window.location.origin), so a spec served from a
       // real private-network address (lan-origin-posture.e2e.ts) gets the exact daemon

@@ -22,7 +22,7 @@ import {
   type ContractView,
   type OwnerReplyOutcome,
   type StartContractInput,
-} from '../../sdk/src/platform/contract/index.js';
+} from '../../platform/src/platform/contract/index.js';
 import { makeContract } from './fixtures.js';
 
 let restore: JudgmentPort | undefined;

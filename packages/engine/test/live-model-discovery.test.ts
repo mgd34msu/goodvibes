@@ -12,7 +12,7 @@ import {
   formatModelDiscoveryReport,
   getProviderModelsCachePath,
   runLiveModelRefresh,
-} from '../sdk/src/platform/providers/live-model-discovery.js';
+} from '../platform/src/platform/providers/live-model-discovery.js';
 
 async function withTempDir<T>(fn: (dir: string) => T | Promise<T>): Promise<T> {
   const dir = mkdtempSync(join(tmpdir(), 'goodvibes-live-model-discovery-'));

@@ -2,7 +2,7 @@
 import { chmodSync, closeSync, constants, fchmodSync, fstatSync, linkSync, lstatSync, mkdtempSync, openSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import type { BigIntStats } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
-import { captureExistingDirectory, prepareAtomicPublicationDirectory, fileObservationIdentity } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { captureExistingDirectory, prepareAtomicPublicationDirectory, fileObservationIdentity } from '@goodvibes-jev/engine/platform/platform/utils';
 
 export interface PublishedReleaseFile {
   readonly path: string;

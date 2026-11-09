@@ -28,9 +28,9 @@ import {
   MailboxCursorStore,
   validateMailboxCursor,
   type CursorSweepReport,
-} from '../sdk/src/platform/email/inbound/cursor-store.ts';
-import type { MailboxCursor } from '../sdk/src/platform/email/inbound/types.ts';
-import type { GmailMailboxCursor } from '../sdk/src/platform/email/inbound/source-cursor.ts';
+} from '../platform/src/platform/email/inbound/cursor-store.ts';
+import type { MailboxCursor } from '../platform/src/platform/email/inbound/types.ts';
+import type { GmailMailboxCursor } from '../platform/src/platform/email/inbound/source-cursor.ts';
 
 /** The uint64 ceiling. `Number('18446744073709551615')` is 18446744073709552000. */
 const UINT64_MAX = '18446744073709551615';

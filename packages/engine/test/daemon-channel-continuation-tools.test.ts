@@ -26,19 +26,19 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { forgetGateReadings, gateReadingsPort, READ_ONLY } from './_helpers/gate-readings.ts';
 import { seedBenchmarkCache } from './_helpers/benchmark-cache.ts';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { DaemonServer } from '../sdk/src/platform/daemon/facade.js';
-import { gateSurfaceSpawn } from '../sdk/src/platform/daemon/surface-conversation-gate.js';
-import type { DaemonSurfaceActionHelper } from '../sdk/src/platform/daemon/surface-actions.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { createRuntimeServices, type RuntimeServices } from '../sdk/src/platform/runtime/services.js';
-import { createRuntimeStore } from '../sdk/src/platform/runtime/store/index.js';
-import type { ChatRequest, ChatResponse, LLMProvider } from '../sdk/src/platform/providers/interface.js';
-import type { SharedSessionContinuationRunner, SharedSessionInputRecord } from '../sdk/src/platform/control-plane/session-intents.js';
-import type { AgentRecord } from '../sdk/src/platform/tools/agent/record.js';
-import type { SpawnInput } from '../sdk/src/platform/daemon/surface-conversation-gate.js';
-import type { ModelDefinition } from '../sdk/src/platform/providers/registry.js';
-import type { PersonalCaptureHolder } from '../sdk/src/platform/personal-capture/port.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { DaemonServer } from '../platform/src/platform/daemon/facade.js';
+import { gateSurfaceSpawn } from '../platform/src/platform/daemon/surface-conversation-gate.js';
+import type { DaemonSurfaceActionHelper } from '../platform/src/platform/daemon/surface-actions.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { createRuntimeServices, type RuntimeServices } from '../platform/src/platform/runtime/services.js';
+import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.js';
+import type { ChatRequest, ChatResponse, LLMProvider } from '../platform/src/platform/providers/interface.js';
+import type { SharedSessionContinuationRunner, SharedSessionInputRecord } from '../platform/src/platform/control-plane/session-intents.js';
+import type { AgentRecord } from '../platform/src/platform/tools/agent/record.js';
+import type { SpawnInput } from '../platform/src/platform/daemon/surface-conversation-gate.js';
+import type { ModelDefinition } from '../platform/src/platform/providers/registry.js';
+import type { PersonalCaptureHolder } from '../platform/src/platform/personal-capture/port.js';
 import { trackDisposables } from './_helpers/disposables.ts';
 
 const PROVIDER = 'scripted';
@@ -319,7 +319,7 @@ describe('a served daemon offers a channel conversation the conversational tools
 });
 
 
-describe('the SDK runtime continuation before the daemon replaces it', () => {
+describe('the platform runtime continuation before the daemon replaces it', () => {
   for (const [name, surfaceKind, metadata] of [
     ['conversation', 'telegram', {}],
     ['confirmed work', 'telegram', { 'goodvibes.workAuthorized': true }],

@@ -13,7 +13,7 @@ import '../config/provider-model.ts';
 import type { ConversationManager } from '../core/conversation';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { InputHandler } from '../input/handler.ts';
-import type { ModelDefinition, ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ModelDefinition, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import {
   describeServingEffort,
   effortPresentationForModel,
@@ -24,9 +24,9 @@ import {
 } from '../providers/reasoning-effort-surface.ts';
 import type { MutableRuntimeState } from '@/runtime/index.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
-import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
-import type { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { SecretsManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
+import type { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ServiceInspectionQuery } from '@/runtime/index.ts';
 import type { ModelPickerTargetInfo } from '../input/model-picker.ts';
 import { type ModelPickerOpenDeps } from '../input/model-picker-open.ts';
@@ -61,7 +61,7 @@ type WireShellUiOpenersOptions = {
 
 /**
  * Derive the configuredVia tier for a provider.
- * Tier order mirrors SDK provider-routes.ts: env → secrets → subscription → undefined.
+ * Tier order mirrors platform provider-routes.ts: env → secrets → subscription → undefined.
  * The preResolvedSecretKeys set is pre-fetched async before the sync picker render cycle.
  */
 
@@ -91,7 +91,7 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
   } = options;
 
   /**
-   * Pre-resolve which provider IDs have secrets-manager keys (async batch, SDK tier pattern).
+   * Pre-resolve which provider IDs have secrets-manager keys (async batch, platform tier pattern).
    * Returns a set of provider IDs (not env var names) that are secrets-backed.
    * Falls back to empty set if secretsManager is not provided.
    */
@@ -159,7 +159,7 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     const currentModel = providerRegistry.getCurrentModel();
     const model = toEffortModel(currentModel);
     // Only this model's real levels, a fallback-sourced guess does not get an
-    // automatic picker step, since the SDK's OpenAI/Gemini adapters drop the
+    // automatic picker step, since the platform's OpenAI/Gemini adapters drop the
     // level entirely for a model nothing recognises.
     publishActiveEffortOptions(model, runtime.sessionId);
     const presentation = effortPresentationForModel(model);
@@ -329,7 +329,7 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
           }
           // The owner keep-awake toggle no longer needs a bespoke live-apply
           // here: services.ts wires wireRuntimePower's subscribeConfig option
-          // (the SDK's own PowerManager config subscription), so setDynamic's
+          // (the platform's own PowerManager config subscription), so setDynamic's
           // persist above already flips the real local inhibitor, and a
           // separate configManager.subscribe('power.keepAwake', ...) in
           // services.ts forwards the toggle to an adopted daemon over the wire

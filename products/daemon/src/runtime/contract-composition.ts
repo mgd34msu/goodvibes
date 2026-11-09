@@ -1,6 +1,6 @@
 /** The daemon composes one canonical runner after its plan and fleet owners exist. */
-import { composeContractRunner, makeRuntimeFleetProbe, type ContractRunnerCompositionOptions } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import { createContractOperatorService } from '@goodvibes-jev/engine/sdk/platform/contract';
+import { composeContractRunner, makeRuntimeFleetProbe, type ContractRunnerCompositionOptions } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { createContractOperatorService } from '@goodvibes-jev/engine/platform/platform/contract';
 
 export type DaemonContractCompositionOptions = Omit<ContractRunnerCompositionOptions, 'fleetCapacity' | 'readAccessFilter'> & {
   readonly readAccessFilter: NonNullable<ContractRunnerCompositionOptions['readAccessFilter']>;

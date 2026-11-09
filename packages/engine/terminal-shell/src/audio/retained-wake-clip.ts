@@ -5,7 +5,7 @@ import {
   resolveManagedWakePaths,
   retainedClipFileName,
   type CapturedUtterance,
-} from '@goodvibes-jev/engine/sdk/platform/voice';
+} from '@goodvibes-jev/engine/platform/platform/voice';
 export function retainWakeClip(
   deps: {
     readonly managedRoot: string;
@@ -23,7 +23,7 @@ export function retainWakeClip(
   const retainedDir = resolveManagedWakePaths(deps.managedRoot).retainedDir;
   try {
     mkdirSync(retainedDir, { recursive: true });
-    // The SDK owns the filename, and it is load-bearing rather than cosmetic: the
+    // The platform owns the filename, and it is load-bearing rather than cosmetic: the
     // recovery sweeper reads the owning session id from the first `--`-delimited
     // segment, so a name invented here would get a live session's clips reaped as
     // orphans (or leave them unreaped forever).

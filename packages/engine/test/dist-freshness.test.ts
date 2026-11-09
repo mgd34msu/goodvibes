@@ -7,11 +7,11 @@ const ROOT = join(import.meta.dir, '..');
 
 const BUILT_PACKAGE_ENTRIES = [
   'contracts',
-  'daemon-sdk',
+  'daemon-api',
   'errors',
-  'operator-sdk',
-  'peer-sdk',
-  'sdk',
+  'operator-client',
+  'peer-client',
+  'platform',
   'transport-core',
   'transport-http',
   'transport-realtime',

@@ -8,9 +8,9 @@
  * NOT_INVOKABLE/501, which these invocations would surface.
  */
 import { describe, expect, test } from 'bun:test';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { registerSkillsGatewayMethods } from '../sdk/src/platform/control-plane/routes/skills.ts';
-import { SkillService, InMemorySkillStore } from '../sdk/src/platform/skills/index.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { registerSkillsGatewayMethods } from '../platform/src/platform/control-plane/routes/skills.ts';
+import { SkillService, InMemorySkillStore } from '../platform/src/platform/skills/index.ts';
 
 function makeCatalog(): GatewayMethodCatalog {
   const catalog = new GatewayMethodCatalog();

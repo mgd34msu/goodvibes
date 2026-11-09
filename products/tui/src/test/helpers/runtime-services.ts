@@ -1,24 +1,24 @@
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll } from 'bun:test';
-import { ArchetypeLoader } from '@goodvibes-jev/engine/sdk/platform/agents';
-import { AgentMessageBus } from '@goodvibes-jev/engine/sdk/platform/agents';
-import { AgentOrchestrator } from '@goodvibes-jev/engine/sdk/platform/agents';
-import { AutomationManager } from '@goodvibes-jev/engine/sdk/platform/automation';
-import { ChannelPolicyManager } from '@goodvibes-jev/engine/sdk/platform/channels';
-import { RouteBindingManager } from '@goodvibes-jev/engine/sdk/platform/channels';
-import { ToolLLM } from '@goodvibes-jev/engine/sdk/platform/config';
-import { ApprovalBroker } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { SharedSessionBroker } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { GitService } from '@goodvibes-jev/engine/sdk/platform/git';
-import type { HookDispatcher } from '@goodvibes-jev/engine/sdk/platform/hooks';
-import type { HookWorkbench } from '@goodvibes-jev/engine/sdk/platform/hooks';
-import { CodeIntelligence } from '@goodvibes-jev/engine/sdk/platform/intelligence';
-import { LspService } from '@goodvibes-jev/engine/sdk/platform/intelligence';
-import { TreeSitterService } from '@goodvibes-jev/engine/sdk/platform/intelligence';
-import { MediaProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/media';
-import { PluginManager } from '@goodvibes-jev/engine/sdk/platform/plugins';
+import { ArchetypeLoader } from '@goodvibes-jev/engine/platform/platform/agents';
+import { AgentMessageBus } from '@goodvibes-jev/engine/platform/platform/agents';
+import { AgentOrchestrator } from '@goodvibes-jev/engine/platform/platform/agents';
+import { AutomationManager } from '@goodvibes-jev/engine/platform/platform/automation';
+import { ChannelPolicyManager } from '@goodvibes-jev/engine/platform/platform/channels';
+import { RouteBindingManager } from '@goodvibes-jev/engine/platform/platform/channels';
+import { ToolLLM } from '@goodvibes-jev/engine/platform/platform/config';
+import { ApprovalBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { SharedSessionBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { GitService } from '@goodvibes-jev/engine/platform/platform/git';
+import type { HookDispatcher } from '@goodvibes-jev/engine/platform/platform/hooks';
+import type { HookWorkbench } from '@goodvibes-jev/engine/platform/platform/hooks';
+import { CodeIntelligence } from '@goodvibes-jev/engine/platform/platform/intelligence';
+import { LspService } from '@goodvibes-jev/engine/platform/platform/intelligence';
+import { TreeSitterService } from '@goodvibes-jev/engine/platform/platform/intelligence';
+import { MediaProviderRegistry } from '@goodvibes-jev/engine/platform/platform/media';
+import { PluginManager } from '@goodvibes-jev/engine/platform/platform/plugins';
 import { createFeatureFlagManager, type FeatureFlagManager } from '@/runtime/index.ts';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { RemoteRunnerRegistry } from '@/runtime/index.ts';
@@ -26,19 +26,19 @@ import { RemoteSupervisor } from '@/runtime/index.ts';
 import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
 import { createShellPathService } from '@/runtime/index.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
-import { TaskScheduler } from '@goodvibes-jev/engine/sdk/platform/scheduler';
-import { SpawnTokenManager } from '@goodvibes-jev/engine/sdk/platform/security';
-import { FileUndoManager } from '@goodvibes-jev/engine/sdk/platform/state';
-import { MemoryEmbeddingProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/state';
-import { ModeManager } from '@goodvibes-jev/engine/sdk/platform/state';
-import { ProjectIndex } from '@goodvibes-jev/engine/sdk/platform/state';
-import { AgentManager, type AgentExecutor } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { AutoHealer } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { ProcessManager } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { ScheduleManager, TriggerManager, WorkflowManager } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { VoiceProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/voice';
-import { WebSearchProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/web-search';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { TaskScheduler } from '@goodvibes-jev/engine/platform/platform/scheduler';
+import { SpawnTokenManager } from '@goodvibes-jev/engine/platform/platform/security';
+import { FileUndoManager } from '@goodvibes-jev/engine/platform/platform/state';
+import { MemoryEmbeddingProviderRegistry } from '@goodvibes-jev/engine/platform/platform/state';
+import { ModeManager } from '@goodvibes-jev/engine/platform/platform/state';
+import { ProjectIndex } from '@goodvibes-jev/engine/platform/platform/state';
+import { AgentManager, type AgentExecutor } from '@goodvibes-jev/engine/platform/platform/tools';
+import { AutoHealer } from '@goodvibes-jev/engine/platform/platform/tools';
+import { ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
+import { ScheduleManager, TriggerManager, WorkflowManager } from '@goodvibes-jev/engine/platform/platform/tools';
+import { VoiceProviderRegistry } from '@goodvibes-jev/engine/platform/platform/voice';
+import { WebSearchProviderRegistry } from '@goodvibes-jev/engine/platform/platform/web-search';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { makeProjectTempDir } from './project-temp.ts';
 import { buildTestModelDefinition, patchTestProviderRegistry } from './test-managers.ts';
 
@@ -98,7 +98,7 @@ function getTestRoots(): IntelligenceTestRoots {
   // the preload's afterAll drains it, with re-checks, when the test process
   // finishes. (2) is what closes the residual noted on
   // disposeTestRuntimeServicesAfterAll below, where a late async write inside
-  // the SDK recreates a few files microtasks after the per-file rmSync.
+  // the platform recreates a few files microtasks after the per-file rmSync.
 
 
   return testRoots;
@@ -188,7 +188,7 @@ export function resetTestRuntimeServices(): void {
  * genuinely succeeds at the moment it runs, but for some files a handful of
  * files reappear under the same path microtasks later, some subsystem
  * inside the created RuntimeServices graph (not identified further; it is
- * inside @goodvibes-jev/engine/sdk, not this repo) performs an async write after
+ * inside @goodvibes-jev/engine/platform, not this repo) performs an async write after
  * `previous?.dispose()` above has synchronously returned, without this
  * module awaiting it (resetTestRuntimeServices()'s signature is used
  * synchronously in dozens of afterEach hooks elsewhere, so it isn't safe to

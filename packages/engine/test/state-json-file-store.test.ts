@@ -1,6 +1,6 @@
 // Tests for JsonFileStore
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { JsonFileStore } from '@goodvibes-jev/engine/sdk/platform/state';
+import { JsonFileStore } from '@goodvibes-jev/engine/platform/platform/state';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';

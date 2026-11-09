@@ -8,7 +8,7 @@ import {
   type HostServicesConfig,
   type DetachedDaemonChild,
   type DetachedDaemonSpawnOptions,
-} from '../sdk/src/platform/runtime/bootstrap-services.ts';
+} from '../platform/src/platform/runtime/bootstrap-services.ts';
 
 /** Unique temp dir so detached-spawn tests never touch the real daemon home. */
 function tempRuntimeDir(): string {
@@ -421,7 +421,7 @@ describe('startHostServices detached daemon spawn (Layer 2 default)', () => {
     expect(captured.command).toBe('goodvibes-daemon');
     expect(captured.args).toContain('--daemon-home');
     // The daemon's STATE directory, not the user home above it. Every reader in
-    // the SDK resolves `--daemon-home` as `~/.goodvibes/daemon` (see
+    // the platform resolves `--daemon-home` as `~/.goodvibes/daemon` (see
     // workspace/daemon-home.ts, config/daemon-config-tier.ts,
     // owner-profile/paths.ts, config/secrets.ts); this spawner passed the user
     // home, so a spawned daemon filed its operator tokens and daemon settings a
@@ -533,7 +533,7 @@ describe('client bootstrap cannot reach daemon composition code', () => {
    * product composes DaemonServer/HttpListener with direct static imports in its
    * own entrypoint; this module must have no path to them at all.
    */
-  const MODULE_PATH = new URL('../sdk/src/platform/runtime/bootstrap-services.ts', import.meta.url);
+  const MODULE_PATH = new URL('../platform/src/platform/runtime/bootstrap-services.ts', import.meta.url);
   const source = readFileSync(MODULE_PATH, 'utf8');
 
   test('no dynamic import reaches platform/daemon', () => {

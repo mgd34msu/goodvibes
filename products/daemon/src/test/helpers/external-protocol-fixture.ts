@@ -4,12 +4,12 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { withDecisionLog, type JudgmentRequest, type Questions } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { registerInboxSurface } from '@goodvibes-jev/engine/sdk/platform/intake';
-import { AcpHostService, type HostedAcpAgent } from '@goodvibes-jev/engine/sdk/platform/acp';
+import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { registerInboxSurface } from '@goodvibes-jev/engine/platform/platform/intake';
+import { AcpHostService, type HostedAcpAgent } from '@goodvibes-jev/engine/platform/platform/acp';
 import { gateReadingsPort } from './synthetic-gate-readings.js';
-import { executeToolCalls } from '@goodvibes-jev/engine/sdk/platform/core';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { executeToolCalls } from '@goodvibes-jev/engine/platform/platform/core';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { startDaemonFixture } from '../../testing/daemon-fixture.js';
 import { makeOwnedTempDir } from './owned-temp.js';
 

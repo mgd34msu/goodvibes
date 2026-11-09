@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   scaffoldCapabilityBundleManifest,
   computeSha256,
   buildMarketplaceIndexEntry,
   serializeMarketplaceIndex,
   type PinnedMarketplaceIndex,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/ecosystem';
+} from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem';
 import { parseGoodVibesCli } from '@goodvibes-jev/engine/terminal-shell';
 import { handlePluginCommand } from '../../cli/plugin-command.ts';
 import type { CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';

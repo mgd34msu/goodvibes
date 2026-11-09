@@ -3,7 +3,7 @@ import { expect, test, spyOn, setSystemTime } from 'bun:test';
 import { createBuiltinProviderHealthModalSurface } from '../../../views/builtin-modals.ts';
 import type { ResolvedBuiltinViewDeps } from '../../../views/view-deps.ts';
 import { createProviderHealthModalSurface } from '../../../views/modals/provider-health-modal.ts';
-import type { ProviderRuntimeSnapshot, ProviderRuntimeMetadata } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ProviderRuntimeSnapshot, ProviderRuntimeMetadata } from '@goodvibes-jev/engine/platform/platform/providers';
 
 
 import { handleConfigModalToken } from '../../../input/handler-modal-routes.ts';

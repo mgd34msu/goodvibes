@@ -45,14 +45,14 @@ on:
 concurrency:
   # Keyed on the TAG being released, so the two paths that can release the same
   # version serialize with each other: a v* tag push and ci.yml's auto-release
-  # dispatch both run at refs/tags/vX, so both produce sdk-release-vX. Different
+  # dispatch both run at refs/tags/vX, so both produce engine-release-vX. Different
   # versions get different groups and never evict one another.
   #
   # A non-release dispatch (dry-run) is keyed on run_id instead: it writes
   # nothing, so parallel manual dry-runs are fine and must not queue behind a
   # real release. The `ref` input is deliberately NOT part of the key; it
   # defaults to "main", which would collapse every dispatch into one group.
-  group: sdk-release-${{ (github.event_name == 'push' || github.event.inputs.mode == 'release') && (github.event.inputs.tag || github.ref_name) || github.run_id }}
+  group: engine-release-${{ (github.event_name == 'push' || github.event.inputs.mode == 'release') && (github.event.inputs.tag || github.ref_name) || github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -99,7 +99,7 @@ jobs:
   # green. Replaces the old 45-minute validate-release re-run. Emits the CI run
   # id + head SHA so publish-npm can restore that run's build artifact.
   #
-  # toolchain-source: workspace, the SDK MUST self-host per-job-green from the
+  # toolchain-source: workspace, the engine MUST self-host per-job-green from the
   # checked-out commit. bunx-from-registry would deadlock the first release
   # (this release is what publishes @goodvibes-jev/engine) and would make
   # every later release verify itself with the PREVIOUS toolchain version.
@@ -152,7 +152,7 @@ jobs:
     # not require npm credentials or a previously published engine package.
     # Registry writes and latest-tag alignment share one owner across versions.
     concurrency:
-      group: sdk-npm-publish
+      group: engine-npm-publish
       cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 25

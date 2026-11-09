@@ -3,9 +3,9 @@ import { SqliteDecisionLog, withDecisionLog, hashState, type EntryType, type Jud
 import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { gateReadingsPort, forgetGateReadings } from './_helpers/gate-readings.ts';
-import { PermissionManager, type PermissionConfigReader } from '../sdk/src/platform/permissions/manager.ts';
-import { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.ts';
-import type { ExternalPermissionHost } from '../sdk/src/platform/permissions/external-request.ts';
+import { PermissionManager, type PermissionConfigReader } from '../platform/src/platform/permissions/manager.ts';
+import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
+import type { ExternalPermissionHost } from '../platform/src/platform/permissions/external-request.ts';
 
 let log: SqliteDecisionLog;
 let restore: ReturnType<typeof installJudgmentPort>;
@@ -50,13 +50,13 @@ beforeEach(() => {
 afterEach(() => { installJudgmentPort(restore); log[Symbol.dispose](); forgetGateReadings(); });
 
 
-import { McpRegistry } from '../sdk/src/platform/mcp/registry.ts';
-import { McpClient } from '../sdk/src/platform/mcp/client.ts';
-import { McpPermissionManager } from '../sdk/src/platform/runtime/mcp/permissions.ts';
-import { withExternalOperationSource } from '../sdk/src/platform/permissions/external-operation-scope.ts';
-import { createRuntimeMcpApi } from '../sdk/src/platform/runtime/runtime-mcp-api.ts';
-import { createMcpAutonomousElicitationHandler } from '../sdk/src/platform/mcp/elicitation-autonomous.ts';
-import { parseElicitationParams } from '../sdk/src/platform/mcp/elicitation.ts';
+import { McpRegistry } from '../platform/src/platform/mcp/registry.ts';
+import { McpClient } from '../platform/src/platform/mcp/client.ts';
+import { McpPermissionManager } from '../platform/src/platform/runtime/mcp/permissions.ts';
+import { withExternalOperationSource } from '../platform/src/platform/permissions/external-operation-scope.ts';
+import { createRuntimeMcpApi } from '../platform/src/platform/runtime/runtime-mcp-api.ts';
+import { createMcpAutonomousElicitationHandler } from '../platform/src/platform/mcp/elicitation-autonomous.ts';
+import { parseElicitationParams } from '../platform/src/platform/mcp/elicitation.ts';
 const operation = () => ({ sourceOf: () => ({ goal: 'Perform the requested write using supplied name Alice', criteria: [] }), inputFacts: [{ name: 'Alice' }], assertCurrent() {} });
 function fixture(mrtr = false) {
   const handler = createMcpAutonomousElicitationHandler(host);
@@ -125,7 +125,7 @@ test('caller mutation during admission cannot change exact wire arguments', asyn
   await f.call(args); expect((f.wire[0]!.params as Record<string, unknown>).arguments).toEqual({ name: 'Alice' });
 });
 
-import { captureExternalRequestEvidence, readExternalRequestEvidence } from '../sdk/src/platform/permissions/external-request-evidence.ts';
+import { captureExternalRequestEvidence, readExternalRequestEvidence } from '../platform/src/platform/permissions/external-request-evidence.ts';
 test('permission does not manufacture or require a Jev disposition receipt', async () => {
   const f = fixture(); await f.call();
   expect(states).toHaveLength(0);

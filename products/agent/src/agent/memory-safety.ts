@@ -1,4 +1,4 @@
-import { containsIssuerCredential } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { containsIssuerCredential } from '@goodvibes-jev/engine/platform/platform/utils';
 
 // Compatibility guards remain until semantic credential screening has a
 // protected-input, cancellable contract. They must not be replaced by a

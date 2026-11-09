@@ -1,0 +1,289 @@
+/**
+ * payments/index.ts, the payment capability's public surface.
+ *
+ * The platform owns this capability, the daemon serves it, and surfaces are wiring
+ * and UI only. Everything a surface needs to render a settings form, an approval
+ * prompt, a veto prompt or a purchase list is exported here; no surface
+ * re-implements a budget, a ladder step, or a window outcome.
+ *
+ * See docs/payments.md for the design and
+ * docs/decisions/2026-07-27-payment-windows-are-deliberately-opposite.md and
+ * docs/decisions/2026-07-27-the-cvv-is-stored.md for the two rulings a later
+ * round is most likely to try to undo.
+ */
+
+export {
+  parseCurrencyCode,
+  parseCommandAuthorityChannel,
+  ownerSuppliedText,
+  SHIPPING_TIERS,
+} from './types.js';
+export type {
+  MinorUnits,
+  CurrencyCode,
+  OwnerSuppliedText,
+  CommandAuthorityChannel,
+  PaymentAnswerChannel,
+  ShippingTier,
+  ShippingOption,
+  ShippingStepDown,
+  CardMetadata,
+  PostalAddress,
+  BudgetPool,
+  BudgetApprovalReason,
+  PurchaseApprovalReason,
+  RefusalCode,
+} from './types.js';
+
+export { dayKey, sameDay, isValidTimezone, resolveTimezone } from './day.js';
+export { CheckoutOwnershipError } from './checkout-ownership.js';
+export type { CheckoutOperationOwnership } from './checkout-ownership.js';
+export type { DayKey } from './day.js';
+
+export { BudgetLedger, RESERVATION_TTL_MS, MAX_RESERVATIONS } from './budget.js';
+export type {
+  BudgetLimits,
+  BudgetReservation,
+  BudgetStateSnapshot,
+  PoolSnapshot,
+  SpendRecord,
+  CheckoutBudgetSettlement,
+  CheckoutBudgetSettlementOwner,
+} from './budget.js';
+
+export { readShippingTiers, walkShippingLadder } from './shipping.js';
+export type { ShippingTiers, ShippingLadderResult } from './shipping.js';
+
+export {
+  APPROVAL_GATE,
+  VETO_WINDOW,
+  advanceApproval,
+  advanceVeto,
+  approvalSettlement,
+  vetoSettlement,
+  isTerminalApproval,
+  isTerminalVeto,
+  windowDeadlineMs,
+  recoverInterruptedWindow,
+} from './windows.js';
+export type {
+  SilenceMeaning,
+  ApprovalState,
+  VetoState,
+  ApprovalEvent,
+  VetoEvent,
+  ChannelDelivery,
+  Settlement,
+  WindowRecovery,
+} from './windows.js';
+
+export { evaluatePaymentTaint, describePaymentTaint } from './taint-gate.js';
+export { describeContentInitiatedRefusal } from './taint-gate.js';
+export type { PaymentIntent, OwnerOriginIntent, ContentOriginIntent, PaymentTaintDecision } from './taint-gate.js';
+
+export {
+  renderApprovalMessage,
+  renderVetoMessage,
+  renderCancellationReport,
+  renderPurchaseNotice,
+  formatMinorUnits,
+} from './message.js';
+export type { PurchaseFacts } from './message.js';
+
+export {
+  mayEnterCardDetails,
+  mayOfferCardEntryFlow,
+  isRemoteMessageSurface,
+  scanForCardDetails,
+  evaluateCardEntry,
+  describeCardEntryRefusal,
+  WEBUI_CARD_ENTRY_CONDITIONS,
+} from './entry-surface.js';
+export type { CardEntrySurface, CardDetailScan, CardEntryDecision } from './entry-surface.js';
+
+export {
+  classifyMerchant,
+  windowForPurchase,
+  parseDomainList,
+  merchantPolicyFromConfig,
+  MERCHANT_RECOURSE_CRITERION,
+} from './merchant-recourse.js';
+export type {
+  MerchantJudgeInput,
+  MerchantJudgePort,
+  MerchantJudgement,
+  MerchantIdentity,
+  MerchantVerdict,
+  MerchantPolicy,
+  MarketplaceKind,
+  MarketplacePolicy,
+  SaleType,
+} from './merchant-recourse.js';
+
+export {
+  DEFAULT_MARKETPLACE_LISTING_THRESHOLDS,
+  evaluateMarketplaceListing,
+  isThirdPartySale,
+} from './marketplace-listing.js';
+export type {
+  FigureRegion,
+  ListingSaleFormat,
+  SellerReputation,
+  MarketplaceListing,
+  MarketplaceListingThresholds,
+  MarketplaceListingVerdict,
+} from './marketplace-listing.js';
+
+export { checkPaymentGates } from './gates.js';
+export type { GateInput, GateRefusal } from './gates.js';
+
+export { decidePurchase } from './decide.js';
+export type { DecisionInput, DecisionOutcome, BudgetDraw, QuotedTotals } from './decide.js';
+
+export { assertCartMatchesRequest, detectRecurringCharge } from './cart.js';
+export type { CartLine, RequestedLine, CartCheck, RecurringCheck } from './cart.js';
+
+export { CVV_PROMPT_TRADEOFF_WARNING } from './browser.js';
+
+// ── Purchase EXECUTION ──────────────────────────────────────────────────────
+//
+// Everything above decides whether to buy. Everything below actually buys,
+// and the seam between them is deliberate: the decision layer is pure and
+// exhaustively tested, and the execution layer reaches it through ports so it
+// can be driven end to end without a browser or a real card.
+
+export { parseMinorUnits, parseQuantity, minorUnitExponent, MAX_PARSEABLE_MINOR_UNITS } from './money-parsing.js';
+
+export { extractCheckout } from './checkout-extraction.js';
+export type { RawCheckoutReading, ExtractedCheckout, ExtractionResult } from './checkout-extraction.js';
+export type { CheckoutTerms } from './checkout-page.js';
+
+export { readCheckoutReadingInput } from './checkout-reading-input.js';
+export type { ReadingInputResult } from './checkout-reading-input.js';
+
+export { CardMaterialRedactor, isCardFieldDescriptor, REDACTED_MARKER } from './card-redaction.js';
+export type { CardFieldKind, FormControlDescriptor } from './card-redaction.js';
+
+export { cardFieldValue, isCardFieldName, CARD_FIELD_NAMES } from './card-material.js';
+export type { CardMaterial, CardMaterialStore, CardFieldName } from './card-material.js';
+
+export {
+  CheckoutRegistry,
+  CheckoutRegistryError,
+  MemoryCheckoutJournal,
+  verdictFor,
+  describeInterruption,
+} from './checkout-registry.js';
+export type {
+  CheckoutPageClaim,
+  CheckoutJournal,
+  CheckoutPhase,
+  InFlightCheckout,
+  InterruptedVerdict,
+} from './checkout-registry.js';
+
+export { CheckoutSubmitRefused, CheckoutQuoteChanged } from './checkout-page.js';
+export type { CheckoutPageDriver, PageIdentity, CheckoutChallenge } from './checkout-page.js';
+
+// The one implementation of that port over a real browser. Exported because a
+// consumer that cannot build a page driver cannot begin a checkout at all, and
+// because this is the module the single-typing-path rule points at: it hands
+// values fill-card.ts read to the engine's fillSecretBatch and produces none
+// itself.
+export { createBrowserCheckoutDriverFactory, CheckoutDriverRefusal } from './browser-checkout-driver.js';
+export type {
+  BrowserCheckoutDriverDeps,
+  CheckoutBrowserEngine,
+  CheckoutEngineTarget,
+  CheckoutGuardHandle,
+  CheckoutSubmission,
+  CheckoutSubmissionDescription,
+} from './browser-checkout-driver.js';
+
+export { fillCard, FillCardRefusal } from './fill-card.js';
+export type { CardFieldTarget, FillCardRequest, FillCardResult, FillCardDeps } from './fill-card.js';
+
+export { runCheckout, merchantIdentity } from './checkout-flow.js';
+export type {
+  PurchaseRequest,
+  PurchaseRecord,
+  PurchaseLedger,
+  PaymentNotifier,
+  PaymentNoticeWindow,
+  CheckoutFlowDeps,
+  CheckoutControls,
+  CheckoutOutcome,
+} from './checkout-flow.js';
+
+export { createChannelPaymentNotifier, readPaymentReply } from './notice-delivery.js';
+export type {
+  PaymentAnswer,
+  PaymentNoticeTarget,
+  PaymentNoticeRouter,
+  PaymentReplySource,
+  PreparedPaymentReply,
+  ChannelPaymentNotifierDeps,
+} from './notice-delivery.js';
+
+export { checkAddress, fillAddresses, renderDestination, addressFieldValue } from './address.js';
+export type {
+  AddressKind,
+  AddressFieldName,
+  AddressFieldTarget,
+  AddressStore,
+  AddressCheck,
+  AddressFillResult,
+} from './address.js';
+
+export { renderPurchaseReport, renderConfirmationReport } from './message.js';
+export {
+  correlatePurchaseMail,
+  extractConfirmationFacts,
+  senderRegistrableDomain,
+} from './order-correlation.js';
+export type { InboundMailFacts, CorrelationResult, ConfirmationFacts } from './order-correlation.js';
+
+export {
+  readPaymentsServiceConfig,
+  readMerchantPolicy,
+  readBudgetLimits,
+  readCvvHandling,
+  readPaymentsEnabled,
+  readDefaultCardId,
+  readNotifyChannels,
+} from './payments-config.js';
+export type { PaymentsConfigReader } from './payments-config.js';
+
+export { createJevMerchantJudge, judgeMerchant } from './merchant-judge-model.js';
+
+export { PaymentReplyInbox, PaymentReplyInboxClosedError, PaymentReplyWindowError } from './reply-inbox.js';
+export type { CheckoutWindowCheckpoint, CheckoutWindowResumption } from './checkout-window-checkpoint.js';
+export type { PaymentReplyOffer, PaymentReplyCorrelation, PaymentWindowView, PaymentWindowAnswer } from './reply-inbox.js';
+export type { PaymentPurchaseStatus } from './window-view.js';
+
+export { registry as paymentsJudgmentRegistry } from './judgment-registry.js';
+
+// The host side: the daemon's card store, purchase ledger, durable budget,
+// approval and checkout-journal stores, address store, notifier and the
+// handler registration that binds them to the payments.* verbs.
+export * from './host/index.js';
+
+// The daemon-side service. Exported because a consumer that cannot construct
+// this cannot use the capability at all: it is what binds the verbs to the
+// flow, and it was reachable from source but absent from the published surface
+//, the exact shape of gap that a subpath check keyed on the exports map
+// cannot see, since the subpath itself was declared correctly.
+export { PaymentsGatewayServiceImpl, RECOVERY_IO_TIMEOUT_MS } from './payments-gateway-service.js';
+export type {
+  PaymentsServiceConfig,
+  PaymentsServiceDeps,
+  BeginCheckoutInput,
+  CheckoutBeginOptions,
+  PaymentBeginResult,
+  InterruptedCheckoutRecovery,
+  CheckoutRecoverySweep,
+  PaymentFillCardResult,
+} from './payments-gateway-service.js';
+
+export { readPaymentOperation, readPaymentOperationCancellation, paymentOperationDescription, isLivePaymentOperation, canReconcilePaymentOperation, PAYMENT_PURCHASE_RECONCILE_HTTP } from './operation-view.js';
+export type { PaymentOperationView, PaymentOperationState, PaymentOperationCancellation } from './operation-view.js';

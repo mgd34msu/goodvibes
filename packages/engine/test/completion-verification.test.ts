@@ -12,21 +12,21 @@ function fakePort(answer: Parameters<typeof baseFakePort>[0]) {
 }
 import { JudgmentContextLimitError, JudgmentError } from '@goodvibes-jev/judgment';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { CompletionVerification } from '../sdk/src/platform/core/verification/coordinator.js';
-import { issueVerificationId, verificationExecutionGroups, verificationSources, verificationWireSource } from '../sdk/src/platform/core/verification/source.js';
-import { VerificationStore } from '../sdk/src/platform/core/verification/store.js';
-import { createVerificationWriter } from '../sdk/src/platform/core/verification/writer.js';
-import { ConversationManager } from '../sdk/src/platform/core/conversation.js';
-import { snapshotJudgmentEvidence } from '../sdk/src/platform/gate/judgment-input.js';
-import { ResponseCompletionGuard } from '../sdk/src/platform/core/response-completion.js';
+import { CompletionVerification } from '../platform/src/platform/core/verification/coordinator.js';
+import { issueVerificationId, verificationExecutionGroups, verificationSources, verificationWireSource } from '../platform/src/platform/core/verification/source.js';
+import { VerificationStore } from '../platform/src/platform/core/verification/store.js';
+import { createVerificationWriter } from '../platform/src/platform/core/verification/writer.js';
+import { ConversationManager } from '../platform/src/platform/core/conversation.js';
+import { snapshotJudgmentEvidence } from '../platform/src/platform/gate/judgment-input.js';
+import { ResponseCompletionGuard } from '../platform/src/platform/core/response-completion.js';
 import { appendVerificationObservation, beginVerificationConversation, verificationHistory, verificationMessages,
-} from '../sdk/src/platform/core/verification/archive.js';
+} from '../platform/src/platform/core/verification/archive.js';
 import { verificationWriter } from './_helpers/verification.js';
-import { retainedDelegationSources } from '../sdk/src/platform/core/verification/delegated-history.js';
-import { verificationOriginalTurns } from '../sdk/src/platform/core/verification/original-turns.js';
-import { observeReadContent } from '../sdk/src/platform/tools/read/observation.js';
-import type { VerificationAccess, VerificationWriter } from '../sdk/src/platform/core/verification/types.js';
-import type { LLMProvider } from '../sdk/src/platform/providers/interface.js';
+import { retainedDelegationSources } from '../platform/src/platform/core/verification/delegated-history.js';
+import { verificationOriginalTurns } from '../platform/src/platform/core/verification/original-turns.js';
+import { observeReadContent } from '../platform/src/platform/tools/read/observation.js';
+import type { VerificationAccess, VerificationWriter } from '../platform/src/platform/core/verification/types.js';
+import type { LLMProvider } from '../platform/src/platform/providers/interface.js';
 
 /** Expected identities come from the same actual retained-source owner. */
 function ownedSources(verifier: CompletionVerification, full: Record<string, unknown>) {

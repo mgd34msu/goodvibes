@@ -1,7 +1,7 @@
 import { resetSessionUntrustedContentLedgerForTests } from '../../trust/untrusted-content.ts';
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { executeAdmitted } from '../helpers/admitted-tool.ts';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import {
   createAgentNotifyTool,
   registerAgentNotifyTool,

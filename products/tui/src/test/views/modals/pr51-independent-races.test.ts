@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import type { ProjectPlanningState } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import type { ProjectPlanningState } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { createPlanningModalSurface, type PlanningModalService } from '../../../views/modals/planning-modal.ts';
 import { ConfigModal } from '../../../input/config-modal.ts';
 import { actionCtx, captureCommands, viewText } from './modal-surface-test-helpers.ts';

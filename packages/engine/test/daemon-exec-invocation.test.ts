@@ -11,7 +11,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   isCompiledBinaryInvocation,
   resolveDaemonExecInvocation,
-} from '../sdk/src/platform/daemon/daemon-exec-invocation.ts';
+} from '../platform/src/platform/daemon/daemon-exec-invocation.ts';
 
 describe('isCompiledBinaryInvocation', () => {
   test('a source/dev run (bun run <cli.ts>) is NOT a compiled binary', () => {

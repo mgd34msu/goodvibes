@@ -17,8 +17,8 @@
 
 import { existsSync, readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { sanitizeSessionName } from '@goodvibes-jev/engine/sdk/platform/sessions';
-import { atomicWriteFileSync } from '@goodvibes-jev/engine/sdk/platform/config';
+import { sanitizeSessionName } from '@goodvibes-jev/engine/platform/platform/sessions';
+import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/config';
 import { MAX_TURN_OUTCOMES, type TurnOutcomeRecord } from './work-tree-focus.js';
 
 const SUFFIX = '.work-tree.json';

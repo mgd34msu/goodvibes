@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import {
   createFeatureFlagManager,
@@ -9,8 +9,8 @@ import {
   configureRuntimeEventBusDefaults,
   runtimeEventBusOptionsFrom,
 } from '@/runtime/index.ts';
-import { AutomationRouteStore } from '@goodvibes-jev/engine/sdk/platform/automation';
-import { RouteBindingManager } from '@goodvibes-jev/engine/sdk/platform/channels';
+import { AutomationRouteStore } from '@goodvibes-jev/engine/platform/platform/automation';
+import { RouteBindingManager } from '@goodvibes-jev/engine/platform/platform/channels';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 describe('automation/control-plane foundation', () => {
@@ -100,7 +100,7 @@ describe('automation/control-plane foundation', () => {
 //
 // Before this sweep, none of the three called it: the schema promised a
 // tunable listener cap and every bus in this project was built with no
-// options, so the cap was always the SDK's hardcoded 100 regardless of the
+// options, so the cap was always the platform's hardcoded 100 regardless of the
 // setting. This proves the exact call shape used at all three sites reaches
 // a freshly-built bus, in both directions (a lower cap refuses sooner, a
 // higher cap accepts more).

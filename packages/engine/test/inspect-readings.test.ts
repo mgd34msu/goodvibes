@@ -16,7 +16,7 @@ import {
   inspectApiSync,
   parsePrismaSchema,
   validateApiSpec,
-} from '../sdk/src/platform/tools/inspect/project.ts';
+} from '../platform/src/platform/tools/inspect/project.ts';
 import {
   inspectAccessibility,
   inspectClientBoundary,
@@ -27,7 +27,7 @@ import {
   inspectSizing,
   inspectStacking,
   inspectTailwind,
-} from '../sdk/src/platform/tools/inspect/frontend.ts';
+} from '../platform/src/platform/tools/inspect/frontend.ts';
 import { useToolReadings } from './_helpers/tool-readings.ts';
 
 const readings = useToolReadings([

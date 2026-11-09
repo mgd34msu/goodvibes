@@ -1,8 +1,8 @@
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import type { KnowledgeIngestContext } from '../sdk/src/platform/knowledge/ingest-context.js';
-import { configureKnowledgeArtifactReferences } from '../sdk/src/platform/knowledge/artifact-reference-ensemble.js';
-import type { ArtifactCreatedLeaf } from '../sdk/src/platform/artifacts/storage-ownership.js';
-import type { ArtifactStreamCreateInput } from '../sdk/src/platform/artifacts/types.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import type { KnowledgeIngestContext } from '../platform/src/platform/knowledge/ingest-context.js';
+import { configureKnowledgeArtifactReferences } from '../platform/src/platform/knowledge/artifact-reference-ensemble.js';
+import type { ArtifactCreatedLeaf } from '../platform/src/platform/artifacts/storage-ownership.js';
+import type { ArtifactStreamCreateInput } from '../platform/src/platform/artifacts/types.js';
 /** Deferred real artifact/SQLite persistence through the actual daemon media routes. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
@@ -10,13 +10,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '../errors/src/index.js';
-import { ArtifactStore } from '../sdk/src/platform/artifacts/store.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { KnowledgeService } from '../sdk/src/platform/knowledge/service.js';
-import { KnowledgeConnectorRegistry } from '../sdk/src/platform/knowledge/connectors.js';
-import { MultimodalService } from '../sdk/src/platform/multimodal/service.js';
-import { buildMediaRouteContext } from '../sdk/src/platform/daemon/http/router-route-contexts.js';
-import { createDaemonMediaRouteHandlers } from '../daemon-sdk/src/media-routes.js';
+import { ArtifactStore } from '../platform/src/platform/artifacts/store.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { KnowledgeService } from '../platform/src/platform/knowledge/service.js';
+import { KnowledgeConnectorRegistry } from '../platform/src/platform/knowledge/connectors.js';
+import { MultimodalService } from '../platform/src/platform/multimodal/service.js';
+import { buildMediaRouteContext } from '../platform/src/platform/daemon/http/router-route-contexts.js';
+import { createDaemonMediaRouteHandlers } from '../daemon-api/src/media-routes.js';
 
 const roots: string[] = [], stores: KnowledgeStore[] = [], services: KnowledgeService[] = [];
 let previous: ReturnType<typeof installJudgmentPort>, installed = false;
@@ -78,7 +78,7 @@ for (const phase of ['artifact', 'knowledge'] as const) for (const change of ['c
 }
 
 test('guarded ingestion reports the true commit before a later generic completion failure', async () => {
-  const { ingestKnowledgeArtifact } = await import('../sdk/src/platform/knowledge/ingest-inputs.js');
+  const { ingestKnowledgeArtifact } = await import('../platform/src/platform/knowledge/ingest-inputs.js');
   const root = mkdtempSync(join(tmpdir(), 'multimodal-commit-receipt-')); roots.push(root);
   previous = installJudgmentPort(fakePort(() => noulAnswer(0.99)).port); installed = true;
   const artifacts = new ArtifactStore({ rootDir: join(root, 'artifacts') });
@@ -100,9 +100,9 @@ test('guarded ingestion reports the true commit before a later generic completio
 
 
 test('ordinary precommit extraction failure still emits the actual failed event without a published extraction', async () => {
-  const { createKnowledgeIngestUriCanonicalizer } = await import('../sdk/src/platform/knowledge/uri-canonicalization/ingest-owner.js');
-  const { prepareKnowledgeExtraction } = await import('../sdk/src/platform/knowledge/prepared-extraction.js');
-  const { finalizeKnowledgeIngestedSource } = await import('../sdk/src/platform/knowledge/ingest-compile.js');
+  const { createKnowledgeIngestUriCanonicalizer } = await import('../platform/src/platform/knowledge/uri-canonicalization/ingest-owner.js');
+  const { prepareKnowledgeExtraction } = await import('../platform/src/platform/knowledge/prepared-extraction.js');
+  const { finalizeKnowledgeIngestedSource } = await import('../platform/src/platform/knowledge/ingest-compile.js');
   const root = mkdtempSync(join(tmpdir(), 'knowledge-precommit-failed-event-')); roots.push(root);
   previous = installJudgmentPort(fakePort(() => noulAnswer(0.99)).port); installed = true;
   const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') }); stores.push(store); await store.init();
@@ -127,7 +127,7 @@ test('ordinary precommit extraction failure still emits the actual failed event 
 
 
 test('actual ingest drains a returned async ownership notification and returns the indexed source before it settles', async () => {
-  const { ingestKnowledgeArtifact } = await import('../sdk/src/platform/knowledge/ingest-inputs.js');
+  const { ingestKnowledgeArtifact } = await import('../platform/src/platform/knowledge/ingest-inputs.js');
   const root = mkdtempSync(join(tmpdir(), 'ingest-async-notification-')); roots.push(root);
   previous = installJudgmentPort(fakePort(() => noulAnswer(0.99)).port); installed = true;
   const artifacts = new ArtifactStore({ rootDir: join(root, 'artifacts') });

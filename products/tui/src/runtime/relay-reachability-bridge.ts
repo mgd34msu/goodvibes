@@ -3,7 +3,7 @@
  * outbound relay's live state.
  *
  * The relay is a DAEMON capability. The reachability controller is composed
- * inside the SDK's `DaemonServer` (platform/daemon/facade.ts,
+ * inside the platform's `DaemonServer` (platform/daemon/facade.ts,
  * `getRelayReachability()`), gated on `relay.enabled` plus the `relay-connect`
  * feature flag, and the process holding that controller is the one that
  * registers with the relay and can mint a pairing payload for it.
@@ -27,7 +27,7 @@
  * with nothing else changing.
  */
 
-import type { RelayRegistrationStatus } from '@goodvibes-jev/engine/daemon-sdk';
+import type { RelayRegistrationStatus } from '@goodvibes-jev/engine/daemon-api';
 import type { RelayPairingPayload } from '@goodvibes-jev/engine/transport-core/relay';
 
 /**

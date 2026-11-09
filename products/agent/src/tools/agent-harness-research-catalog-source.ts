@@ -1,8 +1,8 @@
 import type { CommandContext } from '../input/command-registry.ts';
-import { observeImportFile, assertImportFileCurrent } from '@goodvibes-jev/engine/sdk/platform/config';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { assertJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { SOURCE_SCREENING_LIMITS } from '@goodvibes-jev/engine/sdk/platform/security';
+import { observeImportFile, assertImportFileCurrent } from '@goodvibes-jev/engine/platform/platform/config';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { assertJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
+import { SOURCE_SCREENING_LIMITS } from '@goodvibes-jev/engine/platform/platform/security';
 import { AgentResearchRunRegistry, researchRunStorePath } from '../agent/research-run-registry.ts';
 import { AgentResearchSourceRegistry, researchSourceStorePath } from '../agent/research-source-registry.ts';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';

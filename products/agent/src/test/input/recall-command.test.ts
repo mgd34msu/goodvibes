@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { recallCommand } from '../../input/commands/memory.ts';
-import { MemoryRegistry } from '@goodvibes-jev/engine/sdk/platform/state';
-import type { MemoryAddOptions, MemoryBundle } from '@goodvibes-jev/engine/sdk/platform/state';
-import { createMemoryApi } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import { MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
+import type { MemoryAddOptions, MemoryBundle } from '@goodvibes-jev/engine/platform/platform/state';
+import { createMemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { ForensicsRegistry } from '@/runtime/index.ts';
 import { PolicyRuntimeState } from '@/runtime/index.ts';
 import { createShellPathService } from '@/runtime/index.ts';

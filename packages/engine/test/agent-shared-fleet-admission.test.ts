@@ -2,9 +2,9 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { AgentManager, type AgentExecutor, type AgentFleetOwnership } from '../sdk/src/platform/tools/agent/manager.js';
-import { AgentCapacityError } from '../sdk/src/platform/tools/agent/capacity-error.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { AgentManager, type AgentExecutor, type AgentFleetOwnership } from '../platform/src/platform/tools/agent/manager.js';
+import { AgentCapacityError } from '../platform/src/platform/tools/agent/capacity-error.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

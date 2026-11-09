@@ -4,7 +4,7 @@
  *
  * `GoodVibesConfig` is assembled by declaration merging, each
  * `platform/config/schema-domain-*.ts` contributes its own
- * `declare module … { interface GoodVibesConfig }` block. Inside the SDK's own
+ * `declare module … { interface GoodVibesConfig }` block. Inside the platform's own
  * program every one of those modules is loaded, so the merged type is always
  * complete there and an omission is invisible. A consumer's program loads only
  * the declarations its own imports reach.
@@ -27,7 +27,7 @@
  *
  * Checked by `bun run types:check`.
  */
-import type { GoodVibesConfig } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { GoodVibesConfig } from '@goodvibes-jev/engine/platform/platform/config';
 
 type ConfigKey = keyof GoodVibesConfig;
 
@@ -36,7 +36,7 @@ type Presence<K extends string> = K extends ConfigKey ? 'present' : 'ABSENT';
 
 /**
  * Every key contributed by a `declare module` block in
- * packages/sdk/src/platform/config/schema-domain-*.ts. Adding a domain without
+ * packages/platform/src/platform/config/schema-domain-*.ts. Adding a domain without
  * adding its side-effect import to schema.ts fails here once its key is listed.
  */
 export const clusterPresent: Presence<'cluster'> = 'present';

@@ -22,8 +22,8 @@
 
 import { afterEach, describe, expect, test } from 'bun:test';
 import { createServer, connect, type Server, type Socket } from 'node:net';
-import { EmailService } from '../sdk/src/platform/email/email-service.ts';
-import { createServiceBackedGateway } from '../sdk/src/platform/control-plane/routes/email-composition.ts';
+import { EmailService } from '../platform/src/platform/email/email-service.ts';
+import { createServiceBackedGateway } from '../platform/src/platform/control-plane/routes/email-composition.ts';
 import {
   testDescribeSenderClaim,
   throwingEmailTransport,
@@ -348,7 +348,7 @@ describe('a `{0}` header section is an empty answer, not a missing message', () 
 
 describe('email.inbox.list carries the fact over the wire, not just in-process', () => {
   test('the gateway passes unreadable through, so a remote caller can see it too', async () => {
-    // The SDK-side field is only half the fix: `email.inbox.list` is served to
+    // The platform-side field is only half the fix: `email.inbox.list` is served to
     // callers that never touch `EmailService`, and a schema that advertises the
     // field while the handler drops it would be worse than not having it.
     fake = await startFakeImap({ present: [101, 102, 103], headerless: [102] });

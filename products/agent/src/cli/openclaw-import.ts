@@ -41,7 +41,7 @@ const ALLOWLIST_FILENAMES = ['allowed-tools.json', 'allowlist.json', 'tools.json
 
 /**
  * OpenClaw allowlist tool identifier -> Agent permission tool category. The
- * Agent permission model groups tools into categories (see the SDK config
+ * Agent permission model groups tools into categories (see the platform config
  * schema permissions.tools). An allowlist entry maps to a category by its
  * leading verb; `Bash(git*)`-style entries map by the tool name before `(`.
  */

@@ -8,9 +8,9 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { OwnerProfileStore } from '../sdk/src/platform/owner-profile/index.ts';
-import * as profileDocument from '../sdk/src/platform/owner-profile/document.ts';
-import { resetProcessUntrustedContentLedgerForTests } from '../sdk/src/platform/security/untrusted-content.ts';
+import { OwnerProfileStore } from '../platform/src/platform/owner-profile/index.ts';
+import * as profileDocument from '../platform/src/platform/owner-profile/document.ts';
+import { resetProcessUntrustedContentLedgerForTests } from '../platform/src/platform/security/untrusted-content.ts';
 
 // Profile writes ask the content-derivation reading whenever the process
 // ledger holds untrusted text; another test file's reads must not reach these.

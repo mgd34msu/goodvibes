@@ -1,5 +1,5 @@
 import { maskConcealedText } from '../concealed-input.js';
-import { NOTIFICATIONS_METADATA_ONLY_KEY } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { NOTIFICATIONS_METADATA_ONLY_KEY } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { inferSubscriptionRouteReason, type SubscriptionEntry } from '../settings-subscriptions.js';
 export function formatDefaultValue(value: unknown): string {
   if (value === '') return '(empty)';

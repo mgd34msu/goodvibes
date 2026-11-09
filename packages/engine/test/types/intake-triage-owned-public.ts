@@ -1,7 +1,7 @@
 import { createOwnedTriagedInboxSource, registerTriagedInbox,
   type InboxSurfaceContext, type OwnedTriagedInboxOptions, type OwnedTriagedInboxSource,
   type OwnedInboxTriageResult, type InboxTriageAuthority, type InboxTriageOverlay,
-} from '@goodvibes-jev/engine/sdk/platform/intake';
+} from '@goodvibes-jev/engine/platform/platform/intake';
 declare const context: InboxSurfaceContext;
 declare const options: OwnedTriagedInboxOptions;
 const source: Promise<OwnedTriagedInboxSource> = createOwnedTriagedInboxSource(context, options);

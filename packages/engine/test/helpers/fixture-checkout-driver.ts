@@ -10,7 +10,7 @@
  * the strings the merchant really served, including its number formatting,
  * which is the part most likely to break a parser.
  *
- * Nothing in this file is importable by the SDK, and nothing in the SDK knows
+ * Nothing in this file is importable by the platform, and nothing in the platform knows
  * either fixture's markup. The per-shape selectors below are the TEST playing
  * the model's role; that knowledge living here rather than in the flow is the
  * whole point of the exercise.
@@ -28,11 +28,11 @@
  * from WHERE THE BYTES CAME FROM (loopback). The merchant binding is exercised
  * for real against real domains, and no test needs an exemption.
  */
-import type { CardFieldKind } from '../../sdk/src/platform/payments/card-redaction.js';
-import { extractCheckout, type RawCheckoutReading } from '../../sdk/src/platform/payments/checkout-extraction.js';
-import { CheckoutSubmitRefused, type CheckoutChallenge, type CheckoutPageDriver, type CheckoutTerms, type PageIdentity } from '../../sdk/src/platform/payments/checkout-page.js';
-import { parseMinorUnits } from '../../sdk/src/platform/payments/money-parsing.js';
-import { detectRecurringCharge } from '../../sdk/src/platform/payments/cart.js';
+import type { CardFieldKind } from '../../platform/src/platform/payments/card-redaction.js';
+import { extractCheckout, type RawCheckoutReading } from '../../platform/src/platform/payments/checkout-extraction.js';
+import { CheckoutSubmitRefused, type CheckoutChallenge, type CheckoutPageDriver, type CheckoutTerms, type PageIdentity } from '../../platform/src/platform/payments/checkout-page.js';
+import { parseMinorUnits } from '../../platform/src/platform/payments/money-parsing.js';
+import { detectRecurringCharge } from '../../platform/src/platform/payments/cart.js';
 import type { FixtureMerchant } from './fixture-merchant.js';
 
 /**

@@ -22,22 +22,22 @@ import {
   registerHostedSessionGatewayMethods,
   HOSTED_SESSION_METHOD_IDS,
   type HostedSessionVerbService,
-} from '../sdk/src/platform/control-plane/routes/hosted-sessions.ts';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { readGatewayVerbRefusal } from '../sdk/src/platform/control-plane/routes/gateway-verb-error.ts';
-import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../sdk/src/platform/daemon/control-plane.ts';
-import { SDKErrorCodes } from '../errors/src/index.ts';
+} from '../platform/src/platform/control-plane/routes/hosted-sessions.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { readGatewayVerbRefusal } from '../platform/src/platform/control-plane/routes/gateway-verb-error.ts';
+import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../platform/src/platform/daemon/control-plane.ts';
+import { EngineErrorCodes } from '../errors/src/index.ts';
 import {
   HostedSessionArgumentError,
   HostedSessionLimitError,
   HostedSessionNotFoundError,
   HostedSessionUnavailableError,
-} from '../sdk/src/platform/hosted-sessions/manager.ts';
+} from '../platform/src/platform/hosted-sessions/manager.ts';
 import type {
   CreateHostedSessionInput,
   HostedSessionRecord,
-} from '../sdk/src/platform/hosted-sessions/types.ts';
-import type { GatewayMethodInvocation } from '../sdk/src/platform/control-plane/method-catalog-shared.ts';
+} from '../platform/src/platform/hosted-sessions/types.ts';
+import type { GatewayMethodInvocation } from '../platform/src/platform/control-plane/method-catalog-shared.ts';
 
 function record(id = 'hosted-1'): HostedSessionRecord {
   return {
@@ -209,7 +209,7 @@ test('with no engine the hosted verbs refuse with the catalog\'s own code, on ev
 
     const dispatched = await helper.invokeGatewayMethodCall({ authToken: 't', methodId: id, body: {} });
     expect(dispatched.status, `${id} status`).toBe(400);
-    expect((dispatched.body as Record<string, unknown>).code, `${id} code`).toBe(SDKErrorCodes.NOT_INVOKABLE);
+    expect((dispatched.body as Record<string, unknown>).code, `${id} code`).toBe(EngineErrorCodes.NOT_INVOKABLE);
 
     let caught: unknown;
     try {

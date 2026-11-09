@@ -10,7 +10,7 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { forgetFailureReadings, installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { classifyFailure, summariseFailure } from '../sdk/src/platform/runtime/forensics/classifier.ts';
+import { classifyFailure, summariseFailure } from '../platform/src/platform/runtime/forensics/classifier.ts';
 import { RuntimeEventBus, createEventEnvelope, ForensicsCollector, ForensicsRegistry } from './_helpers/runtime-seam.ts';
 import type { TurnEvent } from './_helpers/runtime-seam.ts';
 import { useFailureReadings } from './_helpers/failure-readings.ts';

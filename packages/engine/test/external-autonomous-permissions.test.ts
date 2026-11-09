@@ -3,10 +3,10 @@ import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibe
 import { fakePort, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { gateReadingsPort, forgetGateReadings } from './_helpers/gate-readings.ts';
-import { PermissionManager, type PermissionConfigReader } from '../sdk/src/platform/permissions/manager.ts';
-import { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.ts';
-import { AcpHostService } from '../sdk/src/platform/acp/host.ts';
-import { admitExternalRequest, type ExternalPermissionHost } from '../sdk/src/platform/permissions/external-request.ts';
+import { PermissionManager, type PermissionConfigReader } from '../platform/src/platform/permissions/manager.ts';
+import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
+import { AcpHostService } from '../platform/src/platform/acp/host.ts';
+import { admitExternalRequest, type ExternalPermissionHost } from '../platform/src/platform/permissions/external-request.ts';
 
 let log: SqliteDecisionLog;
 let restore: ReturnType<typeof installJudgmentPort>;
@@ -82,10 +82,10 @@ test('canonical external admission is single-use and requires original host goal
   expect(humans).toBe(0);
 });
 
-import { McpClient } from '../sdk/src/platform/mcp/client.ts';
-import { createMcpAutonomousElicitationHandler, commitMcpElicitation, discardMcpElicitation } from '../sdk/src/platform/mcp/elicitation-autonomous.ts';
-import { parseElicitationParams } from '../sdk/src/platform/mcp/elicitation.ts';
-import { elicitationContent } from '../sdk/src/platform/mcp/elicitation-schema.ts';
+import { McpClient } from '../platform/src/platform/mcp/client.ts';
+import { createMcpAutonomousElicitationHandler, commitMcpElicitation, discardMcpElicitation } from '../platform/src/platform/mcp/elicitation-autonomous.ts';
+import { parseElicitationParams } from '../platform/src/platform/mcp/elicitation.ts';
+import { elicitationContent } from '../platform/src/platform/mcp/elicitation-schema.ts';
 const form = { message: 'Tell us the requested display name', requestedSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] } };
 const operation = () => ({ sourceOf: () => ({ goal: 'Use the supplied display name Alice', criteria: [] }), inputFacts: [{ name: 'Alice' }], assertCurrent() {} });
 function mcp(inputId = 'form') {
@@ -311,8 +311,8 @@ test('MCP string length uses Unicode code points and unsupported time format fai
   expect(elicitationContent({ type: 'object', properties: { value: { type: 'string', format: 'time' } } }, { value: '12:30:00' })).toBeNull();
 });
 
-import { McpRegistry } from '../sdk/src/platform/mcp/registry.ts';
-import { withExternalOperationSource } from '../sdk/src/platform/permissions/external-operation-scope.ts';
+import { McpRegistry } from '../platform/src/platform/mcp/registry.ts';
+import { withExternalOperationSource } from '../platform/src/platform/permissions/external-operation-scope.ts';
 function registryMcp() {
   const transport = mcp();
   const registry = new McpRegistry({ hookDispatcher: { fire: async () => ({ ok: true }) }, sandboxSessions: { start() {}, stop() {} } as never });
@@ -365,7 +365,7 @@ test('MCP arbitrary server regex constraints are unsupported, never executed aga
   expect(elicitationContent({ type: 'object', properties: { value: { type: 'string', pattern: '(a+)+$' } } }, { value: 'aaaaaaaaaaaaaaaa!' })).toBeNull();
 });
 
-import { AcpPermissionWire } from '../sdk/src/platform/acp/permission-wire.ts';
+import { AcpPermissionWire } from '../platform/src/platform/acp/permission-wire.ts';
 function guardedAcp() {
   const fixture = acp();
   const wire = new AcpPermissionWire(() => {
@@ -481,8 +481,8 @@ for (const field of ['args', 'destination', 'goal', 'diff', 'connection', 'genui
   expect(JSON.stringify(log.query())).not.toContain('password=synthetic-private');
 });
 
-import { retainAutonomousSource } from '../sdk/src/platform/permissions/autonomous.ts';
-import { captureOwnedJson } from '../sdk/src/platform/gate/judgment-input.ts';
+import { retainAutonomousSource } from '../platform/src/platform/permissions/autonomous.ts';
+import { captureOwnedJson } from '../platform/src/platform/gate/judgment-input.ts';
 test('retained source compares exact private provenance without a digest', () => {
   const source = selectedDiffSource(); const isCurrent = retainAutonomousSource(source);
   expect(isCurrent(structuredClone(source))).toBe(true);
@@ -505,7 +505,7 @@ for (const shape of ['getter', 'prototype', 'toJSON']) test(`source and request 
   expect(effects).toBe(0);
 });
 
-import { captureAcpPermissionRequest, captureMcpElicitationRequest, captureMcpInputRequired, readProtocolRequest } from '../sdk/src/platform/permissions/protocol-request.ts';
+import { captureAcpPermissionRequest, captureMcpElicitationRequest, captureMcpInputRequired, readProtocolRequest } from '../platform/src/platform/permissions/protocol-request.ts';
 for (const field of ['session', 'toolCall', 'option']) test(`ACP ${field} UUID survives actual host-to-wire admission and original response routing`, async () => {
   const f = guardedAcp(); const input = request();
   if (field === 'session') { input.sessionId = PAN_SHAPED_PROTOCOL_UUID; f.record.acpSessionId = PAN_SHAPED_PROTOCOL_UUID; }

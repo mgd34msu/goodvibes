@@ -1,6 +1,6 @@
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
-import { readAutonomyIntake, type AutonomyIntakeOptions, type AutonomyIntakeSchedule, type AutonomyIntents } from '@goodvibes-jev/engine/sdk/platform/routing';
-import { getOperatorContract } from '@goodvibes-jev/engine/sdk/contracts';
+import { readAutonomyIntake, type AutonomyIntakeOptions, type AutonomyIntakeSchedule, type AutonomyIntents } from '@goodvibes-jev/engine/platform/platform/routing';
+import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 
@@ -43,7 +43,7 @@ interface WatcherEvidenceContractCheck {
   readonly label: string;
   readonly status: WatcherEvidenceCheckStatus;
   readonly requiredFor: string;
-  readonly owner: 'goodvibes-sdk-or-daemon';
+  readonly owner: 'goodvibes-platform-or-daemon';
   readonly inspectRoute: string;
 }
 
@@ -65,7 +65,7 @@ interface WatcherEvidenceContract {
   readonly status: WatcherEvidenceContractStatus;
   readonly userOutcome: string;
   readonly currentState: string;
-  readonly owner: 'goodvibes-sdk-or-daemon';
+  readonly owner: 'goodvibes-platform-or-daemon';
   readonly nextRoutes: readonly WatcherEvidenceContractRoute[];
   readonly contractChecklist: readonly WatcherEvidenceContractCheck[];
   readonly receiptContract: WatcherEvidenceReceiptContract;
@@ -186,7 +186,7 @@ function watcherEvidenceContract(methodIds: ReadonlySet<string>): WatcherEvidenc
     currentState: watcherListPublished
       ? 'Watcher create/list routes are published, but durable run-history and provider-source records are not published as Agent-readable records yet.'
       : 'Watcher visibility, run-history, and provider-source records are not fully published by the current connected-host contract.',
-    owner: 'goodvibes-sdk-or-daemon',
+    owner: 'goodvibes-platform-or-daemon',
     nextRoutes: [
       {
         id: 'inspect-watcher-methods',
@@ -223,7 +223,7 @@ function watcherEvidenceContract(methodIds: ReadonlySet<string>): WatcherEvidenc
         label: 'Watcher creation route',
         status: watcherCreatePublished ? 'published-route' : 'missing',
         requiredFor: 'Create a visible source-scoped watcher after explicit user confirmation.',
-        owner: 'goodvibes-sdk-or-daemon',
+        owner: 'goodvibes-platform-or-daemon',
         inspectRoute: 'host action:"method" methodId:"watchers.create"',
       },
       {
@@ -231,7 +231,7 @@ function watcherEvidenceContract(methodIds: ReadonlySet<string>): WatcherEvidenc
         label: 'Watcher visibility route',
         status: watcherListPublished ? 'published-route' : 'missing',
         requiredFor: 'Verify a watcher remains visible, scoped, and enabled after creation or control changes.',
-        owner: 'goodvibes-sdk-or-daemon',
+        owner: 'goodvibes-platform-or-daemon',
         inspectRoute: 'host action:"method" methodId:"watchers.list"',
       },
       {
@@ -239,7 +239,7 @@ function watcherEvidenceContract(methodIds: ReadonlySet<string>): WatcherEvidenc
         label: 'Watcher run/control routes',
         status: watcherRunPublished && watcherStartStopPublished ? 'published-route' : 'missing',
         requiredFor: 'Expose explicit run, start, stop, and retry controls without guessing lifecycle state.',
-        owner: 'goodvibes-sdk-or-daemon',
+        owner: 'goodvibes-platform-or-daemon',
         inspectRoute: 'host action:"methods" query:"watchers.run watchers.start watchers.stop"',
       },
       {
@@ -247,7 +247,7 @@ function watcherEvidenceContract(methodIds: ReadonlySet<string>): WatcherEvidenc
         label: 'Durable watcher run history records',
         status: 'missing',
         requiredFor: 'Show past watcher runs, checkpoints, errors, and next recovery routes in the autonomy queue.',
-        owner: 'goodvibes-sdk-or-daemon',
+        owner: 'goodvibes-platform-or-daemon',
         inspectRoute: 'autonomy action:"queue"',
       },
       {
@@ -255,7 +255,7 @@ function watcherEvidenceContract(methodIds: ReadonlySet<string>): WatcherEvidenc
         label: 'Provider-source records',
         status: 'missing',
         requiredFor: 'Show source-scoped Gmail/email/webhook/file records without polling or exposing raw provider payloads.',
-        owner: 'goodvibes-sdk-or-daemon',
+        owner: 'goodvibes-platform-or-daemon',
         inspectRoute: 'personal_ops action:"lane" laneId:"inbox"',
       },
       {
@@ -263,7 +263,7 @@ function watcherEvidenceContract(methodIds: ReadonlySet<string>): WatcherEvidenc
         label: 'Redacted event payload descriptors',
         status: 'missing',
         requiredFor: 'Show what triggered a watcher without leaking raw provider payloads, tokens, or personal message bodies.',
-        owner: 'goodvibes-sdk-or-daemon',
+        owner: 'goodvibes-platform-or-daemon',
         inspectRoute: 'autonomy action:"queue"',
       },
       {
@@ -271,7 +271,7 @@ function watcherEvidenceContract(methodIds: ReadonlySet<string>): WatcherEvidenc
         label: 'Queue correlation records',
         status: 'missing',
         requiredFor: 'Link watcher source events, watcher runs, task records, recovery routes, and user-visible queue cards.',
-        owner: 'goodvibes-sdk-or-daemon',
+        owner: 'goodvibes-platform-or-daemon',
         inspectRoute: 'autonomy action:"queue"',
       },
     ],
@@ -296,7 +296,7 @@ function watcherEvidenceContract(methodIds: ReadonlySet<string>): WatcherEvidenc
       requiredFields: WATCHER_PROVIDER_SOURCE_FIELDS,
       policy: 'Provider-source records must be scoped, permission-aware, redacted, and source-owned; Agent only consumes published records and never polls personal providers silently.',
     },
-    policy: 'This contract is read-only guidance. Watcher creation/control remains on confirmed connected-host operator routes; durable run/source storage remains owned by the SDK/daemon.',
+    policy: 'This contract is read-only guidance. Watcher creation/control remains on confirmed connected-host operator routes; durable run/source storage remains owned by the platform/daemon.',
   };
 }
 
@@ -350,7 +350,7 @@ function buildTriggerWorkflows(request: string, schedule: ScheduleDetection, met
         ? 'The request includes an exact cadence and the connected host publishes automation.schedules.create.'
         : schedulesCreatePublished
           ? 'The schedule route is published, but this request still needs an exact cadence before creation.'
-          : 'The connected host does not publish automation.schedules.create in the current SDK contract.',
+          : 'The connected host does not publish automation.schedules.create in the current platform contract.',
       nextStep: scheduleReady
         ? 'Create through schedule action:"create" with confirm:true and explicit success criteria.'
         : 'Ask for the exact ISO time, every interval, or cron expression before offering schedule creation.',
@@ -377,7 +377,7 @@ function buildTriggerWorkflows(request: string, schedule: ScheduleDetection, met
       status: watcherReady ? 'ready' : watcherCreatePublished ? 'attention' : 'setup-needed',
       userOutcome: 'Start visible work from a trusted incoming webhook, file/source watcher, or explicit event source.',
       summary: watcherReady
-        ? 'The SDK operator contract publishes watcher create/list routes for trusted event-trigger setup.'
+        ? 'The platform operator contract publishes watcher create/list routes for trusted event-trigger setup.'
         : watcherCreatePublished
           ? 'Watcher creation is published, but watcher listing/readiness posture is incomplete.'
           : 'Watcher creation is not published by the current connected-host contract.',
@@ -435,7 +435,7 @@ function buildTriggerWorkflows(request: string, schedule: ScheduleDetection, met
       userOutcome: 'Use daemon control-plane events for status-aware supervision without inventing hidden background work.',
       summary: controlEventsPublished
         ? 'The operator contract publishes control event catalog or stream routes for read-only supervision.'
-        : 'Control-plane event stream routes are not published in the current SDK contract.',
+        : 'Control-plane event stream routes are not published in the current platform contract.',
       nextStep: controlEventsPublished
         ? 'Use read-only control event routes for supervision, then route mutations through exact confirmed operator methods.'
         : 'Keep supervision on autonomy action:"queue" until control event stream routes are published.',

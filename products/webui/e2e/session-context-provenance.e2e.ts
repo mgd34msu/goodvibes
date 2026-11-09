@@ -1,4 +1,4 @@
-/** Genuine runtime/route bytes, real SDK and session UI, on phone and desktop. */
+/** Genuine runtime/route bytes, real platform and session UI, on phone and desktop. */
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { expectNoHorizontalScroll, openRow } from './support/app';
 import { installSessionContextDaemon, type ContextScenario } from './support/session-context-fixture';

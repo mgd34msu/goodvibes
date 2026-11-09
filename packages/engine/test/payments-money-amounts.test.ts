@@ -12,17 +12,17 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { CONFIG_SCHEMA } from '../sdk/src/platform/config/schema.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { CONFIG_SCHEMA } from '../platform/src/platform/config/schema.ts';
 import {
   MAX_MONEY_AMOUNT,
   parseMoneyAmount,
-} from '../sdk/src/platform/config/money-value.ts';
+} from '../platform/src/platform/config/money-value.ts';
 import {
   PAYMENTS_BUDGET_RENAMES,
   migratePaymentsBudgetAmounts,
-} from '../sdk/src/platform/config/migrations.ts';
-import { readBudgetLimits } from '../sdk/src/platform/payments/payments-config.ts';
+} from '../platform/src/platform/config/migrations.ts';
+import { readBudgetLimits } from '../platform/src/platform/payments/payments-config.ts';
 
 const AMOUNT_KEYS = [
   'payments.budget.dailyItem',

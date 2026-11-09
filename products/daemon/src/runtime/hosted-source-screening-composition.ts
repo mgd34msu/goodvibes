@@ -1,8 +1,8 @@
 /** Native consent and credential lifetime for the two explicitly approved hosted services. */
 import { randomUUID } from 'node:crypto';
 import { types } from 'node:util';
-import { isSecretRefInput, normalizeSecretRef, type ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/sdk/platform/security';
+import { isSecretRefInput, normalizeSecretRef, type ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/platform/platform/security';
 import type { SecretsManager } from '../config/secrets.js';
 
 export type HostedInboxScreeningSource = 'discord-bot-dms' | 'slack-inbox' | 'email-inbox';

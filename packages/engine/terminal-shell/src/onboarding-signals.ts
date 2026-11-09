@@ -1,5 +1,5 @@
-import { DEFAULT_CONFIG, type GoodVibesConfig } from '@goodvibes-jev/engine/sdk/platform/config';
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { DEFAULT_CONFIG, type GoodVibesConfig } from '@goodvibes-jev/engine/platform/platform/config';
+import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
 import { isDeepEqual } from './onboarding-values.js';
 import type {
   OnboardingAcknowledgementState,

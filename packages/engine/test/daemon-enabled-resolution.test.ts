@@ -14,9 +14,9 @@ import { describe, expect, test } from 'bun:test';
 import { tmpdir } from 'os';
 import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { resolveDaemonEnabled, type DaemonEnabledReader } from '../sdk/src/platform/config/index.js';
-import { CONFIG_SCHEMA, DEFAULT_CONFIG, CONFIG_KEYS } from '../sdk/src/platform/config/schema.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { resolveDaemonEnabled, type DaemonEnabledReader } from '../platform/src/platform/config/index.js';
+import { CONFIG_SCHEMA, DEFAULT_CONFIG, CONFIG_KEYS } from '../platform/src/platform/config/schema.js';
 
 // A minimal reader that returns exactly the key the resolver consults.
 function reader(values: Partial<Record<'daemon.enabled', boolean>>): DaemonEnabledReader {

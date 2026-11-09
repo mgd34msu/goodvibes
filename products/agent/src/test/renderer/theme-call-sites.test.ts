@@ -18,7 +18,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { renderMarkdown } from '../../renderer/markdown.ts';
 import { resolveTheme, setActiveThemeMode } from '../../renderer/theme.ts';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 
 afterEach(() => setActiveThemeMode('dark'));
 

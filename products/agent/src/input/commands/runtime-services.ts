@@ -58,7 +58,7 @@ import type { CommandContext } from '../command-registry.ts';
 
 
 
-import type { KnowledgeApi } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import type { KnowledgeApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 
 
 

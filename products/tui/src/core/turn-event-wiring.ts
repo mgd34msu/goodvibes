@@ -1,19 +1,19 @@
-import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { UiRuntimeEvents, RuntimeEventBus } from '@/runtime/index.ts';
 import { persistConversation } from '@/runtime/index.ts';
 import { buildCompactionReceiptBlock } from './compaction-receipt.ts';
 import { workstreamFailureNotification } from './workstream-notification.ts';
-import { persistTurnAnchors, recordTurnAnchor, summarizeTurnLabel } from '@goodvibes-jev/engine/sdk/platform/rewind';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
-import type { HookDispatcher, HookPhase, HookCategory, HookEventPath } from '@goodvibes-jev/engine/sdk/platform/hooks';
+import { persistTurnAnchors, recordTurnAnchor, summarizeTurnLabel } from '@goodvibes-jev/engine/platform/platform/rewind';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { HookDispatcher, HookPhase, HookCategory, HookEventPath } from '@goodvibes-jev/engine/platform/platform/hooks';
 import type { ConversationManager } from './conversation.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
-import { journalPathFor, openTranscriptJournal, type TranscriptJournal } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import type { WebhookNotifier } from '@goodvibes-jev/engine/sdk/platform/integrations';
-import { notifyCompletion } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { journalPathFor, openTranscriptJournal, type TranscriptJournal } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import type { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
+import { notifyCompletion } from '@goodvibes-jev/engine/platform/platform/utils';
 import { maybeNotifyLongTask, readNotifyAfterSeconds } from './long-task-notifier.ts';
-import type { FocusTracker } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import type { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import {
   shouldFireAlert,
   FORCE_NOTIFY_DURATION_MS,
@@ -24,9 +24,9 @@ import {
   resolveTurnName,
   trimAtWordBoundary,
   type TurnOutcome,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+} from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { createBudgetBreachNotifier, type BudgetBreachNotifier } from './budget-breach-notifier.ts';
-import { readBudgetAlertUsd } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { readBudgetAlertUsd } from '@goodvibes-jev/engine/platform/platform/providers';
 
 /** Minimal orchestrator surface required by turn-event wiring. */
 interface TurnOrchestrator {
@@ -34,7 +34,7 @@ interface TurnOrchestrator {
   /** Cumulative session usage, same object the usage modal reads, used here for budget-breach checks. */
   readonly usage: { readonly input: number; readonly output: number; readonly cacheRead: number; readonly cacheWrite: number };
   /**
-   * The SDK Orchestrator's own end-of-turn popup; handOff() silences it while
+   * The platform Orchestrator's own end-of-turn popup; handOff() silences it while
    * this wiring's long-task notice owns the popup and returns the release.
    * Optional so bare test doubles still satisfy the type.
    */
@@ -118,13 +118,13 @@ export interface WireTurnEventHandlersOptions {
   readonly terminalNotifier?: import('./terminal-notifier.ts').TerminalNotifier | null;
   /**
    * Desktop delivery for the turn, budget, agent and workstream notices wired
-   * here; defaults to the SDK notifyCompletion. Tests pass a spy to read the text.
+   * here; defaults to the platform notifyCompletion. Tests pass a spy to read the text.
    */
   readonly notifyDesktop?: typeof notifyCompletion;
   /**
    * The terminal bell for a turn over 5s that did not reach the desktop popup
    * (the popup rings it itself); defaults to writing BEL to stdout, which is
-   * what the SDK Orchestrator's own popup did before this wiring took it over.
+   * what the platform Orchestrator's own popup did before this wiring took it over.
    */
   readonly ringBell?: () => void;
   /**
@@ -186,7 +186,7 @@ const FAILOVER_RETRY_GRACE_MS = 30_000;
 /** The Orchestrator's own popup rang the bell for a turn over this long. */
 const TURN_BELL_AFTER_MS = 5_000;
 
-/** The Orchestrator's own popup came for a turn over this long (SDK notifyCompletion). */
+/** The Orchestrator's own popup came for a turn over this long (platform notifyCompletion). */
 const TURN_DESKTOP_AFTER_MS = 30_000;
 
 /** Most agent/workstream names kept at once; a lost terminal event cannot grow the maps unbounded. */
@@ -212,7 +212,7 @@ export interface PendingFailoverNotice {
   readonly isCurrent: () => boolean;
   readonly finish: (retried: boolean) => void;
   readonly cancel: () => void;
-  /** Explicit Esc/Ctrl+C cancellation, including an idle SDK between attempts. */
+  /** Explicit Esc/Ctrl+C cancellation, including an idle platform between attempts. */
   readonly cancelTurn: () => void;
 }
 
@@ -242,11 +242,11 @@ export interface WireTurnEventHandlersResult {
  *   - Fire the Lifecycle:session:save hook
  *   - Refresh git status after turns and tool results
  *
- * Note: auto-compaction is intentionally NOT performed here. The SDK
+ * Note: auto-compaction is intentionally NOT performed here. The platform
  * Orchestrator already runs post-turn context maintenance every turn
  * (handlePostTurnContextMaintenance) using the resolved context window and
  * its own getAutoCompactDecision; re-triggering it from the TUI duplicated
- * that work and raced the SDK's compaction on the shared message array.
+ * that work and raced the platform's compaction on the shared message array.
  *
  * Returns refreshGit (callable externally) and unsubs (push into parent unsubs).
  */
@@ -283,7 +283,7 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
   // ONE POPUP PER TURN. The long-task notice below owns the turn's desktop
   // popup: it names the turn, counts what it did, honors
   // behavior.notifyAfterSeconds and the unfocused-only gate, and reaches the
-  // webhook. The SDK Orchestrator pops its own end-of-turn notice too, so it
+  // webhook. The platform Orchestrator pops its own end-of-turn notice too, so it
   // is handed off here for as long as this wiring lives.
   const releaseTurnEndNotice = orchestrator.turnEndNotice?.handOff();
   if (releaseTurnEndNotice) unsubs.push(releaseTurnEndNotice);
@@ -309,7 +309,7 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
   let turnStartTime: number | null = null;
 
   // What names the turn and what it did, for the end-of-turn notices
-  // (SDK runtime/turn-notification.ts): the submitted text, and a tally of
+  // (platform runtime/turn-notification.ts): the submitted text, and a tally of
   // tool calls, changed files, agents started and the latest review score.
   let readTurnText: (() => string | null) | null = null;
   let lastTurnName: string | null = null;
@@ -443,7 +443,7 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
       configGet,
       notifyDesktop,
       desktop: notifyOnComplete,
-      // The SDK popup this replaces came past 30s whatever notifyAfterSeconds
+      // The platform popup this replaces came past 30s whatever notifyAfterSeconds
       // said (default 60): the one popup keeps that, the webhook keeps the threshold.
       desktopAfterMs: TURN_DESKTOP_AFTER_MS,
     });
@@ -630,9 +630,9 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
       } catch {
         /* best-effort; a rewind-anchor miss must never break the turn */
       }
-      // Auto-compaction is owned by the SDK Orchestrator's post-turn maintenance
+      // Auto-compaction is owned by the platform Orchestrator's post-turn maintenance
       // (handlePostTurnContextMaintenance), which runs on every turn against the
-      // resolved context window (getContextWindowForModel) via the SDK's
+      // resolved context window (getContextWindowForModel) via the platform's
       // getAutoCompactDecision (percentage threshold + 15k safety buffer +
       // small-window handling). The TUI must not independently re-trigger it.
       refreshGit();
@@ -756,9 +756,9 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
     unsubs.push(events.contracts.on('CONTRACT_CANCELLED', notifyWorkstreamEnd));
   }
 
-  // Live footer permission-mode pill: re-render whenever the SDK config
+  // Live footer permission-mode pill: re-render whenever the platform config
   // surface reports permissions.mode changed. Mode changes are made through
-  // configManager.set('permissions.mode', ...) (the SDK-owned surface the
+  // configManager.set('permissions.mode', ...) (the platform-owned surface the
   // PermissionManager reads), so this covers our own Shift+Tab / /plan toggles
   // as well as any other in-process writer. No polling.
   if (typeof configManager.subscribe === 'function') {
@@ -769,7 +769,7 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
     );
   }
 
-  // Post-compaction receipt (never-silent): the SDK emits a mandatory
+  // Post-compaction receipt (never-silent): the platform emits a mandatory
   // COMPACTION_RECEIPT on the 'compaction' domain after every automatic (and
   // the manual) compaction. That domain is NOT in the grouped UiRuntimeEvents
   // feed, so we subscribe on the raw bus and render the receipt as a distinct

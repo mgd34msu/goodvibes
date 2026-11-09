@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import type { BrowserJudgmentMailSubjectSource } from '@goodvibes-jev/engine/daemon-sdk';
-import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../sdk/src/platform/daemon/control-plane.js';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.js';
-import { registerDaemonEmailVerbs } from '../sdk/src/platform/control-plane/routes/email-composition.js';
+import type { BrowserJudgmentMailSubjectSource } from '@goodvibes-jev/engine/daemon-api';
+import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../platform/src/platform/daemon/control-plane.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
+import { registerDaemonEmailVerbs } from '../platform/src/platform/control-plane/routes/email-composition.js';
 import { deferred, mailFixture, tick, type ReadPlan } from './_helpers/mail-subject-source.js';
 
 function host(plans: ReadPlan[]) {

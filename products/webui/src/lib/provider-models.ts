@@ -50,7 +50,7 @@ export function providerOptionsFromResponse(value: unknown): ProviderOption[] {
 
 /**
  * Tolerant read of a model entry's reasoning-effort options (models.list
- * serves `reasoningOptions: { levels, source }` per model from sdk 2.0.23).
+ * serves `reasoningOptions: { levels, source }` per model from platform 2.0.23).
  * Null when the daemon predates the field or the model reports none, the
  * caller renders no effort control rather than a fabricated ladder.
  */

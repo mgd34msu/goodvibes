@@ -1,5 +1,5 @@
-import type { PluginManager } from '@goodvibes-jev/engine/sdk/platform/plugins';
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { PluginManager } from '@goodvibes-jev/engine/platform/platform/plugins';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 export function createPluginStartupTask(
   manager: Pick<PluginManager, 'init' | 'getPluginConfig' | 'isEnabled'>,
   context: () => Omit<Parameters<PluginManager['init']>[0], 'getPluginConfig' | 'isEnabled'>,

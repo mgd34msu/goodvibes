@@ -30,7 +30,7 @@ export const RECALL_CONFIDENCE_FLOOR = 60;
 
 /**
  * True for a persona (VIBE.md) record: cls 'constraint', tagged VIBE_PERSONA_TAG.
- * Mirrors the SDK's vibe-projection.ts selectVibeRecords test exactly, there is no
+ * Mirrors the platform's vibe-projection.ts selectVibeRecords test exactly, there is no
  * `memory.fold`/projection verb on the wire ("fold is NOT on the wire" per the brief
  * this view implements), so browsing personas means re-deriving the same predicate
  * client-side over records already fetched through memory.records.search.

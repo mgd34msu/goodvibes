@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import { createShellPathService } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { AgentPersonaRegistry } from '../../agent/persona-registry.ts';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { createAgentVibeTool, registerAgentVibeTool } from '../../tools/agent-vibe-tool.ts';

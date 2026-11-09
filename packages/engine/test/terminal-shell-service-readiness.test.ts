@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { collectServiceReadiness } from '@goodvibes-jev/engine/terminal-shell/health-findings';
-import type { ServiceRegistry } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
 
 test('service readiness awaits credential inspections and skips removed services', async () => {
   const config = { name: 'Example', authType: 'basic', baseUrl: '' };

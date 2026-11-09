@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { canonicalNativeConversationContinuation } from '../../sdk/src/platform/workflow/work-ledger/native-continuation-context.js';
+import { canonicalNativeConversationContinuation } from '../../platform/src/platform/workflow/work-ledger/native-continuation-context.js';
 /**
  * The contracts operator surface (docs/design/contract-runner.md 10.2): the
  * service that reads and acts across the daemon's runner and the hosted
@@ -8,18 +8,18 @@ import { canonicalNativeConversationContinuation } from '../../sdk/src/platform/
  * enforced.
  */
 import { describe, expect, test } from 'bun:test';
-import { GatewayMethodCatalog } from '../../sdk/src/platform/control-plane/method-catalog.js';
-import { registerContractGatewayMethods } from '../../sdk/src/platform/control-plane/routes/contracts.js';
-import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../../sdk/src/platform/daemon/control-plane.js';
-import { GATEWAY_REST_ROUTES, dispatchDaemonApiRoutes } from '../../daemon-sdk/src/index.js';
-import type { DaemonApiRouteHandlers, GatewayRestVerbInvocation } from '../../daemon-sdk/src/context.js';
+import { GatewayMethodCatalog } from '../../platform/src/platform/control-plane/method-catalog.js';
+import { registerContractGatewayMethods } from '../../platform/src/platform/control-plane/routes/contracts.js';
+import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../../platform/src/platform/daemon/control-plane.js';
+import { GATEWAY_REST_ROUTES, dispatchDaemonApiRoutes } from '../../daemon-api/src/index.js';
+import type { DaemonApiRouteHandlers, GatewayRestVerbInvocation } from '../../daemon-api/src/context.js';
 import {
   ContractOperatorError,
   OPERATOR_SESSION_ID,
   createContractOperatorService,
   type ContractOperatorService,
   type HostedContractRunners,
-} from '../../sdk/src/platform/contract/index.js';
+} from '../../platform/src/platform/contract/index.js';
 import { makeContract } from './fixtures.js';
 import { escalate, fakeRunner, nextContractId, type FakeRunner } from './operator-support.js';
 

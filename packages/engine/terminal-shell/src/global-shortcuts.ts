@@ -1,4 +1,4 @@
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { SearchManager, SearchConversation } from './transcript-search.js';
 import type { KeybindingsManager } from './keybindings.js';
 import type { HistorySearch } from './input-history.js';

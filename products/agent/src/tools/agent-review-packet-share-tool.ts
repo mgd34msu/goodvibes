@@ -1,7 +1,7 @@
-import type { ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import type { ChannelDeliveryRouter } from '@goodvibes-jev/engine/sdk/platform/channels';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import { ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { ChannelDeliveryRouter } from '@goodvibes-jev/engine/platform/platform/channels';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { agentArtifactEffectGuard, captureAgentArtifactSource } from './agent-artifact-effect.ts';
 import { evaluateOutwardEffect, getSessionUntrustedContentLedger } from '../trust/untrusted-content.ts';
 import {

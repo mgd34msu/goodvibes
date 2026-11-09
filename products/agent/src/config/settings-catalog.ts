@@ -1,5 +1,5 @@
 import { readExecutionMode } from '../permissions/execution-mode.ts';
-import type { ConfigKey, ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigKey, ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
 import { isAgentHostSettingKey, type AgentHostSettingKey } from './host-settings.ts';
 
 export type AgentHostSetting = Omit<ConfigSetting, 'key' | 'type' | 'default'> & {
@@ -13,7 +13,7 @@ export type AgentSettingKey = ConfigKey | AgentHostSetting['key'];
 export type AgentHostReader = Partial<Pick<ConfigManager, 'getHostSettingsSchema' | 'getHostBooleanSetting'>>;
 export type AgentSettingsCatalog = Pick<ConfigManager, 'getSchema'> & AgentHostReader;
 
-/** Keep SDK builtin rows and the Agent's registered host rows honestly typed. */
+/** Keep platform builtin rows and the Agent's registered host rows honestly typed. */
 export function getAgentSettingsSchema(config: AgentSettingsCatalog): AgentConfigSetting[] {
   const builtin = config.getSchema();
   const hosts: AgentHostSetting[] = [];

@@ -11,13 +11,13 @@ import {
   getCostOrigin,
   withCostOriginAsync,
   mcpServerOfToolName,
-} from '../sdk/src/platform/runtime/cost/cost-origin.ts';
+} from '../platform/src/platform/runtime/cost/cost-origin.ts';
 import {
   CostAttributionService,
   type ResolvePricing,
-} from '../sdk/src/platform/runtime/cost/attribution.ts';
-import { emitLlmResponseReceived } from '../sdk/src/platform/runtime/emitters/turn.ts';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
+} from '../platform/src/platform/runtime/cost/attribution.ts';
+import { emitLlmResponseReceived } from '../platform/src/platform/runtime/emitters/turn.ts';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
 
 const pricing: ResolvePricing = () => ({ input: 3, output: 15 });
 

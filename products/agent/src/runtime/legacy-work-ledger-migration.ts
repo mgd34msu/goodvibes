@@ -3,7 +3,7 @@ export {
   prepareLegacyWorkLedgerMigration,
   replayLegacyWorkLedgerPreparation,
   projectLegacyImportWorks,
-} from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger';
+} from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 export type {
   LegacyMigrationInput, LegacyMigrationManifest, LegacyMigrationPreparation,
-} from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger';
+} from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';

@@ -9,7 +9,7 @@
  * and not because a setting changed under it.
  */
 import { describe, expect, test } from 'bun:test';
-import { startOccasionSweepTicker, type TickerScheduler } from '../sdk/src/platform/occasions/ticker.ts';
+import { startOccasionSweepTicker, type TickerScheduler } from '../platform/src/platform/occasions/ticker.ts';
 
 interface FakeClock extends TickerScheduler {
   /** Run the pending timer, if there is one. Returns whether one fired. */

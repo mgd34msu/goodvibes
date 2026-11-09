@@ -14,12 +14,12 @@ import {
   runWorktreeSetup,
   resolveWorktreeSetupConfig,
   type WorktreeCommandRunner,
-} from '../sdk/src/platform/runtime/worktree/setup.ts';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
+} from '../platform/src/platform/runtime/worktree/setup.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
 import {
   registerWorktreeSetupGatewayMethods,
-} from '../sdk/src/platform/control-plane/routes/worktree-setup.ts';
-import type { WorktreeSetupResult } from '../sdk/src/platform/runtime/worktree/setup.ts';
+} from '../platform/src/platform/control-plane/routes/worktree-setup.ts';
+import type { WorktreeSetupResult } from '../platform/src/platform/runtime/worktree/setup.ts';
 
 const ctx = { context: { admin: true } } as const;
 const okRunner: WorktreeCommandRunner = async () => ({ exitCode: 0, output: 'ok' });

@@ -32,7 +32,7 @@ mock.module('../../lib/goodvibes', () => ({
   // never calls them.
   getCurrentAuth: () => Promise.resolve({}),
   invokeMethod: () => Promise.resolve({}),
-  sdk: {
+  client: {
     operator: {
       calendar: {
         events: {

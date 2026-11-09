@@ -20,8 +20,8 @@ import { getTestRuntimeServices, resetTestRuntimeServices } from '../helpers/run
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AGENT_OWNER_TERMINAL_GUARD as ENGINE_OWNER_TERMINAL_GUARD } from '@goodvibes-jev/engine/sdk/platform/gate/policy';
-import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { AGENT_OWNER_TERMINAL_GUARD as ENGINE_OWNER_TERMINAL_GUARD } from '@goodvibes-jev/engine/platform/platform/gate/policy';
+import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { composeAgentToolRegistry } from '../../runtime/agent-tool-registry.ts';
 import type { RuntimeServices } from '../../runtime/services.ts';
 import { AGENT_OWNER_TERMINAL_GUARD } from '../../runtime/agent-exec-posture.ts';

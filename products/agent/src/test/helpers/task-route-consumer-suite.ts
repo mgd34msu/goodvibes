@@ -1,9 +1,9 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { ChannelPluginRegistry } from '@goodvibes-jev/engine/sdk/platform/channels';
-import { ToolRegistry, ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import { TASK_ROUTES } from '@goodvibes-jev/engine/sdk/platform/routing';
+import { ChannelPluginRegistry } from '@goodvibes-jev/engine/platform/platform/channels';
+import { ToolRegistry, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { TASK_ROUTES } from '@goodvibes-jev/engine/platform/platform/routing';
 import { actionOf, readingsOf, SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import type { CommandContext, CommandRegistry } from '../../input/command-registry.ts';

@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { applyRuntimeConfigOverrides, applyRuntimeConfigValue, applyRuntimeFeatureFlagOverrides, applyRuntimeCommandEndpointFlagOverrides, applyTerminalRuntimeConfigDefaults } from '../terminal-shell/src/cli-config-overrides.ts';
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

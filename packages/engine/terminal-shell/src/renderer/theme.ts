@@ -5,11 +5,11 @@
  * active theme (config `display.theme`) resolved for the active mode (config
  * `display.themeMode`, or the terminal-background probe under `auto`). The
  * theme data itself (bundled themes, the `system` theme generated from the
- * terminal palette, the resolver and its derived fallbacks) lives in the SDK
+ * terminal palette, the resolver and its derived fallbacks) lives in the platform
  * presentation contract; this module only holds the session state and the
  * read paths the renderer uses:
  *
- *   activeTokens()    the full resolved table (SDK ThemeTokens shape)
+ *   activeTokens()    the full resolved table (platform ThemeTokens shape)
  *   activeTheme()     transcript tokens (markdown / conversation rendering)
  *   activeUiTones()   chrome tokens in the legacy TONE_TOKENS shape
  *   activeDiffTones() diff add/del/hunk in the legacy DIFF_TONES shape
@@ -40,7 +40,7 @@ import {
   type DiffToneTokens,
   type ThemeTokens as PaletteTokens,
   type ToneTokens,
-} from '@goodvibes-jev/engine/sdk/platform/presentation';
+} from '@goodvibes-jev/engine/platform/platform/presentation';
 import { getTerminalPalette, type TerminalPalette } from '../terminal-palette-store.js';
 
 export type { PaletteTokens, DiffToneTokens };

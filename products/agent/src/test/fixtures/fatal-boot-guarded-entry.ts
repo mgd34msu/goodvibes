@@ -26,7 +26,7 @@
  */
 
 import { join } from 'node:path';
-import { configureActivityLogger, logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { configureActivityLogger, logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { reportFatalStartupError } from '@/cli/tui-startup.ts';
 import { installFullScreenTerminalOutputGuard } from '@goodvibes-jev/engine/terminal-shell';
 import { writeFatalLine } from '@/utils/fatal-boot-write.ts';

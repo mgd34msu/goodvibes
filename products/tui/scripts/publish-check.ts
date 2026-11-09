@@ -4,7 +4,7 @@
  *
  * The shared mechanics are owned by @goodvibes-jev/engine/toolchain and driven by
  * this repo's toolchain.config.json:
- *   - sdk-pin-gate: the SDK-pin tri-agreement (overlay absent, exact-semver pin,
+ *   - engine-pin-gate: the engine-pin tri-agreement (overlay absent, exact-semver pin,
  *     installed==pin, lockfile resolves pin) + npm-specifier-only imports;
  *   - package-install-check: the tarball path/size policy + bin-shim
  *     (present/executable/shebang) checks.
@@ -18,7 +18,7 @@ import { join } from 'node:path';
 import {
   loadToolchainConfig,
   realFsReader,
-  runSdkPinGate,
+  runEnginePinGate,
   runPackageInstallCheck,
 } from '@goodvibes-jev/engine/toolchain';
 
@@ -26,8 +26,8 @@ const root = process.cwd();
 const config = loadToolchainConfig(root);
 let failed = 0;
 
-// 1) Shared SDK-pin tri-agreement + import sweep (toolchain).
-for (const result of runSdkPinGate(realFsReader(root), config.sdkPin)) {
+// 1) Shared engine-pin tri-agreement + import sweep (toolchain).
+for (const result of runEnginePinGate(realFsReader(root), config.enginePin)) {
   console.log(`${result.ok ? 'PASS' : 'FAIL'}  ${result.id}; ${result.detail}`);
   if (!result.ok) failed += 1;
 }

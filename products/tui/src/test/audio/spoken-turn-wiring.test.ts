@@ -9,7 +9,7 @@
 import { describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import type { VoiceAudioChunk, VoiceSynthesisRequest, VoiceSynthesisStreamResult } from '@goodvibes-jev/engine/sdk/platform/voice';
+import type { VoiceAudioChunk, VoiceSynthesisRequest, VoiceSynthesisStreamResult } from '@goodvibes-jev/engine/platform/platform/voice';
 import type { StreamingAudioPlayer } from '../../audio/player.ts';
 import { wireSpokenTurnRuntime } from '../../audio/spoken-turn-wiring.ts';
 

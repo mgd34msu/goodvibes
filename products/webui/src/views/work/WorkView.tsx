@@ -21,7 +21,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Archive, History, Inbox, RefreshCw, Search } from 'lucide-react';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import type { WorkTab } from '../../lib/router';
 import { WORK } from '../../components/shell/nav';
@@ -193,7 +193,7 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
   const archiveFinished = async () => {
     setArchiving(true);
     try {
-      const result = await sdk.operator.fleet.archiveFinished();
+      const result = await platformClient.operator.fleet.archiveFinished();
       toast({
         title: result.archivedCount > 0
           ? `Archived ${result.archivedCount} finished process${result.archivedCount === 1 ? '' : 'es'}`

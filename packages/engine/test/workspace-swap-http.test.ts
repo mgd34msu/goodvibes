@@ -11,8 +11,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   createDaemonSystemRouteHandlers,
-} from '../daemon-sdk/src/index.ts';
-import { WorkspaceSwapManager } from '../sdk/src/platform/workspace/workspace-swap-manager.ts';
+} from '../daemon-api/src/index.ts';
+import { WorkspaceSwapManager } from '../platform/src/platform/workspace/workspace-swap-manager.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -1,7 +1,7 @@
 /**
- * compaction.ts, parse and format the SDK's compaction runtime events.
+ * compaction.ts, parse and format the platform's compaction runtime events.
  *
- * GROUNDED: `@goodvibes-jev/engine/sdk/events/compaction` ships a real, typed
+ * GROUNDED: `@goodvibes-jev/engine/platform/events/compaction` ships a real, typed
  * `CompactionEvent` discriminated union (COMPACTION_CHECK, _MICROCOMPACT,
  * _COLLAPSE, _AUTOCOMPACT, _REACTIVE, _BOUNDARY_COMMIT, _DONE, _FAILED,
  * _RESUME_REPAIR, _QUALITY_SCORE, _STRATEGY_SWITCH, and the mandatory
@@ -20,7 +20,7 @@
  * No numeric context-window/token-budget value is exposed anywhere else on the
  * wire for an arbitrary remote session (checked: sessions.get/list, fleet.snapshot,
  * config.get all lack one). COMPACTION_CHECK's `tokenCount`/`threshold` pair is the
- * only SDK-provided numeric usage signal available to a remote client, and
+ * only platform-provided numeric usage signal available to a remote client, and
  * COMPACTION_RECEIPT's `tokensBefore`/`tokensAfter` the only post-compaction one,
  * both consumed here, never invented.
  */
@@ -29,10 +29,10 @@ import { asRecord } from './object';
 
 /**
  * The mandatory first line of every compaction-continuation user message
- * (SDK: `COMPACTION_HANDOFF_HEADER` in platform/core/compaction-sections).
- * Duplicated here as a literal because the SDK's platform/core barrel is not
+ * (platform: `COMPACTION_HANDOFF_HEADER` in platform/core/compaction-sections).
+ * Duplicated here as a literal because the platform's platform/core barrel is not
  * a browser-safe import for the vite bundle; compaction-handoff-contract.test.ts
- * pins this copy byte-for-byte against the SDK's export.
+ * pins this copy byte-for-byte against the platform's export.
  */
 export const COMPACTION_HANDOFF_HEADER =
   'IMPORTANT: This session is not new! Context was compacted, please read the following for proper handoff so you may resume work!';
@@ -77,7 +77,7 @@ export interface CompactionReceipt {
   readonly outcome: CompactionOutcome;
   readonly detail?: string;
   /** Client-stamped arrival time (the wire event carries no timestamp field), used
-   *  only for ordering receipts within a session, never rendered as an SDK-provided
+   *  only for ordering receipts within a session, never rendered as an platform-provided
    *  time. */
   readonly receivedAt: number;
 }

@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import type { DiscoveredServer } from '@goodvibes-jev/engine/sdk/platform/discovery';
-import { LocalAIProvider, TGIProvider, VLLMProvider } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { createDiscoveredProvider } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { LlamaCppProvider } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { LMStudioProvider } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { OpenAICompatProvider } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { OllamaProvider } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { DiscoveredServer } from '@goodvibes-jev/engine/platform/platform/discovery';
+import { LocalAIProvider, TGIProvider, VLLMProvider } from '@goodvibes-jev/engine/platform/platform/providers';
+import { createDiscoveredProvider } from '@goodvibes-jev/engine/platform/platform/providers';
+import { LlamaCppProvider } from '@goodvibes-jev/engine/platform/platform/providers';
+import { LMStudioProvider } from '@goodvibes-jev/engine/platform/platform/providers';
+import { OpenAICompatProvider } from '@goodvibes-jev/engine/platform/platform/providers';
+import { OllamaProvider } from '@goodvibes-jev/engine/platform/platform/providers';
 
 describe('createDiscoveredProvider', () => {
   test('uses LMStudioProvider for detected LM Studio servers', () => {

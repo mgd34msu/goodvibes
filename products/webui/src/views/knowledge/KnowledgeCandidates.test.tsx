@@ -23,7 +23,7 @@ mock.module('../../lib/goodvibes', () => ({
     }
     return Promise.resolve({});
   },
-  sdk: { operator: { calendar: { events: {}, ics: {} } } },
+  client: { operator: { calendar: { events: {}, ics: {} } } },
 }));
 
 const { KnowledgeCandidateRows, KnowledgeCandidatePane, parseCandidate } = await import('./KnowledgeCandidates');

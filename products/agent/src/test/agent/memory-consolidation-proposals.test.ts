@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { MemoryConsolidationRunReceipt } from '@goodvibes-jev/engine/sdk/platform/state';
+import type { MemoryConsolidationRunReceipt } from '@goodvibes-jev/engine/platform/platform/state';
 import {
   formatConsolidationProposalForReview,
   listPendingConsolidationProposals,

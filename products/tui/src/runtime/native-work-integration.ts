@@ -1,4 +1,4 @@
-import type { NativeWorkExecutionSnapshot } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
+import type { NativeWorkExecutionSnapshot } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
 import type { NativeWorkExecutionState } from './native-work-execution.ts';
 
 type IntegrationInspection = NonNullable<Extract<NativeWorkExecutionSnapshot, { kind: 'execution' }>['integration']>;

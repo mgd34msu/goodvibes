@@ -8,12 +8,12 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigManager } from '../../sdk/src/platform/config/manager.js';
-import { CONFIG_SCHEMA, DEFAULT_CONFIG } from '../../sdk/src/platform/config/schema.js';
-import { migrateWrfcSettings, WRFC_SETTING_RENAMES } from '../../sdk/src/platform/config/migrations.js';
-import { applyContractSettingsMigrationPass, runLoadMigrationPasses } from '../../sdk/src/platform/config/manager-migration-passes.js';
-import { FeatureAnnouncementStore, featureAnnouncementsPath } from '../../sdk/src/platform/runtime/feature-announcements.js';
-import { readContractConfig } from '../../sdk/src/platform/contract/index.js';
+import { ConfigManager } from '../../platform/src/platform/config/manager.js';
+import { CONFIG_SCHEMA, DEFAULT_CONFIG } from '../../platform/src/platform/config/schema.js';
+import { migrateWrfcSettings, WRFC_SETTING_RENAMES } from '../../platform/src/platform/config/migrations.js';
+import { applyContractSettingsMigrationPass, runLoadMigrationPasses } from '../../platform/src/platform/config/manager-migration-passes.js';
+import { FeatureAnnouncementStore, featureAnnouncementsPath } from '../../platform/src/platform/runtime/feature-announcements.js';
+import { readContractConfig } from '../../platform/src/platform/contract/index.js';
 
 const GATES = [
   { name: 'typecheck', command: 'npx tsc --noEmit', enabled: true },

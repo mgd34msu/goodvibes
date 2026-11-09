@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { TurnSubmissionOwner } from '../sdk/src/platform/core/turn-submission.js';
+import { TurnSubmissionOwner } from '../platform/src/platform/core/turn-submission.js';
 
 const input = { sessionId: 'session', position: 0, text: 'private input sentinel' };
 

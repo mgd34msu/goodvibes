@@ -1,4 +1,4 @@
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/sdk/contracts';
+import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
 
 /** Shared-token migration authority, verified by the selected host before minting a device token. */
 export function isHostPairingBootstrapPrincipal(auth: OperatorMethodOutput<'control.auth.current'>): boolean {

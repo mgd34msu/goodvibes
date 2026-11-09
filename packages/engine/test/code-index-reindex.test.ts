@@ -8,14 +8,14 @@
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort } from '@goodvibes-jev/judgment/testing';
 import { authoredPrivacyAnswer, errorText } from './_helpers/authored-error-readings.ts';
-import { redactSensitiveDataAsync } from '../sdk/src/platform/utils/redaction.ts';
+import { redactSensitiveDataAsync } from '../platform/src/platform/utils/redaction.ts';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import {
   CodeIndexReindexScheduler,
   extractReindexPaths,
   type CodeIndexReindexTarget,
-} from '../sdk/src/platform/state/code-index-reindex.js';
-import type { CodeChunkMode } from '../sdk/src/platform/state/index.js';
+} from '../platform/src/platform/state/code-index-reindex.js';
+import type { CodeChunkMode } from '../platform/src/platform/state/index.js';
 
 function makeTarget(over: {
   reindex?: (abs: string) => Promise<{ indexed: boolean; mode: CodeChunkMode }>;

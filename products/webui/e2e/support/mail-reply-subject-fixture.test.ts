@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { parseBrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-sdk';
+import { parseBrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-api';
 import { readMailReplySubjectResponse } from '../../src/lib/mail-reply-subject';
 
 test('every captured mail wire is accepted by the real client validator and retains exact source correlation', () => {

@@ -1,5 +1,5 @@
 /**
- * Composition-root wiring proof (mirrors the SDK's runtime services): a
+ * Composition-root wiring proof (mirrors the platform's runtime services): a
  * secrets write triggers a LIVE provider credential refresh, one credential
  * chain (env -> secrets -> subscription) with no restart needed.
  */

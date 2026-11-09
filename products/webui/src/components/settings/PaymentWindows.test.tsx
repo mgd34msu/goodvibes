@@ -5,7 +5,7 @@ import { flushSync } from 'react-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PaymentWindows } from './PaymentWindows';
 import { tokenStore, invalidateClientLifetime } from '../../lib/client-lifetime';
-import type { PaymentOperationView } from '@goodvibes-jev/engine/sdk/platform/payments/browser';
+import type { PaymentOperationView } from '@goodvibes-jev/engine/platform/platform/payments/browser';
 
 const originalFetch = globalThis.fetch;
 const cleanups: (() => void)[] = [];

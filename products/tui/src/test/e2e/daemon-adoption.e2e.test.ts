@@ -4,12 +4,12 @@
  * for this workspace, and the TUI reports its session spine online. The TUI
  * never starts a daemon of its own (it is adopt-only).
  *
- * The daemon is the SDK's fully composed one (bootDaemon), on the isolated
+ * The daemon is the platform's fully composed one (bootDaemon), on the isolated
  * home and the pinned port, sharing one bearer token with the TUI.
  */
 import { afterAll, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { bootDaemon, type BootedDaemon } from '@goodvibes-jev/engine/sdk/daemon';
+import { bootDaemon, type BootedDaemon } from '@goodvibes-jev/engine/platform/daemon';
 import { inputAreaVisible, launchTui, makeHome, screenText, startStubModel, waitFor, type TuiSession } from './harness.ts';
 
 const TOKEN = 'e2e-shared-daemon-token';

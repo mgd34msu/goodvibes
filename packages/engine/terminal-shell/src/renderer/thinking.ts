@@ -1,4 +1,4 @@
-import { type Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import { type Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { BORDERS } from './layout.js';
 import { renderConversationNotice } from './conversation-surface.js';
 import { activeUiTones } from './theme.js';

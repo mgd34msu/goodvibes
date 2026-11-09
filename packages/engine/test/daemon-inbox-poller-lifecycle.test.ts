@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { InboxCursorStore } from '../sdk/src/platform/intake/cursor-store.ts';
-import { InboundPoller, type PollerOptions } from '../sdk/src/platform/intake/poller.ts';
-import type { InboundChannelItem, InboundProviderAdapter, ProviderPollOptions, ProviderPollResult } from '../sdk/src/platform/intake/provider-adapter.ts';
+import { InboxCursorStore } from '../platform/src/platform/intake/cursor-store.ts';
+import { InboundPoller, type PollerOptions } from '../platform/src/platform/intake/poller.ts';
+import type { InboundChannelItem, InboundProviderAdapter, ProviderPollOptions, ProviderPollResult } from '../platform/src/platform/intake/provider-adapter.ts';
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;

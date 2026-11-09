@@ -1,6 +1,6 @@
 /** The TUI/agent prerequisites are available through the published engine entry points. */
-import { runtimeEventKey, runtimeEventOfNotice, type RuntimeEventNotice, type RuntimeEventProvenance } from '@goodvibes-jev/engine/sdk/platform/runtime/bootstrap';
-import { sumConversationUsage, type ConversationMessageSnapshot, type OrchestratorUsageTotals } from '@goodvibes-jev/engine/sdk/platform/core';
+import { runtimeEventKey, runtimeEventOfNotice, type RuntimeEventNotice, type RuntimeEventProvenance } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+import { sumConversationUsage, type ConversationMessageSnapshot, type OrchestratorUsageTotals } from '@goodvibes-jev/engine/platform/platform/core';
 
 const messages: readonly ConversationMessageSnapshot[] = [
   { role: 'assistant', content: 'Done.', usage: { inputTokens: 10, outputTokens: 2 }, followUp: true },

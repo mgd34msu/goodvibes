@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createShellPathService } from '@/runtime/index.ts';
 import { AgentPersonaRegistry } from '../../../agent/persona-registry.ts';
 import { AgentRoutineRegistry } from '../../../agent/routine-registry.ts';

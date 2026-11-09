@@ -28,28 +28,28 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
-import { createRuntimeStore } from '../sdk/src/platform/runtime/store/index.ts';
-import { createRuntimeServices, type RuntimeServices } from '../sdk/src/platform/runtime/services.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
+import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.ts';
+import { createRuntimeServices, type RuntimeServices } from '../platform/src/platform/runtime/services.ts';
 import {
   createClientRuntimeServices,
   createHeldSessionDispatch,
   type ClientRuntimeServices,
   type ClientRuntimeServicesFromHost,
   type SessionContinuationDispatch,
-} from '../sdk/src/platform/runtime/client-services.ts';
-import { WorkspaceTrustManager } from '../sdk/src/platform/runtime/workspace-trust.ts';
-import { createShellPathService } from '../sdk/src/platform/runtime/shell-paths.ts';
-import { createAgentGraph } from '../sdk/src/platform/runtime/agent-graph.ts';
-import { resolveRuntimeFeatureFlags } from '../sdk/src/platform/runtime/feature-flag-composition.ts';
+} from '../platform/src/platform/runtime/client-services.ts';
+import { WorkspaceTrustManager } from '../platform/src/platform/runtime/workspace-trust.ts';
+import { createShellPathService } from '../platform/src/platform/runtime/shell-paths.ts';
+import { createAgentGraph } from '../platform/src/platform/runtime/agent-graph.ts';
+import { resolveRuntimeFeatureFlags } from '../platform/src/platform/runtime/feature-flag-composition.ts';
 import {
   createApprovalDerivedHandlers,
   createUserPermissionRuleStore,
-} from '../sdk/src/platform/runtime/permissions/permission-composition.ts';
-import { createFeatureFlagManager } from '../sdk/src/platform/runtime/feature-flags/index.ts';
-import { FeatureAnnouncementStore, featureAnnouncementsPath } from '../sdk/src/platform/runtime/feature-announcements.ts';
-import type { PermissionPromptDecision } from '../sdk/src/platform/permissions/prompt.ts';
+} from '../platform/src/platform/runtime/permissions/permission-composition.ts';
+import { createFeatureFlagManager } from '../platform/src/platform/runtime/feature-flags/index.ts';
+import { FeatureAnnouncementStore, featureAnnouncementsPath } from '../platform/src/platform/runtime/feature-announcements.ts';
+import type { PermissionPromptDecision } from '../platform/src/platform/permissions/prompt.ts';
 
 /** The two links `createAgentGraph` binds after construction; both private. */
 interface OrchestratorLinks {
@@ -158,7 +158,7 @@ test('a surface composes its interactive loop without any daemon furniture', () 
 test('the daemon-grade graph still satisfies the shared part of the client shape', () => {
   // The compile-time proof lives in test/types/client-runtime-shape.ts; this is
   // the runtime half of it, every shared field is really there on the daemon
-  // graph, so an SDK helper typed against the narrow view accepts either.
+  // graph, so an platform helper typed against the narrow view accepts either.
   const sharedView: ClientRuntimeServicesFromHost = daemon;
   expect(sharedView.agentOrchestrator).toBe(daemon.agentOrchestrator);
   expect(sharedView.providerRegistry).toBe(daemon.providerRegistry);
@@ -292,8 +292,8 @@ test('the remembered-approval store lands at the one control-plane path', async 
 import { withDecisionLog } from '@goodvibes-jev/judgment';
 import { fakePort, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { gateReadingsPort } from './_helpers/gate-readings.ts';
-import type { McpElicitationHandler } from '../sdk/src/platform/mcp/elicitation.ts';
-import { commitMcpElicitation, discardMcpElicitation } from '../sdk/src/platform/mcp/elicitation-autonomous.ts';
+import type { McpElicitationHandler } from '../platform/src/platform/mcp/elicitation.ts';
+import { commitMcpElicitation, discardMcpElicitation } from '../platform/src/platform/mcp/elicitation-autonomous.ts';
 
 test('both real runtime compositions install autonomous MCP input resolution without using their human ask seam', async () => {
   const gate = gateReadingsPort();

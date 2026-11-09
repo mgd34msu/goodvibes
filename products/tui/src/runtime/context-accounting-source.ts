@@ -1,9 +1,9 @@
 import { createLiveContextAccountingSource } from '@goodvibes-jev/engine/terminal-shell/context-accounting-source';
 import '../core/conversation-usage.ts';
-import type { Orchestrator } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { SessionLineageTracker } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { ContextAccountingSource } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { Orchestrator } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { SessionLineageTracker } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ContextAccountingSource } from '@goodvibes-jev/engine/platform/platform/tools';
 
 /**
  * Minimal runtime-bus surface this module needs: subscribe by event type.
@@ -18,7 +18,7 @@ export interface CompactionActivityBus {
 
 /**
  * Builds the interactive session's ContextAccountingSource, the honest
- * backing for the SDK's `context_accounting` tool. Bound onto
+ * backing for the platform's `context_accounting` tool. Bound onto
  * `RuntimeServices.contextAccountingHolder` once, at bootstrap (see
  * bootstrap.ts, right after the live Orchestrator is constructed).
  *

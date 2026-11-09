@@ -2,7 +2,7 @@
 
 Public GoodVibes realtime transport package for event-domain connectors over SSE and WebSocket.
 
-Most applications should install `@goodvibes-jev/engine` and import `@goodvibes-jev/engine/sdk/transport-realtime`. These modules are subpath exports of the engine package.
+Most applications should install `@goodvibes-jev/engine` and import `@goodvibes-jev/engine/platform/transport-realtime`. These modules are subpath exports of the engine package.
 
 Consumer import:
 
@@ -10,14 +10,14 @@ Consumer import:
 import {
   createEventSourceConnector,
   createRemoteRuntimeEvents,
-} from '@goodvibes-jev/engine/sdk/transport-realtime';
+} from '@goodvibes-jev/engine/platform/transport-realtime';
 
 const events = createRemoteRuntimeEvents(
   createEventSourceConnector('https://goodvibes.example.com', 'token', fetch),
 );
 ```
 
-Use this surface when you want runtime-event subscriptions without pulling in the full main SDK.
+Use this surface when you want runtime-event subscriptions without pulling in the full main platform.
 
 ## WebSocket connector
 
@@ -42,7 +42,7 @@ The domain-event layer provides session- and domain-scoped feeds:
 `createTurnLifecycleGate(options?)` filters a reconnecting stream so it cannot deliver another turn's leftover frames. A client that opens a fresh SSE or WebSocket stream without resuming from `Last-Event-ID` is replayed the tail of whatever turn was running before it connected, terminal frames included; without a guard, that prior turn's `TURN_COMPLETED` lands in the new consumer and prematurely finishes a turn it never started. The gate binds per session to whichever turn each session is seen to start (`TURN_SUBMITTED`), then accepts only frames carrying that turn's ID; while unbound it drops replayed terminal frames (`TURN_COMPLETED`, `TURN_ERROR`, `TURN_CANCEL`, `PREFLIGHT_FAIL`) but still accepts non-terminal frames so a client attaching mid-turn can render it. Pass `turnId` explicitly when the consumer already knows which turn it submitted; omit it to let the gate infer the binding from the stream itself.
 
 ```ts
-import { createTurnLifecycleGate, readTurnLifecycleFrame } from '@goodvibes-jev/engine/sdk/transport-realtime';
+import { createTurnLifecycleGate, readTurnLifecycleFrame } from '@goodvibes-jev/engine/platform/transport-realtime';
 
 const gate = createTurnLifecycleGate();
 const frame = readTurnLifecycleFrame(envelope.sessionId, envelope.payload);

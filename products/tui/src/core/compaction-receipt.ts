@@ -1,7 +1,7 @@
 /**
  * Post-compaction receipt rendering.
  *
- * The SDK emits a mandatory COMPACTION_RECEIPT event after every automatic (and
+ * The platform emits a mandatory COMPACTION_RECEIPT event after every automatic (and
  * the manual) compaction path, so a compaction is never silent. This module
  * turns that receipt into a distinct, multi-line `[Compaction]` block for the
  * transcript. It is a pure formatter, no state, no I/O, so it is unit-testable
@@ -18,7 +18,7 @@
  * so the receipt cannot be routed away from the transcript and vanish.
  */
 
-/** The shape of the SDK's COMPACTION_RECEIPT event payload we render from. */
+/** The shape of the platform's COMPACTION_RECEIPT event payload we render from. */
 export interface CompactionReceiptInput {
   readonly trigger: 'auto' | 'manual';
   readonly strategy: string;

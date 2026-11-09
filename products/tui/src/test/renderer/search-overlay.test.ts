@@ -3,7 +3,7 @@ import { renderSearchOverlay } from '../../renderer/search-overlay.ts';
 import { SearchManager } from '../../input/search.ts';
 
 /** Extract text from a rendered Line (Cell array). */
-function lineText(line: import('@goodvibes-jev/engine/sdk/platform/types').Line): string {
+function lineText(line: import('@goodvibes-jev/engine/platform/platform/types').Line): string {
   return line.map(c => c.char).join('');
 }
 

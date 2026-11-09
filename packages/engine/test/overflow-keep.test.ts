@@ -8,7 +8,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { keepForCall, OverflowHandler, outputBlocks } from '../sdk/src/platform/tools/shared/overflow.js';
+import { keepForCall, OverflowHandler, outputBlocks } from '../platform/src/platform/tools/shared/overflow.js';
 import { useToolReadings } from './_helpers/tool-readings.ts';
 
 const readings = useToolReadings([['FAILURE_SUMMARY', { needed: true }]]);

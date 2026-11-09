@@ -10,8 +10,8 @@ describe('lazy native imports', () => {
     const root = mkdtempSync(join(tmpdir(), 'lazy-native-'));
     try {
       const fixture = join(root, 'missing-native.test.ts');
-      const structural = new URL('../sdk/src/platform/tools/find/structural.ts', import.meta.url).href;
-      const editMatch = new URL('../sdk/src/platform/tools/edit/match.ts', import.meta.url).href;
+      const structural = new URL('../platform/src/platform/tools/find/structural.ts', import.meta.url).href;
+      const editMatch = new URL('../platform/src/platform/tools/edit/match.ts', import.meta.url).href;
       // A fresh process avoids module-cache or mock leakage into other suites.
       // The loader rejects the native package regardless of host installation.
       writeFileSync(fixture, `

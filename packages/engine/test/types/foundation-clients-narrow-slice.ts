@@ -13,7 +13,7 @@
  * Checked by `bun run types:check` (tsc over test/types/**), resolving
  * through the package name so the exports map is exercised too.
  */
-import type { bootstrap } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import type { bootstrap } from '@goodvibes-jev/engine/platform/platform/runtime';
 // The memory-governance subpath must serve TYPES through the package name
 // (the phantom-export fix this file rides with).
 import type {
@@ -21,7 +21,7 @@ import type {
   MemoryGovernorSnapshot,
   MemoryTier,
   RegisteredCache,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/memory';
+} from '@goodvibes-jev/engine/platform/platform/runtime/memory';
 
 type Options = bootstrap.RuntimeFoundationClientsOptions;
 type Slice = bootstrap.RuntimeFoundationServicesSlice;

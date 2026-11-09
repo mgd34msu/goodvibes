@@ -20,22 +20,22 @@ import {
   sweepPlaintextCredentials,
   type SweepableConfig,
   type SweepableSecrets,
-} from '../sdk/src/platform/config/plaintext-credential-sweep.ts';
+} from '../platform/src/platform/config/plaintext-credential-sweep.ts';
 import {
   isDeclaredSecretBearingConfigKey,
   isSecretBearingConfigKey,
   SECRET_BEARING_CONFIG_PATHS,
-} from '../sdk/src/platform/config/secret-bearing-config-keys.ts';
-import { daemonSecretKeyFor } from '../sdk/src/platform/config/daemon-secret-keys.ts';
+} from '../platform/src/platform/config/secret-bearing-config-keys.ts';
+import { daemonSecretKeyFor } from '../platform/src/platform/config/daemon-secret-keys.ts';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { raiseReaderFloorInFile } from '../sdk/src/platform/config/shared-config-tier.ts';
+import { raiseReaderFloorInFile } from '../platform/src/platform/config/shared-config-tier.ts';
 import {
   compareReaderVersions,
   readSettingsReaderFloor,
   SWEPT_CREDENTIAL_READER_FLOOR,
-} from '../sdk/src/platform/config/settings-reader-floor.ts';
+} from '../platform/src/platform/config/settings-reader-floor.ts';
 
 const MAIL_PASSWORD = 'surfaces.email.password';
 const MAIL_SECRET_KEY = daemonSecretKeyFor(MAIL_PASSWORD);

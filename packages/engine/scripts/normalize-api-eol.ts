@@ -4,8 +4,8 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 for (const file of [
-  'etc/goodvibes-sdk.api.md',
-  'etc/goodvibes-sdk-embed.api.md',
+  'etc/goodvibes.api.md',
+  'etc/goodvibes-embed.api.md',
   'etc/goodvibes-terminal-shell.api.md',
 ].map((file) => resolve(import.meta.dir, '..', file))) {
   const text = readFileSync(file, 'utf8');

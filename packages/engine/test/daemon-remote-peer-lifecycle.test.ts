@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { PeerRegistry, normalizeBackendConfig, PeerRegistryValidationError } from '../sdk/src/platform/runtime/remote/host/peer-registry.ts';
+import { PeerRegistry, normalizeBackendConfig, PeerRegistryValidationError } from '../platform/src/platform/runtime/remote/host/peer-registry.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 function makeRegistry() {

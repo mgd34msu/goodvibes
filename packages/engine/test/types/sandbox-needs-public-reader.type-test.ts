@@ -3,7 +3,7 @@ import {
   readCommandNeeds,
   type CommandNeeds,
   type SandboxPolicyDecision,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/permissions/sandbox-policy';
+} from '@goodvibes-jev/engine/platform/platform/runtime/permissions/sandbox-policy';
 
 async function publicSandboxPolicy(command: string, workspace?: string): Promise<SandboxPolicyDecision> {
   const needs: CommandNeeds = await readCommandNeeds(command, workspace);

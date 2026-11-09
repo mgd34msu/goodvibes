@@ -1,7 +1,7 @@
-import { withDecisionModelPolicy } from '../../sdk/src/platform/runtime/decision-policy.ts';
+import { withDecisionModelPolicy } from '../../platform/src/platform/runtime/decision-policy.ts';
 import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
-import { readBestOfN } from '../../sdk/src/platform/contract/best-of-n.ts';
-import { nativeContractPort } from '../../sdk/src/platform/contract/native-decisions.ts';
+import { readBestOfN } from '../../platform/src/platform/contract/best-of-n.ts';
+import { nativeContractPort } from '../../platform/src/platform/contract/native-decisions.ts';
 /**
  * One unit check (contract/check.ts) through the fake judgment port: every
  * row of the outcome table (design 4.6), the readings-to-verdicts mapping at
@@ -12,12 +12,12 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { canonicalJson, hashState, readYesNo, STAKES_BANDS } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { DELIVERABLE_JUDGES, deliverableVerdict } from '../../sdk/src/platform/contract/batteries/deliverable-judge.js';
-import { GROUP_JUDGES, groupVerdict } from '../../sdk/src/platform/contract/batteries/group-judge.js';
-import { UNIT_JUDGE_BANDS, UNIT_JUDGES, criterionVerdict as unitJudgeVerdict } from '../../sdk/src/platform/contract/batteries/unit-judge.js';
-import { MID_RUN_QUALITY_ITEMS, UNIT_QUALITY_BAND, midRunNudgeItems, qualityVerdict as unitQualityVerdict } from '../../sdk/src/platform/contract/batteries/unit-quality.js';
-import { registry } from '../../sdk/src/platform/contract/judgment-registry.js';
-import { QUALITY_ITEMS, type QualityItem } from '../../sdk/src/platform/contract/types.js';
+import { DELIVERABLE_JUDGES, deliverableVerdict } from '../../platform/src/platform/contract/batteries/deliverable-judge.js';
+import { GROUP_JUDGES, groupVerdict } from '../../platform/src/platform/contract/batteries/group-judge.js';
+import { UNIT_JUDGE_BANDS, UNIT_JUDGES, criterionVerdict as unitJudgeVerdict } from '../../platform/src/platform/contract/batteries/unit-judge.js';
+import { MID_RUN_QUALITY_ITEMS, UNIT_QUALITY_BAND, midRunNudgeItems, qualityVerdict as unitQualityVerdict } from '../../platform/src/platform/contract/batteries/unit-quality.js';
+import { registry } from '../../platform/src/platform/contract/judgment-registry.js';
+import { QUALITY_ITEMS, type QualityItem } from '../../platform/src/platform/contract/types.js';
 import {
   nativeRecordedCheck,
   applySeverities,
@@ -30,10 +30,10 @@ import {
   type CheckSettings,
   type DecidedCheck,
   type UnitCheckInput,
-} from '../../sdk/src/platform/contract/check.js';
-import { judgeState, type UnitEvidence } from '../../sdk/src/platform/contract/evidence.js';
-import { deserializeContract, serializeContract } from '../../sdk/src/platform/contract/store.js';
-import type { ContractUnit, RequestShape, UnitCheck } from '../../sdk/src/platform/contract/types.js';
+} from '../../platform/src/platform/contract/check.js';
+import { judgeState, type UnitEvidence } from '../../platform/src/platform/contract/evidence.js';
+import { deserializeContract, serializeContract } from '../../platform/src/platform/contract/store.js';
+import type { ContractUnit, RequestShape, UnitCheck } from '../../platform/src/platform/contract/types.js';
 import { checkPort, MET, UNMET, type CheckAnswers } from './check-port.js';
 import { makeContract, makeCriterion, makeUnit } from './fixtures.js';
 

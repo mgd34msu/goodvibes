@@ -6,11 +6,11 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { bindNativeExecutionRequest, parseNativeWorkExecutionRecord, parseNativeWorkExecutionRecordJson, parseNativeWorkExecutionIntent,
-  nativeExecutionOwnerMatches, nativeExecutionStorageKey, nativeExecutionTargetRevision, type NativeExecutionOwnerFacts, type NativeWorkExecutionTarget } from '../sdk/src/platform/workflow/work-ledger/native-execution-types.js';
-import { captureNativeContractSource } from '../sdk/src/platform/contract/native-source.js';
-import { durablePayloadRevision, freezeDurableRequest } from '../sdk/src/platform/contract/durable-admission.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { createWorkLedger } from '../sdk/src/platform/workflow/work-ledger/service.js';
+  nativeExecutionOwnerMatches, nativeExecutionStorageKey, nativeExecutionTargetRevision, type NativeExecutionOwnerFacts, type NativeWorkExecutionTarget } from '../platform/src/platform/workflow/work-ledger/native-execution-types.js';
+import { captureNativeContractSource } from '../platform/src/platform/contract/native-source.js';
+import { durablePayloadRevision, freezeDurableRequest } from '../platform/src/platform/contract/durable-admission.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { createWorkLedger } from '../platform/src/platform/workflow/work-ledger/service.js';
 
 const cleanup: Array<() => Promise<void> | void> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });

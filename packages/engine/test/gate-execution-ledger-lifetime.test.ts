@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import type { JudgmentPort, JudgmentRequest, Questions } from '@goodvibes-jev/judgment';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
-import { emitToolReceived, emitToolValidated, emitToolPrehooked, emitToolExecuting, emitToolMapped, emitToolPosthooked, emitToolPermissioned, emitToolSucceeded, emitToolFailed, emitToolCancelled } from '../sdk/src/platform/runtime/emitters/index.ts';
-import { AgentExecutionLedger, forgetLedgerArgRoles } from '../sdk/src/platform/gate/policy/execution-ledger.ts';
-import { logger } from '../sdk/src/platform/utils/logger.ts';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
+import { emitToolReceived, emitToolValidated, emitToolPrehooked, emitToolExecuting, emitToolMapped, emitToolPosthooked, emitToolPermissioned, emitToolSucceeded, emitToolFailed, emitToolCancelled } from '../platform/src/platform/runtime/emitters/index.ts';
+import { AgentExecutionLedger, forgetLedgerArgRoles } from '../platform/src/platform/gate/policy/execution-ledger.ts';
+import { logger } from '../platform/src/platform/utils/logger.ts';
 
 const ctx = { sessionId: 'ledger', traceId: 'ledger', source: 'test' };
 const call = (callId: string, tool = 'read_everything') => ({ callId, turnId: 'turn', tool });
@@ -170,7 +170,7 @@ describe('shared execution ledger delivery and privacy', () => {
 });
 
 test('decision receipts survive permission/result projection as passive, detached provenance', async () => {
-  const { toToolResultSummary } = await import('../sdk/src/platform/runtime/emitters/tools.ts');
+  const { toToolResultSummary } = await import('../platform/src/platform/runtime/emitters/tools.ts');
   const decision: import('@goodvibes-jev/judgment/decisions').JevDecision = {
     schemaVersion: 1, decisionId: 'fixture-decision', outcome: 'act', summary: 'Synthetic recorded decision',
     binding: { sourceId: 'source', inputRevision: '1', actionId: 'action', actionRevision: '1', authorityId: 'authority', authorityRevision: '1', scopeId: 'scope', scopeRevision: '1' },

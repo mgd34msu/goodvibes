@@ -1,5 +1,5 @@
-import type { Contract } from '../sdk/src/platform/contract/types.js';
-import type { ContractInputAuthority } from '../sdk/src/platform/contract/input-authority.js';
+import type { Contract } from '../platform/src/platform/contract/types.js';
+import type { ContractInputAuthority } from '../platform/src/platform/contract/input-authority.js';
 import { test, expect, spyOn } from 'bun:test';
 import * as fs from 'node:fs';
 import { mkdtempSync, writeFileSync, rmSync, symlinkSync, readFileSync } from 'node:fs';
@@ -10,7 +10,7 @@ import {
   captureContractInput,
   materializeContractInput,
   contractInputPath,
-} from '../sdk/src/platform/contract/input-snapshot.js';
+} from '../platform/src/platform/contract/input-snapshot.js';
 import {
   createContractInputAuthority,
   authorizeContractInputPath,
@@ -18,7 +18,7 @@ import {
   getContractInputAuthority,
   revokeContractInputAuthority,
   assertContractInputAuthority,
-} from '../sdk/src/platform/contract/input-authority.js';
+} from '../platform/src/platform/contract/input-authority.js';
 function git(root: string, ...args: string[]) {
   const r = spawnSync('git', ['-C', root, ...args]);
   if (r.status) throw Error(r.stderr.toString());
@@ -113,12 +113,12 @@ test('independent cloned receipt is not the admitted generation', async () =>
     contract.inputSnapshot = structuredClone(contract.inputSnapshot);
     await expect(assertContractInputAuthority(token)).rejects.toThrow();
   }));
-import { capturedInputTool, capturedInputReadFilter, assertCapturedToolInvocationCurrent } from '../sdk/src/platform/tools/shared/captured-input-tools.js';
-import { ReadTool } from '../sdk/src/platform/tools/read/index.js';
-import { ProjectIndex } from '../sdk/src/platform/state/project-index.js';
-import { FileStateCache } from '../sdk/src/platform/state/file-cache.js';
-import { createEditTool } from '../sdk/src/platform/tools/edit/index.js';
-import { createAnalyzeTool } from '../sdk/src/platform/tools/analyze/index.js';
+import { capturedInputTool, capturedInputReadFilter, assertCapturedToolInvocationCurrent } from '../platform/src/platform/tools/shared/captured-input-tools.js';
+import { ReadTool } from '../platform/src/platform/tools/read/index.js';
+import { ProjectIndex } from '../platform/src/platform/state/project-index.js';
+import { FileStateCache } from '../platform/src/platform/state/file-cache.js';
+import { createEditTool } from '../platform/src/platform/tools/edit/index.js';
+import { createAnalyzeTool } from '../platform/src/platform/tools/analyze/index.js';
 test('independent tool argument mutation during permission await stays held', async () =>
   fixture(async ({ root, view, token }) => {
     const args = { files: [{ path: 'a.txt' }] };
@@ -149,7 +149,7 @@ test('independent tool argument mutation during permission await stays held', as
       await index.dispose();
     }
   }));
-import { createWriteTool } from '../sdk/src/platform/tools/write/index.js';
+import { createWriteTool } from '../platform/src/platform/tools/write/index.js';
 test('independent write args remain pinned through permission callbacks', async () =>
   fixture(async ({ root, view, token }) => {
     const args = {
@@ -371,14 +371,14 @@ for (const allowed of [false, true]) {
 
 test('captured content search rechecks stored-rule revocation before consulting its existing cache', async () =>
   fixture(async ({ root, view, token }) => {
-    const { ConfigManager } = await import('../sdk/src/platform/config/index.js');
-    const { createClientRuntimeServices } = await import('../sdk/src/platform/runtime/bootstrap.js');
-    const { RuntimeEventBus, createRuntimeStore } = await import('../sdk/src/platform/runtime/state.js');
-    const { createLaunchTolerantProviderRegistry } = await import('../sdk/src/platform/providers/index.js');
+    const { ConfigManager } = await import('../platform/src/platform/config/index.js');
+    const { createClientRuntimeServices } = await import('../platform/src/platform/runtime/bootstrap.js');
+    const { RuntimeEventBus, createRuntimeStore } = await import('../platform/src/platform/runtime/state.js');
+    const { createLaunchTolerantProviderRegistry } = await import('../platform/src/platform/providers/index.js');
     const { fakePort, noulAnswer } = await import('@goodvibes-jev/judgment/testing');
     const { installJudgmentPort } = await import('../errors/src/index.js');
-    const { createFindTool } = await import('../sdk/src/platform/tools/find/index.js');
-    const { FindRuntimeService } = await import('../sdk/src/platform/tools/find/shared.js');
+    const { createFindTool } = await import('../platform/src/platform/tools/find/index.js');
+    const { FindRuntimeService } = await import('../platform/src/platform/tools/find/shared.js');
     const config = new ConfigManager({
       surfaceRoot: 'agent',
       configDir: join(root, '.goodvibes', 'cfg'),
@@ -445,7 +445,7 @@ test('captured content search rechecks stored-rule revocation before consulting 
 test('construction-owned auxiliary read assertions remain tied to their exact lease', async () =>
   fixture(async ({ token, contract, view }) => {
     const { registerContractInputReadAssertion, assertContractInputReadAccess } =
-      await import('../sdk/src/platform/contract/input-authority.js');
+      await import('../platform/src/platform/contract/input-authority.js');
     let current = true;
     let checks = 0;
     registerContractInputReadAssertion(token, async () => {
@@ -468,7 +468,7 @@ test('construction-owned auxiliary read assertions remain tied to their exact le
 for (const allowed of [false, true]) {
   test(`captured inspection keeps original-path ${allowed ? 'allow' : 'deny'}`, async () =>
     fixture(async ({ root, view, token }) => {
-      const { InspectTool } = await import('../sdk/src/platform/tools/inspect/index.js');
+      const { InspectTool } = await import('../platform/src/platform/tools/inspect/index.js');
       writeFileSync(join(view, 'component.tsx'), 'export function OwnedWidget() { return <div>fixture</div>; }\n');
       const filter = async (path: string) => allowed || path !== join(root, 'component.tsx');
       const tool = capturedInputTool(new InspectTool(undefined, view), token, view, filter, undefined);
@@ -497,7 +497,7 @@ for (const allowed of [false, true]) {
 
 test('captured api inspection skips a policy-denied file visibly instead of failing the whole scan', async () =>
   fixture(async ({ view, token }) => {
-    const { InspectTool } = await import('../sdk/src/platform/tools/inspect/index.js');
+    const { InspectTool } = await import('../platform/src/platform/tools/inspect/index.js');
     const { fakePort, noulAnswer } = await import('@goodvibes-jev/judgment/testing');
     const { installJudgmentPort } = await import('../errors/src/index.js');
     writeFileSync(join(view, 'package.json'), JSON.stringify({ dependencies: { express: '^4.0.0' } }));
@@ -520,7 +520,7 @@ test('captured api inspection skips a policy-denied file visibly instead of fail
 
 test('captured fetch retains the existing allowed local HTTP path and checks revocation before outward effects', async () =>
   fixture(async ({ token, view, root }) => {
-    const { createFetchTool } = await import('../sdk/src/platform/tools/fetch/index.js');
+    const { createFetchTool } = await import('../platform/src/platform/tools/fetch/index.js');
     let requests = 0;
     const server = Bun.serve({
       hostname: '127.0.0.1',
@@ -550,7 +550,7 @@ test('captured fetch retains the existing allowed local HTTP path and checks rev
 
 test('captured fetch cannot select local file URLs or disk output/cache paths', async () =>
   fixture(async ({ root, token, view }) => {
-    const { createFetchTool } = await import('../sdk/src/platform/tools/fetch/index.js');
+    const { createFetchTool } = await import('../platform/src/platform/tools/fetch/index.js');
     const opened: string[] = [];
     const read = fs.readFileSync;
     const tap = spyOn(fs, 'readFileSync').mockImplementation(((...args: Parameters<typeof fs.readFileSync>) => {
@@ -575,7 +575,7 @@ test('captured fetch cannot select local file URLs or disk output/cache paths', 
 
 test('captured inspector rechecks a path changed to a symlink during original permission await', async () =>
   fixture(async ({ root, token, view }) => {
-    const { InspectTool } = await import('../sdk/src/platform/tools/inspect/index.js');
+    const { InspectTool } = await import('../platform/src/platform/tools/inspect/index.js');
     writeFileSync(join(view, 'component.tsx'), 'export function AllowedWidget() { return <div/>; }');
     writeFileSync(join(view, 'denied.tsx'), 'export function PRIVATE_WIDGET_MARKER() { return <div/>; }');
     let changed = false;
@@ -608,7 +608,7 @@ test('captured inspector rechecks a path changed to a symlink during original pe
 for (const scenario of ['allowed', 'denied', 'immutable', 'cancelled'] as const) {
   test(`captured inspector scaffold honors ${scenario} write authority`, async () =>
     fixture(async ({ root, view, token, abort }) => {
-      const { InspectTool } = await import('../sdk/src/platform/tools/inspect/index.js');
+      const { InspectTool } = await import('../platform/src/platform/tools/inspect/index.js');
       const target = join(view, 'src/widget/index.ts');
       const filter = async (path: string) => {
         if (scenario === 'cancelled') abort.abort();
@@ -636,7 +636,7 @@ test('per-call cancellation during final delivery reauthorization withholds actu
     const index = new ProjectIndex(view);
     const access = capturedInputReadFilter(token, view, filter, undefined, new Set());
     const read = new ReadTool(index, undefined, undefined, access);
-    const observed: import('../sdk/src/platform/types/tools.js').Tool = {
+    const observed: import('../platform/src/platform/types/tools.js').Tool = {
       definition: read.definition,
       execute: async (args) => {
         const result = await read.execute(args);

@@ -5,13 +5,13 @@ import {
   foldMemoryWireExtendedError,
   type MemoryTransport,
   type LocalMemoryStore,
-} from '../sdk/src/platform/runtime/memory-spine/index.js';
+} from '../platform/src/platform/runtime/memory-spine/index.js';
 import { createTransportError } from '../transport-http/src/http-core.ts';
-import type { MemoryBundle, MemoryLink, MemoryRecord, MemorySemanticSearchResult, MemoryVectorStats, MemoryDoctorReport } from '../sdk/src/platform/state/index.js';
-import type { HonestMemorySearchResult } from '../sdk/src/platform/state/index.js';
+import type { MemoryBundle, MemoryLink, MemoryRecord, MemorySemanticSearchResult, MemoryVectorStats, MemoryDoctorReport } from '../platform/src/platform/state/index.js';
+import type { HonestMemorySearchResult } from '../platform/src/platform/state/index.js';
 // MemoryImportResult is a real exported type (memory-store.ts) but is not
 // re-exported from the state barrel (state/index.ts), pull it from source.
-import type { MemoryImportResult } from '../sdk/src/platform/state/memory-store.js';
+import type { MemoryImportResult } from '../platform/src/platform/state/memory-store.js';
 
 /**
  * The memory-spine host-vs-client switch. A daemon host and any offline/embedded

@@ -2,11 +2,11 @@
 import { expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createClusterGroupVerbs, createGroup, joinGroup, leaveGroup } from '../sdk/src/platform/cluster/group-operations.ts';
-import { GROUP_MATERIAL_SECRET_KEY, GROUP_STATE_FILENAME, GROUP_REPLICA_FILENAME, observeGroupKeyMaterial, rotateGroupKeyMaterial } from '../sdk/src/platform/cluster/group-store.ts';
-import { listReplicatedConfigPaths, replicatedSecretKeyFor } from '../sdk/src/platform/cluster/config-replication-policy.ts';
-import { dispatchClusterGroupRoutes } from '../sdk/src/platform/daemon/http/cluster-group-routes.ts';
-import { ClusterMembershipOperationError } from '../sdk/src/platform/cluster/membership-operation.ts';
+import { createClusterGroupVerbs, createGroup, joinGroup, leaveGroup } from '../platform/src/platform/cluster/group-operations.ts';
+import { GROUP_MATERIAL_SECRET_KEY, GROUP_STATE_FILENAME, GROUP_REPLICA_FILENAME, observeGroupKeyMaterial, rotateGroupKeyMaterial } from '../platform/src/platform/cluster/group-store.ts';
+import { listReplicatedConfigPaths, replicatedSecretKeyFor } from '../platform/src/platform/cluster/config-replication-policy.ts';
+import { dispatchClusterGroupRoutes } from '../platform/src/platform/daemon/http/cluster-group-routes.ts';
+import { ClusterMembershipOperationError } from '../platform/src/platform/cluster/membership-operation.ts';
 import { addGroupNode, createGroupWorld, destroyGroupWorld, MemorySecretStore, stopGroupWorld } from './cluster-group-harness.ts';
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
 class ControlledSecrets extends MemorySecretStore {

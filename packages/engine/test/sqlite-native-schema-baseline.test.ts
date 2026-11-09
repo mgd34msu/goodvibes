@@ -2,11 +2,11 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { KNOWLEDGE_SCHEMA_VERSION } from '../sdk/src/platform/knowledge/store-schema-version.js';
-import { prepareNativeKnowledgeSchemaReadPlan } from '../sdk/src/platform/state/knowledge-schema-read-plan.js';
-import { SQLiteStore } from '../sdk/src/platform/state/sqlite-store.js';
-import { readSQLitePersistedImage, SQLiteStorePersistence } from '../sdk/src/platform/state/sqlite-store-persistence.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { KNOWLEDGE_SCHEMA_VERSION } from '../platform/src/platform/knowledge/store-schema-version.js';
+import { prepareNativeKnowledgeSchemaReadPlan } from '../platform/src/platform/state/knowledge-schema-read-plan.js';
+import { SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
+import { readSQLitePersistedImage, SQLiteStorePersistence } from '../platform/src/platform/state/sqlite-store-persistence.js';
 
 const roots: string[] = [], close: Array<() => void | Promise<void>> = [];
 afterEach(async () => {

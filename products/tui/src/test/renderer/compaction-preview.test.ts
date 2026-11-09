@@ -18,8 +18,8 @@ import { scoreCompactionRun } from '../../renderer/compaction-quality.ts';
 import { useCompactionQualityPort } from '../helpers/compaction-quality-port.ts';
 
 useCompactionQualityPort();
-import type { CompactionEvent } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { ProviderMessage } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { CompactionEvent } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ProviderMessage } from '@goodvibes-jev/engine/platform/platform/providers';
 
 function makeMsg(role: 'user' | 'assistant', content: string): ProviderMessage {
   return { role, content };
@@ -60,7 +60,7 @@ describe('buildCompactionPreview', () => {
   });
 
   test('shows token estimate from message content', () => {
-    // 4 chars = 1 token per SDK estimateConversationTokens rule
+    // 4 chars = 1 token per platform estimateConversationTokens rule
     const msgs: ProviderMessage[] = [makeMsg('user', 'aaaa')];
     const result = buildCompactionPreview({ messages: msgs, contextWindow: 0, pinnedMemoryCount: 0, trigger: 'manual' });
     // Should contain "~1" token estimate (ceil(4/4) = 1)

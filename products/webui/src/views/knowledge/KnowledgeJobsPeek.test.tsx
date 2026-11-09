@@ -13,7 +13,7 @@ let invokeImpl: (method: string, input?: unknown) => Promise<unknown> = () => Pr
 mock.module('../../lib/goodvibes', () => ({
   getCurrentAuth: () => Promise.resolve({}),
   invokeMethod: (method: string, input?: unknown) => invokeImpl(method, input),
-  sdk: {},
+  client: {},
 }));
 
 const { KnowledgeJobsPeekBody } = await import('./KnowledgeJobsPeek');

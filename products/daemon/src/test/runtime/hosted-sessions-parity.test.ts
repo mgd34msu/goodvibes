@@ -1,14 +1,14 @@
 /**
  * Daemon-hosted sessions, this is the process that hosts them.
  *
- * The engine is the SDK's and has its own unit suites there. What this daemon
+ * The engine is the platform's and has its own unit suites there. What this daemon
  * owns, and what these tests are the oracle for, is the composition: that the
  * verbs are actually invokable on this daemon's catalog, that a hosted session's
  * asks are gated by the trust decision of the SESSION's workspace rather than
  * the daemon's own directory, that the detach toggle reads this daemon's
  * setting, and that a restart reconciles from disk instead of losing sessions.
  *
- * Turn execution is not re-tested here; the SDK proves that against a stub
+ * Turn execution is not re-tested here; the platform proves that against a stub
  * provider. What is proved here is that a turn CAN be driven, the live-turn
  * controls for a hosted session are bound where `sessions.toolCalls.cancel`
  * looks for them, which is the wiring that goes missing silently.
@@ -16,18 +16,18 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { SessionLiveTurnControlsHolder, createSessionRuntimeControls } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { composeHostedSessions } from '@goodvibes-jev/engine/sdk/platform/daemon';
-import type { HostedSessionManager } from '@goodvibes-jev/engine/sdk/platform/hosted-sessions';
+import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { SessionLiveTurnControlsHolder, createSessionRuntimeControls } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { composeHostedSessions } from '@goodvibes-jev/engine/platform/platform/daemon';
+import type { HostedSessionManager } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
 import { createShellPathService } from '../../runtime/index.js';
 import { createHostedSessionOptions } from '../../runtime/hosted-session-composition.ts';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../../config/surface.ts';
 import { spyOn } from 'bun:test';
 import { withDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { createHostedSessionRuntime } from '@goodvibes-jev/engine/sdk/platform/hosted-sessions';
-import { executeToolCalls } from '@goodvibes-jev/engine/sdk/platform/core';
+import { createHostedSessionRuntime } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
+import { executeToolCalls } from '@goodvibes-jev/engine/platform/platform/core';
 import { createDaemonWorkspaceTrustResolver } from '../../runtime/workspace-trust-composition.js';
 import { createProductionDaemonInboxFactory } from '../../runtime/production-inbox-composition.js';
 import { useGatewayFixture } from '../helpers/gateway-fixture.js';

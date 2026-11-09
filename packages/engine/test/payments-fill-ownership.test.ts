@@ -1,12 +1,12 @@
 import { expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { CardMaterialRedactor } from '../sdk/src/platform/payments/card-redaction.js';
-import type { CardMaterial } from '../sdk/src/platform/payments/card-material.js';
-import type { CheckoutPageDriver } from '../sdk/src/platform/payments/checkout-page.js';
-import { CheckoutRegistry, MemoryCheckoutJournal } from '../sdk/src/platform/payments/checkout-registry.js';
-import { createBrowserCheckoutDriverFactory, type CheckoutBrowserEngine } from '../sdk/src/platform/payments/browser-checkout-driver.js';
-import { fillCard, FillCardRefusal, type FillCardRequest } from '../sdk/src/platform/payments/fill-card.js';
-import { parseCurrencyCode, unsafeOwnerSuppliedTextForTests } from '../sdk/src/platform/payments/types.js';
+import { CardMaterialRedactor } from '../platform/src/platform/payments/card-redaction.js';
+import type { CardMaterial } from '../platform/src/platform/payments/card-material.js';
+import type { CheckoutPageDriver } from '../platform/src/platform/payments/checkout-page.js';
+import { CheckoutRegistry, MemoryCheckoutJournal } from '../platform/src/platform/payments/checkout-registry.js';
+import { createBrowserCheckoutDriverFactory, type CheckoutBrowserEngine } from '../platform/src/platform/payments/browser-checkout-driver.js';
+import { fillCard, FillCardRefusal, type FillCardRequest } from '../platform/src/platform/payments/fill-card.js';
+import { parseCurrencyCode, unsafeOwnerSuppliedTextForTests } from '../platform/src/platform/payments/types.js';
 import { paymentsPort, usePaymentsReadings } from './helpers/payments-readings.ts';
 
 const readings = usePaymentsReadings();

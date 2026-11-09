@@ -1,4 +1,4 @@
-import { applySuiteUpdate, installedSuiteNeedsRepair, rollbackSuiteUpdate, SuiteUpdateRecoveryError, type SuiteUpdateResult } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { applySuiteUpdate, installedSuiteNeedsRepair, rollbackSuiteUpdate, SuiteUpdateRecoveryError, type SuiteUpdateResult } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { createSelfUpdateCommand, retainSuiteUpdateConfiguration, formatSuiteUpdateReport } from '@goodvibes-jev/engine/terminal-shell/release-update-preflight';
 import {
   checkReleaseUpdate,
@@ -22,10 +22,10 @@ import {
   UpdateTransactionError,
   realUpdateFileIo,
   type UpdateFileIo,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+} from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { VERSION } from '../../version.ts';
-import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/sdk/platform/config';
+import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveArtifactNames } from '../../runtime/release-artifacts.ts';
 import { detectInstallKind, fallbackUpdateCommand, type InstallKind, type UpdateFetchLike } from '../../runtime/update-check.ts';
 import { resolveConfiguredServiceName } from '../../runtime/legacy-daemon-migration.ts';
@@ -79,10 +79,10 @@ function abortableFetch(fetchImpl: UpdateFetchLike, signal: AbortSignal | undefi
 
 /**
  * Suffix under which every swap keeps the file it replaced, re-exported
- * from the SDK's canonical update policy module so rollback and swap share
+ * from the platform's canonical update policy module so rollback and swap share
  * one definition everywhere.
  */
-export { PREVIOUS_FILE_SUFFIX } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+export { PREVIOUS_FILE_SUFFIX } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 
 export interface DaemonServiceRestartInfo {
   readonly managed: boolean;
@@ -140,7 +140,7 @@ export interface ApplyUpdateOptions {
   readonly print: (line: string) => void;
   readonly configManager: { get(key: string): unknown };
   readonly runCommand?: RunCommand;
-  /** Injectable filesystem seam (the SDK's UpdateFileIo) so tests observe swaps in memory. */
+  /** Injectable filesystem seam (the platform's UpdateFileIo) so tests observe swaps in memory. */
   readonly io?: UpdateFileIo;
   /**
    * Cancels the update, for real: it is passed to every fetch in the path and
@@ -209,7 +209,7 @@ export interface RollbackUpdateOptions {
   readonly print: (line: string) => void;
   readonly configManager: { get(key: string): unknown };
   readonly runCommand?: RunCommand;
-  /** Injectable filesystem seam (the SDK's UpdateFileIo) so tests observe renames in memory. */
+  /** Injectable filesystem seam (the platform's UpdateFileIo) so tests observe renames in memory. */
   readonly io?: UpdateFileIo;
 }
 

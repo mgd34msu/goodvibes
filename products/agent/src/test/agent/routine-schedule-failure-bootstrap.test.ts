@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { failureReading, failureState, forgetFailureReadings, judgmentPort } from '@goodvibes-jev/engine/errors';
-import { redactSensitiveDataAsync, redactionCredential } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { redactSensitiveDataAsync, redactionCredential } from '@goodvibes-jev/engine/platform/platform/utils';
 import { isDeepStrictEqual } from 'node:util';
 import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { getTestRuntimeServices, resetTestRuntimeServices } from '../helpers/runtime-services.ts';

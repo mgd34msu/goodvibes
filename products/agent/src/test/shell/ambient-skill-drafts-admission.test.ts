@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { PermissionManager, createPermissionConfigReader } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import { PolicyRuntimeState } from '@goodvibes-jev/engine/sdk/platform/runtime/security';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { PermissionManager, createPermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { PolicyRuntimeState } from '@goodvibes-jev/engine/platform/platform/runtime/security';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, choiceAnswer, scoreAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { createShellPathService } from '@/runtime/index.ts';

@@ -31,7 +31,7 @@
 import type {
   HostedSessionHistoryMessage,
   HostedSessionRecord,
-} from '@goodvibes-jev/engine/sdk/platform/hosted-sessions';
+} from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
 import type { HostedSessionStreamEvent } from '../runtime/client/hosted-session-stream.ts';
 
 /** How many transcript rows are kept before the oldest are dropped. */

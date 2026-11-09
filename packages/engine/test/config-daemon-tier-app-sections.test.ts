@@ -24,16 +24,16 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { resolveOrCreateDaemonPath } from '../sdk/src/platform/config/daemon-tier-paths.ts';
-import type { DaemonOwnedConfigPath } from '../sdk/src/platform/config/config-ownership.ts';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
+import { resolveOrCreateDaemonPath } from '../platform/src/platform/config/daemon-tier-paths.ts';
+import type { DaemonOwnedConfigPath } from '../platform/src/platform/config/config-ownership.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import {
   announceIngestionNotice,
   ingestSettingsFile,
   isSafetyGateConfigKey,
   SAFETY_GATE_CONFIG_PREFIXES,
-} from '../sdk/src/platform/config/settings-ingestion.ts';
-import { CONFIG_SCHEMA } from '../sdk/src/platform/config/schema.ts';
+} from '../platform/src/platform/config/settings-ingestion.ts';
+import { CONFIG_SCHEMA } from '../platform/src/platform/config/schema.ts';
 import { useConfigReadings } from './_helpers/config-readings.js';
 
 describe('resolveOrCreateDaemonPath', () => {
@@ -88,7 +88,7 @@ describe('a ConfigManager constructed over a daemon tier holding app-layer keys'
       'utf-8',
     );
 
-    const { ConfigManager } = await import('../sdk/src/platform/config/manager.ts');
+    const { ConfigManager } = await import('../platform/src/platform/config/manager.ts');
     // The regression: this constructor used to throw
     // "section 'email' does not exist" and take the whole daemon down with it.
     const manager = new ConfigManager({
@@ -241,7 +241,7 @@ describe('settings ingestion: a key form from a newer component', () => {
   });
 
   test('a genuinely unrelated app-layer key reads as a form of none and is left unremarked', async () => {
-    // App-layer sections legitimately carry keys the SDK has never heard of.
+    // App-layer sections legitimately carry keys the platform has never heard of.
     // Flagging those would be noise, not a signal.
     const { manager } = managerOverDaemonTier({ email: { imapHost: 'imap.example.com', someProductKey: 1 } });
     await manager.announceUnknownSettingForms();

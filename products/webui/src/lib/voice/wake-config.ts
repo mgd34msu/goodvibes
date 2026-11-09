@@ -2,12 +2,12 @@
  * wake-config.ts, `voice.wake.*` as this surface resolves it.
  *
  * The daemon's `config.get` answers the WHOLE config tree as nested objects; the
- * SDK's `resolveWakeRuntimeSettings` reads FLAT dotted keys. This is the adapter
+ * platform's `resolveWakeRuntimeSettings` reads FLAT dotted keys. This is the adapter
  * between them, plus the one honest statement of what a browser tab can do.
  *
  * None of the capability answers is a guess:
- *   - speexAvailable, asked of the SDK, not declared here. The filter is a
- *     WebAssembly module the SDK carries, so the only question is whether this
+ *   - speexAvailable, asked of the platform, not declared here. The filter is a
+ *     WebAssembly module the platform carries, so the only question is whether this
  *     runtime has WebAssembly, which a tab does: `voice.wake.noiseSuppression:
  *     "speex"` RUNS here, applied by the wrapper inside WakeListener and
  *     PushToTalkSession.
@@ -29,22 +29,22 @@ import {
   type WakeRuntimeSettings,
   type WakeSettingReader,
   type WakeSurfaceCapabilities,
-} from '@goodvibes-jev/engine/sdk/platform/voice/wake/runtime';
-import { noiseSuppressionSupport } from '@goodvibes-jev/engine/sdk/platform/voice/capture';
+} from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
+import { noiseSuppressionSupport } from '@goodvibes-jev/engine/platform/platform/voice/capture';
 import { asRecord } from '../object';
 
 /** The surface id this tab resolves `voice.wake.surfaces.*` under. */
 export const WAKE_SURFACE = 'webui' as const;
 
-/** The `voice.wake.surfaces.webui` key, from the SDK rather than spelled again. */
+/** The `voice.wake.surfaces.webui` key, from the platform rather than spelled again. */
 export const WAKE_SURFACE_KEY = wakeSurfaceKey(WAKE_SURFACE);
 
 /**
  * What a browser tab can actually do. See this file's header for each answer.
  *
- * `speexAvailable` is asked of the SDK rather than declared here: the filter is a
+ * `speexAvailable` is asked of the platform rather than declared here: the filter is a
  * WebAssembly module carried in the package, so the only question is whether this
- * runtime has WebAssembly, which a tab does, and the SDK answers it with a
+ * runtime has WebAssembly, which a tab does, and the platform answers it with a
  * reason a settings row can show.
  *
  * `vadAvailable` is NOT a constant, because the speech gate is its own pinned

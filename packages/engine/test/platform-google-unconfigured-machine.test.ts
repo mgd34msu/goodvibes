@@ -18,10 +18,10 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { detectGoogleSetupState, describeGoogleSetupState } from '../sdk/src/platform/google/setup-state.ts';
-import { openGoogleConnection, describeGoogleConnection } from '../sdk/src/platform/google/connection.ts';
-import { safeConfigGet, safeConfigString } from '../sdk/src/platform/google/config-access.ts';
-import type { GoogleConfigPort, GoogleSecretPort } from '../sdk/src/platform/google/types.ts';
+import { detectGoogleSetupState, describeGoogleSetupState } from '../platform/src/platform/google/setup-state.ts';
+import { openGoogleConnection, describeGoogleConnection } from '../platform/src/platform/google/connection.ts';
+import { safeConfigGet, safeConfigString } from '../platform/src/platform/google/config-access.ts';
+import type { GoogleConfigPort, GoogleSecretPort } from '../platform/src/platform/google/types.ts';
 
 /** A config manager on a machine where the mail and calendar sections do not exist. */
 const throwingConfig: GoogleConfigPort = {

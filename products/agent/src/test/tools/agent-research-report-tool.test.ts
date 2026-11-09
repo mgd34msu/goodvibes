@@ -3,8 +3,8 @@ import { ordinaryResearchOwner, cleanupResearchScreeningFixtures, researchScreen
 import { prepareAgentResearchReportInput } from '../../agent/research-report-input.ts';
 import { afterAll, describe, expect, test } from 'bun:test';
 afterAll(cleanupResearchScreeningFixtures);
-import type { ArtifactCreateInput, ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { ArtifactCreateInput, ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { createAgentResearchReportTool as rawResearchReportTool, registerAgentResearchReportTool } from '../../tools/agent-research-report-tool.ts';
 import { createAgentResearchTool as rawResearchTool } from '../../tools/agent-research-tool.ts';
 import type { CommandContext, CommandRegistry } from '../../input/command-registry.ts';

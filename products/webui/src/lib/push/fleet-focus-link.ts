@@ -3,7 +3,7 @@
  *
  * When a fleet node becomes blocked waiting on the operator, the daemon fans out
  * a PushMessage whose `data` is `{ kind: 'needs-input', sessionId?, nodeId? }`
- * (SDK push/types.ts PushNotificationData). The service worker opens the app at
+ * (platform push/types.ts PushNotificationData). The service worker opens the app at
  * `/?view=fleet#fleet-node=<nodeId>&fleet-session=<sessionId>` (see
  * notification-link.ts). This module reads that fragment and scrubs it, so
  * FleetView can focus the node the operator was summoned to, mirroring the

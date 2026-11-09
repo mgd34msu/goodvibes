@@ -4,10 +4,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, test } from 'bun:test';
-import { ArtifactStore } from '../sdk/src/platform/artifacts/index.js';
-import { HomeGraphRoutes } from '../sdk/src/platform/daemon/http/home-graph-routes.js';
-import { HomeGraphService } from '../sdk/src/platform/knowledge/index.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
+import { ArtifactStore } from '../platform/src/platform/artifacts/index.js';
+import { HomeGraphRoutes } from '../platform/src/platform/daemon/http/home-graph-routes.js';
+import { HomeGraphService } from '../platform/src/platform/knowledge/index.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { trackDisposables } from './_helpers/disposables.ts';
 
 /**

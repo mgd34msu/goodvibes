@@ -8,7 +8,7 @@
  * ui-openers.ts. Two things replace that:
  *
  *  1. services.ts now wires wireRuntimePower's `subscribeConfig` option (the
- *     SDK's own PowerManager config subscription), so ANY power.keepAwake
+ *     platform's own PowerManager config subscription), so ANY power.keepAwake
  *     config change, from the settings modal, a CLI flag, or an external
  *     settings.json edit reaching configManager via watchConfigFiles(),
  *     flips the real LOCAL inhibitor with no bespoke call site needed.
@@ -29,7 +29,7 @@ import { ConfigManager } from '../../config/index.ts';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
-import { createHostPowerSeam } from '@goodvibes-jev/engine/sdk/platform/power';
+import { createHostPowerSeam } from '@goodvibes-jev/engine/platform/platform/power';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 describe('power.keepAwake local live-apply (config-subscription path)', () => {
@@ -76,7 +76,7 @@ describe('power.keepAwake local live-apply (config-subscription path)', () => {
 
       // wireRuntimePower's manager.start() (async: it reaps orphan inhibitors
       // over the real platform seam, THEN registers the config subscription)
-      // is fire-and-forget from services.ts, exactly as the SDK composition
+      // is fire-and-forget from services.ts, exactly as the platform composition
       // root does it. Give start() room to finish registering before driving
       // the toggle, so the test exercises the live-subscription path itself
       // rather than racing it, a config write issued before registration
@@ -110,8 +110,8 @@ describe('power.keepAwake local live-apply (config-subscription path)', () => {
   });
 
   test('a test-constructed runtime (no powerSeam) defaults to the NON-spawning unavailable seam', () => {
-    // SDK 1.9.0 moved seam selection to an explicit opt-in: createRuntimeServices
-    // now defaults an ABSENT powerSeam to the SDK's "unavailable" no-spawn seam,
+    // platform 1.9.0 moved seam selection to an explicit opt-in: createRuntimeServices
+    // now defaults an ABSENT powerSeam to the platform's "unavailable" no-spawn seam,
     // so a test-constructed runtime never spawns systemd-inhibit inhibitors or a
     // dbus-monitor sleep-edge watcher. makeServices() passes no powerSeam, so the
     // composed PowerManager must report the honest 'unavailable (...)' platform,

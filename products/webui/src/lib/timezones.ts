@@ -1,7 +1,7 @@
 /**
  * timezones.ts, pure helpers for the `daemon.timezone` picker.
  *
- * `daemon.timezone` (schema-domain-daemon-location.ts on the SDK side) is an
+ * `daemon.timezone` (schema-domain-daemon-location.ts on the platform side) is an
  * IANA timezone name the daemon reckons calendar days in; empty means UTC.
  * The picker offers a SEARCHABLE list over the real supported set
  * (`Intl.supportedValuesOf('timeZone')`) rather than a free-text box, plus an
@@ -21,7 +21,7 @@ export function listTimezoneNames(): readonly string[] {
 
 /**
  * True for the unset (UTC) value or any IANA name `Intl` actually recognizes.
- * Mirrors the SDK's own `daemon.timezone` `validate()` exactly
+ * Mirrors the platform's own `daemon.timezone` `validate()` exactly
  * (schema-domain-daemon-location.ts), this is a client-side pre-check only;
  * the daemon's config.set remains the authoritative validator.
  */

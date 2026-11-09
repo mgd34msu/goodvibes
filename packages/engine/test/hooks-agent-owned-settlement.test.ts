@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
-import { HookDispatcher } from '../sdk/src/platform/hooks/dispatcher.js';
-import { run } from '../sdk/src/platform/hooks/runners/agent.js';
-import type { HookDefinition, HookEvent } from '../sdk/src/platform/hooks/types.js';
+import { HookDispatcher } from '../platform/src/platform/hooks/dispatcher.js';
+import { run } from '../platform/src/platform/hooks/runners/agent.js';
+import type { HookDefinition, HookEvent } from '../platform/src/platform/hooks/types.js';
 import { ASK, makeHarness, oneUnitPlan, waitFor, type Harness } from './contract/runner-support.js';
 
 let harness: Harness | undefined;

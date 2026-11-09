@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
-import { readCatastrophic, readToolCall } from '../sdk/src/platform/gate/reading.js';
-import { captureExternalRequestEvidence } from '../sdk/src/platform/permissions/external-request-evidence.js';
-import { runSafetyChecks } from '../sdk/src/platform/runtime/permissions/safety-checks.js';
+import { readCatastrophic, readToolCall } from '../platform/src/platform/gate/reading.js';
+import { captureExternalRequestEvidence } from '../platform/src/platform/permissions/external-request-evidence.js';
+import { runSafetyChecks } from '../platform/src/platform/runtime/permissions/safety-checks.js';
 import { gateReadingsPort } from './_helpers/gate-readings.js';
 
 const command = 'rm -rf ./*';

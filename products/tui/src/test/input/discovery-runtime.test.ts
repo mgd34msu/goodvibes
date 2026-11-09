@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { DiscoveredServer } from '@goodvibes-jev/engine/sdk/platform/discovery';
+import type { DiscoveredServer } from '@goodvibes-jev/engine/platform/platform/discovery';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerDiscoveryRuntimeCommands } from '../../input/commands/discovery-runtime.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';

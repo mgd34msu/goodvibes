@@ -16,10 +16,10 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { ProcessManager, ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { FileUndoManager } from '@goodvibes-jev/engine/sdk/platform/state';
-import { PermissionManager, createPermissionConfigReader } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import { PolicyRuntimeState } from '@goodvibes-jev/engine/sdk/platform/runtime/security';
+import { ProcessManager, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { FileUndoManager } from '@goodvibes-jev/engine/platform/platform/state';
+import { PermissionManager, createPermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { PolicyRuntimeState } from '@goodvibes-jev/engine/platform/platform/runtime/security';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
@@ -30,7 +30,7 @@ import { createShellPathService } from '@/runtime/index.ts';
 import { registerAgentHarnessTool } from '../../tools/agent-harness-tool.ts';
 import { AGENT_HARNESS_MODES } from '../../tools/agent-harness-tool-schema.ts';
 import { HARNESS_MODE_DESCRIPTORS } from '../../tools/agent-harness-mode-catalog.ts';
-import { WorkPlanStore } from '@goodvibes-jev/engine/sdk/platform/workflow';
+import { WorkPlanStore } from '@goodvibes-jev/engine/platform/platform/workflow';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 const REMOTE_READ_MODES = ['remote_snapshot', 'remote_peers', 'remote_work', 'remote_pair_requests'] as const;

@@ -10,7 +10,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, expect, test } from 'bun:test';
-import type { ProcessNode } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
+import type { ProcessNode } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import {
   FleetSpawn,
   type AcpSpawnGateway,
@@ -212,7 +212,7 @@ describe('acp-agent row: kind glyph/label + attention with no special-casing', (
     expect(isAttachableFleetKind('acp-agent')).toBe(true);
   });
 
-  test('attention rides on the SDK needsAttention projection; no acp-specific branch', () => {
+  test('attention rides on the platform needsAttention projection; no acp-specific branch', () => {
     const waiting = acpNode({ state: 'awaiting-approval', needsAttention: { reason: 'approval' } });
     expect(fleetNodeAttention(waiting)).toEqual({ reason: 'approval' });
     const working = acpNode();

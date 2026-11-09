@@ -19,8 +19,8 @@ import {
   provisionLocalVoiceRuntime,
   resolveManagedEngine,
   resolveManagedVoicePaths,
-} from '../sdk/src/platform/voice/provisioning/index.ts';
-import { createLocalVoiceProvider } from '../sdk/src/platform/voice/providers/local.ts';
+} from '../platform/src/platform/voice/provisioning/index.ts';
+import { createLocalVoiceProvider } from '../platform/src/platform/voice/providers/local.ts';
 
 function sha256(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
@@ -274,7 +274,7 @@ describe('provisioning failure handling', () => {
 
   test('an engine version bump RE-EXTRACTS and replaces the old binary (no silent no-op)', async () => {
     const dir = scratch();
-    const { provisionLocalVoiceRuntime: provision, readVoiceInstallStamp } = await import('../sdk/src/platform/voice/provisioning/index.ts');
+    const { provisionLocalVoiceRuntime: provision, readVoiceInstallStamp } = await import('../platform/src/platform/voice/provisioning/index.ts');
     const paths = resolveManagedVoicePaths(dir, 'linux-x64');
     // Install v1 end-to-end.
     const v1 = fixtureManifests('binary-v1', 'v1');
@@ -299,7 +299,7 @@ describe('provisioning failure handling', () => {
 
   test('a mid-extract kill never leaves a truncated binary reporting provisioned (atomic swap)', async () => {
     const dir = scratch();
-    const { provisionLocalVoiceRuntime: provision } = await import('../sdk/src/platform/voice/provisioning/index.ts');
+    const { provisionLocalVoiceRuntime: provision } = await import('../platform/src/platform/voice/provisioning/index.ts');
     const paths = resolveManagedVoicePaths(dir, 'linux-x64');
     const v1 = fixtureManifests('good-binary', 'v1');
     // Extractor that dies mid-write (simulated SIGKILL/power loss): a truncated
@@ -329,14 +329,14 @@ describe('provisioning failure handling', () => {
   test('manifest binaryRelPath drives the managed paths (no duplicated constant)', async () => {
     const dir = scratch();
     const paths = resolveManagedVoicePaths(dir, 'linux-x64');
-    const { PIPER_ENGINES } = await import('../sdk/src/platform/voice/provisioning/manifest.ts');
+    const { PIPER_ENGINES } = await import('../platform/src/platform/voice/provisioning/manifest.ts');
     expect(paths.piperBinary).toBe(join(dir, 'engines', PIPER_ENGINES['linux-x64']!.binaryRelPath));
     rmSync(dir, { recursive: true, force: true });
   });
 
   test('status verification reuses one result only for the same file revision and expected pin', async () => {
     const dir = scratch();
-    const { fileMatchesCached } = await import('../sdk/src/platform/voice/provisioning/index.ts');
+    const { fileMatchesCached } = await import('../platform/src/platform/voice/provisioning/index.ts');
     const file = join(dir, 'model.onnx');
     const bytes = new Uint8Array(1024 * 1024);
     bytes[0] = 0x08;
@@ -507,7 +507,7 @@ describe('managed STT (goodvibes-built whisper.cpp)', () => {
 
   test('a HOSTED whisper bundle provisions STT end-to-end (download + verify + atomic extract)', async () => {
     const dir = scratch();
-    const { provisionLocalVoiceRuntime: provision, resolveManagedEngine } = await import('../sdk/src/platform/voice/provisioning/index.ts');
+    const { provisionLocalVoiceRuntime: provision, resolveManagedEngine } = await import('../platform/src/platform/voice/provisioning/index.ts');
     const v1 = fixtureManifests('binary-v1', 'v1');
     const w = whisperFixture('whisper-binary-1');
     const fetchImpl = ((url: string | URL | Request) => {
@@ -540,7 +540,7 @@ describe('managed STT (goodvibes-built whisper.cpp)', () => {
 
   test('no hosted URL + no sideload -> honest bundle-unavailable naming the recipe; TTS unaffected', async () => {
     const dir = scratch();
-    const { provisionLocalVoiceRuntime: provision } = await import('../sdk/src/platform/voice/provisioning/index.ts');
+    const { provisionLocalVoiceRuntime: provision } = await import('../platform/src/platform/voice/provisioning/index.ts');
     const v1 = fixtureManifests('binary-v1', 'v1');
     const w = whisperFixture('whisper-binary-1');
     const unhosted = { ...w.whisper, bundle: { ...w.whisper.bundle, url: null } };
@@ -558,7 +558,7 @@ describe('managed STT (goodvibes-built whisper.cpp)', () => {
 
   test('a SIDELOADED bundle matching the pin provisions STT without a hosted URL', async () => {
     const dir = scratch();
-    const { provisionLocalVoiceRuntime: provision } = await import('../sdk/src/platform/voice/provisioning/index.ts');
+    const { provisionLocalVoiceRuntime: provision } = await import('../platform/src/platform/voice/provisioning/index.ts');
     const v1 = fixtureManifests('binary-v1', 'v1');
     const w = whisperFixture('whisper-binary-1');
     const unhosted = { ...w.whisper, bundle: { ...w.whisper.bundle, url: null } };
@@ -667,7 +667,7 @@ describe('managed STT (goodvibes-built whisper.cpp)', () => {
 
   test('a stale archive that fails the NEW pin is never extracted; old binary + version stamp are preserved (no false new-version stamp)', async () => {
     const dir = scratch();
-    const { provisionLocalVoiceRuntime: provision, readVoiceInstallStamp } = await import('../sdk/src/platform/voice/provisioning/index.ts');
+    const { provisionLocalVoiceRuntime: provision, readVoiceInstallStamp } = await import('../platform/src/platform/voice/provisioning/index.ts');
     const paths = resolveManagedVoicePaths(dir, 'linux-x64');
     const v1 = fixtureManifests('binary-v1', 'v1');
     const w1 = whisperFixture('whisper-binary-1', 'w1'); // hosted
@@ -702,7 +702,7 @@ describe('managed STT (goodvibes-built whisper.cpp)', () => {
 
   test('a failed STT re-install preserves the version stamp, so a later correct sideload of the new bundle applies (frozen-update fixed)', async () => {
     const dir = scratch();
-    const { provisionLocalVoiceRuntime: provision, readVoiceInstallStamp } = await import('../sdk/src/platform/voice/provisioning/index.ts');
+    const { provisionLocalVoiceRuntime: provision, readVoiceInstallStamp } = await import('../platform/src/platform/voice/provisioning/index.ts');
     const paths = resolveManagedVoicePaths(dir, 'linux-x64');
     const v1 = fixtureManifests('binary-v1', 'v1');
     const w1 = whisperFixture('whisper-binary-1', 'w1');
@@ -752,7 +752,7 @@ describe('managed STT (goodvibes-built whisper.cpp)', () => {
   });
 
   test('the default whisper model URL is pinned to an immutable HF revision, not the mutable main ref', async () => {
-    const { DEFAULT_WHISPER_MODEL } = await import('../sdk/src/platform/voice/provisioning/manifest.ts');
+    const { DEFAULT_WHISPER_MODEL } = await import('../platform/src/platform/voice/provisioning/manifest.ts');
     expect(DEFAULT_WHISPER_MODEL.bin.url).not.toContain('/resolve/main/');
     expect(DEFAULT_WHISPER_MODEL.bin.url).toMatch(/\/resolve\/[0-9a-f]{40}\/ggml-base\.en\.bin$/);
     // The pin change keeps the checksum identical (same file bytes).

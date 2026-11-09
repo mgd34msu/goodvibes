@@ -2,9 +2,9 @@
 import { expect, spyOn, test } from 'bun:test';
 import { withDecisionLog, type JudgmentRequest, type Questions } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { createHostedSessionRuntime } from '@goodvibes-jev/engine/sdk/platform/hosted-sessions';
-import { DEVICE_CAPABILITY_IDS, DEVICE_NODE_ANNOUNCEMENT_KEY } from '@goodvibes-jev/engine/sdk/platform/devices';
-import { executeToolCalls, type ToolExecutionDeps } from '@goodvibes-jev/engine/sdk/platform/core';
+import { createHostedSessionRuntime } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
+import { DEVICE_CAPABILITY_IDS, DEVICE_NODE_ANNOUNCEMENT_KEY } from '@goodvibes-jev/engine/platform/platform/devices';
+import { executeToolCalls, type ToolExecutionDeps } from '@goodvibes-jev/engine/platform/platform/core';
 import { gateReadingsPort } from '../helpers/synthetic-gate-readings.js';
 import { createHostedSessionOptions } from '../../runtime/hosted-session-composition.js';
 import { useGatewayFixture } from '../helpers/gateway-fixture.js';

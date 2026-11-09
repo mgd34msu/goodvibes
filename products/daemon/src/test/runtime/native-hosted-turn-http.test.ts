@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { WEBUI_METHOD_ROUTES } from '@goodvibes-jev/engine/contracts/generated/webui-facade';
 import { getOperatorContract, type OperatorMethodOutput } from '@goodvibes-jev/engine/contracts';
 import { firstJsonSchemaFailure } from '@goodvibes-jev/engine/transport-http';
-import { nativeConversationIntakeLookupResultSchema } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
-import { nativeHostedTurnLookupSchema } from '@goodvibes-jev/engine/sdk/platform/hosted-sessions/native-turn-client';
+import { nativeConversationIntakeLookupResultSchema } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
+import { nativeHostedTurnLookupSchema } from '@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client';
 import { createNativeIntakeHttpFixture } from '../helpers/native-intake-http-fixture.js';
 const TEXT = '  Explain café e\u0301 🌻\nKeep this original text.\nKeep this original text.  ';
 

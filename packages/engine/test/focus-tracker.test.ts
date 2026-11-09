@@ -8,7 +8,7 @@
  * - shouldAlertWhenUnfocused(): true for null and false, false only for true
  */
 import { describe, test, expect } from 'bun:test';
-import { FocusTracker } from '../sdk/src/platform/runtime/focus-tracker.ts';
+import { FocusTracker } from '../platform/src/platform/runtime/focus-tracker.ts';
 
 describe('FocusTracker', () => {
   test('isFocused() starts null (unknown)', () => {

@@ -8,14 +8,14 @@
  * `ci.status` description: "the overall verdict is derived from the per-job
  * conclusions (never a rollup); continue-on-error jobs are surfaced as
  * violations and force the verdict off 'passed'." `platform/ci-watch` (the
- * module implementing that doctrine server-side) is not in this SDK's public
+ * module implementing that doctrine server-side) is not in this platform's public
  * export map yet, so the per-job rendering below is a thin, doctrine-faithful
  * mirror of the contract's own `ci.status`/`ci.watches.run` output, every job
  * name and conclusion listed individually, never summarized.
  */
 import type { CommandRegistry } from '../command-registry.ts';
 import { describeOperatorRpcError, getOperatorRpc } from './operator-rpc.ts';
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/sdk';
+import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
 
 export type CiReport = OperatorMethodOutput<'ci.status'>['report'];
 export type CiWatchSubscription = OperatorMethodOutput<'ci.watches.list'>['watches'][number];
@@ -101,7 +101,7 @@ export function registerCiRuntimeCommands(registry: CommandRegistry): void {
           return;
         }
         try {
-          const { report } = await rpc.sdk.operator.invoke('ci.status', {
+          const { report } = await rpc.platformClient.operator.invoke('ci.status', {
             repo: target.repo,
             ...(target.ref !== undefined ? { ref: target.ref } : {}),
             ...(target.prNumber !== undefined ? { prNumber: target.prNumber } : {}),
@@ -126,7 +126,7 @@ export function registerCiRuntimeCommands(registry: CommandRegistry): void {
           return;
         }
         try {
-          const { watch } = await rpc.sdk.operator.invoke('ci.watches.create', {
+          const { watch } = await rpc.platformClient.operator.invoke('ci.watches.create', {
             repo: target.repo,
             ...(target.ref !== undefined ? { ref: target.ref } : {}),
             ...(target.prNumber !== undefined ? { prNumber: target.prNumber } : {}),
@@ -152,7 +152,7 @@ export function registerCiRuntimeCommands(registry: CommandRegistry): void {
             return;
           }
           try {
-            const result = await rpc.sdk.operator.invoke('ci.watches.run', { watchId: runId });
+            const result = await rpc.platformClient.operator.invoke('ci.watches.run', { watchId: runId });
             const lines = [renderReport(result.report)];
             lines.push(`notified: ${result.notified ? 'yes' : 'no'}${result.notificationId ? ` (${result.notificationId})` : ''}`);
             lines.push(`fix-session triggered: ${result.fixSessionTriggered ? 'yes' : 'no'}`);
@@ -167,7 +167,7 @@ export function registerCiRuntimeCommands(registry: CommandRegistry): void {
           return;
         }
         try {
-          const { watches } = await rpc.sdk.operator.invoke('ci.watches.list', {});
+          const { watches } = await rpc.platformClient.operator.invoke('ci.watches.list', {});
           if (watches.length === 0) {
             ctx.print('[ci watches] no standing watches.');
             return;
@@ -190,7 +190,7 @@ export function registerCiRuntimeCommands(registry: CommandRegistry): void {
           return;
         }
         try {
-          const result = await rpc.sdk.operator.invoke('ci.watches.delete', { watchId });
+          const result = await rpc.platformClient.operator.invoke('ci.watches.delete', { watchId });
           ctx.print(result.deleted ? `[ci unwatch] deleted watch ${watchId}.` : `[ci unwatch] no watch found with id ${watchId}.`);
         } catch (error) {
           ctx.print(`[ci unwatch] ${describeOperatorRpcError(error)}`);

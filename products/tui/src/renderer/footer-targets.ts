@@ -7,7 +7,7 @@
  * turns the tags into screen rows each frame and the mouse route reads them.
  */
 
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 
 /** What a clickable footer row opens. */
 export type FooterTarget = 'usage' | 'agents' | 'commands' | 'bottom';

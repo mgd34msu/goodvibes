@@ -2,7 +2,7 @@
  * Compaction quality-score bridging tests.
  *
  * The TUI's real /compact path (ConversationManager.compact(), driven by
- * compactConversation() in runtime-services.ts) never instantiates the SDK's
+ * compactConversation() in runtime-services.ts) never instantiates the platform's
  * CompactionManager pipeline, so computeQualityScore() (which that pipeline
  * calls) never runs in a real session. compaction-quality.ts calls it
  * directly and out-of-band instead. These tests validate that bridge in
@@ -19,13 +19,13 @@ import {
 import { compactionQualityPort, useCompactionQualityPort } from '../helpers/compaction-quality-port.ts';
 
 useCompactionQualityPort();
-import type { ProviderMessage } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ProviderMessage } from '@goodvibes-jev/engine/platform/platform/providers';
 
 function makeMsg(role: 'user' | 'assistant', content: string): ProviderMessage {
   return { role, content };
 }
 
-// No reset hook exists for the module-level score store (matching the SDK's
+// No reset hook exists for the module-level score store (matching the platform's
 // own compaction-event log, which also has none, see
 // compaction-history-modal.test.ts's "guard with a conditional" precedent),
 // so every timestamp key below is unique to this file and to its own test,
@@ -151,7 +151,7 @@ describe('recordCompactionQualityScore / getCompactionQualityScore', () => {
     expect(getCompactionQualityScore(-1_000_002)).toBeUndefined();
   });
 
-  test('bounds the store the same way the SDK bounds its own compaction event log (evicts oldest)', async () => {
+  test('bounds the store the same way the platform bounds its own compaction event log (evicts oldest)', async () => {
     const score = await scoreCompactionRun({
       sessionId: 's',
       contextWindow: 0,

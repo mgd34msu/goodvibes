@@ -1,5 +1,5 @@
 /**
- * SessionRewind, the session-detail REWIND surface (rewind.plan / rewind.apply, SDK 1.6.1).
+ * SessionRewind, the session-detail REWIND surface (rewind.plan / rewind.apply, platform 1.6.1).
  *
  * A terraform-style dry-run/apply flow: pick a recent turn anchor (or the session's most
  * recent checkpoint) and a scope (files / conversation / both) → rewind.plan previews
@@ -19,7 +19,7 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Undo2 } from 'lucide-react';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import type { RewindApplyResult } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { formatError } from '../../lib/errors';
@@ -57,7 +57,7 @@ export function SessionRewind({ sessionId }: SessionRewindProps) {
 
   const messages = useQuery({
     queryKey: queryKeys.sessionMessages(sessionId),
-    queryFn: () => sdk.operator.sessions.messages.list(sessionId),
+    queryFn: () => platformClient.operator.sessions.messages.list(sessionId),
   });
 
   const anchors = useMemo(
@@ -66,12 +66,12 @@ export function SessionRewind({ sessionId }: SessionRewindProps) {
   );
 
   const plan = useMutation({
-    mutationFn: () => sdk.operator.rewind.plan({ sessionId, scope, ...(anchorTurnId ? { turnId: anchorTurnId } : {}) }),
+    mutationFn: () => platformClient.operator.rewind.plan({ sessionId, scope, ...(anchorTurnId ? { turnId: anchorTurnId } : {}) }),
   });
 
   const apply = useMutation({
     mutationFn: (token: string) =>
-      sdk.operator.rewind.apply({ sessionId, scope, ...(anchorTurnId ? { turnId: anchorTurnId } : {}), confirmToken: token }),
+      platformClient.operator.rewind.apply({ sessionId, scope, ...(anchorTurnId ? { turnId: anchorTurnId } : {}), confirmToken: token }),
     onSuccess: async (result) => {
       if (result.receipt) {
         setReceipt(result.receipt);
@@ -85,7 +85,7 @@ export function SessionRewind({ sessionId }: SessionRewindProps) {
 
   const undoFiles = useMutation({
     mutationFn: (restoreCheckpointId: string) =>
-      sdk.operator.checkpoints.restore({ id: restoreCheckpointId, safetyCheckpoint: true, confirm: true }),
+      platformClient.operator.checkpoints.restore({ id: restoreCheckpointId, safetyCheckpoint: true, confirm: true }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessionChanges(sessionId) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.checkpoints });

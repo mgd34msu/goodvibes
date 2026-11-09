@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { ChannelPluginRegistry } from '@goodvibes-jev/engine/sdk/platform/channels';
+import { ChannelPluginRegistry } from '@goodvibes-jev/engine/platform/platform/channels';
 
 describe('ChannelPluginRegistry', () => {
   test('aggregates capabilities, tools, and actions across registered plugins', async () => {

@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import type { BrowserJudgmentRequest, BrowserJudgmentValueMap } from '@goodvibes-jev/engine/daemon-sdk';
+import type { BrowserJudgmentRequest, BrowserJudgmentValueMap } from '@goodvibes-jev/engine/daemon-api';
 import { daemonRefusalValue, readDaemonRefusalResponse, resolveDaemonRefusal } from './daemon-refusal';
 import { getClientLifetime, isClientLifetimeCurrent, tokenStore, WEBUI_TOKEN_STORE_KEY } from './client-lifetime';
 import { isMethodUnavailableError, isSessionActiveError, isSessionClosedError, isSessionNotFoundError, isSessionNotLocalError } from './errors';
-import { runBrowserJudgment, sdk } from './goodvibes';
+import { runBrowserJudgment, client as platformClient } from './goodvibes';
 import { browserDecisionPolicy } from './decision-policy';
 
 type Request = BrowserJudgmentRequest<'webui.errors.daemon-refusal'>;
@@ -141,7 +141,7 @@ describe('awaited reference-only adoption', () => {
     }
   });
 
-  test('SDK transport envelopes adopt without serializing message, input or credentials', async () => {
+  test('platform transport envelopes adopt without serializing message, input or credentials', async () => {
     const error = Object.assign(new Error('Synthetic private browser text'), {
       transport: { status: 404, body: { errorRef: 'synthetic-issued-ref', error: 'Synthetic daemon-private detail' } },
       request: { body: 'Synthetic typed chat', authorization: 'Synthetic credential decoy' },
@@ -242,7 +242,7 @@ describe('real HTTP callers await refusal settlement', () => {
       return json({ errorRef: 'synthetic-issued-ref', error: 'Synthetic session detail' }, 409);
     }) as typeof fetch;
     let caught = false;
-    const result = capturedFailure(sdk.operator.sessions.close('synthetic-session')).then((error) => { caught = true; return error; });
+    const result = capturedFailure(platformClient.operator.sessions.close('synthetic-session')).then((error) => { caught = true; return error; });
     await started.promise;
     expect(caught).toBe(false);
     expect(input.input).toEqual({ errorRef: 'synthetic-issued-ref' });
@@ -266,7 +266,7 @@ describe('real HTTP callers await refusal settlement', () => {
         ? json({ errorRef: 'synthetic-ref-that-must-not-recurse', error: { code: 'JUDGMENT_REFERENCE_HELD' } }, 422)
         : json({ errorRef: 'synthetic-issued-ref', error: 'Synthetic original detail' }, 409);
     }) as typeof fetch;
-    const error = await capturedFailure(sdk.operator.sessions.close('synthetic-session'));
+    const error = await capturedFailure(platformClient.operator.sessions.close('synthetic-session'));
     expect(calls).toHaveLength(2);
     expect(error).toMatchObject({ status: 409, body: { error: 'Synthetic original detail' } });
     expect(daemonRefusalValue(error)).toBeUndefined();
@@ -280,7 +280,7 @@ describe('real HTTP callers await refusal settlement', () => {
         if (!String(url).endsWith('/api/judgment/batteries/run')) return json({ errorRef: 'synthetic-issued-ref', error: 'Synthetic original detail' }, 409);
         input = JSON.parse(String(init?.body)) as Request; signal = init!.signal!; started.resolve(undefined); return gate.promise;
       }) as typeof fetch;
-      const result = capturedFailure(sdk.operator.sessions.close('synthetic-session', abort.signal));
+      const result = capturedFailure(platformClient.operator.sessions.close('synthetic-session', abort.signal));
       await started.promise;
       if (change === 'abort') abort.abort(); else await tokenStore.setToken('synthetic-account-b');
       expect(signal.aborted).toBe(true);
@@ -292,20 +292,20 @@ describe('real HTTP callers await refusal settlement', () => {
   }
 
   const callers: [string, () => Promise<unknown>][] = [
-    ['sessions.get', () => sdk.operator.sessions.get('synthetic-session')],
-    ['sessions.steer', () => sdk.operator.sessions.steer('synthetic-session', { body: 'synthetic message' })],
-    ['sessions.followUp', () => sdk.operator.sessions.followUp('synthetic-session', { body: 'synthetic message' })],
-    ['sessions.inputs.list', () => sdk.operator.sessions.inputs.list('synthetic-session')],
-    ['chat.sessions.create', () => sdk.chat.sessions.create({ title: 'synthetic chat' })],
-    ['chat.sessions.get', () => sdk.chat.sessions.get('synthetic-session')],
-    ['chat.sessions.list', () => sdk.chat.sessions.list()],
-    ['chat.sessions.update', () => sdk.chat.sessions.update('synthetic-session', { title: 'synthetic chat' })],
-    ['chat.messages.create', () => sdk.chat.messages.create('synthetic-session', { content: 'synthetic message' })],
-    ['chat.messages.list', () => sdk.chat.messages.list('synthetic-session')],
-    ['chat.messages.steer', () => sdk.chat.messages.steer('synthetic-session', { content: 'synthetic message' })],
-    ['chat.turns.cancel', () => sdk.chat.turns.cancel('synthetic-session')],
+    ['sessions.get', () => platformClient.operator.sessions.get('synthetic-session')],
+    ['sessions.steer', () => platformClient.operator.sessions.steer('synthetic-session', { body: 'synthetic message' })],
+    ['sessions.followUp', () => platformClient.operator.sessions.followUp('synthetic-session', { body: 'synthetic message' })],
+    ['sessions.inputs.list', () => platformClient.operator.sessions.inputs.list('synthetic-session')],
+    ['chat.sessions.create', () => platformClient.chat.sessions.create({ title: 'synthetic chat' })],
+    ['chat.sessions.get', () => platformClient.chat.sessions.get('synthetic-session')],
+    ['chat.sessions.list', () => platformClient.chat.sessions.list()],
+    ['chat.sessions.update', () => platformClient.chat.sessions.update('synthetic-session', { title: 'synthetic chat' })],
+    ['chat.messages.create', () => platformClient.chat.messages.create('synthetic-session', { content: 'synthetic message' })],
+    ['chat.messages.list', () => platformClient.chat.messages.list('synthetic-session')],
+    ['chat.messages.steer', () => platformClient.chat.messages.steer('synthetic-session', { content: 'synthetic message' })],
+    ['chat.turns.cancel', () => platformClient.chat.turns.cancel('synthetic-session')],
   ];
-  for (const [name, call] of callers) test(`${name} awaits the actual SDK failure reference`, async () => {
+  for (const [name, call] of callers) test(`${name} awaits the actual platform failure reference`, async () => {
     const gate = deferred<Response>(); const started = deferred<undefined>(); let input!: Request; let count = 0;
     globalThis.fetch = (async (url, init) => {
       count++;
@@ -337,7 +337,7 @@ describe('real HTTP callers await refusal settlement', () => {
     const gate = deferred<Response>(); const started = deferred<undefined>(); let calls = 0;
     const lifetime = getClientLifetime();
     globalThis.fetch = Object.assign(() => { calls++; started.resolve(undefined); return gate.promise; }, { preconnect: originalFetch.preconnect });
-    const result = capturedFailure(sdk.operator.sessions.close('synthetic-session'));
+    const result = capturedFailure(platformClient.operator.sessions.close('synthetic-session'));
     await started.promise; await tokenStore.setToken('synthetic-account-b');
     expect(isClientLifetimeCurrent(lifetime)).toBe(false);
     gate.resolve(json({ errorRef: 'synthetic-issued-ref', error: 'Synthetic original detail' }, 409));

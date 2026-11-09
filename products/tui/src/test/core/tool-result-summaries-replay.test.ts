@@ -11,8 +11,8 @@
  * summary from its call) and the turn header lost its model.
  */
 import { describe, expect, test } from 'bun:test';
-import type { ToolCall } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
+import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
 import { beadSummary } from '../../renderer/lane-graph/bead.ts';
 import { ConversationManager } from '../../core/conversation.ts';
 import { buildTurnModel, transcriptUnits, type BeadModel } from '../../core/work-tree-model.ts';

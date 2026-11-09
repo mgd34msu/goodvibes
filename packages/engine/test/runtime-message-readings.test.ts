@@ -8,20 +8,20 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { Question } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import type { ConversationMessageSnapshot } from '../sdk/src/platform/core/conversation.ts';
+import type { ConversationMessageSnapshot } from '../platform/src/platform/core/conversation.ts';
 import {
   buildLocalReturnContextSummary,
   buildPersistedSessionContext,
   buildPersistedSessionContextFromFacts,
-} from '../sdk/src/platform/runtime/session-return-context.ts';
-import { mentionsUserTypedCommand } from '../sdk/src/platform/runtime/setup-contract.ts';
-import { setupReplyCommand } from '../sdk/src/platform/runtime/batteries/setup-reply-command.ts';
+} from '../platform/src/platform/runtime/session-return-context.ts';
+import { mentionsUserTypedCommand } from '../platform/src/platform/runtime/setup-contract.ts';
+import { setupReplyCommand } from '../platform/src/platform/runtime/batteries/setup-reply-command.ts';
 import {
   classifySystemMessageKind,
   classifySystemMessagePriority,
   defaultSystemMessageTarget,
-} from '../sdk/src/platform/runtime/system-message-policy.ts';
-import { voiceSetupStepMentionsUserCommand } from '../sdk/src/platform/voice/setup-chain.ts';
+} from '../platform/src/platform/runtime/system-message-policy.ts';
+import { voiceSetupStepMentionsUserCommand } from '../platform/src/platform/voice/setup-chain.ts';
 import { namedCommandsAndKeys } from './_helpers/setup-vocabulary.ts';
 
 let previous: ReturnType<typeof installJudgmentPort>;

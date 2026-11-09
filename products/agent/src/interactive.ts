@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { OwnedSelectionObservation } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { isNativeConversationTurnReady, nativeConversationTurnInputOptions } from '@goodvibes-jev/engine/terminal-shell/native-ingress';
 import { readShellFrameFacts, createShellSubmissionPorts } from '@goodvibes-jev/engine/terminal-shell/shell-frame-facts';
 import { readInitialExecutionMode } from './permissions/execution-mode.ts';
@@ -18,21 +18,21 @@ import './renderer/compositor.ts';
 import { installStartupThemeProbe } from './renderer/startup-theme-probe.ts';
 import { ThinkingStallClock, buildThinkingOverlay, createThrobberSource, mainPermissionAsk } from './core/thinking-overlay.ts';
 import { UIFactory } from './renderer/ui-factory.ts';
-import '@goodvibes-jev/engine/sdk/platform/core';
+import '@goodvibes-jev/engine/platform/platform/core';
 import { conversationMessagesAsSessionRecords } from './core/conversation-message-snapshot.ts';
 import { createTranscriptNavigators } from './shell/transcript-navigation.ts';
 import { InputHandler } from './input/handler.ts';
 import { createHerdrSessionReporter } from '@goodvibes-jev/engine/terminal-shell';
-import type { ContentPart } from '@goodvibes-jev/engine/sdk/platform/providers';
-import '@goodvibes-jev/engine/sdk/platform/tools';
-import '@goodvibes-jev/engine/sdk/platform/tools';
-import '@goodvibes-jev/engine/sdk/platform/state';
-import '@goodvibes-jev/engine/sdk/platform/permissions';
+import type { ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
+import '@goodvibes-jev/engine/platform/platform/tools';
+import '@goodvibes-jev/engine/platform/platform/tools';
+import '@goodvibes-jev/engine/platform/platform/state';
+import '@goodvibes-jev/engine/platform/platform/permissions';
 import { PermissionPromptUI } from './permissions/prompt.ts';
 import './input/command-registry.ts';
 
 import './input/commands.ts';
-import '@goodvibes-jev/engine/sdk/platform/tools';
+import '@goodvibes-jev/engine/platform/platform/tools';
 import './input/input-history.ts';
 import { ShellPassthrough, SHELL_USAGE_HINT } from './input/shell-passthrough.ts';
 import { buildShellFooter, estimateShellFooterHeight } from './renderer/shell-surface.ts';
@@ -42,11 +42,11 @@ import { buildConversationViewport, centerViewportContent } from './renderer/con
 import { applyConversationOverlays, buildConversationLayers } from './renderer/conversation-overlays.ts';
 import { buildActivityAgentRows, type ActivityView } from './renderer/activity-modal.ts';
 import { ActivityModal } from './input/activity-modal.ts';
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { bootstrapRuntime } from './runtime/bootstrap.ts';
 import { readAgentHostSetting } from './config/host-settings.ts';
 import type { BootstrapContext } from './runtime/bootstrap.ts';
-import type { HITLMode } from '@goodvibes-jev/engine/sdk/platform/state';
+import type { HITLMode } from '@goodvibes-jev/engine/platform/platform/state';
 import { startFirstRenderFollowups, type DaemonRepairPrompt } from './shell/first-render-followups.ts';
 import './tools/agent-harness-model-routing.ts';
 import './tools/agent-harness-setup-model-helpers.ts';
@@ -59,7 +59,7 @@ import { buildShellSessionContinuityHints } from './shell/session-continuity-hin
 import { wireShellUiOpeners } from './shell/ui-openers.ts';
 import { deriveComposerState } from './core/composer-state.ts';
 import { describePowerStatus } from './renderer/power-status.ts';
-import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { installFocusModeExitGuard, markFocusModeEnabled, wrapRequestPermissionWithApprovalAlert } from './shell/terminal-focus-mode.ts';
 import { buildEnterSequence, buildExitSequence } from './renderer/terminal-escapes.ts';
 import { prepareShellCliRuntime } from './cli/entrypoint.ts';

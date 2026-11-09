@@ -26,8 +26,8 @@ import { getSessionUntrustedContentLedger } from '../../trust/untrusted-content.
 import { describeSenderClaim, type DisplayedSenderConfidence } from '../../agent/untrusted-content.ts';
 import type { CommandContext } from '../command-registry.ts';
 import { requireYesFlag, stripYesFlag } from './confirmation.ts';
-import { EmailService, readEmailConfig, validateEmailConfig, ensureEmailConfigDefaults } from '@goodvibes-jev/engine/sdk/platform/email';
-import { nodeEmailTransport } from '@goodvibes-jev/engine/sdk/platform/email/node';
+import { EmailService, readEmailConfig, validateEmailConfig, ensureEmailConfigDefaults } from '@goodvibes-jev/engine/platform/platform/email';
+import { nodeEmailTransport } from '@goodvibes-jev/engine/platform/platform/email/node';
 import { requireSecretsManager } from './runtime-services.ts';
 import type { ConfigKey } from '../../config/index.ts';
 import { persistSecretBackedConfigValue } from '../../config/secret-config.ts';
@@ -67,7 +67,7 @@ export interface EmailConfigManagerLike {
 
 /**
  * SecretsManager surface needed to store the raw password. The real
- * ctx.platform.secretsManager (SDK SecretsManager) has more methods;
+ * ctx.platform.secretsManager (platform SecretsManager) has more methods;
  * persistSecretBackedConfigValue is called through an opaque cast, matching
  * the existing /email set pattern.
  */

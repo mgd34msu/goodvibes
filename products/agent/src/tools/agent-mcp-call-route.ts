@@ -1,9 +1,9 @@
-import { assertCurrentToolInvocation, assertCurrentToolEffect, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { McpApi, McpToolSchema } from '@goodvibes-jev/engine/sdk/platform/mcp';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { assertCurrentToolInvocation, assertCurrentToolEffect, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { McpApi, McpToolSchema } from '@goodvibes-jev/engine/platform/platform/mcp';
+import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import { isDeepStrictEqual } from 'node:util';
 import { captureCatalogData, captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
-import type { Tool, ToolSideEffect } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Tool, ToolSideEffect } from '@goodvibes-jev/engine/platform/platform/types';
 import type { CommandContext } from '../input/command-registry.ts';
 
 type McpCallApi = Pick<McpApi, 'callTool' | 'getToolSchema' | 'listServerSecurity'>;

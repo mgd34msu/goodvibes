@@ -11,7 +11,7 @@
  *
  * Checked by `bun run types:check`.
  */
-import type { StepUpEvaluationInput, buildDaemonRelayReachability } from '@goodvibes-jev/engine/sdk/platform/relay';
+import type { StepUpEvaluationInput, buildDaemonRelayReachability } from '@goodvibes-jev/engine/platform/platform/relay';
 
 type BuildArgs = Parameters<typeof buildDaemonRelayReachability>;
 

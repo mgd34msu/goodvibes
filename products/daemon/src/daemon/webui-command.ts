@@ -37,10 +37,10 @@
 
 import { isAbsolute, join, resolve } from 'node:path';
 import { existsSync, statSync } from 'node:fs';
-import type { ConfigManager, DaemonConfigPatch } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager, DaemonConfigPatch } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
 import { WEBUI_BINDING_RESULT } from '../cli/machine-contracts.js';
-import { describeOriginPosture, formatHttpOrigin, probeStableHostInputs, stableUrlHostForBindHost, type StableHostInputs } from '@goodvibes-jev/engine/sdk/platform/pairing';
+import { describeOriginPosture, formatHttpOrigin, probeStableHostInputs, stableUrlHostForBindHost, type StableHostInputs } from '@goodvibes-jev/engine/platform/platform/pairing';
 
 /** The shipped `web.publicBaseUrl` placeholder, a port nothing binds. */
 const SHIPPED_PUBLIC_BASE_URL = 'http://127.0.0.1:3423';

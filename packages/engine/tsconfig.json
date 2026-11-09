@@ -1,5 +1,5 @@
 {
-  // The engine is the old goodvibes-sdk workspace: each old package keeps its own tsconfig,
+  // The engine is the old goodvibes-platform workspace: each old package keeps its own tsconfig,
   // compiled as before, and this file references them all (the old tsconfig.build.json).
   "compilerOptions": {
     "types": [],
@@ -14,7 +14,7 @@
       "path": "./errors"
     },
     {
-      "path": "./daemon-sdk"
+      "path": "./daemon-api"
     },
     {
       "path": "./transport-core"
@@ -26,13 +26,13 @@
       "path": "./transport-realtime"
     },
     {
-      "path": "./operator-sdk"
+      "path": "./operator-client"
     },
     {
-      "path": "./peer-sdk"
+      "path": "./peer-client"
     },
     {
-      "path": "./sdk"
+      "path": "./platform"
     },
     {
       "path": "./terminal-shell"

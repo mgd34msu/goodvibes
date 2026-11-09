@@ -13,7 +13,7 @@ import { describe, expect, test } from 'bun:test';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { recallCommand } from '../../input/commands/memory.ts';
 import type { TurnInjectionEntry } from '../../renderer/turn-injection.ts';
-import type { AgentRecord } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { AgentRecord } from '@goodvibes-jev/engine/platform/platform/tools';
 
 function makeAgentRecord(overrides: Partial<AgentRecord> & { id: string; task: string }): AgentRecord {
   return {

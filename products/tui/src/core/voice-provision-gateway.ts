@@ -7,7 +7,7 @@
 // one-act managed install. Neither has a named facade on the in-process
 // OperatorClient, so, exactly like the memory-consolidation gateway, they go
 // over the generic operator invoke path (operator-rpc.ts's resolveOperatorRpc
-// -> sdk.operator.invoke), reaching the SAME daemon the command layer does.
+// -> platform.operator.invoke), reaching the SAME daemon the command layer does.
 //
 // A daemon that predates managed voice provisioning answers an honest 501 (verb
 // cataloged but no handler) or a 404 (older daemon without the route), both
@@ -16,8 +16,8 @@
 // its tests round-trip against a mocked daemon.
 // ---------------------------------------------------------------------------
 
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { GoodVibesSdkError } from '@goodvibes-jev/engine/sdk';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { GoodVibesError } from '@goodvibes-jev/engine/platform';
 import { resolveOperatorRpc, describeOperatorRpcError } from '../input/commands/operator-rpc.ts';
 import type { VoiceRuntimeStatusResult, VoiceLocalInstallResult } from './voice-provision-status.ts';
 import { voiceStatusLines, voiceInstallReceiptLines, voiceInstallComponentLine } from './voice-provision-status.ts';
@@ -53,12 +53,12 @@ export interface VoiceProvisionGatewayDeps {
 export function createVoiceProvisionGateway(deps: VoiceProvisionGatewayDeps): VoiceProvisionGatewayResolution {
   const rpc = resolveOperatorRpc({ configManager: deps.configManager, homeDirectory: deps.homeDirectory });
   if (!rpc.available) return { available: false, reason: rpc.reason };
-  const { sdk } = rpc;
+  const { platformClient } = rpc;
   return {
     available: true,
     gateway: {
-      fetchStatus: () => sdk.operator.invoke('voice.local.status', {}),
-      runInstall: () => sdk.operator.invoke('voice.local.install', {}),
+      fetchStatus: () => platformClient.operator.invoke('voice.local.status', {}),
+      runInstall: () => platformClient.operator.invoke('voice.local.install', {}),
     },
   };
 }
@@ -76,7 +76,7 @@ export type VoiceProvisionFetchFailure =
  * the call sites never diverge on how they describe the same daemon response.
  */
 export function classifyVoiceProvisionError(error: unknown): VoiceProvisionFetchFailure {
-  if (error instanceof GoodVibesSdkError && (error.status === 501 || error.status === 404)) {
+  if (error instanceof GoodVibesError && (error.status === 501 || error.status === 404)) {
     return { kind: 'unavailable', reason: 'this daemon does not serve managed voice provisioning yet.' };
   }
   return { kind: 'error', message: describeOperatorRpcError(error) };
@@ -146,7 +146,7 @@ const realSleep = (ms: number): Promise<void> => new Promise((resolve) => setTim
  * `installInProgress` snapshot, printing a per-component line each time a
  * component's phase advances (download → verify → extract → done). When the
  * install settles, print the final receipt (or an honest failure). The install
- * verb streams nothing itself, this polling is exactly how the SDK intends
+ * verb streams nothing itself, this polling is exactly how the platform intends
  * surfaces to render real progress instead of busy→receipt.
  *
  * The caller prints VOICE_SETUP_ANNOUNCEMENT before calling this. gateway

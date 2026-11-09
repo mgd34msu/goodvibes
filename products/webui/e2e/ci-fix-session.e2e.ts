@@ -7,7 +7,7 @@
  *     approvals view's resolved card offers Open fix session once the record
  *     updates post-acceptance.
  * The stamped id is always a real attachable session (never an internal
- * scheduling handle, SDK bb4b9c30), so opening lands on a LIVE session view:
+ * scheduling handle, platform bb4b9c30), so opening lands on a LIVE session view:
  * these tests assert the chat surface actually shows the spawned session, not
  * an id it reconciled away. A failed spawn carries fixSessionError instead,
  * rendered as an honest error line, never a dead open button.

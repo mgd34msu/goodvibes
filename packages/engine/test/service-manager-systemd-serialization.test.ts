@@ -3,8 +3,8 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { PlatformServiceManager, renderSystemdUnit, type ManagedServiceDefinition } from '../sdk/src/platform/daemon/service-manager.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { PlatformServiceManager, renderSystemdUnit, type ManagedServiceDefinition } from '../platform/src/platform/daemon/service-manager.js';
 
 const definition: ManagedServiceDefinition = {
   name: 'jev-serialization-test', description: 'Jev test daemon', workingDirectory: '/tmp/jev-home',

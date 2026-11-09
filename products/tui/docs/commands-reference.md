@@ -137,7 +137,7 @@ GoodVibes ships **162** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/cloudflare` | `/cf` | `[status\|setup\|requirements\|create-token\|discover\|validate\|provision\|verify\|disable] [flags]` | Inspect and manage optional Cloudflare batch/control-plane integration through daemon SDK routes |
+| `/cloudflare` | `/cf` | `[status\|setup\|requirements\|create-token\|discover\|validate\|provision\|verify\|disable] [flags]` | Inspect and manage optional Cloudflare batch/control-plane integration through daemon routes |
 
 ## Cluster
 

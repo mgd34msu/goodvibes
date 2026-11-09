@@ -2,7 +2,7 @@
 # run-hermes-tests.sh
 #
 # Orchestrates the full Hermes test run:
-#   1. Build the SDK (if dist/ is stale)
+#   1. Build the platform (if dist/ is stale)
 #   2. Bundle the Hermes test runner via esbuild (via Bun)
 #   3. Execute the bundle under the Hermes binary
 #
@@ -36,12 +36,12 @@ for arg in "$@"; do
 done
 
 if [ -z "$NO_BUILD" ]; then
-  echo "[hermes] Building SDK dist..."
+  echo "[hermes] Building platform dist..."
   bun run build --cwd "$REPO_ROOT"
 else
   # --no-build was passed: verify dist exists before proceeding
   if [ ! -f "$ENGINE_ROOT/sdk/dist/index.js" ]; then
-    echo "ERROR: --no-build was passed but packages/engine/sdk/dist/index.js does not exist."
+    echo "ERROR: --no-build was passed but packages/engine/platform/dist/index.js does not exist."
     echo "Run: bun run build (from repo root) before using --no-build."
     exit 1
   fi

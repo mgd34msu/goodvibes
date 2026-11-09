@@ -2,7 +2,7 @@ import { mockFetch } from '../helpers/typed-fetch-mock.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { redactSensitiveDataAsync, redactionCredential, residualCredential, fieldKind } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { redactSensitiveDataAsync, redactionCredential, residualCredential, fieldKind } from '@goodvibes-jev/engine/platform/platform/utils';
 import { isDeepStrictEqual } from 'node:util';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -528,7 +528,7 @@ describe('routines CLI command', () => {
       const url = inputUrl(input);
       requests.push({ url, method: init?.method ?? 'GET' });
       // An HTTP 404 is a response. Throwing from fetch instead models a
-      // transport failure, which the browser SDK correctly marks as network.
+      // transport failure, which the browser platform correctly marks as network.
       return new Response('Route not found: /api/automation/schedules (404)', { status: 404 });
     });
 

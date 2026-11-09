@@ -1,7 +1,7 @@
 /**
  * session-union-cache.test.ts
  *
- * Unit evidence for the cross-surface read facade moved into the SDK. Drives
+ * Unit evidence for the cross-surface read facade moved into the platform. Drives
  * the facade with a fake sync local reader + a fake async wire reader (no real
  * daemon here, the daemon-integration test covers the real wire) to prove the
  * honesty contract: embedded/local passthrough; adopted-online union (deduped, local
@@ -10,14 +10,14 @@
  * refresh does not clobber newer state).
  */
 import { describe, expect, test } from 'bun:test';
-import type { SharedSessionRecord } from '../sdk/src/platform/control-plane/index.ts';
+import type { SharedSessionRecord } from '../platform/src/platform/control-plane/index.ts';
 import {
   deriveSpineFooterStatus,
   SessionUnionCache,
   type LocalSessionReader,
   type SessionReadFacade,
   type WireSessionReader,
-} from '../sdk/src/platform/runtime/session-spine/index.ts';
+} from '../platform/src/platform/runtime/session-spine/index.ts';
 
 describe('deriveSpineFooterStatus (offline within one union-probe interval)', () => {
   test('not adopted: falls back to the spine client status', () => {

@@ -1,5 +1,5 @@
 import { expect, spyOn, test } from 'bun:test';
-import { ProcessManager, type BgCommandResult } from '../sdk/src/platform/tools/shared/process-manager.ts';
+import { ProcessManager, type BgCommandResult } from '../platform/src/platform/tools/shared/process-manager.ts';
 import { useToolReadings } from './_helpers/tool-readings.ts';
 
 useToolReadings();

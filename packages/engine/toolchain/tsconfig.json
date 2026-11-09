@@ -24,6 +24,6 @@
   "references": [
     { "path": "../../judgment" },
     { "path": "../errors" },
-    { "path": "../sdk" }
+    { "path": "../platform" }
   ]
 }

@@ -2,7 +2,7 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { ordinaryResearchOwner, cleanupResearchScreeningFixtures } from '../helpers/research-screening.ts';
 import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
-import type { ConfigKey, ConfigSetting, ConfigValue, EffectiveConfigView } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigKey, ConfigSetting, ConfigValue, EffectiveConfigView } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveHarnessSetting, resolveHarnessSettingAsync, type HarnessSettingLookupArgs, type HarnessSettingResolvedBy } from '../../agent/harness-control.ts';
 
 let probability = 0.99;

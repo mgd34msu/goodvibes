@@ -1,5 +1,5 @@
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogData, captureCatalogMethods, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { contractMethodsForAutonomy } from './agent-harness-personal-ops-discovery.ts';
 import type { CommandContext } from '../input/command-registry.ts';
@@ -359,7 +359,7 @@ function buildQueueItems(context: CommandContext, watcherReadModelRecords: reado
             : watcherReadModelRecords.length > 0
               ? 'Review live watcher/source read models and durable receipts; mutate through exact owning routes published by the host under current recorded admission.'
               : watcherReceiptRecords.length > 0
-                ? 'Review durable watcher/run receipts, then wait for live SDK/daemon run records before controlling any run.'
+                ? 'Review durable watcher/run receipts, then wait for live platform/daemon run records before controlling any run.'
                 : 'Inspect automation posture first. Use exact run/job ids for owning run control under current recorded admission.',
       inspectRoute: 'host action:"methods" query:"automation"',
       modelRoute: 'workspace action:"actions" categoryId:"automation"',

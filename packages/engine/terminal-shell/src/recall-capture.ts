@@ -1,11 +1,11 @@
-import type { MemoryApi } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import {
   buildIncidentMemoryAddOptions,
   buildMcpSecurityMemoryAddOptions,
   buildPluginSecurityMemoryAddOptions,
   buildPolicyPreflightMemoryAddOptions,
   type ProvenanceLink,
-} from '@goodvibes-jev/engine/sdk/platform/state';
+} from '@goodvibes-jev/engine/platform/platform/state';
 import { VALID_CLASSES, VALID_SCOPES, isValidClass, isValidScope } from './recall-shared.js';
 export interface RecallCaptureContext {
   readonly print: (message: string) => void;

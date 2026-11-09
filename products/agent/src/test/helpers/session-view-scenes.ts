@@ -9,11 +9,11 @@
  * key did and did not do, and golden frames render the real view path.
  */
 
-import { createEmptyLine, type Line } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { ToolCall } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { AgentManager, ProcessManager } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { ProcessNode, SteerResult } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
+import { createEmptyLine, type Line } from '@goodvibes-jev/engine/platform/platform/types';
+import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
+import type { AgentManager, ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ProcessNode, SteerResult } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import type { AgentLaneInfo, WorkTreeSources } from '../../core/work-tree-sources.ts';
 import { SessionViews } from '../../shell/session-views.ts';
 import { buildShellFooter } from '../../renderer/shell-surface.ts';

@@ -17,8 +17,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, test } from 'bun:test';
-import { ProjectPlanningService } from '../sdk/src/platform/knowledge/index.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
+import { ProjectPlanningService } from '../platform/src/platform/knowledge/index.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 
 const tmpRoots: string[] = [];
 afterEach(() => {
@@ -37,7 +37,7 @@ async function seedWithOpenQuestion(service: ProjectPlanningService): Promise<vo
     projectId: 'alpha',
     state: {
       goal: 'Record answers to project questions',
-      scope: 'SDK service only',
+      scope: 'platform service only',
       tasks: [{
         id: 'answer-project-question', title: 'Implement answerQuestion',
         verification: ['bun test test/project-planning-answer.test.ts'],
@@ -60,13 +60,13 @@ describe('ProjectPlanningService.answerQuestion', () => {
     const result = await service.answerQuestion({
       projectId: 'alpha',
       questionId: 'project-scope',
-      answer: 'A focused project scope covering the SDK service only.',
+      answer: 'A focused project scope covering the platform service only.',
     });
 
     expect(result.answered).toBe(true);
     expect(result.question?.id).toBe('project-scope');
     expect(result.question?.status).toBe('answered');
-    expect(result.question?.answer).toBe('A focused project scope covering the SDK service only.');
+    expect(result.question?.answer).toBe('A focused project scope covering the platform service only.');
     expect(typeof result.question?.answeredAt).toBe('number');
 
     // Open questions no longer include the answered one; the other remains.
@@ -102,7 +102,7 @@ describe('ProjectPlanningService.answerQuestion', () => {
     expect(scopeGapBefore).toBe(true);
 
     const result = await service.answerQuestion({
-      projectId: 'alpha', questionId: 'project-scope', answer: 'The SDK service.',
+      projectId: 'alpha', questionId: 'project-scope', answer: 'The platform service.',
     });
     const scopeGapAfter = result.evaluation.gaps.some((g) => g.id === 'open-question:project-scope');
     expect(scopeGapAfter).toBe(false);

@@ -1,8 +1,8 @@
-import type { MemoryRecord, MemoryRegistry, MemoryVectorStats } from '@goodvibes-jev/engine/sdk/platform/state';
-// The recall-honesty floor + eligibility receipt now live in the SDK as
+import type { MemoryRecord, MemoryRegistry, MemoryVectorStats } from '@goodvibes-jev/engine/platform/platform/state';
+// The recall-honesty floor + eligibility receipt now live in the platform as
 // the ONE cross-surface contract (memory-recall-contract.ts) instead of being defined
 // per surface. This file re-exports them unchanged so every existing agent consumer
-// keeps importing from './memory-prompt.ts', while the SDK is the single source of the
+// keeps importing from './memory-prompt.ts', while the platform is the single source of the
 // floor (60, the store's own baseline), the flagged-record exclusion, and the honest
 // degraded-state distinction. The per-turn ranking below stays agent-local, it is
 // injection wiring on top of the contract, not the contract itself.
@@ -10,8 +10,8 @@ import {
   MIN_PROMPT_MEMORY_CONFIDENCE,
   describeMemoryPromptEligibility,
   isPromptActiveMemory,
-} from '@goodvibes-jev/engine/sdk/platform/state';
-import type { MemoryPromptEligibility } from '@goodvibes-jev/engine/sdk/platform/state';
+} from '@goodvibes-jev/engine/platform/platform/state';
+import type { MemoryPromptEligibility } from '@goodvibes-jev/engine/platform/platform/state';
 
 export { MIN_PROMPT_MEMORY_CONFIDENCE, describeMemoryPromptEligibility, isPromptActiveMemory };
 export type { MemoryPromptEligibility };
@@ -116,7 +116,7 @@ export async function rankMemoryForTurn(
   }
   // Request enough candidates back that every eligible record has a real chance to
   // appear with its similarity score (searchSemantic slices its return to this limit
-  // after scoring, not before), the SDK's vector store caps the underlying KNN search
+  // after scoring, not before), the platform's vector store caps the underlying KNN search
   // at 500 candidates regardless, so there is no point asking for more than that.
   const requestLimit = Math.min(500, Math.max(eligible.length, 50));
   const results = await memoryRegistry.searchSemantic({ query: trimmedTurnText, limit: requestLimit });
@@ -151,7 +151,7 @@ export interface BuildReviewedMemoryPromptOptions {
   readonly turnText?: string | null;
   /**
    * Pre-fetched record set to use instead of `memoryRegistry.getAll()`, e.g. a
-   * memory-spine recall snapshot's records (SDK 1.2.0 sync-recall seam; see
+   * memory-spine recall snapshot's records (platform 1.2.0 sync-recall seam; see
    * prompt-context-receipts.ts's `resolveMemoryRecords`). `memoryRegistry` is still
    * used for the per-turn semantic ranking query (`rankMemoryForTurn`'s
    * `vectorStats`/`searchSemantic` calls stay local-direct regardless of where the

@@ -41,20 +41,20 @@ import {
   OWNER_DIRECT_INPUT_SOURCES,
   inputOriginIsOwnerDirect,
   startTurnForOwnerInput,
-} from '../sdk/src/platform/security/turn-boundary.ts';
+} from '../platform/src/platform/security/turn-boundary.ts';
 import {
   UntrustedContentLedger,
   evaluateOutwardEffect,
-} from '../sdk/src/platform/security/untrusted-content.ts';
+} from '../platform/src/platform/security/untrusted-content.ts';
 import {
   OwnerApprovalStore,
   checkOwnerApproval,
   fingerprintOutwardContent,
   grantOwnerApproval,
   type ApprovalSurface,
-} from '../sdk/src/platform/security/owner-approval.ts';
-import { describeExposures } from '../sdk/src/platform/security/untrusted-surface-language.ts';
-import type { TurnInputOrigin } from '../sdk/src/events/turn.ts';
+} from '../platform/src/platform/security/owner-approval.ts';
+import { describeExposures } from '../platform/src/platform/security/untrusted-surface-language.ts';
+import type { TurnInputOrigin } from '../platform/src/events/turn.ts';
 import { useSecurityReadings } from './helpers/security-readings.ts';
 
 useSecurityReadings();

@@ -2,10 +2,10 @@ import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { acquireCrossProcessLock } from '../sdk/src/platform/workspace/checkpoint/cross-process-lock.js';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { SecretsManager } from '../sdk/src/platform/config/secrets.js';
-import { createAtRestCipher, createDaemonCredentialStore } from '../sdk/src/platform/config/daemon-credential-store.js';
+import { acquireCrossProcessLock } from '../platform/src/platform/workspace/checkpoint/cross-process-lock.js';
+import type { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { SecretsManager } from '../platform/src/platform/config/secrets.js';
+import { createAtRestCipher, createDaemonCredentialStore } from '../platform/src/platform/config/daemon-credential-store.js';
 
 const KEY = 'GOODVIBES_DAEMON_DRAFT_AESKEY';
 function owner(home: string) {
@@ -15,8 +15,8 @@ function owner(home: string) {
 test('independent process creators share one draft namespace and every draft survives reopen', async () => {
   const home = mkdtempSync(join(tmpdir(), 'daemon-draft-key-'));
   const fixture = join(home, 'creator.ts');
-  writeFileSync(fixture, `import { SecretsManager } from ${JSON.stringify(new URL('../sdk/src/platform/config/secrets.ts', import.meta.url).href)};
-import { createAtRestCipher, createDaemonCredentialStore } from ${JSON.stringify(new URL('../sdk/src/platform/config/daemon-credential-store.ts', import.meta.url).href)};
+  writeFileSync(fixture, `import { SecretsManager } from ${JSON.stringify(new URL('../platform/src/platform/config/secrets.ts', import.meta.url).href)};
+import { createAtRestCipher, createDaemonCredentialStore } from ${JSON.stringify(new URL('../platform/src/platform/config/daemon-credential-store.ts', import.meta.url).href)};
 const [home, id] = process.argv.slice(2);
 const secrets = new SecretsManager({ globalHome: home, projectRoot: home, daemonHome: home + '/daemon', surfaceRoot: 'daemon' });
 const cipher = createAtRestCipher(createDaemonCredentialStore(secrets));

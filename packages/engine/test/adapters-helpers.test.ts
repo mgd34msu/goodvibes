@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { readBearerOrHeaderToken, readTextBodyWithinLimit, verifySha256HmacSignature } from '@goodvibes-jev/engine/sdk/platform/adapters';
+import { readBearerOrHeaderToken, readTextBodyWithinLimit, verifySha256HmacSignature } from '@goodvibes-jev/engine/platform/platform/adapters';
 import { createHmac } from 'node:crypto';
 
 describe('adapter helpers', () => {

@@ -6,8 +6,8 @@ import {
   AgentAccountRegistry,
   ACCOUNT_REGISTRY_PATH_SEGMENTS,
   MAX_ACCOUNT_RECORDS,
-} from '../sdk/src/platform/google/account-registry.ts';
-import { mintAddressFor } from '../sdk/src/platform/google/signup-address.ts';
+} from '../platform/src/platform/google/account-registry.ts';
+import { mintAddressFor } from '../platform/src/platform/google/signup-address.ts';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PERMANENT REGRESSION GUARDS.

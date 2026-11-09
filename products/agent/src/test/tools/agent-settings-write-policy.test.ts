@@ -15,9 +15,9 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/sdk/platform/config';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
+import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import {
   AGENT_CONFIRMATION_REQUIRED_CONFIG_KEYS,
   AGENT_SETTINGS_CONFIRMATION_PROPERTY,
@@ -286,7 +286,7 @@ describe('the gate stays narrow', () => {
 
   test('the credential protection is left to the value check, not duplicated as a key gate', () => {
     // The original guard's stated concern included secrets. That half still runs
-    // in the SDK tool, which refuses a raw credential value and names the
+    // in the platform tool, which refuses a raw credential value and names the
     // goodvibes:// reference instead, so token keys are not gated here.
     expect(findConfirmationRequiredConfigKey('surfaces.telegram.botToken')).toBeNull();
     expect(findConfirmationRequiredConfigKey('surfaces.slack.appToken')).toBeNull();

@@ -3,14 +3,14 @@
  * colour, the specialised card per decision kind, and the argument it shows.
  *
  * The gate itself (PermissionManager, the danger-gated daemon and listener,
- * spawn tokens, path validation) is SDK code and is tested in the SDK.
+ * spawn tokens, path validation) is platform code and is tested in the platform.
  */
 
 import { describe, test, expect } from 'bun:test';
 import { promptCardLines } from '../helpers/permission-card.ts';
 import { activeTokens } from '../../renderer/theme.ts';
 import { PermissionPromptUI } from '../../permissions/prompt.ts';
-import { analyzePermissionRequest, type PermissionRequestAnalysis } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import { analyzePermissionRequest, type PermissionRequestAnalysis } from '@goodvibes-jev/engine/platform/platform/permissions';
 
 /** The renderer consumes explicit gate readings; the structural analyzer is not a risk classifier. */
 function readAnalysis(

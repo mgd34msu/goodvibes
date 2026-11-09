@@ -22,25 +22,25 @@
  * itself unavailable BY NAME rather than failing silently or returning empty.
  */
 
-import { describeOpenAIAvailability } from '../../sdk/src/platform/providers/optional-openai.ts';
-import { OpenAIProvider } from '../../sdk/src/platform/providers/openai.ts';
-import { ProviderError } from '../../sdk/src/platform/types/errors.ts';
-import { readNormalizedError } from '../../sdk/src/platform/utils/error-display.ts';
-import { describeBedrockAvailability } from '../../sdk/src/platform/providers/optional-bedrock.ts';
-import { fetchBedrockModelIds } from '../../sdk/src/platform/providers/amazon-bedrock.ts';
+import { describeOpenAIAvailability } from '../../platform/src/platform/providers/optional-openai.ts';
+import { OpenAIProvider } from '../../platform/src/platform/providers/openai.ts';
+import { ProviderError } from '../../platform/src/platform/types/errors.ts';
+import { readNormalizedError } from '../../platform/src/platform/utils/error-display.ts';
+import { describeBedrockAvailability } from '../../platform/src/platform/providers/optional-bedrock.ts';
+import { fetchBedrockModelIds } from '../../platform/src/platform/providers/amazon-bedrock.ts';
 import {
   createAnthropicVertexClient,
   describeAnthropicVertexAvailability,
-} from '../../sdk/src/platform/providers/anthropic-vertex.ts';
-import { describeAcpAvailability } from '../../sdk/src/platform/acp/optional-sdk.ts';
-import { serveAcpAgent } from '../../sdk/src/platform/acp/agent.ts';
-import { describeSimpleGitAvailability } from '../../sdk/src/platform/git/optional-simple-git.ts';
-import { GitService } from '../../sdk/src/platform/git/service.ts';
-import { primeGraphqlModule } from '../../sdk/src/platform/knowledge/graphql-schema.ts';
+} from '../../platform/src/platform/providers/anthropic-vertex.ts';
+import { describeAcpAvailability } from '../../platform/src/platform/acp/optional-acp-library.ts';
+import { serveAcpAgent } from '../../platform/src/platform/acp/agent.ts';
+import { describeSimpleGitAvailability } from '../../platform/src/platform/git/optional-simple-git.ts';
+import { GitService } from '../../platform/src/platform/git/service.ts';
+import { primeGraphqlModule } from '../../platform/src/platform/knowledge/graphql-schema.ts';
 import {
   KnowledgeGraphqlService,
   inspectKnowledgeGraphqlAccess,
-} from '../../sdk/src/platform/knowledge/graphql.ts';
+} from '../../platform/src/platform/knowledge/graphql.ts';
 
 // Printed before anything else: a static import of a missing package never
 // reaches this line, which is the whole difference being measured.

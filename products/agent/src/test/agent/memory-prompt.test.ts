@@ -1,8 +1,8 @@
 import { useMemoryReadings } from '../helpers/memory-readings.ts';
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/sdk/platform/state';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/platform/platform/state';
 import { buildReviewedMemoryPrompt, describeMemoryPromptEligibility, isPromptActiveMemory, rankMemoryForTurn, relevanceBand } from '../../agent/memory-prompt.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
@@ -58,7 +58,7 @@ describe('buildReviewedMemoryPrompt', () => {
 
   test('a genuinely-stored fresh fact (store-default confidence, never reviewed) recalls in a fresh session', async () => {
     // The dogfood repro that motivated this fix: store a fact with no explicit confidence
-    // (so it lands at the SDK's own default of 60, reviewState 'fresh'), then build a
+    // (so it lands at the platform's own default of 60, reviewState 'fresh'), then build a
     // brand-new prompt (as a fresh session would) and confirm it shows up. Before this
     // fix, a fresh record's confidence (60) could never clear a 70 floor, so a fact
     // stored in one session silently never recalled in the next.

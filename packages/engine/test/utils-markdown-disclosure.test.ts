@@ -7,7 +7,7 @@ import {
   materializeMarkdownBody,
   parseMarkdownFrontmatter,
   readMarkdownDisclosure,
-} from '@goodvibes-jev/engine/sdk/platform/utils';
+} from '@goodvibes-jev/engine/platform/platform/utils';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 describe('markdown disclosure', () => {

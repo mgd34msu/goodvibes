@@ -2,11 +2,11 @@ import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createPluginAPI, type PluginAPIContext } from '../sdk/src/platform/plugins/api.ts';
-import { ChannelPluginRegistry, type ChannelPlugin } from '../sdk/src/platform/channels/plugin-registry.ts';
-import { PluginInFlightTracker } from '../sdk/src/platform/plugins/in-flight.ts';
-import { PluginManager } from '../sdk/src/platform/plugins/manager.ts';
-import type { PluginLoaderDeps } from '../sdk/src/platform/plugins/loader.ts';
+import { createPluginAPI, type PluginAPIContext } from '../platform/src/platform/plugins/api.ts';
+import { ChannelPluginRegistry, type ChannelPlugin } from '../platform/src/platform/channels/plugin-registry.ts';
+import { PluginInFlightTracker } from '../platform/src/platform/plugins/in-flight.ts';
+import { PluginManager } from '../platform/src/platform/plugins/manager.ts';
+import type { PluginLoaderDeps } from '../platform/src/platform/plugins/loader.ts';
 
 function gate() {
   let resolve!: () => void;

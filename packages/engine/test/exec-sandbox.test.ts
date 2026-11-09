@@ -16,9 +16,9 @@ import {
   type ExecSandboxConfig,
   type SandboxAvailability,
   type SandboxHostProbe,
-} from '../sdk/src/platform/tools/exec/sandbox.js';
-import { decideSandboxedExec } from '../sdk/src/platform/runtime/permissions/sandbox-policy.js';
-import { guardExecCommand } from '../sdk/src/platform/tools/exec/ast-guard.js';
+} from '../platform/src/platform/tools/exec/sandbox.js';
+import { decideSandboxedExec } from '../platform/src/platform/runtime/permissions/sandbox-policy.js';
+import { guardExecCommand } from '../platform/src/platform/tools/exec/ast-guard.js';
 import { useGateReadings } from './_helpers/gate-readings.ts';
 
 const LOCAL = { needsNetwork: false, needsPrivilege: false } as const;

@@ -1,18 +1,18 @@
 import { afterEach, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
-import { BrowserSessionManager } from '../sdk/src/platform/browser/browser-sessions.js';
-import { BrowserEngine } from '../sdk/src/platform/browser/browser-engine.js';
-import { remotePage, type BrowserHostClient } from '../sdk/src/platform/browser/browser-host-client.js';
-import { findOriginalBrowserPage, observeBrowserPageConnection } from '../sdk/src/platform/browser/browser-page-connection.js';
-import { captureBrowserPageConnection } from '../sdk/src/platform/browser/browser-page-connection-data.js';
-import { DRIVER_VERSION } from '../sdk/src/platform/browser/browser-provision-io.js';
-import type { BrowserProvisionIo } from '../sdk/src/platform/browser/browser-types.js';
+import { BrowserSessionManager } from '../platform/src/platform/browser/browser-sessions.js';
+import { BrowserEngine } from '../platform/src/platform/browser/browser-engine.js';
+import { remotePage, type BrowserHostClient } from '../platform/src/platform/browser/browser-host-client.js';
+import { findOriginalBrowserPage, observeBrowserPageConnection } from '../platform/src/platform/browser/browser-page-connection.js';
+import { captureBrowserPageConnection } from '../platform/src/platform/browser/browser-page-connection-data.js';
+import { DRIVER_VERSION } from '../platform/src/platform/browser/browser-provision-io.js';
+import type { BrowserProvisionIo } from '../platform/src/platform/browser/browser-types.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { createUntrustedContentPort, UntrustedContentLedger } from '../sdk/src/platform/security/untrusted-content.js';
+import { createUntrustedContentPort, UntrustedContentLedger } from '../platform/src/platform/security/untrusted-content.js';
 import { withSecurityReadings } from './helpers/security-readings.ts';
-import { CardMaterialRedactor } from '../sdk/src/platform/payments/card-redaction.js';
-import { createBrowserCheckoutDriverFactory } from '../sdk/src/platform/payments/browser-checkout-driver.js';
+import { CardMaterialRedactor } from '../platform/src/platform/payments/card-redaction.js';
+import { createBrowserCheckoutDriverFactory } from '../platform/src/platform/payments/browser-checkout-driver.js';
 
 const cleanup: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });

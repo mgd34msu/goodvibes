@@ -3,7 +3,7 @@
  * client has.
  *
  * The verb has had a handler in this repository for a while. What it did not
- * have was a client: the SDK descriptor carried `invokable: false`, so the
+ * have was a client: the platform descriptor carried `invokable: false`, so the
  * generic method-dispatch endpoint refused it before the handler was ever
  * consulted, and the advertised path `GET /api/channels/inbox` was in no route
  * table. The agent's unified inbox asked for it on every refresh and recorded
@@ -26,7 +26,7 @@ import type { DaemonFixture } from '../../testing/daemon-fixture.js';
 import { startGatewayFixture as startDaemonFixture } from '../helpers/gateway-route-fixture.js';
 import { makeOwnedTempDir as makeProjectTempDir } from '../helpers/owned-temp.js';
 import { createProductionDaemonInboxFactory } from '../../runtime/production-inbox-composition.js';
-import type { InboxListOutput } from '@goodvibes-jev/engine/sdk/platform/intake';
+import type { InboxListOutput } from '@goodvibes-jev/engine/platform/platform/intake';
 
 const METHOD_ID = 'channels.inbox.list';
 const REST_PATH = '/api/channels/inbox';

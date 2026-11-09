@@ -13,14 +13,14 @@ import { frameFromLayer } from '../helpers/surface-frame.ts';
 import { describe, test, expect } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
-import { createStyledCell } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
+import { createStyledCell } from '@goodvibes-jev/engine/platform/platform/types';
 import { renderSettingsModal } from '../../renderer/settings-modal.ts';
 import { SettingsModal } from '../../input/settings-modal.ts';
-import { ConfigManager, ServiceRegistry, SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager, ServiceRegistry, SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { SecretsManager } from '../../config/secrets.ts';
 import { createFeatureFlagManager, type FeatureFlagManager } from '@/runtime/index.ts';
-import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
+import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
 import {
   assertFrameLiveness,
   differingCells,

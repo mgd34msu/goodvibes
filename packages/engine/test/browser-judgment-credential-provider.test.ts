@@ -1,9 +1,9 @@
 import { expect, spyOn, test } from 'bun:test';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { BrowserJudgmentError, createBrowserJudgmentHttpHandler, type AuthenticatedPrincipal, type BrowserJudgmentRequest } from '../daemon-sdk/src/index.ts';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { createWebuiBrowserJudgment } from '../sdk/src/platform/judgment-browser/webui-runtime.ts';
-import { withWebuiAnswerBoundary } from '../sdk/src/platform/judgment-browser/batteries/webui-answers.ts';
+import { BrowserJudgmentError, createBrowserJudgmentHttpHandler, type AuthenticatedPrincipal, type BrowserJudgmentRequest } from '../daemon-api/src/index.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { createWebuiBrowserJudgment } from '../platform/src/platform/judgment-browser/webui-runtime.ts';
+import { withWebuiAnswerBoundary } from '../platform/src/platform/judgment-browser/batteries/webui-answers.ts';
 
 const owner: AuthenticatedPrincipal = { principalId: 'synthetic-credential-owner', principalKind: 'user', admin: true, scopes: ['write:judgment'] };
 const ORIGIN = 'https://daemon.fixture.invalid';

@@ -1,11 +1,11 @@
 import { expect, test } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
-import { createShellPathService } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
-import { SandboxSessionRegistry } from '@goodvibes-jev/engine/sdk/platform/runtime/sandbox';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
+import { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
+import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { SandboxSessionRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/sandbox';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { ConfigManager } from '../../config/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 import { ConversationManager } from '../../core/conversation.ts';

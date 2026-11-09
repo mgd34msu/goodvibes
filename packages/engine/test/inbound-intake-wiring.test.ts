@@ -8,9 +8,9 @@
  * unmapped sender gets the honest unknown principal (known:false), never a guess.
  */
 import { describe, expect, spyOn, test } from 'bun:test';
-import { SharedSessionBroker } from '../sdk/src/platform/control-plane/session-broker.ts';
-import { PersistentStore } from '../sdk/src/platform/state/persistent-store.ts';
-import { RouteBindingManager } from '../sdk/src/platform/channels/index.ts';
+import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.ts';
+import { PersistentStore } from '../platform/src/platform/state/persistent-store.ts';
+import { RouteBindingManager } from '../platform/src/platform/channels/index.ts';
 import {
   ChannelProfileRegistry,
   ChannelProfileStore,
@@ -22,12 +22,12 @@ import {
   CHANNEL_PROFILE_MODEL_KEY,
   CHANNEL_PROFILE_PROVIDER_KEY,
   CHANNEL_PROFILE_PERMISSION_MODE_KEY,
-} from '../sdk/src/platform/channel-profiles/index.ts';
-import { PrincipalRegistry, PrincipalStore, UNKNOWN_PRINCIPAL_ID } from '../sdk/src/platform/principals/index.ts';
+} from '../platform/src/platform/channel-profiles/index.ts';
+import { PrincipalRegistry, PrincipalStore, UNKNOWN_PRINCIPAL_ID } from '../platform/src/platform/principals/index.ts';
 import { trackDisposables } from './_helpers/disposables.ts';
-import { channelExecutionModeOwner, withChannelExecutionMode } from '../sdk/src/platform/channel-profiles/install-inbound-intake.ts';
-import { currentExecutionModeOwner } from '../sdk/src/platform/gate/execution-context.ts';
-import { createSessionPermissionModeGetHandler, createSessionPermissionModeSetHandler, createSessionRuntimeControls, SessionLiveTurnControlsHolder } from '../sdk/src/platform/control-plane/routes/session-runtime.ts';
+import { channelExecutionModeOwner, withChannelExecutionMode } from '../platform/src/platform/channel-profiles/install-inbound-intake.ts';
+import { currentExecutionModeOwner } from '../platform/src/platform/gate/execution-context.ts';
+import { createSessionPermissionModeGetHandler, createSessionPermissionModeSetHandler, createSessionRuntimeControls, SessionLiveTurnControlsHolder } from '../platform/src/platform/control-plane/routes/session-runtime.ts';
 
 const disposables = trackDisposables();
 

@@ -64,23 +64,23 @@ describe('workflow pins', () => {
   const OLD = 'a'.repeat(40);
   const NEW = 'b'.repeat(40);
   const WORKFLOW = [
-    `    uses: mgd34msu/goodvibes-sdk/.github/workflows/reusable-release-verify.yml@${OLD} # sdk 2.1.0 release`,
-    '      toolchain-spec: "@goodvibes-jev/engine/toolchain@2.1.0"',
-    `    uses: mgd34msu/goodvibes-sdk/.github/workflows/reusable-gh-release.yml@${OLD} # sdk 2.1.0 release`,
+    `    uses: mgd34msu/goodvibes/.github/workflows/reusable-release-verify.yml@${OLD} # engine 2.1.0 release`,
+    '      toolchain-spec: "@goodvibes-jev/engine@2.1.0"',
+    `    uses: mgd34msu/goodvibes/.github/workflows/reusable-gh-release.yml@${OLD} # engine 2.1.0 release`,
     '      uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1',
-    '      publish-command: "bunx @goodvibes-jev/engine/toolchain@2.1.0 goodvibes-publish-package --poll"',
+    '      publish-command: "bunx @goodvibes-jev/engine@2.1.0 goodvibes-publish-package --poll"',
   ].join('\n');
 
-  test('every SDK reusable-workflow ref and toolchain spec moves; other actions do not', () => {
-    const out = rewriteWorkflowPins(WORKFLOW, { sdkVersion: '2.2.0', sdkSha: NEW, toolchainVersion: '2.2.1' });
+  test('every engine reusable-workflow ref and toolchain spec moves; other actions do not', () => {
+    const out = rewriteWorkflowPins(WORKFLOW, { engineVersion: '2.2.0', engineSha: NEW, toolchainVersion: '2.2.1' });
     expect(out).not.toContain(OLD);
-    expect(out.match(new RegExp(`@${NEW} # sdk 2\\.2\\.0 release`, 'g'))).toHaveLength(2);
-    expect(out.match(/@goodvibes-jev\/engine\/toolchain@2\.2\.1/g)).toHaveLength(2);
+    expect(out.match(new RegExp(`@${NEW} # engine 2\\.2\\.0 release`, 'g'))).toHaveLength(2);
+    expect(out.match(/@goodvibes-jev\/engine@2\.2\.1/g)).toHaveLength(2);
     expect(out).toContain('actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1');
   });
 
-  test('with no resolved SHA the SDK refs are left exactly as they were', () => {
-    const out = rewriteWorkflowPins(WORKFLOW, { sdkVersion: '2.2.0', sdkSha: null, toolchainVersion: '2.1.0' });
+  test('with no resolved SHA the engine refs are left exactly as they were', () => {
+    const out = rewriteWorkflowPins(WORKFLOW, { engineVersion: '2.2.0', engineSha: null, toolchainVersion: '2.1.0' });
     expect(out).toBe(WORKFLOW);
   });
 

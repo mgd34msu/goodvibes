@@ -12,7 +12,7 @@ const { validateConfigValue } = createOnboardingConfigValidator<Extract<Onboardi
 });
 import { createOnboardingApplyPrimitives } from '@goodvibes-jev/engine/terminal-shell/onboarding-apply-primitives';
 import { existsSync, rmSync } from 'node:fs';
-import '@goodvibes-jev/engine/sdk/platform/config';
+import '@goodvibes-jev/engine/platform/platform/config';
 import '../../config/index.ts';
 import {
   createAgentRuntimeProfile,

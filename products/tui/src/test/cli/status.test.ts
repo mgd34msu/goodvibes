@@ -185,7 +185,7 @@ describe('CLI exposure report', () => {
   test("an unrecognized hostMode ('LAN') is never presented as a definite loopback binding; bind row warns, reach is unknown, doctor flags it", () => {
     // Pins the verifier's probe: a hand-edited controlPlane.hostMode 'LAN'
     // used to render bind 'LAN 127.0.0.1:3421' with reach 'Local only',
-    // asserting the resolver's fallback as fact for a config the SDK cannot
+    // asserting the resolver's fallback as fact for a config the platform cannot
     // bind at all (its resolver has no default case; the daemon throws
     // before binding). Every display surface now routes through the one
     // formatter seam.

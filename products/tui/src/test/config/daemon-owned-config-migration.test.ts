@@ -1,16 +1,16 @@
-import { DEFAULT_THEME_NAME } from '@goodvibes-jev/engine/sdk/platform/presentation';
+import { DEFAULT_THEME_NAME } from '@goodvibes-jev/engine/platform/platform/presentation';
 import { listThemeChoices } from '../../renderer/theme.ts';
 /**
  * daemon-owned-config-migration.test.ts
  *
  * Daemon-owned configuration now has exactly one home:
- * `~/.goodvibes/daemon/settings.json` (SDK, `platform/config`'s
+ * `~/.goodvibes/daemon/settings.json` (platform, `platform/config`'s
  * `migrateDaemonOwnedConfig`). Before this migration, a value like
  * `surfaces.telegram.botToken` written into `~/.goodvibes/tui/settings.json`
  * looked like any other TUI-local setting but the daemon, the only process
  * that actually reads `surfaces.*`, never saw it. This proves, against a
  * real temp home directory (never a fake): the migration helper this repo
- * wraps around the SDK's function runs and is idempotent, a TUI `ConfigManager`
+ * wraps around the platform's function runs and is idempotent, a TUI `ConfigManager`
  * resolves the moved keys from the daemon tier afterward, and a client-owned
  * key (`display.theme`) is left alone in the surface file.
  */
@@ -18,7 +18,7 @@ import { listThemeChoices } from '../../renderer/theme.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager, daemonConfigPath } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager, daemonConfigPath } from '@goodvibes-jev/engine/platform/platform/config';
 import { runDaemonConfigMigration } from '../../config/run-daemon-config-migration.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 

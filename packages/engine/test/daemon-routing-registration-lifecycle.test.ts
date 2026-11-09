@@ -1,7 +1,7 @@
 import { expect, spyOn, test } from 'bun:test';
 import { existsSync } from 'node:fs';
-import { RouteStore } from '../sdk/src/platform/channels/host-routing/route-store.js';
-import { registerRoutingMethods } from '../sdk/src/platform/channels/host-routing/registration.js';
+import { RouteStore } from '../platform/src/platform/channels/host-routing/route-store.js';
+import { registerRoutingMethods } from '../platform/src/platform/channels/host-routing/registration.js';
 import { makeHandlerContext, makeInvocation, makeTmpWorkingDir } from './_helpers/routing-registration.js';
 
 function deferred() { let resolve!: () => void; const promise = new Promise<void>((done) => { resolve = done; }); return { resolve, promise }; }

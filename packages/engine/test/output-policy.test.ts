@@ -11,8 +11,8 @@ import { join } from 'node:path';
 import type { EntryType, Question } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { OverflowHandler } from '../sdk/src/platform/tools/shared/overflow.js';
-import { applyOutputPolicy, type ToolOutputPolicy } from '../sdk/src/platform/runtime/tools/output-policy.js';
+import { OverflowHandler } from '../platform/src/platform/tools/shared/overflow.js';
+import { applyOutputPolicy, type ToolOutputPolicy } from '../platform/src/platform/runtime/tools/output-policy.js';
 
 function makeOverflowHandler(): OverflowHandler {
   return new OverflowHandler({ baseDir: mkdtempSync(join(tmpdir(), 'goodvibes-output-policy-')) });

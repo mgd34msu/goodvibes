@@ -15,10 +15,10 @@ import { describe, expect, it } from 'bun:test';
 import {
   MAX_INPUT_LENGTH,
   MAX_TOKEN_COUNT,
-} from '../sdk/src/platform/runtime/permissions/normalization/tokenizer.ts';
+} from '../platform/src/platform/runtime/permissions/normalization/tokenizer.ts';
 import {
   tokenize,
-} from '../sdk/src/platform/runtime/permissions/normalization/index.ts';
+} from '../platform/src/platform/runtime/permissions/normalization/index.ts';
 
 // ---------------------------------------------------------------------------
 // Fuzz seed corpus, pathological inputs that commonly expose parser hangs

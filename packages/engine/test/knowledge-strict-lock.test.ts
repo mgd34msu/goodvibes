@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { acquireCrossProcessLock } from '../sdk/src/platform/workspace/checkpoint/cross-process-lock.js';
+import { acquireCrossProcessLock } from '../platform/src/platform/workspace/checkpoint/cross-process-lock.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -29,7 +29,7 @@ test.each(['', 'not-json', '{"pid":0}', '{"pid":-7}', '{"pid":99999999,"token":"
 
 test('strict ownership recovers a real exited owner and releases only its own inode', async () => {
   const file = lockPath();
-  const modulePath = new URL('../sdk/src/platform/workspace/checkpoint/cross-process-lock.ts', import.meta.url).pathname;
+  const modulePath = new URL('../platform/src/platform/workspace/checkpoint/cross-process-lock.ts', import.meta.url).pathname;
   const child = Bun.spawn([process.execPath, '--no-env-file', '--preload', new URL('../scripts/test-network-preload.ts', import.meta.url).pathname, '-e',
     `const { acquireCrossProcessLock } = await import(process.argv[1]); await acquireCrossProcessLock(process.argv[2], { strictOwnership: true }); console.log(process.pid); process.exit(0);`, modulePath, file,
   ], { stdout: 'pipe', stderr: 'pipe', env: { ...process.env } });
@@ -47,7 +47,7 @@ test('strict ownership recovers a real exited owner and releases only its own in
 
 test('unsupported atomic publication fails closed, including after another caller enabled fallback', async () => {
   const file = lockPath();
-  const modulePath = new URL('../sdk/src/platform/workspace/checkpoint/cross-process-lock.ts', import.meta.url).pathname;
+  const modulePath = new URL('../platform/src/platform/workspace/checkpoint/cross-process-lock.ts', import.meta.url).pathname;
   const script = `
     import { mock } from 'bun:test';
     const fs = await import('node:fs');

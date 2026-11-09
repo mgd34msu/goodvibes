@@ -9,10 +9,10 @@ import { describe, expect, test } from 'bun:test';
 import {
   evaluateOrchestrationSpawn,
   ORCHESTRATION_CAP_KEYS,
-} from '../sdk/src/platform/runtime/orchestration/spawn-policy.js';
-import { coreConfigDefaults } from '../sdk/src/platform/config/schema-domain-core.js';
-import { fleetConfigDefaults } from '../sdk/src/platform/config/schema-domain-fleet.js';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.js';
+} from '../platform/src/platform/runtime/orchestration/spawn-policy.js';
+import { coreConfigDefaults } from '../platform/src/platform/config/schema-domain-core.js';
+import { fleetConfigDefaults } from '../platform/src/platform/config/schema-domain-fleet.js';
+import type { ConfigManager } from '../platform/src/platform/config/manager.js';
 
 // Config manager stub that returns null for every key, exercising the
 // schema-default fallback path.

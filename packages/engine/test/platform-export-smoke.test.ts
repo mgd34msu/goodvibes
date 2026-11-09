@@ -6,7 +6,7 @@ import { describe, expect, test } from 'bun:test';
 
 describe('platform/export: smoke', () => {
   test('exportToJSON returns a string for minimal session data', async () => {
-    const { exportToJSON } = await import('../sdk/src/platform/export/index.js');
+    const { exportToJSON } = await import('../platform/src/platform/export/index.js');
     // await exportToJSON(messages, metadata?, options?), pass empty messages array.
     const result = await exportToJSON([]);
     expect(typeof result).toBe('string');
@@ -17,7 +17,7 @@ describe('platform/export: smoke', () => {
   });
 
   test('defaultExportPath returns a non-empty string path', async () => {
-    const { defaultExportPath } = await import('../sdk/src/platform/export/index.js');
+    const { defaultExportPath } = await import('../platform/src/platform/export/index.js');
     const path = defaultExportPath('json', '/tmp');
     expect(typeof path).toBe('string');
     expect(path.length).toBeGreaterThan(0);

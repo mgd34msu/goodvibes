@@ -8,11 +8,11 @@ import { createShellPathService, createUnsignedBundle, createPermissionSimulator
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
-import { SandboxSessionRegistry } from '@goodvibes-jev/engine/sdk/platform/runtime/sandbox';
-import { createRuntimeStore, type ContractRecord } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
-import { createOperationsReadModels } from '@goodvibes-jev/engine/sdk/platform/runtime/ui';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
+import { SandboxSessionRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/sandbox';
+import { createRuntimeStore, type ContractRecord } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { createOperationsReadModels } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
 import { registerControlRoomRuntimeCommands } from '../../input/commands/control-room-runtime.ts';
 import { preparePublicErrorText, publicErrorTextAnswer } from '../helpers/user-error-reading.ts';
 

@@ -3,7 +3,7 @@ import { routeNativeConversationInput } from '../../runtime/native-conversation-
 import { openModalCommand, requirePlanManager } from './runtime-services.ts';
 import { togglePlanMode, permissionModeLabel, type PermissionModeValue } from '../../core/permission-mode.ts';
 import { parsePlanningActionTarget } from './planning-action-target.ts';
-import { readPlanningGoal } from '@goodvibes-jev/engine/sdk/platform/agents';
+import { readPlanningGoal } from '@goodvibes-jev/engine/platform/platform/agents';
 import { beginCommandReading } from './command-reading-lifetime.ts';
 
 export function registerPlanningRuntimeCommands(registry: CommandRegistry): void {
@@ -135,7 +135,7 @@ export function registerPlanningRuntimeCommands(registry: CommandRegistry): void
         return;
       }
 
-      // Explicit historical record editing only. The SDK guards the selected
+      // Explicit historical record editing only. The platform guards the selected
       // source revision; its evaluation hints never reopen an interview here.
       if (args[0] === 'answer') {
         if (!projectPlanningService || !projectId) {
@@ -227,7 +227,7 @@ export function registerPlanningRuntimeCommands(registry: CommandRegistry): void
 
   // /plan now enters/toggles the SESSION PERMISSION plan mode (read-only
   // planning posture), distinct from the project-planning manager above, which
-  // moved to /project-plan (alias /planning). The change goes through the SDK
+  // moved to /project-plan (alias /planning). The change goes through the platform
   // config surface (permissions.mode), the same value the PermissionManager
   // reads and Shift+Tab cycles, so plan mode is one concept across surfaces.
   registry.register({

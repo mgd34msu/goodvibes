@@ -1,6 +1,6 @@
 /**
  * A fake judgment port for the tools batteries
- * (packages/engine/sdk/src/platform/tools/batteries), so tests of the exec,
+ * (packages/engine/platform/src/platform/tools/batteries), so tests of the exec,
  * analyze, agent and auto-repair paths never call the live Jev API.
  *
  * Each table entry pairs text that appears in a reading's state (its JSON)
@@ -25,10 +25,10 @@ import type { JudgmentPort, Question, Questions } from '@goodvibes-jev/judgment'
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { forgetGateReadings, gateReadingsPort, type GateReadingTable } from './gate-readings.ts';
-import { forgetCredentialEnvReadings } from '../../sdk/src/platform/tools/exec/credential-env.ts';
-import { forgetServerOnlyReadings } from '../../sdk/src/platform/tools/inspect/frontend-readings.ts';
-import type { ExecFailureCategory } from '../../sdk/src/platform/tools/batteries/exec-retry.ts';
-import type { ChildFailureReading } from '../../sdk/src/platform/tools/batteries/child-failure-reason.ts';
+import { forgetCredentialEnvReadings } from '../../platform/src/platform/tools/exec/credential-env.ts';
+import { forgetServerOnlyReadings } from '../../platform/src/platform/tools/inspect/frontend-readings.ts';
+import type { ExecFailureCategory } from '../../platform/src/platform/tools/batteries/exec-retry.ts';
+import type { ChildFailureReading } from '../../platform/src/platform/tools/batteries/child-failure-reason.ts';
 
 export interface ToolReading {
   readonly backtracking?: boolean | 'uncertain';

@@ -4,7 +4,7 @@ import { renderConfigModal } from '../../renderer/config-modal.ts';
 import { planningModalGoldenSurface } from '../helpers/planning-modal-fixture.ts';
 import { frameFromLayer, frameText } from '../helpers/surface-frame.ts';
 import { assertGoldenIn } from '../helpers/golden-snapshot.ts';
-import type { ProjectPlanningState } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import type { ProjectPlanningState } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { createPlanningModalSurface, type PlanningModalService } from '../../views/modals/planning-modal.ts';
 import { modalGeometry, MODAL_PAD_X } from '../../renderer/surface-kit.ts';
 

@@ -12,13 +12,13 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MailboxCursorStore } from '../sdk/src/platform/email/inbound/cursor-store.ts';
-import { InboundMailStore } from '../sdk/src/platform/email/inbound/record-store.ts';
-import { PersistedExpectationStore } from '../sdk/src/platform/email/inbound/expectation-store.ts';
+import { MailboxCursorStore } from '../platform/src/platform/email/inbound/cursor-store.ts';
+import { InboundMailStore } from '../platform/src/platform/email/inbound/record-store.ts';
+import { PersistedExpectationStore } from '../platform/src/platform/email/inbound/expectation-store.ts';
 import {
   InboundMailHousekeeper,
   type InboundMailHousekeepingReport,
-} from '../sdk/src/platform/email/inbound/housekeeping.ts';
+} from '../platform/src/platform/email/inbound/housekeeping.ts';
 
 let dir: string;
 let cursorPath: string;

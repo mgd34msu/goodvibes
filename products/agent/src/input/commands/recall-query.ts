@@ -1,6 +1,6 @@
 import { createRecallQueryCommands } from '@goodvibes-jev/engine/terminal-shell/recall-query';
 import type { CommandContext } from '../command-registry.ts';
-import type { MemoryApi } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { formatAgentRecordReference, formatAgentRecordReferences } from '../../agent/record-labels.ts';
 
 export function getMemoryApi(context: CommandContext): MemoryApi | null {

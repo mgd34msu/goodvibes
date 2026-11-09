@@ -1,7 +1,7 @@
 /**
  * memory-governor.test.ts
  *
- * Guard for the SDK-owned memory governance layer: the cache
+ * Guard for the platform-owned memory governance layer: the cache
  * registry's fail-closed membership gate, the pausable-job seam, and the
  * MemoryGovernor's tier machine + leak tripwire. Everything I/O is injected, so
  * the tiers and tripwire are exercised deterministically with fake clocks and
@@ -20,7 +20,7 @@ import {
   type MemoryPressureEvent,
   type MemorySample,
   type MemoryTripwireReceipt,
-} from '../sdk/src/platform/runtime/memory/index.js';
+} from '../platform/src/platform/runtime/memory/index.js';
 
 const MB = 1024 * 1024;
 
@@ -395,7 +395,7 @@ describe('memory allocation pressure and failure handling', () => {
   });
 
   test('budget auto-resolution honors the cgroup v2/v1 limit below physical RAM', async () => {
-    const { resolveEffectiveSystemRamMb } = await import('../sdk/src/platform/runtime/memory/index.ts');
+    const { resolveEffectiveSystemRamMb } = await import('../platform/src/platform/runtime/memory/index.ts');
     // v2 limit 2GB at the ROOT on a 64GB host -> 2048MB effective (fallback path).
     expect(resolveEffectiveSystemRamMb((p) => {
       if (p === '/sys/fs/cgroup/memory.max') return String(2 * 1024 * 1024 * 1024);
@@ -412,7 +412,7 @@ describe('memory allocation pressure and failure handling', () => {
   });
 
   test('cgroup walk finds a systemd MemoryMax= limit on the OWN cgroup path (root is unlimited)', async () => {
-    const { resolveEffectiveSystemRamMb } = await import('../sdk/src/platform/runtime/memory/index.ts');
+    const { resolveEffectiveSystemRamMb } = await import('../platform/src/platform/runtime/memory/index.ts');
     // The failure the fix closes: a daemon under `systemd MemoryMax=2G` has its
     // limit at /sys/fs/cgroup/system.slice/<unit>.service/memory.max, the root
     // memory.max is 'max' (unlimited). A root-only read misses it and budgets
@@ -431,7 +431,7 @@ describe('memory allocation pressure and failure handling', () => {
   });
 
   test('cgroup walk takes the MINIMUM limit along the ancestor chain', async () => {
-    const { resolveEffectiveSystemRamMb } = await import('../sdk/src/platform/runtime/memory/index.ts');
+    const { resolveEffectiveSystemRamMb } = await import('../platform/src/platform/runtime/memory/index.ts');
     // A parent slice caps at 4G, the leaf unit caps at 1G, the effective limit
     // is the tighter (leaf) one.
     const files: Record<string, string> = {
@@ -447,7 +447,7 @@ describe('memory allocation pressure and failure handling', () => {
   });
 
   test('cgroup walk: a container with the limit at the ROOT (0::/) is still honored', async () => {
-    const { resolveEffectiveSystemRamMb } = await import('../sdk/src/platform/runtime/memory/index.ts');
+    const { resolveEffectiveSystemRamMb } = await import('../platform/src/platform/runtime/memory/index.ts');
     // Docker default (private cgroup namespace): the process reports 0::/ and
     // the limit lives at the root memory.max.
     const files: Record<string, string> = {
@@ -462,7 +462,7 @@ describe('memory allocation pressure and failure handling', () => {
   });
 
   test('cgroup walk: no cgroup limit anywhere -> physical RAM', async () => {
-    const { resolveEffectiveSystemRamMb } = await import('../sdk/src/platform/runtime/memory/index.ts');
+    const { resolveEffectiveSystemRamMb } = await import('../platform/src/platform/runtime/memory/index.ts');
     // v2 unified with an unlimited own path and no root limit: physical RAM.
     const files: Record<string, string> = {
       '/proc/self/cgroup': '0::/user.slice/user-1000.slice/session-3.scope\n',
@@ -475,7 +475,7 @@ describe('memory allocation pressure and failure handling', () => {
   });
 
   test('cgroup walk: v1 memory controller resolves the own-path limit', async () => {
-    const { resolveEffectiveSystemRamMb } = await import('../sdk/src/platform/runtime/memory/index.ts');
+    const { resolveEffectiveSystemRamMb } = await import('../platform/src/platform/runtime/memory/index.ts');
     const files: Record<string, string> = {
       '/proc/self/cgroup': '5:memory:/system.slice/goodvibes.service\n0::/system.slice/goodvibes.service\n',
       '/sys/fs/cgroup/memory/system.slice/goodvibes.service/memory.limit_in_bytes': String(3 * 1024 * 1024 * 1024),
@@ -543,7 +543,7 @@ describe('memory allocation pressure and failure handling', () => {
     const pruned: number[] = [];
     const brokerTrims: string[] = [];
     let rss = 10 * MB;
-    const { memoryGovernor, cacheRegistry } = (await import('../sdk/src/platform/runtime/memory/index.ts')).wireDaemonMemoryGovernance({
+    const { memoryGovernor, cacheRegistry } = (await import('../platform/src/platform/runtime/memory/index.ts')).wireDaemonMemoryGovernance({
       config: baseConfig,
       cacheRegistry: new CacheRegistry(),
       pauseController: new PauseController(),

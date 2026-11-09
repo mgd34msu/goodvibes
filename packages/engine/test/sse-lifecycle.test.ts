@@ -7,8 +7,8 @@ import { describe, expect, test } from 'bun:test';
 describe('sse lifecycle', () => {
 
   test('emitStreamSubscriberConnected emits correct payload', async () => {
-    const { emitStreamSubscriberConnected } = await import('../sdk/src/platform/runtime/emitters/transport.js');
-    const { RuntimeEventBus } = await import('../sdk/src/platform/runtime/events/index.js');
+    const { emitStreamSubscriberConnected } = await import('../platform/src/platform/runtime/emitters/transport.js');
+    const { RuntimeEventBus } = await import('../platform/src/platform/runtime/events/index.js');
     const bus = new RuntimeEventBus();
     const events: unknown[] = [];
     bus.onDomain('transport', (e: unknown) => events.push(e));
@@ -26,8 +26,8 @@ describe('sse lifecycle', () => {
   });
 
   test('emitStreamSubscriberDisconnected emits optional reason', async () => {
-    const { emitStreamSubscriberDisconnected } = await import('../sdk/src/platform/runtime/emitters/transport.js');
-    const { RuntimeEventBus } = await import('../sdk/src/platform/runtime/events/index.js');
+    const { emitStreamSubscriberDisconnected } = await import('../platform/src/platform/runtime/emitters/transport.js');
+    const { RuntimeEventBus } = await import('../platform/src/platform/runtime/events/index.js');
     const bus = new RuntimeEventBus();
     const events: unknown[] = [];
     bus.onDomain('transport', (e: unknown) => events.push(e));
@@ -46,7 +46,7 @@ describe('sse lifecycle', () => {
   // production wiring, ControlPlaneGateway.createEventStream fires connected/disconnected.
   test('createEventStream emits STREAM_SUBSCRIBER_CONNECTED on connect and DISCONNECTED on abort', async () => {
     const { EventEmitter } = await import('node:events');
-    const { ControlPlaneGateway } = await import('../sdk/src/platform/control-plane/gateway.js');
+    const { ControlPlaneGateway } = await import('../platform/src/platform/control-plane/gateway.js');
 
     // Build a minimal EventEmitter bus that satisfies RuntimeEventBus duck-typing.
     const ee = new EventEmitter();
@@ -89,7 +89,7 @@ describe('sse lifecycle', () => {
   });
 
   test('sseSubscribers gauge supports set/get', async () => {
-    const { sseSubscribers } = await import('../sdk/src/platform/runtime/metrics.js');
+    const { sseSubscribers } = await import('../platform/src/platform/runtime/metrics.js');
     const before = sseSubscribers.value();
     sseSubscribers.set(3);
     expect(sseSubscribers.value()).toBe(3);

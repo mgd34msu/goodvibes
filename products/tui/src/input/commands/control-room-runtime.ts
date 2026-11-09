@@ -1,8 +1,8 @@
 import { createSecurityCommand } from '@goodvibes-jev/engine/terminal-shell/security-command';
 import type { CommandRegistry, CommandContext } from '../command-registry.ts';
 import '@/runtime/index.ts';
-import { buildKnowledgeInjectionPrompt, selectKnowledgeForTask } from '@goodvibes-jev/engine/sdk/platform/state';
-import '@goodvibes-jev/engine/sdk/platform/config';
+import { buildKnowledgeInjectionPrompt, selectKnowledgeForTask } from '@goodvibes-jev/engine/platform/platform/state';
+import '@goodvibes-jev/engine/platform/platform/config';
 import { requireReadModels, requireSubscriptionManager, requireTokenAuditor } from './runtime-services.ts';
 import { getMemoryApi, getMemorySpine } from './recall-query.ts';
 
@@ -150,7 +150,7 @@ export function registerControlRoomRuntimeCommands(registry: CommandRegistry): v
         return;
       }
       if (subcommand === 'queue') {
-        // Repointed onto the memory spine (SDK 1.2.0 full-detach) so the
+        // Repointed onto the memory spine (platform 1.2.0 full-detach) so the
         // queue reflects the daemon's own canonical store when adopted.
         const memory = getMemorySpine(ctx);
         if (!memory) return;
@@ -173,7 +173,7 @@ export function registerControlRoomRuntimeCommands(registry: CommandRegistry): v
       if (subcommand === 'explain') {
         // Stays on the local MemoryApi: `explain` is a host-side projection
         // over whatever read surface is active, not a store operation
-        // (docs/decisions/2026-07-06-memory-wire-full-detach.md, SDK repo).
+        // (docs/decisions/2026-07-06-memory-wire-full-detach.md, platform repo).
         const memory = getMemoryApi(ctx);
         if (!memory) return;
         const scopeIdx = args.indexOf('--scope');

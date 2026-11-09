@@ -1,9 +1,9 @@
 import { dirname, join } from 'path';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { atomicWriteFileSync } from '@goodvibes-jev/engine/sdk/platform/config';
+import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/config';
 import type { CommandRegistry } from '../command-registry.ts';
-import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/sdk/platform/config';
-import { listHookPointContracts } from '@goodvibes-jev/engine/sdk/platform/hooks';
+import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
+import { listHookPointContracts } from '@goodvibes-jev/engine/platform/platform/hooks';
 import type { SetupTransferBundle } from './local-setup-transfer.ts';
 import {
   buildSetupTransferBundle,
@@ -14,7 +14,7 @@ import {
 } from './local-setup-transfer.ts';
 import { buildSetupReviewSnapshot, exportSetupSupportBundle, renderSetupSandboxReview } from './local-setup-review.ts';
 import { openOnboardingWizard, requireShellPaths } from './runtime-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 type SetupSnapshot = Awaited<ReturnType<typeof buildSetupReviewSnapshot>>;
 

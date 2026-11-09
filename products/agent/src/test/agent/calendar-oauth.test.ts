@@ -1,8 +1,8 @@
 /**
  * Calendar OAuth agent-side tests.
  *
- * The deep OAuth + provider-API flow is proven at the SDK level against fake servers
- * (goodvibes-sdk/test/platform-calendar-oauth.test.ts). Here we prove the AGENT half:
+ * The deep OAuth + provider-API flow is proven at the platform level against fake servers
+ * (goodvibes-platform/test/platform-calendar-oauth.test.ts). Here we prove the AGENT half:
  *  - the advanced-credentials wizard stores the client id in config and the client
  *    secret through the secret manager (never in plain config, status, or result),
  *    using a real ConfigManager + in-memory secret store.
@@ -15,8 +15,8 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { CalendarConnector } from '@goodvibes-jev/engine/sdk/platform/calendar';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { CalendarConnector } from '@goodvibes-jev/engine/platform/platform/calendar';
 import type { CommandContext } from '../../input/command-registry.ts';
 import {
   CALENDAR_OAUTH_CLIENT_ID_KEYS,
@@ -349,7 +349,7 @@ describe('calendar connect/disconnect/accounts commands', () => {
 
   // F1a: a bare `/calendar connect` (no provider at all) is a dead end today
   // without a real guide, it must explain what connecting does, name both
-  // providers, and (since this build always ships the SDK placeholder client
+  // providers, and (since this build always ships the platform placeholder client
   // ids) state that honestly with the concrete next steps, not a bare usage
   // line.
   test('connect with no provider prints a real guide: what it does, both providers, and the honest no-client-id situation with next steps', async () => {
@@ -371,7 +371,7 @@ describe('calendar connect/disconnect/accounts commands', () => {
 
 describe('calendar OAuth service permission reading', () => {
   test('the real service/connector propagates an exact Jev permission and owned cancellation', async () => {
-    const { CalendarConnector, CalendarTokenStore, providerProfile, resolveClientConfig } = await import('@goodvibes-jev/engine/sdk/platform/calendar');
+    const { CalendarConnector, CalendarTokenStore, providerProfile, resolveClientConfig } = await import('@goodvibes-jev/engine/platform/platform/calendar');
     const { installJudgmentPort } = await import('@goodvibes-jev/engine/errors');
     const { fakePort, choiceAnswer, noulAnswer } = await import('@goodvibes-jev/judgment/testing');
     const fake = fakePort((name, question, state) => {

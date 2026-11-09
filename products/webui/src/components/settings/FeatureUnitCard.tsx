@@ -4,7 +4,7 @@
  * scroll, never clip), its enablement control in its REAL shape, and the typed
  * editors for the settings keys it owns. Everything writes through the same
  * config.set path as every other field, features live on first-class domain
- * settings keys (SDK 1.7.1's dissolved feature model), not on a separate
+ * settings keys (platform 1.7.1's dissolved feature model), not on a separate
  * enablement namespace.
  *
  * Enablement shapes (feature.enablement.kind):

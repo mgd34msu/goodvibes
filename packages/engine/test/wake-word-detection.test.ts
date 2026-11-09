@@ -9,11 +9,11 @@
  */
 import { describe, expect, test } from 'bun:test';
 import fixture from './fixtures/wake-word-front-end.json' with { type: 'json' };
-import { WakeDetector, WAKE_DETECTOR_DEFAULTS } from '../sdk/src/platform/voice/wake/detector.js';
-import { WakeWordEngine } from '../sdk/src/platform/voice/wake/engine.js';
-import { WAKE_CHUNK_SAMPLES, WAKE_CLASSIFIER_FRAMES, WAKE_EMBED_DIM } from '../sdk/src/platform/voice/wake/feature-pipeline.js';
-import type { WakeInferenceSession, WakeTensor } from '../sdk/src/platform/voice/wake/types.js';
-import { resolveWakeWordModel } from '../sdk/src/platform/voice/provisioning/wake-word-manifest.js';
+import { WakeDetector, WAKE_DETECTOR_DEFAULTS } from '../platform/src/platform/voice/wake/detector.js';
+import { WakeWordEngine } from '../platform/src/platform/voice/wake/engine.js';
+import { WAKE_CHUNK_SAMPLES, WAKE_CLASSIFIER_FRAMES, WAKE_EMBED_DIM } from '../platform/src/platform/voice/wake/feature-pipeline.js';
+import type { WakeInferenceSession, WakeTensor } from '../platform/src/platform/voice/wake/types.js';
+import { resolveWakeWordModel } from '../platform/src/platform/voice/provisioning/wake-word-manifest.js';
 
 const POSITIVE = fixture.scoreTraces.positive.scores;
 const NEGATIVE = fixture.scoreTraces.negative.scores;

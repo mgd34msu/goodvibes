@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
-import { AgentMessageBus } from '@goodvibes-jev/engine/sdk/platform/agents';
-import type { AgentMessage } from '@goodvibes-jev/engine/sdk/platform/agents';
+import { AgentMessageBus } from '@goodvibes-jev/engine/platform/platform/agents';
+import type { AgentMessage } from '@goodvibes-jev/engine/platform/platform/agents';
 import { getTestAgentMessageBus, resetTestRuntimeServices } from '../helpers/runtime-services.ts';
 
 beforeEach(() => {

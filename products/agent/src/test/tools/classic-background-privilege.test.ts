@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
 import { decisionModelPolicyState, installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { withDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { withDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { withBackgroundPrivilegeCheck } from '../../tools/agent-harness-background-privilege.ts';

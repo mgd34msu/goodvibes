@@ -2,10 +2,10 @@ import { expect, test } from 'bun:test';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createExecTool } from '../sdk/src/platform/tools/exec/runtime.js';
-import { detectSandboxAvailability, probeSandboxHost } from '../sdk/src/platform/tools/exec/sandbox.js';
-import { ProcessManager } from '../sdk/src/platform/tools/shared/process-manager.js';
-import { OverflowHandler } from '../sdk/src/platform/tools/shared/overflow.js';
+import { createExecTool } from '../platform/src/platform/tools/exec/runtime.js';
+import { detectSandboxAvailability, probeSandboxHost } from '../platform/src/platform/tools/exec/sandbox.js';
+import { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.js';
+import { OverflowHandler } from '../platform/src/platform/tools/shared/overflow.js';
 import { useToolReadings } from './_helpers/tool-readings.js';
 
 useToolReadings();

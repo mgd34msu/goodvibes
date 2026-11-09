@@ -4,7 +4,7 @@ export type AuthTokenResolver = () => MaybePromise<string | null | undefined>;
 
 /**
  * Any supported public auth-token input form.
- * Normalised to `AuthTokenResolver` at SDK/transport boundaries via `normalizeAuthToken`.
+ * Normalised to `AuthTokenResolver` at platform/transport boundaries via `normalizeAuthToken`.
  */
 export type AuthTokenInput =
   | string
@@ -112,7 +112,7 @@ export function normalizeAuthToken(input: AuthTokenInput): AuthTokenResolver {
  * Resolve the token for an outbound transport request.
  *
  * This helper is intentionally transport-facing: it does not read process
- * environment variables, config files, or global SDK state. Higher layers are
+ * environment variables, config files, or global platform state. Higher layers are
  * responsible for choosing a token source and passing it here explicitly.
  */
 export async function resolveAuthToken(

@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'nod
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { AgentWorktree } from '../sdk/src/platform/agents/worktree.js';
+import { AgentWorktree } from '../platform/src/platform/agents/worktree.js';
 function git(root: string, ...args: string[]) {
   const r = spawnSync('git', ['-C', root, ...args]);
   if (r.status !== 0) throw Error(r.stderr.toString());

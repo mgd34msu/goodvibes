@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { GATE_PRESETS, normalizePermissionMode } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { GATE_PRESETS, normalizePermissionMode } from '@goodvibes-jev/engine/platform/platform/gate';
 import { computeApprovalPosture, readApprovalPostureFromConfig } from '../../permissions/approval-posture.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 

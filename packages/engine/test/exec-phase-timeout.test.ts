@@ -1,9 +1,9 @@
 /** Explicit execution budgets and cancellation remain effective without a default tool deadline. */
 
 import { describe, expect, test } from 'bun:test';
-import { createPhasedExecutor } from '../sdk/src/platform/runtime/tools/index.js';
-import type { ToolRuntimeContext } from '../sdk/src/platform/runtime/tools/index.js';
-import type { Tool } from '../sdk/src/platform/types/tools.js';
+import { createPhasedExecutor } from '../platform/src/platform/runtime/tools/index.js';
+import type { ToolRuntimeContext } from '../platform/src/platform/runtime/tools/index.js';
+import type { Tool } from '../platform/src/platform/types/tools.js';
 
 function sleepingTool(name: string, ms: number): Tool {
   return {

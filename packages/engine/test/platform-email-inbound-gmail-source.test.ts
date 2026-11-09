@@ -16,25 +16,25 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
-import { MailboxCursorStore } from '../sdk/src/platform/email/inbound/cursor-store.ts';
-import { GmailMailSource } from '../sdk/src/platform/email/inbound/gmail-source.ts';
-import type { GmailMailSourceDeps } from '../sdk/src/platform/email/inbound/gmail-source.ts';
+import { MailboxCursorStore } from '../platform/src/platform/email/inbound/cursor-store.ts';
+import { GmailMailSource } from '../platform/src/platform/email/inbound/gmail-source.ts';
+import type { GmailMailSourceDeps } from '../platform/src/platform/email/inbound/gmail-source.ts';
 import type {
   InboundMailNote,
   InboundMailSink,
   InboundMailTerminalFailure,
   InboundMailboxMessage,
-} from '../sdk/src/platform/email/inbound/ports.ts';
+} from '../platform/src/platform/email/inbound/ports.ts';
 import {
   GMAIL_BODY_SCOPES,
   GMAIL_HISTORY_SCOPES,
-} from '../sdk/src/platform/google/history-delta.ts';
+} from '../platform/src/platform/google/history-delta.ts';
 import {
   MAIL_CONTENT_PROVENANCE,
   type GmailMessageBody,
   type GoogleApiFailure,
   type GoogleApiResult,
-} from '../sdk/src/platform/google/api-client.ts';
+} from '../platform/src/platform/google/api-client.ts';
 import { FakeClock, flush, waitFor } from './_helpers/inbound-watcher-harness.ts';
 
 const ACCOUNT = 'primary';

@@ -4,8 +4,8 @@ import {
   DEFAULT_MEMORY_EMBEDDING_DIMS,
   HASHED_MEMORY_EMBEDDING_PROVIDER,
   MemoryEmbeddingProviderRegistry,
-} from '@goodvibes-jev/engine/sdk/platform/state';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+} from '@goodvibes-jev/engine/platform/platform/state';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 describe('MemoryEmbeddingProviderRegistry', () => {

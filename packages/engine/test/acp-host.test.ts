@@ -20,11 +20,11 @@ import {
   AcpHostService,
   discoverAcpAgents,
   type DiscoveredAcpAgent,
-} from '../sdk/src/platform/acp/host.ts';
-import { adaptHostedAcpAgent } from '../sdk/src/platform/runtime/fleet/adapters/acp-host.ts';
-import { createProcessRegistry, type ProcessRegistryDeps } from '../sdk/src/platform/runtime/fleet/index.ts';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { registerAcpGatewayMethods } from '../sdk/src/platform/control-plane/routes/acp.ts';
+} from '../platform/src/platform/acp/host.ts';
+import { adaptHostedAcpAgent } from '../platform/src/platform/runtime/fleet/adapters/acp-host.ts';
+import { createProcessRegistry, type ProcessRegistryDeps } from '../platform/src/platform/runtime/fleet/index.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { registerAcpGatewayMethods } from '../platform/src/platform/control-plane/routes/acp.ts';
 
 const FIXTURE = join(import.meta.dir, 'fixtures', 'fake-acp-agent.ts');
 let previousPort: ReturnType<typeof installJudgmentPort>;

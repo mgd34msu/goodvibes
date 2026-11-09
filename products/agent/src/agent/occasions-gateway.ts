@@ -10,7 +10,7 @@
  *
  * - When this process carries the handlers itself, the Agent composes a real
  *   gateway method catalog (runtime/services.ts, which threads configManager and
- *   shellPaths into the SDK's registrar), the call runs in-process.
+ *   shellPaths into the platform's registrar), the call runs in-process.
  * - Otherwise the call goes to the connected host over the operator gateway,
  *   the same path `profile`, `ci`, `principals` and `channel-profiles` use.
  *
@@ -33,15 +33,15 @@
  * daemon, most dangerously the rule that a nudge never carries the date.
  */
 
-import { captureOccasionsGatewayTarget, type GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { assertCurrentProfileDelegation, bindProfileMutationOptionsToInvocation } from '@goodvibes-jev/engine/sdk/platform/owner-profile';
+import { captureOccasionsGatewayTarget, type GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { assertCurrentProfileDelegation, bindProfileMutationOptionsToInvocation } from '@goodvibes-jev/engine/platform/platform/owner-profile';
 import { dirname } from 'node:path';
-import type { OccasionMutationOptions } from '@goodvibes-jev/engine/sdk/platform/occasions';
-import type { GatewayMethodInvocation } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import type { OccasionMutationOptions } from '@goodvibes-jev/engine/platform/platform/occasions';
+import type { GatewayMethodInvocation } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { captureCatalogMethods } from '../tools/agent-harness-catalog-ranking.ts';
 import { captureOperatorConnection } from './operator-connection-owner.ts';
-import type { OperatorMethodId, OperatorMethodInput } from '@goodvibes-jev/engine/sdk/contracts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { OperatorMethodId, OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { OCCASIONS_METHOD_IDS, type OccasionsMethodId } from '../tools/agent-occasions-types.ts';
 import {
   formatOperatorGatewayFailure,
@@ -92,7 +92,7 @@ export interface OccasionsGatewayOptions {
 const _occasionsIdsAreOperatorIds: readonly OperatorMethodId[] = Object.values(OCCASIONS_METHOD_IDS);
 void _occasionsIdsAreOperatorIds;
 
-/** Informational labels only; the SDK resolves the real binding from the contract. */
+/** Informational labels only; the platform resolves the real binding from the contract. */
 const OCCASIONS_ROUTES: Readonly<Record<OccasionsMethodId, string>> = {
   'occasions.list': 'GET /api/occasions',
   'occasions.pending': 'GET /api/occasions/pending',

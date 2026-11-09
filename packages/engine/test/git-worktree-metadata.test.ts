@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { GitService } from '../sdk/src/platform/git/service.ts';
+import { GitService } from '../platform/src/platform/git/service.ts';
 
 const exec = promisify(execFile);
 const roots: string[] = [];

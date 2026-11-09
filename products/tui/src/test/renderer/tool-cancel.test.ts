@@ -5,7 +5,7 @@ import {
 } from '../../core/conversation-rendering.ts';
 import { createCancelToolCall, type ToolCancelOrchestrator } from '../../core/turn-cancellation.ts';
 import { KeybindingsManager } from '../../input/keybindings.ts';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { lineToString } from '../setup.ts';
 
 // ---------------------------------------------------------------------------
@@ -40,7 +40,7 @@ const renderMessages = (messages: unknown[], width = 80): string => {
   return lines.map(lineToString).join('\n');
 };
 
-// A cancelled call, as the transcript holds it: the call, then the SDK's
+// A cancelled call, as the transcript holds it: the call, then the platform's
 // structured cancelled result with whatever partial output the tool produced.
 const cancelledTurn = (partial: string): unknown[] => [
   { role: 'user', content: 'run it' },

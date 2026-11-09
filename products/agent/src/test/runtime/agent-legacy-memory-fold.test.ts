@@ -8,7 +8,7 @@ import {
   MemoryRegistry,
   MemoryStore,
   resolveCanonicalMemoryDbPath,
-} from '@goodvibes-jev/engine/sdk/platform/state';
+} from '@goodvibes-jev/engine/platform/platform/state';
 import { ConfigManager } from '../../config/index.ts';
 import { foldAgentLegacyMemory } from '../../runtime/services.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';

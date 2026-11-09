@@ -16,10 +16,10 @@
  *   FAKE_ACP_MODE=hang        reads stdin but never answers initialize (timeout path).
  *   FAKE_ACP_MODE=slow-turn   a prompt streams then waits until cancelled.
  */
-// The ACP SDK's values come off `loadAcpSdk()` rather than a re-export,
+// The ACP SDK's values come off `loadAcpLibrary()` rather than a re-export,
 // because `@agentclientprotocol/sdk` is an optionalDependency and a re-export
-// links its specifier at module init. See acp/optional-sdk.ts.
-import { loadAcpSdk } from '../../sdk/src/platform/acp/protocol.ts';
+// links its specifier at module init. See acp/optional-acp-library.ts.
+import { loadAcpLibrary } from '../../platform/src/platform/acp/protocol.ts';
 import type {
   AgentSideConnection,
   Agent,
@@ -30,7 +30,7 @@ import type {
   NewSessionResponse,
   PromptRequest,
   PromptResponse,
-} from '../../sdk/src/platform/acp/protocol.ts';
+} from '../../platform/src/platform/acp/protocol.ts';
 
 const mode = process.argv[2] ?? process.env.FAKE_ACP_MODE ?? 'happy';
 
@@ -45,7 +45,7 @@ if (mode === 'hang') {
   process.stdin.on('data', () => {});
   setInterval(() => {}, 60_000);
 } else {
-  const { AgentSideConnection, ndJsonStream, PROTOCOL_VERSION } = await loadAcpSdk();
+  const { AgentSideConnection, ndJsonStream, PROTOCOL_VERSION } = await loadAcpLibrary();
   const stdout = new WritableStream<Uint8Array>({
     write(chunk) { process.stdout.write(chunk); },
   });

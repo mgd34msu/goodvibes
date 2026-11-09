@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { deflateSync } from 'node:zlib';
-import { readMultimodalPdf } from '../sdk/src/platform/multimodal/pdf-source.js';
+import { readMultimodalPdf } from '../platform/src/platform/multimodal/pdf-source.js';
 
 function pdf(text: string, commands?: string, title?: string): Buffer {
   const stream = deflateSync(Buffer.from(commands ?? `BT /F1 12 Tf 72 720 Td (${text}) Tj ET`));

@@ -4,7 +4,7 @@
  *
  * ── Why the CLI and not the in-process service manager ─────────────────────
  *
- * The Agent already reads a service entry in-process, through the SDK's
+ * The Agent already reads a service entry in-process, through the platform's
  * `createDaemonServiceControl` over `PlatformServiceManager`, and that stays
  * exactly where it is: it is the right seam for the boot-time start of an
  * installed-but-stopped host, because that path only ever needs to know

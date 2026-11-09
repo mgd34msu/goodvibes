@@ -1,5 +1,5 @@
 import { Dispatch, SetStateAction, useCallback, useEffect, useRef, useState, RefObject } from 'react';
-import { sdk, DEFAULT_SSE_RECONNECT } from '../../lib/goodvibes';
+import { client as platformClient, DEFAULT_SSE_RECONNECT } from '../../lib/goodvibes';
 import { getClientLifetime, isClientLifetimeCurrent } from '../../lib/client-lifetime';
 import { asRecord, firstString } from '../../lib/object';
 import { RELAY_OVERFLOW_EVENT, noteRelayOverflow, readDroppedCount } from '../../lib/relay-stream-overflow';
@@ -95,7 +95,7 @@ export interface UseChatStreamResult {
   /**
    * Force a fresh connection attempt after the stream gave up ('stream paused').
    * The built-in reconnect only retries up to DEFAULT_SSE_RECONNECT.maxAttempts with
-   * backoff; once exhausted the SDK stops entirely on its own, so recovery needs an
+   * backoff; once exhausted the platform stops entirely on its own, so recovery needs an
    * explicit re-open. Safe to call any time, it just re-runs the connect effect.
    */
   retryStream: () => void;
@@ -146,7 +146,7 @@ export function useChatStream({
   // which handles the CROSS-effect case (session switch / retry / unmount).
   const stoppedRef = useRef(false);
   const connectionOwner = useRef<object | null>(null);
-  // Bumped by retryStream() to force a fresh connect after the SDK's own
+  // Bumped by retryStream() to force a fresh connect after the platform's own
   // reconnect loop gives up (it never retries again on its own past onTerminate).
   const [retryNonce, setRetryNonce] = useState(0);
   // Tool calls currently in flight for this turn, see ActiveToolCall's own doc comment.
@@ -187,7 +187,7 @@ export function useChatStream({
     const owner = connectionOwner.current;
     const lifetime = getClientLifetime();
     setTurnState('stopping');
-    void sdk.chat.turns.cancel(activeSessionId).catch((error: unknown) => {
+    void platformClient.chat.turns.cancel(activeSessionId).catch((error: unknown) => {
       if (!owner || connectionOwner.current !== owner || !isClientLifetimeCurrent(lifetime)) return;
       if (isNoActiveTurnError(error)) {
         // Benign: the turn finished before the stop landed. The terminal
@@ -203,7 +203,7 @@ export function useChatStream({
         setTurnState('stopped locally');
         setTurnError(
           'Stopped rendering only. This daemon does not support stopping a turn '
-          + 'server-side (needs SDK 1.4+). The reply may still finish and will '
+          + 'server-side (update the connected daemon). The reply may still finish and will '
           + 'appear in the history.',
         );
         return;
@@ -229,7 +229,7 @@ export function useChatStream({
     // any shared ref. Every callback below, plus the stream-open .then/.catch, closes
     // over ITS OWN `cancelled`. That is what makes a late callback from the OLD stream
     // inert: it reads its own `cancelled` (true), never the shared stoppedRef the new
-    // effect just reset to false. Without this, an SDK stream() whose disconnect handle
+    // effect just reset to false. Without this, a platform stream() whose disconnect handle
     // only resolves AFTER the switch would (a) let the old stream's onReconnect/onEvent
     // clobber the new session's state, and (b) store the OLD handle into the shared
     // disconnectRef, orphaning the new stream. See the "session switch mid-handshake"
@@ -251,7 +251,7 @@ export function useChatStream({
     // already whatever the caller set) apart from "a reconnect after a drop succeeded"
     // (clear the reconnecting message). Also lets onError tell apart a transient error
     // it already saw via onReconnect (skip, avoid clobbering with a duplicate/contra-
-    // dictory 'stream error') from a standalone failure (none observed via this SDK's
+    // dictory 'stream error') from a standalone failure (none observed via this platform's
     // current wiring, but kept as a defensive fallback).
     let hadDrop = false;
     // Guards the auth-expiry handoff to fire exactly once per connection instance,
@@ -272,7 +272,7 @@ export function useChatStream({
       return true;
     };
 
-    void sdk.chat.events.stream(activeSessionId, {
+    void platformClient.chat.events.stream(activeSessionId, {
       onReady: () => {
         if (cancelled || stoppedRef.current) return;
         if (hadDrop) {
@@ -445,7 +445,7 @@ export function useChatStream({
       // Fires on every transient failure the built-in reconnect loop is about to
       // retry (paired with, and called right after, onReconnect below), and once
       // more on the terminal failure (paired with, and called right after,
-      // onTerminate below). It never fires standalone against this SDK's current
+      // onTerminate below). It never fires standalone against this platform's current
       // wiring, so `hadDrop`, already true from the paired call, lets this handler
       // stay a no-op rather than overwrite the more specific 'reconnecting' /
       // 'stream paused' / 'session expired' state with a generic 'stream error'.
@@ -488,7 +488,7 @@ export function useChatStream({
         );
       },
     }, { reconnect: DEFAULT_SSE_RECONNECT }).then((nextDisconnect) => {
-      // The SDK only yields the disconnect handle AFTER the handshake. If this effect
+      // The platform only yields the disconnect handle AFTER the handshake. If this effect
       // was superseded (cancelled) or the turn was stopped while that promise was still
       // pending, the handle is already orphaned: disconnect it immediately and never
       // store it, storing a stale handle here is exactly what used to clobber the new
@@ -543,7 +543,7 @@ export function useChatStream({
   // matching turn.tool_result (or a terminal turn event) arrives above.
   const cancelToolCall = useCallback(
     async (callId: string): Promise<{ cancelled: boolean }> => {
-      const result = await sdk.operator.sessions.toolCalls.cancel(activeSessionId, callId);
+      const result = await platformClient.operator.sessions.toolCalls.cancel(activeSessionId, callId);
       if (result.cancelled) {
         setActiveToolCalls((current) => current.map((c) => (c.toolCallId === callId ? { ...c, cancelled: true } : c)));
       }

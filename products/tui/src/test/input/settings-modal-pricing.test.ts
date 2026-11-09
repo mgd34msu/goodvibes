@@ -3,7 +3,7 @@
  * generically, including the object-typed pricing.modelPrices key, which
  * must render honestly (never "[object Object]") and edit as validated JSON
  * persisted live. Also pins that the new notifications.push* and
- * watchers.ciPollIntervalMs keys from this SDK round surface in their
+ * watchers.ciPollIntervalMs keys from this platform round surface in their
  * existing categories with no TUI-side change.
  */
 import { describe, test, expect } from 'bun:test';
@@ -16,7 +16,7 @@ import type { SettingEntry } from '../../input/settings-modal-types.ts';
 function findEntry(groups: ReturnType<typeof buildSettingGroups>, key: string) {
   for (const entries of groups.values()) {
     const found = entries.find((e) => e.setting.key === key);
-    if (found?.kind === 'host') throw new Error('The bare SDK fixture must contain only builtin rows');
+    if (found?.kind === 'host') throw new Error('The bare platform fixture must contain only builtin rows');
     if (found) return found;
   }
   return undefined;

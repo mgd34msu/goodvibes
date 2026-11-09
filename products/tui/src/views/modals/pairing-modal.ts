@@ -6,8 +6,8 @@ import type {
   ConfigModalSurface,
   ConfigModalView,
 } from '../../input/config-modal-types.ts';
-import { describeOriginPosture, generateQrMatrix, renderQrToString, type OriginPosture, type PairingHandoffOfferKind } from '@goodvibes-jev/engine/sdk/platform/pairing';
-import { formatPairingOffers, formatPostureCapabilities, pairingPostureNotice } from '@goodvibes-jev/engine/sdk/platform/pairing';
+import { describeOriginPosture, generateQrMatrix, renderQrToString, type OriginPosture, type PairingHandoffOfferKind } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { formatPairingOffers, formatPostureCapabilities, pairingPostureNotice } from '@goodvibes-jev/engine/platform/platform/pairing';
 
 // ---------------------------------------------------------------------------
 // Device Pairing config-modal surface. Shows the web-app origin, the per-device
@@ -38,7 +38,7 @@ export interface PairingModalConnectionInfo {
   readonly offers: readonly PairingHandoffOfferKind[];
   /**
    * The honest TLS/capability posture of the web origin the deep link opens
-   * (the SDK's describeOriginPosture / the handoff's `posture` field). The one
+   * (the platform's describeOriginPosture / the handoff's `posture` field). The one
    * honest LAN line and the labeled capability list both render from here, never
    * from a locally-authored string. Absent when no web origin is known.
    */
@@ -173,7 +173,7 @@ class PairingModalSurface implements ConfigModalSurface {
       rows.push(infoRow('caps-h', 'This device will get:', { fg: MODAL_TONES.dim }));
       capabilities.forEach((line, i) => rows.push(infoRow(`cap:${i}`, line)));
     }
-    // The ONE honest LAN line, the SDK posture's own notice (LAN_PLAIN_HTTP_NOTICE),
+    // The ONE honest LAN line, the platform posture's own notice (LAN_PLAIN_HTTP_NOTICE),
     // present only for the plain-http-on-LAN posture, never a nag elsewhere.
     const notice = pairingPostureNotice(posture);
     if (notice) rows.push(infoRow('posture', notice, { fg: MODAL_TONES.reasoning }));

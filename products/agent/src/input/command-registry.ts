@@ -15,24 +15,24 @@ import type { NativeConversationIntakeActions, NativeConversationIntakeState } f
 
 import type { ConversationManager } from '../core/conversation';
 
-import type { ProcessManager } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
 
 import type { KeybindingsManager } from './keybindings.ts';
-import type { KnowledgeApi } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import type { HookApi } from '@goodvibes-jev/engine/sdk/platform/hooks';
-import type { McpApi } from '@goodvibes-jev/engine/sdk/platform/mcp';
-import type { ProviderApi } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { KnowledgeApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import type { HookApi } from '@goodvibes-jev/engine/platform/platform/hooks';
+import type { McpApi } from '@goodvibes-jev/engine/platform/platform/mcp';
+import type { ProviderApi } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { OpsApi } from '@/runtime/index.ts';
 import type { OperatorClient } from '@/runtime/index.ts';
 import type { PeerClient } from '@/runtime/index.ts';
 import type { DirectTransport } from '@/runtime/index.ts';
 import type { AgentPromptContextReceiptStore } from '../agent/prompt-context-receipts.ts';
-import type { MemoryConsolidationProposal } from '@goodvibes-jev/engine/sdk/platform/state';
+import type { MemoryConsolidationProposal } from '@goodvibes-jev/engine/platform/platform/state';
 
 import type { AgentMemoryDiagnostics, AgentVoiceSetupService } from '../runtime/services.ts';
-import type { MediaProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/media';
-import type { ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import type { ChannelDeliveryRouter } from '@goodvibes-jev/engine/sdk/platform/channels';
+import type { MediaProviderRegistry } from '@goodvibes-jev/engine/platform/platform/media';
+import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { ChannelDeliveryRouter } from '@goodvibes-jev/engine/platform/platform/channels';
 import type { AgentExecutionLedger } from '../runtime/execution-ledger.ts';
 import type { ApprovalsView } from '../runtime/client/approvals-view.ts';
 import type { CommandWorkspaceShellServices } from '@/runtime/index.ts';
@@ -54,7 +54,7 @@ export interface CommandUiActions extends TerminalCommandUiActions<import('./mod
   dispatchNativeIntakeTurn?: (state: NativeConversationIntakeState) => Promise<void>;
   submitInput?: (
     text: string,
-    content?: import('@goodvibes-jev/engine/sdk/platform/providers').ContentPart[],
+    content?: import('@goodvibes-jev/engine/platform/platform/providers').ContentPart[],
     context?: ProductInputContext,
   ) => void;
 
@@ -129,7 +129,7 @@ export interface CommandSessionServices extends TerminalCommandSessionServices {
   /**
    * Writes the surface-scoped last-session pointer file. Bound once at
    * bootstrap to the runtime's SessionSurface (see
-   * the SDK's bindWriteLastSessionPointerToSurface)
+   * the platform's bindWriteLastSessionPointerToSurface)
    * so this command layer never has to re-derive the surface itself. Called
    * at the moment runtime.sessionId changes to a session the user explicitly
    * homed the live session on (/session resume, /session fork) so the next
@@ -190,7 +190,7 @@ export interface CommandOpsServices extends CommandOpsShellServices {
 export interface CommandExtensionRegistryServices extends TerminalCommandExtensionRegistryServices {}
 
 export interface CommandExtensionServices extends CommandExtensionRegistryServices, CommandExtensionShellServices {
-  readonly agentKnowledgeService?: import('@goodvibes-jev/engine/sdk/platform/knowledge').KnowledgeService;
+  readonly agentKnowledgeService?: import('@goodvibes-jev/engine/platform/platform/knowledge').KnowledgeService;
 }
 
 /** Read-only handle onto pending memory-consolidation judgment proposals (see agent/memory-consolidation-proposals.ts). */
@@ -232,7 +232,7 @@ export interface CommandContext extends CommandUiActions, CommandShellUiOpeners 
     /**
      * Read-only access to pending memory-consolidation judgment proposals
      * (contradictions, cross-scope duplicates, stale-delete candidates),
-     * adopts the SDK's memory.consolidation.receipts verb shape locally
+     * adopts the platform's memory.consolidation.receipts verb shape locally
      * (see agent/memory-consolidation-proposals.ts), since this runtime owns
      * the consolidation scheduler directly rather than reaching it over the
      * wire.

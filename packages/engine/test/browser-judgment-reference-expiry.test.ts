@@ -1,6 +1,6 @@
 import { describe, expect, spyOn, test } from 'bun:test';
-import { BrowserJudgmentError, type AuthenticatedPrincipal } from '../daemon-sdk/src/index.ts';
-import { BrowserJudgmentReferences, type BrowserJudgmentReferenceSource } from '../sdk/src/platform/judgment-browser/index.ts';
+import { BrowserJudgmentError, type AuthenticatedPrincipal } from '../daemon-api/src/index.ts';
+import { BrowserJudgmentReferences, type BrowserJudgmentReferenceSource } from '../platform/src/platform/judgment-browser/index.ts';
 
 const battery = 'webui.errors.daemon-refusal';
 const owner: AuthenticatedPrincipal = { principalId: 'fixture-owner', principalKind: 'user', admin: true, scopes: ['write:judgment'] };

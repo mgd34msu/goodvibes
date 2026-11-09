@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { gatherTrainStatus, realExec, type TrainStatusManifest } from '@goodvibes-jev/engine/toolchain';
 
 // Integration coverage: real git against two tiny throwaway repos (one
-// tagged, one untagged). npm is stubbed out via fetchLatestSdkVersion so the
+// tagged, one untagged). npm is stubbed out via fetchLatestEngineVersion so the
 // test never touches the real registry.
 
 const ROOT = mkdtempSync(join(tmpdir(), 'gv-train-status-'));
@@ -41,7 +41,7 @@ git(taggedDir, 'tag', 'v1.0.0');
 commit(taggedDir, '1.0.1-dev', 'work after tag 1');
 commit(taggedDir, '1.0.1-dev', 'work after tag 2');
 
-// Untagged repo: an sdk-consumer with a stale SDK pin, no tag at all.
+// Untagged repo: an platform-consumer with a stale platform pin, no tag at all.
 const untaggedDir = initRepo('untagged-repo');
 writeFileSync(
   join(untaggedDir, 'package.json'),
@@ -57,9 +57,9 @@ afterAll(() => {
 describe('gatherTrainStatus against real git repos', () => {
   test('a tagged sdk repo with commits since the tag reports the correct counts and action', () => {
     const manifest: TrainStatusManifest = {
-      repos: [{ path: taggedDir, name: 'goodvibes-sdk', kind: 'sdk' }],
+      repos: [{ path: taggedDir, name: 'goodvibes-platform', kind: 'platform' }],
     };
-    const result = gatherTrainStatus(manifest, { exec: realExec, fetchLatestSdkVersion: () => null });
+    const result = gatherTrainStatus(manifest, { exec: realExec, fetchLatestEngineVersion: () => null });
     const row = result.rows[0]!;
     expect(row.error).toBeUndefined();
     expect(row.version).toBe('1.0.1-dev');
@@ -73,23 +73,23 @@ describe('gatherTrainStatus against real git repos', () => {
     const manifest: TrainStatusManifest = {
       repos: [{ path: untaggedDir, name: 'consumer-repo', kind: 'sdk-consumer' }],
     };
-    const result = gatherTrainStatus(manifest, { exec: realExec, fetchLatestSdkVersion: () => '1.4.0' });
-    expect(result.latestSdkVersion).toBe('1.4.0');
+    const result = gatherTrainStatus(manifest, { exec: realExec, fetchLatestEngineVersion: () => '1.4.0' });
+    expect(result.latestEngineVersion).toBe('1.4.0');
     const row = result.rows[0]!;
     expect(row.error).toBeUndefined();
     expect(row.version).toBe('0.3.0');
     expect(row.lastTag).toBe('(none)');
     expect(row.commitsSinceTag).toBe(1);
-    expect(row.sdkPin).toBe('1.0.0 -> 1.4.0 (repin needed)');
+    expect(row.enginePin).toBe('1.0.0 -> 1.4.0 (repin needed)');
     expect(row.action).toBe('repin to 1.4.0 then release');
   });
 
-  test('fetchLatestSdkVersion is never called when no repo in the manifest is an sdk-consumer', () => {
+  test('fetchLatestEngineVersion is never called when no repo in the manifest is an sdk-consumer', () => {
     const manifest: TrainStatusManifest = {
-      repos: [{ path: taggedDir, name: 'goodvibes-sdk', kind: 'sdk' }],
+      repos: [{ path: taggedDir, name: 'goodvibes-platform', kind: 'platform' }],
     };
     let called = false;
-    gatherTrainStatus(manifest, { exec: realExec, fetchLatestSdkVersion: () => { called = true; return '1.0.0'; } });
+    gatherTrainStatus(manifest, { exec: realExec, fetchLatestEngineVersion: () => { called = true; return '1.0.0'; } });
     expect(called).toBe(false);
   });
 
@@ -97,7 +97,7 @@ describe('gatherTrainStatus against real git repos', () => {
     const manifest: TrainStatusManifest = {
       repos: [{ path: join(ROOT, 'does-not-exist'), name: 'ghost', kind: 'independent' }],
     };
-    const result = gatherTrainStatus(manifest, { exec: realExec, fetchLatestSdkVersion: () => null });
+    const result = gatherTrainStatus(manifest, { exec: realExec, fetchLatestEngineVersion: () => null });
     const row = result.rows[0]!;
     expect(row.error).toContain('path does not exist');
     expect(row.action).toContain('ERROR:');
@@ -109,7 +109,7 @@ describe('gatherTrainStatus against real git repos', () => {
     const manifest: TrainStatusManifest = {
       repos: [{ path: notGit, name: 'plain-dir', kind: 'independent' }],
     };
-    const result = gatherTrainStatus(manifest, { exec: realExec, fetchLatestSdkVersion: () => null });
+    const result = gatherTrainStatus(manifest, { exec: realExec, fetchLatestEngineVersion: () => null });
     const row = result.rows[0]!;
     expect(row.error).toContain('not a git repository');
   });

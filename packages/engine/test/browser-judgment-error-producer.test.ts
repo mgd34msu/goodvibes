@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
-import { attachBrowserJudgmentError, browserJudgmentErrorMethod } from '../sdk/src/platform/daemon/http/browser-judgment-error.ts';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import type { AuthenticatedPrincipal, BrowserJudgmentErrorSource } from '../daemon-sdk/src/index.ts';
+import { attachBrowserJudgmentError, browserJudgmentErrorMethod } from '../platform/src/platform/daemon/http/browser-judgment-error.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import type { AuthenticatedPrincipal, BrowserJudgmentErrorSource } from '../daemon-api/src/index.ts';
 
 const principal: AuthenticatedPrincipal = { principalId: 'synthetic-owner', principalKind: 'user', admin: true, scopes: ['write:judgment'] };
 function fixture() {

@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { CostTracker, COST_TRACKER_MAX_AGENTS } from '../sdk/src/platform/observe/index.ts';
-import { RuntimeEventBus, createEventEnvelope } from '../sdk/src/platform/runtime/state.ts';
-import { createUiRuntimeEvents } from '../sdk/src/platform/runtime/ui.ts';
-import { calcSessionCost, resolveSessionCost, setModelPricingResolver, setPricingSource } from '../sdk/src/platform/providers/session-cost.ts';
-import type { AgentRecord } from '../sdk/src/platform/tools/agent/record.ts';
+import { CostTracker, COST_TRACKER_MAX_AGENTS } from '../platform/src/platform/observe/index.ts';
+import { RuntimeEventBus, createEventEnvelope } from '../platform/src/platform/runtime/state.ts';
+import { createUiRuntimeEvents } from '../platform/src/platform/runtime/ui.ts';
+import { calcSessionCost, resolveSessionCost, setModelPricingResolver, setPricingSource } from '../platform/src/platform/providers/session-cost.ts';
+import type { AgentRecord } from '../platform/src/platform/tools/agent/record.ts';
 
 const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 function record(id: string, inputTokens = 1_000_000, contractRole?: AgentRecord['contractRole']): AgentRecord {

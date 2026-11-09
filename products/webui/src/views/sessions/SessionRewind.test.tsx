@@ -46,7 +46,7 @@ const MESSAGES = {
 mock.module('../../lib/goodvibes', () => ({
   getCurrentAuth: () => Promise.resolve({}),
   invokeMethod: () => Promise.resolve({}),
-  sdk: {
+  client: {
     operator: {
       sessions: { messages: { list: (_id: string) => Promise.resolve(MESSAGES) } },
       rewind: {

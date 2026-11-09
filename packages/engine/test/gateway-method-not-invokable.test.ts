@@ -4,7 +4,7 @@
  * Review-fix: codifies the `invokable` flag's real semantics. It is
  * enforced on the generic HTTP/WS method-dispatch path
  * (`validateGatewayInvocation` / `invokeGatewayMethodCall` in
- * ../sdk/src/platform/daemon/control-plane.ts) but `GatewayMethodCatalog`'s
+ * ../platform/src/platform/daemon/control-plane.ts) but `GatewayMethodCatalog`'s
  * own `invoke()` does NOT consult it for a method that has a registered handler,
  * that is intentional: a runtime that has wired up a real in-process handler is
  * authoritative over whether the method actually works, not the descriptor's flag.
@@ -13,17 +13,17 @@
  *  (a) the doc comment on `invokable` (method-catalog-shared.ts) states this
  *      precisely, read there, not re-asserted here as prose.
  *  (b) the HTTP 400 for an `invokable:false` method carries a machine-readable
- *      `code: 'NOT_INVOKABLE'` (SDKErrorCodes), not just a message string.
+ *      `code: 'NOT_INVOKABLE'` (EngineErrorCodes), not just a message string.
  *  (c) `GatewayMethodCatalog.invoke()` on a method with `invokable:false` AND no
  *      registered handler throws an honest NOT_INVOKABLE error, not a generic
  *      "no internal handler" one, while a method with `invokable:false` but a REAL
  *      registered handler still runs it.
  */
 import { describe, expect, test } from 'bun:test';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { isGatewayVerbError } from '../sdk/src/platform/control-plane/routes/gateway-verb-error.ts';
-import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../sdk/src/platform/daemon/control-plane.ts';
-import { SDKErrorCodes } from '../errors/src/index.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { isGatewayVerbError } from '../platform/src/platform/control-plane/routes/gateway-verb-error.ts';
+import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../platform/src/platform/daemon/control-plane.ts';
+import { EngineErrorCodes } from '../errors/src/index.ts';
 
 function blockedDescriptor(id: string) {
   return {
@@ -52,7 +52,7 @@ describe('GatewayMethodCatalog.invoke() and invokable:false', () => {
     }
     expect(isGatewayVerbError(caught)).toBe(true);
     if (isGatewayVerbError(caught)) {
-      expect(caught.code).toBe(SDKErrorCodes.NOT_INVOKABLE);
+      expect(caught.code).toBe(EngineErrorCodes.NOT_INVOKABLE);
       expect(caught.status).toBe(400);
     }
   });
@@ -112,7 +112,7 @@ describe('DaemonControlPlaneHelper.validateGatewayInvocation / invokeGatewayMeth
     const denied = helper.validateGatewayInvocation(descriptor);
     expect(denied).not.toBeNull();
     expect(denied?.status).toBe(400);
-    expect(denied?.body.code).toBe(SDKErrorCodes.NOT_INVOKABLE);
+    expect(denied?.body.code).toBe(EngineErrorCodes.NOT_INVOKABLE);
     expect(denied?.body.code).toBe('NOT_INVOKABLE');
   });
 
@@ -128,7 +128,7 @@ describe('DaemonControlPlaneHelper.validateGatewayInvocation / invokeGatewayMeth
     const result = await helper.invokeGatewayMethodCall({ authToken: 'irrelevant', methodId: 'test.blocked.e2e' });
     expect(result.status).toBe(400);
     expect(result.ok).toBe(false);
-    expect((result.body as Record<string, unknown>).code).toBe(SDKErrorCodes.NOT_INVOKABLE);
+    expect((result.body as Record<string, unknown>).code).toBe(EngineErrorCodes.NOT_INVOKABLE);
     // The HTTP/WS dispatch gate rejects it before the registered handler is ever
     // reached, the flag DOES block this path, even though the handler exists.
     expect(handlerCalled).toBe(false);

@@ -2,9 +2,9 @@ import { joinPromptParts } from '@goodvibes-jev/engine/terminal-shell/prompt-par
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { writeStoreFile } from '@/utils/store-file.ts';
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
-import type { MemoryRecord, MemoryRegistry } from '@goodvibes-jev/engine/sdk/platform/state';
-import type { MemoryRecallSnapshot } from '@goodvibes-jev/engine/sdk/platform/runtime/memory-spine';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { MemoryRecord, MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
+import type { MemoryRecallSnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import type { ShellPathService } from '@/runtime/index.ts';
 import type { CapabilityIndexReport } from '../capabilities/capability-types.ts';
 import { buildCapabilitySummaryPrompt } from './capability-summary-prompt.ts';
@@ -108,12 +108,12 @@ export interface RuntimePromptCompositionInput {
    *  Null/undefined when there is no active turn (e.g. a follow-up composition). */
   readonly turnText?: string | null;
   /**
-   * The memory spine's cached recall snapshot (SDK 1.2.0 sync-recall seam), when the
+   * The memory spine's cached recall snapshot (platform 1.2.0 sync-recall seam), when the
    * caller has one to offer.
    *
-   * SYNC-RECALL SEAM (memory-spine full-detach adoption, SDK 1.2.0): this function is
-   * called synchronously from the SDK's `Orchestrator.getSystemPrompt` callback, which
-   * the SDK defines as non-async, while a wire client's memory reads are async. Rather
+   * SYNC-RECALL SEAM (memory-spine full-detach adoption, platform 1.2.0): this function is
+   * called synchronously from the platform's `Orchestrator.getSystemPrompt` callback, which
+   * the platform defines as non-async, while a wire client's memory reads are async. Rather
    * than reading `memoryRegistry.getAll()` directly (a frozen local snapshot that would
    * silently miss whatever the daemon wrote after this process last opened its own
    * copy, the exact failure the 1.1.0-era `memorySpineMode` degrade note used to flag),
@@ -227,7 +227,7 @@ function receiptSegment(
 }
 
 /**
- * Read via the memory spine's cached recall snapshot when the caller has one (SDK
+ * Read via the memory spine's cached recall snapshot when the caller has one (platform
  * 1.2.0 sync-recall seam, see RuntimePromptCompositionInput.memoryRecallSnapshot);
  * fall back to the direct registry read otherwise (unchanged pre-1.2.0 behavior).
  * Shared by the prompt text build and the receipt segment build so both derive

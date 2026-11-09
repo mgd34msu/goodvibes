@@ -18,8 +18,8 @@
  * (the output, or the throbber); the input area's ▄ cap gives the half row
  * below it (shell-surface.ts builds that stack). Gone at the bottom.
  */
-import { type Line, createEmptyLine } from '@goodvibes-jev/engine/sdk/platform/types';
-import { getDisplayWidth } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { type Line, createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types';
+import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils';
 import { activeTokens } from './theme.js';
 /** What the pill shows. */
 export interface BackToBottomState {

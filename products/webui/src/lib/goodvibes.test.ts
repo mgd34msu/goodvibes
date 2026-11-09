@@ -10,7 +10,7 @@ import {
   isRuntimeDomain,
   isExtraRoutedMethod,
   webuiRouteFor,
-  sdk,
+  client as platformClient,
 } from './goodvibes';
 import { getObservedClientCompatibilityFloor } from './client-compatibility';
 import type { OperatorMethodOutput } from './goodvibes';
@@ -52,8 +52,8 @@ describe('isRuntimeDomain', () => {
 
 describe('EXTRA_METHOD_ROUTES retirement (W2B)', () => {
   test('sessions.get/steer/followUp resolve NATIVELY, no EXTRA row', () => {
-    // These gained native coverage in the 0.38 browser SDK (SHARED_BROWSER_ROUTES);
-    // they must fall through to scopedSdk.operator.invoke, not a hand-written route.
+    // These gained native coverage in the 0.38 browser platform (SHARED_BROWSER_ROUTES);
+    // they must fall through to scopedPlatform.operator.invoke, not a hand-written route.
     expect(isExtraRoutedMethod('sessions.get')).toBe(false);
     expect(isExtraRoutedMethod('sessions.steer')).toBe(false);
     expect(isExtraRoutedMethod('sessions.followUp')).toBe(false);
@@ -71,7 +71,7 @@ describe('EXTRA_METHOD_ROUTES retirement (W2B)', () => {
     expect(isExtraRoutedMethod('sessions.reopen')).toBe(true);
   });
 
-  test('the justified survivors remain (SDK-coverage targets)', () => {
+  test('the justified survivors remain (platform-coverage targets)', () => {
     for (const method of [
       'approvals.approve', 'approvals.list', 'models.list', 'models.current.get', 'models.current.set',
       'tasks.list', 'tasks.cancel', 'tasks.retry', 'config.get', 'config.set', 'local_auth.status',
@@ -83,7 +83,7 @@ describe('EXTRA_METHOD_ROUTES retirement (W2B)', () => {
 
   test('sessions.delete / companion.chat.sessions.close / control.methods.get are table-routed (delete-means-delete)', () => {
     // None of these three ids are in the installed 0.38 OperatorMethodId union
-    // (sessions.delete, companion.chat.sessions.close) or have a browser-SDK REST
+    // (sessions.delete, companion.chat.sessions.close) or have a browser-platform REST
     // binding (control.methods.get), every one needs its own EXTRA_METHOD_ROUTES row.
     expect(isExtraRoutedMethod('sessions.delete')).toBe(true);
     expect(isExtraRoutedMethod('companion.chat.sessions.close')).toBe(true);
@@ -96,7 +96,7 @@ describe('EXTRA_METHOD_ROUTES retirement (W2B)', () => {
     }
   });
 
-  // sessions.changes.get / cost.attribution.get (SDK 1.6.1): `transport: ["ws"]` only,
+  // sessions.changes.get / cost.attribution.get (platform 1.6.1): `transport: ["ws"]` only,
   // no `http` route, same generic-invoke-only shape as fleet.*/checkpoints.* above, not
   // a table-routed EXTRA_METHOD_ROUTES entry.
   test('sessions.changes.get and cost.attribution.get are NOT extra-routed, generic invoke path', () => {
@@ -104,7 +104,7 @@ describe('EXTRA_METHOD_ROUTES retirement (W2B)', () => {
     expect(isExtraRoutedMethod('cost.attribution.get')).toBe(false);
   });
 
-  // sessions.permissionMode.get/set + sessions.contextUsage.get (SDK 1.6.1): real REST
+  // sessions.permissionMode.get/set + sessions.contextUsage.get (platform 1.6.1): real REST
   // routes with real generated I/O maps, but not in SHARED/KNOWLEDGE_BROWSER_ROUTES,
   // same table-routed shape as sessions.close/reopen above, not the generic-invoke path.
   test('sessions.permissionMode.get/set and sessions.contextUsage.get are table-routed', () => {
@@ -113,7 +113,7 @@ describe('EXTRA_METHOD_ROUTES retirement (W2B)', () => {
     expect(isExtraRoutedMethod('sessions.contextUsage.get')).toBe(true);
   });
 
-  // ci.* (SDK 1.6.1's initiative-family repack): real REST routes with real generated
+  // ci.* (platform 1.6.1's initiative-family repack): real REST routes with real generated
   // I/O maps, but not in SHARED/KNOWLEDGE_BROWSER_ROUTES, same table-routed shape as
   // sessions.permissionMode.*/contextUsage.get above.
   test('ci.status and ci.watches.* are table-routed', () => {
@@ -124,7 +124,7 @@ describe('EXTRA_METHOD_ROUTES retirement (W2B)', () => {
     expect(isExtraRoutedMethod('ci.watches.run')).toBe(true);
   });
 
-  // checkin.* (SDK 1.6.1's initiative-family repack): same table-routed shape as ci.*
+  // checkin.* (platform 1.6.1's initiative-family repack): same table-routed shape as ci.*
   // above.
   test('checkin.* is table-routed', () => {
     expect(isExtraRoutedMethod('checkin.config.get')).toBe(true);
@@ -133,7 +133,7 @@ describe('EXTRA_METHOD_ROUTES retirement (W2B)', () => {
     expect(isExtraRoutedMethod('checkin.run')).toBe(true);
   });
 
-  // principals.* / channels.profiles.* (SDK 1.6.1's initiative-family repack): same
+  // principals.* / channels.profiles.* (platform 1.6.1's initiative-family repack): same
   // table-routed shape as ci.*/checkin.* above.
   test('principals.* and channels.profiles.* are table-routed', () => {
     for (const method of [
@@ -145,7 +145,7 @@ describe('EXTRA_METHOD_ROUTES retirement (W2B)', () => {
   });
 
   // occasions.* (docs/occasions.md, the dates panel): same table-routed shape as
-  // checkin.*/ci.*/principals.* above, real REST routes, no browser-SDK coverage.
+  // checkin.*/ci.*/principals.* above, real REST routes, no browser-platform coverage.
   test('occasions.* is table-routed', () => {
     for (const method of [
       'occasions.list', 'occasions.pending', 'occasions.propose', 'occasions.confirm', 'occasions.remove',
@@ -172,7 +172,7 @@ describe('facade route knowledge is generated, not hand-maintained', () => {
   test('every table route matches the generated WEBUI_METHOD_ROUTES artifact EXACTLY (no hand-written row shadows or diverges from a generated one)', () => {
     for (const [methodId, generated] of Object.entries(WEBUI_METHOD_ROUTES)) {
       const resolved = webuiRouteFor(methodId);
-      // undefined ⇒ the method is browser-SDK-covered and resolves natively (falls through);
+      // undefined ⇒ the method is browser-platform-covered and resolves natively (falls through);
       // present ⇒ it must equal the generated route byte-for-byte.
       if (resolved === undefined) continue;
       expect(resolved, `${methodId}: table route diverges from the generated artifact`).toEqual({
@@ -258,7 +258,7 @@ describe('facade route knowledge is generated, not hand-maintained', () => {
 
 });
 
-describe('sdk.operator.fleet / sdk.operator.checkpoints: generic invoke-by-id', () => {
+describe('platform.operator.fleet / platform.operator.checkpoints: generic invoke-by-id', () => {
   const originalFetch = globalThis.fetch;
   let calls: { url: string; method: string; body: unknown }[];
 
@@ -280,7 +280,7 @@ describe('sdk.operator.fleet / sdk.operator.checkpoints: generic invoke-by-id', 
 
   test('fleet.snapshot POSTs to the generic invoke endpoint with an empty body envelope', async () => {
     stubFetch({ capturedAt: 1, nodes: [], truncated: false, totalCount: 0 });
-    await sdk.operator.fleet.snapshot();
+    await platformClient.operator.fleet.snapshot();
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toContain('/api/control-plane/methods/fleet.snapshot/invoke');
     expect(calls[0].method).toBe('POST');
@@ -289,14 +289,14 @@ describe('sdk.operator.fleet / sdk.operator.checkpoints: generic invoke-by-id', 
 
   test('fleet.list forwards its filter input inside the body envelope', async () => {
     stubFetch({ items: [], hasMore: false, capturedAt: 1 });
-    await sdk.operator.fleet.list({ kinds: ['agent'], limit: 10 });
+    await platformClient.operator.fleet.list({ kinds: ['agent'], limit: 10 });
     expect(calls[0].url).toContain('/api/control-plane/methods/fleet.list/invoke');
     expect(calls[0].body).toEqual({ body: { kinds: ['agent'], limit: 10 } });
   });
 
   test('checkpoints.create forwards kind/label inside the body envelope', async () => {
     stubFetch({ checkpoint: null, noop: true });
-    await sdk.operator.checkpoints.create({ kind: 'manual', label: 'test' });
+    await platformClient.operator.checkpoints.create({ kind: 'manual', label: 'test' });
     expect(calls[0].url).toContain('/api/control-plane/methods/checkpoints.create/invoke');
     expect(calls[0].body).toEqual({ body: { kind: 'manual', label: 'test' } });
   });
@@ -305,7 +305,7 @@ describe('sdk.operator.fleet / sdk.operator.checkpoints: generic invoke-by-id', 
     stubFetch({ error: 'Checkpoint not found: wcp_ghost', code: 'NOT_FOUND' }, 404);
     let caught: unknown;
     try {
-      await sdk.operator.checkpoints.restore({ id: 'wcp_ghost' });
+      await platformClient.operator.checkpoints.restore({ id: 'wcp_ghost' });
     } catch (error) {
       caught = error;
     }
@@ -315,7 +315,7 @@ describe('sdk.operator.fleet / sdk.operator.checkpoints: generic invoke-by-id', 
 
   test('sessions.search (typed-client scaffold) POSTs to the generic invoke endpoint with its filter input', async () => {
     stubFetch({ sessions: [], hasMore: false });
-    await sdk.operator.sessions.search({ query: 'deploy', includeClosed: true });
+    await platformClient.operator.sessions.search({ query: 'deploy', includeClosed: true });
     expect(calls[0].url).toContain('/api/control-plane/methods/sessions.search/invoke');
     expect(calls[0].method).toBe('POST');
     expect(calls[0].body).toEqual({ body: { query: 'deploy', includeClosed: true } });
@@ -326,7 +326,7 @@ describe('sdk.operator.fleet / sdk.operator.checkpoints: generic invoke-by-id', 
     let caught: unknown;
     let result: unknown;
     try {
-      result = await sdk.operator.sessions.search();
+      result = await platformClient.operator.sessions.search();
     } catch (error) {
       caught = error;
     }
@@ -341,7 +341,7 @@ describe('sdk.operator.fleet / sdk.operator.checkpoints: generic invoke-by-id', 
       sessionId: 's-1', checkpointCount: 0, checkpointIds: [], from: 'EMPTY', to: 'EMPTY',
       files: [], unifiedDiff: '', stat: '',
     });
-    await sdk.operator.sessions.changes.get('s-1');
+    await platformClient.operator.sessions.changes.get('s-1');
     expect(calls[0].url).toContain('/api/control-plane/methods/sessions.changes.get/invoke');
     expect(calls[0].method).toBe('POST');
     expect(calls[0].body).toEqual({ body: { sessionId: 's-1' } });
@@ -354,7 +354,7 @@ describe('sdk.operator.fleet / sdk.operator.checkpoints: generic invoke-by-id', 
       tokens: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
       rows: [],
     });
-    await sdk.operator.cost.attribution.get({ window: '24h', dimension: 'session' });
+    await platformClient.operator.cost.attribution.get({ window: '24h', dimension: 'session' });
     expect(calls[0].url).toContain('/api/control-plane/methods/cost.attribution.get/invoke');
     expect(calls[0].method).toBe('POST');
     expect(calls[0].body).toEqual({ body: { window: '24h', dimension: 'session' } });
@@ -383,7 +383,7 @@ describe('delete-means-delete: sessions.delete / chat.sessions.close / control.m
 
   test('operator.sessions.delete DELETEs /api/sessions/{sessionId} with no body', async () => {
     stubFetch({ sessionId: 'sess-1', deleted: true });
-    const result = await sdk.operator.sessions.delete('sess-1');
+    const result = await platformClient.operator.sessions.delete('sess-1');
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toContain('/api/sessions/sess-1');
     expect(calls[0].method).toBe('DELETE');
@@ -394,7 +394,7 @@ describe('delete-means-delete: sessions.delete / chat.sessions.close / control.m
     stubFetch({ error: 'Session is active; close it, then delete.', code: 'SESSION_ACTIVE' }, 409);
     let caught: unknown;
     try {
-      await sdk.operator.sessions.delete('sess-1');
+      await platformClient.operator.sessions.delete('sess-1');
     } catch (error) {
       caught = error;
     }
@@ -404,14 +404,14 @@ describe('delete-means-delete: sessions.delete / chat.sessions.close / control.m
 
   test('chat.sessions.close POSTs /api/companion/chat/sessions/{sessionId}/close', async () => {
     stubFetch({ sessionId: 'chat-1', status: 'closed' });
-    await sdk.chat.sessions.close('chat-1');
+    await platformClient.chat.sessions.close('chat-1');
     expect(calls[0].url).toContain('/api/companion/chat/sessions/chat-1/close');
     expect(calls[0].method).toBe('POST');
   });
 
   test('operator.control.methodInfo GETs /api/control-plane/methods/{methodId}', async () => {
     stubFetch({ method: { id: 'sessions.delete', invokable: true } });
-    const result = await sdk.operator.control.methodInfo('sessions.delete');
+    const result = await platformClient.operator.control.methodInfo('sessions.delete');
     expect(calls[0].url).toContain('/api/control-plane/methods/sessions.delete');
     expect(calls[0].method).toBe('GET');
     expect(result.method.id).toBe('sessions.delete');
@@ -422,7 +422,7 @@ describe('delete-means-delete: sessions.delete / chat.sessions.close / control.m
     stubFetch({ error: 'Unknown gateway method', status: 404 }, 404);
     let caught: unknown;
     try {
-      await sdk.operator.control.methodInfo('totally-not-a-real-method');
+      await platformClient.operator.control.methodInfo('totally-not-a-real-method');
     } catch (error) {
       caught = error;
     }
@@ -432,7 +432,7 @@ describe('delete-means-delete: sessions.delete / chat.sessions.close / control.m
   });
 });
 
-describe('ci.* (SDK 1.6.1 initiative family) wire calls', () => {
+describe('ci.* (platform 1.6.1 initiative family) wire calls', () => {
   const originalFetch = globalThis.fetch;
   let calls: { url: string; method: string; body: unknown }[];
 
@@ -454,7 +454,7 @@ describe('ci.* (SDK 1.6.1 initiative family) wire calls', () => {
 
   test('operator.ci.watches.list GETs /api/ci/watches', async () => {
     stubFetch({ watches: [] });
-    const result = await sdk.operator.ci.watches.list();
+    const result = await platformClient.operator.ci.watches.list();
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toContain('/api/ci/watches');
     expect(calls[0].method).toBe('GET');
@@ -463,7 +463,7 @@ describe('ci.* (SDK 1.6.1 initiative family) wire calls', () => {
 
   test('operator.ci.watches.create POSTs the full body to /api/ci/watches', async () => {
     stubFetch({ watch: { id: 'ciw-1', repo: 'acme/example', deliveryChannel: 'slack:#ci', triggerFixSession: false, createdAt: 1, updatedAt: 1 } });
-    await sdk.operator.ci.watches.create({ repo: 'acme/example', deliveryChannel: 'slack:#ci', triggerFixSession: false });
+    await platformClient.operator.ci.watches.create({ repo: 'acme/example', deliveryChannel: 'slack:#ci', triggerFixSession: false });
     expect(calls[0].url).toContain('/api/ci/watches');
     expect(calls[0].method).toBe('POST');
     expect(calls[0].body).toEqual({ repo: 'acme/example', deliveryChannel: 'slack:#ci', triggerFixSession: false });
@@ -471,7 +471,7 @@ describe('ci.* (SDK 1.6.1 initiative family) wire calls', () => {
 
   test('operator.ci.watches.delete DELETEs /api/ci/watches/{watchId} with no body', async () => {
     stubFetch({ watchId: 'ciw-1', deleted: true });
-    const result = await sdk.operator.ci.watches.delete('ciw-1');
+    const result = await platformClient.operator.ci.watches.delete('ciw-1');
     expect(calls[0].url).toContain('/api/ci/watches/ciw-1');
     expect(calls[0].method).toBe('DELETE');
     expect(result).toEqual({ watchId: 'ciw-1', deleted: true });
@@ -480,7 +480,7 @@ describe('ci.* (SDK 1.6.1 initiative family) wire calls', () => {
   test('operator.ci.watches.run POSTs /api/ci/watches/{watchId}/run and returns the full report envelope', async () => {
     const report = { repo: 'acme/example', overall: 'failed' as const, jobs: [{ name: 'lint', status: 'completed' as const, conclusion: 'failure' }], violations: ['job "lint" concluded failure'], checkedAt: 1 };
     stubFetch({ report, notified: true, fixSessionTriggered: false });
-    const result = await sdk.operator.ci.watches.run('ciw-1');
+    const result = await platformClient.operator.ci.watches.run('ciw-1');
     expect(calls[0].url).toContain('/api/ci/watches/ciw-1/run');
     expect(calls[0].method).toBe('POST');
     // The honesty bar: the full per-job report rides through untouched, never collapsed
@@ -492,7 +492,7 @@ describe('ci.* (SDK 1.6.1 initiative family) wire calls', () => {
   test('operator.ci.status POSTs the repo/ref/prNumber body to /api/ci/status', async () => {
     const report = { repo: 'acme/example', ref: 'main', overall: 'passed', jobs: [], violations: [], checkedAt: 1 };
     stubFetch({ report });
-    const result = await sdk.operator.ci.status({ repo: 'acme/example', ref: 'main' });
+    const result = await platformClient.operator.ci.status({ repo: 'acme/example', ref: 'main' });
     expect(calls[0].url).toContain('/api/ci/status');
     expect(calls[0].method).toBe('POST');
     expect(calls[0].body).toEqual({ repo: 'acme/example', ref: 'main' });
@@ -500,7 +500,7 @@ describe('ci.* (SDK 1.6.1 initiative family) wire calls', () => {
   });
 });
 
-describe('checkin.* (SDK 1.6.1 initiative family) wire calls', () => {
+describe('checkin.* (platform 1.6.1 initiative family) wire calls', () => {
   const originalFetch = globalThis.fetch;
   let calls: { url: string; method: string; body: unknown }[];
 
@@ -523,7 +523,7 @@ describe('checkin.* (SDK 1.6.1 initiative family) wire calls', () => {
   test('operator.checkin.config.get GETs /api/checkin/config', async () => {
     const config = { enabled: true, cadence: '0 9 * * *', deliveryChannel: 'slack:#daily', quietHours: '22:00-07:00' };
     stubFetch({ config });
-    const result = await sdk.operator.checkin.config.get();
+    const result = await platformClient.operator.checkin.config.get();
     expect(calls[0].url).toContain('/api/checkin/config');
     expect(calls[0].method).toBe('GET');
     expect(result).toEqual({ config });
@@ -531,7 +531,7 @@ describe('checkin.* (SDK 1.6.1 initiative family) wire calls', () => {
 
   test('operator.checkin.config.set POSTs only the provided fields to /api/checkin/config', async () => {
     stubFetch({ config: { enabled: false, cadence: '0 9 * * *', deliveryChannel: 'slack:#daily', quietHours: '22:00-07:00' } });
-    await sdk.operator.checkin.config.set({ enabled: false });
+    await platformClient.operator.checkin.config.set({ enabled: false });
     expect(calls[0].url).toContain('/api/checkin/config');
     expect(calls[0].method).toBe('POST');
     expect(calls[0].body).toEqual({ enabled: false });
@@ -540,7 +540,7 @@ describe('checkin.* (SDK 1.6.1 initiative family) wire calls', () => {
   test('operator.checkin.receipts.list GETs /api/checkin/receipts and preserves every receipt field', async () => {
     const receipts = [{ id: 'ckr-1', ranAt: 1, trigger: 'scheduled' as const, outcome: 'skipped-quiet-hours' as const, briefingSummary: 'x', decisionReason: 'quiet hours' }];
     stubFetch({ receipts });
-    const result = await sdk.operator.checkin.receipts.list();
+    const result = await platformClient.operator.checkin.receipts.list();
     expect(calls[0].url).toContain('/api/checkin/receipts');
     expect(calls[0].method).toBe('GET');
     // The honesty bar: outcome and decisionReason ride through untouched.
@@ -549,7 +549,7 @@ describe('checkin.* (SDK 1.6.1 initiative family) wire calls', () => {
 
   test('operator.checkin.run POSTs /api/checkin/run with no body and returns the receipt shape', async () => {
     stubFetch({ outcome: 'delivered', summary: 'All quiet.', deliveryId: 'dlv-1' });
-    const result = await sdk.operator.checkin.run();
+    const result = await platformClient.operator.checkin.run();
     expect(calls[0].url).toContain('/api/checkin/run');
     expect(calls[0].method).toBe('POST');
     expect(result).toEqual({ outcome: 'delivered', summary: 'All quiet.', deliveryId: 'dlv-1' });
@@ -578,7 +578,7 @@ describe('occasions.* (docs/occasions.md, the dates panel) wire calls', () => {
 
   test('operator.occasions.list GETs /api/occasions', async () => {
     stubFetch({ today: '2026-07-29', timezone: 'America/Chicago', occasions: [], unparsed: [], conflicts: [] });
-    const result = await sdk.operator.occasions.list();
+    const result = await platformClient.operator.occasions.list();
     expect(calls[0].url).toContain('/api/occasions');
     expect(calls[0].method).toBe('GET');
     expect(result.occasions).toEqual([]);
@@ -586,7 +586,7 @@ describe('occasions.* (docs/occasions.md, the dates panel) wire calls', () => {
 
   test('operator.occasions.pending GETs /api/occasions/pending', async () => {
     stubFetch({ today: '2026-07-29', nudge: null, conflicts: [], interviews: [] });
-    const result = await sdk.operator.occasions.pending();
+    const result = await platformClient.operator.occasions.pending();
     expect(calls[0].url).toContain('/api/occasions/pending');
     expect(calls[0].method).toBe('GET');
     expect(result.nudge).toBeNull();
@@ -594,7 +594,7 @@ describe('occasions.* (docs/occasions.md, the dates panel) wire calls', () => {
 
   test('operator.occasions.plans.list GETs /api/occasions/plans', async () => {
     stubFetch({ today: '2026-07-29', plans: [], unparsed: [], awayNow: null });
-    const result = await sdk.operator.occasions.plans.list();
+    const result = await platformClient.operator.occasions.plans.list();
     expect(calls[0].url).toContain('/api/occasions/plans');
     expect(calls[0].method).toBe('GET');
     expect(result.awayNow).toBeNull();
@@ -602,7 +602,7 @@ describe('occasions.* (docs/occasions.md, the dates panel) wire calls', () => {
 
   test('operator.occasions.state GETs /api/occasions/state', async () => {
     stubFetch({ path: '/tmp/occasions-state.json', acknowledgements: 1, giftRecords: 2, openItems: 0, interviews: 0, mirrors: 0, lastSweep: null, corruption: null });
-    const result = await sdk.operator.occasions.state();
+    const result = await platformClient.operator.occasions.state();
     expect(calls[0].url).toContain('/api/occasions/state');
     expect(calls[0].method).toBe('GET');
     expect(result.acknowledgements).toBe(1);
@@ -610,7 +610,7 @@ describe('occasions.* (docs/occasions.md, the dates panel) wire calls', () => {
 
   test('operator.occasions.answer POSTs occasionId/answer/occurrence to /api/occasions/answer', async () => {
     stubFetch({ ok: true, reason: null, interview: null });
-    await sdk.operator.occasions.answer({ occasionId: 'occ-1', answer: 'yes' });
+    await platformClient.operator.occasions.answer({ occasionId: 'occ-1', answer: 'yes' });
     expect(calls[0].url).toContain('/api/occasions/answer');
     expect(calls[0].method).toBe('POST');
     expect(calls[0].body).toEqual({ occasionId: 'occ-1', answer: 'yes' });
@@ -618,7 +618,7 @@ describe('occasions.* (docs/occasions.md, the dates panel) wire calls', () => {
 
   test('operator.occasions.remove POSTs occasionId/confirmed/authority to /api/occasions/remove', async () => {
     stubFetch({ ok: true, reason: null, occasionId: 'occ-1', disclosure: 'Removed.', droppedRecords: 2 });
-    const result = await sdk.operator.occasions.remove({ occasionId: 'occ-1', confirmed: true, authority: 'owner-direct' });
+    const result = await platformClient.operator.occasions.remove({ occasionId: 'occ-1', confirmed: true, authority: 'owner-direct' });
     expect(calls[0].url).toContain('/api/occasions/remove');
     expect(calls[0].method).toBe('POST');
     expect(calls[0].body).toEqual({ occasionId: 'occ-1', confirmed: true, authority: 'owner-direct' });
@@ -627,7 +627,7 @@ describe('occasions.* (docs/occasions.md, the dates panel) wire calls', () => {
 
   test('operator.occasions.confirm POSTs the full owner-profile write body to /api/occasions/confirm', async () => {
     stubFetch({ ok: true, reason: null, occasionId: 'occ-new', disclosure: 'Added.', droppedRecords: 0 });
-    await sdk.operator.occasions.confirm({
+    await platformClient.operator.occasions.confirm({
       title: 'Sarah’s birthday', date: '2026-03-14', kind: 'gift-giving', surface: 'webui', said: '(added in the dates panel)', authority: 'owner-direct',
     });
     expect(calls[0].url).toContain('/api/occasions/confirm');
@@ -639,7 +639,7 @@ describe('occasions.* (docs/occasions.md, the dates panel) wire calls', () => {
 
   test('operator.occasions.gifts POSTs occasionId to /api/occasions/gifts', async () => {
     stubFetch({ occasionId: 'occ-1', gifts: [] });
-    const result = await sdk.operator.occasions.gifts('occ-1');
+    const result = await platformClient.operator.occasions.gifts('occ-1');
     expect(calls[0].url).toContain('/api/occasions/gifts');
     expect(calls[0].method).toBe('POST');
     expect(calls[0].body).toEqual({ occasionId: 'occ-1' });
@@ -652,7 +652,7 @@ describe('occasions.* (docs/occasions.md, the dates panel) wire calls', () => {
       delivered: false, deliveryChannel: 'telegram', deliveryId: null, deliveries: [], mirrored: 0, housekeeping: null,
     } satisfies OperatorMethodOutput<'occasions.sweep'>;
     stubFetch(receipt);
-    const result = await sdk.operator.occasions.sweep();
+    const result = await platformClient.operator.occasions.sweep();
     expect(calls[0].url).toContain('/api/occasions/sweep');
     expect(calls[0].method).toBe('POST');
     expect(calls[0].body).toEqual({});
@@ -666,7 +666,7 @@ describe('occasions.* (docs/occasions.md, the dates panel) wire calls', () => {
     'operator.occasions.sweep preserves the accepted delivery receipt when $stopped',
     async (receipt) => {
       stubFetch(receipt);
-      const result = await sdk.operator.occasions.sweep();
+      const result = await platformClient.operator.occasions.sweep();
       expect(calls[0].url).toContain('/api/occasions/sweep');
       expect(calls[0].method).toBe('POST');
       expect(calls[0].body).toEqual({});
@@ -676,7 +676,7 @@ describe('occasions.* (docs/occasions.md, the dates panel) wire calls', () => {
 
   test('operator.occasions.conflict.resolve POSTs occasionId to /api/occasions/conflict/resolve', async () => {
     stubFetch({ occasionId: 'occ-1', resolved: true });
-    const result = await sdk.operator.occasions.conflict.resolve('occ-1');
+    const result = await platformClient.operator.occasions.conflict.resolve('occ-1');
     expect(calls[0].url).toContain('/api/occasions/conflict/resolve');
     expect(calls[0].method).toBe('POST');
     expect(calls[0].body).toEqual({ occasionId: 'occ-1' });
@@ -685,7 +685,7 @@ describe('occasions.* (docs/occasions.md, the dates panel) wire calls', () => {
 
   test('operator.occasions.interview.get POSTs interviewId to /api/occasions/interview', async () => {
     stubFetch({ present: false, interview: null });
-    const result = await sdk.operator.occasions.interview.get('iv-1');
+    const result = await platformClient.operator.occasions.interview.get('iv-1');
     expect(calls[0].url).toContain('/api/occasions/interview');
     expect(calls[0].method).toBe('POST');
     expect(calls[0].body).toEqual({ interviewId: 'iv-1' });
@@ -694,7 +694,7 @@ describe('occasions.* (docs/occasions.md, the dates panel) wire calls', () => {
 
   test('operator.occasions.interview.answer POSTs interviewId/stepId/text to /api/occasions/interview/answer', async () => {
     stubFetch({ present: true, interview: null });
-    await sdk.operator.occasions.interview.answer({ interviewId: 'iv-1', stepId: 'step-1', text: 'A scarf' });
+    await platformClient.operator.occasions.interview.answer({ interviewId: 'iv-1', stepId: 'step-1', text: 'A scarf' });
     expect(calls[0].url).toContain('/api/occasions/interview/answer');
     expect(calls[0].method).toBe('POST');
     expect(calls[0].body).toEqual({ interviewId: 'iv-1', stepId: 'step-1', text: 'A scarf' });
@@ -702,7 +702,7 @@ describe('occasions.* (docs/occasions.md, the dates panel) wire calls', () => {
 
   test('operator.occasions.interview.record POSTs interviewId/landedOn to /api/occasions/interview/record', async () => {
     stubFetch({ present: true, interview: null });
-    await sdk.operator.occasions.interview.record({ interviewId: 'iv-1', landedOn: 'A scarf' });
+    await platformClient.operator.occasions.interview.record({ interviewId: 'iv-1', landedOn: 'A scarf' });
     expect(calls[0].url).toContain('/api/occasions/interview/record');
     expect(calls[0].method).toBe('POST');
     expect(calls[0].body).toEqual({ interviewId: 'iv-1', landedOn: 'A scarf' });
@@ -710,12 +710,12 @@ describe('occasions.* (docs/occasions.md, the dates panel) wire calls', () => {
 
   test('operator.occasions.plans.propose/confirm POST to their own paths', async () => {
     stubFetch({ ok: true, reason: null, line: 'sample', confirmation: 'sample', needsKind: false, conflictsWith: [] });
-    await sdk.operator.occasions.plans.propose({ title: 'Lisbon', from: '2026-09-12', to: '2026-09-19', away: true });
+    await platformClient.operator.occasions.plans.propose({ title: 'Lisbon', from: '2026-09-12', to: '2026-09-19', away: true });
     expect(calls[0].url).toContain('/api/occasions/plans/propose');
     expect(calls[0].method).toBe('POST');
 
     stubFetch({ ok: true, reason: null, occasionId: 'plan-1', disclosure: 'Added.', droppedRecords: 0 });
-    await sdk.operator.occasions.plans.confirm({
+    await platformClient.operator.occasions.plans.confirm({
       title: 'Lisbon', from: '2026-09-12', to: '2026-09-19', away: true, surface: 'webui', said: '(added in the dates panel)', authority: 'owner-direct',
     });
     expect(calls[0].url).toContain('/api/occasions/plans/confirm');
@@ -723,7 +723,7 @@ describe('occasions.* (docs/occasions.md, the dates panel) wire calls', () => {
   });
 });
 
-describe('principals.* / channels.profiles.* (SDK 1.6.1 initiative family) wire calls', () => {
+describe('principals.* / channels.profiles.* (platform 1.6.1 initiative family) wire calls', () => {
   const originalFetch = globalThis.fetch;
   let calls: { url: string; method: string; body: unknown }[];
 
@@ -745,7 +745,7 @@ describe('principals.* / channels.profiles.* (SDK 1.6.1 initiative family) wire 
 
   test('operator.principals.create POSTs the full body to /api/principals', async () => {
     stubFetch({ principal: { id: 'p-1', name: 'Mike', kind: 'user', identities: [], createdAt: 1, updatedAt: 1 } });
-    await sdk.operator.principals.create({ name: 'Mike', kind: 'user' });
+    await platformClient.operator.principals.create({ name: 'Mike', kind: 'user' });
     expect(calls[0].url).toContain('/api/principals');
     expect(calls[0].method).toBe('POST');
     expect(calls[0].body).toEqual({ name: 'Mike', kind: 'user' });
@@ -753,7 +753,7 @@ describe('principals.* / channels.profiles.* (SDK 1.6.1 initiative family) wire 
 
   test('operator.principals.update POSTs to /api/principals/{principalId}/update, principalId consumed by the path (not duplicated in the body)', async () => {
     stubFetch({ principal: { id: 'p-1', name: 'Mike D', kind: 'user', identities: [], createdAt: 1, updatedAt: 2 } });
-    await sdk.operator.principals.update('p-1', { name: 'Mike D' });
+    await platformClient.operator.principals.update('p-1', { name: 'Mike D' });
     expect(calls[0].url).toContain('/api/principals/p-1/update');
     expect(calls[0].method).toBe('POST');
     expect(calls[0].body).toEqual({ name: 'Mike D' });
@@ -761,7 +761,7 @@ describe('principals.* / channels.profiles.* (SDK 1.6.1 initiative family) wire 
 
   test('operator.principals.delete DELETEs /api/principals/{principalId} with no body', async () => {
     stubFetch({ principalId: 'p-1', deleted: true });
-    const result = await sdk.operator.principals.delete('p-1');
+    const result = await platformClient.operator.principals.delete('p-1');
     expect(calls[0].url).toContain('/api/principals/p-1');
     expect(calls[0].method).toBe('DELETE');
     expect(result).toEqual({ principalId: 'p-1', deleted: true });
@@ -770,7 +770,7 @@ describe('principals.* / channels.profiles.* (SDK 1.6.1 initiative family) wire 
   test('operator.principals.resolve POSTs channel/value and preserves known:false for an unmapped identity', async () => {
     const unknown = { id: 'principal-unknown', name: 'unknown', kind: 'user', identities: [], createdAt: 0, updatedAt: 0 };
     stubFetch({ principal: unknown, known: false });
-    const result = await sdk.operator.principals.resolve({ channel: 'slack', value: 'U999' });
+    const result = await platformClient.operator.principals.resolve({ channel: 'slack', value: 'U999' });
     expect(calls[0].url).toContain('/api/principals/resolve');
     expect(calls[0].method).toBe('POST');
     expect(calls[0].body).toEqual({ channel: 'slack', value: 'U999' });
@@ -779,7 +779,7 @@ describe('principals.* / channels.profiles.* (SDK 1.6.1 initiative family) wire 
 
   test('operator.channels.profiles.set POSTs the full binding body to /api/channels/profiles', async () => {
     stubFetch({ binding: { id: 'cp-1', surfaceKind: 'slack', updatedAt: 1 } });
-    await sdk.operator.channels.profiles.set({ surfaceKind: 'slack', model: 'claude-sonnet' });
+    await platformClient.operator.channels.profiles.set({ surfaceKind: 'slack', model: 'claude-sonnet' });
     expect(calls[0].url).toContain('/api/channels/profiles');
     expect(calls[0].method).toBe('POST');
     expect(calls[0].body).toEqual({ surfaceKind: 'slack', model: 'claude-sonnet' });
@@ -787,7 +787,7 @@ describe('principals.* / channels.profiles.* (SDK 1.6.1 initiative family) wire 
 
   test('operator.channels.profiles.delete DELETEs /api/channels/profiles/{surfaceKind} with an honest deleted boolean', async () => {
     stubFetch({ surfaceKind: 'slack', deleted: false });
-    const result = await sdk.operator.channels.profiles.delete('slack');
+    const result = await platformClient.operator.channels.profiles.delete('slack');
     expect(calls[0].url).toContain('/api/channels/profiles/slack');
     expect(calls[0].method).toBe('DELETE');
     expect(result.deleted).toBe(false);
@@ -800,21 +800,21 @@ describe('principals.* / channels.profiles.* (SDK 1.6.1 initiative family) wire 
 // There is nothing to assert at runtime, so there is deliberately no test() around them.
 function typeOnlySessionsSteerRejectsNumericBody(): void {
   // @ts-expect-error -- OperatorMethodInput<'sessions.steer'> requires body: string; this used to silently pass through a removed `as never` cast.
-  void sdk.operator.sessions.steer('session-1', { body: 123 });
+  void platformClient.operator.sessions.steer('session-1', { body: 123 });
 }
 function typeOnlyCheckpointsCreateRejectsUnknownKind(): void {
   // @ts-expect-error -- CheckpointsCreateInput.kind is 'turn' | 'agent-run' | 'manual', not an arbitrary string.
-  void sdk.operator.checkpoints.create({ kind: 'not-a-real-kind' });
+  void platformClient.operator.checkpoints.create({ kind: 'not-a-real-kind' });
 }
 function typeOnlyTasksCreateRejectsNumericTitle(): void {
   // @ts-expect-error -- title is typed string on the generated contract; tasks.create's input flows straight from OperatorMethodInput<'tasks.create'>.
-  void sdk.operator.tasks.create({ task: 'x', title: 123 });
+  void platformClient.operator.tasks.create({ task: 'x', title: 123 });
 }
 void typeOnlySessionsSteerRejectsNumericBody;
 void typeOnlyCheckpointsCreateRejectsUnknownKind;
 void typeOnlyTasksCreateRejectsNumericTitle;
 
-describe('sdk facade rules', () => {
+describe('platform facade rules', () => {
   // The facade's key lists are not pinned here: a namespace a view uses cannot be
   // removed without a compile error in that view, and a snapshot of every key only
   // fails on additions. What IS pinned is the two facts a snapshot cannot express.
@@ -828,7 +828,7 @@ describe('sdk facade rules', () => {
     expect(webuiRouteFor('voice.wake.model.get')).toEqual({ method: 'GET', path: '/api/voice/wake/model' });
   });
 
-  test('sdk.chat.sessions.delete still points at the companion delete verb (the honest hard-delete behind the same id)', () => {
+  test('platform.chat.sessions.delete still points at the companion delete verb (the honest hard-delete behind the same id)', () => {
     expect(isExtraRoutedMethod('companion.chat.sessions.delete')).toBe(true);
   });
 });
@@ -840,16 +840,16 @@ describe('sdk facade rules', () => {
 // gate + health axis hand off to sign-in instead of leaving the operator in a shell
 // where every data endpoint 401s.
 describe('getCurrentAuth honors the authenticated field (token-honesty handoff)', () => {
-  const original = sdk.auth.current;
+  const original = platformClient.auth.current;
   // Deliberate PARTIAL snapshots, the real AuthSnapshot has ~10 fields, but
   // getCurrentAuth only inspects `authenticated`. Cast to the property's type so the
   // stubs stand in without hand-authoring every field.
-  const stub = (value: unknown): typeof sdk.auth.current =>
-    (() => Promise.resolve(value)) as typeof sdk.auth.current;
-  afterEach(() => { sdk.auth.current = original; });
+  const stub = (value: unknown): typeof platformClient.auth.current =>
+    (() => Promise.resolve(value)) as typeof platformClient.auth.current;
+  afterEach(() => { platformClient.auth.current = original; });
 
   test('rejects with a 401/authentication error when authenticated is false', async () => {
-    sdk.auth.current = stub({ authenticated: false, authMode: 'invalid' });
+    platformClient.auth.current = stub({ authenticated: false, authMode: 'invalid' });
     let thrown: unknown;
     try { await getCurrentAuth(); } catch (e) { thrown = e; }
     expect(thrown).toBeDefined();
@@ -860,13 +860,13 @@ describe('getCurrentAuth honors the authenticated field (token-honesty handoff)'
 
   test('resolves when authenticated is true', async () => {
     const snapshot = { authenticated: true, authMode: 'shared-token' };
-    sdk.auth.current = stub(snapshot);
+    platformClient.auth.current = stub(snapshot);
     expect(await getCurrentAuth()).toEqual(snapshot);
   });
 
   test('does not misclassify a snapshot with no authenticated field (unknown shape passes through)', async () => {
     const snapshot = { some: 'other-shape' };
-    sdk.auth.current = stub(snapshot);
+    platformClient.auth.current = stub(snapshot);
     expect(await getCurrentAuth()).toEqual(snapshot);
   });
 });
@@ -886,13 +886,13 @@ describe('requestJson records the daemon-announced client-build floor off every 
 
   test('a response carrying X-Goodvibes-Client-Floor updates the observed-floor store', async () => {
     stubFetch({ sessionId: 'sess-1', deleted: true }, { 'X-Goodvibes-Client-Floor': '1.14.0' });
-    await sdk.operator.sessions.delete('sess-1');
+    await platformClient.operator.sessions.delete('sess-1');
     expect(getObservedClientCompatibilityFloor()).toBe('1.14.0');
   });
 
   test('a response with no floor header leaves the store at undefined', async () => {
     stubFetch({ sessionId: 'sess-1', deleted: true });
-    await sdk.operator.sessions.delete('sess-1');
+    await platformClient.operator.sessions.delete('sess-1');
     expect(getObservedClientCompatibilityFloor()).toBeUndefined();
   });
 });
@@ -910,7 +910,7 @@ describe('decision policy observations belong to the authenticated client identi
     const requests: string[] = [];
     globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => { requests.push(String(input)); return classicResponse(); },
       { preconnect: originalFetch.preconnect });
-    await sdk.operator.sessions.delete('sess-1');
+    await platformClient.operator.sessions.delete('sess-1');
     expect(requests).toHaveLength(1);
     expect(browserDecisionPolicy.snapshot()).toMatchObject({ policy: 'Classic - Off', operation: 'classic' });
   });
@@ -920,7 +920,7 @@ describe('decision policy observations belong to the authenticated client identi
     const held = Promise.withResolvers<Response>(), entered = Promise.withResolvers<void>();
     globalThis.fetch = Object.assign(async () => { entered.resolve(); return held.promise; },
       { preconnect: originalFetch.preconnect });
-    const pending = sdk.operator.sessions.delete('sess-1');
+    const pending = platformClient.operator.sessions.delete('sess-1');
     try {
       await entered.promise;
       await tokenStore.setToken('synthetic-replacement-account');
@@ -989,8 +989,8 @@ describe('read-only contract inspection facade', () => {
       return Response.json({ contracts: [] });
     }) as typeof fetch;
     const abort = new AbortController();
-    await sdk.operator.contracts.list({ includeTerminal: true, sessionId: 'session:a/b' }, abort.signal);
-    await sdk.operator.contracts.get('contract:a/b', abort.signal);
+    await platformClient.operator.contracts.list({ includeTerminal: true, sessionId: 'session:a/b' }, abort.signal);
+    await platformClient.operator.contracts.get('contract:a/b', abort.signal);
     expect(requests.map((r) => r.method)).toEqual(['GET', 'GET']);
     expect(requests[0].url.pathname).toBe(WEBUI_METHOD_ROUTES['contracts.list'].path);
     expect(requests[0].url.searchParams.get('includeTerminal')).toBe('true');
@@ -1003,14 +1003,14 @@ describe('read-only contract inspection facade', () => {
     let calls = 0;
     globalThis.fetch = (async () => { calls++; return Response.json({ contracts: [] }); }) as unknown as typeof fetch;
     const abort = new AbortController(); abort.abort();
-    await expect(sdk.operator.contracts.list({}, abort.signal)).rejects.toThrow();
+    await expect(platformClient.operator.contracts.list({}, abort.signal)).rejects.toThrow();
     expect(calls).toBe(0);
   });
 
   test('a response completed after cancellation is not accepted', async () => {
     const abort = new AbortController();
     globalThis.fetch = (async () => { abort.abort(); return Response.json({ contracts: [] }); }) as unknown as typeof fetch;
-    await expect(sdk.operator.contracts.list({}, abort.signal)).rejects.toThrow();
+    await expect(platformClient.operator.contracts.list({}, abort.signal)).rejects.toThrow();
   });
 });
 
@@ -1023,7 +1023,7 @@ describe('explicit contract cancellation facade', () => {
       requests.push({ url: new URL(String(input)), init }); return Response.json({ cancelled: false });
     }) as typeof fetch;
     const abort = new AbortController();
-    expect(await sdk.operator.contracts.cancel('contract:a/b', abort.signal)).toEqual({ cancelled: false });
+    expect(await platformClient.operator.contracts.cancel('contract:a/b', abort.signal)).toEqual({ cancelled: false });
     expect(requests).toHaveLength(1);
     expect(requests[0].url.pathname).toBe(WEBUI_METHOD_ROUTES['contracts.cancel'].path.replace('{contractId}', encodeURIComponent('contract:a/b')));
     expect(requests[0].init?.method).toBe('POST'); expect(requests[0].init?.signal).toBe(abort.signal);
@@ -1032,19 +1032,19 @@ describe('explicit contract cancellation facade', () => {
   test('interrupted confirmation does not reach fetch and late acknowledgement is rejected', async () => {
     let calls = 0; const abort = new AbortController(); abort.abort();
     globalThis.fetch = (async () => { calls++; return Response.json({ cancelled: true }); }) as unknown as typeof fetch;
-    await expect(sdk.operator.contracts.cancel('cancelled-before-send', abort.signal)).rejects.toThrow(); expect(calls).toBe(0);
+    await expect(platformClient.operator.contracts.cancel('cancelled-before-send', abort.signal)).rejects.toThrow(); expect(calls).toBe(0);
     const late = new AbortController();
     globalThis.fetch = (async () => { calls++; late.abort(); return Response.json({ cancelled: true }); }) as unknown as typeof fetch;
-    await expect(sdk.operator.contracts.cancel('late', late.signal)).rejects.toThrow(); expect(calls).toBe(1);
+    await expect(platformClient.operator.contracts.cancel('late', late.signal)).rejects.toThrow(); expect(calls).toBe(1);
   });
   test('malformed acknowledgement and service failure are never replayed', async () => {
     for (const body of [{}, { cancelled: 'true' }, { cancelled: true, cleanupComplete: true }]) {
       let calls = 0;
       globalThis.fetch = (async () => { calls++; return Response.json(body); }) as unknown as typeof fetch;
-      await expect(sdk.operator.contracts.cancel('malformed', new AbortController().signal)).rejects.toThrow('unreadable cancellation response'); expect(calls).toBe(1);
+      await expect(platformClient.operator.contracts.cancel('malformed', new AbortController().signal)).rejects.toThrow('unreadable cancellation response'); expect(calls).toBe(1);
     }
     let calls = 0;
     globalThis.fetch = (async () => { calls++; return Response.json({ error: 'lost response' }, { status: 503 }); }) as unknown as typeof fetch;
-    await expect(sdk.operator.contracts.cancel('ambiguous', new AbortController().signal)).rejects.toThrow(); expect(calls).toBe(1);
+    await expect(platformClient.operator.contracts.cancel('ambiguous', new AbortController().signal)).rejects.toThrow(); expect(calls).toBe(1);
   });
 });

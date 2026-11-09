@@ -3,7 +3,7 @@ import * as crypto from 'node:crypto';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createDaemonContinuationPolicy } from '../../runtime/native-continuation-policy.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 

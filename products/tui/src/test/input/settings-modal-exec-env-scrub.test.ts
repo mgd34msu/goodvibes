@@ -7,8 +7,8 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ConfigKey, ConfigManager as ConfigManagerType, ConfigValue } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigKey, ConfigManager as ConfigManagerType, ConfigValue } from '@goodvibes-jev/engine/platform/platform/config';
 import { buildSettingGroups } from '../../input/settings-modal-data.ts';
 import { applySettingValue } from '../../input/settings-modal-mutations.ts';
 import {
@@ -48,7 +48,7 @@ describe('permissions.execEnvScrubAllowlist synthetic setting', () => {
   });
 
   test('degrades a malformed (non-array) value to empty, never throws', () => {
-    // permissions.execEnvScrubAllowlist is TUI-local, not in the SDK's
+    // permissions.execEnvScrubAllowlist is TUI-local, not in the platform's
     // ConfigValue<K> mapping, so it resolves to `never` there; the stub's
     // `get` has to stay generic over K to satisfy ConfigManager's real
     // `get<K extends ConfigKey>(key: K): ConfigValue<K>` signature.

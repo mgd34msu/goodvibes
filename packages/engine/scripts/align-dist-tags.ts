@@ -37,7 +37,7 @@ import {
   parseSemanticVersion as parseVersion,
   compareSemanticVersions as compareVersions,
   type ParsedSemanticVersion as ParsedVersion,
-} from '../sdk/src/platform/runtime/semantic-version.js';
+} from '../platform/src/platform/runtime/semantic-version.js';
 export { parseVersion, compareVersions };
 
 // ---------------------------------------------------------------------------

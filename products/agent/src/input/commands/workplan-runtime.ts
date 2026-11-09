@@ -1,4 +1,4 @@
-import type { WorkPlanItemStatus } from '@goodvibes-jev/engine/sdk/platform/workflow';
+import type { WorkPlanItemStatus } from '@goodvibes-jev/engine/platform/platform/workflow';
 import { createAgentWorkPlanTool } from '../../tools/agent-work-plan-tool.ts';
 import { captureCatalogMethods } from '../../tools/agent-harness-catalog-ranking.ts';
 import { captureAgentExportPath } from '../../tools/agent-artifact-effect.ts';

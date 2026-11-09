@@ -1,4 +1,4 @@
-import { readTelegramCursorPreview, readTelegramCursorMigrationResult, type TelegramCursorPreview } from '@goodvibes-jev/engine/sdk/platform/channels/telegram-cursor';
+import { readTelegramCursorPreview, readTelegramCursorMigrationResult, type TelegramCursorPreview } from '@goodvibes-jev/engine/platform/platform/channels/telegram-cursor';
 import { RetainedOperatorConnection } from './retained-operator-connection.js';
 import type { PaymentWindowCommandContext, PaymentWindowCommandPolicy } from './payment-window-command.js';
 import type { SelectionItem, SelectionResult } from './selection-modal.js';

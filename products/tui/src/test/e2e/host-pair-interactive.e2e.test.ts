@@ -1,12 +1,12 @@
-import { WorkspaceRegistrationStore, sharedWorkspaceRegisterPath, legacyWorkspaceRegisterPath } from '@goodvibes-jev/engine/sdk/platform/workspace';
+import { WorkspaceRegistrationStore, sharedWorkspaceRegisterPath, legacyWorkspaceRegisterPath } from '@goodvibes-jev/engine/platform/platform/workspace';
 import { WEBUI_METHOD_ROUTES } from '@goodvibes-jev/engine/contracts/generated/webui-facade';
 /** Compiled TUI, real owner PTY, and owned production pairing/native-capture handlers. */
 import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
-import { registerInboxSurface } from '@goodvibes-jev/engine/sdk/platform/intake';
-import { BenchmarkStore, getProviderModelsCachePath } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { registerInboxSurface } from '@goodvibes-jev/engine/platform/platform/intake';
+import { BenchmarkStore, getProviderModelsCachePath } from '@goodvibes-jev/engine/platform/platform/providers';
 import { startDaemonFixture } from '@goodvibes-jev/daemon/testing';
 import { TuiConfigManager } from '../../config/host-settings.ts';
 import { beginTuiHostPairing, completeTuiHostPairing, tuiHostPairingStorePath, readTuiHostPairing } from '../../runtime/tui-host-credential-store.ts';

@@ -1,5 +1,5 @@
 import type { CommonSettingsCategory, CommonSettingEntryState } from '@goodvibes-jev/engine/terminal-shell/settings-model-types';
-import type { ConfigSetting, HostBooleanSetting } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigSetting, HostBooleanSetting } from '@goodvibes-jev/engine/platform/platform/config';
 import type { FeatureFlag, FeatureSetting, FlagState } from '@/runtime/index.ts';
 
 export type SettingsCategory = CommonSettingsCategory | 'wrfc' | 'connections';
@@ -72,7 +72,7 @@ export const SETTINGS_CATEGORY_GROUPS: ReadonlyArray<{
 
 export const SETTINGS_CATEGORIES: SettingsCategory[] = SETTINGS_CATEGORY_GROUPS.flatMap((group) => group.categories);
 
-/** Builtin and host rows keep their distinct public SDK key contracts. */
+/** Builtin and host rows keep their distinct public platform key contracts. */
 export type SettingEntry = BuiltinSettingEntry | HostSettingEntry;
 
 export interface BuiltinSettingEntry extends SettingEntryState {

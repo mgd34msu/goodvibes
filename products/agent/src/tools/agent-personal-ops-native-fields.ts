@@ -1,5 +1,5 @@
-import type { StructuredRedactionOptions } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { captureOwnedJson } from '@goodvibes-jev/engine/sdk/platform/gate';
+import type { StructuredRedactionOptions } from '@goodvibes-jev/engine/platform/platform/utils';
+import { captureOwnedJson } from '@goodvibes-jev/engine/platform/platform/gate';
 import { LANE_IDS } from './agent-harness-personal-ops-types.ts';
 
 export const PERSONAL_OPS_EFFECT_RECEIPT_PURPOSES = new Set([

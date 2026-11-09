@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { UserAuthManager } from '../sdk/src/platform/security/user-auth.js';
+import { UserAuthManager } from '../platform/src/platform/security/user-auth.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 test('public session IDs support scoped revocation without exposing or accepting bearer tokens', () => {

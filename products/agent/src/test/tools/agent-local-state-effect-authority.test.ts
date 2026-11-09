@@ -1,19 +1,19 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { WorkPlanStore } from '@goodvibes-jev/engine/sdk/platform/workflow';
-import { ConfigManager, type PermissionMode } from '@goodvibes-jev/engine/sdk/platform/config';
-import { createShellPathService } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
+import { WorkPlanStore } from '@goodvibes-jev/engine/platform/platform/workflow';
+import { ConfigManager, type PermissionMode } from '@goodvibes-jev/engine/platform/platform/config';
+import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { AgentPersonaRegistry } from '../../agent/persona-registry.ts';
 import { createAgentWorkPlanTool, registerAgentWorkPlanTool } from '../../tools/agent-work-plan-tool.ts';
 import { createAgentVibeTool, registerAgentVibeTool } from '../../tools/agent-vibe-tool.ts';
 import { admitLocalState } from '../helpers/local-state-admission.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
-import { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { OwnerProfileStore, parseProfileDocument, type ProfileMutationOptions } from '@goodvibes-jev/engine/sdk/platform/owner-profile';
-import { composeOccasions } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { resetProcessUntrustedContentLedgerForTests } from '@goodvibes-jev/engine/sdk/platform/security';
+import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { OwnerProfileStore, parseProfileDocument, type ProfileMutationOptions } from '@goodvibes-jev/engine/platform/platform/owner-profile';
+import { composeOccasions } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { resetProcessUntrustedContentLedgerForTests } from '@goodvibes-jev/engine/platform/platform/security';
 import { createOccasionsGatewayInvoke, type OccasionsGatewayInvoke } from '../../agent/occasions-gateway.ts';
 import { createAgentOccasionsTool, registerAgentOccasionsTool } from '../../tools/agent-occasions-tool.ts';
 

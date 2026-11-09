@@ -12,8 +12,8 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { DaemonLifecycleRuntime } from '../sdk/src/platform/daemon/facade-lifecycle.js';
-import { createDaemonRuntimeAutomationRouteHandlers } from '../daemon-sdk/dist/index.js';
+import { DaemonLifecycleRuntime } from '../platform/src/platform/daemon/facade-lifecycle.js';
+import { createDaemonRuntimeAutomationRouteHandlers } from '../daemon-api/dist/index.js';
 import {
   FeatureAnnouncementStore,
   featureAnnouncementsPath,
@@ -24,8 +24,8 @@ import {
   collectStartupAnnouncements,
   createSandboxContainmentAnnouncer,
   resolveWebSurfaceUrl,
-} from '../sdk/src/platform/runtime/feature-announcements.js';
-import { DEFAULT_CONFIG } from '../sdk/src/platform/config/schema.js';
+} from '../platform/src/platform/runtime/feature-announcements.js';
+import { DEFAULT_CONFIG } from '../platform/src/platform/config/schema.js';
 
 const tmpRoots: string[] = [];
 afterEach(() => {

@@ -5,7 +5,7 @@ import type { InputHandler } from '../input/handler.ts';
 // they pull in feature-enablement's eager metadata lookups before boot begins.
 import { readOnboardingCompletionMarker } from '../runtime/onboarding/markers.ts';
 import type { GoodVibesCliParseResult } from './types.ts';
-import { checkRecoveryFile, readLastSessionPointer, type SessionSurface } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { checkRecoveryFile, readLastSessionPointer, type SessionSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { resolveResumableSession, surfaceResumeRelaunchNotice } from './resume-relaunch-notice.ts';
 import { writeFatalLine } from '../utils/fatal-boot-write.ts';
 

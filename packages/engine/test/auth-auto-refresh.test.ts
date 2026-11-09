@@ -9,12 +9,12 @@ import {
   createGoodVibesAuthClient,
   createMemoryTokenStore,
   type GoodVibesExpiringTokenStore,
-} from '../sdk/src/auth.js';
-import type { AutoRefreshOptions } from '../sdk/src/auth.js';
-import { forgetFailureReadings, GoodVibesSdkError, installJudgmentPort, JudgmentPortMissingError } from '../errors/src/index.js';
+} from '../platform/src/auth.js';
+import type { AutoRefreshOptions } from '../platform/src/auth.js';
+import { forgetFailureReadings, GoodVibesError, installJudgmentPort, JudgmentPortMissingError } from '../errors/src/index.js';
 import { useFailureReadings } from './_helpers/failure-readings.js';
-import type { SDKObserver } from '../sdk/src/observer/index.js';
-import type { OperatorSdk } from '../operator-sdk/src/index.js';
+import type { PlatformObserver } from '../platform/src/observer/index.js';
+import type { OperatorApiClient } from '../operator-client/src/index.js';
 import { installFrozenNow } from './_helpers/test-timeout.js';
 
 // ---------------------------------------------------------------------------
@@ -33,9 +33,9 @@ afterEach(() => {
   restoreDateNow = undefined;
 });
 
-/** Build a 401 HTTP-status-error matching the SDK's expected shape. */
-function make401Error(): GoodVibesSdkError {
-  return new GoodVibesSdkError('Authentication failed', {
+/** Build a 401 HTTP-status-error matching the platform's expected shape. */
+function make401Error(): GoodVibesError {
+  return new GoodVibesError('Authentication failed', {
     category: 'authentication',
     source: 'transport',
     status: 401,
@@ -44,14 +44,14 @@ function make401Error(): GoodVibesSdkError {
 }
 
 /**
- * Create a minimal OperatorSdk stub that records `control.auth.current` calls.
+ * Create a minimal OperatorApiClient stub that records `control.auth.current` calls.
  *
  * @param handler Optional override for `control.auth.current`. Defaults to
  *   returning a successful anonymous response.
  */
 function makeOperatorStub(
   handler?: () => Promise<object>,
-): { sdk: OperatorSdk; calls: string[] } {
+): { platformClient: OperatorApiClient; calls: string[] } {
   const calls: string[] = [];
   const defaultCurrentResponse = {
     authenticated: false,
@@ -66,7 +66,7 @@ function makeOperatorStub(
     roles: [],
   };
 
-  const sdk = {
+  const platformClient = {
     control: {
       auth: {
         current: async () => {
@@ -84,9 +84,9 @@ function makeOperatorStub(
         },
       },
     },
-  } as unknown as OperatorSdk;
+  } as unknown as OperatorApiClient;
 
-  return { sdk, calls };
+  return { platformClient, calls };
 }
 
 // ---------------------------------------------------------------------------
@@ -97,10 +97,10 @@ describe('pre-flight: leeway triggers refresh when token is near expiry', () => 
   it('calls ensureFreshToken and proceeds when leeway window not exceeded', async () => {
     // Token expires 2 hours from now, well outside 60s leeway.
     const store = createMemoryTokenStore('valid-token', Date.now() + 2 * 3_600_000);
-    const { sdk, calls } = makeOperatorStub();
+    const { platformClient, calls } = makeOperatorStub();
 
     const auth = createGoodVibesAuthClient(
-      sdk,
+      platformClient,
       store,
       undefined,
       undefined,
@@ -118,7 +118,7 @@ describe('pre-flight: leeway triggers refresh when token is near expiry', () => 
     // Token expires in 30 seconds, inside 60s leeway.
     // No refresh endpoint → graceful no-op, but coordinator runs.
     const store = createMemoryTokenStore('expiring-token', Date.now() + 30_000);
-    const { sdk, calls } = makeOperatorStub();
+    const { platformClient, calls } = makeOperatorStub();
 
     const refreshCalls: string[] = [];
     // Override the store to track setToken calls (proxy)
@@ -140,7 +140,7 @@ describe('pre-flight: leeway triggers refresh when token is near expiry', () => 
     };
 
     const auth = createGoodVibesAuthClient(
-      sdk,
+      platformClient,
       proxyStore,
       undefined,
       undefined,
@@ -171,7 +171,7 @@ describe('in-flight queuing: concurrent refreshes collapse to one', () => {
     // Create the coordinator directly to verify the queue behaviour with a
     // custom refresh function.
     const { AutoRefreshCoordinator } = await import(
-      '../sdk/src/client-auth/auto-refresh.js'
+      '../platform/src/client-auth/auto-refresh.js'
     );
 
     let refreshResolve: () => void;
@@ -213,7 +213,7 @@ describe('reactive 401 retry: retry succeeds after refresh', () => {
     let attempt = 0;
 
     const { AutoRefreshCoordinator } = await import(
-      '../sdk/src/client-auth/auto-refresh.js'
+      '../platform/src/client-auth/auto-refresh.js'
     );
 
     const coordinator = new AutoRefreshCoordinator({
@@ -243,11 +243,11 @@ describe('reactive 401 retry: retry succeeds after refresh', () => {
 // ---------------------------------------------------------------------------
 
 describe('reactive 401 terminal: double 401 throws auth error', () => {
-  it('throws GoodVibesSdkError with kind=auth on terminal 401', async () => {
+  it('throws GoodVibesError with kind=auth on terminal 401', async () => {
     const store = createMemoryTokenStore('stale-token');
 
     const { AutoRefreshCoordinator } = await import(
-      '../sdk/src/client-auth/auto-refresh.js'
+      '../platform/src/client-auth/auto-refresh.js'
     );
 
     const coordinator = new AutoRefreshCoordinator({
@@ -263,29 +263,29 @@ describe('reactive 401 terminal: double 401 throws auth error', () => {
       throw make401Error();
     }).catch((err: unknown) => err);
 
-    expect(caught).toBeInstanceOf(GoodVibesSdkError);
-    const sdkErr = caught as GoodVibesSdkError;
-    expect(sdkErr.kind).toBe('auth');
-    expect(sdkErr.category).toBe('authentication');
-    expect(sdkErr.status).toBe(401);
-    expect(sdkErr.recoverable).toBe(false);
-    expect(typeof sdkErr.message).toBe('string');
+    expect(caught).toBeInstanceOf(GoodVibesError);
+    const engineErr = caught as GoodVibesError;
+    expect(engineErr.kind).toBe('auth');
+    expect(engineErr.category).toBe('authentication');
+    expect(engineErr.status).toBe(401);
+    expect(engineErr.recoverable).toBe(false);
+    expect(typeof engineErr.message).toBe('string');
     // Three-part message format: [what] · [why] · [what to do]
-    expect(sdkErr.message).toContain('Authentication failed');
+    expect(engineErr.message).toContain('Authentication failed');
   });
 
   it('emits onError observer notification on terminal 401', async () => {
     const store = createMemoryTokenStore('stale-token');
-    const observedErrors: GoodVibesSdkError[] = [];
+    const observedErrors: GoodVibesError[] = [];
 
-    const observer: SDKObserver = {
+    const observer: PlatformObserver = {
       onError(err) {
         observedErrors.push(err);
       },
     };
 
     const { AutoRefreshCoordinator } = await import(
-      '../sdk/src/client-auth/auto-refresh.js'
+      '../platform/src/client-auth/auto-refresh.js'
     );
 
     const coordinator = new AutoRefreshCoordinator({
@@ -312,10 +312,10 @@ describe('reactive 401 terminal: double 401 throws auth error', () => {
 
   it('reports failed refresh attempts before clearing to anonymous', async () => {
     const store = createMemoryTokenStore('expiring-token', Date.now() + 10_000);
-    const observedErrors: GoodVibesSdkError[] = [];
+    const observedErrors: GoodVibesError[] = [];
     const transitions: unknown[] = [];
 
-    const observer: SDKObserver = {
+    const observer: PlatformObserver = {
       onError(err) {
         observedErrors.push(err);
       },
@@ -325,7 +325,7 @@ describe('reactive 401 terminal: double 401 throws auth error', () => {
     };
 
     const { AutoRefreshCoordinator } = await import(
-      '../sdk/src/client-auth/auto-refresh.js'
+      '../platform/src/client-auth/auto-refresh.js'
     );
 
     const coordinator = new AutoRefreshCoordinator({
@@ -342,7 +342,7 @@ describe('reactive 401 terminal: double 401 throws auth error', () => {
 
     expect(await store.getToken()).toBeNull();
     expect(observedErrors).toHaveLength(1);
-    expect(observedErrors[0]!.code).toBe('SDK_AUTH_REFRESH_FAILED');
+    expect(observedErrors[0]!.code).toBe('ENGINE_AUTH_REFRESH_FAILED');
     expect(observedErrors[0]!.recoverable).toBe(true);
     expect(transitions).toContainEqual({
       from: 'token',
@@ -361,7 +361,7 @@ describe('opt-out: autoRefresh:false disables refresh and bubbles 401', () => {
     const store = createMemoryTokenStore('token');
 
     const { AutoRefreshCoordinator } = await import(
-      '../sdk/src/client-auth/auto-refresh.js'
+      '../platform/src/client-auth/auto-refresh.js'
     );
 
     let refreshCalled = false;
@@ -380,8 +380,8 @@ describe('opt-out: autoRefresh:false disables refresh and bubbles 401', () => {
     }).catch((err: unknown) => err);
 
     // The original 401 error should bubble up unchanged.
-    expect(caught).toBeInstanceOf(GoodVibesSdkError);
-    const err = caught as GoodVibesSdkError;
+    expect(caught).toBeInstanceOf(GoodVibesError);
+    const err = caught as GoodVibesError;
     expect(err.status).toBe(401);
     // Refresh must NOT have been called.
     expect(refreshCalled).toBe(false);
@@ -392,7 +392,7 @@ describe('opt-out: autoRefresh:false disables refresh and bubbles 401', () => {
     const store = createMemoryTokenStore('expiring', Date.now() + 5_000);
 
     const { AutoRefreshCoordinator } = await import(
-      '../sdk/src/client-auth/auto-refresh.js'
+      '../platform/src/client-auth/auto-refresh.js'
     );
 
     let refreshCalled = false;
@@ -413,12 +413,12 @@ describe('opt-out: autoRefresh:false disables refresh and bubbles 401', () => {
 
   it('autoRefresh:false on createGoodVibesAuthClient passes through to coordinator', async () => {
     const store = createMemoryTokenStore('token');
-    const { sdk, calls } = makeOperatorStub(async () => {
+    const { platformClient, calls } = makeOperatorStub(async () => {
       throw make401Error();
     });
 
     const auth = createGoodVibesAuthClient(
-      sdk,
+      platformClient,
       store,
       undefined,
       undefined,
@@ -429,7 +429,7 @@ describe('opt-out: autoRefresh:false disables refresh and bubbles 401', () => {
 
     // With autoRefresh:false, the coordinator is disabled entirely.
     // The 401 from the operator should propagate directly.
-    expect(caught).toBeInstanceOf(GoodVibesSdkError);
+    expect(caught).toBeInstanceOf(GoodVibesError);
     // current() attempted exactly once (no retry).
     expect(calls).toHaveLength(1);
   });
@@ -444,14 +444,14 @@ describe('observer: onAuthTransition emitted on successful refresh', () => {
     const store = createMemoryTokenStore('stale-token');
     const transitions: Array<{ from: string; to: string; reason: string }> = [];
 
-    const observer: SDKObserver = {
+    const observer: PlatformObserver = {
       onAuthTransition(t) {
         transitions.push({ from: t.from, to: t.to, reason: t.reason });
       },
     };
 
     const { AutoRefreshCoordinator } = await import(
-      '../sdk/src/client-auth/auto-refresh.js'
+      '../platform/src/client-auth/auto-refresh.js'
     );
 
     const coordinator = new AutoRefreshCoordinator({
@@ -485,14 +485,14 @@ describe('observer: onAuthTransition emitted on successful refresh', () => {
     const store = createMemoryTokenStore('stale-token', Date.now() + 10_000);
     const transitions: Array<{ from: string; to: string; reason: string }> = [];
 
-    const observer: SDKObserver = {
+    const observer: PlatformObserver = {
       onAuthTransition(t) {
         transitions.push({ from: t.from, to: t.to, reason: t.reason });
       },
     };
 
     const { AutoRefreshCoordinator } = await import(
-      '../sdk/src/client-auth/auto-refresh.js'
+      '../platform/src/client-auth/auto-refresh.js'
     );
 
     const coordinator = new AutoRefreshCoordinator({
@@ -570,7 +570,7 @@ describe('consumer refresh callback: pre-flight leeway trigger', () => {
     let refreshCallCount = 0;
 
     const { AutoRefreshCoordinator } = await import(
-      '../sdk/src/client-auth/auto-refresh.js'
+      '../platform/src/client-auth/auto-refresh.js'
     );
 
     const coordinator = new AutoRefreshCoordinator({
@@ -593,7 +593,7 @@ describe('consumer refresh callback: pre-flight leeway trigger', () => {
     const store = createMemoryTokenStore('stale-token', Date.now() + 5_000);
 
     const { AutoRefreshCoordinator } = await import(
-      '../sdk/src/client-auth/auto-refresh.js'
+      '../platform/src/client-auth/auto-refresh.js'
     );
 
     const coordinator = new AutoRefreshCoordinator({
@@ -620,7 +620,7 @@ describe('consumer refresh callback: reactive 401 path', () => {
     let attempt = 0;
 
     const { AutoRefreshCoordinator } = await import(
-      '../sdk/src/client-auth/auto-refresh.js'
+      '../platform/src/client-auth/auto-refresh.js'
     );
 
     const coordinator = new AutoRefreshCoordinator({
@@ -649,7 +649,7 @@ describe('consumer refresh callback: reactive 401 path', () => {
     let attempt = 0;
 
     const { AutoRefreshCoordinator } = await import(
-      '../sdk/src/client-auth/auto-refresh.js'
+      '../platform/src/client-auth/auto-refresh.js'
     );
 
     const coordinator = new AutoRefreshCoordinator({
@@ -680,7 +680,7 @@ describe('consumer refresh callback: reactive 401 path', () => {
 describe('is401Error: broadened error shapes', () => {
   it('detects 401 on error.response.status', async () => {
     const { AutoRefreshCoordinator } = await import(
-      '../sdk/src/client-auth/auto-refresh.js'
+      '../platform/src/client-auth/auto-refresh.js'
     );
 
     const store = createMemoryTokenStore('tok');
@@ -705,7 +705,7 @@ describe('is401Error: broadened error shapes', () => {
 
   it('detects 401 on error.cause.response.status', async () => {
     const { AutoRefreshCoordinator } = await import(
-      '../sdk/src/client-auth/auto-refresh.js'
+      '../platform/src/client-auth/auto-refresh.js'
     );
 
     const store = createMemoryTokenStore('tok');
@@ -730,7 +730,7 @@ describe('is401Error: broadened error shapes', () => {
 
   it('does not falsely detect 401 on non-401 response.status', async () => {
     const { AutoRefreshCoordinator } = await import(
-      '../sdk/src/client-auth/auto-refresh.js'
+      '../platform/src/client-auth/auto-refresh.js'
     );
 
     const store = createMemoryTokenStore('tok');
@@ -769,8 +769,8 @@ describe('refresh failure transience', () => {
   async function refreshFailingWith(error: unknown) {
     const store = createMemoryTokenStore('near-expiry-token', Date.now() + 10_000);
     const transitions: unknown[] = [];
-    const errors: GoodVibesSdkError[] = [];
-    const { AutoRefreshCoordinator } = await import('../sdk/src/client-auth/auto-refresh.js');
+    const errors: GoodVibesError[] = [];
+    const { AutoRefreshCoordinator } = await import('../platform/src/client-auth/auto-refresh.js');
     const coordinator = new AutoRefreshCoordinator({
       tokenStore: store,
       autoRefresh: true,
@@ -826,7 +826,7 @@ describe('refresh failure with no judgment port', () => {
     const previous = installJudgmentPort(undefined);
     try {
       const store = createMemoryTokenStore('near-expiry-token', Date.now() + 10_000);
-      const { AutoRefreshCoordinator } = await import('../sdk/src/client-auth/auto-refresh.js');
+      const { AutoRefreshCoordinator } = await import('../platform/src/client-auth/auto-refresh.js');
       const coordinator = new AutoRefreshCoordinator({
         tokenStore: store,
         autoRefresh: true,

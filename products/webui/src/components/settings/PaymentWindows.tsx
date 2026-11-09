@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { isLivePaymentOperation, canReconcilePaymentOperation, paymentOperationDescription, type PaymentWindowView, type PaymentOperationView } from '@goodvibes-jev/engine/sdk/platform/payments/browser';
-import { sdk } from '../../lib/goodvibes';
+import { isLivePaymentOperation, canReconcilePaymentOperation, paymentOperationDescription, type PaymentWindowView, type PaymentOperationView } from '@goodvibes-jev/engine/platform/platform/payments/browser';
+import { client as platformClient } from '../../lib/goodvibes';
 import { formatError } from '../../lib/errors';
 import { minorUnitsToMajorText } from '../../lib/money';
 import { getClientLifetime, subscribeClientLifetime } from '../../lib/client-lifetime';
@@ -20,7 +20,7 @@ export function PaymentWindows() {
   const [finding, setFinding] = useState<{ operation: PaymentOperationView; outcome: 'purchased' | 'not-purchased' } | null>(null);
   const [inspected, setInspected] = useState(false);
   const identity = useSyncExternalStore(subscribeClientLifetime, () => getClientLifetime().revision, () => 0);
-  const windows = useQuery({ queryKey: [...QUERY_KEY, identity], queryFn: ({ signal }) => sdk.operator.payments.purchase.status(signal),
+  const windows = useQuery({ queryKey: [...QUERY_KEY, identity], queryFn: ({ signal }) => platformClient.operator.payments.purchase.status(signal),
     refetchInterval: 2000, retry: false, gcTime: 0 });
   useEffect(() => () => active.current?.abort(), []);
   useEffect(() => subscribeClientLifetime(() => {
@@ -34,7 +34,7 @@ export function PaymentWindows() {
     const selected = { purchaseId: window.purchaseId, windowId: window.windowId };
     setPending(window.windowId); setMessage('');
     try {
-      const result = await sdk.operator.payments.purchase[action](selected, controller.signal);
+      const result = await platformClient.operator.payments.purchase[action](selected, controller.signal);
       if (controller.signal.aborted) return;
       setMessage(result.answer === 'approve' || result.answer === 'acknowledge'
         ? 'Answer accepted. The daemon will continue the checkout checks.'
@@ -56,7 +56,7 @@ export function PaymentWindows() {
     const controller = new AbortController(); active.current = controller;
     setPending(operation.operationId); setMessage('');
     try {
-      const result = await sdk.operator.payments.purchase.stopOperation({ purchaseId: operation.purchaseId, operationId: operation.operationId }, controller.signal);
+      const result = await platformClient.operator.payments.purchase.stopOperation({ purchaseId: operation.purchaseId, operationId: operation.operationId }, controller.signal);
       if (controller.signal.aborted) return;
       setMessage(result.mayHaveSubmitted
         ? 'Stopping was requested after submission may have begun. Check final status and the merchant; this does not undo an order.'
@@ -75,7 +75,7 @@ export function PaymentWindows() {
     const selected = finding, controller = new AbortController(); active.current = controller;
     setPending(selected.operation.operationId); setMessage('');
     try {
-      const result = await sdk.operator.payments.purchase.reconcile(selected.operation, selected.outcome, controller.signal);
+      const result = await platformClient.operator.payments.purchase.reconcile(selected.operation, selected.outcome, controller.signal);
       if (controller.signal.aborted) return;
       setMessage(paymentOperationDescription(result)); setFinding(null); setInspected(false);
     } catch (error) {

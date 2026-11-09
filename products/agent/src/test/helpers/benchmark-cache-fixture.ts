@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { BenchmarkStore } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { BenchmarkStore } from '@goodvibes-jev/engine/platform/platform/providers';
 import { createShellPathService } from '@/runtime/index.ts';
 
 /** Valid empty metadata for tests that exercise runtime ownership, not remote leaderboards. */

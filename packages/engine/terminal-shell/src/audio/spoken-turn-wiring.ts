@@ -1,10 +1,10 @@
 import { isProxy } from 'node:util/types';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { UiRuntimeEvents } from '@goodvibes-jev/engine/sdk/platform/runtime/ui';
-import type { VoiceService } from '@goodvibes-jev/engine/sdk/platform/voice';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { UiRuntimeEvents } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
+import type { VoiceService } from '@goodvibes-jev/engine/platform/platform/voice';
 import type { StreamingAudioPlayer } from './player.js';
 import { LocalStreamingAudioPlayer } from './player.js';
-import { SpokenTurnController } from '@goodvibes-jev/engine/sdk/platform/voice';
+import { SpokenTurnController } from '@goodvibes-jev/engine/platform/platform/voice';
 export interface SpokenTurnRuntime {
     readonly unsubs: readonly (() => void)[];
     submitNextTurn(prompt: string): boolean;
@@ -35,9 +35,9 @@ export interface WireSpokenTurnRuntimeOptions {
  */
 export function wireSpokenTurnRuntime(options: WireSpokenTurnRuntimeOptions, source: string): SpokenTurnRuntime {
     const player = options.playerFactory ? options.playerFactory() : new LocalStreamingAudioPlayer();
-    // The terminal platform's subprocess-based player already satisfies the SDK's AudioSink
-    // interface unchanged (see docs/decisions/2026-07-06-spoken-turn-tts-policy-sdk-hoist.md
-    // in the SDK repo), only the option name (`sink` not `player`) and the
+    // The terminal platform's subprocess-based player already satisfies the platform's AudioSink
+    // interface unchanged (see docs/decisions/2026-07-06-spoken-turn-tts-policy-platform-hoist.md
+    // in the platform repo), only the option name (`sink` not `player`) and the
     // attribution `source` are new.
     const controller = new SpokenTurnController({
         voiceService: options.voiceService,

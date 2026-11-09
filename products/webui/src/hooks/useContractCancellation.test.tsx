@@ -7,7 +7,7 @@ import { queryKeys } from '../lib/queries';
 let cancel: (id: string, signal: AbortSignal) => Promise<{ cancelled: boolean }> = () => Promise.resolve({ cancelled: true });
 mock.module('../lib/goodvibes', () => ({
   hasStoredTokenSync: () => Boolean(localStorage.getItem(WEBUI_TOKEN_STORE_KEY)),
-  sdk: { operator: { contracts: { cancel: (id: string, signal: AbortSignal) => cancel(id, signal) } } },
+  client: { operator: { contracts: { cancel: (id: string, signal: AbortSignal) => cancel(id, signal) } } },
 }));
 const { useContractCancellation, CONTRACT_CANCEL_NOTICE } = await import('./useContractCancellation');
 const { useContractScope } = await import('./useContracts');

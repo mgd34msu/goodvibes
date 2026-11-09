@@ -21,7 +21,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 
 export const TEST_TMP_ROOT = tmpdir();
-export const RUN_TMP_PREFIX = 'goodvibes-sdk-testrun-';
+export const RUN_TMP_PREFIX = 'goodvibes-testrun-';
 export const RETAIN_RUN_MARKER = '.keep-proof-output';
 const activeRoots = new Map<string, { readonly dev: number; readonly ino: number; retained: boolean }>();
 
@@ -130,4 +130,4 @@ export function testTmpEnv(runTmpDir: string): Readonly<Record<string, string>> 
  * Folding it into that return value would make the guard go quiet on exactly
  * the change it is watching for.
  */
-export const RUNNER_ENV_FLAG = 'GOODVIBES_SDK_TEST_RUNNER';
+export const RUNNER_ENV_FLAG = 'GOODVIBES_ENGINE_TEST_RUNNER';

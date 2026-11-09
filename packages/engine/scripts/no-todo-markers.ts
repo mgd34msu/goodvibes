@@ -79,7 +79,7 @@ function walkSourceFiles(dir: string): string[] {
 // Scan only the package source tree, scripts/ is build tooling, not published source.
 const SCAN_ROOTS = [
   // The old packages/* are the engine's top-level package directories.
-  ...['contracts', 'daemon-sdk', 'errors', 'operator-sdk', 'peer-sdk', 'sdk', 'terminal-shell',
+  ...['contracts', 'daemon-api', 'errors', 'operator-client', 'peer-client', 'platform', 'terminal-shell',
     'toolchain', 'transport-core', 'transport-http', 'transport-realtime'].map((pkg) => resolve(TODO_ROOT, pkg)),
 ];
 

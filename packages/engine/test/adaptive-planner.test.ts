@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { coreReadingsPort, useCoreReadings } from './_helpers/core-readings.ts';
-import { AdaptivePlanner, PlannerJudgmentError, type PlannerInputs } from '../sdk/src/platform/core/adaptive-planner.js';
-import type { RawDecomposition } from '../sdk/src/platform/core/plan-proposal.js';
+import { AdaptivePlanner, PlannerJudgmentError, type PlannerInputs } from '../platform/src/platform/core/adaptive-planner.js';
+import type { RawDecomposition } from '../platform/src/platform/core/plan-proposal.js';
 
 const readings = useCoreReadings({ strategy: 'cohort' });
 

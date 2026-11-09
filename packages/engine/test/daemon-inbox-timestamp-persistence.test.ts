@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs/promises';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { InboxCursorStore } from '../sdk/src/platform/intake/cursor-store.ts';
-import { InboundPoller } from '../sdk/src/platform/intake/poller.ts';
-import type { InboundChannelItem, InboundProviderAdapter } from '../sdk/src/platform/intake/provider-adapter.ts';
+import { InboxCursorStore } from '../platform/src/platform/intake/cursor-store.ts';
+import { InboundPoller } from '../platform/src/platform/intake/poller.ts';
+import type { InboundChannelItem, InboundProviderAdapter } from '../platform/src/platform/intake/provider-adapter.ts';
 
 const cleanup: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });

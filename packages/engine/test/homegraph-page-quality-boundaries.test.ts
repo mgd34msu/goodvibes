@@ -1,9 +1,9 @@
 import * as crypto from 'node:crypto';
-import { createWorkLedger } from '../sdk/src/platform/workflow/work-ledger/service.js';
-import { KnowledgeGeneratedFactSupportHeldError } from '../sdk/src/platform/knowledge/semantic/verification/types.js';
-import { HomeGraphService } from '../sdk/src/platform/knowledge/home-graph/service.js';
-import { withKnowledgeSourceAnswerAliases } from '../sdk/src/platform/knowledge/source-structural-references.js';
-import { createKnowledgeNodeOperatorMutation } from '../sdk/src/platform/knowledge/store-node-authority.js';
+import { createWorkLedger } from '../platform/src/platform/workflow/work-ledger/service.js';
+import { KnowledgeGeneratedFactSupportHeldError } from '../platform/src/platform/knowledge/semantic/verification/types.js';
+import { HomeGraphService } from '../platform/src/platform/knowledge/home-graph/service.js';
+import { withKnowledgeSourceAnswerAliases } from '../platform/src/platform/knowledge/source-structural-references.js';
+import { createKnowledgeNodeOperatorMutation } from '../platform/src/platform/knowledge/store-node-authority.js';
 import { seedHomeAssistantObservation } from './_helpers/homegraph-observation-fixtures.js';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -12,20 +12,20 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer, scoreAnswer } from '@goodvibes-jev/judgment/testing';
-import { ArtifactStore } from '../sdk/src/platform/artifacts/index.js';
-import { refreshDevicePagesForHomeGraphAsk } from '../sdk/src/platform/knowledge/home-graph/ask-page-refresh.js';
+import { ArtifactStore } from '../platform/src/platform/artifacts/index.js';
+import { refreshDevicePagesForHomeGraphAsk } from '../platform/src/platform/knowledge/home-graph/ask-page-refresh.js';
 import {
   generateHomeGraphRoomPage,
   refreshHomeGraphDevicePassport,
-} from '../sdk/src/platform/knowledge/home-graph/generated-pages.js';
-import { buildHomeGraphMetadata } from '../sdk/src/platform/knowledge/home-graph/helpers.js';
-import { renderRoomPage } from '../sdk/src/platform/knowledge/home-graph/rendering.js';
-import { readHomeGraphState } from '../sdk/src/platform/knowledge/home-graph/state.js';
-import type { HomeGraphAskResult } from '../sdk/src/platform/knowledge/home-graph/types.js';
-import { KnowledgeSourceQualityHeldError } from '../sdk/src/platform/knowledge/source-quality.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { SQLitePublicationError } from '../sdk/src/platform/state/sqlite-store-persistence.js';
-import type { KnowledgeNodeRecord, KnowledgeSourceRecord } from '../sdk/src/platform/knowledge/types.js';
+} from '../platform/src/platform/knowledge/home-graph/generated-pages.js';
+import { buildHomeGraphMetadata } from '../platform/src/platform/knowledge/home-graph/helpers.js';
+import { renderRoomPage } from '../platform/src/platform/knowledge/home-graph/rendering.js';
+import { readHomeGraphState } from '../platform/src/platform/knowledge/home-graph/state.js';
+import type { HomeGraphAskResult } from '../platform/src/platform/knowledge/home-graph/types.js';
+import { KnowledgeSourceQualityHeldError } from '../platform/src/platform/knowledge/source-quality.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { SQLitePublicationError } from '../platform/src/platform/state/sqlite-store-persistence.js';
+import type { KnowledgeNodeRecord, KnowledgeSourceRecord } from '../platform/src/platform/knowledge/types.js';
 import { withTestTimeout } from './_helpers/test-timeout.js';
 import { homeGraphRepairProfileValues, repairProfileFixtureReading, repairUsefulFixtureReading } from './_helpers/repair-profile-fixture-readings.js';
 

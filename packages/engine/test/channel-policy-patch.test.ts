@@ -8,10 +8,10 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { createDaemonChannelRouteHandlers } from '../daemon-sdk/src/channel-routes.js';
-import { dispatchOperatorRoutes } from '../daemon-sdk/src/operator.js';
-import type { DaemonChannelRouteContext } from '../daemon-sdk/src/channel-route-types.js';
-import type { DaemonApiRouteHandlers } from '../daemon-sdk/src/context.js';
+import { createDaemonChannelRouteHandlers } from '../daemon-api/src/channel-routes.js';
+import { dispatchOperatorRoutes } from '../daemon-api/src/operator.js';
+import type { DaemonChannelRouteContext } from '../daemon-api/src/channel-route-types.js';
+import type { DaemonApiRouteHandlers } from '../daemon-api/src/context.js';
 
 // ---------------------------------------------------------------------------
 // Stubs

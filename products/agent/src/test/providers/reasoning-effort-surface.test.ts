@@ -9,12 +9,12 @@
 // model was actually serving.
 //
 // Each spec kind gets its own honest presentation, a level a model does not
-// offer snaps DOWN with the SDK's own sentence, and a best-guess spec is
+// offer snaps DOWN with the platform's own sentence, and a best-guess spec is
 // labelled as one rather than presented as verified provider data.
 // ---------------------------------------------------------------------------
 
 import { describe, expect, test } from 'bun:test';
-import type { LLMProvider, ReasoningEffortSpec } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { LLMProvider, ReasoningEffortSpec } from '@goodvibes-jev/engine/platform/platform/providers';
 import { createTestProviderRegistry } from '../helpers/test-managers.ts';
 import {
   describeConfiguredEffort,
@@ -28,7 +28,7 @@ import {
 
 /**
  * Model ids that must not match a curated family row, so the spec attached
- * here is the one under test rather than one the SDK's family table supplies.
+ * here is the one under test rather than one the platform's family table supplies.
  * (`resolveReasoningEffortSpec` lets the curated table outrank a non-catalog
  * spec on purpose, see its doc, so these tests use catalog-sourced specs.)
  */
@@ -113,12 +113,12 @@ describe('effort presentation per spec kind', () => {
 
 describe('best-guess (fallback-source) specs are labelled, never presented as verified', () => {
   test('an unrecognised model carries the best-guess caveat', () => {
-    // No spec attached and no family row => the SDK's labelled fallback ladder.
+    // No spec attached and no family row => the platform's labelled fallback ladder.
     const presentation = effortPresentationForModel(model(undefined));
     expect(presentation.spec.source).toBe('fallback');
     expect(presentation.caveat).toBeDefined();
     expect(presentation.caveat).toContain('Best guess');
-    // The SDK's OpenAI and Gemini adapters drop the field entirely for such a
+    // The platform's OpenAI and Gemini adapters drop the field entirely for such a
     // model, so the caveat has to say the setting may not reach the provider.
     expect(presentation.caveat).toContain('send nothing');
   });
@@ -186,7 +186,7 @@ describe('the /effort explainer is generated from the resolved spec', () => {
 });
 
 describe('switching or failing over re-resolves the level against the serving model', () => {
-  test('a level the serving model lacks snaps down and carries the SDK note', () => {
+  test('a level the serving model lacks snaps down and carries the platform note', () => {
     const serving = model({ kind: 'effort', values: ['low', 'medium', 'high'], source: 'catalog' }, {
       displayName: 'gpt-5',
     });

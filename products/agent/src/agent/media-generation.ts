@@ -1,13 +1,13 @@
-import type { ArtifactCreateInput, ArtifactDescriptor, ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
+import type { ArtifactCreateInput, ArtifactDescriptor, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type {
   MediaArtifact,
   MediaGenerationRequest,
   MediaProvider,
   MediaProviderRegistry,
-} from '@goodvibes-jev/engine/sdk/platform/media';
+} from '@goodvibes-jev/engine/platform/platform/media';
 import { retainSurfaceMethods, retainSurfaceRead } from '../tools/agent-surface-effect.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { assertDeliveryCurrent, type DeliveryLifetime } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { assertDeliveryCurrent, type DeliveryLifetime } from '@goodvibes-jev/engine/platform/platform/utils';
 
 export interface AgentMediaGenerationInput {
   readonly prompt: string;

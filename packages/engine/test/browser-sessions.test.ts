@@ -5,8 +5,8 @@ import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
-import { BrowserSessionError, BrowserSessionManager, cdpEndpointCandidates, type BrowserSessionManagerDeps } from '../sdk/src/platform/browser/browser-sessions.js';
-import type { BrowserProvisionIo } from '../sdk/src/platform/browser/browser-types.js';
+import { BrowserSessionError, BrowserSessionManager, cdpEndpointCandidates, type BrowserSessionManagerDeps } from '../platform/src/platform/browser/browser-sessions.js';
+import type { BrowserProvisionIo } from '../platform/src/platform/browser/browser-types.js';
 
 // BrowserSessionManager.launch() does a real `mkdirSync(profileDirectory, ...)`
 // even with a fully mocked driver (see browser-sessions.ts), a fixed literal

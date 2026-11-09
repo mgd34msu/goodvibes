@@ -1,6 +1,6 @@
 
 import { describe, expect, test } from 'bun:test';
-import { TemplateManager, parseTemplateArgs } from '../sdk/src/platform/templates/manager.js';
+import { TemplateManager, parseTemplateArgs } from '../platform/src/platform/templates/manager.js';
 
 describe('platform/templates: template management behavior', () => {
   test('parseTemplateArgs parses named args', () => {

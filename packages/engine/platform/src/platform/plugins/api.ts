@@ -1,0 +1,466 @@
+import type { CommandRegistryLike, HostSlashCommand } from '../runtime/host-ui.js';
+import type { ModelDefinition, ProviderRegistry, RuntimeProviderRegistration, TokenLimits, ModelTier } from '../providers/registry.js';
+import type { LLMProvider } from '../providers/interface.js';
+import type { ToolRegistry } from '../tools/registry.js';
+import type { Tool, ToolDefinition } from '../types/tools.js';
+import type { RuntimeEventBus, AnyRuntimeEvent, RuntimeEventPayload } from '../runtime/events/index.js';
+import type { GatewayMethodCatalog, GatewayMethodDescriptor, GatewayMethodHandler } from '../control-plane/index.js';
+import {
+  type ChannelDeliveryStrategy,
+  type ChannelPlugin,
+} from '../channels/index.js';
+import type { ChannelDeliveryRouter, ChannelPluginRegistry } from '../channels/index.js';
+import type { MemoryEmbeddingProvider, MemoryEmbeddingProviderRegistry } from '../state/index.js';
+import type { VoiceProvider, VoiceProviderRegistry } from '../voice/index.js';
+import type { MediaProvider, MediaProviderRegistry } from '../media/index.js';
+import type { WebSearchProvider, WebSearchProviderRegistry } from '../web-search/index.js';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
+import { reasoningEffortSpecFromLevels } from '../providers/reasoning-effort.js';
+import { GatewayVerbError } from '../control-plane/routes/gateway-verb-error.js';
+import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
+import { createOwnedPluginCapabilities } from './owned-capabilities.js';
+import { PluginClosedError, PluginQuiescingError, type PluginInFlightTracker } from './in-flight.js';
+
+/**
+ * PluginProviderConfig, minimal config for registering a custom LLM provider
+ * via an OpenAI-compatible endpoint.
+ */
+export interface PluginProviderConfig {
+  /** Base URL for an OpenAI-compatible endpoint (e.g. "http://localhost:8080/v1"). */
+  baseURL: string;
+  /** API key. May be empty string for local/unauthenticated servers. */
+  apiKey?: string | undefined;
+  /** Model IDs this provider exposes. */
+  models: string[];
+  /** Optional display label shown in the model picker. */
+  displayName?: string | undefined;
+  /** Optional embedding model exposed by the endpoint. */
+  embeddingModel?: string | undefined;
+  /** Optional reasoning-format override for compatible endpoints. */
+  reasoningFormat?: 'mercury' | 'openrouter' | 'llamacpp' | 'none' | undefined;
+  /** Optional context-window metadata for runtime-registered model picker entries. */
+  contextWindow?: number | undefined;
+  /** Optional runtime capability hints for the registered model entries. */
+  capabilities?: Partial<ModelDefinition['capabilities']> | undefined;
+  /** Optional reasoning effort options surfaced in the picker. */
+  reasoningEffort?: string[] | undefined;
+  /** Optional provider tier surfaced in the picker. */
+  tier?: ModelTier | undefined;
+  /** Optional token limits surfaced in the picker. */
+  tokenLimits?: TokenLimits | undefined;
+  /** Optional auth env vars for provider posture. */
+  authEnvVars?: readonly string[] | undefined;
+  /** Optional service names that expose service-owned OAuth. */
+  serviceNames?: readonly string[] | undefined;
+  /** Optional subscription-provider identity used for stored OAuth posture. */
+  subscriptionProviderId?: string | undefined;
+  /** Optional provider-qualified catalog registry keys hidden by this runtime provider. */
+  suppressCatalogModelRegistryKeys?: readonly string[] | undefined;
+}
+
+export interface PluginRuntimeProviderModel {
+  readonly id: string;
+  readonly displayName?: string | undefined;
+  readonly description?: string | undefined;
+  readonly contextWindow?: number | undefined;
+  readonly selectable?: boolean | undefined;
+  readonly capabilities?: Partial<ModelDefinition['capabilities']> | undefined;
+  readonly reasoningEffort?: string[] | undefined;
+  readonly tier?: ModelTier | undefined;
+  readonly tokenLimits?: TokenLimits | undefined;
+}
+
+export interface PluginProviderRegistration {
+  readonly provider: LLMProvider;
+  readonly models?: readonly PluginRuntimeProviderModel[] | undefined;
+  readonly suppressCatalogModelRegistryKeys?: readonly string[] | undefined;
+  readonly replace?: boolean | undefined;
+}
+
+/**
+ * PluginToolSchema, JSON Schema for a tool parameter object.
+ */
+export type PluginToolSchema = Record<string, unknown>;
+
+/**
+ * PluginToolHandler, Called when the LLM invokes a plugin-registered tool.
+ */
+export type PluginToolHandler = (
+  args: Record<string, unknown>,
+) => Promise<{ success: boolean; output?: string; error?: string }>;
+
+/**
+ * PluginCommandHandler, Called when a user runs a plugin-registered slash command.
+ */
+export type PluginCommandHandler = (args: string[]) => void | Promise<void>;
+
+/**
+ * PluginAPI, The constrained API surface exposed to plugins.
+ * Plugins receive an instance of this interface during init; they cannot
+ * access the wider application implementation details directly.
+ */
+export interface PluginAPI {
+  /** Register a custom slash command. */
+  registerCommand(
+    name: string,
+    description: string,
+    handler: PluginCommandHandler,
+  ): void;
+
+  /** Register a custom LLM provider (OpenAI-compatible endpoint). */
+  registerProvider(name: string, config: PluginProviderConfig): Promise<void>;
+
+  /** Register a fully custom runtime provider instance with optional model entries. */
+  registerProviderInstance(registration: PluginProviderRegistration): void;
+
+  /** Register a custom tool available to the LLM. */
+  registerTool(
+    name: string,
+    schema: PluginToolSchema,
+    handler: PluginToolHandler,
+  ): void;
+
+  /** Register a callable control-plane gateway method. */
+  registerGatewayMethod(
+    descriptor: Omit<GatewayMethodDescriptor, 'source' | 'pluginId'> & Partial<Pick<GatewayMethodDescriptor, 'source' | 'pluginId'>>,
+    handler: GatewayMethodHandler,
+  ): void;
+
+  /** Register a channel plugin for a surface such as Slack, Discord, ntfy, or webhooks. */
+  registerChannelPlugin(plugin: ChannelPlugin): void;
+
+  /** Register an outbound channel delivery strategy. */
+  registerDeliveryStrategy(strategy: ChannelDeliveryStrategy, options?: { readonly replace?: boolean }): void;
+
+  /** Register a memory embedding provider. Sync providers can power sqlite-vec indexing immediately. */
+  registerMemoryEmbeddingProvider(provider: MemoryEmbeddingProvider, options?: { readonly replace?: boolean; readonly makeDefault?: boolean }): void;
+
+  /** Register a TS-only voice provider for TTS, STT, or realtime session negotiation. */
+  registerVoiceProvider(provider: VoiceProvider, options?: { readonly replace?: boolean }): void;
+
+  /** Register a TS-only media provider for analysis, transform, or generation. */
+  registerMediaProvider(provider: MediaProvider, options?: { readonly replace?: boolean }): void;
+
+  /** Register a provider-backed web search adapter. */
+  registerWebSearchProvider(provider: WebSearchProvider, options?: { readonly replace?: boolean }): void;
+
+  /** Subscribe to a typed runtime event. Returns an unsubscribe function. */
+  onEvent<K extends AnyRuntimeEvent['type']>(
+    eventName: K,
+    handler: (payload: RuntimeEventPayload<K>) => void,
+  ): () => void;
+
+  /** Read a plugin-specific config value from the plugin's stored settings. */
+  getConfig(key: string): unknown;
+
+  /** Emit structured log output to the application logger. */
+  log(level: 'info' | 'warn' | 'error' | 'debug', message: string): void;
+}
+
+/** Dependencies passed when creating a PluginAPI instance. */
+export interface PluginAPIContext {
+  pluginName: string;
+  runtimeBus: RuntimeEventBus;
+  commandRegistry: CommandRegistryLike;
+  providerRegistry: ProviderRegistry;
+  toolRegistry: ToolRegistry;
+  gatewayMethods: GatewayMethodCatalog;
+  channelRegistry: ChannelPluginRegistry;
+  channelDeliveryRouter: ChannelDeliveryRouter;
+  memoryEmbeddingRegistry: MemoryEmbeddingProviderRegistry;
+  voiceProviderRegistry: VoiceProviderRegistry;
+  mediaProviderRegistry: MediaProviderRegistry;
+  webSearchProviderRegistry: WebSearchProviderRegistry;
+  /** Plugin-specific config key-value pairs from plugins.json state. */
+  pluginConfig: Record<string, unknown>;
+  /** Collect cleanup callbacks so the manager can teardown on disable/reload. */
+  cleanup: Array<() => void>;
+  /**
+   * In-flight accounting for calls into this plugin. When present, every
+   * command, tool, gateway method and event hook the plugin registers is
+   * counted while it runs and refused while the plugin quiesces for a reload.
+   */
+  inFlight?: PluginInFlightTracker | undefined;
+  /** Per-instance registration lifetime, closed before unloading this instance. */
+  registrations?: PluginInFlightTracker | undefined;
+}
+
+/**
+ * createPluginAPI, Factory that creates a sandboxed PluginAPI for a single plugin.
+ * All registrations are tracked in `ctx.cleanup` so they can be undone on deactivation.
+ */
+export function createPluginAPI(ctx: PluginAPIContext): PluginAPI {
+  const tracker = ctx.inFlight;
+  /** Run one call into plugin code through the in-flight tracker, when there is one. */
+  const track = <T>(call: () => T): T => {
+    if (ctx.registrations?.isClosed(ctx.pluginName)) throw new PluginClosedError(ctx.pluginName);
+    const invoke = () => tracker ? tracker.track(ctx.pluginName, call) : call();
+    return ctx.registrations ? ctx.registrations.track(ctx.pluginName, invoke) : invoke();
+  };
+  const assertRegistrationOpen = (): void => {
+    if (tracker?.isClosed(ctx.pluginName) || ctx.registrations?.isClosed(ctx.pluginName)) {
+      throw new PluginClosedError(ctx.pluginName);
+    }
+  };
+  const register = <T>(action: () => T): T => {
+    assertRegistrationOpen();
+    return ctx.registrations ? ctx.registrations.track(ctx.pluginName, action) : action();
+  };
+  const owned = createOwnedPluginCapabilities(track);
+  return {
+    registerCommand(name, description, handler) {
+      return register(() => {
+        // Namespace commands to avoid collisions: "plugin-<pluginName>-<name>"
+        const cmdName = `plugin-${ctx.pluginName}-${name}`;
+        const cmd: HostSlashCommand = {
+          name: cmdName,
+          description: `[${ctx.pluginName}] ${description}`,
+          handler: async (args: string[]) => {
+            try {
+              await track(() => handler(args));
+            } catch (err) {
+              if (err instanceof PluginQuiescingError) {
+                logger.warn(`[plugin:${ctx.pluginName}] Command '${name}' refused: ${err.message}`);
+                return;
+              }
+              logger.error(`[plugin:${ctx.pluginName}] Command '${name}' threw: ${summarizeError(err)}`);
+            }
+          },
+        };
+        ctx.commandRegistry.register(cmd);
+        ctx.cleanup.push(() => ctx.commandRegistry.unregister(cmdName));
+      });
+    },
+
+    registerProvider(name, config) {
+      try { return register(async () => {
+        // Dynamically import to avoid circular dependency at module load time.
+        try {
+          const { OpenAICompatProvider } = await import('../providers/openai-compat.js');
+          assertRegistrationOpen();
+          try {
+            const provider = new OpenAICompatProvider({
+              name,
+              baseURL: config.baseURL,
+              apiKey: config.apiKey ?? '',
+              defaultModel: config.models[0] ?? '',
+              models: config.models,
+              ...(config.embeddingModel ? { embeddingModel: config.embeddingModel } : {}),
+              ...(config.reasoningFormat ? { reasoningFormat: config.reasoningFormat } : {}),
+              ...(config.authEnvVars ? { authEnvVars: config.authEnvVars } : {}),
+              ...(config.serviceNames ? { serviceNames: config.serviceNames } : {}),
+              ...(config.subscriptionProviderId ? { subscriptionProviderId: config.subscriptionProviderId } : {}),
+            });
+            const registered = owned.provider(provider);
+            const unregister = ctx.providerRegistry.registerRuntimeProvider({
+              provider: registered,
+              models: config.models.map((modelId) => ({
+                id: modelId,
+                provider: name,
+                registryKey: `${name}:${modelId}`,
+                displayName: config.displayName ?? modelId,
+                description: `Plugin provider ${name}`,
+                contextWindow: config.contextWindow ?? 8192,
+                selectable: true,
+                capabilities: {
+                  toolCalling: config.capabilities?.toolCalling ?? true,
+                  codeEditing: config.capabilities?.codeEditing ?? true,
+                  reasoning: config.capabilities?.reasoning ?? false,
+                  multimodal: config.capabilities?.multimodal ?? false,
+                },
+                ...(config.reasoningEffort
+                  ? { reasoningEffort: reasoningEffortSpecFromLevels(config.reasoningEffort) }
+                  : {}),
+                ...(config.tier ? { tier: config.tier } : {}),
+                ...(config.tokenLimits ? { tokenLimits: config.tokenLimits } : {}),
+              })),
+              suppressCatalogModelRegistryKeys: config.suppressCatalogModelRegistryKeys,
+            });
+            ctx.cleanup.push(() => { if (ctx.providerRegistry.has(name) && ctx.providerRegistry.getRegistered(name) === registered) unregister(); });
+            logger.info(`[plugin:${ctx.pluginName}] Registered provider '${name}' with ${config.models.length} model(s)`);
+          } catch (err) {
+            logger.error(`[plugin:${ctx.pluginName}] registerProvider '${name}' failed: ${summarizeError(err)}`);
+            throw err;
+          }
+        } catch (err) {
+          logger.error(`[plugin:${ctx.pluginName}] Could not import OpenAICompatProvider: ${summarizeError(err)}`);
+          throw err;
+        }
+      }); } catch (error) {
+        const refused = Promise.reject(error);
+        void refused.catch(() => {});
+        return refused;
+      }
+    },
+
+    registerProviderInstance(registration) {
+      return register(() => {
+        const registered = owned.provider(registration.provider);
+        const unregister = ctx.providerRegistry.registerRuntimeProvider({
+          provider: registered,
+          models: (registration.models ?? []).map((model) => ({
+            id: model.id,
+            provider: registration.provider.name,
+            registryKey: `${registration.provider.name}:${model.id}`,
+            displayName: model.displayName ?? model.id,
+            description: model.description ?? `Plugin provider ${registration.provider.name}`,
+            contextWindow: model.contextWindow ?? 8192,
+            selectable: model.selectable ?? true,
+            capabilities: {
+              toolCalling: model.capabilities?.toolCalling ?? true,
+              codeEditing: model.capabilities?.codeEditing ?? true,
+              reasoning: model.capabilities?.reasoning ?? false,
+              multimodal: model.capabilities?.multimodal ?? false,
+            },
+            ...(model.reasoningEffort
+              ? { reasoningEffort: reasoningEffortSpecFromLevels(model.reasoningEffort) }
+              : {}),
+            ...(model.tier ? { tier: model.tier } : {}),
+            ...(model.tokenLimits ? { tokenLimits: model.tokenLimits } : {}),
+          })),
+          suppressCatalogModelRegistryKeys: registration.suppressCatalogModelRegistryKeys,
+          replace: registration.replace,
+        } satisfies RuntimeProviderRegistration);
+        ctx.cleanup.push(() => { if (ctx.providerRegistry.has(registered.name) && ctx.providerRegistry.getRegistered(registered.name) === registered) unregister(); });
+        logger.info(`[plugin:${ctx.pluginName}] Registered provider instance '${registration.provider.name}'`);
+      });
+    },
+
+    registerTool(name, schema, handler) {
+      return register(() => {
+        const toolName = `plugin_${ctx.pluginName}_${name}`;
+        if (ctx.toolRegistry.has(toolName)) {
+          logger.warn(`[plugin:${ctx.pluginName}] Tool '${toolName}' already registered, skipping`);
+          return;
+        }
+        const definition: ToolDefinition = {
+          name: toolName,
+          description: (schema.description as string) ?? `Plugin tool: ${name}`,
+          parameters: schema,
+        };
+        const tool: Tool = {
+          definition,
+          execute: async (args: Record<string, unknown>) => {
+            try {
+              return await track(() => handler(args));
+            } catch (err) {
+              if (err instanceof PluginQuiescingError) return { success: false, error: err.message };
+              return { success: false, error: summarizeError(err) };
+            }
+          },
+        };
+        ctx.toolRegistry.register(tool);
+        // Removed on deactivate so a reloaded instance registers its own handler.
+        ctx.cleanup.push(() => {
+          ctx.toolRegistry.unregister(toolName, tool);
+        });
+      });
+    },
+
+    registerGatewayMethod(descriptor, handler) {
+      return register(() => {
+        const methodId = descriptor.id.startsWith(`plugin.${ctx.pluginName}.`)
+          ? descriptor.id
+          : `plugin.${ctx.pluginName}.${descriptor.id}`;
+        const unregister = ctx.gatewayMethods.register({
+          ...descriptor,
+          id: methodId,
+          source: 'plugin',
+          pluginId: ctx.pluginName,
+        }, (input) => {
+          try {
+            return track(() => handler(input));
+          } catch (err) {
+            if (err instanceof PluginQuiescingError) {
+              throw new GatewayVerbError(err.message, EngineErrorCodes.SERVICE_UNAVAILABLE, 503);
+            }
+            throw err;
+          }
+        });
+        ctx.cleanup.push(unregister);
+        logger.info(`[plugin:${ctx.pluginName}] Registered gateway method '${methodId}'`);
+      });
+    },
+
+    registerChannelPlugin(plugin) {
+      return register(() => {
+        const registry = ctx.channelRegistry;
+        const registered = owned.channel(plugin);
+        registry.register(registered);
+        ctx.cleanup.push(() => {
+          registry.unregister(plugin.id, registered);
+        });
+        logger.info(`[plugin:${ctx.pluginName}] Registered channel plugin '${plugin.id}'`);
+      });
+    },
+
+    registerDeliveryStrategy(strategy, options = {}) {
+      return register(() => {
+        const router = ctx.channelDeliveryRouter;
+        const registered = owned.delivery(strategy);
+        router.registerStrategy(registered, options);
+        ctx.cleanup.push(() => {
+          if (router.listStrategies().includes(registered)) router.unregisterStrategy(strategy.id);
+        });
+        logger.info(`[plugin:${ctx.pluginName}] Registered delivery strategy '${strategy.id}'`);
+      });
+    },
+
+    registerMemoryEmbeddingProvider(provider, options = {}) {
+      return register(() => {
+        const unregister = ctx.memoryEmbeddingRegistry.register(owned.memory(provider), options);
+        ctx.cleanup.push(unregister);
+        logger.info(`[plugin:${ctx.pluginName}] Registered memory embedding provider '${provider.id}'`);
+      });
+    },
+
+    registerVoiceProvider(provider, options = {}) {
+      return register(() => {
+        const unregister = ctx.voiceProviderRegistry.register(owned.voice(provider), options);
+        ctx.cleanup.push(unregister);
+        logger.info(`[plugin:${ctx.pluginName}] Registered voice provider '${provider.id}'`);
+      });
+    },
+
+    registerMediaProvider(provider, options = {}) {
+      return register(() => {
+        const unregister = ctx.mediaProviderRegistry.register(owned.media(provider), options);
+        ctx.cleanup.push(unregister);
+        logger.info(`[plugin:${ctx.pluginName}] Registered media provider '${provider.id}'`);
+      });
+    },
+
+    registerWebSearchProvider(provider, options = {}) {
+      return register(() => {
+        const unregister = ctx.webSearchProviderRegistry.register(owned.search(provider), options);
+        ctx.cleanup.push(unregister);
+        logger.info(`[plugin:${ctx.pluginName}] Registered web search provider '${provider.id}'`);
+      });
+    },
+
+    onEvent(eventName, handler) {
+      return register(() => {
+        const unsub = ctx.runtimeBus.on(
+          eventName,
+          (envelope) => {
+            // An event reaching a quiescing plugin is not delivered: the instance
+            // it would run on is about to be unloaded.
+            if (tracker?.isQuiescing(ctx.pluginName) || ctx.registrations?.isClosed(ctx.pluginName)) return;
+            track(() => handler(envelope.payload as RuntimeEventPayload<typeof eventName>));
+          },
+        );
+        ctx.cleanup.push(unsub);
+        return unsub;
+      });
+    },
+
+    getConfig(key) {
+      return ctx.pluginConfig[key];
+    },
+
+    log(level, message) {
+      logger[level](`[plugin:${ctx.pluginName}] ${message}`);
+    },
+  };
+}

@@ -1,11 +1,11 @@
 /** Deterministic close/drain ownership regressions for WebhookNotifier. */
 import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
 import { createHmac } from 'node:crypto';
-import { WebhookNotifier, type WebhookNotifierOptions } from '../sdk/src/platform/integrations/webhooks.ts';
-import * as http from '../sdk/src/platform/utils/url-safety.ts';
-import { logger } from '../sdk/src/platform/utils/logger.ts';
-import { RuntimeEventBus, createEventEnvelope } from '../sdk/src/platform/runtime/events/index.ts';
-import type { NotificationDelivery } from '../sdk/src/platform/runtime/turn-notification.ts';
+import { WebhookNotifier, type WebhookNotifierOptions } from '../platform/src/platform/integrations/webhooks.ts';
+import * as http from '../platform/src/platform/utils/url-safety.ts';
+import { logger } from '../platform/src/platform/utils/logger.ts';
+import { RuntimeEventBus, createEventEnvelope } from '../platform/src/platform/runtime/events/index.ts';
+import type { NotificationDelivery } from '../platform/src/platform/runtime/turn-notification.ts';
 import { withTestTimeout } from './_helpers/test-timeout.ts';
 
 const URLS = ['https://example.com/close-a', 'https://example.com/close-b', 'https://example.com/close-c'];

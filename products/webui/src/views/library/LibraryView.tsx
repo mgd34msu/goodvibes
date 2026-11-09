@@ -13,7 +13,7 @@ import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Field';
 import { Segmented } from '../../components/ui/Segmented';
 import { formatError } from '../../lib/errors';
-import { sdk, type MemoryAddInput } from '../../lib/goodvibes';
+import { client as platformClient, type MemoryAddInput } from '../../lib/goodvibes';
 import type { LibraryTab } from '../../lib/router';
 import { KnowledgeView } from '../KnowledgeView';
 import { AddMemoryDialog } from '../memory/AddMemoryDialog';
@@ -42,7 +42,7 @@ export function LibraryView({ tab, onTabChange }: LibraryViewProps) {
   const query = forced ?? settled;
 
   const add = useMutation({
-    mutationFn: (input: MemoryAddInput) => sdk.operator.memory.add(input),
+    mutationFn: (input: MemoryAddInput) => platformClient.operator.memory.add(input),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['memory'] });
       setAdding(false);

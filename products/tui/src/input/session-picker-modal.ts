@@ -32,11 +32,11 @@ import { SavedSessionPickerState } from '@goodvibes-jev/engine/terminal-shell/se
  */
 
 import { unlinkSync } from 'node:fs';
-import type { SessionInfo, SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
-import type { SharedSessionRecord } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import type { CrossSurfaceView, SessionReadFacade } from '@goodvibes-jev/engine/sdk/platform/runtime/session-spine';
+import type { SessionInfo, SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
+import type { SharedSessionRecord } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import type { CrossSurfaceView, SessionReadFacade } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
 import type { CommandContext } from './command-registry.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { HostedRosterSnapshot } from '../runtime/client/hosted-roster.ts';
 // Re-exported so the composition site (input/handler.ts) reaches the picker and
 // its hosted roster through ONE import, that file sits on this repo's 800-line

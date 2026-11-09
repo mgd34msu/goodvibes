@@ -1,14 +1,14 @@
 import { useGateReadings } from './_helpers/gate-readings.ts';
 import { describe, expect, test } from 'bun:test';
-import { ApprovalBroker } from '../sdk/src/platform/control-plane/approval-broker.js';
-import { executeToolCalls, type ToolExecutionDeps } from '../sdk/src/platform/core/orchestrator-tool-runtime.js';
-import type { ToolRegistry } from '../sdk/src/platform/tools/registry.js';
-import type { ToolCall, ToolResult } from '../sdk/src/platform/types/tools.js';
+import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-broker.js';
+import { executeToolCalls, type ToolExecutionDeps } from '../platform/src/platform/core/orchestrator-tool-runtime.js';
+import type { ToolRegistry } from '../platform/src/platform/tools/registry.js';
+import type { ToolCall, ToolResult } from '../platform/src/platform/types/tools.js';
 
 useGateReadings();
 
 /** Explicitly requested broker decisions retain the selected edit hunks through execution. */
-function explicitBrokerPermissions(requestPermission: (request: Parameters<ApprovalBroker['requestApproval']>[0]['request']) => Promise<import('../sdk/src/platform/permissions/prompt.js').PermissionPromptDecision>): ToolExecutionDeps['permissionManager'] {
+function explicitBrokerPermissions(requestPermission: (request: Parameters<ApprovalBroker['requestApproval']>[0]['request']) => Promise<import('../platform/src/platform/permissions/prompt.js').PermissionPromptDecision>): ToolExecutionDeps['permissionManager'] {
   return {
     async checkDetailed(tool: string, args: Record<string, unknown>) {
       const analysis = { classification: 'write' as const, riskLevel: 'medium' as const, summary: 'Explicit edit review', reasons: [] };

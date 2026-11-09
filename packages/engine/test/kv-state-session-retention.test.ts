@@ -4,7 +4,7 @@
  * Regression evidence that the `session_<8hex>.json` store is actually bounded.
  *
  * The defect: `KVState.cleanupOldSessions` existed and had ZERO production
- * callers anywhere in the SDK or its surfaces, and no age bound or count bound
+ * callers anywhere in the platform or its surfaces, and no age bound or count bound
  * was applied on any other path. Every session and every agent spawn wrote a
  * file into `<wd>/.goodvibes/<surface>/state/` that nothing ever removed, so a
  * long-lived working directory accumulated them without limit. The `.json`
@@ -23,8 +23,8 @@ import { existsSync, mkdirSync, readdirSync, statSync, utimesSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { KVState } from '../sdk/src/platform/state/kv-state.ts';
-import { logger } from '../sdk/src/platform/utils/logger.ts';
+import { KVState } from '../platform/src/platform/state/kv-state.ts';
+import { logger } from '../platform/src/platform/utils/logger.ts';
 
 /** Mirrors SESSION_MAX_AGE_MS in kv-state.ts, the contract these tests hold it to. */
 const MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;

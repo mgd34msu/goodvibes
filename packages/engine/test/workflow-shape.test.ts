@@ -944,7 +944,7 @@ describe('release.yml: by-reference release', () => {
   test('the concurrency group is keyed on the tag, so both release paths for one version serialize', () => {
     const group = String(rel.concurrency?.group ?? '');
     // The `ref` input defaults to "main", so keying on it put EVERY dispatched
-    // release in one group (sdk-release-main) and put a tag push for the same
+    // release in one group (platform-release-main) and put a tag push for the same
     // version in a different group from its dispatch, letting the two race.
     expect(group).not.toContain('inputs.ref');
     expect(group).toContain('github.ref_name');
@@ -1105,10 +1105,10 @@ describe('reusable workflows: workflow_call contracts', () => {
     expect(outputsText).toContain('pjg-registry');
   });
 
-  test('the SDK release.yml self-hosts release-verify with the workspace toolchain', () => {
+  test('the platform release.yml self-hosts release-verify with the workspace toolchain', () => {
     const rel = load('release.yml');
     const rv = rel.jobs!['release-verify']! as Job & { with?: Record<string, unknown> };
-    // The SDK cannot bunx-from-registry: its own release publishes the
+    // The platform cannot bunx-from-registry: its own release publishes the
     // toolchain (first-release bootstrap), and later releases must verify with
     // the commit under release, not the previously published version.
     expect(rv.with?.['toolchain-source']).toBe('workspace');

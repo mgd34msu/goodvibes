@@ -3,8 +3,8 @@ import { lstatSync, readdirSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { types as nodeTypes } from 'node:util';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { captureExistingDirectory } from '@goodvibes-jev/engine/sdk/platform/state/durable-file-io';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { captureExistingDirectory } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
 import { LegacyImportJournal, type LegacyImportJournalOptions } from './legacy-work-ledger-import-journal.js';
 
 function historicalCandidates(directory: string) {

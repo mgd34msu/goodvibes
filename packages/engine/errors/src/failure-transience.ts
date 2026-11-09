@@ -11,7 +11,7 @@ import {
 /**
  * Whether a failure is worth another attempt: the one transience decision the
  * engine's retry, cooldown and dead-letter sites share (integration delivery,
- * automation runs, provider batches) and the client SDK's token refresh uses.
+ * automation runs, provider batches) and the client platform's token refresh uses.
  * Structure decides first; only when structure is silent is the wording read
  * through the engine failure battery (`readFailure`).
  */

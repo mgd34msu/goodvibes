@@ -7,7 +7,7 @@ import { TriggerRecoverySettings } from '../../TriggerRecoverySettings';
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Smartphone } from 'lucide-react';
-import { GOODVIBES_BASE_URL, WEBUI_VERSION, invokeMethod, sdk } from '../../../../lib/goodvibes';
+import { GOODVIBES_BASE_URL, WEBUI_VERSION, invokeMethod, client as platformClient } from '../../../../lib/goodvibes';
 import { queryKeys } from '../../../../lib/queries';
 import { bestTitle } from '../../../../lib/object';
 import { providerOptionsFromResponse, sortProvidersConfiguredFirst } from '../../../../lib/provider-models';
@@ -67,7 +67,7 @@ export function PeopleSection() {
 }
 
 export function CredentialsSection() {
-  const accounts = useQuery({ queryKey: queryKeys.accounts, queryFn: () => sdk.operator.accounts.snapshot() });
+  const accounts = useQuery({ queryKey: queryKeys.accounts, queryFn: () => platformClient.operator.accounts.snapshot() });
   return (
     <>
       <CredentialStatusPanel />
@@ -84,14 +84,14 @@ export function CredentialsSection() {
 }
 
 export function UsageSection() {
-  const providers = useQuery({ queryKey: queryKeys.providers, queryFn: () => sdk.operator.providers.list() });
+  const providers = useQuery({ queryKey: queryKeys.providers, queryFn: () => platformClient.operator.providers.list() });
   const options = useMemo(() => sortProvidersConfiguredFirst(providerOptionsFromResponse(providers.data)), [providers.data]);
   const [picked, setPicked] = useState('');
   const providerId = picked || options[0]?.id || '';
   const usage = useQuery({
     queryKey: ['providers', providerId, 'usage'],
     enabled: Boolean(providerId),
-    queryFn: () => sdk.operator.providers.usage(providerId),
+    queryFn: () => platformClient.operator.providers.usage(providerId),
   });
 
   return (
@@ -209,7 +209,7 @@ export function AllSettingsSection() {
 }
 
 export function AboutSection({ realtimeError }: { realtimeError?: string | null }) {
-  const status = useQuery({ queryKey: queryKeys.status, queryFn: () => sdk.operator.control.status() });
+  const status = useQuery({ queryKey: queryKeys.status, queryFn: () => platformClient.operator.control.status() });
   const localAuth = useQuery({ queryKey: queryKeys.localAuth, queryFn: () => invokeMethod('local_auth.status') });
 
   return (

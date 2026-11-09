@@ -14,10 +14,10 @@ import { describe, it, expect, mock } from 'bun:test';
 import {
   PermissionSimulator,
   DivergenceDashboard,
-} from '../sdk/src/platform/runtime/permissions/index.ts';
+} from '../platform/src/platform/runtime/permissions/index.ts';
 import {
   DivergencePanel,
-} from '../sdk/src/platform/runtime/diagnostics/panels/divergence.ts';
+} from '../platform/src/platform/runtime/diagnostics/panels/divergence.ts';
 
 // Drain queued microtasks so bus.emit() listeners (async dispatch) run before assertions.
 const flushMicrotasks = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };

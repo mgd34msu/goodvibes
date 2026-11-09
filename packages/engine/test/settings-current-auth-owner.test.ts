@@ -3,13 +3,13 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { PairingTokenManager, PairingTokenStoreBusyError } from '../sdk/src/platform/pairing/pairing-token-store.js';
-import { UserAuthManager } from '../sdk/src/platform/security/user-auth.js';
-import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../sdk/src/platform/daemon/control-plane.js';
-import * as atomic from '../sdk/src/platform/utils/atomic-json-store.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { createServingSettingsPrecondition } from '../sdk/src/platform/daemon/http/settings-precondition.js';
-import { createDaemonSystemRouteHandlers } from '../daemon-sdk/src/system-routes.js';
+import { PairingTokenManager, PairingTokenStoreBusyError } from '../platform/src/platform/pairing/pairing-token-store.js';
+import { UserAuthManager } from '../platform/src/platform/security/user-auth.js';
+import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../platform/src/platform/daemon/control-plane.js';
+import * as atomic from '../platform/src/platform/utils/atomic-json-store.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { createServingSettingsPrecondition } from '../platform/src/platform/daemon/http/settings-precondition.js';
+import { createDaemonSystemRouteHandlers } from '../daemon-api/src/system-routes.js';
 
 function ownerLockPath(file: string): string { return join(dirname(file), '.pairing-owner-locks', `${basename(file)}.lock`); }
 

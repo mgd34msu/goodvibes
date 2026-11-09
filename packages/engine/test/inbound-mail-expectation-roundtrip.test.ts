@@ -13,8 +13,8 @@ import {
   MIN_VERIFICATION_WINDOW_MS,
   VerificationExpectationBook,
   validatePersistedExpectation,
-} from '../sdk/src/platform/google/verification-expectations.ts';
-import { PersistedExpectationStore } from '../sdk/src/platform/email/inbound/expectation-store.ts';
+} from '../platform/src/platform/google/verification-expectations.ts';
+import { PersistedExpectationStore } from '../platform/src/platform/email/inbound/expectation-store.ts';
 
 const T0 = new Date('2026-07-27T12:00:00.000Z');
 

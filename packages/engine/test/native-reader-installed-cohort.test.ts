@@ -3,11 +3,11 @@ import { expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { createNativeDataWriteOwner, nativeReaderCapabilities, NATIVE_READER_REQUIREMENT_FILE } from '../sdk/src/platform/runtime/native-reader-compatibility.js';
-import { createInstalledReaderCohort } from '../sdk/src/platform/runtime/native-reader-cohort.js';
-import { clientReaderAsset, clientReaderPayloadPaths, clientReaderMemberPath, type ClientReaderArtifact, type ClientReaderPackage } from '../sdk/src/platform/runtime/client-reader-artifact.js';
-import { sha256 } from '../sdk/src/platform/runtime/self-update.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
+import { createNativeDataWriteOwner, nativeReaderCapabilities, NATIVE_READER_REQUIREMENT_FILE } from '../platform/src/platform/runtime/native-reader-compatibility.js';
+import { createInstalledReaderCohort } from '../platform/src/platform/runtime/native-reader-cohort.js';
+import { clientReaderAsset, clientReaderPayloadPaths, clientReaderMemberPath, type ClientReaderArtifact, type ClientReaderPackage } from '../platform/src/platform/runtime/client-reader-artifact.js';
+import { sha256 } from '../platform/src/platform/runtime/self-update.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { makeProjectTempDir } from './_helpers/project-temp.js';
 function fixture() {
   const root = makeProjectTempDir('installed-reader-cohort'), execPath = join(root, 'goodvibes'); writeFileSync(execPath, 'Own admitted terminal', { mode: 0o755 });

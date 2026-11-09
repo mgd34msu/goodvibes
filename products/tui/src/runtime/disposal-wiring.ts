@@ -4,8 +4,8 @@
  * Teardown for every poller this surface's runtime graph starts.
  *
  * The mechanics, the ordered, best-effort, idempotent scope and the
- * all-required owner list, live in the SDK (`platform/runtime/disposal`), so
- * this surface and the SDK's own composition root cannot drift into two
+ * all-required owner list, live in the platform (`platform/runtime/disposal`), so
+ * this surface and the platform's own composition root cannot drift into two
  * different ideas of what "stop the graph" means. What lives here is only the
  * mapping from this fork's assembled graph onto that list.
  *
@@ -13,7 +13,7 @@
  * 800-line source cap (check-architecture.ts) with no room for the wiring.
  *
  * Ownership note, and the reason any of this exists: this surface builds the
- * graph and hands the SAME object to `DaemonServer`. The SDK facade disposes
+ * graph and hands the SAME object to `DaemonServer`. The platform facade disposes
  * only a graph it constructed itself, so it deliberately leaves this one alone
  *, nothing upstream will ever stop these pollers. The shutdown paths in
  * daemon/cli.ts, main.ts's teardown registry and the one-shot CLI commands are
@@ -29,7 +29,7 @@ import {
   registerRuntimePollers,
   type DisposalRegistry,
   type RuntimePollerOwners,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/disposal';
+} from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
 
 /** Re-exported so the composition root reaches the whole seam through one import. */
 export { createDisposalScope };

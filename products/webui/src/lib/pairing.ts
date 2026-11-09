@@ -9,9 +9,9 @@
  * or a Referer header. This module only READS that fragment; QR *generation*
  * lives entirely on the daemon/TUI side, never here.
  *
- * SDK 1.8.0's pairing.handoff.create rides the EXACT SAME `#pair=<token>`
+ * platform 1.8.0's pairing.handoff.create rides the EXACT SAME `#pair=<token>`
  * fragment shape, with an offer set alongside in an `offers=` key this module
- * did not used to read at all (the SDK's own pairing-handoff.ts header notes
+ * did not used to read at all (the platform's own pairing-handoff.ts header notes
  * this deliberately: "the web app... ignores any other fragment keys", this
  * file is the "ignores" it meant, now made offer-aware). A plain `#pair=<token>`
  * link (no `offers=`) still parses exactly as before, parsePairingOffersFromHash
@@ -30,7 +30,7 @@ export const PAIRING_FRAGMENT_KEY = 'pair';
 /** The fragment key an offer-bearing hand-off link uses alongside `pair`. */
 export const PAIRING_OFFERS_FRAGMENT_KEY = 'offers';
 
-/** The set-up steps a pairing hand-off can offer, mirrors the SDK's PairingHandoffOfferKind. */
+/** The set-up steps a pairing hand-off can offer, mirrors the platform's PairingHandoffOfferKind. */
 export type PairingOfferKind = 'notifications' | 'relay' | 'passkey';
 const PAIRING_OFFER_KINDS: readonly PairingOfferKind[] = ['notifications', 'relay', 'passkey'];
 
@@ -53,7 +53,7 @@ export function parsePairingTokenFromHash(hash: string): string | null {
 
 /**
  * Extract the offer-kind list from the same hash a pairing token rides in
- * (comma-separated, e.g. `#pair=tok&offers=notifications,relay`), in the SDK's
+ * (comma-separated, e.g. `#pair=tok&offers=notifications,relay`), in the platform's
  * canonical order, deduped, and dropping any kind this web app does not
  * recognize. Returns [] for a plain token-only link, an absent hash, or a hash
  * with no `pair` key at all (an offer set with no token to pair is meaningless).

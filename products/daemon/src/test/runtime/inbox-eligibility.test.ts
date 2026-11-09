@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { FakeClusterClock } from '@goodvibes-jev/engine/sdk/platform/cluster';
+import { FakeClusterClock } from '@goodvibes-jev/engine/platform/platform/cluster';
 import { ownInboxEligibility } from '../../runtime/inbox-eligibility.js';
 
 const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };

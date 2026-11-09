@@ -1,15 +1,15 @@
 /** Checkout gate facts are captured synchronously before injected config and
  * driver callbacks. The daemon passes its facts directly as host-only options;
- * bare SDK callers still supply the synchronous gates() dependency. */
+ * bare platform callers still supply the synchronous gates() dependency. */
 import { describe, expect, test } from 'bun:test';
-import { PaymentsGatewayServiceImpl } from '../sdk/src/platform/payments/payments-gateway-service.js';
-import { BudgetLedger } from '../sdk/src/platform/payments/budget.js';
-import { CheckoutRegistry, MemoryCheckoutJournal, type CheckoutPhase, type InFlightCheckout } from '../sdk/src/platform/payments/checkout-registry.js';
-import { UntrustedContentLedger } from '../sdk/src/platform/security/untrusted-content.js';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { registerPaymentsGatewayMethods } from '../sdk/src/platform/control-plane/routes/payments.js';
-import { unsafeOwnerSuppliedTextForTests } from '../sdk/src/platform/payments/types.js';
-import type { CurrencyCode } from '../sdk/src/platform/payments/types.js';
+import { PaymentsGatewayServiceImpl } from '../platform/src/platform/payments/payments-gateway-service.js';
+import { BudgetLedger } from '../platform/src/platform/payments/budget.js';
+import { CheckoutRegistry, MemoryCheckoutJournal, type CheckoutPhase, type InFlightCheckout } from '../platform/src/platform/payments/checkout-registry.js';
+import { UntrustedContentLedger } from '../platform/src/platform/security/untrusted-content.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { registerPaymentsGatewayMethods } from '../platform/src/platform/control-plane/routes/payments.js';
+import { unsafeOwnerSuppliedTextForTests } from '../platform/src/platform/payments/types.js';
+import type { CurrencyCode } from '../platform/src/platform/payments/types.js';
 
 function buildService(
   order: string[],

@@ -1,4 +1,4 @@
-import { ToolInputProjectionError, type ProcessManager, type ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError, type ProcessManager, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { AgentHarnessBackgroundProcessArgs } from './agent-harness-background-processes-types.ts';

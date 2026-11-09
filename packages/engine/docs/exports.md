@@ -1,53 +1,53 @@
 # Public exports
 
-GoodVibes SDK exposes deliberate entrypoints. Code under repository
+GoodVibes platform exposes deliberate entrypoints. Code under repository
 source folders is implementation, not public API.
 
-## Facade package
+## Client facade subpath
 
-`@goodvibes-jev/engine/sdk` is the consumer-facing facade. It composes the
-source-of-truth workspace packages and SDK-owned platform/runtime modules.
+`@goodvibes-jev/engine/platform` is the consumer-facing facade. It composes the
+contract, transport and client modules within the engine package.
 
-Use the root package for normal daemon-connected client work:
+Install `@goodvibes-jev/engine` and import the facade subpath for daemon-connected client work:
 
 ```ts
-import { createGoodVibesSdk } from '@goodvibes-jev/engine/sdk';
+import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
 ```
 
 The package also exposes `@goodvibes-jev/engine/package.json` as metadata.
 
-## Source-of-truth package facades
+## Contract, transport and client facades
 
-These subpaths expose source-of-truth workspace package outputs:
+These explicit subpaths expose modules maintained within the engine package:
 
-- `@goodvibes-jev/engine/sdk/contracts`
-- `@goodvibes-jev/engine/sdk/contracts/node`
-- `@goodvibes-jev/engine/sdk/contracts/operator-contract.json`
-- `@goodvibes-jev/engine/sdk/contracts/operator-openapi.json`
-- `@goodvibes-jev/engine/sdk/contracts/peer-contract.json`
-- `@goodvibes-jev/engine/sdk/errors`
-- `@goodvibes-jev/engine/sdk/daemon`
-- `@goodvibes-jev/engine/sdk/operator`
-- `@goodvibes-jev/engine/sdk/peer`
-- `@goodvibes-jev/engine/sdk/transport-core`
-- `@goodvibes-jev/engine/sdk/transport-http`
-- `@goodvibes-jev/engine/sdk/transport-realtime`
+- `@goodvibes-jev/engine/platform/contracts`
+- `@goodvibes-jev/engine/platform/contracts/node`
+- `@goodvibes-jev/engine/platform/contracts/operator-contract.json`
+- `@goodvibes-jev/engine/platform/contracts/operator-openapi.json`
+- `@goodvibes-jev/engine/platform/contracts/peer-contract.json`
+- `@goodvibes-jev/engine/platform/errors`
+- `@goodvibes-jev/engine/platform/daemon`
+- `@goodvibes-jev/engine/platform/operator`
+- `@goodvibes-jev/engine/platform/peer`
+- `@goodvibes-jev/engine/platform/transport-core`
+- `@goodvibes-jev/engine/platform/transport-http`
+- `@goodvibes-jev/engine/platform/transport-realtime`
 
-`@goodvibes-jev/engine/sdk/transport-direct` is an SDK-owned facade over direct
+`@goodvibes-jev/engine/platform/transport-direct` is a platform-owned facade over direct
 transport helpers from `transport-core`; it is not backed by a separate
-transport-direct sibling package.
+transport-direct package.
 
 See [Transports](./transports.md) for the canonical `transport-direct` facade
 description.
 
 ## Embedding facade
 
-`@goodvibes-jev/engine/sdk/embed` is a separate, narrower facade from the root
-package. It is the frozen 1.0 SDK Embedding API for hosting a GoodVibes
+`@goodvibes-jev/engine/platform/embed` is a narrower facade within the engine
+package. It is the frozen 1.0 platform embedding API for hosting a GoodVibes
 session inside another application (`createEmbeddedSession`, `bootDaemon`,
 and the permission-callback contract). It curates existing runtime machinery
 rather than adding new engine surface, so its breaking changes are gated by
-their own API Extractor report separate from the root package's. See
+their own API Extractor report separate from the main client facade's. See
 [Public Surface](./public-surface.md) for the full contract.
 
 ## Platform surfaces
@@ -58,23 +58,23 @@ package exports, it is private implementation.
 
 Client-safe surfaces:
 
-- `@goodvibes-jev/engine/sdk/auth`
-- `@goodvibes-jev/engine/sdk/browser`
-- `@goodvibes-jev/engine/sdk/browser/knowledge`
-- `@goodvibes-jev/engine/sdk/browser/homeassistant`
-- `@goodvibes-jev/engine/sdk/browser/agent`
-- `@goodvibes-jev/engine/sdk/client-auth`
-- `@goodvibes-jev/engine/sdk/platform/payments/browser` (the four payment UI policy helpers only)
-- `@goodvibes-jev/engine/sdk/platform/judgment-browser/catalogs` (fixed command descriptors and structural status tones only)
-- `@goodvibes-jev/engine/sdk/events`
-- `@goodvibes-jev/engine/sdk/events/<domain>` for the explicit public event domains documented in [Public Surface](./public-surface.md)
-- `@goodvibes-jev/engine/sdk/observer`
-- `@goodvibes-jev/engine/sdk/web`
-- `@goodvibes-jev/engine/sdk/workers`
-- `@goodvibes-jev/engine/sdk/react-native`
-- `@goodvibes-jev/engine/sdk/expo`
+- `@goodvibes-jev/engine/platform/auth`
+- `@goodvibes-jev/engine/platform/browser`
+- `@goodvibes-jev/engine/platform/browser/knowledge`
+- `@goodvibes-jev/engine/platform/browser/homeassistant`
+- `@goodvibes-jev/engine/platform/browser/agent`
+- `@goodvibes-jev/engine/platform/client-auth`
+- `@goodvibes-jev/engine/platform/platform/payments/browser` (the four payment UI policy helpers only)
+- `@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs` (fixed command descriptors and structural status tones only)
+- `@goodvibes-jev/engine/platform/events`
+- `@goodvibes-jev/engine/platform/events/<domain>` for the explicit public event domains documented in [Public Surface](./public-surface.md)
+- `@goodvibes-jev/engine/platform/observer`
+- `@goodvibes-jev/engine/platform/web`
+- `@goodvibes-jev/engine/platform/workers`
+- `@goodvibes-jev/engine/platform/react-native`
+- `@goodvibes-jev/engine/platform/expo`
 
-Runtime-heavy surfaces live under `@goodvibes-jev/engine/sdk/platform/...`. There
+Runtime-heavy surfaces live under `@goodvibes-jev/engine/platform/platform/...`. There
 are over ninety of these subpaths, spanning subsystems from provider routing
 (`platform/providers`) and orchestration (`platform/orchestration`) to
 device capabilities, email and calendar connectors, sandboxed exec, and the
@@ -90,16 +90,16 @@ See [Public Surface](./public-surface.md) for the complete, per-subpath table
 with descriptions and stability levels; it is generated by hand against
 `packages/engine/package.json` and is the only place that list is maintained.
 
-## Sibling-package deep subpaths
+## Implementation module subpaths
 
-The source-of-truth sibling packages publish deep subpaths of their own, for example
+The engine also exposes deeper implementation module subpaths, for example
 `@goodvibes-jev/engine/contracts/generated/*`, `@goodvibes-jev/engine/contracts/zod-schemas/*`, and
-`@goodvibes-jev/engine/contracts/node`; `@goodvibes-jev/engine/daemon-sdk/*` route helpers plus its
+`@goodvibes-jev/engine/contracts/node`; `@goodvibes-jev/engine/daemon-api/*` route helpers plus its
 `relay-server`, `sessions`, `tasks`, and `telemetry-routes` modules;
 `@goodvibes-jev/engine/transport-core/*` (including `direct`, `client-transport`, and `relay`);
 `@goodvibes-jev/engine/transport-http/*` (auth, backoff, retry, SSE, and the contract client);
 `@goodvibes-jev/engine/transport-realtime/*` (`domain-events`, `runtime-events`, `relay-transport`);
-`@goodvibes-jev/engine/operator-sdk/client*` and `@goodvibes-jev/engine/peer-sdk/client*`; and
+`@goodvibes-jev/engine/operator-client/client*` and `@goodvibes-jev/engine/peer-client/client*`; and
 `@goodvibes-jev/engine/errors/daemon-error-contract`. These exist to compose the
-`@goodvibes-jev/engine/sdk` facade and are not part of the supported consumer contract. Prefer the
-matching `@goodvibes-jev/engine/sdk/...` subpath; the bare sibling deep paths may change without notice.
+`@goodvibes-jev/engine/platform` facade and are not part of the supported consumer contract. Prefer the
+matching `@goodvibes-jev/engine/platform/...` subpath; the direct implementation paths may change without notice.

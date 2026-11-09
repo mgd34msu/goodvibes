@@ -4,7 +4,7 @@ coverage/
 *.tsbuildinfo
 .goodvibes/
 
-# Carried from goodvibes-sdk (paths re-rooted at packages/engine where they point into it).
+# Engine development artifacts.
 *.log
 .DS_Store
 # Script scratch: the release stage at the repo root, everything else in the engine.

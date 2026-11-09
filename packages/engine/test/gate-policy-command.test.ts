@@ -8,10 +8,10 @@
 // simulation reads, and the config and MCP getters the preflight reads.
 import { describe, expect, test } from 'bun:test';
 import { useGateReadings } from './_helpers/gate-readings.ts';
-import type { GoodVibesConfig } from '../sdk/src/platform/config/schema-types.ts';
-import { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.ts';
-import { runPolicyCommand, type PolicyFrontDoorContext } from '../sdk/src/platform/gate/policy/policy-command.ts';
-import type { PolicyMcpServerSecurity } from '../sdk/src/platform/gate/policy/policy-dispatch.ts';
+import type { GoodVibesConfig } from '../platform/src/platform/config/schema-types.ts';
+import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
+import { runPolicyCommand, type PolicyFrontDoorContext } from '../platform/src/platform/gate/policy/policy-command.ts';
+import type { PolicyMcpServerSecurity } from '../platform/src/platform/gate/policy/policy-dispatch.ts';
 
 const unused = (): never => { throw new Error('not used by this verb'); };
 

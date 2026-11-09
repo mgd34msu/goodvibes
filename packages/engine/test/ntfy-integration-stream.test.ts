@@ -13,14 +13,14 @@ import {
   isGoodVibesNtfyDeliveryEcho,
   resolveGoodVibesNtfyTopics,
   type NtfyMessage,
-} from '../sdk/src/platform/integrations/ntfy.js';
-import { handleNtfySurfacePayload } from '../sdk/src/platform/adapters/ntfy/index.js';
-import type { SurfaceAdapterContext } from '../sdk/src/platform/adapters/types.js';
-import { ChannelProviderRuntimeManager } from '../sdk/src/platform/channels/provider-runtime.js';
-import { DaemonSurfaceActionHelper } from '../sdk/src/platform/daemon/surface-actions.js';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { emitTurnCompleted, emitTurnSubmitted } from '../sdk/src/platform/runtime/emitters/index.js';
-import type { ChannelPolicyRecord } from '../sdk/src/platform/channels/types.js';
+} from '../platform/src/platform/integrations/ntfy.js';
+import { handleNtfySurfacePayload } from '../platform/src/platform/adapters/ntfy/index.js';
+import type { SurfaceAdapterContext } from '../platform/src/platform/adapters/types.js';
+import { ChannelProviderRuntimeManager } from '../platform/src/platform/channels/provider-runtime.js';
+import { DaemonSurfaceActionHelper } from '../platform/src/platform/daemon/surface-actions.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { emitTurnCompleted, emitTurnSubmitted } from '../platform/src/platform/runtime/emitters/index.js';
+import type { ChannelPolicyRecord } from '../platform/src/platform/channels/types.js';
 
 /** Stable published policy, including the owner views used by retained guards. */
 function allowedNtfyPolicy() {
@@ -690,7 +690,7 @@ describe('ntfy topic routing', () => {
 });
 
 describe('ntfy GoodVibes self-echo marker', () => {
-  test('publish adds the SDK-owned marker header and tag', async () => {
+  test('publish adds the platform-owned marker header and tag', async () => {
     let requestHeaders: IncomingHttpHeaders = {};
     const server = createServer((req, res) => {
       requestHeaders = req.headers;
@@ -709,11 +709,27 @@ describe('ntfy GoodVibes self-echo marker', () => {
       });
 
       expect(requestHeaders[GOODVIBES_NTFY_ORIGIN_HEADER.toLowerCase()]).toBe(GOODVIBES_NTFY_ORIGIN);
+      expect(requestHeaders[GOODVIBES_NTFY_ORIGIN_HEADER.toLowerCase()]).toBe('goodvibes-platform');
+      expect(String(requestHeaders.tags)).toContain('goodvibes-platform-outbound');
+      expect(String(requestHeaders.tags)).not.toContain('goodvibes-sdk');
       expect(String(requestHeaders.tags)).toContain('agent');
       expect(String(requestHeaders.tags)).toContain(GOODVIBES_NTFY_OUTBOUND_TAG);
     } finally {
       await close(server);
     }
+  });
+
+  for (const [marker, earlier] of [
+    ['tag', { tags: ['goodvibes-sdk-outbound'] }],
+    ['header', { headers: { 'X-Goodvibes-Origin': 'goodvibes-sdk' } }],
+  ] as const) test(`actual earlier delivery ${marker} suppresses incoming backlog echoes before work intake`, async () => {
+    const calls = { authorize: 0, upsert: 0, submit: 0, spawn: 0, queue: 0 };
+    const context = makeSurfaceAdapterContext(calls);
+    const response = await handleNtfySurfacePayload({ event: 'message', topic: 'goodvibes', message: 'saved earlier delivery', ...earlier }, context);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ acknowledged: true, queued: false, reason: 'goodvibes-self-echo' });
+    expect(calls).toEqual({ authorize: 0, upsert: 0, submit: 0, spawn: 0, queue: 0 });
+    expect(isGoodVibesNtfyDeliveryEcho({ event: 'open', ...earlier })).toBe(false);
   });
 
   test('inbound adapter ignores only explicitly marked GoodVibes ntfy deliveries', async () => {

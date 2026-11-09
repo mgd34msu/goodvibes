@@ -1,22 +1,22 @@
-# SDK error kinds
+# platform error kinds
 
 > Consumer reference. For handling patterns see [Error Handling](./error-handling.md); for internals see [Error Architecture](./errors.md).
 
-Every error thrown by the SDK's public surface is an instance of `GoodVibesSdkError`. The `kind` field is the primary discriminant. Use it in `switch` statements or `if` chains instead of parsing `message` strings or using `instanceof` on subclasses.
+Every error thrown by the platform's public surface is an instance of `GoodVibesError`. The `kind` field is the primary discriminant. Use it in `switch` statements or `if` chains instead of parsing `message` strings or using `instanceof` on subclasses.
 
 ## Quick reference
 
 | `kind` | Description | Retryable |
 |--------|-------------|----------|
 | `auth` | Credential or permission failure | No |
-| `config` | Local SDK misconfiguration | No |
+| `config` | Local platform misconfiguration | No |
 | `contract` | Method/route contract violation | No |
 | `network` | Transport or connectivity failure | Yes |
 | `not-found` | Remote resource does not exist | No |
 | `rate-limit` | Upstream rate limit exceeded | Yes |
 | `protocol` | Wire-format or protocol failure | Sometimes |
 | `service` | Upstream service or HTTP 5xx failure | Sometimes |
-| `internal` | Daemon/internal SDK failure | No |
+| `internal` | Daemon/internal platform failure | No |
 | `tool` | Tool execution failure | Sometimes |
 | `validation` | Input failed schema or value checks | No |
 | `unknown` | Unclassified error | No |
@@ -39,13 +39,13 @@ Every error thrown by the SDK's public surface is an instance of `GoodVibesSdkEr
 
 ### `config`
 
-**When it fires:** The SDK was called with a missing or invalid configuration value. For example, the HTTP transport's base-URL normalization throws this when `baseUrl` is empty (`SDK_TRANSPORT_BASE_URL_REQUIRED`) or is not a parseable absolute URL (`SDK_TRANSPORT_BASE_URL_INVALID`).
+**When it fires:** The platform was called with a missing or invalid configuration value. For example, the HTTP transport's base-URL normalization throws this when `baseUrl` is empty (`ENGINE_TRANSPORT_BASE_URL_REQUIRED`) or is not a parseable absolute URL (`ENGINE_TRANSPORT_BASE_URL_INVALID`).
 
-**Remediation:** Inspect `err.message` and `err.code` to identify the missing field, then fix the SDK initialization options before retrying.
+**Remediation:** Inspect `err.message` and `err.code` to identify the missing field, then fix the platform initialization options before retrying.
 
 **Retryable:** No.
 
-**Example `code` values:** `SDK_CONFIGURATION_ERROR`, `SDK_TRANSPORT_BASE_URL_REQUIRED`, `SDK_TRANSPORT_BASE_URL_INVALID`
+**Example `code` values:** `ENGINE_CONFIGURATION_ERROR`, `ENGINE_TRANSPORT_BASE_URL_REQUIRED`, `ENGINE_TRANSPORT_BASE_URL_INVALID`
 
 ---
 
@@ -57,7 +57,7 @@ Every error thrown by the SDK's public surface is an instance of `GoodVibesSdkEr
 
 **Retryable:** No.
 
-**Example `code` values:** `SDK_CONTRACT_ERROR`
+**Example `code` values:** `ENGINE_CONTRACT_ERROR`
 
 ---
 
@@ -65,7 +65,7 @@ Every error thrown by the SDK's public surface is an instance of `GoodVibesSdkEr
 
 **When it fires:** The HTTP fetch failed before a response was received (DNS failure, connection refused, SSE stream error, transport timeout).
 
-**Remediation:** Check connectivity and retry with exponential backoff. The SDK's built-in retry policy (`DEFAULT_HTTP_RETRY_POLICY`) handles common transient cases automatically.
+**Remediation:** Check connectivity and retry with exponential backoff. The platform's built-in retry policy (`DEFAULT_HTTP_RETRY_POLICY`) handles common transient cases automatically.
 
 **Retryable:** Yes. `err.recoverable` will be `true`.
 
@@ -87,7 +87,7 @@ Every error thrown by the SDK's public surface is an instance of `GoodVibesSdkEr
 
 **When it fires:** The remote server returned HTTP 429.
 
-**Remediation:** Wait for `err.retryAfterMs` milliseconds (if present) or use exponential backoff, then retry. The SDK's retry policy handles this automatically.
+**Remediation:** Wait for `err.retryAfterMs` milliseconds (if present) or use exponential backoff, then retry. The platform's retry policy handles this automatically.
 
 **Retryable:** Yes. `err.recoverable` will be `true`.
 
@@ -109,13 +109,13 @@ Every error thrown by the SDK's public surface is an instance of `GoodVibesSdkEr
 
 **Remediation:** Log `err.requestId` for debugging. Retry with backoff for 500/502/503/504, these are typically transient. Do not retry on 501.
 
-**Retryable:** Sometimes. Check `err.recoverable`. The SDK sets it based on status code. HTTP 500/502/503/504 are retryable by default.
+**Retryable:** Sometimes. Check `err.recoverable`. The platform sets it based on status code. HTTP 500/502/503/504 are retryable by default.
 
 ---
 
 ### `internal`
 
-**When it fires:** The daemon or SDK surfaced a bug or invariant violation from inside GoodVibes rather than from user input, transport, or an upstream provider.
+**When it fires:** The daemon or platform surfaced a bug or invariant violation from inside GoodVibes rather than from user input, transport, or an upstream provider.
 
 **Remediation:** Log the full structured error and report the bug. Do not rely on retry unless `err.recoverable` is explicitly true.
 
@@ -157,7 +157,7 @@ Every error thrown by the SDK's public surface is an instance of `GoodVibesSdkEr
 
 ## Route-level error codes
 
-Daemon HTTP routes return structured error bodies with a `code` string that is separate from the SDK-layer `kind` discriminant. These codes appear in route-specific error responses and are not `GoodVibesSdkError` instances. They are HTTP error body fields returned by the daemon before the SDK maps them to a `GoodVibesSdkError`.
+Daemon HTTP routes return structured error bodies with a `code` string that is separate from the platform-layer `kind` discriminant. These codes appear in route-specific error responses and are not `GoodVibesError` instances. They are HTTP error body fields returned by the daemon before the platform maps them to a `GoodVibesError`.
 
 Route-level codes are not standardized across the daemon. Different routes emit different strings for the same HTTP status, and some 401 responses omit a `code` field entirely (a bare `{ error: 'Unauthorized' }`). Treat this as a sample of codes actually in use, not an exhaustive or normalized catalog:
 
@@ -172,40 +172,40 @@ Route-level codes are not standardized across the daemon. Different routes emit 
 | `RATE_LIMITED` | 429 | The request was rejected by an upstream rate-limit policy. |
 | `INTERNAL_ERROR` | 500 | The daemon encountered an unhandled internal error. |
 
-The SDK maps these HTTP error responses to `GoodVibesSdkError` instances using the `kind` mapping above. To inspect the raw route-level code, read `err.code` on the thrown `GoodVibesSdkError`. To cross-reference route-specific codes, check the route documentation for that namespace (e.g., [Companion Message Routing](./companion-message-routing.md) for `INVALID_KIND`).
+The platform maps these HTTP error responses to `GoodVibesError` instances using the `kind` mapping above. To inspect the raw route-level code, read `err.code` on the thrown `GoodVibesError`. To cross-reference route-specific codes, check the route documentation for that namespace (e.g., [Companion Message Routing](./companion-message-routing.md) for `INVALID_KIND`).
 
 > **Three overlapping `code` value-spaces:** `err.code` is a single `string` field, but the value you read may come from any of three overlapping spaces:
 >
-> 1. **Canonical `SDKErrorCode`.** Codes the SDK assigns to `GoodVibesSdkError` (e.g. `RATE_LIMITED`, `AUTH_REQUIRED`, `PROTOCOL_ERROR`, `INTERNAL_ERROR`); see [Canonical SDK error codes](#canonical-sdk-error-codes).
-> 2. **Daemon route-body codes.** Raw `code` strings in daemon HTTP error bodies (e.g. `INVALID_KIND`, `PROVIDER_NOT_CONFIGURED`, `RATE_LIMITED`, `INTERNAL_ERROR`, enumerated above) before the SDK normalises them.
+> 1. **Canonical `EngineErrorCode`.** Codes the platform assigns to `GoodVibesError` (e.g. `RATE_LIMITED`, `AUTH_REQUIRED`, `PROTOCOL_ERROR`, `INTERNAL_ERROR`); see [Canonical platform error codes](#canonical-platform-error-codes).
+> 2. **Daemon route-body codes.** Raw `code` strings in daemon HTTP error bodies (e.g. `INVALID_KIND`, `PROVIDER_NOT_CONFIGURED`, `RATE_LIMITED`, `INTERNAL_ERROR`, enumerated above) before the platform normalises them.
 > 3. **`AppError`-subclass codes.** Literal codes declared by `AppError` subclasses (e.g. `CONFIG_ERROR`, `PROVIDER_ERROR`, `TOOL_ERROR`, `ACP_ERROR`, `PERMISSION_DENIED`, `RENDER_ERROR`); see [Config errors and the AppError hierarchy](#config-errors-and-the-apperror-hierarchy).
 >
-> There is **no suffix rule** distinguishing these spaces: `INTERNAL_ERROR` appears as both a route-body code and a canonical code, and subclass codes exist both with (`CONFIG_ERROR`) and without (`PERMISSION_DENIED`) the `_ERROR` suffix. Always switch on `err.kind` (the `SDKErrorKind` discriminant) first, then read `err.code` only to disambiguate further.
+> There is **no suffix rule** distinguishing these spaces: `INTERNAL_ERROR` appears as both a route-body code and a canonical code, and subclass codes exist both with (`CONFIG_ERROR`) and without (`PERMISSION_DENIED`) the `_ERROR` suffix. Always switch on `err.kind` (the `EngineErrorKind` discriminant) first, then read `err.code` only to disambiguate further.
 
 ---
 
-## Canonical SDK error codes
+## Canonical platform error codes
 
-Beyond the `kind` discriminant, every `GoodVibesSdkError` carries a `code`. SDK-produced errors set one of the canonical values in the `SDKErrorCode` union; caller-supplied codes may be any string, since `code` is typed `SDKErrorCode | (string & {})`.
+Beyond the `kind` discriminant, every `GoodVibesError` carries a `code`. platform-produced errors set one of the canonical values in the `EngineErrorCode` union; caller-supplied codes may be any string, since `code` is typed `EngineErrorCode | (string & {})`.
 
-Prefer the `SDKErrorCodes` const and the runtime guards over bare string literals:
+Prefer the `EngineErrorCodes` const and the runtime guards over bare string literals:
 
-- `isErrorCode(err, SDKErrorCodes.RATE_LIMITED)` returns `true` and narrows `err.code` to the given literal. It works on any object with an optional `code` field.
+- `isErrorCode(err, EngineErrorCodes.RATE_LIMITED)` returns `true` and narrows `err.code` to the given literal. It works on any object with an optional `code` field.
 - `isKnownErrorCode(value)` returns `true` when an arbitrary string is one of the canonical codes, useful for values received over the wire.
 
 ```ts
-import { isErrorCode, SDKErrorCodes, GoodVibesSdkError } from '@goodvibes-jev/engine/errors';
+import { isErrorCode, EngineErrorCodes, GoodVibesError } from '@goodvibes-jev/engine/errors';
 
 try {
-  await sdk.operator.accounts.snapshot();
+  await platformClient.operator.accounts.snapshot();
 } catch (err) {
-  if (err instanceof GoodVibesSdkError && isErrorCode(err, SDKErrorCodes.RATE_LIMITED)) {
+  if (err instanceof GoodVibesError && isErrorCode(err, EngineErrorCodes.RATE_LIMITED)) {
     await delay(err.retryAfterMs ?? 1000);
   }
 }
 ```
 
-The full set of canonical codes, available as `SDKErrorCodes.*`, is twenty
+The full set of canonical codes, available as `EngineErrorCodes.*`, is twenty
 five values grouped by the failure family they name.
 
 | Code | What it signals |
@@ -231,19 +231,19 @@ five values grouped by the failure family they name.
 | `CONTRACT_MISMATCH` | Client and daemon disagree about the contract shape |
 | `PROTOCOL_ERROR` | The wire exchange itself violated the protocol |
 | `INTERNAL_ERROR` | An unexpected internal failure with no more specific code |
-| `SDK_CONFIGURATION_ERROR` | The SDK was constructed or configured incorrectly |
-| `SDK_CONTRACT_ERROR` | The SDK detected a contract violation on its own side |
-| `SDK_HTTP_STATUS_ERROR` | An HTTP status error carried no more specific mapping |
+| `ENGINE_CONFIGURATION_ERROR` | The platform was constructed or configured incorrectly |
+| `ENGINE_CONTRACT_ERROR` | The platform detected a contract violation on its own side |
+| `ENGINE_HTTP_STATUS_ERROR` | An HTTP status error carried no more specific mapping |
 | `UNKNOWN` | Nothing more specific could be inferred |
 
 ### Kind → representative code
 
-The SDK infers a representative canonical code for each `kind` (via `inferKind` and `inferCodeFromCategory`). The mapping is representative, not exhaustive. One `kind` may surface several codes (for example, `auth` covers `AUTH_REQUIRED`, `TOKEN_EXPIRED`, `PERMISSION_DENIED`, and `PAYMENT_REQUIRED`).
+The platform infers a representative canonical code for each `kind` (via `inferKind` and `inferCodeFromCategory`). The mapping is representative, not exhaustive. One `kind` may surface several codes (for example, `auth` covers `AUTH_REQUIRED`, `TOKEN_EXPIRED`, `PERMISSION_DENIED`, and `PAYMENT_REQUIRED`).
 
 | `kind` | Representative `code` |
 |--------|-----------------------|
 | `auth` | `AUTH_REQUIRED` |
-| `config` | `SDK_CONFIGURATION_ERROR` |
+| `config` | `ENGINE_CONFIGURATION_ERROR` |
 | `contract` | `CONTRACT_MISMATCH` |
 | `network` | `NETWORK_UNREACHABLE` |
 | `not-found` | `NOT_FOUND` |
@@ -259,9 +259,9 @@ The SDK infers a representative canonical code for each `kind` (via `inferKind` 
 
 ## Contract failure kinds and unmet criteria
 
-> These are not `GoodVibesSdkError` error kinds. They describe how a contract run by the contract runner ended or what its checks read, and can be confused for error kinds.
+> These are not `GoodVibesError` error kinds. They describe how a contract run by the contract runner ended or what its checks read, and can be confused for error kinds.
 
-A contract that fails emits `CONTRACT_FAILED` on the `contracts` event domain with a `failureKind`, also stored as `Contract.failureKind` (`CONTRACT_FAILURE_KINDS`, `packages/engine/sdk/src/events/contract.ts`):
+A contract that fails emits `CONTRACT_FAILED` on the `contracts` event domain with a `failureKind`, also stored as `Contract.failureKind` (`CONTRACT_FAILURE_KINDS`, `packages/engine/platform/src/events/contract.ts`):
 
 | `failureKind` | Meaning |
 |---|---|
@@ -276,7 +276,7 @@ A contract that fails emits `CONTRACT_FAILED` on the `contracts` event domain wi
 
 The contract's owner agent record fails with the same reason, so `AGENT_FAILED` for the owner carries it too.
 
-Unmet acceptance criteria are not failures at all. A check that finds a criterion unmet emits `CONTRACT_CHECKED` with that criterion's `verdict: 'unmet'` and nudges the unit's agent (`CONTRACT_NUDGED`); the work continues until the criterion reads met or the owner decides. None of this is thrown or reaches the error handler or `SDKObserver.onError`. See [Contract criteria](./contract-criteria.md).
+Unmet acceptance criteria are not failures at all. A check that finds a criterion unmet emits `CONTRACT_CHECKED` with that criterion's `verdict: 'unmet'` and nudges the unit's agent (`CONTRACT_NUDGED`); the work continues until the criterion reads met or the owner decides. None of this is thrown or reaches the error handler or `PlatformObserver.onError`. See [Contract criteria](./contract-criteria.md).
 
 ---
 
@@ -296,7 +296,7 @@ export class ProviderError extends AppError {
 }
 ```
 
-> **`err.code` is not compiler-exhaustive.** A `switch (err.code)` with a `const _exhaustive: never = err.code` default does **not** type-check on a `GoodVibesSdkError` or `AppError` value. `GoodVibesSdkError.code` is typed `SDKErrorCode | (string & {})` and `AppError.code` is plain `string`. Both are wide string types, so the `never` assignment is a type error. The trick only compiles after you narrow to a finite, hand-built union of concrete subclasses, where each branch contributes its literal `code`:
+> **`err.code` is not compiler-exhaustive.** A `switch (err.code)` with a `const _exhaustive: never = err.code` default does **not** type-check on a `GoodVibesError` or `AppError` value. `GoodVibesError.code` is typed `EngineErrorCode | (string & {})` and `AppError.code` is plain `string`. Both are wide string types, so the `never` assignment is a type error. The trick only compiles after you narrow to a finite, hand-built union of concrete subclasses, where each branch contributes its literal `code`:
 
 ```ts
 // Compiles only because `err` is narrowed to a finite subclass union first.
@@ -320,12 +320,12 @@ Two distinct error types relate to configuration; do not confuse them:
 
 | Type | Code | Import subpath |
 |------|------|----------------|
-| `ConfigurationError` | `SDK_CONFIGURATION_ERROR` | `@goodvibes-jev/engine/sdk/errors` |
-| `ConfigError` | `CONFIG_ERROR` | `@goodvibes-jev/engine/sdk/platform/types` |
+| `ConfigurationError` | `ENGINE_CONFIGURATION_ERROR` | `@goodvibes-jev/engine/platform/errors` |
+| `ConfigError` | `CONFIG_ERROR` | `@goodvibes-jev/engine/platform/platform/types` |
 
-`ConfigurationError` extends `GoodVibesSdkError` directly and is thrown for invalid SDK setup (category and kind `config`). `ConfigError` is an `AppError` subclass used by the platform/runtime layer.
+`ConfigurationError` extends `GoodVibesError` directly and is thrown for invalid platform setup (category and kind `config`). `ConfigError` is an `AppError` subclass used by the platform/runtime layer.
 
-`AppError` extends `GoodVibesSdkError` and adds `statusCode`, `guidance`, `detail`, and `rawMessage`; its `code` is widened to plain `string`. The concrete subclasses ship under `@goodvibes-jev/engine/sdk/platform/types`:
+`AppError` extends `GoodVibesError` and adds `statusCode`, `guidance`, `detail`, and `rawMessage`; its `code` is widened to plain `string`. The concrete subclasses ship under `@goodvibes-jev/engine/platform/platform/types`:
 
 | Subclass | `code` | Recoverable |
 |----------|--------|-------------|
@@ -338,14 +338,14 @@ Two distinct error types relate to configuration; do not confuse them:
 
 Subclass codes do **not** share one naming convention. `PERMISSION_DENIED` has no `_ERROR` suffix, while the others do.
 
-## Useful fields on every `GoodVibesSdkError`
+## Useful fields on every `GoodVibesError`
 
 The class exposes 18 structured fields; `toJSON()` serializes them with `undefined` values omitted.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `kind` | `SDKErrorKind` | Primary discriminant for switch/if handling. |
-| `code` | `SDKErrorCode \| (string & {})` | Typed error code; canonical for SDK errors, any string for caller-supplied codes. |
+| `kind` | `EngineErrorKind` | Primary discriminant for switch/if handling. |
+| `code` | `EngineErrorCode \| (string & {})` | Typed error code; canonical for platform errors, any string for caller-supplied codes. |
 | `category` | `ErrorCategory` | Fine-grained classification (e.g. `authentication`, `rate_limit`). |
 | `source` | `ErrorSource` | Where the error originated (`transport`, `contract`, `config`, etc.). |
 | `recoverable` | `boolean` | Whether a retry is expected to succeed. |

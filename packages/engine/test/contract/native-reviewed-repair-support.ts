@@ -6,7 +6,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { hashState, toJson } from '@goodvibes-jev/judgment';
 import { noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { contractPath, readContractSnapshot } from '../../sdk/src/platform/contract/store.js';
+import { contractPath, readContractSnapshot } from '../../platform/src/platform/contract/store.js';
 import { createNativeIntegrationFixture, integrationBarrier } from './native-integration-support.js';
 import { draftUnit, plannerOutput, type DraftPlan } from './plan-support.js';
 import { waitFor } from './runner-support.js';

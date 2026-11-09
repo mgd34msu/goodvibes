@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { chmodSync, statSync, readdirSync, rmSync } from 'node:fs';
-import { ArtifactStore } from '../sdk/src/platform/artifacts/store.ts';
+import { ArtifactStore } from '../platform/src/platform/artifacts/store.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 test('a spool open failure rejects and cancels a producer waiting for its next chunk', async () => {

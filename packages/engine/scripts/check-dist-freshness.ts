@@ -8,7 +8,7 @@
  *
  * Usage:
  *   bun scripts/check-dist-freshness.ts          # check all built packages
- *   bun scripts/check-dist-freshness.ts sdk       # check a single package by name
+ *   bun scripts/check-dist-freshness.ts engine       # check a single package by name
  *
  * Exits 0 when all dist trees are fresh, 1 when any are stale.
  */
@@ -19,12 +19,12 @@ import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SDK_ROOT = resolve(__dirname, '..');
+const ENGINE_ROOT = resolve(__dirname, '..');
 
 // Each old package builds its own dist inside the engine.
 const BUILT_PACKAGES = [
-  'contracts', 'errors', 'daemon-sdk', 'transport-core', 'transport-http', 'transport-realtime',
-  'operator-sdk', 'peer-sdk', 'sdk', 'terminal-shell', 'toolchain',
+  'contracts', 'errors', 'daemon-api', 'transport-core', 'transport-http', 'transport-realtime',
+  'operator-client', 'peer-client', 'platform', 'terminal-shell', 'toolchain',
   // The judgment package ships beside the engine and builds with it.
   '../judgment',
 ];
@@ -71,8 +71,8 @@ const missing: string[] = [];
 const fresh: string[] = [];
 
 for (const pkg of targetPackages) {
-  const srcDir = join(SDK_ROOT, pkg, 'src');
-  const distDir = join(SDK_ROOT, pkg, 'dist');
+  const srcDir = join(ENGINE_ROOT, pkg, 'src');
+  const distDir = join(ENGINE_ROOT, pkg, 'dist');
 
   const srcMtime = newestMtime(srcDir);
   const distMtime = newestMtime(distDir);

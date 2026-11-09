@@ -1,5 +1,5 @@
 /**
- * A fake judgment port for the gate's batteries (packages/engine/sdk/src/platform/gate),
+ * A fake judgment port for the gate's batteries (packages/engine/platform/src/platform/gate),
  * so tests of the gate, the permission phase and the tools never call the
  * live Jev API.
  *
@@ -18,9 +18,9 @@ import { afterEach, beforeEach } from 'bun:test';
 import type { Question } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { forgetReadSecrets } from '../../sdk/src/platform/permissions/credential-read-defaults.ts';
-import { forgetCommandNeeds } from '../../sdk/src/platform/runtime/permissions/normalization/classifier.ts';
-import { forgetLedgerArgRoles } from '../../sdk/src/platform/gate/policy/execution-ledger.ts';
+import { forgetReadSecrets } from '../../platform/src/platform/permissions/credential-read-defaults.ts';
+import { forgetCommandNeeds } from '../../platform/src/platform/runtime/permissions/normalization/classifier.ts';
+import { forgetLedgerArgRoles } from '../../platform/src/platform/gate/policy/execution-ledger.ts';
 
 /** Clears the readings the gate remembers per process, so one test's answers never serve another. */
 export function forgetGateReadings(): void {
@@ -28,8 +28,8 @@ export function forgetGateReadings(): void {
   forgetCommandNeeds();
   forgetLedgerArgRoles();
 }
-import type { GateRiskFamily } from '../../sdk/src/platform/gate/batteries/risk-family.ts';
-import type { SideEffectKind } from '../../sdk/src/platform/gate/batteries/side-effect.ts';
+import type { GateRiskFamily } from '../../platform/src/platform/gate/batteries/risk-family.ts';
+import type { SideEffectKind } from '../../platform/src/platform/gate/batteries/side-effect.ts';
 
 export interface GateCallReading {
   readonly family?: GateRiskFamily;

@@ -7,7 +7,7 @@ import {
 import '@goodvibes-jev/engine/terminal-shell/onboarding-read-facts';
 import '@goodvibes-jev/engine/terminal-shell/onboarding-read-facts';
 
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
 import { readOnboardingRuntimeState } from './state.ts';
 import type {
   OnboardingConfigSnapshot,
@@ -16,7 +16,7 @@ import type {
   OnboardingSnapshotDependencies,
   OnboardingSnapshotState,
 } from './types.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 function buildConfigSnapshot(config: OnboardingSnapshotDependencies['config']): OnboardingConfigSnapshot {
   return captureOnboardingConfigSnapshot(config, [

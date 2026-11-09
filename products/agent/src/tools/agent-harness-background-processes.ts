@@ -1,16 +1,16 @@
 import { withBackgroundPrivilegeCheck } from './agent-harness-background-privilege.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { realpathSync } from 'node:fs';
 import { mapLimit } from '@goodvibes-jev/judgment';
-import { redactSensitiveDataAsync, resolveAndValidatePath } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { redactSensitiveDataAsync, resolveAndValidatePath } from '@goodvibes-jev/engine/platform/platform/utils';
 import { harnessCatalogInvocationAuthority } from './agent-harness-catalog-ingress.ts';
 import { captureCatalogData, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import { processClassificationOptions, spawnClassifiedBackgroundProcess } from './agent-harness-process-launch.ts';
 import type { ProcessClassificationOptions } from './agent-harness-process-classification.ts';
-import { getOperatorContract } from '@goodvibes-jev/engine/sdk/contracts';
-import type { BackgroundProcess, ProcessManager } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
+import type { BackgroundProcess, ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext } from '../input/command-registry.ts';
 import { sudoExecutionPosture } from './agent-harness-sudo-posture.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
@@ -89,7 +89,7 @@ function operatorContractMethods(): readonly OperatorContractMethod[] {
 
 function operatorMethodSearchText(method: OperatorContractMethod): string {
   // EXCLUDES title/description prose: discovery keys off what a method IS
-  // (id/route/category/scopes), not how its docs read, SDK 1.4.0's "terminal
+  // (id/route/category/scopes), not how its docs read, platform 1.4.0's "terminal
   // turn.cancelled event" wording false-matched as a terminal/TTY capability.
   return [
     method.id,
@@ -417,13 +417,13 @@ async function capabilities(context?: CommandContext, options: CatalogRankingOpt
       status: snapshot?.parityStatus.ptyContract ? 'contract-discovered-but-not-generic-executable' : 'not-yet-supported-in-agent-harness',
       guidance: snapshot?.parityStatus.ptyContract
         ? 'A certified PTY runtime record is published. Use its confirmed session routes; generic PTY spawn is not exposed.'
-        : 'Use foreground exec for noninteractive commands. Interactive PTY needs a published SDK/daemon session API before Agent can expose it safely.',
+        : 'Use foreground exec for noninteractive commands. Interactive PTY needs a published platform/daemon session API before Agent can expose it safely.',
     },
     stdinWrite: {
       status: stdinWrite.status === 'contract-discovered' ? 'supported' : 'unavailable',
       modelRoute: 'process action:"write" processId:"..." data:"..."',
       guidance: stdinWrite.status === 'contract-discovered'
-        ? 'Tracked launches open a native stdin pipe. Writes require current recorded admission and retain the exact process until the SDK write and flush finish.'
+        ? 'Tracked launches open a native stdin pipe. Writes require current recorded admission and retain the exact process until the platform write and flush finish.'
         : 'The local guarded ProcessManager writeInput contract is unavailable.',
     },
     sudo: {

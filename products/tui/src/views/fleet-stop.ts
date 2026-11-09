@@ -7,7 +7,7 @@
 // instance; all the state->display logic lives in these pure helpers.
 // ---------------------------------------------------------------------------
 
-import type { ProcessNode, ProcessState } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
+import type { ProcessNode, ProcessState } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import { discardableContractWorktree } from './fleet-contract-targets.ts';
 import { fleetNodeAttention, fleetStateGlyph, fleetStateTone, isTerminalProcessState, type FleetStateTone, type FleetTreeRow } from './fleet-read-model.ts';
 

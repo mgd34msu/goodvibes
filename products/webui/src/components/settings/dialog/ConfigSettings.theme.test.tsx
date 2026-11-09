@@ -24,7 +24,7 @@ async function config(method: 'GET' | 'POST', body?: unknown): Promise<unknown> 
 }
 mock.module('../../../lib/goodvibes', () => ({
   runBrowserJudgment: async () => { throw new Error('No semantic reading fixture'); },
-  sdk: { operator: { config: {
+  client: { operator: { config: {
     get: () => config('GET'),
     set: (key: string, value: unknown) => config('POST', { key, value }),
   } } },

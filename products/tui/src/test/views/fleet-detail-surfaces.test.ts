@@ -4,7 +4,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, expect, test } from 'bun:test';
-import type { ProcessNode } from '@goodvibes-jev/engine/sdk/platform/runtime/fleet';
+import type { ProcessNode } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import { renderFleetDetailLines, renderGraphPostureLines } from '../../views/fleet-format.ts';
 import type { WorkstreamGraphSnapshot } from '../../views/workstream-graph-render.ts';
 import { FleetActs, type FleetDiffSurface } from '../../views/fleet-acts.ts';

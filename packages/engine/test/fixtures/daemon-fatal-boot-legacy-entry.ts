@@ -2,10 +2,10 @@
  * disclose malformed settings at ingestion, before this legacy catch runs.
  * Pinned daemon source ab6ce91f2fc646eb563686071393b69438a487e6.
  */
-import { ConfigManager } from '../../sdk/src/platform/config/manager.ts';
-import { resolveDaemonCliPaths } from '../../sdk/src/platform/daemon/cli-paths.ts';
-import { flushActivityLogSync, logger } from '../../sdk/src/platform/utils/logger.ts';
-import { summarizeError } from '../../sdk/src/platform/utils/error-display.ts';
+import { ConfigManager } from '../../platform/src/platform/config/manager.ts';
+import { resolveDaemonCliPaths } from '../../platform/src/platform/daemon/cli-paths.ts';
+import { flushActivityLogSync, logger } from '../../platform/src/platform/utils/logger.ts';
+import { summarizeError } from '../../platform/src/platform/utils/error-display.ts';
 
 async function main(): Promise<void> {
   const { workingDirectory, homeDirectory, daemonTierPath } = resolveDaemonCliPaths();

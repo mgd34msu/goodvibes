@@ -1,5 +1,5 @@
-import { nativeWorkExecutionSnapshotSchema, type NativeWorkExecutionIdentity, type NativeWorkExecutionSnapshot, type OperatorNativeWorkExecutionClient } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
-import type { NativeConversationIntakeWorkReceipt } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
+import { nativeWorkExecutionSnapshotSchema, type NativeWorkExecutionIdentity, type NativeWorkExecutionSnapshot, type OperatorNativeWorkExecutionClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
+import type { NativeConversationIntakeWorkReceipt } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 import type { NativeIntakeExecutionIntent } from './types.js';
 import type { NativeWorkExecutionState } from './native-work-execution.js';
 

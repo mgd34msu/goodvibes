@@ -1,7 +1,7 @@
 import { useSecurityReadings } from '../helpers/security-readings.ts';
 import { describe, expect, setSystemTime, test } from 'bun:test';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
-import type { ChannelDeliveryRequest } from '@goodvibes-jev/engine/sdk/platform/channels';
+import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
+import type { ChannelDeliveryRequest } from '@goodvibes-jev/engine/platform/platform/channels';
 import {
   buildAgentChannelDeliveryPreview,
   deliverAgentChannelMessage,

@@ -13,7 +13,7 @@ import { RuntimeEventBus, createUiRuntimeEvents } from '@/runtime/index.ts';
 import { bridgeHostedFrameOntoRuntimeBus } from '../../runtime/client/hosted-turn-bus-bridge.ts';
 import { wireSpokenTurnRuntime } from '../../audio/spoken-turn-wiring.ts';
 import type { HostedSessionFrame } from '../../runtime/client/hosted-frame-render.ts';
-import type { VoiceAudioChunk, VoiceSynthesisRequest, VoiceSynthesisStreamResult } from '@goodvibes-jev/engine/sdk/platform/voice';
+import type { VoiceAudioChunk, VoiceSynthesisRequest, VoiceSynthesisStreamResult } from '@goodvibes-jev/engine/platform/platform/voice';
 import type { StreamingAudioPlayer } from '../../audio/player.ts';
 
 function frame(type: string, payload: Record<string, unknown> = {}): HostedSessionFrame {
@@ -26,7 +26,7 @@ async function drain(): Promise<void> {
 }
 
 describe('bridgeHostedFrameOntoRuntimeBus', () => {
-  test('republishes TURN_SUBMITTED, STREAM_DELTA and TURN_COMPLETED as the SDK turn events they mirror', async () => {
+  test('republishes TURN_SUBMITTED, STREAM_DELTA and TURN_COMPLETED as the platform turn events they mirror', async () => {
     const bus = new RuntimeEventBus();
     const events = createUiRuntimeEvents(bus);
     const seen: Array<{ type: string; turnId: string }> = [];

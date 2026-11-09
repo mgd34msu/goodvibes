@@ -4,7 +4,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { buildBwrapArgv } from '../sdk/src/platform/tools/exec/sandbox.js';
+import { buildBwrapArgv } from '../platform/src/platform/tools/exec/sandbox.js';
 
 test.skipIf(process.platform !== 'linux' || !existsSync('/usr/bin/bwrap') || !existsSync('/usr/bin/python3'))('ordinary sandbox cannot connect to host runtime sockets', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'sandbox-socket-'));

@@ -1,13 +1,13 @@
 import { syncTerminalNotifierQueues } from '@goodvibes-jev/engine/terminal-shell/bootstrap-primitives';
-import { Notifier, type WebhookNotifier } from '@goodvibes-jev/engine/sdk/platform/integrations';
+import { Notifier, type WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
 import {
   readNotificationsMetadataOnly,
   type NotificationDelivery,
   type TurnNotificationFacts,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+} from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { RuntimeEventBus } from '@/runtime/index.ts';
-import { createUiRuntimeEvents } from '@goodvibes-jev/engine/sdk/platform/runtime/ui';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { createUiRuntimeEvents } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { formatTurnBudgetOutcome } from '../core/turn-budget-outcome.ts';
 import type { createDomainDispatch } from './store/index.ts';
 
@@ -39,9 +39,9 @@ export function createRuntimeNotifier(
 }
 
 /**
- * This host supplies facts to the SDK's delivery owner instead of attaching its
+ * This host supplies facts to the platform's delivery owner instead of attaching its
  * legacy string formatter. A fact's content getters run only at rich admission;
- * the SDK snapshots them synchronously and owns privacy changes across recipients,
+ * the platform snapshots them synchronously and owns privacy changes across recipients,
  * retries and dead letters. No event object or getter enters a delivery queue.
  * Contract endings and agent cancellation carry no duration. They notify only
  * when this adapter observed the start, rather than inventing a zero duration.

@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NativeConversationIntakeJournal } from '../../runtime/native-conversation-intake-journal.ts';
-import { writeJsonFileAtomic } from '@goodvibes-jev/engine/sdk/platform/state/durable-file-io';
+import { writeJsonFileAtomic } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
 const binding = { endpoint: 'https://native.invalid', projectId: 'p', workspace: '/workspace', principalId: 'paired' };
 const command = { requestId: 'request', inputId: 'input', text: '  Original\r\n😀  ', unsupportedSources: [{ kind: 'file' as const, label: '!@file.ts' }] };
 async function fixture(run: (path: string, directory: string) => Promise<void>) {

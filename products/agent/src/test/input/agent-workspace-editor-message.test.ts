@@ -9,7 +9,7 @@ import type { AgentWorkspaceLocalEditor } from '../../input/agent-workspace-type
 import type { CommandContext } from '../../input/command-registry.ts';
 import { renderAgentWorkspace } from '../../renderer/agent-workspace.ts';
 import { WORKSPACE_PALETTE } from '../../renderer/fullscreen-workspace.ts';
-import { withDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { withDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 
 const previous = installJudgmentPort(undefined);
 afterEach(() => {

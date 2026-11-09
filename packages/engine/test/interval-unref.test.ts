@@ -1,7 +1,7 @@
 /**
  * setInterval .unref() invariant.
  *
- * Enumerates all setInterval call sites in the SDK platform source and
+ * Enumerates all setInterval call sites in the platform platform source and
  * verifies the interval reference is passed to .unref?.() so that Node.js /
  * Bun processes can exit cleanly without dangling intervals keeping the event
  * loop alive.
@@ -15,7 +15,7 @@ import { glob } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { Lang, parse } from '@ast-grep/napi';
 
-const SDK_SRC = resolve(import.meta.dir, '../sdk/src/platform');
+const ENGINE_SRC = resolve(import.meta.dir, '../platform/src/platform');
 
 /**
  * For a given source file, find all `setInterval(...)` call expressions using
@@ -136,8 +136,8 @@ function findUnrefViolations(
 describe('setInterval .unref() coverage (AST walk)', () => {
   test('all setInterval sites in platform/ have .unref?.() (real AST walk)', async () => {
     const files: string[] = [];
-    for await (const entry of glob('**/*.ts', { cwd: SDK_SRC })) {
-      files.push(resolve(SDK_SRC, entry));
+    for await (const entry of glob('**/*.ts', { cwd: ENGINE_SRC })) {
+      files.push(resolve(ENGINE_SRC, entry));
     }
 
     const allViolations: { file: string; line: number; snippet: string }[] = [];
@@ -150,7 +150,7 @@ describe('setInterval .unref() coverage (AST walk)', () => {
       const violations = findUnrefViolations(file, content);
       for (const v of violations) {
         allViolations.push({
-          file: file.replace(SDK_SRC + '/', ''),
+          file: file.replace(ENGINE_SRC + '/', ''),
           line: v.line,
           snippet: v.snippet,
         });

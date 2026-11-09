@@ -11,9 +11,9 @@
 import { existsSync, readFileSync, writeFileSync, unlinkSync, symlinkSync, linkSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, test } from 'bun:test';
-import type { InFlightCheckout } from '../sdk/src/platform/payments/checkout-registry.js';
-import { DurableCheckoutJournal, PaymentCheckoutJournalUnavailableError } from '../sdk/src/platform/payments/host/checkout-journal-store.js';
-import { CheckoutRegistry } from '../sdk/src/platform/payments/checkout-registry.js';
+import type { InFlightCheckout } from '../platform/src/platform/payments/checkout-registry.js';
+import { DurableCheckoutJournal, PaymentCheckoutJournalUnavailableError } from '../platform/src/platform/payments/host/checkout-journal-store.js';
+import { CheckoutRegistry } from '../platform/src/platform/payments/checkout-registry.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 function record(overrides: Partial<InFlightCheckout> = {}): InFlightCheckout {

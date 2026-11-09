@@ -16,7 +16,7 @@
 import { useState, type SyntheticEvent } from 'react';
 import { SendHorizontal, Unlink } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { sdk, WEBUI_SURFACE_ID, WEBUI_SURFACE_KIND } from '../../lib/goodvibes';
+import { client as platformClient, WEBUI_SURFACE_ID, WEBUI_SURFACE_KIND } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { formatError } from '../../lib/errors';
 import { useToast } from '../../lib/toast';
@@ -36,7 +36,7 @@ export function FleetSessionActions({ sessionId, steerable, detachable }: FleetS
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const detach = useMutation({
-    mutationFn: () => sdk.operator.sessions.detach(sessionId, WEBUI_SURFACE_ID),
+    mutationFn: () => platformClient.operator.sessions.detach(sessionId, WEBUI_SURFACE_ID),
     onSuccess: async () => {
       toast({ title: 'Detached: this browser stops receiving live updates for this session', tone: 'info' });
       await queryClient.invalidateQueries({ queryKey: queryKeys.fleet });
@@ -81,7 +81,7 @@ function LegacyFleetSteer({ sessionId }: { sessionId: string }) {
 
   const steer = useMutation({
     mutationFn: (body: string) =>
-      sdk.operator.sessions.steer(sessionId, { body, surfaceKind: WEBUI_SURFACE_KIND, surfaceId: WEBUI_SURFACE_ID }),
+      platformClient.operator.sessions.steer(sessionId, { body, surfaceKind: WEBUI_SURFACE_KIND, surfaceId: WEBUI_SURFACE_ID }),
     onSuccess: async () => {
       setText('');
       toast({ title: 'Steer sent', tone: 'success' });

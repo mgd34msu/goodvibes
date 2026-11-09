@@ -7,7 +7,7 @@ import { afterAll, afterEach, describe, expect, test } from 'bun:test';
 import {
   InboundMailboxWatcher,
   resolveWatcherSettings,
-} from '../sdk/src/platform/email/inbound/index.ts';
+} from '../platform/src/platform/email/inbound/index.ts';
 import { makeFakeMailbox, openMailboxSocket, type FakeMailboxServer } from './_helpers/fake-imap-mailbox.ts';
 import {
   FakeClock,

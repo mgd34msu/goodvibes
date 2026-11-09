@@ -24,7 +24,7 @@ mock.module('../../lib/goodvibes', () => ({
   // resolve or the import itself fails before any test runs.
   getCurrentAuth: () => Promise.resolve({}),
   invokeMethod: () => Promise.resolve({}),
-  sdk: {
+  client: {
     operator: {
       sessions: {
         queuedMessages: {

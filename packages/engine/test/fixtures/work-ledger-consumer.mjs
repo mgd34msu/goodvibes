@@ -11,7 +11,7 @@ import {
   WorkLedgerAccessError,
   workLedgerCommandSchema,
   workLedgerStateSchema,
-} from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger';
+} from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 
 const projectId = 'package-consumer';
 let state = createEmptyWorkLedgerState(projectId);

@@ -13,8 +13,8 @@
  * Chips that do not fit are left out whole and counted in a faint "+N".
  */
 
-import { type Line, createEmptyLine } from '@goodvibes-jev/engine/sdk/platform/types';
-import { getDisplayWidth, truncateDisplay } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { type Line, createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types';
+import { getDisplayWidth, truncateDisplay } from '@goodvibes-jev/engine/platform/platform/utils';
 import { activeTokens } from './theme.js';
 import { keycapHintsWidth, paintKeycapHints } from './surface-kit-parts.js';
 import type { KitHint } from './surface-kit.js';

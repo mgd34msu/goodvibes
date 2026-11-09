@@ -11,22 +11,22 @@
  * than silently executing shared-session work under superseded rules.
  *
  * PROVENANCE: this logic is also implemented in the installed
- * @goodvibes-jev/engine/sdk (platform/control-plane/client-compatibility.ts,
+ * @goodvibes-jev/engine/platform (platform/control-plane/client-compatibility.ts,
  * evaluateClientCompatibility/compareBuildVersions/readClientCompatibilityFloor), but
- * that module is exported only through the daemon-facing `@goodvibes-jev/engine/sdk/platform/control-plane`
+ * that module is exported only through the daemon-facing `@goodvibes-jev/engine/platform/platform/control-plane`
  * subpath, whose barrel also carries the gateway/session-broker/route-dispatch server
  * implementation (dispatchDaemonApiRoutes, SharedSessionBroker, ControlPlaneGateway, …),
  * not something this browser bundle should import. No browser-safe subpath exposes it at
  * the installed 2.0.0 pin (re-verified at this pin: `./platform/control-plane` is still
  * the only export surfacing it, and its barrel still carries the full server
  * implementation). This module is a small, independently-tested copy of the same three
- * functions' documented semantics, kept here until a future SDK release exposes them
+ * functions' documented semantics, kept here until a future platform release exposes them
  * through a seam this app can import directly (a `// SWAP:` seam, same pattern
  * contract-bridge-types.ts uses for a bridge type ahead of its generated counterpart).
- * Re-diffed field-by-field against the 2.0.0 SDK's
+ * Re-diffed field-by-field against the 2.0.0 platform's
  * dist/platform/control-plane/client-compatibility.js at this re-pin: compareBuildVersions
  * and evaluateClientCompatibility are byte-identical in logic (the browser copy's
- * messages say "reload the page" / "Reload from the current install" where the SDK's
+ * messages say "reload the page" / "Reload from the current install" where the platform's
  * process-oriented copy says "restart it", a deliberate, permanent surface-appropriate
  * wording divergence, not drift to fix).
  *

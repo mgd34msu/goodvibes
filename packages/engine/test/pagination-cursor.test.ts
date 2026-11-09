@@ -1,5 +1,5 @@
 /**
- * Tests for cursor-based pagination on daemon-sdk list endpoints.
+ * Tests for cursor-based pagination on daemon-api list endpoints.
  *
  * Coverage:
  * - paginateItems: first page + nextCursor + hasMore true/false
@@ -12,7 +12,7 @@
  * - hasPaginationParams: detects limit/cursor in URL
  * - getAutomationJobs: backward-compat (no params), paginated path, limit clamping
  * - getAutomationRuns: backward-compat (no params), paginated path, limit clamping
- * - getIntegrationSessions: always returns snapshot (pagination not implemented in daemon-sdk)
+ * - getIntegrationSessions: always returns snapshot (pagination not implemented in daemon-api)
  * - knowledge sources: backward-compat and paginated path (via handleGetKnowledgeSources)
  * - knowledge nodes: backward-compat and paginated path (via handleGetKnowledgeNodes)
  */
@@ -23,14 +23,14 @@ import {
   decodeCursor,
   hasPaginationParams,
   paginateItems,
-} from '../daemon-sdk/dist/index.js';
-import type { PaginatedResponse } from '../daemon-sdk/dist/index.js';
-import { createDaemonRuntimeAutomationRouteHandlers } from '../daemon-sdk/dist/index.js';
-import { createDaemonIntegrationRouteHandlers } from '../daemon-sdk/dist/index.js';
-import { createDaemonKnowledgeRouteHandlers } from '../daemon-sdk/dist/index.js';
-import type { DaemonRuntimeRouteContext } from '../daemon-sdk/dist/index.js';
-import type { DaemonIntegrationRouteContext } from '../daemon-sdk/dist/index.js';
-import type { DaemonKnowledgeRouteContext } from '../daemon-sdk/dist/index.js';
+} from '../daemon-api/dist/index.js';
+import type { PaginatedResponse } from '../daemon-api/dist/index.js';
+import { createDaemonRuntimeAutomationRouteHandlers } from '../daemon-api/dist/index.js';
+import { createDaemonIntegrationRouteHandlers } from '../daemon-api/dist/index.js';
+import { createDaemonKnowledgeRouteHandlers } from '../daemon-api/dist/index.js';
+import type { DaemonRuntimeRouteContext } from '../daemon-api/dist/index.js';
+import type { DaemonIntegrationRouteContext } from '../daemon-api/dist/index.js';
+import type { DaemonKnowledgeRouteContext } from '../daemon-api/dist/index.js';
 
 // ============================================================
 // Cursor encode / decode
@@ -447,7 +447,7 @@ describe('getAutomationRuns', () => {
 });
 
 // ============================================================
-// Integration sessions route (no pagination in daemon-sdk)
+// Integration sessions route (no pagination in daemon-api)
 // ============================================================
 
 function makeIntegrationContext(
@@ -510,7 +510,7 @@ describe('getIntegrationSessions', () => {
     expect(body).toEqual(expected);
   });
 
-  test('with ?limit=10: still returns session broker snapshot (no pagination in daemon-sdk)', async () => {
+  test('with ?limit=10: still returns session broker snapshot (no pagination in daemon-api)', async () => {
     const expected = { sessions: [{ id: 's1' }] };
     const handlers = createDaemonIntegrationRouteHandlers(makeIntegrationContext(expected));
     const url = new URL('http://localhost/api/sessions?limit=10');

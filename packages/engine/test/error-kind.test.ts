@@ -1,110 +1,110 @@
 /**
- * Tests for SDKError.kind tagged-union field.
+ * Tests for GoodVibesError.kind tagged-union field.
  *
  * Verifies that:
  * - Each error class sets the correct `kind` tag
  * - `instanceof` checks still work (type behavior)
  * - `kind` is correctly inferred from HTTP status codes
- * - All SDKErrorKind values are exercised
+ * - All EngineErrorKind values are exercised
  */
 import { describe, expect, test } from 'bun:test';
 import {
   ConfigurationError,
   ContractError,
-  GoodVibesSdkError,
+  GoodVibesError,
   HttpStatusError,
   RETRYABLE_STATUS_CODES,
   createHttpStatusError,
 } from '../errors/dist/index.js';
-import { RETRYABLE_STATUS_CODES as SDK_RETRYABLE_STATUS_CODES } from '../sdk/dist/platform/types/errors.js';
+import { RETRYABLE_STATUS_CODES as ENGINE_RETRYABLE_STATUS_CODES } from '../platform/dist/platform/types/errors.js';
 import { DEFAULT_HTTP_RETRY_POLICY } from '../transport-http/dist/index.js';
-import type { SDKErrorKind } from '../errors/dist/index.js';
+import type { EngineErrorKind } from '../errors/dist/index.js';
 
 describe('error-kind: packages/errors', () => {
-  describe('GoodVibesSdkError base class', () => {
+  describe('GoodVibesError base class', () => {
     test('has kind field', () => {
-      const err = new GoodVibesSdkError('base');
+      const err = new GoodVibesError('base');
       expect(typeof err.kind).toBe('string'); // kind is always a string
       expect(typeof err.kind).toBe('string');
     });
 
     test('kind defaults to unknown when no category or status', () => {
-      const err = new GoodVibesSdkError('test');
+      const err = new GoodVibesError('test');
       expect(err.kind).toBe('unknown');
     });
 
     test('kind is config when category is config', () => {
-      const err = new GoodVibesSdkError('test', { category: 'config' });
+      const err = new GoodVibesError('test', { category: 'config' });
       expect(err.kind).toBe('config');
     });
 
     test('kind is contract when category is contract', () => {
-      const err = new GoodVibesSdkError('test', { category: 'contract' });
+      const err = new GoodVibesError('test', { category: 'contract' });
       expect(err.kind).toBe('contract');
     });
 
     test('kind is auth when category is authentication', () => {
-      const err = new GoodVibesSdkError('test', { category: 'authentication' });
+      const err = new GoodVibesError('test', { category: 'authentication' });
       expect(err.kind).toBe('auth');
     });
 
     test('kind is auth when category is authorization', () => {
-      const err = new GoodVibesSdkError('test', { category: 'authorization' });
+      const err = new GoodVibesError('test', { category: 'authorization' });
       expect(err.kind).toBe('auth');
     });
 
     test('kind is auth when category is billing', () => {
-      const err = new GoodVibesSdkError('test', { category: 'billing' });
+      const err = new GoodVibesError('test', { category: 'billing' });
       expect(err.kind).toBe('auth');
     });
 
     test('kind is auth when category is permission', () => {
-      const err = new GoodVibesSdkError('test', { category: 'permission' });
+      const err = new GoodVibesError('test', { category: 'permission' });
       expect(err.kind).toBe('auth');
     });
 
     test('kind is network when category is network', () => {
-      const err = new GoodVibesSdkError('test', { category: 'network' });
+      const err = new GoodVibesError('test', { category: 'network' });
       expect(err.kind).toBe('network');
     });
 
     test('kind is network when category is timeout', () => {
-      const err = new GoodVibesSdkError('test', { category: 'timeout' });
+      const err = new GoodVibesError('test', { category: 'timeout' });
       expect(err.kind).toBe('network');
     });
 
     test('kind is not-found when category is not_found', () => {
-      const err = new GoodVibesSdkError('test', { category: 'not_found' });
+      const err = new GoodVibesError('test', { category: 'not_found' });
       expect(err.kind).toBe('not-found');
     });
 
     test('kind is rate-limit when category is rate_limit', () => {
-      const err = new GoodVibesSdkError('test', { category: 'rate_limit' });
+      const err = new GoodVibesError('test', { category: 'rate_limit' });
       expect(err.kind).toBe('rate-limit');
     });
 
     test('kind is service when category is service', () => {
-      const err = new GoodVibesSdkError('test', { category: 'service' });
+      const err = new GoodVibesError('test', { category: 'service' });
       expect(err.kind).toBe('service');
     });
 
     test('kind is protocol when category is protocol', () => {
-      const err = new GoodVibesSdkError('test', { category: 'protocol' });
+      const err = new GoodVibesError('test', { category: 'protocol' });
       expect(err.kind).toBe('protocol');
     });
 
     test('kind is internal when category is internal', () => {
-      const err = new GoodVibesSdkError('test', { category: 'internal' });
+      const err = new GoodVibesError('test', { category: 'internal' });
       expect(err.kind).toBe('internal');
     });
 
     test('kind is validation when category is bad_request', () => {
-      const err = new GoodVibesSdkError('test', { category: 'bad_request' });
+      const err = new GoodVibesError('test', { category: 'bad_request' });
       expect(err.kind).toBe('validation');
     });
 
     test('kind is tool when category is tool', () => {
-      const err = new GoodVibesSdkError('test', { category: 'tool' });
+      const err = new GoodVibesError('test', { category: 'tool' });
       expect(err.kind).toBe('tool');
     });
   });
@@ -112,11 +112,11 @@ describe('error-kind: packages/errors', () => {
   describe('ConfigurationError', () => {
     test('has kind config', () => {
       const err = new ConfigurationError('bad config');
-      expect(err.kind).toBe('config' satisfies SDKErrorKind);
+      expect(err.kind).toBe('config' satisfies EngineErrorKind);
     });
 
-    test('is instanceof GoodVibesSdkError', () => {
-      expect(new ConfigurationError('x')).toBeInstanceOf(GoodVibesSdkError);
+    test('is instanceof GoodVibesError', () => {
+      expect(new ConfigurationError('x')).toBeInstanceOf(GoodVibesError);
     });
 
     test('is instanceof ConfigurationError', () => {
@@ -127,11 +127,11 @@ describe('error-kind: packages/errors', () => {
   describe('ContractError', () => {
     test('has kind contract', () => {
       const err = new ContractError('bad contract');
-      expect(err.kind).toBe('contract' satisfies SDKErrorKind);
+      expect(err.kind).toBe('contract' satisfies EngineErrorKind);
     });
 
-    test('is instanceof GoodVibesSdkError', () => {
-      expect(new ContractError('x')).toBeInstanceOf(GoodVibesSdkError);
+    test('is instanceof GoodVibesError', () => {
+      expect(new ContractError('x')).toBeInstanceOf(GoodVibesError);
     });
 
     test('is instanceof ContractError', () => {
@@ -140,8 +140,8 @@ describe('error-kind: packages/errors', () => {
   });
 
   describe('HttpStatusError', () => {
-    test('is instanceof GoodVibesSdkError', () => {
-      expect(new HttpStatusError('x')).toBeInstanceOf(GoodVibesSdkError);
+    test('is instanceof GoodVibesError', () => {
+      expect(new HttpStatusError('x')).toBeInstanceOf(GoodVibesError);
     });
 
     test('is instanceof HttpStatusError', () => {
@@ -150,43 +150,43 @@ describe('error-kind: packages/errors', () => {
 
     test('401 produces kind auth', () => {
       const err = createHttpStatusError(401, 'http://example.com', 'GET', { error: 'Unauthorized' });
-      expect(err.kind).toBe('auth' satisfies SDKErrorKind);
+      expect(err.kind).toBe('auth' satisfies EngineErrorKind);
       expect(err).toBeInstanceOf(HttpStatusError);
     });
 
     test('402 produces kind auth', () => {
       const err = createHttpStatusError(402, 'http://example.com', 'GET', { error: 'Payment Required' });
-      expect(err.kind).toBe('auth' satisfies SDKErrorKind);
+      expect(err.kind).toBe('auth' satisfies EngineErrorKind);
     });
 
     test('403 produces kind auth', () => {
       const err = createHttpStatusError(403, 'http://example.com', 'GET', { error: 'Forbidden' });
-      expect(err.kind).toBe('auth' satisfies SDKErrorKind);
+      expect(err.kind).toBe('auth' satisfies EngineErrorKind);
     });
 
     test('404 produces kind not-found', () => {
       const err = createHttpStatusError(404, 'http://example.com', 'GET', { error: 'Not Found' });
-      expect(err.kind).toBe('not-found' satisfies SDKErrorKind);
+      expect(err.kind).toBe('not-found' satisfies EngineErrorKind);
     });
 
     test('408 produces kind network (timeout)', () => {
       const err = createHttpStatusError(408, 'http://example.com', 'GET', { error: 'Timeout' });
-      expect(err.kind).toBe('network' satisfies SDKErrorKind);
+      expect(err.kind).toBe('network' satisfies EngineErrorKind);
     });
 
     test('429 produces kind rate-limit', () => {
       const err = createHttpStatusError(429, 'http://example.com', 'GET', { error: 'Rate Limited' });
-      expect(err.kind).toBe('rate-limit' satisfies SDKErrorKind);
+      expect(err.kind).toBe('rate-limit' satisfies EngineErrorKind);
     });
 
     test('500 produces kind service', () => {
       const err = createHttpStatusError(500, 'http://example.com', 'GET', { error: 'Internal Server Error' });
-      expect(err.kind).toBe('service' satisfies SDKErrorKind);
+      expect(err.kind).toBe('service' satisfies EngineErrorKind);
     });
 
     test('503 produces kind service', () => {
       const err = createHttpStatusError(503, 'http://example.com', 'GET', { error: 'Service Unavailable' });
-      expect(err.kind).toBe('service' satisfies SDKErrorKind);
+      expect(err.kind).toBe('service' satisfies EngineErrorKind);
     });
 
     test('category in body overrides status inference', () => {
@@ -195,7 +195,7 @@ describe('error-kind: packages/errors', () => {
         category: 'rate_limit',
       });
       // category from body takes precedence
-      expect(err.kind).toBe('rate-limit' satisfies SDKErrorKind);
+      expect(err.kind).toBe('rate-limit' satisfies EngineErrorKind);
       expect(err.category).toBe('rate_limit');
     });
 
@@ -205,7 +205,7 @@ describe('error-kind: packages/errors', () => {
         source: 'transport',
         recoverable: true,
       });
-      expect(err.kind).toBe('network' satisfies SDKErrorKind);
+      expect(err.kind).toBe('network' satisfies EngineErrorKind);
     });
   });
 
@@ -220,10 +220,10 @@ describe('error-kind: packages/errors', () => {
         createHttpStatusError(500, 'http://x.com', 'GET', { error: 'x' }),
         new HttpStatusError('x', { category: 'network' }),
         new HttpStatusError('x', { category: 'bad_request' }),
-        new GoodVibesSdkError('x'),
+        new GoodVibesError('x'),
       ];
 
-      const kinds: SDKErrorKind[] = [];
+      const kinds: EngineErrorKind[] = [];
       for (const err of errors) {
         switch (err.kind) {
           case 'auth': kinds.push('auth'); break;
@@ -257,36 +257,36 @@ describe('error-kind: packages/errors', () => {
 });
 
 describe('retryable status codes', () => {
-  test('SDK and HTTP retry policies use the canonical errors package list', () => {
-    expect(SDK_RETRYABLE_STATUS_CODES).toEqual(RETRYABLE_STATUS_CODES);
+  test('platform and HTTP retry policies use the canonical errors package list', () => {
+    expect(ENGINE_RETRYABLE_STATUS_CODES).toEqual(RETRYABLE_STATUS_CODES);
     expect(DEFAULT_HTTP_RETRY_POLICY.retryOnStatuses).toEqual(RETRYABLE_STATUS_CODES);
   });
 });
 
 describe('error-kind: canonical errors package', () => {
-  test('GoodVibesSdkError from canonical errors package has kind field', async () => {
-    const { GoodVibesSdkError: SdkMirrorBase } = await import('../errors/src/index.js');
-    const err = new SdkMirrorBase('test', { category: 'rate_limit' });
+  test('GoodVibesError from canonical errors package has kind field', async () => {
+    const { GoodVibesError: PlatformMirrorBase } = await import('../errors/src/index.js');
+    const err = new PlatformMirrorBase('test', { category: 'rate_limit' });
     expect(err.kind).toBe('rate-limit');
   });
 
   test('ConfigurationError from canonical errors package has kind config', async () => {
-    const { ConfigurationError: SdkConfigError } = await import('../errors/src/index.js');
-    const err = new SdkConfigError('bad config');
+    const { ConfigurationError: PlatformConfigError } = await import('../errors/src/index.js');
+    const err = new PlatformConfigError('bad config');
     expect(err.kind).toBe('config');
   });
 
   test('ContractError from canonical errors package has kind contract', async () => {
-    const { ContractError: SdkContractError } = await import('../errors/src/index.js');
-    const err = new SdkContractError('bad contract');
+    const { ContractError: PlatformContractError } = await import('../errors/src/index.js');
+    const err = new PlatformContractError('bad contract');
     expect(err.kind).toBe('contract');
   });
 
   test('HttpStatusError from canonical errors package instanceof works', async () => {
-    const { HttpStatusError: SdkHttpError, GoodVibesSdkError: SdkBase } = await import('../errors/src/index.js');
-    const err = new SdkHttpError('test', { category: 'service' });
-    expect(err).toBeInstanceOf(SdkBase);
-    expect(err).toBeInstanceOf(SdkHttpError);
+    const { HttpStatusError: PlatformHttpError, GoodVibesError: PlatformBase } = await import('../errors/src/index.js');
+    const err = new PlatformHttpError('test', { category: 'service' });
+    expect(err).toBeInstanceOf(PlatformBase);
+    expect(err).toBeInstanceOf(PlatformHttpError);
     expect(err.kind).toBe('service');
   });
 });

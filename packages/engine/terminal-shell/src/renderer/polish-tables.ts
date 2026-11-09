@@ -1,6 +1,6 @@
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
-import { getDisplayWidth, truncateDisplay } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { GLYPHS } from '@goodvibes-jev/engine/sdk/platform/presentation';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
+import { getDisplayWidth, truncateDisplay } from '@goodvibes-jev/engine/platform/platform/utils';
+import { GLYPHS } from '@goodvibes-jev/engine/platform/platform/presentation';
 import { activeUiTones, registerThemeRefresh } from './theme.js';
 // Build on the leaf primitives in ./polish-core.ts (palette + base line
 // builders). polish-core has no back-edge to this file, so there is no cycle.

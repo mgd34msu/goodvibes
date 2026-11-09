@@ -33,16 +33,16 @@ import { join } from 'node:path';
 import {
   MailboxCursorStore,
   validateMailboxCursor,
-} from '../sdk/src/platform/email/inbound/cursor-store.ts';
+} from '../platform/src/platform/email/inbound/cursor-store.ts';
 import {
   isImapUid,
   isImapUidValidity,
   MAX_IMAP_UID,
   validateInboundSourceCursor,
-} from '../sdk/src/platform/email/inbound/source-cursor.ts';
-import { parseSearchNumbers } from '../sdk/src/platform/email/imap-headers.ts';
-import { searchAboveCursor } from '../sdk/src/platform/email/inbound/poll-loop.ts';
-import type { MailboxWire } from '../sdk/src/platform/email/inbound/ports.ts';
+} from '../platform/src/platform/email/inbound/source-cursor.ts';
+import { parseSearchNumbers } from '../platform/src/platform/email/imap-headers.ts';
+import { searchAboveCursor } from '../platform/src/platform/email/inbound/poll-loop.ts';
+import type { MailboxWire } from '../platform/src/platform/email/inbound/ports.ts';
 
 /** `Number.MAX_SAFE_INTEGER`, a valid JS integer, and not a UID any server can issue. */
 const ABSURD_UID = 9_007_199_254_740_991;

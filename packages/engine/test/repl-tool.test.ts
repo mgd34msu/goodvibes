@@ -12,11 +12,11 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { SandboxSessionRegistry } from '../sdk/src/platform/runtime/sandbox/session-registry.ts';
-import { createReplTool, REPL_NO_ISOLATING_BACKEND_ERROR } from '../sdk/src/platform/tools/repl/index.ts';
-import { REPL_TOOL_SCHEMA } from '../sdk/src/platform/tools/repl/schema.ts';
-import type { Tool } from '../sdk/src/platform/types/tools.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { SandboxSessionRegistry } from '../platform/src/platform/runtime/sandbox/session-registry.ts';
+import { createReplTool, REPL_NO_ISOLATING_BACKEND_ERROR } from '../platform/src/platform/tools/repl/index.ts';
+import { REPL_TOOL_SCHEMA } from '../platform/src/platform/tools/repl/schema.ts';
+import type { Tool } from '../platform/src/platform/types/tools.ts';
 
 const EXPECTED_REFUSAL =
   'REPL eval needs an isolating sandbox backend, and none is available: the only sandbox backend is local host execution (sandbox.vmBackend "local"), which does not isolate evaluated code.';

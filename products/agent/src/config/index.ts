@@ -6,18 +6,18 @@
  * - Pure helpers that derive values from an explicit ConfigManager instance
  */
 
-export { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+export { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 export { AgentConfigManager, AGENT_NOTIFICATIONS_METADATA_ONLY_KEY, AGENT_HOSTED_RESEARCH_SCREENING_KEY } from './host-settings.ts';
-export type { DeepReadonly } from '@goodvibes-jev/engine/sdk/platform/config';
-export type { GoodVibesConfig, ConfigKey, ConfigValue, ConfigSetting, PermissionMode, PermissionAction, PermissionsToolConfig, NotificationsConfig } from '@goodvibes-jev/engine/sdk/platform/config';
-export { DEFAULT_CONFIG, CONFIG_SCHEMA } from '@goodvibes-jev/engine/sdk/platform/config';
-export { ConfigError } from '@goodvibes-jev/engine/sdk/platform/types';
+export type { DeepReadonly } from '@goodvibes-jev/engine/platform/platform/config';
+export type { GoodVibesConfig, ConfigKey, ConfigValue, ConfigSetting, PermissionMode, PermissionAction, PermissionsToolConfig, NotificationsConfig } from '@goodvibes-jev/engine/platform/platform/config';
+export { DEFAULT_CONFIG, CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
+export { ConfigError } from '@goodvibes-jev/engine/platform/platform/types';
 
 import { readFileSync } from 'fs';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { GoodVibesConfig } from '@goodvibes-jev/engine/sdk/platform/config';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { GoodVibesConfig } from '@goodvibes-jev/engine/platform/platform/config';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { getProviderIdFromModel } from './provider-model.ts';
 
 export function getConfigSnapshot(configManager: Pick<ConfigManager, 'getRaw'>): Readonly<GoodVibesConfig> {
@@ -55,7 +55,7 @@ export function getConfiguredSystemPrompt(configManager: Pick<ConfigManager, 'ge
   }
 }
 
-export { getConfiguredApiKeys, resolveApiKeys } from '@goodvibes-jev/engine/sdk/platform/config';
+export { getConfiguredApiKeys, resolveApiKeys } from '@goodvibes-jev/engine/platform/platform/config';
 
 // The daemon-client credential STATUS read (secret-free, honest-degrade).
 // Value reads above stay local/env; only the status VISIBILITY path moves to the daemon.

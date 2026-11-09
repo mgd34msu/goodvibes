@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { createOperatorSdk } from '@goodvibes-jev/engine/operator-sdk';
-import { resolveConnectedHostDialEnabled } from '@goodvibes-jev/engine/sdk/platform/config';
+import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
+import { resolveConnectedHostDialEnabled } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveConnectedHostBaseUrl } from '../config/connected-host-dial.ts';
 import { resolveConnectedHostConnection, type AgentDaemonVerbCallerOptions } from './client/daemon-verbs.ts';
 import { readConnectedHostOperatorToken } from './connected-host-auth.ts';
@@ -58,7 +58,7 @@ export async function previewAgentHostPairing(
       const now = resolveConnectedHostConnection(options);
       return nowHome === home && !('reason' in now) && now.baseUrl === selected.baseUrl && now.token === selected.token;
     };
-    const authClient = createOperatorSdk({ baseUrl: host, authToken: selected.token, ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}) });
+    const authClient = createOperatorApiClient({ baseUrl: host, authToken: selected.token, ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}) });
     let auth;
     try { auth = await authClient.invoke('control.auth.current', {}, { signal: AbortSignal.any([AbortSignal.timeout(1500), ...(signal ? [signal] : [])]) }); }
     finally { authClient.dispose(); }
@@ -82,7 +82,7 @@ export async function previewAgentHostPairing(
       try {
         if (!current() || !isDeepStrictEqual(readAgentHostPairing(home, host), state)) return changed();
         // Authority can be revoked after preview without replacing the local token.
-        const verifier = createOperatorSdk({ baseUrl: host, authToken: selected.token, ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}) });
+        const verifier = createOperatorApiClient({ baseUrl: host, authToken: selected.token, ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}) });
         let live;
         try { live = await verifier.invoke('control.auth.current', {}, { signal: AbortSignal.any([AbortSignal.timeout(1500), ...(actionSignal ? [actionSignal] : [])]) }); }
         finally { verifier.dispose(); }
@@ -117,7 +117,7 @@ export async function previewAgentHostPairing(
         // Persist before verifying: a lost verification reply must never lose
         // the only copy of the newly issued credential or cause another mint.
         if (actionSignal?.aborted) return { status: 'paired-unverified', host, message: 'Pairing credential stored for this host. Verification was interrupted; rerun setup status. No second credential will be created.' };
-        const pairedClient = createOperatorSdk({ baseUrl: host, authToken: minted.token, ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}) });
+        const pairedClient = createOperatorApiClient({ baseUrl: host, authToken: minted.token, ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}) });
         let pairedAuth;
         try { pairedAuth = await pairedClient.invoke('control.auth.current', {}, { signal: AbortSignal.any([AbortSignal.timeout(1500), ...(actionSignal ? [actionSignal] : [])]) }); }
         catch { return { status: 'paired-unverified', host, message: 'Pairing credential stored for this host, but live verification failed. Rerun setup status; do not remint.' }; }

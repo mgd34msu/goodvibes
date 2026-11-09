@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { WorkspaceRegistrationStore } from '@goodvibes-jev/engine/sdk/platform/workspace';
+import { WorkspaceRegistrationStore } from '@goodvibes-jev/engine/platform/platform/workspace';
 import { readSharedWorkspaceRegistrationSnapshotSync, resolveCheckpointEligibilitySync, sharedWorkspaceRegistrationStorePath } from '../../runtime/trust/checkpoint-eligibility.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 
@@ -53,7 +53,7 @@ test('registered main worktree coverage is inherited only through the supplied g
 });
 
 
-test('SDK v2 promotion preserves legacy checkpoint permission without inventing native authority', async () => {
+test('platform v2 promotion preserves legacy checkpoint permission without inventing native authority', async () => {
   const f = fixture();
   const root = join(f.paths.homeDirectory, 'existing-checkpoint-root');
   const otherRoot = join(f.paths.homeDirectory, 'new-native-root');

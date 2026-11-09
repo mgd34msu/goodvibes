@@ -1,13 +1,13 @@
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-import { withDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { withDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { afterAll, afterEach, beforeEach, expect, setSystemTime, test } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { ArtifactStore, type ArtifactDescriptor } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import { localBenchmarkPrompt, localBenchmarkPromptPolicy, routingRegistry } from '@goodvibes-jev/engine/sdk/platform/routing';
+import { ArtifactStore, type ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import { localBenchmarkPrompt, localBenchmarkPromptPolicy, routingRegistry } from '@goodvibes-jev/engine/platform/platform/routing';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { localBenchmarkRouteLatencyMapFor, localModelBenchmarkHistory, localModelBenchmarkHistoryFrom,
   readLocalModelBenchmarkHistory, readLocalModelBenchmarkSnapshot, type BenchmarkArtifactContext } from '../../tools/agent-harness-local-model-benchmarks.ts';

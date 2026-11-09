@@ -1,19 +1,19 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
-import * as capturedRepair from '../sdk/src/platform/tools/shared/captured-auto-heal.js';
+import * as capturedRepair from '../platform/src/platform/tools/shared/captured-auto-heal.js';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { JudgmentError } from '@goodvibes-jev/judgment';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { createContractInputAuthority, revokeContractInputAuthority } from '../sdk/src/platform/contract/input-authority.js';
-import { captureContractInput, contractInputPath, materializeContractInput } from '../sdk/src/platform/contract/input-snapshot.js';
-import type { Contract } from '../sdk/src/platform/contract/types.js';
-import { FileUndoManager } from '../sdk/src/platform/state/file-undo.js';
-import { createCapturedAutoHealBackend } from '../sdk/src/platform/tools/shared/captured-auto-heal.js';
-import { capturedInputTool } from '../sdk/src/platform/tools/shared/captured-input-tools.js';
-import { createWriteTool } from '../sdk/src/platform/tools/write/index.js';
+import type { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { createContractInputAuthority, revokeContractInputAuthority } from '../platform/src/platform/contract/input-authority.js';
+import { captureContractInput, contractInputPath, materializeContractInput } from '../platform/src/platform/contract/input-snapshot.js';
+import type { Contract } from '../platform/src/platform/contract/types.js';
+import { FileUndoManager } from '../platform/src/platform/state/file-undo.js';
+import { createCapturedAutoHealBackend } from '../platform/src/platform/tools/shared/captured-auto-heal.js';
+import { capturedInputTool } from '../platform/src/platform/tools/shared/captured-input-tools.js';
+import { createWriteTool } from '../platform/src/platform/tools/write/index.js';
 import { useToolReadings } from './_helpers/tool-readings.js';
 
 useToolReadings([['', { fixesErrors: true, onlyTheFix: true }]]);

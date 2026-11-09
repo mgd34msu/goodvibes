@@ -3,11 +3,11 @@ import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { inspectPersistedPlanningProjects, PlanningProjectInspectionError } from '../sdk/src/platform/knowledge/project-planning/persisted-projects.ts';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.ts';
-import { SQLiteStore, loadSqlJsEngine } from '../sdk/src/platform/state/sqlite-store.ts';
-import { KNOWLEDGE_SCHEMA_VERSION } from '../sdk/src/platform/knowledge/store-schema.ts';
-import { createEmptyWorkLedgerState } from '../sdk/src/platform/workflow/work-ledger/service.ts';
+import { inspectPersistedPlanningProjects, PlanningProjectInspectionError } from '../platform/src/platform/knowledge/project-planning/persisted-projects.ts';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.ts';
+import { SQLiteStore, loadSqlJsEngine } from '../platform/src/platform/state/sqlite-store.ts';
+import { KNOWLEDGE_SCHEMA_VERSION } from '../platform/src/platform/knowledge/store-schema.ts';
+import { createEmptyWorkLedgerState } from '../platform/src/platform/workflow/work-ledger/service.ts';
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function fixture() { const root = mkdtempSync(join(tmpdir(), 'planning-project-readonly-')); roots.push(root); return { root, path: join(root, 'knowledge.sqlite') }; }

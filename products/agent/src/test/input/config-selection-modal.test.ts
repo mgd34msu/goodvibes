@@ -5,11 +5,11 @@ import { rmSync } from 'fs';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerConfigCommand } from '../../input/commands/config.ts';
 import { isAgentHiddenSettingKey, SettingsModal } from '../../input/settings-modal.ts';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
-import { ServiceRegistry } from '@goodvibes-jev/engine/sdk/platform/config';
-import { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
+import { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { SecretsManager } from '../../config/secrets.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 

@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { recallCommand } from '../../input/commands/memory.ts';
-import { createMemoryApi } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import { MemorySpineClient, createLocalMemoryAccess, type LocalMemoryStore } from '@goodvibes-jev/engine/sdk/platform/runtime/memory-spine';
-import { MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/sdk/platform/state';
-import { MemoryEmbeddingProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/state';
+import { createMemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { MemorySpineClient, createLocalMemoryAccess, type LocalMemoryStore } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
+import { MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/platform/platform/state';
+import { MemoryEmbeddingProviderRegistry } from '@goodvibes-jev/engine/platform/platform/state';
 import { createShellPathService } from '@/runtime/index.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 

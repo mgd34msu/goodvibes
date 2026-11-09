@@ -9,7 +9,7 @@ import {
   captureShortcutFeedState,
 } from '@goodvibes-jev/engine/terminal-shell/input-feed-adapters';
 import { createFeedInputTokens } from '@goodvibes-jev/engine/terminal-shell/input-feed-pipeline';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';
 import type { CommandContext, CommandRegistry } from './command-registry.ts';
 import { AutocompleteEngine } from './autocomplete.ts';
@@ -77,7 +77,7 @@ import type { FocusTracker } from '@/runtime/index.ts';
  *     Never reallocated. `burstSuppressedCount` is this wiring layer's own
  *     bookkeeping (not part of the ported module) for the honest resolution
  *     notice, see feedInputTokens below.
- *   - `focusTracker` (the SDK's FocusTracker), tracks OS-level
+ *   - `focusTracker` (the platform's FocusTracker), tracks OS-level
  *     terminal focus from `\x1b[I`/`\x1b[O` tokens (DECSET ?1004h, enabled in
  *     main.ts). Shared instance from RuntimeServices, threaded via
  *     uiServices.platform.focusTracker (mirrors the TUI's own wiring).
@@ -185,7 +185,7 @@ export interface InputFeedContext {
   readonly handleBlockToggle: () => void;
   readonly findMarkerAtPos: (pos: number) => { start: number; end: number } | null;
   readonly cleanupMarkerRegistry: (text: string) => void;
-  readonly expandPrompt: (text: string) => string | import('@goodvibes-jev/engine/sdk/platform/providers').ContentPart[];
+  readonly expandPrompt: (text: string) => string | import('@goodvibes-jev/engine/platform/platform/providers').ContentPart[];
   readonly openModelPickerWithTarget: (target: ModelPickerTarget, source?: 'settings') => boolean;
   readonly openProviderModelPickerWithTarget: (target: ModelPickerTarget, source?: 'settings') => boolean;
   readonly onModelPickerCommit: () => boolean;

@@ -1,6 +1,6 @@
 /**
  * payments-cards.ts, the pure half of card entry on THIS surface: which
- * surface we are, whether the SDK's allowlist lets a card be typed here, and
+ * surface we are, whether the platform's allowlist lets a card be typed here, and
  * how a typed draft becomes the `payments.cards.create` input the daemon
  * accepts. No React, no I/O, so every rule below is unit-testable without a
  * DOM or a daemon.
@@ -14,30 +14,30 @@
  *
  *   "so is the webui getting card input? i said yes..."
  *
- * Recorded in the SDK as docs/decisions/2026-07-27-card-entry-surfaces.md, and
+ * Recorded in the platform as docs/decisions/2026-07-27-card-entry-surfaces.md, and
  * enforced in code by `platform/payments/entry-surface.ts`, whose
  * CARD_ENTRY_SURFACES allowlist is the authority this module defers to. The
  * surface list is NEVER duplicated here: `mayEnterCardDetailsHere()` asks the
- * SDK. If a later ruling closes the webui again, that one edit in the SDK
+ * platform. If a later ruling closes the webui again, that one edit in the platform
  * turns this whole surface off, with no webui change and no stale copy to miss.
  *
  * ── The six conditions came WITH the ruling ───────────────────────────────
  *
  * The option he selected carried them; they are part of what he chose, not
- * advice added afterwards. The SDK ships them as `WEBUI_CARD_ENTRY_CONDITIONS`
+ * advice added afterwards. The platform ships them as `WEBUI_CARD_ENTRY_CONDITIONS`
  * so no surface can implement a weaker version, but that export is not in the
- * SDK version this app pins (see the note on CARD_ENTRY_CONDITIONS below), so
- * the text is mirrored here verbatim and pinned by a test against the SDK's
+ * platform version this app pins (see the note on CARD_ENTRY_CONDITIONS below), so
+ * the text is mirrored here verbatim and pinned by a test against the platform's
  * copy the moment the pin catches up.
  *
  * A browser adds attack surface a terminal does not, which is exactly why the
  * conditions arrived attached to the ruling rather than after it.
  */
-import { mayEnterCardDetails, mayOfferCardEntryFlow } from '@goodvibes-jev/engine/sdk/platform/payments/browser';
+import { mayEnterCardDetails, mayOfferCardEntryFlow } from '@goodvibes-jev/engine/platform/platform/payments/browser';
 import { majorTextToMinorUnits, InvalidMoneyInputError } from './money';
 
 /**
- * This surface's identity, as the SDK's entry-surface allowlist names it.
+ * This surface's identity, as the platform's entry-surface allowlist names it.
  *
  * A constant rather than a literal at each call site so the gate below is
  * checking a real, single answer to "which surface is this?", and so a test
@@ -49,11 +49,11 @@ export const WEBUI_CARD_ENTRY_SURFACE = 'webui';
 /**
  * The conditions the owner attached to webui card entry, verbatim.
  *
- * MIRRORED, not imported: the SDK exports these as WEBUI_CARD_ENTRY_CONDITIONS
- * from `platform/payments`, but that export does not exist in the SDK build
+ * MIRRORED, not imported: the platform exports these as WEBUI_CARD_ENTRY_CONDITIONS
+ * from `platform/payments`, but that export does not exist in the platform build
  * this app resolves against, so importing it would not compile. The strings
- * below are character-for-character the SDK's. `payments-cards.test.ts` pins
- * them structurally (count and content), and the moment the SDK pin carries
+ * below are character-for-character the platform's. `payments-cards.test.ts` pins
+ * them structurally (count and content), and the moment the platform pin carries
  * the export, that test switches to comparing against it directly and this
  * copy goes away.
  */
@@ -253,7 +253,7 @@ export function buildCardCreateInput(draft: CardDraft, currency = 'USD'): CardCr
 }
 
 /**
- * May a card be typed on THIS surface? Asks the SDK's allowlist; never a local list.
+ * May a card be typed on THIS surface? Asks the platform's allowlist; never a local list.
  *
  * Exposed as a function rather than a computed constant so a test can observe
  * it being asked, and so the answer is read at the moment of use rather than

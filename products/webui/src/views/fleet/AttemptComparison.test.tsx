@@ -19,7 +19,7 @@ let pickApplied = true;
 mock.module('../../lib/goodvibes', () => ({
   getCurrentAuth: () => Promise.resolve({}),
   invokeMethod: () => Promise.resolve({}),
-  sdk: {
+  client: {
     operator: {
       fleet: {
         attempts: {

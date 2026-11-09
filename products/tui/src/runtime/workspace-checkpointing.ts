@@ -1,6 +1,6 @@
-import { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/sdk/platform/workspace';
+import { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/platform/platform/workspace';
 import { withCheckpointGuardSettings } from '../config/tui-extension-settings.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { RuntimeEventBus, SessionSurface } from '@/runtime/index.ts';
 
 /**
@@ -14,7 +14,7 @@ export function createWorkspaceCheckpointing(opts: {
    * The app's declare-once storage handle. Passing it resolves the checkpoint
    * git store to `surface.checkpointsDir` (`<workingDirectory>/.goodvibes/tui/
    * checkpoints`) instead of the unscoped `<workspaceRoot>/.goodvibes/
-   * checkpoints` every product using this SDK would otherwise share. The SDK
+   * checkpoints` every product using this platform would otherwise share. The platform
    * migrates an existing legacy store into the scoped location on first use.
    */
   surface: SessionSurface;
@@ -22,7 +22,7 @@ export function createWorkspaceCheckpointing(opts: {
   configManager: ConfigManager;
 }): WorkspaceCheckpointManager {
   // Checkpoint root-guard from the user's `checkpoints.*` config (docs/configuration.md;
-  // inert until the platform SDK's checkpoint manager exposes the keys, see the reader's note).
+  // inert until the platform platform's checkpoint manager exposes the keys, see the reader's note).
   const manager = new WorkspaceCheckpointManager(
     withCheckpointGuardSettings({ workspaceRoot: opts.workspaceRoot, surface: opts.surface, runtimeBus: opts.runtimeBus }, opts.configManager),
   );

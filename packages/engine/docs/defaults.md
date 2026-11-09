@@ -1,9 +1,9 @@
 # Network defaults reference
 
-This document records every timeout, retry, and backoff default in the SDK.
+This document records every timeout, retry, and backoff default in the platform.
 All values are in milliseconds unless stated otherwise.
 
-## HTTP transport (`@goodvibes-jev/engine/sdk/transport-http`)
+## HTTP transport (`@goodvibes-jev/engine/platform/transport-http`)
 
 | Path | Default | Notes |
 |------|---------|-------|
@@ -19,7 +19,7 @@ All values are in milliseconds unless stated otherwise.
 **Rationale:** Single-attempt default keeps latency predictable for interactive workloads. Callers
 increase `maxAttempts` for batch/background operations.
 
-## SSE stream reconnect (`@goodvibes-jev/engine/sdk/transport-http`, `reconnect.ts`)
+## SSE stream reconnect (`@goodvibes-jev/engine/platform/transport-http`, `reconnect.ts`)
 
 | Path | Default | Notes |
 |------|---------|-------|
@@ -41,16 +41,16 @@ wait between attempts to 30 seconds.
 | `batch.queueBackend` | `local` | The daemon stores jobs locally unless a client explicitly uses the Cloudflare Worker bridge. |
 | `batch.tickIntervalMs` | `60 000` | Local daemon batch scheduler interval. |
 | `batch.maxDelayMs` | `300 000` | Max queued-job wait before local submission on a scheduler tick. |
-| `batch.maxJobsPerProviderBatch` | `100` | SDK grouping limit before upstream provider-specific limits. |
+| `batch.maxJobsPerProviderBatch` | `100` | platform grouping limit before upstream provider-specific limits. |
 | `batch.maxQueuePayloadBytes` | `16 384` | Cloudflare queue messages should be small signals, not full prompts. |
 | `batch.maxQueueMessagesPerDay` | `1 000` | Free-tier-oriented client guardrail. |
 | `cloudflare.enabled` | `false` | Cloudflare is optional and never required for daemon value. |
 | `cloudflare.freeTierMode` | `true` | Prefer small queue signals and bounded daily usage. |
-| `cloudflare.accountId` | empty string | Cloudflare account id used by SDK-owned provisioning. |
+| `cloudflare.accountId` | empty string | Cloudflare account id used by platform-owned provisioning. |
 | `cloudflare.apiTokenRef` | empty string | Secret reference for the Cloudflare API token; empty falls back to `CLOUDFLARE_API_TOKEN`. |
 | `cloudflare.zoneId` | empty string | Optional Cloudflare zone id used by DNS and Access automation. |
 | `cloudflare.zoneName` | empty string | Optional Cloudflare zone name used during onboarding/discovery. |
-| `cloudflare.workerName` | `goodvibes-batch-worker` | Worker script name managed by SDK provisioning. |
+| `cloudflare.workerName` | `goodvibes-batch-worker` | Worker script name managed by platform provisioning. |
 | `cloudflare.workerSubdomain` | empty string | Account workers.dev subdomain used to infer the Worker URL. |
 | `cloudflare.workerHostname` | empty string | Optional custom Worker hostname managed through DNS automation. |
 | `cloudflare.workerBaseUrl` | empty string | Public Worker URL clients use for batch proxy/queue calls. |
@@ -129,18 +129,18 @@ See [Web UI Integration → Deployment topology](./web-ui-integration.md#deploym
 
 See [Voice and streaming TTS](./voice.md) for the provider-agnostic streaming route and TUI integration contract.
 
-## WebSocket reconnect (`@goodvibes-jev/engine/sdk/transport-realtime`)
+## WebSocket reconnect (`@goodvibes-jev/engine/platform/transport-realtime`)
 
 | Path | Default | Notes |
 |------|---------|-------|
-| `DEFAULT_WS_MAX_ATTEMPTS` | 10 | Shared constant in `@goodvibes-jev/engine/sdk/transport-realtime`; passed to `normalizeStreamReconnectPolicy` |
+| `DEFAULT_WS_MAX_ATTEMPTS` | 10 | Shared constant in `@goodvibes-jev/engine/platform/transport-realtime`; passed to `normalizeStreamReconnectPolicy` |
 | `reconnect.baseDelayMs` | 500 (inherited from SSE policy) | |
 | `reconnect.maxDelayMs` | 30 000 (inherited from SSE policy) | |
 | `reconnect.backoffFactor` | 2 | |
 
 **Rationale:** Matches SSE for a symmetric schedule. Finite cap prevents infinite auth-failure loops.
 
-## Auth (`@goodvibes-jev/engine/sdk/auth`)
+## Auth (`@goodvibes-jev/engine/platform/auth`)
 
 | Path | Timeout | Max Retries | Notes |
 |------|---------|-------------|-------|
@@ -150,13 +150,13 @@ See [Voice and streaming TTS](./voice.md) for the provider-agnostic streaming ro
 **Rationale:** Auth calls go through the HTTP transport layer which applies `DEFAULT_HTTP_RETRY_POLICY`.
 There is no separate auth-specific timeout; callers should pass an `AbortSignal` for bounded waits.
 
-## Session auth (`@goodvibes-jev/engine/sdk/daemon`, daemon embedders)
+## Session auth (`@goodvibes-jev/engine/platform/daemon`, daemon embedders)
 
 | Constant | Default | Notes |
 |----------|---------|-------|
 | `DEFAULT_SESSION_TTL_MS` | `3 600 000` (1 hour) | Session tokens expire after 1 hour of creation; expired sessions are rejected and pruned on access |
 
-**Source:** `packages/engine/sdk/src/platform/security/user-auth.ts`. Not a public configurable and not a daemon config key. A daemon embedding can override it only by passing `sessionTtlMs` when constructing the user-auth manager.
+**Source:** `packages/engine/platform/src/platform/security/user-auth.ts`. Not a public configurable and not a daemon config key. A daemon embedding can override it only by passing `sessionTtlMs` when constructing the user-auth manager.
 
 ## Rate limits (daemon built-in)
 
@@ -165,7 +165,7 @@ There is no separate auth-specific timeout; callers should pass an `AbortSignal`
 | General rate limiter | 60 requests / minute / IP | Applied to all routes except login; configurable via `rateLimit` daemon option |
 | Login rate limiter | 5 requests / minute / IP | Applied to `POST /login` only; configurable via `loginRateLimit` daemon option |
 
-## Outbound producer queue (`@goodvibes-jev/engine/sdk/transport-realtime`, `runtime-events.ts`)
+## Outbound producer queue (`@goodvibes-jev/engine/platform/transport-realtime`, `runtime-events.ts`)
 
 | Field | Value | Notes |
 |-------|-------|-------|

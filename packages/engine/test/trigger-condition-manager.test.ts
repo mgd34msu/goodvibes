@@ -19,7 +19,7 @@ import {
   type ProbeIo,
   type TriggerActionExecutor,
   type TriggerValue,
-} from '../sdk/src/platform/triggers/index.ts';
+} from '../platform/src/platform/triggers/index.ts';
 import { useFailureReadings } from './_helpers/failure-readings.js';
 
 const roots: string[] = [];

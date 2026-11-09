@@ -9,7 +9,7 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 // default-OFF auto-start contract, and that an explicit build indexes real
 // files, degraded/lexical mode is expected and fine (no embedding provider
 // is configured; the HASHED_MEMORY_EMBEDDING_PROVIDER default is a weak
-// lexical-ish signal, not "no provider", see the SDK's own degradation
+// lexical-ish signal, not "no provider", see the platform's own degradation
 // doc). Mirrors workstream-services.test.ts's scratch-project-root harness
 // and memory-store.test.ts's ConfigManager construction.
 // ---------------------------------------------------------------------------
@@ -17,15 +17,15 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { beforeEach, describe, test, expect, afterEach } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '../sdk/src/platform/config/index.ts';
-import type { ConfigKey } from '../sdk/src/platform/config/index.ts';
-import { MemoryEmbeddingProviderRegistry } from '../sdk/src/platform/state/index.ts';
+import { ConfigManager } from '../platform/src/platform/config/index.ts';
+import type { ConfigKey } from '../platform/src/platform/config/index.ts';
+import { MemoryEmbeddingProviderRegistry } from '../platform/src/platform/state/index.ts';
 import {
   CODE_INDEX_ENABLED_CONFIG_KEY,
   codeIndexDbPath,
   createCodeIndexServices,
   isCodeIndexAutoStartEnabled,
-} from '../sdk/src/platform/runtime/code-index-services.ts';
+} from '../platform/src/platform/runtime/code-index-services.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 /** The scope a caller supplies; any non-empty segment exercises the same paths. */

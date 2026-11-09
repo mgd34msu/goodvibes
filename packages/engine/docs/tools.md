@@ -5,7 +5,7 @@ contracts, and remote surfaces. Tools are registered through
 `registerAllTools()` and guarded by config permissions plus feature-flagged
 contract checks.
 
-Accessible via `@goodvibes-jev/engine/sdk/platform/tools` (daemon embedders). Consumer apps interact through sessions and operator methods.
+Accessible via `@goodvibes-jev/engine/platform/platform/tools` (daemon embedders). Consumer apps interact through sessions and operator methods.
 
 For how tool-call arguments are parsed, validated, and dropped when malformed, see [Tool Safety](./tool-safety.md).
 
@@ -109,7 +109,7 @@ resolution, and secret-aware integration status.
 
 ## Runtime and settings awareness
 
-The SDK registers `goodvibes_context` and `goodvibes_settings` for all full
+The platform registers `goodvibes_context` and `goodvibes_settings` for all full
 tool runtimes, including TUI turns, companion remote chat, Home Assistant
 chat, ntfy remote chat, agents, and channel-backed surfaces.
 
@@ -133,7 +133,7 @@ set or reset scalar config keys through `ConfigManager`, requires
 store credentials through the secret system and set config keys to
 `goodvibes://` references.
 
-Every SDK-owned turn path adds a small harness-awareness system instruction
+Every platform-owned turn path adds a small harness-awareness system instruction
 that tells the model to call `goodvibes_context` before answering questions
 about local settings, configured integrations, host capabilities, tools,
 providers, or surfaces. The same instruction tells the model not to start

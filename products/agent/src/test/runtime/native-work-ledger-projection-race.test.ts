@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
-import { createOperatorWorkLedgerReadClient } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/operator-read-client';
-import type { OperatorRemoteClient } from '@goodvibes-jev/engine/operator-sdk';
-import type { WorkLedgerReadEvent, WorkLedgerReadSnapshot } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger';
+import { createOperatorWorkLedgerReadClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/operator-read-client';
+import type { OperatorRemoteClient } from '@goodvibes-jev/engine/operator-client';
+import type { WorkLedgerReadEvent, WorkLedgerReadSnapshot } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 import fixture from '../fixtures/legacy-ledger/preparation.json';
 import { prepareLegacyWorkLedgerMigration, projectLegacyImportWorks } from '../../runtime/legacy-work-ledger-migration.ts';
 import { NativeWorkLedgerModel } from '../../runtime/native-work-ledger.ts';

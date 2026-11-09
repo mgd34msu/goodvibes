@@ -16,7 +16,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { ActivityLogger } from '../sdk/src/platform/utils/logger.ts';
+import { ActivityLogger } from '../platform/src/platform/utils/logger.ts';
 
 const dirs: string[] = [];
 const loggers: ActivityLogger[] = [];

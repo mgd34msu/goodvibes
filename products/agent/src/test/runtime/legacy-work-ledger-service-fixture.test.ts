@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { KnowledgeStore, ProjectPlanningService } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import { KnowledgeStore, ProjectPlanningService } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { prepareLegacyWorkLedgerMigration, replayLegacyWorkLedgerPreparation, type LegacyMigrationInput } from '../../runtime/legacy-work-ledger-migration.ts';
 
 test('actual legacy service records replay without changing SQLite or conflating source projections', async () => {

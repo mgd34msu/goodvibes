@@ -58,7 +58,7 @@ id = "aws-access-token"
 description = "Exact historical synthetic fixture at its authored path"
 condition = "AND"
 regexTarget = "secret"
-paths = [ '''^packages/engine/sdk/src/platform/tools/batteries/secret\-finding\.ts$''' ]
+paths = [ '''^packages/engine/platform/src/platform/tools/batteries/secret\-finding\.ts$''' ]
 regexes = [ '''^(?:AKIAQ4F7ZL2PXM3N8TRW)$''' ]
 
 [[rules]]
@@ -68,7 +68,7 @@ id = "curl-auth-header"
 description = "Exact historical synthetic fixture at its authored path"
 condition = "AND"
 regexTarget = "secret"
-paths = [ '''^packages/engine/sdk/src/platform/gate/batteries/side\-effect\.ts$''' ]
+paths = [ '''^packages/engine/platform/src/platform/gate/batteries/side\-effect\.ts$''' ]
 regexes = [ '''^(?:ghp_4f9aX2kLmQ8rT1vB7nC3dE5)$''' ]
 
 [[rules]]
@@ -78,7 +78,7 @@ id = "discord-client-id"
 description = "Exact historical synthetic fixture at its authored path"
 condition = "AND"
 regexTarget = "secret"
-paths = [ '''^packages/engine/sdk/src/platform/tools/batteries/credential\-value\.ts$''' ]
+paths = [ '''^packages/engine/platform/src/platform/tools/batteries/credential\-value\.ts$''' ]
 regexes = [ '''^(?:112233445566778899)$''' ]
 
 [[rules]]
@@ -105,21 +105,21 @@ regexes = [ '''^(?:abc123def456ghi789)$''' ]
 description = "Exact historical synthetic fixture at its authored path"
 condition = "AND"
 regexTarget = "secret"
-paths = [ '''^packages/engine/sdk/src/platform/runtime/batteries/at\-rest\-credential\.ts$''' ]
+paths = [ '''^packages/engine/platform/src/platform/runtime/batteries/at\-rest\-credential\.ts$''' ]
 regexes = [ '''^(?:key\-3ax6xnjp29jd6fds4gc373sgvjxteol0|sk\-or\-v1\-7c1e2b9a04d38f6e5a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d|sk\-proj\-4fQ9xT2mLk8vRw7ZbN3cYp1JhG6sDe0A)$''' ]
 
 [[rules.allowlists]]
 description = "Exact historical synthetic fixture at its authored path"
 condition = "AND"
 regexTarget = "secret"
-paths = [ '''^packages/engine/sdk/src/platform/tools/batteries/secret\-finding\.ts$''' ]
+paths = [ '''^packages/engine/platform/src/platform/tools/batteries/secret\-finding\.ts$''' ]
 regexes = [ '''^(?:kB9s2Lq7Xv0Yw3Rt6Pm1Nz8Jc4Hd5Fg2Ae7Ub0Oi)$''' ]
 
 [[rules.allowlists]]
 description = "Exact historical synthetic fixture at its authored path"
 condition = "AND"
 regexTarget = "secret"
-paths = [ '''^packages/engine/sdk/src/platform/tools/batteries/secret\-line\.ts$''' ]
+paths = [ '''^packages/engine/platform/src/platform/tools/batteries/secret\-line\.ts$''' ]
 regexes = [ '''^(?:MIIEowIBAAKCAQEAu1SU1LfVLPHCozMxH2Mo4lgOEePzNm0tRgeLezV6ffAt0gun)$''' ]
 
 [[rules.allowlists]]
@@ -209,5 +209,5 @@ id = "jwt"
 description = "Exact historical synthetic fixture at its authored path"
 condition = "AND"
 regexTarget = "secret"
-paths = [ '''^packages/engine/sdk/src/platform/runtime/batteries/at\-rest\-credential\.ts$''' ]
+paths = [ '''^packages/engine/platform/src/platform/runtime/batteries/at\-rest\-credential\.ts$''' ]
 regexes = [ '''^(?:eyJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiJ1c2VyLTQyIn0\.dBjftJeZ4CVP\-mB92K27uhbUJU1p1r_wW1gFWFOEjXk|eyJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiJ1c2VyLTQyIn0\.dBjftJeZ4CVP\-mB92K27uhbUJU1p1r_wW1gFWFOEjXk\\\\)$''' ]

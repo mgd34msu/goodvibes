@@ -2,9 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import {
   runReachabilityCheck,
   resolveSelfDirectory,
-} from '../sdk/src/platform/runtime/reachability-check.ts';
-import { buildReachabilityNotices, reachabilityNoticeLines } from '../sdk/src/platform/runtime/reachability-notice.ts';
-import { scanCommandShadows } from '../sdk/src/platform/runtime/path-shadow.ts';
+} from '../platform/src/platform/runtime/reachability-check.ts';
+import { buildReachabilityNotices, reachabilityNoticeLines } from '../platform/src/platform/runtime/reachability-notice.ts';
+import { scanCommandShadows } from '../platform/src/platform/runtime/path-shadow.ts';
 
 /**
  * The startup reachability check: does this running build say so when the

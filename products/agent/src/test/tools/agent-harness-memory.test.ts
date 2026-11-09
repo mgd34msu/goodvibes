@@ -4,7 +4,7 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { resetAgentMcpCallRouteForTests } from '../../tools/agent-mcp-call-route.ts';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { join } from 'node:path';
-import { ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
+import { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import { makeFixture, attachMemoryApi, executeHarnessJson, createHarnessFixtureReadings } from "./agent-harness-tool-fixture.ts";
 
 

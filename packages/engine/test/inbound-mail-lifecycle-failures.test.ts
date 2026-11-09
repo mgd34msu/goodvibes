@@ -40,11 +40,11 @@ import {
   type InboundMailTerminalFailure,
   type MailboxCursor,
   type MailboxCursorPort,
-} from '../sdk/src/platform/email/inbound/index.ts';
-import { composeInboundMail } from '../sdk/src/platform/daemon/facade-inbound-mail.ts';
-import { createEmailInboundStatusHandler } from '../sdk/src/platform/control-plane/routes/email-inbound-status.ts';
-import type { InboundMailSource, SourceLatency } from '../sdk/src/platform/email/inbound/source.ts';
-import type { StructuredNotice } from '../sdk/src/platform/email/inbound-notice.ts';
+} from '../platform/src/platform/email/inbound/index.ts';
+import { composeInboundMail } from '../platform/src/platform/daemon/facade-inbound-mail.ts';
+import { createEmailInboundStatusHandler } from '../platform/src/platform/control-plane/routes/email-inbound-status.ts';
+import type { InboundMailSource, SourceLatency } from '../platform/src/platform/email/inbound/source.ts';
+import type { StructuredNotice } from '../platform/src/platform/email/inbound-notice.ts';
 import {
   makeFakeMailbox,
   openMailboxSocket,

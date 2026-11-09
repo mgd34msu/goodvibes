@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test';
-import { retainCheckoutInvocation } from '../sdk/src/platform/payments/host/checkout-invocation.js';
-import { HandlerError, type HandlerContextEnvelope } from '../sdk/src/platform/payments/host/handler-plumbing.js';
-import type { PaymentsHandlerDeps } from '../sdk/src/platform/payments/host/register.js';
-import type { BrowserCheckoutSeam } from '../sdk/src/platform/control-plane/routes/browser-composition.js';
-import type { NativeExecutionAuthority, NativePairedSnapshot } from '../sdk/src/platform/security/http-auth.js';
+import { retainCheckoutInvocation } from '../platform/src/platform/payments/host/checkout-invocation.js';
+import { HandlerError, type HandlerContextEnvelope } from '../platform/src/platform/payments/host/handler-plumbing.js';
+import type { PaymentsHandlerDeps } from '../platform/src/platform/payments/host/register.js';
+import type { BrowserCheckoutSeam } from '../platform/src/platform/control-plane/routes/browser-composition.js';
+import type { NativeExecutionAuthority, NativePairedSnapshot } from '../platform/src/platform/security/http-auth.js';
 
 function fixture() {
   let allowed = true, leader = true;

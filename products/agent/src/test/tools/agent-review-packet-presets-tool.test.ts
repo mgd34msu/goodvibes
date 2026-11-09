@@ -1,7 +1,7 @@
 import { executeAdmitted } from '../helpers/admitted-tool.ts';
 import { describe, expect, test } from 'bun:test';
-import type { ArtifactCreateInput, ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { ArtifactCreateInput, ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import {
   createAgentReviewPacketPresetsTool,
   registerAgentReviewPacketPresetsTool,

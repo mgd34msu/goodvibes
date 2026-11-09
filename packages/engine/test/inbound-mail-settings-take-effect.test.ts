@@ -28,14 +28,14 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { BuiltinChannelRuntime } from '../sdk/src/platform/channels/builtin-runtime.ts';
-import { createInboundMailSourceFactory } from '../sdk/src/platform/email/inbound/source-factory.ts';
-import type { GmailSourceBuilder } from '../sdk/src/platform/email/inbound/source-factory.ts';
+import { BuiltinChannelRuntime } from '../platform/src/platform/channels/builtin-runtime.ts';
+import { createInboundMailSourceFactory } from '../platform/src/platform/email/inbound/source-factory.ts';
+import type { GmailSourceBuilder } from '../platform/src/platform/email/inbound/source-factory.ts';
 
 /** Exactly what the factory hands the Gmail builder. */
 type CapturedGmailInput = Parameters<GmailSourceBuilder>[0];
-import { resolveWatcherSettings } from '../sdk/src/platform/email/inbound/ports.ts';
-import type { InboundMailSource } from '../sdk/src/platform/email/inbound/source.ts';
+import { resolveWatcherSettings } from '../platform/src/platform/email/inbound/ports.ts';
+import type { InboundMailSource } from '../platform/src/platform/email/inbound/source.ts';
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => { setTimeout(resolve, ms); });
 
@@ -196,7 +196,7 @@ describe('an inbound-mail setting edit reaches the running source', () => {
 describe('the supervisor passes a recheck to the source it is running', () => {
   test('recheckNow reaches the live source', async () => {
     const { InboundMailSupervisor } = await import(
-      '../sdk/src/platform/email/inbound/supervisor.ts'
+      '../platform/src/platform/email/inbound/supervisor.ts'
     );
     let rechecks = 0;
     const source: InboundMailSource = {
@@ -240,7 +240,7 @@ describe('the supervisor passes a recheck to the source it is running', () => {
 
   test('a source that declares no recheckNow is a no-op, not a throw', async () => {
     const { InboundMailSupervisor } = await import(
-      '../sdk/src/platform/email/inbound/supervisor.ts'
+      '../platform/src/platform/email/inbound/supervisor.ts'
     );
     const source: InboundMailSource = {
       kind: 'gmail-history',

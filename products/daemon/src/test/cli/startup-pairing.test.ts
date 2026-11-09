@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { renderDaemonStartupPairing } from '../../cli/startup-pairing.js';
 
 function config(values: Record<string, unknown>): Pick<ConfigManager, 'get'> {

@@ -6,12 +6,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { ApprovalBroker } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { createClientRuntimeServices } from '@goodvibes-jev/engine/sdk/platform/runtime/bootstrap';
-import { createRuntimeStore, RuntimeEventBus } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
-import { createLaunchTolerantProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { UserPermissionRuleStore } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { ApprovalBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { createClientRuntimeServices } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+import { createRuntimeStore, RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { createLaunchTolerantProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { UserPermissionRuleStore } from '@goodvibes-jev/engine/platform/platform/permissions';
 
 async function waitFor(predicate: () => boolean, label: string, milliseconds = 3000) {
   const deadline = Date.now() + milliseconds;

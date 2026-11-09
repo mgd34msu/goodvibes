@@ -5,12 +5,12 @@ import { tmpdir } from 'node:os';
 import { decisionModelPolicyState, installJudgmentPort, type DecisionModelPolicy } from '@goodvibes-jev/engine/errors';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort } from '@goodvibes-jev/judgment/testing';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
-import { ArtifactStore } from '../sdk/src/platform/artifacts/store.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { HomeGraphService } from '../sdk/src/platform/knowledge/home-graph/service.js';
-import { runHomeGraphIssueTriage } from '../sdk/src/platform/knowledge/home-graph/triage.js';
-import { rankHomeGraphPageCandidates } from '../sdk/src/platform/knowledge/home-graph/page-priority.js';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
+import { ArtifactStore } from '../platform/src/platform/artifacts/store.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { HomeGraphService } from '../platform/src/platform/knowledge/home-graph/service.js';
+import { runHomeGraphIssueTriage } from '../platform/src/platform/knowledge/home-graph/triage.js';
+import { rankHomeGraphPageCandidates } from '../platform/src/platform/knowledge/home-graph/page-priority.js';
 
 const roots: string[] = [], stores: KnowledgeStore[] = [], services: HomeGraphService[] = [];
 let previous: JudgmentPort | undefined, installed = false;

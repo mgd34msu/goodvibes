@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { decisionModelPolicyState, installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
 import { multimodalFixture } from './_helpers/multimodal-entities.js';
 
 let previous: JudgmentPort | undefined, installed = false;

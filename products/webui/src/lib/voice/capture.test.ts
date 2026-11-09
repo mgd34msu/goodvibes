@@ -20,8 +20,8 @@
  * AudioWorklet exists.
  */
 import { describe, expect, test } from 'bun:test';
-import { AudioCaptureError, PCM16_FULL_SCALE } from '@goodvibes-jev/engine/sdk/platform/voice/capture';
-import type { AudioCaptureHandlers, AudioCaptureRequest } from '@goodvibes-jev/engine/sdk/platform/voice/capture';
+import { AudioCaptureError, PCM16_FULL_SCALE } from '@goodvibes-jev/engine/platform/platform/voice/capture';
+import type { AudioCaptureHandlers, AudioCaptureRequest } from '@goodvibes-jev/engine/platform/platform/voice/capture';
 import {
   CaptureFramePump,
   createBrowserCaptureOpener,
@@ -287,7 +287,7 @@ describe('detectMicSupport', () => {
   });
 });
 
-// ─── Honest failure reasons (carried over, remapped to the SDK's enumeration) ─
+// ─── Honest failure reasons (carried over, remapped to the platform's enumeration) ─
 
 describe('the opener refuses honestly', () => {
   test('an insecure origin is refused with reason insecure-origin', async () => {

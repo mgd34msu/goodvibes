@@ -1,7 +1,7 @@
 /**
  * stepup.ts, the browser-side WebAuthn step-up ceremony.
  *
- * The daemon gates mutating relay calls behind a WebAuthn step-up assertion (see the SDK's
+ * The daemon gates mutating relay calls behind a WebAuthn step-up assertion (see the platform's
  * platform/relay/step-up-policy + daemon-wiring): a mutating call that arrives over the
  * relay without a fresh, valid assertion is answered 401 with `www-authenticate: WebAuthn`
  * and body `{ error: 'step-up-required' }`. This module is the operator's half of that
@@ -16,11 +16,11 @@
  *                          the retried call.
  *
  * WIRE PRIMITIVES (STEP_UP_ASSERTION_HEADER, encodeAssertionHeader) are replicated here as
- * the small, stable wire contract they are, the SDK defines them in a Node/daemon module
+ * the small, stable wire contract they are, the platform defines them in a Node/daemon module
  * (platform/relay), which is not browser-safe to import, so we mirror the exact format:
  *   - header name: 'x-goodvibes-stepup-assertion'      (STEP_UP_ASSERTION_HEADER)
  *   - header value: base64url(utf8(JSON.stringify(envelope)))   (encodeAssertionHeader)
- * These are asserted against the SDK's own values by stepup.test.ts.
+ * These are asserted against the platform's own values by stepup.test.ts.
  *
  * HONESTY: every failure path returns a specific, machine-readable StepUpError code and a
  * plain operator-facing message. Nothing silently "succeeds" without a real authenticator
@@ -28,7 +28,7 @@
  * a not-yet-registered passkey are each surfaced distinctly, never swallowed.
  */
 
-/** The request header a step-up assertion rides on. Mirrors the SDK's STEP_UP_ASSERTION_HEADER. */
+/** The request header a step-up assertion rides on. Mirrors the platform's STEP_UP_ASSERTION_HEADER. */
 export const STEP_UP_ASSERTION_HEADER = 'x-goodvibes-stepup-assertion';
 
 /** localStorage key recording the credential id registered on THIS device/browser. */
@@ -54,7 +54,7 @@ export function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> {
 }
 
 // ---------------------------------------------------------------------------
-// The assertion envelope + header encoding (mirrors the SDK wire contract)
+// The assertion envelope + header encoding (mirrors the platform wire contract)
 // ---------------------------------------------------------------------------
 
 /** The assertion envelope a surface sends in the step-up header (all base64url). */

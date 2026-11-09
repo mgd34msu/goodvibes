@@ -17,7 +17,7 @@ import { Row, RowList } from '../ui/Row';
 import { Segmented } from '../ui/Segmented';
 import { Select } from '../ui/Select';
 import { PHONE_QUERY, useMediaQuery } from '../ui/overlay';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import { formatError } from '../../lib/errors';
 import { readPath } from '../../lib/object';
 import { useToast } from '../../lib/toast';
@@ -97,7 +97,7 @@ export function ModelWorkspaceModal({ open, onClose }: ModelWorkspaceModalProps)
 
   const providers = useQuery({
     queryKey: ['providers'],
-    queryFn: () => sdk.operator.providers.list(),
+    queryFn: () => platformClient.operator.providers.list(),
     enabled: open,
     // Families arrive as optional server enrichment; never block catalog access
     // on judgment. React Query owns/stops refreshes with the visible grouping.
@@ -105,12 +105,12 @@ export function ModelWorkspaceModal({ open, onClose }: ModelWorkspaceModalProps)
   });
   const currentModel = useQuery({
     queryKey: ['models', 'current'],
-    queryFn: () => sdk.operator.models.current.get(),
+    queryFn: () => platformClient.operator.models.current.get(),
     enabled: open,
   });
   const config = useQuery({
     queryKey: ['config'],
-    queryFn: () => sdk.operator.config.get(),
+    queryFn: () => platformClient.operator.config.get(),
     enabled: open,
   });
 
@@ -147,7 +147,7 @@ export function ModelWorkspaceModal({ open, onClose }: ModelWorkspaceModalProps)
   const useModel = useMutation({
     mutationFn: async (model: CatalogModel) => {
       if (target === 'main') {
-        return sdk.operator.models.current.set(model.registryKey);
+        return platformClient.operator.models.current.set(model.registryKey);
       }
       const entries = buildTargetWriteEntries(target, model.provider, model.id) ?? [];
       // Sequential, not Promise.all: the daemon's /config route accepts one key at a
@@ -155,7 +155,7 @@ export function ModelWorkspaceModal({ open, onClose }: ModelWorkspaceModalProps)
       // for one target (e.g. helper.globalProvider + helper.globalModel + helper.enabled)
       // means several awaited config.set calls in a row.
       for (const [key, value] of entries) {
-        await sdk.operator.config.set(key, value);
+        await platformClient.operator.config.set(key, value);
       }
       return { entries };
     },
@@ -176,7 +176,7 @@ export function ModelWorkspaceModal({ open, onClose }: ModelWorkspaceModalProps)
     mutationFn: async (enabled: boolean) => {
       const entry = buildTargetEnableEntry(target, enabled);
       if (!entry) return;
-      await sdk.operator.config.set(entry[0], entry[1]);
+      await platformClient.operator.config.set(entry[0], entry[1]);
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['config'] });

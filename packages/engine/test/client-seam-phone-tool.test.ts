@@ -31,18 +31,18 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { GatewayMethodCatalog, registerDevicesGatewayMethods } from '../sdk/src/platform/control-plane/index.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { GatewayMethodCatalog, registerDevicesGatewayMethods } from '../platform/src/platform/control-plane/index.ts';
 import {
   DEVICE_CAPABILITY_CONTRACT_VERSION,
   DEVICE_CAPABILITY_IDS,
   DEVICE_NODE_ANNOUNCEMENT_KEY,
   createDevicePostureRuntime,
-} from '../sdk/src/platform/devices/index.ts';
-import type { DeviceApprovalBridge, DevicePeerTransport, DevicePeerView } from '../sdk/src/platform/devices/index.ts';
-import { createDevicesClient } from '../sdk/src/platform/runtime/client/devices-client.ts';
-import { createClientPhoneTool } from '../sdk/src/platform/runtime/client/phone-tool.ts';
-import type { DaemonVerbCaller } from '../sdk/src/platform/runtime/client/daemon-verbs.ts';
+} from '../platform/src/platform/devices/index.ts';
+import type { DeviceApprovalBridge, DevicePeerTransport, DevicePeerView } from '../platform/src/platform/devices/index.ts';
+import { createDevicesClient } from '../platform/src/platform/runtime/client/devices-client.ts';
+import { createClientPhoneTool } from '../platform/src/platform/runtime/client/phone-tool.ts';
+import type { DaemonVerbCaller } from '../platform/src/platform/runtime/client/daemon-verbs.ts';
 
 /** PNG-ish bytes; the store only cares that what comes back is what went in. */
 const CAPTURE_BYTES = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 7, 7, 7, 7]);

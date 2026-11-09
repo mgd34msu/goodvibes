@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { FileUndoManager } from '../sdk/src/platform/state/file-undo.js';
+import { FileUndoManager } from '../platform/src/platform/state/file-undo.js';
 
 test('undo removes a newly created file and redo restores its contents', () => {
   const root = mkdtempSync(join(tmpdir(), 'file-undo-'));

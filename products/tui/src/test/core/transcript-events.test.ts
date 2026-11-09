@@ -1,4 +1,4 @@
-import { TranscriptReadingLifetime } from '@goodvibes-jev/engine/sdk/platform/core';
+import { TranscriptReadingLifetime } from '@goodvibes-jev/engine/platform/platform/core';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';

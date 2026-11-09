@@ -13,7 +13,7 @@
  *    feed's warnings and criticals only).
  */
 import { describe, expect, test } from 'bun:test';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import { SurfaceModalHost, type SurfaceModal } from '../../input/surface-modal-host.ts';
 import { handleEscape } from '../../input/handler-modal-stack.ts';
 import { CommandPalette, buildPaletteEntries, paletteScore, recordPaletteUse, resetPaletteUsageForTests } from '../../input/command-palette.ts';

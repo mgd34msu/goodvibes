@@ -4,7 +4,7 @@
  * whole-view honest degrade (METHOD_NOT_FOUND → "this daemon does not serve memory").
  * The add/list/delete/review-queue wire-round-trip journey is covered end to end by
  * e2e/memory-journey.e2e.ts against the hermetic mock daemon; this file is about what
- * each component STATE renders given a controlled sdk response.
+ * each component STATE renders given a controlled platform response.
  */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import React from 'react';
@@ -94,7 +94,7 @@ mock.module('../../lib/goodvibes', () => ({
   // resolve or the import itself fails before any test runs.
   getCurrentAuth: () => Promise.resolve({}),
   invokeMethod: () => Promise.resolve({}),
-  sdk: {
+  client: {
     operator: {
       memory: {
         search: (input?: unknown) => searchImpl(input),

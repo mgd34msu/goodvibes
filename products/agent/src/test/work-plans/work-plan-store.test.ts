@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { WorkPlanStore } from '@goodvibes-jev/engine/sdk/platform/workflow';
+import { WorkPlanStore } from '@goodvibes-jev/engine/platform/platform/workflow';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 

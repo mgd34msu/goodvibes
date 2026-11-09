@@ -1,16 +1,16 @@
-import { knowledgeNodeContentRevisionTriggers } from '../sdk/src/platform/knowledge/store-node-content-revisions.js';
-import { knowledgeContentHash } from '../sdk/src/platform/knowledge/content-hash.js';
+import { knowledgeNodeContentRevisionTriggers } from '../platform/src/platform/knowledge/store-node-content-revisions.js';
+import { knowledgeContentHash } from '../platform/src/platform/knowledge/content-hash.js';
 import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createSchema, KNOWLEDGE_SCHEMA_VERSION } from '../sdk/src/platform/knowledge/store-schema.js';
+import { createSchema, KNOWLEDGE_SCHEMA_VERSION } from '../platform/src/platform/knowledge/store-schema.js';
 import { createKnowledgeRowRevisions, knowledgeRowGenerationFromRows, knowledgeRawRowForAdmission,
-  knowledgeRevisionTables, knowledgeRowRevisionTriggers, validateKnowledgeRowRevisions } from '../sdk/src/platform/knowledge/store-row-revisions.js';
+  knowledgeRevisionTables, knowledgeRowRevisionTriggers, validateKnowledgeRowRevisions } from '../platform/src/platform/knowledge/store-row-revisions.js';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { loadSqlJsEngine, type SqlDatabase } from '../sdk/src/platform/state/sqlite-store.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { loadSqlJsEngine, type SqlDatabase } from '../platform/src/platform/state/sqlite-store.js';
 
 const databases: SqlDatabase[] = [], roots: string[] = [];
 afterEach(() => {

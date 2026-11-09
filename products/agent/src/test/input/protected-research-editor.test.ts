@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from 'bun:test';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { createShellPathService } from '@/runtime/index.ts';
 import { AgentWorkspace } from '../../input/agent-workspace.ts';
 import { createAgentResearchReportEditor } from '../../input/agent-workspace-research-report-editor.ts';

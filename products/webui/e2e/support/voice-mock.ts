@@ -40,7 +40,7 @@ export interface VoiceMockOptions {
   ttsProvider?: string;
   ttsVoice?: string;
   /**
-   * voice.local.status's resting state (SDK 1.9.0-dev's managed provisioning).
+   * voice.local.status's resting state (platform 1.9.0-dev's managed provisioning).
    * Default 'not-provisioned' (the size-labeled setup offer). 'unavailable' answers
    * the honest 404 of an older daemon build (the section stays absent entirely).
    */
@@ -51,7 +51,7 @@ export interface VoiceMockOptions {
   /**
    * How long the install POST stays in flight, in ms (default 0, answers
    * immediately). While it is in flight, voice.local.status serves the
-   * installInProgress section (SDK 5357f09e), set this to a couple of poll
+   * installInProgress section (platform 5357f09e), set this to a couple of poll
    * intervals to prove the live-progress rendering end to end.
    */
   localInstallDurationMs?: number;
@@ -261,7 +261,7 @@ export async function installVoiceRoutes(page: Page, options: VoiceMockOptions =
       ui: { voiceEnabled: true },
       tts: { provider: ttsProvider, voice: ttsVoice, speed: 1 },
       // The wake rows the tab resolves for this surface. Absent keys fall through to
-      // the SDK's shipped defaults, which is why an unseeded test never listens.
+      // the platform's shipped defaults, which is why an unseeded test never listens.
       voice: { wake: { ...wakeConfigState } },
     });
   });
@@ -271,9 +271,9 @@ export async function installVoiceRoutes(page: Page, options: VoiceMockOptions =
     const method = request.method();
     const path = new URL(request.url()).pathname;
 
-    // Managed local voice (voice.local.status / voice.local.install, SDK 1.9.0-dev).
+    // Managed local voice (voice.local.status / voice.local.install, platform 1.9.0-dev).
     // While an install POST is in flight, status carries the installInProgress
-    // section (SDK 5357f09e), present during, and only during, the active run,
+    // section (platform 5357f09e), present during, and only during, the active run,
     // exactly like the daemon's single-flight tracker.
     if (method === 'GET' && path === '/api/voice/local/status') {
       if (!voiceLocalState) return json(route, { error: 'Unknown gateway method', code: 'METHOD_NOT_FOUND' }, 404);
@@ -315,7 +315,7 @@ export async function installVoiceRoutes(page: Page, options: VoiceMockOptions =
           configured: p.configured,
           metadata: {},
         })),
-        note: 'Voice capture is intentionally external to the SDK host process.',
+        note: 'Voice capture is intentionally external to the platform host process.',
       });
     }
     if (method === 'GET' && path === '/api/voice/providers') {

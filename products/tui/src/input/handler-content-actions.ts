@@ -7,15 +7,15 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import '../utils/clipboard.ts';
 
 import type { ConversationManager } from '../core/conversation';
-import type { PermissionCategory } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import type { PermissionCategory } from '@goodvibes-jev/engine/platform/platform/permissions';
 
 import type { CommandContext } from './command-registry.ts';
 
-import { resolveAndValidatePath } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { analyzePermissionRequest } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import { resolveAndValidatePath } from '@goodvibes-jev/engine/platform/platform/utils';
+import { analyzePermissionRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
 
 
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 /** Expand folded text before either Main submission or an agent steer. */
 

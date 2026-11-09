@@ -10,8 +10,8 @@ import {
   resolveOperatorTokenPath,
   writeOperatorTokenFile,
   readOperatorTokenFile,
-} from '../sdk/src/platform/workspace/daemon-home.ts';
-import { WorkspaceSwapManager } from '../sdk/src/platform/workspace/workspace-swap-manager.ts';
+} from '../platform/src/platform/workspace/daemon-home.ts';
+import { WorkspaceSwapManager } from '../platform/src/platform/workspace/workspace-swap-manager.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -402,7 +402,7 @@ describe('WorkspaceSwapManager: edge cases', () => {
         emittedEvents.push({ domain, type: envelope.type });
       },
       on: () => () => {},
-    } as unknown as import('../sdk/src/platform/runtime/events/index.ts').RuntimeEventBus;
+    } as unknown as import('../platform/src/platform/runtime/events/index.ts').RuntimeEventBus;
 
     return new WorkspaceSwapManager(baseDir, {
       runtimeBus: mockBus,
@@ -489,7 +489,7 @@ describe('WorkspaceSwapManager: edge cases', () => {
         }
       },
       on: () => () => {},
-    } as unknown as import('../sdk/src/platform/runtime/events/index.ts').RuntimeEventBus;
+    } as unknown as import('../platform/src/platform/runtime/events/index.ts').RuntimeEventBus;
 
     const mgr = new WorkspaceSwapManager(baseDir, {
       runtimeBus: mockBus,

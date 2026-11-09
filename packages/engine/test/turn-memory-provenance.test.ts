@@ -13,12 +13,12 @@
  *     completion site) stamps the real runtime-bus envelope.
  */
 import { describe, expect, test } from 'bun:test';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import type { RuntimeEventEnvelope } from '../sdk/src/platform/runtime/events/index.js';
-import { emitTurnCompleted } from '../sdk/src/platform/runtime/emitters/turn.js';
-import { handleFinalResponseOutcome } from '../sdk/src/platform/core/orchestrator-turn-helpers.js';
-import { validateTurnCompleted } from '../sdk/src/events/contracts.js';
-import type { TurnEvent } from '../sdk/src/events/turn.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import type { RuntimeEventEnvelope } from '../platform/src/platform/runtime/events/index.js';
+import { emitTurnCompleted } from '../platform/src/platform/runtime/emitters/turn.js';
+import { handleFinalResponseOutcome } from '../platform/src/platform/core/orchestrator-turn-helpers.js';
+import { validateTurnCompleted } from '../platform/src/events/contracts.js';
+import type { TurnEvent } from '../platform/src/events/turn.js';
 
 type TurnCompleted = Extract<TurnEvent, { type: 'TURN_COMPLETED' }>;
 

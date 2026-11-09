@@ -1,4 +1,4 @@
-import { type Line, createEmptyLine } from '@goodvibes-jev/engine/sdk/platform/types';
+import { type Line, createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types';
 
 /**
  * InfiniteBuffer - Manages the complete conversation history as a list of lines.

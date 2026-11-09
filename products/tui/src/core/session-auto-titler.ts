@@ -8,10 +8,10 @@
  * never overwritten, and it runs at most once per session.
  */
 
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { createSessionTitleGenerator, type SessionTitleModel } from '@goodvibes-jev/engine/sdk/platform/sessions';
-export { sanitizeSessionTitle as sanitizeTitle } from '@goodvibes-jev/engine/sdk/platform/sessions';
+import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { createSessionTitleGenerator, type SessionTitleModel } from '@goodvibes-jev/engine/platform/platform/sessions';
+export { sanitizeSessionTitle as sanitizeTitle } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { readSessionSettings } from '../config/tui-extension-settings.ts';
 
 /** Minimal conversation surface the titler needs. */

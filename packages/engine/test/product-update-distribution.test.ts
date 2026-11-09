@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { workspaceProductUpdatePolicy } from '../sdk/src/platform/utils/product-identity.ts';
+import { workspaceProductUpdatePolicy } from '../platform/src/platform/utils/product-identity.ts';
 test('private monorepo manifests do not disable standalone compiled product updates', () => {
   const saved = process.execPath;
   try {

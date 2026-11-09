@@ -1,6 +1,6 @@
-import type { ConversationMessageSnapshot, TokenUsage } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { ContentPart } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { ToolCall } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { ConversationMessageSnapshot, TokenUsage } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -32,7 +32,7 @@ function readContent(value: unknown): string | ContentPart[] | null {
   return parts;
 }
 function readTokenUsage(value: unknown): TokenUsage | undefined {
-  // Preserve untrusted usage verbatim for the SDK fold's strict validation.
+  // Preserve untrusted usage verbatim for the platform fold's strict validation.
   // Dropping malformed fields would turn unknown billing into known zero.
   return value as TokenUsage;
 }

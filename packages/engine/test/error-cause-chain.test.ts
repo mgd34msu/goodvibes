@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { GoodVibesSdkError } from '../errors/src/index.js';
-import { AppError } from '../sdk/src/platform/types/errors.js';
+import { GoodVibesError } from '../errors/src/index.js';
+import { AppError } from '../platform/src/platform/types/errors.js';
 import {
   buildErrorResponseBody,
   normalizeError,
-} from '../sdk/src/platform/utils/error-display.js';
+} from '../platform/src/platform/utils/error-display.js';
 
 /**
  * Error cause chain, verifies that NormalizedError preserves all
@@ -47,8 +47,8 @@ describe('error cause chain', () => {
     expect(typeof result.recoverable).toBe('boolean');
   });
 
-  test('GoodVibesSdkError infers a better category from nested causes without an HTTP status', async () => {
-    const wrapped = new GoodVibesSdkError('middleware wrapper', {
+  test('GoodVibesError infers a better category from nested causes without an HTTP status', async () => {
+    const wrapped = new GoodVibesError('middleware wrapper', {
       cause: {
         originalError: {
           category: 'rate_limit',
@@ -61,11 +61,11 @@ describe('error cause chain', () => {
     expect(wrapped.kind).toBe('rate-limit');
   });
 
-  test('GoodVibesSdkError cause category inference is cycle-safe', async () => {
+  test('GoodVibesError cause category inference is cycle-safe', async () => {
     type RecursiveCause = { cause?: RecursiveCause };
     const loop: RecursiveCause = {};
     loop.cause = loop;
-    const wrapped = new GoodVibesSdkError('cyclic wrapper', { cause: loop });
+    const wrapped = new GoodVibesError('cyclic wrapper', { cause: loop });
 
     expect(wrapped.category).toBe('unknown');
     expect(wrapped.kind).toBe('unknown');

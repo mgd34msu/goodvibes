@@ -3,7 +3,7 @@ import {
   registerCompositeInboxSurface,
   type InboxSurfaceRegistration,
   type OwnedInboxSource,
-} from '@goodvibes-jev/engine/sdk/platform/intake';
+} from '@goodvibes-jev/engine/platform/platform/intake';
 import type { DaemonInboxFactory } from './daemon-handler-composition.js';
 
 export type DaemonInboxSourceFactory = (

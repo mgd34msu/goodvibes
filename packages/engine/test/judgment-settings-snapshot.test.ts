@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
 import { noul } from '@goodvibes-jev/judgment';
-import { createSettingsJudgmentPort, judgmentConfigFromSettings, type JudgmentSettingsSource } from '../sdk/src/platform/runtime/judgment-services.ts';
+import { createSettingsJudgmentPort, judgmentConfigFromSettings, type JudgmentSettingsSource } from '../platform/src/platform/runtime/judgment-services.ts';
 
 const request = { state: { fixture: 'settings reload' }, questions: { allowed: noul('Is this allowed?') }, context: { site: 'test.settings-reload' } };
 function fixture(keySource: 'env' | 'secret' = 'secret') {

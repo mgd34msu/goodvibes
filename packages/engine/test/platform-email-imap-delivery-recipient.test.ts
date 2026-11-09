@@ -12,7 +12,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { connect, createServer, type Server, type Socket } from 'node:net';
-import { ImapClient, type ImapEnvelope } from '../sdk/src/platform/email/imap-client.ts';
+import { ImapClient, type ImapEnvelope } from '../platform/src/platform/email/imap-client.ts';
 
 // ---------------------------------------------------------------------------
 // Fake server harness

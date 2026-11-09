@@ -20,17 +20,17 @@ import { randomUUID } from 'node:crypto';
 import {
   applyRecoverySnapshot,
   confirmRecoveryRestore,
-} from '../sdk/src/platform/runtime/recovery-snapshot-apply.ts';
-import type { ConversationTitleSource } from '../sdk/src/platform/core/conversation.ts';
+} from '../platform/src/platform/runtime/recovery-snapshot-apply.ts';
+import type { ConversationTitleSource } from '../platform/src/platform/core/conversation.ts';
 import {
   createSessionSurface,
   type SessionSurface,
-} from '../sdk/src/platform/runtime/session-surface.ts';
-import { writeRecoveryFile } from '../sdk/src/platform/runtime/session-recovery.ts';
+} from '../platform/src/platform/runtime/session-surface.ts';
+import { writeRecoveryFile } from '../platform/src/platform/runtime/session-recovery.ts';
 import {
   journalPathFor,
   openTranscriptJournal,
-} from '../sdk/src/platform/runtime/transcript-journal.ts';
+} from '../platform/src/platform/runtime/transcript-journal.ts';
 
 const roots: string[] = [];
 

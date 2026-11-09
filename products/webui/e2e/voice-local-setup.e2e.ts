@@ -1,6 +1,6 @@
 /**
  * Local voice setup, the one-act managed provisioning flow (voice.local.status /
- * voice.local.install, SDK 1.9.0-dev), proven end to end against the hermetic voice
+ * voice.local.install, platform 1.9.0-dev), proven end to end against the hermetic voice
  * mock inside the voice-settings popover:
  *   - unprovisioned -> a size-labeled "Set up local voice" action.
  *   - install -> the final receipt (per-engine outcomes + configured-vs-skipped keys)

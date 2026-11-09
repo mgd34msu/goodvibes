@@ -12,11 +12,11 @@ import { describe, expect, test } from 'bun:test';
 import {
   decideSandboxedExec,
   type SandboxPolicyDecision,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/permissions/sandbox-policy';
+} from '@goodvibes-jev/engine/platform/platform/runtime/permissions/sandbox-policy';
 import {
   detectSandboxAvailability,
   probeSandboxHost,
-} from '@goodvibes-jev/engine/sdk/platform/tools/exec/sandbox';
+} from '@goodvibes-jev/engine/platform/platform/tools/exec/sandbox';
 
 describe('sandbox policy public subpaths', () => {
   test('decideSandboxedExec is exported and relaxes a boundary-safe ask to an allow', () => {

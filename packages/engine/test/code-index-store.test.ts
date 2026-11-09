@@ -12,15 +12,15 @@ import { join } from 'node:path';
 import {
   CodeIndexStore,
   type CodeChunk,
-} from '../sdk/src/platform/state/code-index-store.js';
+} from '../platform/src/platform/state/code-index-store.js';
 import {
   MemoryEmbeddingProviderRegistry,
   embedMemoryText,
   type MemoryEmbeddingProvider,
-} from '../sdk/src/platform/state/memory-embeddings.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
+} from '../platform/src/platform/state/memory-embeddings.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { Database } from 'bun:sqlite';
-import { loadSqliteVecExtension } from '../sdk/src/platform/state/sqlite-vec-loader.js';
+import { loadSqliteVecExtension } from '../platform/src/platform/state/sqlite-vec-loader.js';
 
 const roots: string[] = [];
 

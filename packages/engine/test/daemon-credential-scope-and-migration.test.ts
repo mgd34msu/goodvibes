@@ -25,24 +25,24 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import { rmSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SecretsManager } from '../sdk/src/platform/config/secrets.ts';
+import { SecretsManager } from '../platform/src/platform/config/secrets.ts';
 import {
   resolveSecretWriteScope,
   secretWriteScopeWasOverridden,
-} from '../sdk/src/platform/config/secrets.ts';
+} from '../platform/src/platform/config/secrets.ts';
 import {
   CREDENTIAL_SCOPE_DECLARATIONS,
   describeCredentialScope,
   findCredentialScopeDeclaration,
   isDaemonNeededSecretKey,
-} from '../sdk/src/platform/config/credential-scope-registry.ts';
+} from '../platform/src/platform/config/credential-scope-registry.ts';
 import {
   buildCredentialMigrationReceipt,
   migrateDaemonNeededCredentials,
   type MigratableSecretStore,
-} from '../sdk/src/platform/config/daemon-credential-migration.ts';
-import { daemonSecretKeyFor } from '../sdk/src/platform/config/daemon-secret-keys.ts';
-import type { SecretRecord, SecretScope } from '../sdk/src/platform/config/secrets.ts';
+} from '../platform/src/platform/config/daemon-credential-migration.ts';
+import { daemonSecretKeyFor } from '../platform/src/platform/config/daemon-secret-keys.ts';
+import type { SecretRecord, SecretScope } from '../platform/src/platform/config/secrets.ts';
 
 /**
  * Every throwaway home this file creates, reaped when it finishes.

@@ -30,9 +30,9 @@ import {
   type NamedDecision,
 } from '@goodvibes-jev/judgment';
 import { failureReading } from '../errors/src/failure-reading.ts';
-import { analyzeDecisionLog, JUDGMENT_EVAL_SUITE, judgmentEvalScenarios } from '../sdk/src/platform/observe/index.ts';
-import { EvalRunner } from '../sdk/src/platform/runtime/eval/index.ts';
-import { decisionLogPath, openStateDecisionLog } from '../sdk/src/platform/state/decision-log.ts';
+import { analyzeDecisionLog, JUDGMENT_EVAL_SUITE, judgmentEvalScenarios } from '../platform/src/platform/observe/index.ts';
+import { EvalRunner } from '../platform/src/platform/runtime/eval/index.ts';
+import { decisionLogPath, openStateDecisionLog } from '../platform/src/platform/state/decision-log.ts';
 import { ENGINE_ROOT, loadEngineRegistries } from './judgment-registries.ts';
 import { prepareObserveProofWorkspace, retainProofOutput } from './proof-temp.ts';
 import { unregisteredProbe } from './fixtures/observe-unregistered.ts';

@@ -1,5 +1,5 @@
 /** Consumer-vantage pin for the host-only intake public package subpath. */
-import { InboxCursorStore, InboundPoller, buildAdapters, type AdapterContext, type InboundChannelItem, type InboxQuery, type IntakeCredentialStore, type ProviderPollOptions } from '@goodvibes-jev/engine/sdk/platform/intake';
+import { InboxCursorStore, InboundPoller, buildAdapters, type AdapterContext, type InboundChannelItem, type InboxQuery, type IntakeCredentialStore, type ProviderPollOptions } from '@goodvibes-jev/engine/platform/platform/intake';
 
 declare const credentials: IntakeCredentialStore;
 declare const context: AdapterContext;

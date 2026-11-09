@@ -5,11 +5,11 @@ import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { upsertObservedKnowledgeNode } from '../sdk/src/platform/knowledge/store-node-observation.js';
-import { SQLiteStore } from '../sdk/src/platform/state/sqlite-store.js';
-import { canonicalRepairSubjectNodes } from '../sdk/src/platform/knowledge/semantic/repair-subjects.js';
-import { prepareRepairSourceAuthorities } from '../sdk/src/platform/knowledge/semantic/repair-fact-selection.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { upsertObservedKnowledgeNode } from '../platform/src/platform/knowledge/store-node-observation.js';
+import { SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
+import { canonicalRepairSubjectNodes } from '../platform/src/platform/knowledge/semantic/repair-subjects.js';
+import { prepareRepairSourceAuthorities } from '../platform/src/platform/knowledge/semantic/repair-fact-selection.js';
 
 const roots: string[] = [], stores: KnowledgeStore[] = [];
 let previous: JudgmentPort | undefined;

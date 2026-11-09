@@ -8,8 +8,8 @@ messages surfaced through `conversation.followup.companion` and the runtime
 
 A companion process may inject a message into the operator's live session
 without spawning agent work or starting a contract. This is called a companion main-chat
-message. The SDK routes these through `POST /api/sessions/:sessionId/messages`
-with `kind: 'message'` in the request body. If `kind` is omitted, the SDK now
+message. The platform routes these through `POST /api/sessions/:sessionId/messages`
+with `kind: 'message'` in the request body. If `kind` is omitted, the platform now
 uses the same conversation route. Callers that want agent/task behavior must
 send `kind: 'task'` explicitly.
 
@@ -86,7 +86,7 @@ bus and handle it as follows:
 ```ts
 // NOTE: runtimeBus and orchestrator are TUI host internals; this pattern applies to
 // embedders running the full daemon surface. Companion apps receive messages through
-// the realtime event feed (sdk.realtime); they do not subscribe to runtimeBus directly.
+// the realtime event feed (platformClient.realtime); they do not subscribe to runtimeBus directly.
 runtimeBus.on('COMPANION_MESSAGE_RECEIVED', ({ payload }) => {
   if (payload.sessionId !== activeSessionId) return;
   void orchestrator.handleUserInput(payload.body, undefined, {
@@ -110,10 +110,10 @@ runtime session id.
 
 ## ntfy chat replies
 
-The `goodvibes-chat` ntfy route uses this same companion message path. The SDK
+The `goodvibes-chat` ntfy route uses this same companion message path. The platform
 queues a one-shot ntfy reply target before emitting `COMPANION_MESSAGE_RECEIVED`.
 To make reply correlation durable, TUI clients should pass
-`payload.messageId` into `handleUserInput()` as `origin.messageId`; the SDK then
+`payload.messageId` into `handleUserInput()` as `origin.messageId`; the platform then
 matches `TURN_SUBMITTED` and `TURN_COMPLETED` by message id and publishes only
 the matching model response back to the originating ntfy topic.
 

@@ -4,11 +4,11 @@ import {
   ImapStoreError,
   imapStoreFlagOverTls,
   makeRetryingImapStoreFlag,
-} from '../sdk/src/platform/intake/triage/tagger/imap.ts';
+} from '../platform/src/platform/intake/triage/tagger/imap.ts';
 import type {
   ImapConnect,
   ImapSocketLike,
-} from '../sdk/src/platform/intake/triage/tagger/imap.ts';
+} from '../platform/src/platform/intake/triage/tagger/imap.ts';
 
 const BASE = {
   host: 'imap.example.test',

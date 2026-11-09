@@ -17,13 +17,13 @@ import { describe, test, expect } from 'bun:test';
 import { mkdtempSync, rmSync, readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SecretsManager } from '../sdk/src/platform/config/secrets.js';
-import { daemonSecretKeyFor } from '../sdk/src/platform/config/daemon-secret-keys.js';
+import { SecretsManager } from '../platform/src/platform/config/secrets.js';
+import { daemonSecretKeyFor } from '../platform/src/platform/config/daemon-secret-keys.js';
 import {
   DAEMON_OWNED_CONFIG_PREFIXES,
   isDaemonOwnedConfigKey,
-} from '../sdk/src/platform/config/config-ownership.js';
-import { CONFIG_SCHEMA, DEFAULT_CONFIG } from '../sdk/src/platform/config/schema.js';
+} from '../platform/src/platform/config/config-ownership.js';
+import { CONFIG_SCHEMA, DEFAULT_CONFIG } from '../platform/src/platform/config/schema.js';
 
 /** Obviously fake fixtures. No real card material appears in this repository. */
 const FIXTURE_PAN = '4242424242424242';
@@ -133,7 +133,7 @@ describe('the payments module never emits card material', () => {
   test('no payments source file logs, renders, or serializes a cvv field', async () => {
     const { Glob } = await import('bun');
     const glob = new Glob('*.ts');
-    const dir = new URL('../sdk/src/platform/payments/', import.meta.url).pathname;
+    const dir = new URL('../platform/src/platform/payments/', import.meta.url).pathname;
 
     const offenders: string[] = [];
     for await (const file of glob.scan({ cwd: dir })) {
@@ -171,7 +171,7 @@ describe('the payments module never emits card material', () => {
   });
 
   test('the modules that DO hold card material cannot log, serialize or echo it', async () => {
-    const dir = new URL('../sdk/src/platform/payments/', import.meta.url).pathname;
+    const dir = new URL('../platform/src/platform/payments/', import.meta.url).pathname;
     for (const file of ['card-material.ts', 'card-redaction.ts', 'fill-card.ts', 'payments-gateway-service.ts']) {
       const text = await Bun.file(`${dir}${file}`).text();
       const code = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
@@ -196,7 +196,7 @@ describe('the payments module never emits card material', () => {
 
   test('the facts a prompt is rendered from carry last4 only', async () => {
     const source = await Bun.file(
-      new URL('../sdk/src/platform/payments/message.ts', import.meta.url),
+      new URL('../platform/src/platform/payments/message.ts', import.meta.url),
     ).text();
     // PurchaseFacts is the complete set of fields a prompt can show. It exposes
     // cardLast4 and nothing else about the instrument.
@@ -206,7 +206,7 @@ describe('the payments module never emits card material', () => {
 
   test('card metadata exposed to surfaces has no material fields', async () => {
     const source = await Bun.file(
-      new URL('../sdk/src/platform/payments/types.ts', import.meta.url),
+      new URL('../platform/src/platform/payments/types.ts', import.meta.url),
     ).text();
     const metadataBlock = source.slice(
       source.indexOf('export interface CardMetadata'),
@@ -221,7 +221,7 @@ describe('the payments module never emits card material', () => {
 describe('the prompt trade-off is stated where the switch is flipped', () => {
   test('the shared warning names the actual consequence', async () => {
     const { CVV_PROMPT_TRADEOFF_WARNING } = await import(
-      '../sdk/src/platform/payments/index.js'
+      '../platform/src/platform/payments/index.js'
     );
     // Surfaces render this string rather than writing their own, so the wording
     // cannot drift between the TUI, the agent and the webui.
@@ -241,7 +241,7 @@ describe('the fixture values themselves are never committed anywhere real', () =
   test('the fake PAN appears only in tests', async () => {
     const { Glob } = await import('bun');
     const glob = new Glob('**/*.ts');
-    const dir = new URL('../sdk/src/platform/', import.meta.url).pathname;
+    const dir = new URL('../platform/src/platform/', import.meta.url).pathname;
     const offenders: string[] = [];
     for await (const file of glob.scan({ cwd: dir })) {
       const text = await Bun.file(`${dir}${file}`).text();

@@ -1,7 +1,7 @@
 /**
  * useCompactionReceipts, scoped-to-one-session compaction stream.
  *
- * Mirrors useSessionRealtime.test.tsx's harness (mock sdk.streams.open, capture
+ * Mirrors useSessionRealtime.test.tsx's harness (mock platform.streams.open, capture
  * the registered handlers, drive them by hand) since this hook follows the same
  * raw-stream-escape-hatch pattern rather than the invalidate-only viaSse facade.
  */
@@ -17,7 +17,7 @@ const openCalls: string[] = [];
 
 mock.module('../lib/goodvibes', () => ({
   DEFAULT_SSE_RECONNECT: { enabled: true, baseDelayMs: 1, maxDelayMs: 2, backoffFactor: 2, maxAttempts: 3 },
-  sdk: {
+  client: {
     streams: {
       open: (pathOrUrl: string, handlers: ServerSentEventHandlers) => {
         openCalls.push(pathOrUrl);

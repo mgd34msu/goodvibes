@@ -2,8 +2,8 @@ import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-c
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { DaemonServer } from '@goodvibes-jev/engine/sdk/platform/daemon';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { DaemonServer } from '@goodvibes-jev/engine/platform/platform/daemon';
 import { RuntimeEventBus, createEventEnvelope, type AgentEvent } from '@/runtime/index.ts';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
 import { createDirectTransport } from '@/runtime/index.ts';
@@ -12,7 +12,7 @@ import { createRealtimeTransport } from '@/runtime/index.ts';
 import { createAuthenticatedWebSocket } from '../helpers/authenticated-websocket.ts';
 import { createRuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
-import { UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
+import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 type TransportKind = 'direct' | 'http' | 'realtime';

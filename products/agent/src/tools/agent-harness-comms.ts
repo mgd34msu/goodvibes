@@ -1,6 +1,6 @@
 import type { CommandContext } from '../input/command-registry.ts';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogData, captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 import { dirname } from 'node:path';
 import { readFileSync } from 'node:fs';

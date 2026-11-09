@@ -32,7 +32,7 @@
       "version": "3.1.2",
       "bin": {
         "goodvibes-toolchain": "./toolchain/dist/bin/toolchain.js",
-        "goodvibes-sdk-pin-gate": "./toolchain/dist/bin/sdk-pin-gate.js",
+        "goodvibes-platform-pin-gate": "./toolchain/dist/bin/sdk-pin-gate.js",
         "goodvibes-build-binaries": "./toolchain/dist/bin/build-binaries.js",
         "goodvibes-release-cut": "./toolchain/dist/bin/release-cut.js",
         "goodvibes-coverage-gate": "./toolchain/dist/bin/coverage-gate.js",
@@ -44,7 +44,7 @@
         "goodvibes-changelog-gate": "./toolchain/dist/bin/changelog-gate.js",
         "goodvibes-sha256sums": "./toolchain/dist/bin/sha256sums.js",
         "goodvibes-train-status": "./toolchain/dist/bin/train-status.js",
-        "goodvibes-contract": "./sdk/dist/bin/goodvibes-contract.js",
+        "goodvibes-contract": "./platform/dist/bin/goodvibes-contract.js",
       },
       "dependencies": {
         "@goodvibes-jev/judgment": "workspace:*",

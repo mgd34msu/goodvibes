@@ -11,7 +11,7 @@
  * (no network, no store write, no activity line).
  *
  * Bounded: only feeds actually DUE per their per-subscription refresh interval
- * are fetched (`force: false`, the SDK store skips the rest without network),
+ * are fetched (`force: false`, the platform store skips the rest without network),
  * and due fetches send stored etag/last-modified validators so an unchanged
  * feed costs one conditional 304 round trip.
  *
@@ -25,7 +25,7 @@
  * last-good cached events, and /calendar subscriptions still shows the honest
  * per-feed health (unreachable / parse-error / stale with age).
  */
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ShellPathService } from '@/runtime/index.ts';
 import {
   CalendarSubscriptionRegistry,

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { SharedSessionBroker } from '../sdk/src/platform/control-plane/session-broker.ts';
-import { PersistentStore } from '../sdk/src/platform/state/persistent-store.ts';
-import { RouteBindingManager } from '../sdk/src/platform/channels/index.ts';
+import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.ts';
+import { PersistentStore } from '../platform/src/platform/state/persistent-store.ts';
+import { RouteBindingManager } from '../platform/src/platform/channels/index.ts';
 import { trackDisposables } from './_helpers/disposables.ts';
 
 const disposables = trackDisposables();

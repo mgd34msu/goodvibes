@@ -71,7 +71,7 @@ export const KNOWN_TMPDIR_PREFIXES: readonly string[] = [
   'gv-agent-test-run-',
   // Historical / legacy, see the comment above.
   'accounts-tool-',
-  'agent-sdk-dev-',
+  'agent-engine-dev-',
   'agent-shutdown-home-',
   'agent-shutdown-wiring-',
   'agent-shutdown-work-',
@@ -353,7 +353,7 @@ export const KNOWN_TMPDIR_PREFIXES: readonly string[] = [
   'gv-remote-artifacts-',
   'gv-replay-root-',
   'gv-routine-schedule-receipts-',
-  'gv-sdk-gate-',
+  'gv-engine-gate-',
   'gv-session-intents-',
   'gv-session-orch-',
   'gv-settings-list-flags-',

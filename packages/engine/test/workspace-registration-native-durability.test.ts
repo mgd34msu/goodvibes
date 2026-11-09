@@ -2,9 +2,9 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { promises as fs, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { PersistentStore } from '../sdk/src/platform/state/persistent-store.ts';
-import { WorkspaceRegistrationStore } from '../sdk/src/platform/workspace/registration/store.ts';
-import * as atomic from '../sdk/src/platform/utils/atomic-json-store.ts';
+import { PersistentStore } from '../platform/src/platform/state/persistent-store.ts';
+import { WorkspaceRegistrationStore } from '../platform/src/platform/workspace/registration/store.ts';
+import * as atomic from '../platform/src/platform/utils/atomic-json-store.ts';
 
 const owned: string[] = [];
 afterEach(() => { for (const path of owned.splice(0)) rmSync(path, { recursive: true, force: true }); });

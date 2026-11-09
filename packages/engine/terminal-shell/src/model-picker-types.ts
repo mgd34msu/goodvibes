@@ -1,5 +1,5 @@
-import { modelFamilyReadings, type ModelFamily } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { modelFamilyReadings, type ModelFamily } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
 export type PickerMode = 'model' | 'provider' | 'effort' | 'contextCap' | 'embeddingProvider';
 /**
  * Which config keys the model picker writes to on commit.

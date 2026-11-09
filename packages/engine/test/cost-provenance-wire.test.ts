@@ -13,14 +13,14 @@ import { describe, expect, test } from 'bun:test';
 import {
   CostAttributionService,
   type ResolvePricing,
-} from '../sdk/src/platform/runtime/cost/attribution.ts';
-import { QuotaWindowTracker } from '../sdk/src/platform/runtime/cost/quota-window.ts';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { registerCostGatewayMethods } from '../sdk/src/platform/control-plane/routes/cost.ts';
-import { getProviderUsageSnapshot } from '../sdk/src/platform/providers/runtime-snapshot.ts';
-import { mergeCostSource, mergePricingAsOf, mergeWorkItemUsage, emptyWorkItemUsage } from '../sdk/src/platform/orchestration/types.ts';
-import { adaptAgent, type AgentAdapterContext } from '../sdk/src/platform/runtime/fleet/adapters/agent.ts';
-import type { AgentRecord } from '../sdk/src/platform/tools/agent/index.ts';
+} from '../platform/src/platform/runtime/cost/attribution.ts';
+import { QuotaWindowTracker } from '../platform/src/platform/runtime/cost/quota-window.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { registerCostGatewayMethods } from '../platform/src/platform/control-plane/routes/cost.ts';
+import { getProviderUsageSnapshot } from '../platform/src/platform/providers/runtime-snapshot.ts';
+import { mergeCostSource, mergePricingAsOf, mergeWorkItemUsage, emptyWorkItemUsage } from '../platform/src/platform/orchestration/types.ts';
+import { adaptAgent, type AgentAdapterContext } from '../platform/src/platform/runtime/fleet/adapters/agent.ts';
+import type { AgentRecord } from '../platform/src/platform/tools/agent/index.ts';
 
 const ctx = { context: { admin: true } } as const;
 

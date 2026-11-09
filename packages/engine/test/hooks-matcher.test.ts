@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { matchesEventPath, matchesMatcher } from '@goodvibes-jev/engine/sdk/platform/hooks';
+import { matchesEventPath, matchesMatcher } from '@goodvibes-jev/engine/platform/platform/hooks';
 
 describe('matchesEventPath', () => {
   describe('exact matching', () => {

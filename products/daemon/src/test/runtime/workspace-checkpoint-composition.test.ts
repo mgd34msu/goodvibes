@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { WorkspaceRegistrationStore } from '@goodvibes-jev/engine/sdk/platform/workspace';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { WorkspaceRegistrationStore } from '@goodvibes-jev/engine/platform/platform/workspace';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createSessionSurface, RuntimeEventBus } from '../../runtime/index.js';
 import { createWorkspaceCheckpointing } from '../../runtime/workspace-checkpointing.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';

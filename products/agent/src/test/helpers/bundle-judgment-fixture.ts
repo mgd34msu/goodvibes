@@ -1,4 +1,4 @@
-import { CONFIG_SCHEMA, isDeclaredSecretBearingConfigKey, type ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { CONFIG_SCHEMA, isDeclaredSecretBearingConfigKey, type ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 
 const paths = new Set(CONFIG_SCHEMA.flatMap(setting => setting.key.split('.').map((_, i, parts) => parts.slice(0, i + 1).join('.'))));
 const fields = new Set([...paths].flatMap(path => path.split('.')));

@@ -4,7 +4,7 @@ import { makeTestWebhookNotifier, settleTestWebhookNotifications } from '../help
  *
  * "notifications need to be a bit better. they work but don't convey any
  * useful information ... it should provide a summarized name for the turn"
- * Privacy admission follows the current public SDK helper: explicit false only.
+ * Privacy admission follows the current public platform helper: explicit false only.
  *
  * Every channel the TUI sends on is driven here through the real wiring and
  * read back: the desktop popup (the injected notifyDesktop), the in-terminal
@@ -17,8 +17,8 @@ import { makeTestWebhookNotifier, settleTestWebhookNotifications } from '../help
 import { describe, expect, mock, test } from 'bun:test';
 import { wireTurnEventHandlers, type WireTurnEventHandlersOptions } from '../../core/turn-event-wiring.ts';
 import { wrapRequestPermissionWithAlert } from '../../core/approval-alert.ts';
-import type { PermissionPromptRequest } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import { FocusTracker } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import type { PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { makeTestSurface } from '../helpers/session-surface.ts';
 
 const ASK = 'Refactor the authentication middleware so expired sessions redirect to the login page instead of throwing a 500 error';

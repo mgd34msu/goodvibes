@@ -2,8 +2,8 @@ import { copyToClipboard } from './clipboard.js';
 import type { InfiniteBuffer } from './conversation-history.js';
 import type { TerminalConversationManager, BlockMeta } from './terminal-conversation.js';
 import type { SelectionManager } from './text-selection.js';
-import type { BookmarkManager } from '@goodvibes-jev/engine/sdk/platform/bookmarks';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { BookmarkManager } from '@goodvibes-jev/engine/platform/platform/bookmarks';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { activeTokens } from './renderer/theme.js';
 import { describeBlockForReceipt } from './block-description.js';
 export function createBlockContentActions(policy: {

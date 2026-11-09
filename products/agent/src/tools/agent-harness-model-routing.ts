@@ -1,5 +1,5 @@
 import { arch, cpus, freemem, platform, totalmem } from 'node:os';
-import type { ArtifactDescriptor } from '@goodvibes-jev/engine/sdk/platform/artifacts';
+import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { requireProviderApi } from '../input/commands/runtime-services.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
@@ -219,7 +219,7 @@ async function describeRoute(route: RouteCandidate, options: { readonly context:
 function compactProviderHealthSignal(signal: ModelProviderHealthSignal): Record<string, unknown> {
   return {
     status: signal.status,
-    sdkContract: signal.sdkContract,
+    engineContract: signal.engineContract,
     daemonPublication: signal.daemonPublication,
     agentConsumption: signal.agentConsumption,
     ...(signal.healthStatus ? { healthStatus: signal.healthStatus } : {}),

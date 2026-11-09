@@ -2,7 +2,7 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { applyRuntimeConfigValue } from '@goodvibes-jev/engine/terminal-shell';
-import * as pairing from '@goodvibes-jev/engine/sdk/platform/pairing';
+import * as pairing from '@goodvibes-jev/engine/platform/platform/pairing';
 import * as reconcile from '../../runtime/legacy-daemon-reconcile.js';
 import { createDaemonCliConfiguration } from '../../cli/configuration.js';
 import { persistDaemonStartupPublicUrl, pruneDaemonStartupTokens, reconcileDaemonStartup } from '../../cli/startup-maintenance.js';

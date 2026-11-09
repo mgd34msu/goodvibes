@@ -3,7 +3,7 @@ import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { makeHarness, makeRepo, oneUnitPlan } from './contract/runner-support.js';
 import { makeContract, makeGroup } from './contract/fixtures.js';
-import { registerHostRuntimeEvents, runtimeEventKey, runtimeEventOfNotice, type RuntimeEventProvenance } from '../sdk/src/platform/runtime/bootstrap-runtime-events.js';
+import { registerHostRuntimeEvents, runtimeEventKey, runtimeEventOfNotice, type RuntimeEventProvenance } from '../platform/src/platform/runtime/bootstrap-runtime-events.js';
 import { waitFor } from './_helpers/test-timeout.js';
 
 for (const type of ['CONTRACT_FAILED', 'CONTRACT_CANCELLED', 'CONTRACT_PASSED', 'CONTRACT_COMMITTED'] as const) {

@@ -17,12 +17,12 @@
  */
 
 import { describe, expect, test, beforeEach } from 'bun:test';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
-import { AgentTaskAdapter } from '../sdk/src/platform/runtime/tasks/adapters/agent-adapter.js';
-import { createRuntimeStore } from '../sdk/src/platform/runtime/store/index.js';
-import type { RuntimeStore } from '../sdk/src/platform/runtime/store/index.js';
-import { createEventEnvelope } from '../sdk/src/platform/runtime/events/index.js';
-import type { AgentEvent } from '../sdk/src/events/agents.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { AgentTaskAdapter } from '../platform/src/platform/runtime/tasks/adapters/agent-adapter.js';
+import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.js';
+import type { RuntimeStore } from '../platform/src/platform/runtime/store/index.js';
+import { createEventEnvelope } from '../platform/src/platform/runtime/events/index.js';
+import type { AgentEvent } from '../platform/src/events/agents.js';
 import { settleEvents } from './_helpers/test-timeout.js';
 import { trackDisposables } from './_helpers/disposables.ts';
 
@@ -127,13 +127,13 @@ describe('AgentTaskAdapter.attachRuntimeBus: task registry sync', () => {
 // SharedSessionBroker, input record reconciliation via RuntimeEventBus
 // ---------------------------------------------------------------------------
 
-import type { SharedSessionRecord, SharedSessionMessage } from '../sdk/src/platform/control-plane/session-types.js';
-import type { SharedSessionInputRecord } from '../sdk/src/platform/control-plane/session-intents.js';
-import { SharedSessionBroker } from '../sdk/src/platform/control-plane/session-broker.js';
-import { finalizeAgentSessionInputs } from '../sdk/src/platform/control-plane/session-broker-inputs.js';
-import type { SharedSessionStoreSnapshot, SharedSessionEventPublisher } from '../sdk/src/platform/control-plane/session-broker-helpers.js';
-import type { PersistentStore } from '../sdk/src/platform/state/persistent-store.js';
-import type { RouteBindingManager } from '../sdk/src/platform/channels/route-manager.js';
+import type { SharedSessionRecord, SharedSessionMessage } from '../platform/src/platform/control-plane/session-types.js';
+import type { SharedSessionInputRecord } from '../platform/src/platform/control-plane/session-intents.js';
+import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.js';
+import { finalizeAgentSessionInputs } from '../platform/src/platform/control-plane/session-broker-inputs.js';
+import type { SharedSessionStoreSnapshot, SharedSessionEventPublisher } from '../platform/src/platform/control-plane/session-broker-helpers.js';
+import type { PersistentStore } from '../platform/src/platform/state/persistent-store.js';
+import type { RouteBindingManager } from '../platform/src/platform/channels/route-manager.js';
 
 /** Minimal in-memory PersistentStore stub (matches PersistentStore<T> API: load + persist) */
 function makePersistentStoreStub(): PersistentStore<SharedSessionStoreSnapshot> {

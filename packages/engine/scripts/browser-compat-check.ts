@@ -3,24 +3,24 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SDK_ROOT = resolve(__dirname, '..');
+const ENGINE_ROOT = resolve(__dirname, '..');
 
 const runtimeNeutralEntries = [
   'contracts/dist/index.js',
   'errors/dist/index.js',
-  'operator-sdk/dist/index.js',
-  'peer-sdk/dist/index.js',
-  'sdk/dist/index.js',
-  'sdk/dist/browser.js',
-  'sdk/dist/browser-homeassistant.js',
-  'sdk/dist/browser-knowledge.js',
-  'sdk/dist/browser-decision-router.js',
-  'sdk/dist/platform/gate/presets.js',
-  'sdk/dist/platform/channels/telegram/cursor-migration-data.js',
-  'sdk/dist/react-native.js',
-  'sdk/dist/expo.js',
+  'operator-client/dist/index.js',
+  'peer-client/dist/index.js',
+  'platform/dist/index.js',
+  'platform/dist/browser.js',
+  'platform/dist/browser-homeassistant.js',
+  'platform/dist/browser-knowledge.js',
+  'platform/dist/browser-decision-router.js',
+  'platform/dist/platform/gate/presets.js',
+  'platform/dist/platform/channels/telegram/cursor-migration-data.js',
+  'platform/dist/react-native.js',
+  'platform/dist/expo.js',
   // /auth subpath is used by RN consumers for token helpers, must be node:-free
-  'sdk/dist/auth.js',
+  'platform/dist/auth.js',
   'transport-core/dist/index.js',
   'transport-http/dist/index.js',
   'transport-realtime/dist/index.js',
@@ -34,7 +34,7 @@ const disallowedPatterns = [
 ];
 
 for (const relativePath of runtimeNeutralEntries) {
-  const content = readFileSync(resolve(SDK_ROOT, relativePath), 'utf8');
+  const content = readFileSync(resolve(ENGINE_ROOT, relativePath), 'utf8');
   for (const pattern of disallowedPatterns) {
     if (pattern.test(content)) {
       throw new Error(`Runtime-neutral entry leaked a Node-only import: ${relativePath}`);

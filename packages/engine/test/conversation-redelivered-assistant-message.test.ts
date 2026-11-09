@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { ConversationManager } from '../sdk/src/platform/core/conversation.ts';
+import { ConversationManager } from '../platform/src/platform/core/conversation.ts';
 
 // The defect this pins: the recovery journal recorded the SAME final assistant
 // message for one turn twice, same content, same usage. Cause: a hosted

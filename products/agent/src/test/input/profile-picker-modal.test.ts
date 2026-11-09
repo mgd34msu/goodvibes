@@ -5,8 +5,8 @@ import { describe, test, expect, beforeEach, afterEach, spyOn } from 'bun:test';
 import { rmSync, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { ProfilePickerModal } from '../../input/profile-picker-modal.ts';
-import { ProfileManager } from '@goodvibes-jev/engine/sdk/platform/profiles';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ProfileManager } from '@goodvibes-jev/engine/platform/platform/profiles';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 // ---------------------------------------------------------------------------

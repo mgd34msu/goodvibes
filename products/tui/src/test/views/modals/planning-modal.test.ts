@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import type { ProjectPlanningState, ProjectPlanningStatus } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import type { ProjectPlanningState, ProjectPlanningStatus } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { createPlanningModalSurface, type PlanningModalService } from '../../../views/modals/planning-modal.ts';
 import { ConfigModal } from '../../../input/config-modal.ts';
 import { actionCtx, tabText } from './modal-surface-test-helpers.ts';

@@ -3,7 +3,7 @@ import {
   createDaemonCredentialStore,
   type AtRestCipher,
   type DaemonCredentialStore,
-} from '@goodvibes-jev/engine/sdk/platform/config';
+} from '@goodvibes-jev/engine/platform/platform/config';
 
 const credentials: DaemonCredentialStore = createDaemonCredentialStore({
   async get(_key: string): Promise<string | null> { return null; },

@@ -4,7 +4,7 @@
  * Keyed by type, so a type added to the union without a sample does not
  * compile.
  */
-import { CONTRACT_EVENT_TYPES, type ContractEvent, type ContractEventType } from '../../sdk/src/events/index.js';
+import { CONTRACT_EVENT_TYPES, type ContractEvent, type ContractEventType } from '../../platform/src/events/index.js';
 
 export const CTR = 'ctr-0a1b2c3d';
 const shape = { verdict: 'no', probability: 0.08, outcome: 'act' } as const;

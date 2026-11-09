@@ -30,11 +30,11 @@ afterEach(() => { installJudgmentPort(previousImapPort); });
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { classifyLocalFailure } from '../sdk/src/platform/email/inbound/capability.ts';
-import { MailboxCursorStore } from '../sdk/src/platform/email/inbound/cursor-store.ts';
-import { InboundMailHousekeeper } from '../sdk/src/platform/email/inbound/housekeeping.ts';
-import { InboundMailStore } from '../sdk/src/platform/email/inbound/record-store.ts';
-import { PersistedExpectationStore } from '../sdk/src/platform/email/inbound/expectation-store.ts';
+import { classifyLocalFailure } from '../platform/src/platform/email/inbound/capability.ts';
+import { MailboxCursorStore } from '../platform/src/platform/email/inbound/cursor-store.ts';
+import { InboundMailHousekeeper } from '../platform/src/platform/email/inbound/housekeeping.ts';
+import { InboundMailStore } from '../platform/src/platform/email/inbound/record-store.ts';
+import { PersistedExpectationStore } from '../platform/src/platform/email/inbound/expectation-store.ts';
 
 const NOW = new Date('2026-07-27T12:00:00.000Z');
 

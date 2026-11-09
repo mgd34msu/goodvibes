@@ -1,6 +1,6 @@
-import type { GoodVibesConfig, SecretRecord, SecretStorageReview } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { LocalAuthSnapshot } from '@goodvibes-jev/engine/sdk/platform/security';
-import type { SubscriptionAccessQuery } from '@goodvibes-jev/engine/sdk/platform/runtime/ui';
+import type { GoodVibesConfig, SecretRecord, SecretStorageReview } from '@goodvibes-jev/engine/platform/platform/config';
+import type { LocalAuthSnapshot } from '@goodvibes-jev/engine/platform/platform/security';
+import type { SubscriptionAccessQuery } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
 export type OnboardingNetworkMode = 'local-network-default' | 'custom';
 export type OnboardingAcknowledgementReason =
   | 'not-needed'

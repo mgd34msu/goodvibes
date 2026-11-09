@@ -5,8 +5,8 @@ import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/test
 import {
   decideNativeIntake, NATIVE_INTAKE_COVERAGE_SITE, NATIVE_INTAKE_DECISION_SITE, NATIVE_INTAKE_ROUTE_SITE,
   readNativeIntakeRoute, validateNativeRequirementProposal, type NativeIntakeReadInput,
-} from '../sdk/src/platform/workflow/work-ledger/native-intake-decisions.js';
-import { requestRoute } from '../sdk/src/platform/contract/batteries/request-route.js';
+} from '../platform/src/platform/workflow/work-ledger/native-intake-decisions.js';
+import { requestRoute } from '../platform/src/platform/contract/batteries/request-route.js';
 
 const binding = { sourceId: 'source', inputRevision: 'source-1', actionId: 'intake', actionRevision: 'routing-1', authorityId: 'owner', authorityRevision: 'authority-1', scopeId: 'project', scopeRevision: 'scope-1',
 };

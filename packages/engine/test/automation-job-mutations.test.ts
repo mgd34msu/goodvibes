@@ -1,10 +1,10 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, promises as fs, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { PersistentStore } from '../sdk/src/platform/state/persistent-store.js';
-import { AutomationJobCommitIndeterminateError, AutomationJobMutationStaleError } from '../sdk/src/platform/automation/job-mutations.js';
-import { AutomationJobStore } from '../sdk/src/platform/automation/store/jobs.js';
-import type { MutationPublication } from '../sdk/src/platform/utils/file-mutation.js';
+import { PersistentStore } from '../platform/src/platform/state/persistent-store.js';
+import { AutomationJobCommitIndeterminateError, AutomationJobMutationStaleError } from '../platform/src/platform/automation/job-mutations.js';
+import { AutomationJobStore } from '../platform/src/platform/automation/store/jobs.js';
+import type { MutationPublication } from '../platform/src/platform/utils/file-mutation.js';
 import { automationMutationFixture, managedAutomationJob } from './_helpers/automation-mutation-fixture.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 

@@ -2,7 +2,7 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { parse, resolve } from 'node:path';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { writeStoreJson } from '@/utils/store-file.ts';
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import {
   WorkspaceRegistrationStore,
   withWorkspaceRegistrationWriteLockSync,
@@ -15,21 +15,21 @@ import {
   type WorkspaceCoverageStatus,
   type WorkspaceGitMetadata,
   type WorkspaceResolution,
-} from '@goodvibes-jev/engine/sdk/platform/workspace';
+} from '@goodvibes-jev/engine/platform/platform/workspace';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.ts';
 import {
   legacyWorkspaceRegisterPath,
   resolveWorkspaceRegisterReadPath,
   sharedWorkspaceRegisterPath,
-} from '@goodvibes-jev/engine/sdk/platform/workspace';
+} from '@goodvibes-jev/engine/platform/platform/workspace';
 
-export { normalizeWorkspaceRoot } from '@goodvibes-jev/engine/sdk/platform/workspace';
+export { normalizeWorkspaceRoot } from '@goodvibes-jev/engine/platform/platform/workspace';
 export type {
   DeclinedWorkspaceRecord,
   RegisteredWorkspaceRecord,
   WorkspaceCoverageStatus,
   WorkspaceResolution,
-} from '@goodvibes-jev/engine/sdk/platform/workspace';
+} from '@goodvibes-jev/engine/platform/platform/workspace';
 
 /**
  * CHECKPOINT-ELIGIBILITY BOUNDARY (owner ruling: the checkpoint boundary stays
@@ -43,7 +43,7 @@ export type {
  * checkpoint boundary must therefore consume ONLY records the owner EXPLICITLY
  * registered for checkpoints, marked by `checkpointEligible === true`.
  *
- * The SDK record schema natively carries both fields (typed on
+ * The platform record schema natively carries both fields (typed on
  * {@link RegisteredWorkspaceRecord}): `origin`, which flow wrote/stamped the
  * record, provenance only, and `checkpointEligible`, where ABSENT MEANS FALSE.
  * The store's `add` stamps/upgrades them typed, and absent options never strip
@@ -53,7 +53,7 @@ export type {
 export const AGENT_EXPLICIT_REGISTRATION_ORIGIN = 'agent-explicit-registration';
 
 /**
- * Shared registered-workspace registry (SDK 1.6.1 platform/workspace/registration),
+ * Shared registered-workspace registry (platform 1.6.1 platform/workspace/registration),
  * the successor to this fork's local per-user JSON registry
  * (superseded ../config/workspace-registry.ts, deleted).
  *
@@ -61,14 +61,14 @@ export const AGENT_EXPLICIT_REGISTRATION_ORIGIN = 'agent-explicit-registration';
  * is field-identical to the shared store's `RegisteredWorkspaceRecord`, so a local
  * file migrates in as a straight import, see migrateLegacyWorkspaceRegistryIfNeeded.
  *
- * WHY A SYNCHRONOUS RESOLVER EXISTS ALONGSIDE THE ASYNC STORE. The SDK's
+ * WHY A SYNCHRONOUS RESOLVER EXISTS ALONGSIDE THE ASYNC STORE. The platform's
  * WorkspaceRegistrationStore is Promise-based (it persists through
  * PersistentStore). createRuntimeServices() (../runtime/services.ts) is
  * synchronous by design, every consumer (the CLI, the TUI bootstrap, every
  * test file) calls it synchronously, and the automatic-checkpoint decision
  * (whether to pass runtimeBus to WorkspaceCheckpointManager) must be made AT
  * construction time, not after an async read resolves later. So this module
- * also ships a synchronous snapshot read + the SDK's PURE resolver
+ * also ships a synchronous snapshot read + the platform's PURE resolver
  * (resolveWorkspaceRegistration, no disk/git I/O) for that one call site;
  * every other consumer (the workspaces CLI, a future interactive prompt) goes
  * through the real async store below, the single source of truth for writes.
@@ -78,7 +78,7 @@ export const AGENT_EXPLICIT_REGISTRATION_ORIGIN = 'agent-explicit-registration';
 export type StoreShellPaths = Pick<ShellPathService, 'resolveUserPath' | 'homeDirectory'>;
 
 /**
- * Path of the shared store's JSON document, the SAME file the SDK's
+ * Path of the shared store's JSON document, the SAME file the platform's
  * registerGatewayVerbGroups writes and the daemon reads for checkpoint
  * eligibility.
  *
@@ -176,7 +176,7 @@ export function readSharedWorkspaceRegistrationSnapshotSync(shellPaths: StoreShe
 
 /**
  * Resolve `path` against the shared registration store SYNCHRONOUSLY: a direct
- * on-disk read plus the SDK's pure resolveWorkspaceRegistration. `git` defaults
+ * on-disk read plus the platform's pure resolveWorkspaceRegistration. `git` defaults
  * to a real worktree-link probe (probeWorktreeLink spawns `git`), so a linked
  * orchestration worktree of a registered repo resolves as covered without any
  * extra wiring, the worktree-link inheritance the shared store provides.
@@ -366,13 +366,13 @@ function readSharedStoreRawDoc(path: string): RawSharedStoreDoc {
 
 /**
  * The agent's EXPLICIT checkpoint-registration path: one typed store `add` that
- * registers `root` (the SDK's own root-guarded write) AND stamps it
+ * registers `root` (the platform's own root-guarded write) AND stamps it
  * `checkpointEligible: true` with the agent-explicit origin, the store's `add`
  * carries both fields natively, upgrading an already-present record's stamp in
  * the same call. This is the ONLY way a record becomes checkpoint-eligible at
- * write time, a plain SDK `add` (the TUI's first-open self-recording) never
+ * write time, a plain platform `add` (the TUI's first-open self-recording) never
  * sets the flag, so opening a directory in the TUI cannot widen the agent's
- * checkpoint boundary. Returns the SDK's register result unchanged so callers
+ * checkpoint boundary. Returns the platform's register result unchanged so callers
  * keep their existing messaging.
  */
 export async function registerWorkspaceForCheckpoints(
@@ -405,7 +405,7 @@ export interface CheckpointEligibilityBackfillResult {
  * new eligibility boundary does not retroactively drop workspaces the owner had
  * already opted into checkpoints before this flag existed. This is exactly the
  * "the consumer that owns checkpointing re-stamps its own roots on boot" the
- * SDK's record schema documents for pre-provenance records; it writes the raw
+ * platform's record schema documents for pre-provenance records; it writes the raw
  * legacy document directly (field-preserving, see readSharedStoreRawDoc) because it
  * runs inside the synchronous createRuntimeServices path where the async typed
  * store cannot be awaited. It takes the same strict writer lock and refuses
@@ -648,7 +648,7 @@ function canonicalPath(path: string): string {
 
 /**
  * Would the shared store refuse to register `root` as too broad? Mirrors the
- * SDK's broadRootReason (checkpoint/root-guard.ts, not part of the public
+ * platform's broadRootReason (checkpoint/root-guard.ts, not part of the public
  * platform/workspace export, so replicated here at the same single-purpose
  * level as this module's other store-internal-logic mirrors) closely enough
  * for a PRE-registration "would this be refused?" check. Used only to decide

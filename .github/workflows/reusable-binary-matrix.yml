@@ -11,14 +11,14 @@ name: Reusable native binary matrix
 #   Call it:
 #     jobs:
 #       binaries:
-#         uses: mgd34msu/goodvibes-sdk/.github/workflows/reusable-binary-matrix.yml@<commit-sha>
+#         uses: mgd34msu/goodvibes/.github/workflows/reusable-binary-matrix.yml@<commit-sha>
 #         with:
 #           targets: '[{"key":"linux-x64","runner":"ubuntu-latest","smoke":true,"binary":"dist/goodvibes-linux-x64"},
 #                      {"key":"darwin-arm64","runner":"macos-15","smoke":true,"binary":"dist/goodvibes-macos-arm64"}]'
 #           artifact-glob: "dist/goodvibes-* dist/lib"
 #
 #   Pin `<commit-sha>` to a full commit SHA, never `@main`; note alongside the
-#   pin which goodvibes-sdk version it corresponds to. Bumping the pin is a
+#   pin which GoodVibes version it corresponds to. Bumping the pin is a
 #   deliberate, reviewed change (its own commit/PR), not an automatic float
 #   onto whatever main has become.
 #

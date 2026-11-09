@@ -2,10 +2,10 @@
  * OpenTelemetry observer, in-memory collector integration tests.
  *
  * Verifies that createOpenTelemetryObserver emits the correct spans and
- * metric increments for every SDKObserver callback:
- *   - onAuthTransition  → sdk.auth.transitions counter + sdk.auth.transition span
- *   - onError           → sdk.errors counter + sdk.error span
- *   - onTransportActivity (recv only) → sdk.transport.duration_ms histogram
+ * metric increments for every PlatformObserver callback:
+ *   - onAuthTransition  → platform.auth.transitions counter + platform.auth.transition span
+ *   - onError           → platform.errors counter + platform.error span
+ *   - onTransportActivity (recv only) → platform.transport.duration_ms histogram
  *   - onEvent           → no-op (no metric emitted; verified by absence)
  *
  * All assertions run against in-memory collector mocks, no real OTEL
@@ -18,9 +18,9 @@ import {
   type OtelTracer,
   type OtelMeter,
   type OtelSpan,
-  type SDKObserver,
+  type PlatformObserver,
   type TransportActivityInfo,
-} from '../sdk/src/observer/index.js';
+} from '../platform/src/observer/index.js';
 
 // ---------------------------------------------------------------------------
 // In-memory collector
@@ -107,32 +107,32 @@ function makeCollector(): Collector {
 // ---------------------------------------------------------------------------
 
 describe('createOpenTelemetryObserver: onAuthTransition', () => {
-  test('emits sdk.auth.transitions counter with correct attributes', () => {
+  test('emits platform.auth.transitions counter with correct attributes', () => {
     const col = makeCollector();
     const obs = createOpenTelemetryObserver(col.tracer, col.meter);
 
     obs.onAuthTransition?.({ from: 'anonymous', to: 'token', reason: 'login' });
 
-    const counter = col.counters.find((c) => c.name === 'sdk.auth.transitions');
-    expect(counter?.name).toBe('sdk.auth.transitions');
+    const counter = col.counters.find((c) => c.name === 'platform.auth.transitions');
+    expect(counter?.name).toBe('platform.auth.transitions');
     expect(counter!.value).toBe(1);
     expect(counter!.attributes.from).toBe('anonymous');
     expect(counter!.attributes.to).toBe('token');
     expect(counter!.attributes.reason).toBe('login');
   });
 
-  test('emits sdk.auth.transition span with correct attributes', () => {
+  test('emits platform.auth.transition span with correct attributes', () => {
     const col = makeCollector();
     const obs = createOpenTelemetryObserver(col.tracer, col.meter);
 
     obs.onAuthTransition?.({ from: 'token', to: 'anonymous', reason: 'logout' });
 
-    const span = col.spans.find((s) => s.name === 'sdk.auth.transition');
-    expect(span?.name).toBe('sdk.auth.transition');
+    const span = col.spans.find((s) => s.name === 'platform.auth.transition');
+    expect(span?.name).toBe('platform.auth.transition');
     expect(span!.ended).toBe(true);
-    expect(span!.attributes['sdk.auth.from']).toBe('token');
-    expect(span!.attributes['sdk.auth.to']).toBe('anonymous');
-    expect(span!.attributes['sdk.auth.reason']).toBe('logout');
+    expect(span!.attributes['platform.auth.from']).toBe('token');
+    expect(span!.attributes['platform.auth.to']).toBe('anonymous');
+    expect(span!.attributes['platform.auth.reason']).toBe('logout');
   });
 
   test('multiple transitions each emit their own counter + span', () => {
@@ -142,60 +142,60 @@ describe('createOpenTelemetryObserver: onAuthTransition', () => {
     obs.onAuthTransition?.({ from: 'anonymous', to: 'token', reason: 'login' });
     obs.onAuthTransition?.({ from: 'token', to: 'anonymous', reason: 'logout' });
 
-    expect(col.counters.filter((c) => c.name === 'sdk.auth.transitions')).toHaveLength(2);
-    expect(col.spans.filter((s) => s.name === 'sdk.auth.transition')).toHaveLength(2);
+    expect(col.counters.filter((c) => c.name === 'platform.auth.transitions')).toHaveLength(2);
+    expect(col.spans.filter((s) => s.name === 'platform.auth.transition')).toHaveLength(2);
   });
 });
 
 describe('createOpenTelemetryObserver: onError', () => {
-  function makeSdkError(kind = 'network', category = 'transport'): Parameters<NonNullable<SDKObserver['onError']>>[0] {
+  function makePlatformError(kind = 'network', category = 'transport'): Parameters<NonNullable<PlatformObserver['onError']>>[0] {
     const err = Object.assign(new Error('sdk test error'), {
       kind,
       category,
       recoverable: false,
     });
-    return err as unknown as Parameters<NonNullable<SDKObserver['onError']>>[0];
+    return err as unknown as Parameters<NonNullable<PlatformObserver['onError']>>[0];
   }
 
-  test('emits sdk.errors counter with kind + category', () => {
+  test('emits platform.errors counter with kind + category', () => {
     const col = makeCollector();
     const obs = createOpenTelemetryObserver(col.tracer, col.meter);
 
-    obs.onError?.(makeSdkError('network', 'transport'));
+    obs.onError?.(makePlatformError('network', 'transport'));
 
-    const counter = col.counters.find((c) => c.name === 'sdk.errors');
-    expect(counter?.name).toBe('sdk.errors');
+    const counter = col.counters.find((c) => c.name === 'platform.errors');
+    expect(counter?.name).toBe('platform.errors');
     expect(counter!.value).toBe(1);
     expect(counter!.attributes.kind).toBe('network');
     expect(counter!.attributes.category).toBe('transport');
   });
 
-  test('emits sdk.error span with error attributes and exception recorded', () => {
+  test('emits platform.error span with error attributes and exception recorded', () => {
     const col = makeCollector();
     const obs = createOpenTelemetryObserver(col.tracer, col.meter);
 
-    obs.onError?.(makeSdkError('auth', 'security'));
+    obs.onError?.(makePlatformError('auth', 'security'));
 
-    const span = col.spans.find((s) => s.name === 'sdk.error');
-    expect(span?.name).toBe('sdk.error');
+    const span = col.spans.find((s) => s.name === 'platform.error');
+    expect(span?.name).toBe('platform.error');
     expect(span!.ended).toBe(true);
-    expect(span!.attributes['sdk.error.kind']).toBe('auth');
-    expect(span!.attributes['sdk.error.category']).toBe('security');
+    expect(span!.attributes['platform.error.kind']).toBe('auth');
+    expect(span!.attributes['platform.error.category']).toBe('security');
     expect(span!.exceptions).toHaveLength(1);
     expect(span!.status?.code).toBe(2); // SpanStatusCode.ERROR
   });
 });
 
 describe('createOpenTelemetryObserver: onTransportActivity', () => {
-  test('records sdk.transport.duration_ms histogram for recv with durationMs', () => {
+  test('records platform.transport.duration_ms histogram for recv with durationMs', () => {
     const col = makeCollector();
     const obs = createOpenTelemetryObserver(col.tracer, col.meter);
 
     const activity: TransportActivityInfo = { direction: 'recv', url: 'http://x', kind: 'http', durationMs: 123 };
     obs.onTransportActivity?.(activity);
 
-    const hist = col.histograms.find((h) => h.name === 'sdk.transport.duration_ms');
-    expect(hist?.name).toBe('sdk.transport.duration_ms');
+    const hist = col.histograms.find((h) => h.name === 'platform.transport.duration_ms');
+    expect(hist?.name).toBe('platform.transport.duration_ms');
     expect(hist!.value).toBe(123);
     expect(hist!.attributes.kind).toBe('http');
   });
@@ -206,7 +206,7 @@ describe('createOpenTelemetryObserver: onTransportActivity', () => {
 
     obs.onTransportActivity?.({ direction: 'send', url: 'http://x', kind: 'http' });
 
-    expect(col.histograms.filter((h) => h.name === 'sdk.transport.duration_ms')).toHaveLength(0);
+    expect(col.histograms.filter((h) => h.name === 'platform.transport.duration_ms')).toHaveLength(0);
   });
 
   test('does NOT record histogram for recv without durationMs', () => {
@@ -215,7 +215,7 @@ describe('createOpenTelemetryObserver: onTransportActivity', () => {
 
     obs.onTransportActivity?.({ direction: 'recv', url: 'http://x', kind: 'sse' });
 
-    expect(col.histograms.filter((h) => h.name === 'sdk.transport.duration_ms')).toHaveLength(0);
+    expect(col.histograms.filter((h) => h.name === 'platform.transport.duration_ms')).toHaveLength(0);
   });
 
   test('records histogram with status attribute when status is present', () => {
@@ -224,8 +224,8 @@ describe('createOpenTelemetryObserver: onTransportActivity', () => {
 
     obs.onTransportActivity?.({ direction: 'recv', url: 'http://x', kind: 'http', durationMs: 55, status: 200 });
 
-    const hist = col.histograms.find((h) => h.name === 'sdk.transport.duration_ms');
-    expect(hist?.name).toBe('sdk.transport.duration_ms');
+    const hist = col.histograms.find((h) => h.name === 'platform.transport.duration_ms');
+    expect(hist?.name).toBe('platform.transport.duration_ms');
     expect(hist!.attributes.status).toBe(200);
   });
 });
@@ -236,7 +236,7 @@ describe('createOpenTelemetryObserver: onEvent', () => {
     const obs = createOpenTelemetryObserver(col.tracer, col.meter);
 
     // Call with a synthetic event-like payload
-    obs.onEvent?.({ type: 'AGENT_SPAWNING' } as Parameters<NonNullable<SDKObserver['onEvent']>>[0]);
+    obs.onEvent?.({ type: 'AGENT_SPAWNING' } as Parameters<NonNullable<PlatformObserver['onEvent']>>[0]);
 
     // No spans or counters should have been emitted for this event
     expect(col.spans).toHaveLength(0);

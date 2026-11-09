@@ -5,12 +5,12 @@ import { existsSync, linkSync, mkdirSync, readFileSync, renameSync, statSync, sy
 import { join } from 'node:path';
 import { makeProjectTempDir } from './_helpers/project-temp.js';
 import { acquireDiscordInboxIdentity, acquireDiscordInboxRegistryRevision, resolveDiscordInboxIdentity,
-  type DiscordInboxIdentity, type DiscordInboxIdentityInput } from '../sdk/src/platform/intake/providers/discord-identity.js';
-import { InboxCursorStore } from '../sdk/src/platform/intake/cursor-store.js';
-import { SqliteTriageStore } from '../sdk/src/platform/intake/triage/store.js';
-import { inboxTriage, TRIAGE_MODEL } from '../sdk/src/platform/intake/triage/battery.js';
-import { createNativeDataWriteOwner, assertNativeReaderCompatible, NativeDataCompatibilityError } from '../sdk/src/platform/runtime/native-reader-compatibility.js';
-import { realUpdateFileIo } from '../sdk/src/platform/runtime/self-update.js';
+  type DiscordInboxIdentity, type DiscordInboxIdentityInput } from '../platform/src/platform/intake/providers/discord-identity.js';
+import { InboxCursorStore } from '../platform/src/platform/intake/cursor-store.js';
+import { SqliteTriageStore } from '../platform/src/platform/intake/triage/store.js';
+import { inboxTriage, TRIAGE_MODEL } from '../platform/src/platform/intake/triage/battery.js';
+import { createNativeDataWriteOwner, assertNativeReaderCompatible, NativeDataCompatibilityError } from '../platform/src/platform/runtime/native-reader-compatibility.js';
+import { realUpdateFileIo } from '../platform/src/platform/runtime/self-update.js';
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });
 const userId = '100000000000000001', channelId = '100000000000000002';

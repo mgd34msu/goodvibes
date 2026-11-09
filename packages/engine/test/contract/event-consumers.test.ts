@@ -10,22 +10,22 @@ import { fakePort, choiceAnswer } from '@goodvibes-jev/judgment/testing';
  * domain lists that subscribe to the domain.
  */
 import { describe, expect, spyOn, test } from 'bun:test';
-import { RuntimeEventBus } from '../../sdk/src/platform/runtime/events/index.js';
-import { emitAgentCompleted } from '../../sdk/src/platform/runtime/emitters/agents.js';
-import { emitContractEvent } from '../../sdk/src/platform/contract/events.js';
-import { Notifier } from '../../sdk/src/platform/integrations/notifier.js';
-import { WebhookNotifier } from '../../sdk/src/platform/integrations/webhooks.js';
-import { registerBootstrapHookBridge } from '../../sdk/src/platform/runtime/bootstrap-hook-bridge.js';
-import { registerHostRuntimeEvents, registerContractRuntimeEvents } from '../../sdk/src/platform/runtime/bootstrap-runtime-events.js';
-import { createDomainDispatch, createRuntimeStore } from '../../sdk/src/platform/runtime/store/index.js';
-import { createUiRuntimeEvents } from '../../sdk/src/platform/runtime/ui-events.js';
-import { classifySystemMessageKind } from '../../sdk/src/platform/runtime/system-message-policy.js';
-import { classifyTranscriptMessages } from '../../sdk/src/platform/core/transcript-events/classify.js';
-import { ALL_DOMAINS } from '../../sdk/src/platform/runtime/telemetry/api-helpers.js';
-import { resetWorkstreamLabelsForTests } from '../../sdk/src/platform/channels/workstream-labels.js';
-import type { HookEvent } from '../../sdk/src/platform/hooks/types.js';
-import type { ConversationFollowUpItem } from '../../sdk/src/platform/core/conversation-follow-ups.js';
-import type { ContractView } from '../../sdk/src/platform/contract/types.js';
+import { RuntimeEventBus } from '../../platform/src/platform/runtime/events/index.js';
+import { emitAgentCompleted } from '../../platform/src/platform/runtime/emitters/agents.js';
+import { emitContractEvent } from '../../platform/src/platform/contract/events.js';
+import { Notifier } from '../../platform/src/platform/integrations/notifier.js';
+import { WebhookNotifier } from '../../platform/src/platform/integrations/webhooks.js';
+import { registerBootstrapHookBridge } from '../../platform/src/platform/runtime/bootstrap-hook-bridge.js';
+import { registerHostRuntimeEvents, registerContractRuntimeEvents } from '../../platform/src/platform/runtime/bootstrap-runtime-events.js';
+import { createDomainDispatch, createRuntimeStore } from '../../platform/src/platform/runtime/store/index.js';
+import { createUiRuntimeEvents } from '../../platform/src/platform/runtime/ui-events.js';
+import { classifySystemMessageKind } from '../../platform/src/platform/runtime/system-message-policy.js';
+import { classifyTranscriptMessages } from '../../platform/src/platform/core/transcript-events/classify.js';
+import { ALL_DOMAINS } from '../../platform/src/platform/runtime/telemetry/api-helpers.js';
+import { resetWorkstreamLabelsForTests } from '../../platform/src/platform/channels/workstream-labels.js';
+import type { HookEvent } from '../../platform/src/platform/hooks/types.js';
+import type { ConversationFollowUpItem } from '../../platform/src/platform/core/conversation-follow-ups.js';
+import type { ContractView } from '../../platform/src/platform/contract/types.js';
 import { ALL_CONTRACT_EVENTS, CTR, SAMPLES } from './event-samples.js';
 import { waitFor } from '../_helpers/test-timeout.js';
 

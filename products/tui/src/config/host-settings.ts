@@ -1,6 +1,6 @@
 import { installedDataWriter } from '../runtime/native-data-writer.ts';
-import { ConfigManager, type ConfigKey, type HostBooleanSetting } from '@goodvibes-jev/engine/sdk/platform/config';
-import { NOTIFICATIONS_METADATA_ONLY_KEY, NOTIFICATIONS_METADATA_ONLY_SETTING } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { ConfigManager, type ConfigKey, type HostBooleanSetting } from '@goodvibes-jev/engine/platform/platform/config';
+import { NOTIFICATIONS_METADATA_ONLY_KEY, NOTIFICATIONS_METADATA_ONLY_SETTING } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 
 export const TUI_NOTIFICATIONS_METADATA_ONLY_KEY = NOTIFICATIONS_METADATA_ONLY_KEY;
 
@@ -8,7 +8,7 @@ export const TUI_NOTIFICATIONS_METADATA_ONLY_KEY = NOTIFICATIONS_METADATA_ONLY_K
 
 // This switch is consumed by the TUI terminal notifier and exposed in its
 // settings workspace. Register it before ingestion so an enabled OSC 9 feature
-// is not sent to the unknown-setting classifier as a possible renamed SDK key.
+// is not sent to the unknown-setting classifier as a possible renamed platform key.
 const TERMINAL_TURN_END_SETTING: HostBooleanSetting = Object.freeze({
   key: 'behavior.terminalNotifyTurnEnd',
   type: 'boolean',
@@ -16,7 +16,7 @@ const TERMINAL_TURN_END_SETTING: HostBooleanSetting = Object.freeze({
   description: 'Send an in-terminal (OSC 9) desktop notification when a turn finishes. Off by default. Fires only when the terminal window is unfocused.',
 });
 
-/** Register TUI-owned settings without changing the shared SDK schema or defaults. */
+/** Register TUI-owned settings without changing the shared platform schema or defaults. */
 export class TuiConfigManager extends ConfigManager {
   constructor(options: ConstructorParameters<typeof ConfigManager>[0]) {
     super({ ...options, nativeDataWriter: options.nativeDataWriter ?? installedDataWriter, hostSettings: [...(options.hostSettings ?? []), NOTIFICATIONS_METADATA_ONLY_SETTING, TERMINAL_TURN_END_SETTING] });

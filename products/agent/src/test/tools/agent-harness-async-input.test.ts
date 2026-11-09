@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureAsyncHarnessInput } from '../../tools/agent-harness-async-input.ts';
 import { captureCatalogSnapshotGuard, type CatalogRankingOptions } from '../../tools/agent-harness-catalog-ranking.ts';
 

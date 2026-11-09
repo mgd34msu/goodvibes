@@ -32,18 +32,18 @@ import { describe, test, expect, beforeEach, afterEach, spyOn, mock } from 'bun:
 import { mkdirSync, rmSync, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { SubscriptionManager, ServiceRegistry } from '@goodvibes-jev/engine/sdk/platform/config';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { SubscriptionManager, ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   mayEnterCardDetails,
   mayOfferCardEntryFlow,
   describeCardEntryRefusal,
-} from '@goodvibes-jev/engine/sdk/platform/payments';
+} from '@goodvibes-jev/engine/platform/platform/payments';
 import { SecretsManager } from '../../config/secrets.ts';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
-import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
+import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
 import { SettingsModal } from '../../input/settings-modal.ts';
 import { renderSettingsModal } from '../../renderer/settings-modal.ts';
 import { layerText } from '../helpers/surface-frame.ts';
@@ -766,11 +766,11 @@ describe('payments card containment (agent terminal)', () => {
   });
 
   // -------------------------------------------------------------------------
-  // 6. The entry-surface gate, refused when the SDK says the surface may not
+  // 6. The entry-surface gate, refused when the platform says the surface may not
   //    take card details, and the prompt is never even offered.
   // -------------------------------------------------------------------------
 
-  test("this command's own surface is a real entry surface, per the SDK's allowlist", () => {
+  test("this command's own surface is a real entry surface, per the platform's allowlist", () => {
     expect(CARD_ENTRY_SURFACE).toBe('agent-terminal');
     expect(mayEnterCardDetails(CARD_ENTRY_SURFACE)).toBe(true);
     expect(mayOfferCardEntryFlow(CARD_ENTRY_SURFACE)).toBe(true);

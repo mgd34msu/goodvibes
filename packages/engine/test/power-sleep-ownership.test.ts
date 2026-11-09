@@ -16,10 +16,10 @@
 import { describe, expect, test } from 'bun:test';
 import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { PowerManager, LID_SWITCH_HONEST_SPLIT } from '../sdk/src/platform/power/manager.ts';
-import { bindPowerWorkSignals } from '../sdk/src/platform/power/work-signals.ts';
-import { createLinuxLogindSeam, inhibitChildArgs, reapOrphanedInhibitors } from '../sdk/src/platform/power/linux-logind.ts';
-import type { PowerInhibitClass, PowerPlatformSeam } from '../sdk/src/platform/power/types.ts';
+import { PowerManager, LID_SWITCH_HONEST_SPLIT } from '../platform/src/platform/power/manager.ts';
+import { bindPowerWorkSignals } from '../platform/src/platform/power/work-signals.ts';
+import { createLinuxLogindSeam, inhibitChildArgs, reapOrphanedInhibitors } from '../platform/src/platform/power/linux-logind.ts';
+import type { PowerInhibitClass, PowerPlatformSeam } from '../platform/src/platform/power/types.ts';
 import type { EventEnvelope } from '@goodvibes-jev/engine/transport-core';
 import { withTestTimeout } from './_helpers/test-timeout.js';
 

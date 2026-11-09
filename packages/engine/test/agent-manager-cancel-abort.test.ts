@@ -7,7 +7,7 @@
  * next boundary. An engine-registered external signal also cancels the run.
  */
 import { describe, expect, test } from 'bun:test';
-import { AgentManager, type AgentExecutor } from '../sdk/src/platform/tools/agent/manager.ts';
+import { AgentManager, type AgentExecutor } from '../platform/src/platform/tools/agent/manager.ts';
 
 /** An executor that marks the agent running and keeps it running until released. */
 function hangingExecutor(): AgentExecutor & { release: () => void } {

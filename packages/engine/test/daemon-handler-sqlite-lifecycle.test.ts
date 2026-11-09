@@ -1,10 +1,10 @@
-import { SqlJsDatabaseAllocationError } from '../sdk/src/platform/state/sqljs-database.ts';
+import { SqlJsDatabaseAllocationError } from '../platform/src/platform/state/sqljs-database.ts';
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs';
 import * as fsPromises from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { HandlerSqliteStore } from '../sdk/src/platform/state/daemon-handler-sqlite-store.ts';
-import { loadSqlJsEngine, SQLiteStore } from '../sdk/src/platform/state/sqlite-store.ts';
+import { HandlerSqliteStore } from '../platform/src/platform/state/daemon-handler-sqlite-store.ts';
+import { loadSqlJsEngine, SQLiteStore } from '../platform/src/platform/state/sqlite-store.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const SCHEMA = ['CREATE TABLE IF NOT EXISTS probe (id TEXT PRIMARY KEY, value TEXT)'];
@@ -172,16 +172,16 @@ test('SQL operations preserve the legacy layout, transactions and missing-row be
   expect(store.all('SELECT * FROM probe')).toEqual([{ id: 'a', value: 'kept' }]);
 });
 
-test('concurrent handler and SDK store initialization shares the WASM loader', async () => {
+test('concurrent handler and platform store initialization shares the WASM loader', async () => {
   const handler = makeStore();
-  const sdk = new SQLiteStore();
+  const platformClient = new SQLiteStore();
   try {
-    await Promise.all([handler.init(), handler.init(), sdk.init((db) => { db.run(SCHEMA[0]!); })]);
+    await Promise.all([handler.init(), handler.init(), platformClient.init((db) => { db.run(SCHEMA[0]!); })]);
     handler.run('INSERT INTO probe VALUES (?, ?)', ['handler', 'ready']);
-    sdk.run('INSERT INTO probe VALUES (?, ?)', ['sdk', 'ready']);
+    platformClient.run('INSERT INTO probe VALUES (?, ?)', ['platform', 'ready']);
     expect(handler.get<{ value: string }>('SELECT value FROM probe')).toEqual({ value: 'ready' });
-    expect(sdk.exec('SELECT value FROM probe')[0]?.values).toEqual([['ready']]);
-  } finally { sdk.close(); }
+    expect(platformClient.exec('SELECT value FROM probe')[0]?.values).toEqual([['ready']]);
+  } finally { platformClient.close(); }
 });
 
 test('separate database writes and reopens remain isolated when random values repeat', async () => {

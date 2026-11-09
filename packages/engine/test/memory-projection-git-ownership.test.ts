@@ -14,8 +14,8 @@ import { join } from 'node:path';
 import {
   createMemoryProjectionGit,
   projectMemoryToFiles,
-} from '../sdk/src/platform/state/memory-file-projection.js';
-import type { MemoryRecord } from '../sdk/src/platform/state/memory-store.js';
+} from '../platform/src/platform/state/memory-file-projection.js';
+import type { MemoryRecord } from '../platform/src/platform/state/memory-store.js';
 
 const scratchDirs: string[] = [];
 

@@ -16,7 +16,7 @@ import {
   WorkProposalStore,
   validateWorkProposal,
   type WorkProposalRecord,
-} from '../sdk/src/platform/agents/work-proposal-store.ts';
+} from '../platform/src/platform/agents/work-proposal-store.ts';
 
 function makeInput(overrides: Record<string, unknown> = {}) {
   return {

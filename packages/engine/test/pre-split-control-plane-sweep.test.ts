@@ -26,13 +26,13 @@ import {
   PRE_SPLIT_QUARANTINE_PREFIX,
   reapQuarantineDirectories,
   sweepPreSplitControlPlaneStore,
-} from '../sdk/src/platform/control-plane/pre-split-control-plane-sweep.ts';
+} from '../platform/src/platform/control-plane/pre-split-control-plane-sweep.ts';
 import {
   importLegacyDaemonSessionStores,
   runDaemonSessionStoreBoot,
-} from '../sdk/src/platform/daemon/daemon-session-store-boot.ts';
-import { SharedSessionBroker } from '../sdk/src/platform/control-plane/session-broker.ts';
-import { RouteBindingManager } from '../sdk/src/platform/channels/index.ts';
+} from '../platform/src/platform/daemon/daemon-session-store-boot.ts';
+import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.ts';
+import { RouteBindingManager } from '../platform/src/platform/channels/index.ts';
 import { trackDisposables } from './_helpers/disposables.ts';
 
 const disposables = trackDisposables();

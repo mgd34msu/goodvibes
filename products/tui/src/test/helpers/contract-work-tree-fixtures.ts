@@ -1,4 +1,4 @@
-import type { ContractView, ContractUnitView, CriterionView } from '@goodvibes-jev/engine/sdk/platform/contract';
+import type { ContractView, ContractUnitView, CriterionView } from '@goodvibes-jev/engine/platform/platform/contract';
 
 const usage: ContractView['usage'] = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, llmCallCount: 0, turnCount: 0, toolCallCount: 0, costUsd: null, costState: 'unpriced' };
 

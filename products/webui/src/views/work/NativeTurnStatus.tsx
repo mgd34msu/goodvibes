@@ -1,4 +1,4 @@
-import type { NativeHostedTurnSnapshot } from "@goodvibes-jev/engine/sdk/platform/hosted-sessions/native-turn-client";
+import type { NativeHostedTurnSnapshot } from "@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client";
 import type { NativeTurnObservation } from "../../lib/native-turn";
 import { Button } from "../../components/ui/Button";
 import { DetailSection, Facts } from "../../components/data-view/DataView";

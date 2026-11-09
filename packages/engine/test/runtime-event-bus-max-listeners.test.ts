@@ -19,10 +19,10 @@ import {
   MAX_LISTENERS,
   configureRuntimeEventBusDefaults,
   runtimeEventBusOptionsFrom,
-} from '../sdk/src/platform/runtime/events/index.ts';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { logger } from '../sdk/src/platform/utils/logger.ts';
-import type { SessionEvent } from '../sdk/src/events/session.js';
+} from '../platform/src/platform/runtime/events/index.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { logger } from '../platform/src/platform/utils/logger.ts';
+import type { SessionEvent } from '../platform/src/events/session.js';
 
 /** No-op listener factory, each call returns a distinct function reference. */
 function makeListener(): () => void {
@@ -256,7 +256,7 @@ describe('config override via maxListeners constructor option', () => {
 // ---------------------------------------------------------------------------
 //
 // Everything above proves the cap works when a construction site passes one.
-// None of it says `runtime.eventBus.maxListeners` reaches a bus: the SDK's three
+// None of it says `runtime.eventBus.maxListeners` reaches a bus: the platform's three
 // construction sites all passed nothing, so the schema promised a tunable cap
 // that was always 100. These drive the real read path, a ConfigManager holding
 // a set value, through `runtimeEventBusOptionsFrom` and

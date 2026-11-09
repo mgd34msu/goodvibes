@@ -1,6 +1,6 @@
-import { migrateOperatorTriggers, triggerOperatorStatus, TriggerOperatorError, type TriggerOperatorSupervisor } from '@goodvibes-jev/engine/sdk/platform/triggers';
-import { GoodVibesSdkError } from '@goodvibes-jev/engine/errors';
-import { readTriggerOperatorStatus, readTriggerMigrationResult, TRIGGER_OPERATOR_MESSAGES, type TriggerOperatorFailureKind } from '@goodvibes-jev/engine/sdk/platform/triggers/browser';
+import { migrateOperatorTriggers, triggerOperatorStatus, TriggerOperatorError, type TriggerOperatorSupervisor } from '@goodvibes-jev/engine/platform/platform/triggers';
+import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { readTriggerOperatorStatus, readTriggerMigrationResult, TRIGGER_OPERATOR_MESSAGES, type TriggerOperatorFailureKind } from '@goodvibes-jev/engine/platform/platform/triggers/browser';
 import { RetainedOperatorConnection } from './retained-operator-connection.js';
 import { isPairedOperatorPrincipal } from './native/native-paired-principal.js';
 import type { PaymentWindowCommandContext, PaymentWindowCommandPolicy } from './payment-window-command.js';
@@ -84,7 +84,7 @@ export function registerRemoteTriggerSupervisorCommand<Context extends PaymentWi
       const report = (message: string) => { if (!closed) { context.print(message); context.renderRequest(); } };
       const fail = (error: unknown) => {
         let kind: TriggerOperatorFailureKind = 'unavailable';
-        if (error instanceof GoodVibesSdkError) {
+        if (error instanceof GoodVibesError) {
           const body = error.body;
           const code = body && typeof body === 'object' && 'code' in body ? body.code : error.code;
           for (const candidate of ['other-process', 'migration-required', 'not-required', 'future-version'] as const) {

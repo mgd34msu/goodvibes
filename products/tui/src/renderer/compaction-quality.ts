@@ -1,7 +1,7 @@
 /**
  * Compaction quality-score bridging.
  *
- * Reality check: the SDK's `computeQualityScore()`
+ * Reality check: the platform's `computeQualityScore()`
  * (platform/runtime/compaction/quality-score.ts) is only ever called from a
  * SEPARATE pipeline, `CompactionManager` (platform/runtime/compaction/manager.ts).
  * The TUI's actual `/compact` path never instantiates `CompactionManager`, it
@@ -25,21 +25,21 @@
  * rendering of the score says so explicitly (see `formatQualityScoreLine`).
  *
  * Storage: scores are kept in a TUI-local, timestamp-keyed store, never added
- * to the SDK's public `CompactionEvent` type (that would force an
- * api-extractor regen for a value the SDK's own compaction log never
+ * to the platform's public `CompactionEvent` type (that would force an
+ * api-extractor regen for a value the platform's own compaction log never
  * populates). Keyed by `CompactionEvent.timestamp` rather than array index,
  * because `compactSmallWindow`'s null-event path (small-context-window
  * models, see runtime-services.ts) can create index gaps.
  */
 
-import { computeQualityScore, describeScore } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import type { CompactionQualityScore, StrategyInput, StrategyOutput } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import type { ProviderMessage } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { computeQualityScore, describeScore } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import type { CompactionQualityScore, StrategyInput, StrategyOutput } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import type { ProviderMessage } from '@goodvibes-jev/engine/platform/platform/providers';
 
-export type { CompactionQualityScore } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+export type { CompactionQualityScore } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 
 /**
- * Bound the TUI-local score store the same way the SDK bounds its own
+ * Bound the TUI-local score store the same way the platform bounds its own
  * compaction event log (context-compaction.ts caps at 50 and shifts the
  * oldest entry), a long-running session should not accumulate this forever.
  */
@@ -72,7 +72,7 @@ export interface ScoreCompactionRunInput {
 
 /**
  * Compute a CompactionQualityScore for one compaction run, out-of-band from
- * the SDK's own (unused, in this TUI) CompactionManager pipeline.
+ * the platform's own (unused, in this TUI) CompactionManager pipeline.
  */
 export async function scoreCompactionRun(input: ScoreCompactionRunInput): Promise<CompactionQualityScore> {
   const strategyInput: StrategyInput = {

@@ -6,20 +6,20 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { createInitialAcpState } from '../sdk/src/platform/runtime/store/domains/acp.js';
-import { createInitialAgentsState } from '../sdk/src/platform/runtime/store/domains/agents.js';
-import { createInitialAutomationState } from '../sdk/src/platform/runtime/store/domains/automation.js';
-import { createInitialContractsState } from '../sdk/src/platform/runtime/store/domains/contracts.js';
-import { createInitialConversationState } from '../sdk/src/platform/runtime/store/domains/conversation.js';
-import { createInitialDaemonState } from '../sdk/src/platform/runtime/store/domains/daemon.js';
-import { createInitialDiscoveryState } from '../sdk/src/platform/runtime/store/domains/discovery.js';
-import { createInitialGitState } from '../sdk/src/platform/runtime/store/domains/git.js';
-import { createInitialIntelligenceState } from '../sdk/src/platform/runtime/store/domains/intelligence.js';
-import { createInitialMcpState } from '../sdk/src/platform/runtime/store/domains/mcp.js';
-import { createInitialModelState } from '../sdk/src/platform/runtime/store/domains/model.js';
-import { createInitialPermissionsState } from '../sdk/src/platform/runtime/store/domains/permissions.js';
-import { createInitialSessionState } from '../sdk/src/platform/runtime/store/domains/session.js';
-import { createInitialTasksState } from '../sdk/src/platform/runtime/store/domains/tasks.js';
+import { createInitialAcpState } from '../platform/src/platform/runtime/store/domains/acp.js';
+import { createInitialAgentsState } from '../platform/src/platform/runtime/store/domains/agents.js';
+import { createInitialAutomationState } from '../platform/src/platform/runtime/store/domains/automation.js';
+import { createInitialContractsState } from '../platform/src/platform/runtime/store/domains/contracts.js';
+import { createInitialConversationState } from '../platform/src/platform/runtime/store/domains/conversation.js';
+import { createInitialDaemonState } from '../platform/src/platform/runtime/store/domains/daemon.js';
+import { createInitialDiscoveryState } from '../platform/src/platform/runtime/store/domains/discovery.js';
+import { createInitialGitState } from '../platform/src/platform/runtime/store/domains/git.js';
+import { createInitialIntelligenceState } from '../platform/src/platform/runtime/store/domains/intelligence.js';
+import { createInitialMcpState } from '../platform/src/platform/runtime/store/domains/mcp.js';
+import { createInitialModelState } from '../platform/src/platform/runtime/store/domains/model.js';
+import { createInitialPermissionsState } from '../platform/src/platform/runtime/store/domains/permissions.js';
+import { createInitialSessionState } from '../platform/src/platform/runtime/store/domains/session.js';
+import { createInitialTasksState } from '../platform/src/platform/runtime/store/domains/tasks.js';
 
 /** All domain states must have a numeric revision field. */
 function assertBaseShape(state: unknown, domainName: string) {

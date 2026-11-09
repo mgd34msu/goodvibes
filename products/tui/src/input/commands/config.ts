@@ -1,7 +1,7 @@
 import { createConfigWorkspaceCommand } from '@goodvibes-jev/engine/terminal-shell/entry-workspace-commands';
 import { TUI_NOTIFICATIONS_METADATA_ONLY_KEY } from '../../config/host-settings.ts';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { setActiveThemeMode, setActiveThemeName, type ThemeMode } from '../../renderer/theme.ts';
 import {
   buildGoodVibesSecretKey,
@@ -9,7 +9,7 @@ import {
   isSecretConfigKey,
   persistSecretBackedConfigValue,
 } from '../../config/secret-config.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 export function registerConfigCommand(registry: CommandRegistry): void {
   registry.register(configWorkspaceCommand);

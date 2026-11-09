@@ -3,7 +3,7 @@ import { JudgmentFallbackEditor } from "./JudgmentFallbackEditor";
 import { JudgmentModelField, JudgmentProviderField } from "./JudgmentModelFields";
 import { DecisionRouterEditor } from "./DecisionRouterEditor";
 /**
- * SettingsField, one typed config editor row, driven by the SDK schema. Laid
+ * SettingsField, one typed config editor row, driven by the platform schema. Laid
  * out as a settings-dialog row: a readable label, the key in mono and the
  * description on the left, the kit control on the right (stacked beneath on a
  * phone, and for wide editors). No native widgets.
@@ -28,7 +28,7 @@ import { DecisionRouterEditor } from "./DecisionRouterEditor";
  *                             CVV_PROMPT_TRADEOFF_WARNING the moment 'prompt'
  *                             is selected.
  *   payments.budget.*      → MoneyField for any schema key marked
- *                             `unit: 'money'` (SDK 2.0.5's money-value.ts),
+ *                             `unit: 'money'` (platform 2.0.5's money-value.ts),
  *                             the plain amount is displayed and entered as-is,
  *                             with no unit conversion; detection reads the
  *                             schema's `unit` mark, never the key's name.
@@ -48,7 +48,7 @@ import { useRef, useState } from "react";
 import {
   captureStructuredCredentialReferenceConfigValue,
   isStructuredCredentialReferenceConfigKey,
-} from "@goodvibes-jev/engine/sdk/platform/judgment-browser/catalogs";
+} from "@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs";
 import { useSettingsDraft } from "../../hooks/useSettingsDraft";
 import { SettingsDraftConflict } from "./SettingsDraftConflict";
 import { maskSecretValue } from "../../lib/config-redaction";

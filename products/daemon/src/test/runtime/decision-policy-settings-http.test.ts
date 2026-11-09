@@ -1,6 +1,6 @@
 import { expect, spyOn, test } from 'bun:test';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { WEBUI_METHOD_ROUTES } from '@goodvibes-jev/engine/contracts/generated/webui-facade';
 import { DECISION_MODEL_POLICY_HEADER, readDecisionModelPolicyHeader } from '@goodvibes-jev/engine/errors';
 import { useGatewayFixture } from '../helpers/gateway-fixture.js';

@@ -1,7 +1,7 @@
 import { captureJudgmentPort, decisionModelPolicyState, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { prepareJudgmentResult, snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { prepareJudgmentResult, snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import { processOutputError, processOutputEndpoint } from './batteries/process-output.js';
-import { decisionOrClassic } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { decisionOrClassic } from '@goodvibes-jev/engine/platform/platform/runtime';
 
 export const PROCESS_OUTPUT_READING_LIMITS = { questions: 64, concurrency: 4, endpointCandidates: 256 } as const;
 export interface ProcessOutputEvidenceLine { readonly id: string; readonly text: string; readonly raw: string; readonly stream: 'stdout' | 'stderr'; }

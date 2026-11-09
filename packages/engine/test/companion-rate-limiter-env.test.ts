@@ -9,7 +9,7 @@ import {
   CompanionChatRateLimiter,
   readThresholdFromEnv,
   DEFAULT_MESSAGES_PER_MINUTE_PER_SESSION,
-} from '../sdk/src/platform/companion/companion-chat-rate-limiter.ts';
+} from '../platform/src/platform/companion/companion-chat-rate-limiter.ts';
 
 // ---------------------------------------------------------------------------
 // readThresholdFromEnv
@@ -91,7 +91,7 @@ describe('CompanionChatRateLimiter threshold precedence', () => {
     expect(() => limiter.check('session-f15', 'client-1')).not.toThrow();
     // Request 3, must throw with rate-limit category
     const caught = (() => { try { limiter.check('session-f15', 'client-1'); } catch (e) { return e; } })();
-    // GoodVibesSdkError should have category 'rate_limit'
+    // GoodVibesError should have category 'rate_limit'
     expect((caught as { category?: string }).category).toBe('rate_limit');
   });
 });

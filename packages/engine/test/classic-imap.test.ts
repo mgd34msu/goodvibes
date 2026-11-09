@@ -2,11 +2,11 @@ import { afterEach, expect, test } from 'bun:test';
 import { decisionModelPolicyState, installJudgmentPort, type DecisionModelPolicy } from '@goodvibes-jev/engine/errors';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
-import { readImapRefusal, readImapCursorFailure, readImapDrafts } from '../sdk/src/platform/email/imap-readings.js';
-import { classifyServerRefusalOwned } from '../sdk/src/platform/email/imap-open.js';
-import { selectDraftsMailboxFrames } from '../sdk/src/platform/email/imap-draft.js';
-import { ImapClient } from '../sdk/src/platform/email/imap-client.js';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
+import { readImapRefusal, readImapCursorFailure, readImapDrafts } from '../platform/src/platform/email/imap-readings.js';
+import { classifyServerRefusalOwned } from '../platform/src/platform/email/imap-open.js';
+import { selectDraftsMailboxFrames } from '../platform/src/platform/email/imap-draft.js';
+import { ImapClient } from '../platform/src/platform/email/imap-client.js';
 import { makeFakeImapServer, connectSocket, serverWrite } from './_helpers/fake-imap-server.js';
 
 let previous: JudgmentPort | undefined, installed = false;

@@ -2,7 +2,7 @@ import { effectAdmissionFixture } from '../helpers/effect-admission.ts';
 import { describe, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { AgentResearchSourceRegistry } from '../../agent/research-source-registry.ts';
 import { createAgentResearchSourcesTool as rawResearchSourcesTool, registerAgentResearchSourcesTool } from '../../tools/agent-research-sources-tool.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';

@@ -32,7 +32,7 @@
 
 import type { ConfigManager } from '../config/index.ts';
 import type { ConversationManager } from '../core/conversation.ts';
-import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { createOccasionsGatewayInvoke } from '../agent/occasions-gateway.ts';
 import {
   installAgentConversationSender,

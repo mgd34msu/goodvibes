@@ -1,4 +1,4 @@
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import type { SurfaceLayer } from './surface-kit.js';
 import { renderToasts, type ToastSpec } from './surface-kit-parts.js';
 import { overlayViewportBottom } from './conversation-layout.js';

@@ -1,7 +1,7 @@
 /** Original five route seams, strengthened to actual product HTTP composition. */
 import { expect, test } from 'bun:test';
-import { listProviderRuntimeSnapshots } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { getKnowledgeGraphqlSchemaText } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import { listProviderRuntimeSnapshots } from '@goodvibes-jev/engine/platform/platform/providers';
+import { getKnowledgeGraphqlSchemaText } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { useGatewayFixture } from '../helpers/gateway-route-fixture.js';
 const fixture = useGatewayFixture({ hostSessions: false });
 

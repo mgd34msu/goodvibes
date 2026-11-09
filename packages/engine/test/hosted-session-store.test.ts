@@ -20,8 +20,8 @@ import {
   CURRENT_HOSTED_SESSION_VERSION,
   boundMessages,
   describeInvalidPersistedHostedSession,
-} from '../sdk/src/platform/hosted-sessions/store.ts';
-import type { HostedSessionRecord } from '../sdk/src/platform/hosted-sessions/types.ts';
+} from '../platform/src/platform/hosted-sessions/store.ts';
+import type { HostedSessionRecord } from '../platform/src/platform/hosted-sessions/types.ts';
 
 let dir: string;
 

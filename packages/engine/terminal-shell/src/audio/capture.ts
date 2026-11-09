@@ -3,13 +3,13 @@
  *
  * Wake-word detection is the consumer today (src/audio/wake-runtime.ts). It is
  * written as a shared opener rather than a private detail of that file because a
- * wake does not END a capture session, it starts one: the SDK listener keeps the
+ * wake does not END a capture session, it starts one: the platform listener keeps the
  * same stream open and switches it to recording the utterance that follows, so a
  * second opener would drop the beginning of a sentence and race the operating
  * system for a device that is already held.
  *
  * The framing arithmetic, the recorder argv, the probe order and the utterance
- * policy all live in the SDK (`@goodvibes-jev/engine/sdk/platform/voice/capture`),
+ * policy all live in the platform (`@goodvibes-jev/engine/platform/platform/voice/capture`),
  * because getting any of them subtly wrong is SILENT: a container header out of
  * byte alignment, or a frame at 62.5 fps against a 100 fps model, still "works"
  * and simply never detects. The terminal platform supplies the host process adapter, shared by both
@@ -18,7 +18,7 @@
  * reported state rather than an exception.
  */
 import { spawn } from 'node:child_process';
-import { createRecorderCaptureOpener, type AudioCaptureOpener, type AudioCaptureWarn, type CaptureChildProcess, type CaptureSpawn, } from '@goodvibes-jev/engine/sdk/platform/voice/capture';
+import { createRecorderCaptureOpener, type AudioCaptureOpener, type AudioCaptureWarn, type CaptureChildProcess, type CaptureSpawn, } from '@goodvibes-jev/engine/platform/platform/voice/capture';
 import { findExecutable } from './player.js';
 /**
  * WHERE NOISE SUPPRESSION HAPPENS, AND WHY NOT HERE
@@ -54,7 +54,7 @@ import { findExecutable } from './player.js';
  */
 export const spawnRecorderProcess: CaptureSpawn = (command, args): CaptureChildProcess => {
     const child = spawn(command, [...args], { stdio: ['ignore', 'pipe', 'pipe'] });
-    // Adapted rather than returned directly: the SDK's port declares the signal as
+    // Adapted rather than returned directly: the platform's port declares the signal as
     // a plain `string` (it is shared with a browser bundle that has no
     // NodeJS.Signals) and node's narrower union is not assignable to it. The two
     // event listeners are branched explicitly for the same reason, node's `on` is

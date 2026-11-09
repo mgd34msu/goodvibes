@@ -16,9 +16,9 @@ import { fileURLToPath } from 'node:url';
 import { typecheckFailures, type CommandResult } from './typecheck-output-rule.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SDK_ROOT = resolve(__dirname, '..');
+const ENGINE_ROOT = resolve(__dirname, '..');
 // The composite solution is the repo root tsconfig.json (judgment and engine).
-const REPO_ROOT = resolve(SDK_ROOT, '../..');
+const REPO_ROOT = resolve(ENGINE_ROOT, '../..');
 
 interface Project {
   readonly label: string;

@@ -1,13 +1,13 @@
 import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { RuntimeEventBus } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { createRuntimeServices } from '../../runtime/services.ts';
 import { createDomainDispatch, createRuntimeStore } from '../../runtime/store/index.ts';
 import { registerAgentRuntimeEvents } from '../../runtime/agent-runtime-events.ts';
-import { emitContractEvent } from '@goodvibes-jev/engine/sdk/platform/contract';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { emitContractEvent } from '@goodvibes-jev/engine/platform/platform/contract';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 test('the actual Agent graph exposes the published contract services and disposes offline', async () => {

@@ -14,14 +14,14 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { handleSettingsModalToken } from '../../input/handler-modal-routes.ts';
 import { SettingsModal } from '../../input/settings-modal.ts';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { ServiceRegistry } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
 import { SecretsManager } from '../../config/secrets.ts';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
-import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 
 // ---------------------------------------------------------------------------
 // Helpers

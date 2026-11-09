@@ -4,7 +4,7 @@
  * Covers:
  *   - resolveTheme / resolveUiTones: stable per (theme, mode), complete, and
  *     light differs from dark
- *   - transcript tokens map onto the SDK theme tokens (one source)
+ *   - transcript tokens map onto the platform theme tokens (one source)
  *   - goodvibes-neon reproduces the historical transcript and chrome values,
  *     except the documented textFaint nudge (#475569 -> #4e5c6f)
  *   - raw colours live only in the theme layer (the QR module colours) and the
@@ -15,7 +15,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync, statSync } from 'fs';
 import path from 'path';
-import { TONE_TOKENS } from '@goodvibes-jev/engine/sdk/platform/presentation';
+import { TONE_TOKENS } from '@goodvibes-jev/engine/platform/platform/presentation';
 import {
   activeTokens,
   listThemeChoices,

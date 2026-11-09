@@ -9,13 +9,13 @@
  * denial explanation for that case.
  */
 import { describe, expect, it } from 'bun:test';
-import { parseCommandAST } from '../sdk/src/platform/runtime/permissions/normalization/parser.js';
-import { collectCommandNodes } from '../sdk/src/platform/runtime/permissions/normalization/ast.js';
+import { parseCommandAST } from '../platform/src/platform/runtime/permissions/normalization/parser.js';
+import { collectCommandNodes } from '../platform/src/platform/runtime/permissions/normalization/ast.js';
 import {
   buildDenialExplanation,
   evaluateCommandAST,
   evaluateSegmentNode,
-} from '../sdk/src/platform/runtime/permissions/normalization/verdict.js';
+} from '../platform/src/platform/runtime/permissions/normalization/verdict.js';
 
 const verdictOf = (cmd: string) => evaluateCommandAST(cmd, parseCommandAST(cmd));
 

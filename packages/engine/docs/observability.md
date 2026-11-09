@@ -1,19 +1,19 @@
 # Observability
 
-> **Surface scope:** This document covers the observability stack for the **full surface (Bun runtime)**. Most observer APIs (`SDKObserver`, `createConsoleObserver`) are also available on companion surfaces (React Native, Expo, browser) via their surface-specific entry points. See [Published Surface Matrix](./surfaces.md) for the full breakdown.
+> **Surface scope:** This document covers the observability stack for the **full surface (Bun runtime)**. Most observer APIs (`PlatformObserver`, `createConsoleObserver`) are also available on companion surfaces (React Native, Expo, browser) via their surface-specific entry points. See [Published Surface Matrix](./surfaces.md) for the full breakdown.
 
-This guide covers the SDK's observability stack: structured logging, runtime event feeds, session telemetry, health monitoring, failure forensics, and diagnostic panels.
+This guide covers the platform's observability stack: structured logging, runtime event feeds, session telemetry, health monitoring, failure forensics, and diagnostic panels.
 
 ## Logging
 
-> **Daemon embedders only:** The `configureActivityLogger` API and `logger` singleton are intended for daemon-embedder use. Consumer apps should pass an `SDKObserver` via the `observer` option when constructing the SDK (`createGoodVibesSdk({ ..., observer })`) or subscribe to runtime events via `sdk.realtime.viaSse()` / `sdk.realtime.viaWebSocket()`, instead of writing to the activity log directly.
+> **Daemon embedders only:** The `configureActivityLogger` API and `logger` singleton are intended for daemon-embedder use. Consumer apps should pass a `PlatformObserver` via the `observer` option when constructing the platform (`createGoodVibesPlatform({ ..., observer })`) or subscribe to runtime events via `platformClient.realtime.viaSse()` / `platformClient.realtime.viaWebSocket()`, instead of writing to the activity log directly.
 
 ### ActivityLogger
 
-The SDK ships a persistent, buffered activity logger that writes structured entries to `.goodvibes/logs/activity.md`. It is the primary debug trail for production diagnosis.
+The platform ships a persistent, buffered activity logger that writes structured entries to `.goodvibes/logs/activity.md`. It is the primary debug trail for production diagnosis.
 
 ```ts
-import { configureActivityLogger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { configureActivityLogger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -27,7 +27,7 @@ configureActivityLogger(join(homedir(), '.goodvibes', 'logs'));
 The logger is a singleton (`logger`) used throughout the platform. It exposes four levels:
 
 ```ts
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 
 logger.info('session started', { sessionId });
 logger.warn('retry triggered', { attempt, delayMs });
@@ -85,7 +85,7 @@ interface EventEnvelope<TType, TPayload> {
 Create an envelope. `createEventEnvelope` requires `sessionId` and `source` in the context; `traceId` is taken from the context when supplied (it is not generated automatically). Pass a shared `traceId` to correlate fan-out envelopes under one trace:
 
 ```ts
-import { createEventEnvelope } from '@goodvibes-jev/engine/sdk/transport-core';
+import { createEventEnvelope } from '@goodvibes-jev/engine/platform/transport-core';
 
 const envelope = createEventEnvelope(
   'TURN_SUBMITTED',
@@ -138,7 +138,7 @@ A contract's decisions (why a unit was nudged, a fix planned, an escalation rais
 ### Subscribing via SSE
 
 ```ts
-const stop = sdk.realtime.viaSse().turn.on('TURN_COMPLETED', (event) => {
+const stop = platformClient.realtime.viaSse().turn.on('TURN_COMPLETED', (event) => {
   console.log('turn completed', event.turnId, event.stopReason);
 });
 
@@ -155,7 +155,7 @@ GET /api/control-plane/events?domains=turn,tools,forensics
 ### Subscribing via WebSocket
 
 ```ts
-const stop = sdk.realtime.viaWebSocket().agents.on('AGENT_COMPLETED', (event) => {
+const stop = platformClient.realtime.viaWebSocket().agents.on('AGENT_COMPLETED', (event) => {
   console.log('agent done', event.agentId);
 });
 ```
@@ -236,7 +236,7 @@ interface RuntimeEventFeeds<TDomain, TEvent> {
 The `telemetry` store domain accumulates session-level metrics, correlation IDs, and a recent-event ring buffer. Access it via the selector:
 
 ```ts
-import { selectTelemetry } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
+import { selectTelemetry } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 
 const telemetry = selectTelemetry(state);
 
@@ -325,7 +325,7 @@ import {
   selectSystemHealth,
   selectDomainHealth,
   selectProviderHealth,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/state';
+} from '@goodvibes-jev/engine/platform/platform/runtime/state';
 
 // Aggregate across all health domains
 const systemHealth = selectSystemHealth(state);
@@ -457,7 +457,7 @@ interface FailureReport {
 `ForensicsRegistry` stores and indexes failure reports. It holds at most 100 reports by default (configurable). Oldest reports are evicted when the limit is reached.
 
 ```ts
-import { ForensicsRegistry } from '@goodvibes-jev/engine/sdk/platform/runtime/observability';
+import { ForensicsRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/observability';
 
 const registry = new ForensicsRegistry(200); // custom limit
 
@@ -530,7 +530,7 @@ for (const link of report.jumpLinks) {
 `ForensicsDataPanel` bridges `ForensicsRegistry` into the diagnostics panel subscription model:
 
 ```ts
-import { createDiagnosticsProvider } from '@goodvibes-jev/engine/sdk/platform/runtime/observability';
+import { createDiagnosticsProvider } from '@goodvibes-jev/engine/platform/platform/runtime/observability';
 
 // createDiagnosticsProvider assembles all panels from runtimeServices;
 // the forensics panel is available as diag.forensics
@@ -577,7 +577,7 @@ All panel providers follow the same pattern: construct with data sources, call `
 Provider health is tracked in the `providerHealth` store domain. Read it via selector:
 
 ```ts
-import { selectProviderHealth } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
+import { selectProviderHealth } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 
 const ph = selectProviderHealth(state);
 // ph.status: provider health status
@@ -587,7 +587,7 @@ const ph = selectProviderHealth(state);
 ### Accessing diagnostics
 
 ```ts
-import { createDiagnosticsProvider } from '@goodvibes-jev/engine/sdk/platform/runtime/observability';
+import { createDiagnosticsProvider } from '@goodvibes-jev/engine/platform/platform/runtime/observability';
 
 const diag = createDiagnosticsProvider(runtimeServices);
 
@@ -598,21 +598,21 @@ const forensics = diag.forensics.getAll();
 
 ---
 
-## SDKObserver: pluggable telemetry hooks
+## PlatformObserver: pluggable telemetry hooks
 
-The `SDKObserver` interface lets you attach custom telemetry through the public SDK surface. All methods are optional; the SDK works identically whether an observer is provided or not.
+The `PlatformObserver` interface lets you attach custom telemetry through the public platform surface. All methods are optional; the platform works identically whether an observer is provided or not.
 
 ### Interface
 
 ```ts
-import type { SDKObserver } from '@goodvibes-jev/engine/sdk';
+import type { PlatformObserver } from '@goodvibes-jev/engine/platform';
 
-export interface SDKObserver {
+export interface PlatformObserver {
   /** Called for every event dispatched through the RuntimeEventBus. */
   onEvent?(event: AnyRuntimeEvent): void;
 
-  /** Called when the SDK catches and is about to rethrow a GoodVibesSdkError. */
-  onError?(err: GoodVibesSdkError): void;
+  /** Called when the platform catches and is about to rethrow a GoodVibesError. */
+  onError?(err: GoodVibesError): void;
 
   /** Called at HTTP/SSE/WS transport boundaries. */
   onTransportActivity?(activity: {
@@ -634,20 +634,20 @@ export interface SDKObserver {
 
 ### Registering an observer
 
-Pass an observer in `GoodVibesSdkOptions` when constructing the SDK:
+Pass an observer in `GoodVibesPlatformOptions` when constructing the platform:
 
 ```ts
-import { createMemoryTokenStore } from '@goodvibes-jev/engine/sdk/auth';
-import { createGoodVibesSdk, createConsoleObserver } from '@goodvibes-jev/engine/sdk';
+import { createMemoryTokenStore } from '@goodvibes-jev/engine/platform/auth';
+import { createGoodVibesPlatform, createConsoleObserver } from '@goodvibes-jev/engine/platform';
 
-const sdk = createGoodVibesSdk({
+const platformClient = createGoodVibesPlatform({
   baseUrl: 'http://127.0.0.1:3421',
   tokenStore: createMemoryTokenStore(),
   observer: createConsoleObserver({ level: 'debug' }),
 });
 ```
 
-The observer is propagated internally to the operator transport, peer transport, auth client, and realtime connectors, all from the single `observer` field on `GoodVibesSdkOptions`. You do not need to wire it separately to each subsystem.
+The observer is propagated internally to the operator transport, peer transport, auth client, and realtime connectors, all from the single `observer` field on `GoodVibesPlatformOptions`. You do not need to wire it separately to each subsystem.
 
 ### Observer error isolation
 
@@ -657,22 +657,22 @@ Every observer call site goes through a shared `invokeObserver` helper instead o
 invokeObserver(() => observer?.onAuthTransition?.(transition), { label: 'onAuthTransition' });
 ```
 
-`invokeObserver` calls the callback, catches anything it throws, and returns `{ ok: true }` or `{ ok: false, error }`. A thrown error is not silently dropped. By default it is reported once to `console.warn` (prefixed `[sdk:observer] observer callback failed`, with the optional `label` identifying the call site) before isolation swallows it, so a broken observer is visible without being allowed to break SDK flow. A caller that wants to handle a failure itself can pass `{ report: false }` to suppress the default warning. An observer that throws will never disrupt the SDK; this is the hard correctness invariant for the observer contract.
+`invokeObserver` calls the callback, catches anything it throws, and returns `{ ok: true }` or `{ ok: false, error }`. A thrown error is not silently dropped. By default it is reported once to `console.warn` (prefixed `[platform:observer] observer callback failed`, with the optional `label` identifying the call site) before isolation swallows it, so a broken observer is visible without being allowed to break platform flow. A caller that wants to handle a failure itself can pass `{ report: false }` to suppress the default warning. An observer that throws will never disrupt the platform; this is the hard correctness invariant for the observer contract.
 
 ### Console adapter
 
 `createConsoleObserver` is the built-in development adapter. It logs auth transitions and errors at `info` level, and transport activity + runtime events at `debug` level.
 
 ```ts
-import { createConsoleObserver } from '@goodvibes-jev/engine/sdk';
+import { createConsoleObserver } from '@goodvibes-jev/engine/platform';
 
 const observer = createConsoleObserver({ level: 'debug' });
 ```
 
 Output example:
 ```
-[sdk:observer] auth transition anonymous → token (login)
-[sdk:observer] transport recv http https://daemon.example.com/api/control-plane/auth/login status=200 142ms
+[platform:observer] auth transition anonymous → token (login)
+[platform:observer] transport recv http https://daemon.example.com/api/control-plane/auth/login status=200 142ms
 ```
 
 ### OpenTelemetry adapter
@@ -681,11 +681,11 @@ Output example:
 
 ```ts
 import { trace, metrics } from '@opentelemetry/api';
-import { createOpenTelemetryObserver } from '@goodvibes-jev/engine/sdk';
+import { createOpenTelemetryObserver } from '@goodvibes-jev/engine/platform';
 
 const observer = createOpenTelemetryObserver(
-  trace.getTracer('goodvibes-sdk'),
-  metrics.getMeter('goodvibes-sdk'),
+  trace.getTracer('goodvibes-platform'),
+  metrics.getMeter('goodvibes-platform'),
 );
 ```
 
@@ -693,45 +693,45 @@ Metrics emitted:
 
 | Metric | Type | Description |
 |---|---|---|
-| `sdk.auth.transitions` | Counter | Auth state transitions, tagged with `from`, `to`, `reason` |
-| `sdk.errors` | Counter | SDK errors, tagged with `kind` and `category` |
-| `sdk.transport.duration_ms` | Histogram | HTTP transport call duration (recv only), tagged with `kind` and `status` |
+| `platform.auth.transitions` | Counter | Auth state transitions, tagged with `from`, `to`, `reason` |
+| `platform.errors` | Counter | platform errors, tagged with `kind` and `category` |
+| `platform.transport.duration_ms` | Histogram | HTTP transport call duration (recv only), tagged with `kind` and `status` |
 
 Spans emitted:
 
 | Span | When |
 |---|---|
-| `sdk.auth.transition` | On each auth state transition |
-| `sdk.error` | On each `GoodVibesSdkError` |
+| `platform.auth.transition` | On each auth state transition |
+| `platform.error` | On each `GoodVibesError` |
 
 ### Wire-up status
 
-The following table shows which `SDKObserver` callbacks each transport seam calls. "Wired" means the seam actively invokes the callback; "Not wired" means that seam is not observed.
+The following table shows which `PlatformObserver` callbacks each transport seam calls. "Wired" means the seam actively invokes the callback; "Not wired" means that seam is not observed.
 
 | Seam | Status |
 |---|---|
 | `createGoodVibesAuthClient`: `onAuthTransition` on login | Wired |
 | `createGoodVibesAuthClient`: `onAuthTransition` on logout (clearToken) | Wired |
 | `AutoRefreshCoordinator`: `onAuthTransition` reason `refresh` or `expire` | Wired |
-| `OperatorSdk` or `PeerSdk` HTTP transport: `onTransportActivity` (send + recv) | Wired |
+| `OperatorApiClient` or `PeerApiClient` HTTP transport: `onTransportActivity` (send + recv) | Wired |
 | SSE transport: `onTransportActivity` (send on connect, recv on event) | Wired |
 | WebSocket transport: `onTransportActivity` (send on connect, recv on message) | Wired |
 | SSE or WebSocket transport: `onEvent` (incoming remote runtime events) | Wired |
 | HTTP transport error sites: `onError` | Wired |
 | SSE or WebSocket transport error sites: `onError` | Wired |
-| `RuntimeEventBus.emit` (platform-internal bus): `onEvent` | Not wired, internal bus is not observable via SDKObserver |
+| `RuntimeEventBus.emit` (platform-internal bus): `onEvent` | Not wired, internal bus is not observable via PlatformObserver |
 
 ### W3C traceparent propagation
 
 The transport layer can inject W3C Trace Context headers (`traceparent`, `tracestate`) into outgoing HTTP and realtime requests when an active OpenTelemetry span is available.
 
-Two helpers are exported from `@goodvibes-jev/engine/sdk/transport-core`:
+Two helpers are exported from `@goodvibes-jev/engine/platform/transport-core`:
 
 ```ts
 import {
   injectTraceparent,
   injectTraceparentAsync,
-} from '@goodvibes-jev/engine/sdk/transport-core';
+} from '@goodvibes-jev/engine/platform/transport-core';
 
 // Synchronous: uses require-based OTel detection. Use for HTTP requests.
 const headers: Record<string, string> = {};
@@ -774,7 +774,7 @@ A unit passes only when every judged criterion reads met. `CONTRACT_PASSED`, `CO
 
 ## Judgment analytics
 
-Every Jev reading the engine takes is recorded in the state layer's decision log (`<workspace>/.goodvibes/<surface>/decisions.sqlite`): the call, what the decision concluded (a `readings` note), what code did with it (an `action` note) and, once known, what was right (a `truth` note from a calibration fixture, an owner correction or an observed outcome). The observe subsystem (`@goodvibes-jev/engine/sdk/platform/observe`) reads it without making new calls:
+Every Jev reading the engine takes is recorded in the state layer's decision log (`<workspace>/.goodvibes/<surface>/decisions.sqlite`): the call, what the decision concluded (a `readings` note), what code did with it (an `action` note) and, once known, what was right (a `truth` note from a calibration fixture, an owner correction or an observed outcome). The observe subsystem (`@goodvibes-jev/engine/platform/platform/observe`) reads it without making new calls:
 
 | Analysis | What it reads |
 |---|---|

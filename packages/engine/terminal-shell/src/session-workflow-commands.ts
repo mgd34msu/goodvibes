@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import { findSessionCandidates, type SessionManager, type SessionMeta } from '@goodvibes-jev/engine/sdk/platform/sessions';
-import { formatReturnContextForDisplay } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { findSessionCandidates, type SessionManager, type SessionMeta } from '@goodvibes-jev/engine/platform/platform/sessions';
+import { formatReturnContextForDisplay } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { TerminalConversationManager } from './terminal-conversation.js';
 import {
   captureTranscriptSource,
@@ -43,7 +43,6 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
     readonly afterSwitch: (context: Context, operation: 'fork' | 'save', destination: string) => void;
     readonly saved: (name: string, sanitizedName: string, path: string) => string;
     readonly forked: (id: string, name: string, source: string, title: string, count: number) => string;
-    readonly prepareRename: (context: Context, manager: SessionManager) => void;
     readonly productCommand: (args: string[], context: Context, manager: SessionManager, sub: string) => Promise<boolean>;
   },
 ) {
@@ -110,8 +109,21 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
         return true;
       }
       try {
-        policy.prepareRename(ctx, sm);
-        sm.rename(ctx.session.runtime.sessionId, newName);
+        const sessionId = ctx.session.runtime.sessionId;
+        if (!sm.getMeta(sessionId)) {
+          const snapshot = policy.captureSession(ctx);
+          sm.save(sessionId, snapshot.messages, {
+            title: ctx.session.conversationManager.title || '',
+            model: ctx.session.runtime.model,
+            provider: ctx.session.runtime.provider,
+            timestamp: Date.now(),
+            ...snapshot.metadata,
+            // Materializing a file for an explicit rename is a user save;
+            // retention must preserve this deliberately named conversation.
+            saveSource: 'user',
+          });
+        }
+        sm.rename(sessionId, newName);
         ctx.session.conversationManager.title = newName;
         ctx.print(policy.renamed(newName));
         ctx.renderRequest();

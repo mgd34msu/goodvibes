@@ -23,16 +23,16 @@ import { beforeEach, describe, expect, test, afterEach, spyOn } from 'bun:test';
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CodeIndexStore } from '../sdk/src/platform/state/code-index-store.js';
+import { CodeIndexStore } from '../platform/src/platform/state/code-index-store.js';
 import {
   MemoryEmbeddingProviderRegistry,
   embedMemoryText,
   type MemoryEmbeddingProvider,
-} from '../sdk/src/platform/state/memory-embeddings.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
+} from '../platform/src/platform/state/memory-embeddings.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import * as findFiles from '../sdk/src/platform/tools/find/shared.js';
+import * as findFiles from '../platform/src/platform/tools/find/shared.js';
 
 const roots: string[] = [];
 

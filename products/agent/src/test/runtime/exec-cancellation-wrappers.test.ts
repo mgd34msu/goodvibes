@@ -8,7 +8,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { createExecTool, OverflowHandler, ProcessManager, ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { createExecTool, OverflowHandler, ProcessManager, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { AGENT_OWNER_TERMINAL_GUARD } from '../../runtime/agent-exec-posture.ts';
 import { installAgentToolPolicyGuard } from '../../tools/agent-tool-policy-guard.ts';

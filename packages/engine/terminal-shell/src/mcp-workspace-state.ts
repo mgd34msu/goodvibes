@@ -1,9 +1,9 @@
 import type { McpWorkspaceFormField } from './mcp-workspace-model.js';
 export type { McpWorkspaceFormField } from './mcp-workspace-model.js';
 /** Common MCP workspace state and inspection; each product retains its write authority. */
-import type { McpApi, McpServerConfig, RegisteredTool } from '@goodvibes-jev/engine/sdk/platform/mcp';
-import type { ShellPathService } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { McpApi, McpServerConfig, RegisteredTool } from '@goodvibes-jev/engine/platform/platform/mcp';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import {
   MCP_ROLES,
   MCP_FORM_TRUST_MODES,

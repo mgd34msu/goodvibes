@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { runProcess } from '../sdk/src/platform/runtime/remote/host/backends/process-runner.ts';
+import { runProcess } from '../platform/src/platform/runtime/remote/host/backends/process-runner.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const code = (source: string) => [process.execPath, '--no-env-file', '-e', source];

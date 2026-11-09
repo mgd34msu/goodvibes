@@ -1,9 +1,9 @@
 import { expect, spyOn, test } from 'bun:test';
-import { CheckinService } from '../sdk/src/platform/checkin/service.js';
-import { executeCheckinJob } from '../sdk/src/platform/automation/checkin-execution.js';
-import type { AutomationManagerExecutionContext } from '../sdk/src/platform/automation/manager-runtime-execution.js';
-import type { AutomationJob } from '../sdk/src/platform/automation/jobs.js';
-import { CheckinReceiptStore } from '../sdk/src/platform/checkin/receipts.js';
+import { CheckinService } from '../platform/src/platform/checkin/service.js';
+import { executeCheckinJob } from '../platform/src/platform/automation/checkin-execution.js';
+import type { AutomationManagerExecutionContext } from '../platform/src/platform/automation/manager-runtime-execution.js';
+import type { AutomationJob } from '../platform/src/platform/automation/jobs.js';
+import { CheckinReceiptStore } from '../platform/src/platform/checkin/receipts.js';
 
 for (const confirmed of [false, true]) {
   test(`revocation after delivery entry preserves confirmation honesty: confirmed=${confirmed}`, async () => {

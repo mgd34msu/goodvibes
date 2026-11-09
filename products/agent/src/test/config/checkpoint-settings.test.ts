@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { readCheckpointGuardSettings, readCheckpointRegistrationSetting } from '../../config/checkpoint-settings.ts';
 
 function configManagerWithRaw(raw: Record<string, unknown>): Pick<ConfigManager, 'getRaw'> {
@@ -28,7 +28,7 @@ describe('readCheckpointRegistrationSetting', () => {
     expect(readCheckpointRegistrationSetting(configManagerWithRaw({ checkpoints: null }))).toBe('off');
   });
 
-  test('does not leak unregisteredWorkspaces into the SDK guard-settings passthrough', () => {
+  test('does not leak unregisteredWorkspaces into the platform guard-settings passthrough', () => {
     const raw = { checkpoints: { unregisteredWorkspaces: 'guarded', preferGitRoot: false } };
     const guardSettings = readCheckpointGuardSettings(configManagerWithRaw(raw));
     expect(guardSettings).not.toHaveProperty('unregisteredWorkspaces');

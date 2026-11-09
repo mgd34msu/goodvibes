@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { coverageFindings, questionCoverage, sourceFindings } from '../scripts/judgment-lint-rules.ts';
-import { autonomousDisposition, autonomousRefusal } from '../sdk/src/platform/gate/batteries/autonomous.js';
-import { registry } from '../sdk/src/platform/gate/judgment-registry.js';
+import { autonomousDisposition, autonomousRefusal } from '../platform/src/platform/gate/batteries/autonomous.js';
+import { registry } from '../platform/src/platform/gate/judgment-registry.js';
 
 const dispositionName = 'engine.gate.autonomous-disposition';
 const refusalName = 'engine.gate.autonomous-refusal';
@@ -13,10 +13,10 @@ test('shared autonomous questions are registered decisions with recognized sourc
   expect(registry.get(dispositionName)).toBe(autonomousDisposition);
   expect(registry.get(refusalName)).toBe(autonomousRefusal);
   const registered = new Set(registry.list().map(decision => decision.name));
-  for (const path of ['../sdk/src/platform/gate/batteries/autonomous.ts', '../sdk/src/platform/gate/autonomous-decision.ts']) {
+  for (const path of ['../platform/src/platform/gate/batteries/autonomous.ts', '../platform/src/platform/gate/autonomous-decision.ts']) {
     expect(sourceFindings(path, readFileSync(new URL(path, import.meta.url), 'utf8'), registered)).toEqual([]);
   }
-  const source = readFileSync(new URL('../sdk/src/platform/gate/batteries/autonomous.ts', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../platform/src/platform/gate/batteries/autonomous.ts', import.meta.url), 'utf8');
   // Removing either registration must be caught; neither call relies on a
   // forwarding-wrapper exemption or a lint-recognized factory name alone.
   for (const name of [dispositionName, refusalName]) {

@@ -11,7 +11,7 @@ import {
   renderWorkProposalMessage,
   summarizeWorkRequest,
   type ConversationGateConfig,
-} from '../sdk/src/platform/agents/conversation-gate.ts';
+} from '../platform/src/platform/agents/conversation-gate.ts';
 
 function reader(scalars: Record<string, unknown>, category?: unknown) {
   return {

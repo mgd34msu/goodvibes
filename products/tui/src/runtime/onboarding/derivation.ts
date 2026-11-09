@@ -7,8 +7,8 @@ import {
 import { deriveReopenEditAcknowledgementState as deriveAcknowledgements } from '@goodvibes-jev/engine/terminal-shell/onboarding-signals';
 import { countConfiguredSurfaceKinds, hasExternalIntegrations } from '@goodvibes-jev/engine/terminal-shell/onboarding-signals';
 import '@goodvibes-jev/engine/terminal-shell/onboarding-values';
-import '@goodvibes-jev/engine/sdk/platform/config';
-import '@goodvibes-jev/engine/sdk/platform/providers';
+import '@goodvibes-jev/engine/platform/platform/config';
+import '@goodvibes-jev/engine/platform/platform/providers';
 import type {
   OnboardingNetworkMode,
   OnboardingReopenEditAcknowledgementState,

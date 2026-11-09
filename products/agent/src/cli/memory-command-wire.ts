@@ -2,17 +2,17 @@
  * memory-command-wire.ts
  *
  * Split out of memory-command.ts to stay under the 800-line architecture cap.
- * Owns the CLI's wire-first path onto the memory spine (SDK 1.2.0 full-detach
+ * Owns the CLI's wire-first path onto the memory spine (platform 1.2.0 full-detach
  * catalog), see the CLI ruling below for why this exists and what it
  * deliberately still does NOT cover.
  */
-import type { MemoryReviewState } from '@goodvibes-jev/engine/sdk/platform/state';
-import type { LocalMemoryStore, MemoryAccess } from '@goodvibes-jev/engine/sdk/platform/runtime/memory-spine';
-import { MemorySpineClient, createLocalMemoryAccess } from '@goodvibes-jev/engine/sdk/platform/runtime/memory-spine';
+import type { MemoryReviewState } from '@goodvibes-jev/engine/platform/platform/state';
+import type { LocalMemoryStore, MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
+import { MemorySpineClient, createLocalMemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import { assertNoSecretLikeMemoryText } from '../agent/memory-safety.ts';
 import { formatAgentRecordReviewState } from '../agent/record-labels.ts';
 import { createSpineConnectionResolver } from '../runtime/session-spine-rest-transport.ts';
-import { createSessionSpineRestProbe as createSpineRestProbe } from '@goodvibes-jev/engine/sdk/platform/runtime/session-spine';
+import { createSessionSpineRestProbe as createSpineRestProbe } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
 import { createMemorySpineRestTransport } from '../runtime/memory-spine-rest-transport.ts';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';
@@ -41,7 +41,7 @@ import {
 } from './memory-command.ts';
 
 /**
- * CLI RULING (memory-spine adoption, SDK 1.2.0 full-detach catalog).
+ * CLI RULING (memory-spine adoption, platform 1.2.0 full-detach catalog).
  *
  * The CLI is a one-shot process invoked by `goodvibes-agent memory ...` with no
  * lasting daemon context, it doesn't get to sit through a boot-time reachability
@@ -64,7 +64,7 @@ import {
  *
  * 1.2.0 closes most of the prior gap: `show` (get + linksFor), `link`, `export`,
  * `import`, and the `search --semantic`/`--vector` path, plus `promote` (which is
- * not a distinct wire verb, it is `update({ scope })`, per the SDK's full-detach
+ * not a distinct wire verb, it is `update({ scope })`, per the platform's full-detach
  * ruling) now all run over the wire when a daemon is adopted.
  *
  * A real, stated gap remains: `queue` (reviewQueue) and `vector` (vectorStats /
@@ -100,7 +100,7 @@ function isWireEligibleMemorySubcommand(normalized: string): boolean {
 /**
  * A `LocalMemoryStore` stub that must never actually run. `MemorySpineClient`
  * routes EVERY op to the transport once constructed with one attached (mode is
- * 'client' immediately, see the SDK's one-writer enforcement ruling in
+ * 'client' immediately, see the platform's one-writer enforcement ruling in
  * client.ts), so this stub exists only to satisfy the constructor's required
  * `local` argument without opening the CLI's own copy of the store file, the
  * exact single-writer race the whole wire-first path exists to avoid. A call
@@ -190,7 +190,7 @@ async function handlePromoteWire(runtime: CliCommandRuntime, memorySpine: Memory
   const [id, scopeRaw] = options.positionals;
   if (!id || !scopeRaw) return failure(runtime, 'invalid_memory_command', 'Usage: goodvibes-agent memory promote <id> <session|project|team> --yes', 2);
   if (!hasFlag(options, 'yes')) return failure(runtime, 'confirmation_required', `Refusing to promote memory record ${id} without --yes.`, 2);
-  // "Promote" is not a distinct wire verb, it is a scope edit, per the SDK's
+  // "Promote" is not a distinct wire verb, it is a scope edit, per the platform's
   // full-detach ruling (a scope promotion is update({ scope })).
   //
   // `update` now returns null ONLY for a genuine record-miss (a

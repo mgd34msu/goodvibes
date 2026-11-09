@@ -2,10 +2,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, test } from 'bun:test';
-import { ArtifactStore } from '../sdk/src/platform/artifacts/index.js';
-import { compileKnowledgeSource } from '../sdk/src/platform/knowledge/ingest.js';
-import type { KnowledgeIngestContext } from '../sdk/src/platform/knowledge/ingest-context.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
+import { ArtifactStore } from '../platform/src/platform/artifacts/index.js';
+import { compileKnowledgeSource } from '../platform/src/platform/knowledge/ingest.js';
+import type { KnowledgeIngestContext } from '../platform/src/platform/knowledge/ingest-context.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 
 const tmpRoots: string[] = [];
 

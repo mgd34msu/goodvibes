@@ -13,19 +13,19 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { FakeClusterClock } from '../sdk/src/platform/cluster/clock.js';
-import { MemoryClusterBus, type MemoryClusterTransport } from '../sdk/src/platform/cluster/memory-transport.js';
+import { FakeClusterClock } from '../platform/src/platform/cluster/clock.js';
+import { MemoryClusterBus, type MemoryClusterTransport } from '../platform/src/platform/cluster/memory-transport.js';
 import {
   ClusterGroupRuntime,
   type ClusterGroupRuntimeOptions,
-} from '../sdk/src/platform/cluster/group-runtime.js';
+} from '../platform/src/platform/cluster/group-runtime.js';
 import {
   DEFAULT_CLUSTER_GROUP_SETTINGS,
   type ClusterGroupSettings,
-} from '../sdk/src/platform/cluster/group-settings.js';
-import type { GroupOperationsContext } from '../sdk/src/platform/cluster/group-operations.js';
-import type { ClusterSecretStore } from '../sdk/src/platform/cluster/group-store.js';
-import type { ClusterLogger } from '../sdk/src/platform/cluster/types.js';
+} from '../platform/src/platform/cluster/group-settings.js';
+import type { GroupOperationsContext } from '../platform/src/platform/cluster/group-operations.js';
+import type { ClusterSecretStore } from '../platform/src/platform/cluster/group-store.js';
+import type { ClusterLogger } from '../platform/src/platform/cluster/types.js';
 
 export const SILENT_LOGGER: ClusterLogger = {
   debug: () => {},

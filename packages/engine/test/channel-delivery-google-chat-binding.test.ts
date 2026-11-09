@@ -14,11 +14,11 @@
  * that it did not lose the precedence the other sources had.
  */
 import { afterEach, describe, expect, test, spyOn, type Mock } from 'bun:test';
-import { createGoogleChatDeliveryStrategy } from '../sdk/src/platform/channels/delivery/strategies-core.ts';
-import type { ChannelDeliveryRequest } from '../sdk/src/platform/channels/delivery/types.ts';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import type { ServiceRegistry } from '../sdk/src/platform/config/service-registry.ts';
-import type { ArtifactStore } from '../sdk/src/platform/artifacts/index.ts';
+import { createGoogleChatDeliveryStrategy } from '../platform/src/platform/channels/delivery/strategies-core.ts';
+import type { ChannelDeliveryRequest } from '../platform/src/platform/channels/delivery/types.ts';
+import type { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import type { ServiceRegistry } from '../platform/src/platform/config/service-registry.ts';
+import type { ArtifactStore } from '../platform/src/platform/artifacts/index.ts';
 
 const BINDING_WEBHOOK = 'https://chat.googleapis.com/v1/spaces/AAAA-binding/messages?key=k&token=t';
 const CONFIG_WEBHOOK = 'https://chat.googleapis.com/v1/spaces/AAAA-config/messages?key=k&token=t';

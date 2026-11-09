@@ -15,7 +15,7 @@
  *   GOODVIBES_HOME, home directory for the embedded daemon (default: $HOME).
  */
 
-import { serveAcpAgent } from '../sdk/src/platform/acp/agent.ts';
+import { serveAcpAgent } from '../platform/src/platform/acp/agent.ts';
 
 // Awaited because `@agentclientprotocol/sdk` is an optionalDependency and the
 // connection is built after it resolves. An install without it rejects here,

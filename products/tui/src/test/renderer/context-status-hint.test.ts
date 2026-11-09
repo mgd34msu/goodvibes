@@ -20,7 +20,7 @@
  */
 import { describe, test, expect } from 'bun:test';
 import { resolveContextStatusHint } from '../../renderer/context-status-hint.ts';
-import { DEFAULT_CONTEXT_WINDOW } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { DEFAULT_CONTEXT_WINDOW } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { ViewSessionMaintenanceLevel } from '../../views/session-maintenance.ts';
 
 /** Real, provider-vouched numbers by default: a 200k window with usage actually counted. */
@@ -108,7 +108,7 @@ describe('resolveContextStatusHint', () => {
 
 describe('boot state: a pressure claim must be backed by real numbers', () => {
   // What a real v1.19.6 boot actually looked like: nothing counted yet, and
-  // the resolved window still the SDK's DEFAULT_CONTEXT_WINDOW fallback. The
+  // the resolved window still the platform's DEFAULT_CONTEXT_WINDOW fallback. The
   // evaluator legitimately reports 'suggest-compact' here, because 8,192 free
   // tokens is under its 15,000-token remaining-headroom rule.
   const bootHint = (

@@ -2,7 +2,7 @@ import type { CommandRegistry, SlashCommand } from '../input/command-registry.ts
 import { parseSlashCommand } from '../input/slash-command-parser.ts';
 import { describeCommandPolicy } from './agent-harness-metadata.ts';
 import { rankHarnessCatalog, captureCatalogData, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { types as nodeTypes } from 'node:util';
 
 export interface AgentHarnessCommandCatalogArgs {

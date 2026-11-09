@@ -7,7 +7,7 @@ import type {
   ProjectPlanningService,
   ProjectPlanningState,
   ProjectPlanningStatus,
-} from '@goodvibes-jev/engine/sdk/platform/knowledge';
+} from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type {
   ConfigModalActionContext,
   ConfigModalRow,

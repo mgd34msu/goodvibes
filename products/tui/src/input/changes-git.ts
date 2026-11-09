@@ -7,8 +7,8 @@
  */
 
 import { isAbsolute, join, relative } from 'node:path';
-import { GitService } from '@goodvibes-jev/engine/sdk/platform/git';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { GitService } from '@goodvibes-jev/engine/platform/platform/git';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 /** Which diff the modal shows. */
 export type ChangesSource = 'session' | 'working' | 'staged' | 'head';

@@ -16,20 +16,20 @@ import {
   summarizeBundleCapabilities,
   scaffoldCapabilityBundleManifest,
   type CapabilityBundleManifest,
-} from '../sdk/src/platform/runtime/ecosystem/bundle-manifest.js';
-import { planBundleActivation } from '../sdk/src/platform/runtime/ecosystem/bundle-install.js';
+} from '../platform/src/platform/runtime/ecosystem/bundle-manifest.js';
+import { planBundleActivation } from '../platform/src/platform/runtime/ecosystem/bundle-install.js';
 import {
   computeSha256,
   verifyBundleBytes,
   fetchAndVerifyBundle,
   BundlePinRefusal,
   type PinnedBundleSource,
-} from '../sdk/src/platform/runtime/ecosystem/bundle-pin.js';
+} from '../platform/src/platform/runtime/ecosystem/bundle-pin.js';
 import {
   parseMarketplaceIndex,
   buildMarketplaceIndexEntry,
   serializeMarketplaceIndex,
-} from '../sdk/src/platform/runtime/ecosystem/marketplace-index.js';
+} from '../platform/src/platform/runtime/ecosystem/marketplace-index.js';
 
 function validManifest(overrides: Partial<CapabilityBundleManifest> = {}): CapabilityBundleManifest {
   return {

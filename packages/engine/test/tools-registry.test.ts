@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { ToolError } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { Tool, ToolDefinition } from '@goodvibes-jev/engine/sdk/platform/types';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { ToolError } from '@goodvibes-jev/engine/platform/platform/types';
+import type { Tool, ToolDefinition } from '@goodvibes-jev/engine/platform/platform/types';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 
 function makeTool(name: string, output = 'ok'): Tool {

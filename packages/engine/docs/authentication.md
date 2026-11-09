@@ -13,7 +13,7 @@ GoodVibes currently exposes two auth modes through the operator contract:
 Use a bearer token when:
 - you are building a server-side integration
 - you are calling the daemon/operator API cross-origin
-- you are embedding the SDK in automation or service processes
+- you are embedding the platform in automation or service processes
 - you are building native mobile clients
 - you are building React Native or Expo companion apps
 
@@ -61,39 +61,39 @@ Session cookie:
 
 GoodVibes also ships an OAuth flow used for daemon-side token acquisition (for example, authorizing third-party providers). The flow itself runs on the server side: `OAuthClient` and the core helpers (`platform/runtime/auth/oauth-core.ts`, `oauth-client.ts`) depend on Node runtime facilities and are **not** part of the consumer client surface. Clients do not run the OAuth handshake directly; they receive acquired tokens through a `TokenStore`.
 
-The OAuth *payload types*, `OAuthStartState` and `OAuthTokenPayload`, are exported from `@goodvibes-jev/engine/sdk/client-auth` (and re-exported from `@goodvibes-jev/engine/sdk/auth`) for typing the values you persist. `PermissionResolver`, also exported from `@goodvibes-jev/engine/sdk/client-auth`, resolves the permissions carried by an acquired token.
+The OAuth *payload types*, `OAuthStartState` and `OAuthTokenPayload`, are exported from `@goodvibes-jev/engine/platform/client-auth` (and re-exported from `@goodvibes-jev/engine/platform/auth`) for typing the values you persist. `PermissionResolver`, also exported from `@goodvibes-jev/engine/platform/client-auth`, resolves the permissions carried by an acquired token.
 
-## SDK auth helpers
+## platform auth helpers
 
-The umbrella SDK exposes an auth client plus token-store helpers:
+The umbrella platform exposes an auth client plus token-store helpers:
 
 ```ts
 import {
-  createGoodVibesSdk,
+  createGoodVibesPlatform,
   createMemoryTokenStore,
-} from '@goodvibes-jev/engine/sdk';
+} from '@goodvibes-jev/engine/platform';
 
-const sdk = createGoodVibesSdk({
+const platformClient = createGoodVibesPlatform({
   baseUrl: 'http://127.0.0.1:3421',
   tokenStore: createMemoryTokenStore(),
 });
 
-await sdk.auth.login({
+await platformClient.auth.login({
   username: 'alice',
   password: 'secret',
 });
 
-console.log(await sdk.auth.current());
+console.log(await platformClient.auth.current());
 ```
 
 Useful auth helpers:
 - `createMemoryTokenStore()`
 - `createBrowserTokenStore()`
-- `sdk.auth.login(...)`
-- `sdk.auth.current()`
-- `sdk.auth.getToken()`
-- `sdk.auth.setToken(...)`
-- `sdk.auth.clearToken()`
+- `platformClient.auth.login(...)`
+- `platformClient.auth.current()`
+- `platformClient.auth.getToken()`
+- `platformClient.auth.setToken(...)`
+- `platformClient.auth.clearToken()`
 
 ## Recommended auth by environment
 
@@ -107,10 +107,10 @@ Useful auth helpers:
 Use `createBrowserTokenStore()` when you want local-storage-backed bearer token persistence in a browser app:
 
 ```ts
-import { createBrowserGoodVibesSdk } from '@goodvibes-jev/engine/sdk/browser';
-import { createBrowserTokenStore } from '@goodvibes-jev/engine/sdk/auth';
+import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
+import { createBrowserTokenStore } from '@goodvibes-jev/engine/platform/auth';
 
-const sdk = createBrowserGoodVibesSdk({
+const platformClient = createBrowserGoodVibesPlatform({
   baseUrl: 'https://goodvibes.example.com',
   tokenStore: createBrowserTokenStore(),
 });
@@ -120,19 +120,19 @@ For same-origin web UIs, cookie-backed session auth is often simpler than token 
 
 ## Automatic token refresh
 
-When you provide a `tokenStore`, the SDK wires a built-in `AutoRefreshCoordinator` that handles proactive token refresh and reactive 401 retry automatically. No custom middleware is needed.
+When you provide a `tokenStore`, the platform wires a built-in `AutoRefreshCoordinator` that handles proactive token refresh and reactive 401 retry automatically. No custom middleware is needed.
 
 **Proactive refresh.** The coordinator checks the token's `expiresAt` field before each request. If the token expires within `refreshLeewayMs` (default: 60 seconds), a refresh call is issued before the request proceeds.
 
 **Reactive 401 retry.** When the server returns 401, the coordinator attempts one refresh and retries the original request with the new token, transparently to the caller.
 
-Configure via the `autoRefresh` option in `createGoodVibesSdk`:
+Configure via the `autoRefresh` option in `createGoodVibesPlatform`:
 
 ```ts
-import { createGoodVibesSdk } from '@goodvibes-jev/engine/sdk';
-import { createMemoryTokenStore } from '@goodvibes-jev/engine/sdk/auth';
+import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
+import { createMemoryTokenStore } from '@goodvibes-jev/engine/platform/auth';
 
-const sdk = createGoodVibesSdk({
+const platformClient = createGoodVibesPlatform({
   baseUrl: 'http://127.0.0.1:3421',
   tokenStore: createMemoryTokenStore(),
   autoRefresh: {
@@ -149,11 +149,11 @@ const sdk = createGoodVibesSdk({
 
 Auto-refresh is enabled by default when `tokenStore` is present. Set `autoRefresh: { autoRefresh: false }` to disable it entirely. The `refresh` callback is required for proactive refresh to work; without it, only the reactive 401 retry path is active.
 
-The `AutoRefreshCoordinator` class is also available directly from `@goodvibes-jev/engine/sdk/client-auth` for advanced use cases where you need to manage the coordinator lifecycle yourself.
+The `AutoRefreshCoordinator` class is also available directly from `@goodvibes-jev/engine/platform/client-auth` for advanced use cases where you need to manage the coordinator lifecycle yourself.
 
 ## Read-only token resolvers
 
-If you pass `getAuthToken`, the SDK can read tokens dynamically for requests and reconnects, but it cannot persist or mutate them unless you also pass `tokenStore`.
+If you pass `getAuthToken`, the platform can read tokens dynamically for requests and reconnects, but it cannot persist or mutate them unless you also pass `tokenStore`.
 
 That matters for:
 - refreshing tokens from an external auth system
@@ -162,7 +162,7 @@ That matters for:
 
 ## Scope handling
 
-The SDK preserves structured authorization failures. When a token is missing required scopes, you will receive a structured SDK error with:
+The platform preserves structured authorization failures. When a token is missing required scopes, you will receive a structured platform error with:
 - `status`
 - `category`
 - `source`

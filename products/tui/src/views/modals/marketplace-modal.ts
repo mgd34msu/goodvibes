@@ -15,7 +15,7 @@ import {
   type EcosystemEntryKind,
 } from '@/runtime/index.ts';
 import type { UiMarketplaceSnapshot, UiReadModel } from '../../runtime/ui-read-models.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

@@ -26,10 +26,10 @@ sections.
 
 ## 1. Where it lives
 
-The SDK owns the capability, the daemon serves it, surfaces are wiring and UI
+The platform owns the capability, the daemon serves it, surfaces are wiring and UI
 only. Two rules set that split:
 
-- The agent, the TUI and the webui exist to expose different parts of the SDK to
+- The agent, the TUI and the webui exist to expose different parts of the platform to
   a user interface. None of them owns a part of the capability.
 - The daemon has every ability the capability offers.
 
@@ -37,9 +37,9 @@ Concretely:
 
 | Layer | Owns |
 |---|---|
-| `packages/engine/sdk/src/platform/payments/*` | Budget arithmetic, the decision order, both window state machines, the shipping ladder, message rendering, the audit ledger, the taint gate. All pure and injectable. |
-| `packages/engine/sdk/src/platform/control-plane/` (`method-catalog-payments.ts`, `routes/payments.ts`) | The `payments.*` operator methods the daemon serves. |
-| `packages/engine/sdk/src/platform/config/schema-domain-payments.ts` | The config schema, defaults, validation. |
+| `packages/engine/platform/src/platform/payments/*` | Budget arithmetic, the decision order, both window state machines, the shipping ladder, message rendering, the audit ledger, the taint gate. All pure and injectable. |
+| `packages/engine/platform/src/platform/control-plane/` (`method-catalog-payments.ts`, `routes/payments.ts`) | The `payments.*` operator methods the daemon serves. |
+| `packages/engine/platform/src/platform/config/schema-domain-payments.ts` | The config schema, defaults, validation. |
 | TUI / agent / webui | Settings forms, the approval and veto prompts, the purchase list. No decision logic. |
 
 Card material and settings live in the **daemon-owned** config and secret tiers,
@@ -80,14 +80,14 @@ So the design supports both, prefers one:
 ### 3.1 Secret tier: card material
 
 Card material goes to `SecretsManager`
-(`packages/engine/sdk/src/platform/config/secrets.ts`), daemon scope, secure medium.
+(`packages/engine/platform/src/platform/config/secrets.ts`), daemon scope, secure medium.
 Encrypted at rest with AES-256-GCM under a random 32-byte keyfile
 (`~/.goodvibes/secrets.key`, 0600 in a 0700 directory), never a key derived from
 hostname or username.
 
 Secret key names are **derived, never hand-picked**, via
 `daemonSecretKeyFor(configPath)` in
-`packages/engine/sdk/src/platform/config/daemon-secret-keys.ts`. Adding `payments.` to
+`packages/engine/platform/src/platform/config/daemon-secret-keys.ts`. Adding `payments.` to
 `DAEMON_OWNED_CONFIG_PREFIXES` (`config/config-ownership.ts`) makes
 `resolveSecretWriteScope` force every payment secret into the daemon tier
 regardless of what scope a caller asks for:
@@ -221,7 +221,7 @@ All payment state resolves through the formalized surface-root mechanism in
 ## 4. Timezone and the day boundary
 
 **The daemon has no timezone concept today.** Searched: no global timezone or
-locale config key exists; the only IANA timezone strings in the SDK are
+locale config key exists; the only IANA timezone strings in the platform are
 per-schedule fields in `platform/scheduler/scheduler.ts` and
 `platform/automation/schedules.ts`, and `device.location.*` is a paired-phone
 GPS permission, unrelated. This capability adds the first one.
@@ -734,7 +734,7 @@ text contains no four-digit run at all.
 
 A browser adds attack surface a terminal does not, which is why these arrived
 with the ruling rather than after it. Each is a requirement with a test, and the
-list ships from the SDK as `WEBUI_CARD_ENTRY_CONDITIONS` so a surface cannot
+list ships from the platform as `WEBUI_CARD_ENTRY_CONDITIONS` so a surface cannot
 quietly implement a weaker version.
 
 | Condition | Why |
@@ -1124,7 +1124,7 @@ ignores cancellation still belongs to this owner until it settles; a recovery
 reporting timeout does not make it safe to replace the composition. Recovery
 coalesces concurrent sweep requests and refuses a new sweep while timed-out I/O
 is still pending. A late result cannot stamp or settle a retired recovery.
-SDK embedders should await `PaymentsGatewayServiceImpl.close()`; daemon
+platform embedders should await `PaymentsGatewayServiceImpl.close()`; daemon
 registrations expose an awaited `close()` as well as the compatibility void
 `unregister()`. A caller must await close before registering replacement handlers.
 Detached acknowledgement survives a request disconnect. Restart reconciles the
@@ -1385,7 +1385,7 @@ and any verified price revision. Missing, truncated or evicted original evidence
 remains incomplete; a later empty ledger does not clear it. Conversely, an
 unrelated later turn does not taint a purchase whose bound instruction was clean.
 Original paired-owner, payment settings, page and execution-lifetime checks
-still run independently. Direct SDK checkout captures its current evidence at
+still run independently. Direct platform checkout captures its current evidence at
 entry unless its host supplies an already retained original snapshot. These
 facts are not parsed from the checkout request body and grant no submit authority.
 
@@ -1673,7 +1673,7 @@ the clean run.
 
 The approval and veto notices carry text a merchant page controls into a message
 the owner reads on their phone and answers under a ten-minute clock, with money
-attached. That is the inbound-mail notice defect (SDK `140cbcb4`) with a charge
+attached. That is the inbound-mail notice defect (platform `140cbcb4`) with a charge
 on the end of it.
 
 The reasoning that produced that defect is the part to keep in view: the field
@@ -1696,9 +1696,9 @@ quoted back inside a refusal reason.
 
 **Where per-channel escaping lives.** Two layers, deliberately split:
 
-- **Source (SDK, `notice-text.ts`)**, neutralise the *union* of trigger
+- **Source (platform, `notice-text.ts`)**, neutralise the *union* of trigger
   characters across Telegram MarkdownV2, Slack mrkdwn, Discord markdown, ntfy and
-  a bare terminal. The SDK does not know which route a notice will take, so it
+  a bare terminal. The platform does not know which route a notice will take, so it
   does not guess; this is the layer that has to hold regardless of destination.
 - **Delivery (channel adapter)**, whatever escaping that specific wire format
   requires, owned by the code that knows the format.
@@ -2000,7 +2000,7 @@ verb.
 | `payments.purchase.status` | `read:payments` | Durable operation status and live windows, optionally for one original purchase ID. | yes |
 | `payments.purchase.reconcile` | paired admin owner, `write:payments`, explicit inspected-history confirmation | Records an owner’s merchant-history finding and settles original accounting without another submit. | yes |
 
-The original seven SDK verbs, the pre-checkout `payments.checkout.approve`,
+The original seven platform verbs, the pre-checkout `payments.checkout.approve`,
 the four live-window methods, and explicit purchase reconciliation are attached
 by the daemon payment composition.
 `payments.checkout.begin` requires a stable `requestId`, saved by the caller
@@ -2175,7 +2175,7 @@ otherwise established merchant require approval; additions establish recourse
 without another merchant reading. The budget and other unconditional refusals
 still apply.
 
-### 10.4 The master switch is a plain config key, not the SDK's flag registry
+### 10.4 The master switch is a plain config key, not the platform's flag registry
 
 **Correction (2026-08-21, v2.0.19):** this section previously said the
 capability registers in `platform/runtime/feature-flags/flags.ts`

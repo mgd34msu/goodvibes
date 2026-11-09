@@ -4,10 +4,10 @@
  * All functions are stateless: they receive inputs and return results without
  * side-effects. The class in model-picker.ts uses these as delegates.
  */
-import type { ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { compositeScore, A_TIER_THRESHOLD } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { BenchmarkStore } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
+import { compositeScore, A_TIER_THRESHOLD } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { BenchmarkStore } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import { tierToCategoryFilter } from './model-picker-types.js';
 import type { BenchmarkSort, CapabilityFilter, CategoryFilter, FilteredModelsCache, FilteredProvidersCache, GroupByMode, } from './model-picker-types.js';
 import { filterProviders } from './model-picker-provider-filter.js';

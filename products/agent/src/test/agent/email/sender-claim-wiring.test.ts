@@ -14,7 +14,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { parseAuthenticationResults, readSenderAuthentication } from '@goodvibes-jev/engine/sdk/platform/google';
+import { parseAuthenticationResults, readSenderAuthentication } from '@goodvibes-jev/engine/platform/platform/google';
 import { describeSenderClaim } from '../../../agent/untrusted-content.ts';
 import {
   assertCanConfirm,

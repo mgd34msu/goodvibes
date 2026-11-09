@@ -4,7 +4,7 @@
  * transactions within this process. Synchronous shared stores use
  * runStoreFileUpdateSync to lock the complete transaction across processes.
  */
-import { atomicWriteFileSync, type AtomicWriteOptions } from '@goodvibes-jev/engine/sdk/platform/config';
+import { atomicWriteFileSync, type AtomicWriteOptions } from '@goodvibes-jev/engine/platform/platform/config';
 import { dirname, resolve } from 'node:path';
 import { closeSync, mkdirSync, openSync } from 'node:fs';
 import { Database } from 'bun:sqlite';
@@ -14,9 +14,9 @@ import { Database } from 'bun:sqlite';
 // ---------------------------------------------------------------------------
 
 /**
- * Write `contents` to `path` through the sdk's atomic-write primitive
+ * Write `contents` to `path` through the platform's atomic-write primitive
  * (private temp file, fsync, then rename), creating the parent directory if
- * needed. A failed write leaves `path` holding its previous contents; the sdk
+ * needed. A failed write leaves `path` holding its previous contents; the platform
  * primitive removes its own temp file on failure.
  */
 export function writeStoreFile(path: string, contents: string, options: Pick<AtomicWriteOptions, 'assertCurrent' | 'onEffect'> = {}): void {

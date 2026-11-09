@@ -14,9 +14,9 @@ import { seedBenchmarkCacheFixture } from '../helpers/benchmark-cache-fixture.ts
  */
 import { describe, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
-import { bootDaemon, type BootedDaemon } from '@goodvibes-jev/engine/sdk/platform/daemon';
+import { bootDaemon, type BootedDaemon } from '@goodvibes-jev/engine/platform/platform/daemon';
 import { createHttpTransport } from '@/runtime/index.ts';
-import { SessionSpineClient, TUI_SPINE_PARTICIPANT } from '@goodvibes-jev/engine/sdk/platform/runtime/session-spine';
+import { SessionSpineClient, TUI_SPINE_PARTICIPANT } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
 import { createTuiSpineTransport, type SpineSessionsClient } from '../../runtime/session-spine-transport.ts';
 import {
   SessionInboundInputPoller,

@@ -7,16 +7,16 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { EntryType, Question } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { forgetModelLimitReadings } from '../sdk/src/platform/routing/model-limit-readings.js';
+import { forgetModelLimitReadings } from '../platform/src/platform/routing/model-limit-readings.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   AnthropicProvider,
   ANTHROPIC_DATED_STATIC_MODELS,
-} from '../sdk/src/platform/providers/anthropic.js';
-import { OpenAIProvider, OPENAI_DATED_STATIC_MODELS } from '../sdk/src/platform/providers/openai.js';
-import { GeminiProvider, GEMINI_DATED_STATIC_MODELS } from '../sdk/src/platform/providers/gemini.js';
+} from '../platform/src/platform/providers/anthropic.js';
+import { OpenAIProvider, OPENAI_DATED_STATIC_MODELS } from '../platform/src/platform/providers/openai.js';
+import { GeminiProvider, GEMINI_DATED_STATIC_MODELS } from '../platform/src/platform/providers/gemini.js';
 
 async function withMockedFetch<T>(
   handler: (url: string, init?: RequestInit) => Response | Promise<Response>,

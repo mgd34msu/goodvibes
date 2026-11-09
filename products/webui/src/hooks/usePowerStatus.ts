@@ -1,5 +1,5 @@
 /**
- * usePowerStatus, the host sleep-ownership state (power.status.get, SDK 1.8.0).
+ * usePowerStatus, the host sleep-ownership state (power.status.get, platform 1.8.0).
  *
  * One query shared by every consumer of this state: the always-visible "sleep
  * disabled" chip (StatusStrip/PowerChip) and the admin Power panel
@@ -14,13 +14,13 @@
  * this one's own mutation success.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { sdk } from '../lib/goodvibes';
+import { client as platformClient } from '../lib/goodvibes';
 import { queryKeys } from '../lib/queries';
 
 export function usePowerStatus() {
   return useQuery({
     queryKey: queryKeys.power,
-    queryFn: () => sdk.operator.power.status(),
+    queryFn: () => platformClient.operator.power.status(),
     staleTime: 10_000,
     retry: false,
   });
@@ -31,7 +31,7 @@ export function usePowerStatus() {
 export function useSetKeepAwake() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (enabled: boolean) => sdk.operator.power.setKeepAwake(enabled),
+    mutationFn: (enabled: boolean) => platformClient.operator.power.setKeepAwake(enabled),
     onSuccess: (result) => {
       queryClient.setQueryData(queryKeys.power, result);
     },

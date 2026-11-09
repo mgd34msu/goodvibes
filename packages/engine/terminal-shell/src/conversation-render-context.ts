@@ -7,16 +7,16 @@
  * SHAPE of a render without depending on each other. Every import here is
  * type-only, which is what makes this a leaf of the import graph.
  */
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import type { BlockMeta } from './work-tree-types.js';
 import type { WorkTreeSources } from './work-tree-sources.js';
 import type { TreeGlyphSetName } from './renderer/lane-graph-glyphs.js';
 import type { SplashOptions } from './splash-lines.js';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
 // SystemMessageKind imported from runtime directly to avoid cycle:
 //   conversation-rendering.ts → system-message-router.ts → conversation.ts → conversation-rendering.ts
-import type { SystemMessageKind } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
+import type { SystemMessageKind } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 type Message = ConversationMessageSnapshot;
 /** Execution outcomes are recorded facts. Legacy content parsing is an explicit compatibility option. */
 export type ToolCallOutcome = 'ok' | 'error' | 'cancelled';

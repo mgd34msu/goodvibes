@@ -5,7 +5,7 @@
  * restart (owner rulings 2026-09-29).
  */
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import { SlackIntegration } from '@goodvibes-jev/engine/sdk/platform/integrations';
+import { SlackIntegration } from '@goodvibes-jev/engine/platform/platform/integrations';
 import { createEventEnvelope, RuntimeEventBus } from '@/runtime/index.ts';
 import { createRuntimeNotifier } from '../../runtime/bootstrap-notifier.ts';
 

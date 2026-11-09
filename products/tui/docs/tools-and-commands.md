@@ -735,9 +735,9 @@ Adjacent reliability subsystems: notifications; performance budgets and render-h
 
 ## Project planning
 
-Project planning is TUI-owned. When a normal chat turn clearly asks for an implementation plan, dependency graph, verification strategy, or agent handoff, the TUI opens the Planning modal, stores state in the SDK `ProjectPlanningService`, evaluates readiness, and asks one focused planning question before execution.
+Project planning is TUI-owned. When a normal chat turn clearly asks for an implementation plan, dependency graph, verification strategy, or agent handoff, the TUI opens the Planning modal, stores state in the platform `ProjectPlanningService`, evaluates readiness, and asks one focused planning question before execution.
 
-Planning artifacts are stored in a project knowledge space named `project:<projectId>`, where the project id is derived from the workspace path. The SDK supplies passive daemon routes and operator methods, but daemon/non-TUI surfaces do not enter planning loops.
+Planning artifacts are stored in a project knowledge space named `project:<projectId>`, where the project id is derived from the workspace path. The platform supplies passive daemon routes and operator methods, but daemon/non-TUI surfaces do not enter planning loops.
 
 See [Project planning](project-planning.md) for the modal layout, `/project-plan` behavior, and route/method list.
 
@@ -753,9 +753,9 @@ Use `/compact` to compact manually at any time.
 
 ## Knowledge ask
 
-`/knowledge ask <query>` asks the SDK knowledge/wiki layer for a source-backed semantic answer. Use `--space <knowledgeSpaceId>` to target a specific space such as a Home Assistant graph, `--limit <n>` to bound evidence, and `--mode concise|standard|detailed` to select answer detail.
+`/knowledge ask <query>` asks the platform knowledge/wiki layer for a source-backed semantic answer. Use `--space <knowledgeSpaceId>` to target a specific space such as a Home Assistant graph, `--limit <n>` to bound evidence, and `--mode concise|standard|detailed` to select answer detail.
 
-The TUI displays the SDK-returned answer text, sources, facts, linked objects, gaps, confidence, and synthesized state directly. It does not turn search results into local snippets.
+The TUI displays the platform-returned answer text, sources, facts, linked objects, gaps, confidence, and synthesized state directly. It does not turn search results into local snippets.
 
 ## WRFC constraint visibility
 
@@ -808,7 +808,7 @@ The high-signal subcommands, in the order a setup normally uses them:
 | `/cloudflare verify` | Verify the provisioned resources end to end |
 | `/cloudflare disable` | Turn the integration off |
 
-The TUI calls SDK daemon routes only. It does not call Cloudflare APIs directly. See [Cloudflare batch and control plane](cloudflare-batch.md) for token setup, supported components, and provisioning behavior.
+The TUI calls platform daemon routes only. It does not call Cloudflare APIs directly. See [Cloudflare batch and control plane](cloudflare-batch.md) for token setup, supported components, and provisioning behavior.
 
 ## Workflow-oriented commands
 

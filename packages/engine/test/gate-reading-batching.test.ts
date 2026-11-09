@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { actionOf, SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { readToolCall } from '../sdk/src/platform/gate/reading.ts';
+import { readToolCall } from '../platform/src/platform/gate/reading.ts';
 
 test('one recorded request supplies the selected gate readings and their single actual lineage', async () => {
   using log = new SqliteDecisionLog(':memory:');

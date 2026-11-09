@@ -3,10 +3,10 @@ import { readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from 'no
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import type { OrchestrationEngine } from '../../sdk/src/platform/orchestration/engine.js';
-import type { DurableContractBoundary, DurableContractRequest } from '../../sdk/src/platform/contract/index.js';
-import { contractPath } from '../../sdk/src/platform/contract/index.js';
-import { DurableContractAdmissions, durablePayloadRevision } from '../../sdk/src/platform/contract/durable-admission.js';
+import type { OrchestrationEngine } from '../../platform/src/platform/orchestration/engine.js';
+import type { DurableContractBoundary, DurableContractRequest } from '../../platform/src/platform/contract/index.js';
+import { contractPath } from '../../platform/src/platform/contract/index.js';
+import { DurableContractAdmissions, durablePayloadRevision } from '../../platform/src/platform/contract/durable-admission.js';
 import { makeHarness, makeRepo, oneUnitPlan, waitFor, type Harness } from './runner-support.js';
 
 const roots: string[] = [];

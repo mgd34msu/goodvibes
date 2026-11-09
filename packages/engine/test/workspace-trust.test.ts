@@ -2,12 +2,12 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { PermissionExecutionOptions, PermissionPromptRequest } from '../sdk/src/platform/permissions/index.js';
+import type { PermissionExecutionOptions, PermissionPromptRequest } from '../platform/src/platform/permissions/index.js';
 import {
   WorkspaceTrustManager,
   detectPriorWorkspaceState,
   trustGatedAsk,
-} from '../sdk/src/platform/runtime/workspace-trust.ts';
+} from '../platform/src/platform/runtime/workspace-trust.ts';
 
 /** The scope a caller supplies; any non-empty segment exercises the same paths. */
 const SURFACE_ROOT = 'test-surface';

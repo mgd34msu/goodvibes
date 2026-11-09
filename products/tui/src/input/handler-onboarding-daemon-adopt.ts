@@ -5,8 +5,8 @@
  * under the architecture line cap.
  */
 import { join } from 'node:path';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { resolveDaemonCompanionToken } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { resolveDaemonCompanionToken } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { isLoopbackAddress } from './onboarding/onboarding-wizard-helpers.ts';
 import {
   buildManagedDaemonServiceManager,

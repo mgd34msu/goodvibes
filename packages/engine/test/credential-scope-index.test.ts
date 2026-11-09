@@ -7,8 +7,8 @@ import {
   CREDENTIAL_SCOPE_DECLARATIONS,
   findCredentialScopeDeclaration,
   type CredentialScopeDeclaration,
-} from '../sdk/src/platform/config/credential-scope-registry.ts';
-import { BUILTIN_PROVIDER_ENV_KEYS } from '../sdk/src/platform/config/provider-credential-catalog.ts';
+} from '../platform/src/platform/config/credential-scope-registry.ts';
+import { BUILTIN_PROVIDER_ENV_KEYS } from '../platform/src/platform/config/provider-credential-catalog.ts';
 
 const fixtureDirectories: string[] = [];
 afterAll(() => { for (const directory of fixtureDirectories) rmSync(directory, { recursive: true, force: true }); });
@@ -31,8 +31,8 @@ function exhaustive(rows: readonly CredentialScopeDeclaration[], key: string): C
   return rows.find(row => row.match === 'exact' ? key === row.key : key.startsWith(row.key) && key.length > row.key.length) ?? null;
 }
 
-async function isolated(scenario: string): Promise<typeof import('../sdk/src/platform/config/credential-scope-registry.ts')> {
-  const url = new URL('../sdk/src/platform/config/credential-scope-registry.ts', import.meta.url);
+async function isolated(scenario: string): Promise<typeof import('../platform/src/platform/config/credential-scope-registry.ts')> {
+  const url = new URL('../platform/src/platform/config/credential-scope-registry.ts', import.meta.url);
   let source = readFileSync(url, 'utf8');
   for (const dependency of ['daemon-secret-keys', 'provider-credential-catalog']) {
     const original = `from './${dependency}.js';`;
@@ -45,7 +45,7 @@ async function isolated(scenario: string): Promise<typeof import('../sdk/src/pla
   fixtureDirectories.push(directory);
   const path = join(directory, `${scenario}.ts`);
   writeFileSync(path, source);
-  const module: typeof import('../sdk/src/platform/config/credential-scope-registry.ts') = await import(path);
+  const module: typeof import('../platform/src/platform/config/credential-scope-registry.ts') = await import(path);
   expect(module.CREDENTIAL_SCOPE_DECLARATIONS).not.toBe(CREDENTIAL_SCOPE_DECLARATIONS);
   return module;
 }

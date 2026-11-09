@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { OpenAICodexProvider } from '../sdk/src/platform/providers/openai-codex.js';
-import type { ProviderSubscription, SubscriptionManager } from '../sdk/src/platform/config/subscriptions.js';
-import { computeConfiguredProviderIds } from '../sdk/src/platform/providers/registry-configured-ids.js';
+import { OpenAICodexProvider } from '../platform/src/platform/providers/openai-codex.js';
+import type { ProviderSubscription, SubscriptionManager } from '../platform/src/platform/config/subscriptions.js';
+import { computeConfiguredProviderIds } from '../platform/src/platform/providers/registry-configured-ids.js';
 
 /**
  * A revoked-but-unexpired subscription token: the backend answers 401 while
@@ -334,7 +334,7 @@ describe('OpenAICodexProvider refresh-on-401', () => {
 
 describe('a revoked session is never shown as healthy', () => {
   test('the auth-route posture reports a revoked record as expired and says why', async () => {
-    const { buildStandardProviderAuthRoutes } = await import('../sdk/src/platform/providers/runtime-metadata.js');
+    const { buildStandardProviderAuthRoutes } = await import('../platform/src/platform/providers/runtime-metadata.js');
     const record = { ...liveRecord(), revokedAt: Date.now() } as ProviderSubscription;
     const routes = await buildStandardProviderAuthRoutes({
       providerId: 'openai-subscriber',

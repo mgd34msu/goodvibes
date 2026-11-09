@@ -1,14 +1,14 @@
 /**
  * spine-adoption.ts, wiring this surface's session and memory spines to the
- * daemon it adopted, over the SDK's adoption policy.
+ * daemon it adopted, over the platform's adoption policy.
  *
- * ── What moved to the SDK, and what stays here ────────────────────────────
+ * ── What moved to the platform, and what stays here ────────────────────────────
  *
- * The SDK's `@goodvibes-jev/engine/sdk/platform/runtime/client` now owns WHEN the
+ * The platform's `@goodvibes-jev/engine/platform/platform/runtime/client` now owns WHEN the
  * wire comes up and goes down: idempotent per base URL, torn down on a
  * change, the one-time legacy-store fold. This module owns WHAT the wire is,
  * this terminal's own `createHttpTransport` + `createTuiSpineTransport` +
- * `createTuiMemorySpineTransport`, injected as the SDK's `connect(baseUrl,
+ * `createTuiMemorySpineTransport`, injected as the platform's `connect(baseUrl,
  * authToken)` callback, because building the actual HTTP client is the same
  * connection-resolution concern the verb caller already keeps product-side.
  *
@@ -32,41 +32,41 @@
  *   - `sessions.list`, the cross-surface union the modals read, interval-
  *     refreshed and served synchronously.
  *   - the memory spine's wire transport, folded into the same handler by the
- *     SDK, this module's own `syncMemorySpineToHostStatus` call is retired;
+ *     platform, this module's own `syncMemorySpineToHostStatus` call is retired;
  *     supplying `memoryTransport` in the bundle and `memorySpine` in the
  *     options is what activates it now.
  *
  * Plus a one-time, marker-guarded fold of this project's own pre-spine
- * `control-plane/sessions.json` into the adopted daemon, done by the SDK.
+ * `control-plane/sessions.json` into the adopted daemon, done by the platform.
  *
  * ── Why this module's exported shape does not change ──────────────────────
  *
  * `bootstrap.ts` gates on `HostServiceStatus` and hands a bare
- * `(daemonStatus, sharedDaemonToken)` pair to whatever this returns. The SDK's
+ * `(daemonStatus, sharedDaemonToken)` pair to whatever this returns. The platform's
  * handler takes a narrower `{ mode, baseUrl }` signal instead, so the adapting
  * happens inside this module rather than at the call site.
  */
 import { createHttpTransport, type HostServiceStatus } from '@/runtime/index.ts';
-import { createSpineAdoptionSync as createSdkSpineAdoptionSync } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
-import type { SpineAdoptionOptions as SdkSpineAdoptionOptions } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+import { createSpineAdoptionSync as createPlatformSpineAdoptionSync } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import type { SpineAdoptionOptions as PlatformSpineAdoptionOptions } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 
 import { createTuiSpineTransport, type SpineSessionsClient } from '../session-spine-transport.ts';
 import { createTuiMemorySpineTransport } from '../memory-spine-transport.ts';
 
-/** This module's own options: the SDK's shape minus the two fields it builds itself. */
-export type SpineAdoptionOptions = Omit<SdkSpineAdoptionOptions, 'connect' | 'activation'>;
+/** This module's own options: the platform's shape minus the two fields it builds itself. */
+export type SpineAdoptionOptions = Omit<PlatformSpineAdoptionOptions, 'connect' | 'activation'>;
 
 /**
  * Build the "the adopted daemon changed" handler.
  *
- * Idempotent per base URL (the SDK's own guarantee): re-running it against the
+ * Idempotent per base URL (the platform's own guarantee): re-running it against the
  * same adopted daemon is a no-op, so a re-probe after an autostart does not
  * tear a live mirror down and put it back up.
  */
 export function createSpineAdoptionSync(
   options: SpineAdoptionOptions,
 ): (daemonStatus: HostServiceStatus, sharedDaemonToken: string) => void {
-  const sync = createSdkSpineAdoptionSync({
+  const sync = createPlatformSpineAdoptionSync({
     ...options,
     // This terminal has a boot discovery probe and can render "no daemon"
     // honestly, so it gates on the probe's verdict rather than wiring the

@@ -2,11 +2,11 @@ import { expect, test } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { installJudgmentPort, judgmentPort } from '@goodvibes-jev/engine/errors';
-import { ConfigManager, SecretsManager, type JudgmentFallbackSettings } from '@goodvibes-jev/engine/sdk/platform/config';
-import { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { composeJudgment } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import { WEBUI_COMMAND_CATALOG_VERSION } from '@goodvibes-jev/engine/sdk/platform/judgment-browser/catalogs';
-import type { AuthenticatedPrincipal } from '@goodvibes-jev/engine/daemon-sdk';
+import { ConfigManager, SecretsManager, type JudgmentFallbackSettings } from '@goodvibes-jev/engine/platform/platform/config';
+import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { composeJudgment } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { WEBUI_COMMAND_CATALOG_VERSION } from '@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs';
+import type { AuthenticatedPrincipal } from '@goodvibes-jev/engine/daemon-api';
 import { composeBrowserJudgment } from '../../runtime/browser-judgment-composition.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 

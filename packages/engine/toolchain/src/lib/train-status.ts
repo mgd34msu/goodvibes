@@ -4,7 +4,7 @@
  *
  * Strictly read-only: every git/npm call this module makes is a query (no
  * push, tag, install, or write outside stdout). Decision and rendering logic
- * (classifySdkPin/deriveAction/deriveRow/render*) is pure over gathered
+ * (classifyEnginePin/deriveAction/deriveRow/render*) is pure over gathered
  * structs, so unit tests drive it without touching git or npm; gatherOneRepo
  * and gatherTrainStatus are the only impure pieces, and take their subprocess
  * runner as an injectable `Exec` (see effects.ts) so a real integration test
@@ -18,7 +18,7 @@ import { z } from 'zod/v4';
 import type { Exec } from './effects.js';
 import { realExec } from './effects.js';
 
-export type RepoKind = 'sdk' | 'sdk-consumer' | 'independent';
+export type RepoKind = 'platform' | 'engine-consumer' | 'independent';
 
 export interface TrainStatusRepoEntry {
   readonly path: string;
@@ -38,7 +38,7 @@ export interface TrainStatusManifest {
 const RepoEntrySchema = z.object({
   path: z.string().min(1, 'must be a non-empty string'),
   name: z.string().min(1, 'must be a non-empty string'),
-  kind: z.enum(['sdk', 'sdk-consumer', 'independent']),
+  kind: z.enum(['platform', 'engine-consumer', 'independent']),
   releaseCommand: z.string().min(1, 'must be a non-empty string').optional(),
 }).catchall(z.unknown());
 
@@ -73,8 +73,8 @@ export interface RepoGathered {
   readonly entry: TrainStatusRepoEntry;
   /** `n/a` for repos with no package.json (e.g. a Python repo in the family). */
   readonly version: string;
-  /** The @goodvibes-jev/engine pin read from dependencies/devDependencies; null when absent or not an sdk-consumer. */
-  readonly sdkPin: string | null;
+  /** The @goodvibes-jev/engine pin read from dependencies/devDependencies; null when absent or not an engine-consumer. */
+  readonly enginePin: string | null;
   readonly lastTag: string | null;
   readonly commitsSinceTag: number;
   readonly unpushedCommits: number;
@@ -84,8 +84,8 @@ export interface RepoRow {
   readonly name: string;
   readonly kind: RepoKind;
   readonly version: string;
-  /** `n/a` for kinds other than sdk-consumer. */
-  readonly sdkPin: string;
+  /** `n/a` for kinds other than engine-consumer. */
+  readonly enginePin: string;
   readonly lastTag: string;
   readonly commitsSinceTag: number;
   readonly unpushedCommits: number;
@@ -94,32 +94,32 @@ export interface RepoRow {
   readonly error?: string;
 }
 
-/** The engine package a consumer depends on (the same name as DEFAULT_SDK_PACKAGE in config.ts). */
-export const SDK_PACKAGE_NAME = '@goodvibes-jev/engine';
+/** The engine package a consumer depends on (the same name as DEFAULT_ENGINE_PACKAGE in config.ts). */
+export const ENGINE_PACKAGE_NAME = '@goodvibes-jev/engine';
 
-/** Render the sdk-consumer pin ⇄ latest column. `n/a` for non-consumer kinds. */
-export function classifySdkPin(pin: string | null, latest: string | null, kind: RepoKind): string {
-  if (kind !== 'sdk-consumer') return 'n/a';
+/** Render the engine-consumer pin ⇄ latest column. `n/a` for non-consumer kinds. */
+export function classifyEnginePin(pin: string | null, latest: string | null, kind: RepoKind): string {
+  if (kind !== 'engine-consumer') return 'n/a';
   if (!pin) return 'unpinned';
   if (!latest) return `${pin} (latest unknown)`;
   return pin === latest ? `${pin} (current)` : `${pin} -> ${latest} (repin needed)`;
 }
 
 function needsRepin(pin: string | null, latest: string | null, kind: RepoKind): boolean {
-  return kind === 'sdk-consumer' && pin !== null && latest !== null && pin !== latest;
+  return kind === 'engine-consumer' && pin !== null && latest !== null && pin !== latest;
 }
 
 /** Derive the suggested action for one repo. Pure; the manifest's releaseCommand is used verbatim when present. */
-export function deriveAction(gathered: RepoGathered, latestSdkVersion: string | null): string {
-  const { entry, commitsSinceTag, unpushedCommits, sdkPin } = gathered;
+export function deriveAction(gathered: RepoGathered, latestEngineVersion: string | null): string {
+  const { entry, commitsSinceTag, unpushedCommits, enginePin } = gathered;
 
-  if (entry.kind === 'sdk') {
+  if (entry.kind === 'platform') {
     return commitsSinceTag > 0 ? 'cut vNEXT' : 'idle';
   }
 
-  if (entry.kind === 'sdk-consumer') {
-    if (needsRepin(sdkPin, latestSdkVersion, entry.kind)) {
-      return `repin to ${latestSdkVersion} then release`;
+  if (entry.kind === 'engine-consumer') {
+    if (needsRepin(enginePin, latestEngineVersion, entry.kind)) {
+      return `repin to ${latestEngineVersion} then release`;
     }
     return commitsSinceTag > 0 ? `release (${commitsSinceTag} unreleased)` : 'idle';
   }
@@ -136,16 +136,16 @@ export function deriveAction(gathered: RepoGathered, latestSdkVersion: string | 
 }
 
 /** Turn gathered facts into the printed row. Pure. */
-export function deriveRow(gathered: RepoGathered, latestSdkVersion: string | null): RepoRow {
+export function deriveRow(gathered: RepoGathered, latestEngineVersion: string | null): RepoRow {
   return {
     name: gathered.entry.name,
     kind: gathered.entry.kind,
     version: gathered.version,
-    sdkPin: classifySdkPin(gathered.sdkPin, latestSdkVersion, gathered.entry.kind),
+    enginePin: classifyEnginePin(gathered.enginePin, latestEngineVersion, gathered.entry.kind),
     lastTag: gathered.lastTag ?? '(none)',
     commitsSinceTag: gathered.commitsSinceTag,
     unpushedCommits: gathered.unpushedCommits,
-    action: deriveAction(gathered, latestSdkVersion),
+    action: deriveAction(gathered, latestEngineVersion),
   };
 }
 
@@ -155,7 +155,7 @@ export function errorRow(entry: TrainStatusRepoEntry, message: string): RepoRow 
     name: entry.name,
     kind: entry.kind,
     version: 'n/a',
-    sdkPin: 'n/a',
+    enginePin: 'n/a',
     lastTag: 'n/a',
     commitsSinceTag: 0,
     unpushedCommits: 0,
@@ -168,14 +168,14 @@ export function errorRow(entry: TrainStatusRepoEntry, message: string): RepoRow 
 // Rendering
 // ---------------------------------------------------------------------------
 
-const TABLE_HEADERS = ['REPO', 'KIND', 'VERSION', 'SDK PIN', 'LAST TAG', 'SINCE TAG', 'UNPUSHED', 'ACTION'] as const;
+const TABLE_HEADERS = ['REPO', 'KIND', 'VERSION', 'engine PIN', 'LAST TAG', 'SINCE TAG', 'UNPUSHED', 'ACTION'] as const;
 
 function rowCells(row: RepoRow): string[] {
   return [
     row.name,
     row.kind,
     row.version,
-    row.sdkPin,
+    row.enginePin,
     row.lastTag,
     String(row.commitsSinceTag),
     String(row.unpushedCommits),
@@ -203,7 +203,7 @@ export function renderTrainStatusTable(rows: readonly RepoRow[]): string {
 }
 
 export interface TrainStatusResult {
-  readonly latestSdkVersion: string | null;
+  readonly latestEngineVersion: string | null;
   readonly rows: readonly RepoRow[];
 }
 
@@ -239,7 +239,7 @@ export function readPackageVersion(repoPath: string): string {
 }
 
 /** Read the @goodvibes-jev/engine pin from dependencies or devDependencies. Null when absent. */
-export function readTrainStatusSdkPin(repoPath: string): string | null {
+export function readTrainStatusEnginePin(repoPath: string): string | null {
   const pkgPath = resolve(repoPath, 'package.json');
   if (!existsSync(pkgPath)) return null;
   try {
@@ -247,7 +247,7 @@ export function readTrainStatusSdkPin(repoPath: string): string | null {
       dependencies?: Record<string, unknown>;
       devDependencies?: Record<string, unknown>;
     };
-    const pin = pkg.dependencies?.[SDK_PACKAGE_NAME] ?? pkg.devDependencies?.[SDK_PACKAGE_NAME];
+    const pin = pkg.dependencies?.[ENGINE_PACKAGE_NAME] ?? pkg.devDependencies?.[ENGINE_PACKAGE_NAME];
     return typeof pin === 'string' ? pin : null;
   } catch {
     return null;
@@ -275,18 +275,18 @@ export function gatherGitFacts(exec: Exec, repoPath: string): GitFacts {
   return { lastTag, commitsSinceTag, unpushedCommits };
 }
 
-/** Fetches the latest published SDK version once for the whole run. Null when npm view fails or returns nothing. */
-export type FetchLatestSdkVersion = (exec: Exec) => string | null;
+/** Fetches the latest published engine version once for the whole run. Null when npm view fails or returns nothing. */
+export type FetchLatestEngineVersion = (exec: Exec) => string | null;
 
-export const realFetchLatestSdkVersion: FetchLatestSdkVersion = (exec) => {
-  const result = exec('npm', ['view', SDK_PACKAGE_NAME, 'version'], { timeoutMs: NPM_TIMEOUT_MS });
+export const realFetchLatestEngineVersion: FetchLatestEngineVersion = (exec) => {
+  const result = exec('npm', ['view', ENGINE_PACKAGE_NAME, 'version'], { timeoutMs: NPM_TIMEOUT_MS });
   if (result.status !== 0) return null;
   const version = result.stdout.trim();
   return version.length > 0 ? version : null;
 };
 
 /** Gather one repo's row. Never throws: a missing path or non-git-repo path becomes a single error row. */
-export function gatherOneRepo(exec: Exec, entry: TrainStatusRepoEntry, latestSdkVersion: string | null): RepoRow {
+export function gatherOneRepo(exec: Exec, entry: TrainStatusRepoEntry, latestEngineVersion: string | null): RepoRow {
   if (!existsSync(entry.path)) {
     return errorRow(entry, `path does not exist: ${entry.path}`);
   }
@@ -296,28 +296,28 @@ export function gatherOneRepo(exec: Exec, entry: TrainStatusRepoEntry, latestSdk
   }
 
   const version = readPackageVersion(entry.path);
-  const sdkPin = entry.kind === 'sdk-consumer' ? readTrainStatusSdkPin(entry.path) : null;
+  const enginePin = entry.kind === 'engine-consumer' ? readTrainStatusEnginePin(entry.path) : null;
   const { lastTag, commitsSinceTag, unpushedCommits } = gatherGitFacts(exec, entry.path);
 
-  return deriveRow({ entry, version, sdkPin, lastTag, commitsSinceTag, unpushedCommits }, latestSdkVersion);
+  return deriveRow({ entry, version, enginePin, lastTag, commitsSinceTag, unpushedCommits }, latestEngineVersion);
 }
 
 export interface GatherTrainStatusOptions {
   readonly exec?: Exec;
   /** Overridable so an integration test can skip the real npm registry call. */
-  readonly fetchLatestSdkVersion?: FetchLatestSdkVersion;
+  readonly fetchLatestEngineVersion?: FetchLatestEngineVersion;
 }
 
 /** Gather every repo in the manifest into the full train-status result. The only network/subprocess entry point. */
 export function gatherTrainStatus(manifest: TrainStatusManifest, options: GatherTrainStatusOptions = {}): TrainStatusResult {
   const exec = options.exec ?? realExec;
-  const fetchLatestSdkVersion = options.fetchLatestSdkVersion ?? realFetchLatestSdkVersion;
+  const fetchLatestEngineVersion = options.fetchLatestEngineVersion ?? realFetchLatestEngineVersion;
 
   // Fetched once for the whole run, not per repo, whether or not there turns
-  // out to be an sdk-consumer, keeps the call graph obvious from this one line.
-  const needsSdkVersion = manifest.repos.some((entry) => entry.kind === 'sdk-consumer');
-  const latestSdkVersion = needsSdkVersion ? fetchLatestSdkVersion(exec) : null;
+  // out to be an engine-consumer, keeps the call graph obvious from this one line.
+  const needsEngineVersion = manifest.repos.some((entry) => entry.kind === 'engine-consumer');
+  const latestEngineVersion = needsEngineVersion ? fetchLatestEngineVersion(exec) : null;
 
-  const rows = manifest.repos.map((entry) => gatherOneRepo(exec, entry, latestSdkVersion));
-  return { latestSdkVersion, rows };
+  const rows = manifest.repos.map((entry) => gatherOneRepo(exec, entry, latestEngineVersion));
+  return { latestEngineVersion, rows };
 }

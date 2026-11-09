@@ -1,14 +1,14 @@
 import { createHash } from 'node:crypto';
-import { canonicalNativeConversationContinuation } from '../sdk/src/platform/workflow/work-ledger/native-continuation-context.js';
+import { canonicalNativeConversationContinuation } from '../platform/src/platform/workflow/work-ledger/native-continuation-context.js';
 import { describe, expect, spyOn, test } from 'bun:test';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.js';
-import { registerWorkLedgerGatewayMethods } from '../sdk/src/platform/control-plane/routes/work-ledger.js';
-import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../sdk/src/platform/daemon/control-plane.js';
-import { dispatchGatewayRestRoutes } from '../daemon-sdk/src/gateway-rest-routes.js';
-import { createOperatorSdk } from '../operator-sdk/src/client.js';
-import type { OperatorRemoteClient } from '../operator-sdk/src/client-core.js';
-import { createOperatorWorkLedgerReadClient } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/operator-read-client';
-import { WorkLedgerAccessError, type WorkLedgerEvent } from '../sdk/src/platform/workflow/work-ledger/types.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
+import { registerWorkLedgerGatewayMethods } from '../platform/src/platform/control-plane/routes/work-ledger.js';
+import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../platform/src/platform/daemon/control-plane.js';
+import { dispatchGatewayRestRoutes } from '../daemon-api/src/gateway-rest-routes.js';
+import { createOperatorApiClient } from '../operator-client/src/client.js';
+import type { OperatorRemoteClient } from '../operator-client/src/client-core.js';
+import { createOperatorWorkLedgerReadClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/operator-read-client';
+import { WorkLedgerAccessError, type WorkLedgerEvent } from '../platform/src/platform/workflow/work-ledger/types.js';
 
 function event(sequence: number): Exclude<WorkLedgerEvent, { type: 'import_legacy' }> {
   return { sequence, type: 'create', actorId: 'fixture-owner', requestId: `request-${sequence}`, workId: `work-${sequence}`,
@@ -62,8 +62,8 @@ function fixture(count = 0) {
     });
     return response ?? Response.json({ error: 'Not found' }, { status: 404 });
   };
-  const sdk = (token = 'synthetic-owner-token') => createOperatorSdk({ baseUrl: 'http://127.0.0.1:1', authToken: token, fetch });
-  return { catalog, helper, events, reader, requests, sdk, get historyCalls() { return historyCalls; },
+  const platformClient = (token = 'synthetic-owner-token') => createOperatorApiClient({ baseUrl: 'http://127.0.0.1:1', authToken: token, fetch });
+  return { catalog, helper, events, reader, requests, platformClient, get historyCalls() { return historyCalls; },
     get snapshotCalls() { return snapshotCalls; },
     downgradeRole() { sessionRoles = []; }, rotateToken() { token = 'synthetic-replacement-token'; },
     revoke() { revoked = true; }, close() { closed = true; }, onHistory(fn: () => void) { beforeHistory = fn; } };
@@ -80,10 +80,10 @@ async function waitFor(check: () => boolean): Promise<void> {
 describe('native ledger authenticated read transport', () => {
   test('owner auth reaches matching host; read-only user and unrelated scopes cannot read', async () => {
     const host = fixture();
-    const reader = createOperatorWorkLedgerReadClient(host.sdk(), 'fixture-project');
+    const reader = createOperatorWorkLedgerReadClient(host.platformClient(), 'fixture-project');
     expect(await reader.readSnapshot()).toEqual({ projectId: 'fixture-project', cursor: 0, revision: 0, provenance: 'available', works: [] });
     expect(host.requests[0]?.headers.get('authorization')).toBe('Bearer synthetic-owner-token');
-    await expect(createOperatorWorkLedgerReadClient(host.sdk('synthetic-reader-token'), 'fixture-project').readSnapshot()).rejects.toMatchObject({ status: 403 });
+    await expect(createOperatorWorkLedgerReadClient(host.platformClient('synthetic-reader-token'), 'fixture-project').readSnapshot()).rejects.toMatchObject({ status: 403 });
     const descriptor = host.catalog.get('workLedger.snapshot')!;
     expect(descriptor.scopes).toEqual(['read:work-ledger']);
     expect(host.helper.validateGatewayInvocation(descriptor, { admin: true, scopes: ['read:events', 'read:fleet', 'read:workspaces'] })?.status).toBe(403);
@@ -92,15 +92,15 @@ describe('native ledger authenticated read transport', () => {
   });
   test('rejects different project and identity/path injection before storage read', async () => {
     const host = fixture();
-    await expect(createOperatorWorkLedgerReadClient(host.sdk(), 'other-project').readSnapshot()).rejects.toMatchObject({ status: 403 });
-    await expect(host.sdk().invoke('workLedger.snapshot', { projectId: 'fixture-project', actorId: 'owner' })).rejects.toMatchObject({ status: 400 });
-    await expect(host.sdk().invoke('workLedger.snapshot', { projectId: 'fixture-project', path: '/tmp/other.sqlite' })).rejects.toMatchObject({ status: 400 });
+    await expect(createOperatorWorkLedgerReadClient(host.platformClient(), 'other-project').readSnapshot()).rejects.toMatchObject({ status: 403 });
+    await expect(host.platformClient().invoke('workLedger.snapshot', { projectId: 'fixture-project', actorId: 'owner' })).rejects.toMatchObject({ status: 400 });
+    await expect(host.platformClient().invoke('workLedger.snapshot', { projectId: 'fixture-project', path: '/tmp/other.sqlite' })).rejects.toMatchObject({ status: 400 });
     expect(host.historyCalls).toBe(0);
   });
   test('fixed pages drain one pinned watermark despite concurrent growth', async () => {
     const host = fixture(205);
     host.onHistory(() => { host.events.push(event(host.events.length + 1)); });
-    const reader = createOperatorWorkLedgerReadClient(host.sdk(), 'fixture-project');
+    const reader = createOperatorWorkLedgerReadClient(host.platformClient(), 'fixture-project');
     const history = await reader.history(0);
     expect(history).toHaveLength(205); expect(history.at(-1)?.sequence).toBe(205);
     expect(host.historyCalls).toBe(3);
@@ -109,18 +109,18 @@ describe('native ledger authenticated read transport', () => {
     reader.dispose();
   });
   test('invalid/future cursors and oversized events are refusals, not partial success', async () => {
-    const host = fixture(2); const reader = createOperatorWorkLedgerReadClient(host.sdk(), 'fixture-project');
+    const host = fixture(2); const reader = createOperatorWorkLedgerReadClient(host.platformClient(), 'fixture-project');
     await expect(reader.history(-1)).rejects.toThrow('invalid history cursor');
     await expect(reader.history(10)).rejects.toMatchObject({ status: 400 });
     // A permitted work's bounded fields can still exceed the whole wire response bound.
     host.events[0]!.work.criteria = Array.from({ length: 100 }, () => 'x'.repeat(20_000));
     await expect(reader.history(0)).rejects.toMatchObject({ status: 413 });
-    await expect(host.sdk().invoke('workLedger.history', { projectId: 'fixture-project', afterSequence: '1.5' })).rejects.toMatchObject({ status: 400 });
+    await expect(host.platformClient().invoke('workLedger.history', { projectId: 'fixture-project', afterSequence: '1.5' })).rejects.toMatchObject({ status: 400 });
     reader.dispose();
   });
   test('revocation is rechecked per request and polling stops after denial', async () => {
     const host = fixture(); const unavailable: Error[] = []; const observed: number[] = [];
-    const reader = createOperatorWorkLedgerReadClient(host.sdk(), 'fixture-project', { pollIntervalMs: 100, onUnavailable: e => unavailable.push(e) });
+    const reader = createOperatorWorkLedgerReadClient(host.platformClient(), 'fixture-project', { pollIntervalMs: 100, onUnavailable: e => unavailable.push(e) });
     reader.subscribe(snapshot => observed.push(snapshot.cursor));
     await pause(30); expect(observed).toEqual([0]);
     host.revoke(); await pause(140);
@@ -130,7 +130,7 @@ describe('native ledger authenticated read transport', () => {
   });
   test('host closure is unavailable, never an empty ledger', async () => {
     const host = fixture(); host.close();
-    await expect(createOperatorWorkLedgerReadClient(host.sdk(), 'fixture-project').readSnapshot()).rejects.toMatchObject({ status: 503 });
+    await expect(createOperatorWorkLedgerReadClient(host.platformClient(), 'fixture-project').readSnapshot()).rejects.toMatchObject({ status: 503 });
   });
 });
 
@@ -164,10 +164,10 @@ describe('native ledger reader lifecycle', () => {
   });
   test('transient polling failure backs off then catches up the durable cursor', async () => {
     const host = fixture(); let calls = 0; const snapshots: number[] = []; const errors: Error[] = [];
-    const sdk = host.sdk();
+    const platformClient = host.platformClient();
     const invoke: OperatorRemoteClient['invoke'] = async <T>(method: string, input?: Record<string, unknown>, options?: { signal?: AbortSignal }) => {
       if (++calls === 1) throw new Error('synthetic offline');
-      return sdk.invoke<T>(method, input, options);
+      return platformClient.invoke<T>(method, input, options);
     };
     const reader = createOperatorWorkLedgerReadClient({ invoke }, 'fixture-project', { pollIntervalMs: 100, onUnavailable: e => errors.push(e) });
     let now = 0;
@@ -227,7 +227,7 @@ describe('native ledger reader lifecycle', () => {
   test('history aggregate cap rejects instead of returning a silently truncated prefix', async () => {
     const host = fixture(500);
     for (const item of host.events) item.work.goal = 'x'.repeat(20_000);
-    const reader = createOperatorWorkLedgerReadClient(host.sdk(), 'fixture-project');
+    const reader = createOperatorWorkLedgerReadClient(host.platformClient(), 'fixture-project');
     await expect(reader.history(0)).rejects.toThrow('history catch-up exceeds the bounded read limit'); reader.dispose();
   });
 });
@@ -256,7 +256,7 @@ test('snapshots reject authority-bearing fields and oversized data', async () =>
   host.reader.readSnapshot = async () => ({ projectId: 'fixture-project', revision: 0, cursor: 0, works: Array.from({ length: 100 }, () => ({
     work: event(1).work, attempt: null, verification: { state: 'unverified' as const, reason: 'x'.repeat(20_000), evidence: null }, attention: [],
   })) });
-  const reader = createOperatorWorkLedgerReadClient(host.sdk(), 'fixture-project');
+  const reader = createOperatorWorkLedgerReadClient(host.platformClient(), 'fixture-project');
   await expect(reader.readSnapshot()).rejects.toMatchObject({ status: 413 });
   const authorityBearing = { projectId: 'fixture-project', cursor: 0, revision: 0, works: [{
     work: event(1).work, attempt: null, verification: { state: 'unverified' as const, reason: 'unverified', evidence: null },
@@ -268,7 +268,7 @@ test('snapshots reject authority-bearing fields and oversized data', async () =>
 
 test('two subscriptions using the same callback own independent leases', async () => {
   const host = fixture(); const snapshots: number[] = [];
-  const reader = createOperatorWorkLedgerReadClient(host.sdk(), 'fixture-project', { pollIntervalMs: 100 });
+  const reader = createOperatorWorkLedgerReadClient(host.platformClient(), 'fixture-project', { pollIntervalMs: 100 });
   const listener = (snapshot: { cursor: number }) => snapshots.push(snapshot.cursor);
   const first = reader.subscribe(listener); const second = reader.subscribe(listener);
   first(); await pause(30); expect(snapshots).toEqual([0]);
@@ -278,11 +278,11 @@ test('two subscriptions using the same callback own independent leases', async (
 
 
 test('a timed-out observation reports unavailable, backs off, and resumes from durable state', async () => {
-  const host = fixture(); const sdk = host.sdk();
+  const host = fixture(); const platformClient = host.platformClient();
   let calls = 0; const failures: Error[] = []; const cursors: number[] = [];
   const invoke: OperatorRemoteClient['invoke'] = async <T>(method: string, input?: Record<string, unknown>, options?: { signal?: AbortSignal }) => {
     if (++calls === 1) return await new Promise(() => {}) as T;
-    return sdk.invoke<T>(method, input, options);
+    return platformClient.invoke<T>(method, input, options);
   };
   const reader = createOperatorWorkLedgerReadClient({ invoke }, 'fixture-project', {
     requestTimeoutMs: 100, pollIntervalMs: 100, onUnavailable: error => failures.push(error),
@@ -299,7 +299,7 @@ test('a timed-out observation reports unavailable, backs off, and resumes from d
 
 
 test.each(['subscription', 'unavailable'] as const)('async %s observer rejection after disposal stays isolated', async kind => {
-  const host = fixture(); const sdk = host.sdk();
+  const host = fixture(); const platformClient = host.platformClient();
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   let observed = false;
@@ -309,7 +309,7 @@ test.each(['subscription', 'unavailable'] as const)('async %s observer rejection
   const callback = async () => { observed = true; await gate; throw new Error('synthetic observer rejection'); };
   const invoke: OperatorRemoteClient['invoke'] = async <T>(method: string, input?: Record<string, unknown>, options?: { signal?: AbortSignal }) => {
     if (kind === 'unavailable') throw new Error('synthetic offline');
-    return sdk.invoke<T>(method, input, options);
+    return platformClient.invoke<T>(method, input, options);
   };
   const reader = createOperatorWorkLedgerReadClient({ invoke }, 'fixture-project', {
     pollIntervalMs: 100, ...(kind === 'unavailable' ? { onUnavailable: callback } : {}),
@@ -322,10 +322,10 @@ test.each(['subscription', 'unavailable'] as const)('async %s observer rejection
 });
 
 test.each(['subscription', 'unavailable'] as const)('hostile %s thenable and reentrant disposal stay isolated', async kind => {
-  const host = fixture(); const sdk = host.sdk(); let called = 0; let thenRead = 0;
+  const host = fixture(); const platformClient = host.platformClient(); let called = 0; let thenRead = 0;
   const invoke: OperatorRemoteClient['invoke'] = async <T>(method: string, input?: Record<string, unknown>, options?: { signal?: AbortSignal }) => {
     if (kind === 'unavailable') throw new Error('synthetic offline');
-    return sdk.invoke<T>(method, input, options);
+    return platformClient.invoke<T>(method, input, options);
   };
   const callback = () => {
     called += 1;
@@ -448,7 +448,7 @@ test('unavailable observer mutation cannot turn terminal auth failure into retri
 
 test('one observer cannot rewrite another observer snapshot', async () => {
   const host = fixture(1); const snapshots: number[] = [];
-  const reader = createOperatorWorkLedgerReadClient(host.sdk(), 'fixture-project', { pollIntervalMs: 100 });
+  const reader = createOperatorWorkLedgerReadClient(host.platformClient(), 'fixture-project', { pollIntervalMs: 100 });
   reader.subscribe(snapshot => { Object.assign(snapshot, { cursor: 999, projectId: 'rewritten' }); });
   reader.subscribe(snapshot => snapshots.push(snapshot.cursor));
   await waitFor(() => snapshots.length > 0); expect(snapshots).toEqual([1]);
@@ -465,7 +465,7 @@ test('generic ledger snapshot and history omit hosted transcript without changin
     extraction: { version: 1, offsetEncoding: 'utf16', spans: [{ partId: 'input', start: 0, end: 1 }], proposalRevision: 'proposal', admissionDecisionId: 'decision', judgmentDecisionIds: ['decision'] } };
   host.reader.readSnapshot = async () => ({ projectId: 'fixture-project', cursor: 1, revision: 1,
     works: [{ work, attempt: null, verification: { state: 'unverified', reason: '', evidence: null }, attention: [] }] });
-  const reader = createOperatorWorkLedgerReadClient(host.sdk(), 'fixture-project');
+  const reader = createOperatorWorkLedgerReadClient(host.platformClient(), 'fixture-project');
   const snapshot = await reader.readSnapshot(); const history = await reader.history(0);
   expect(JSON.stringify(snapshot)).not.toContain(messages[0]!.content); expect(JSON.stringify(history)).not.toContain(messages[0]!.content);
   expect(JSON.stringify(snapshot)).not.toContain(sessionId); expect(JSON.stringify(history)).not.toContain(sessionId);

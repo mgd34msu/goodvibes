@@ -1,6 +1,6 @@
-import { BROWSER_SPEECH_SEAM_BAND, type BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-sdk/browser-judgment-contract';
+import { BROWSER_SPEECH_SEAM_BAND, type BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-api/browser-judgment-contract';
 import { runBrowserJudgment } from '../goodvibes';
-import { classicSpeechEndOffsets, DecisionModelsDisabledError } from '@goodvibes-jev/engine/sdk/browser/decision-policy';
+import { classicSpeechEndOffsets, DecisionModelsDisabledError } from '@goodvibes-jev/engine/platform/browser/decision-policy';
 import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime } from '../client-lifetime';
 import { randomUuid } from '../uuid';
 

@@ -2,11 +2,11 @@
 // fleet-transcript.ts
 //
 // Renders the content of an attached Agents modal
-// session tab. Three sources, chosen by what the SDK can actually provide
+// session tab. Three sources, chosen by what the platform can actually provide
 // (see the design brief's "central reality check", a full-fidelity live
 // transcript needs a ConversationMessageSnapshot[] history source, which
 // only exists for a RUNNING agent or a just-completed one still inside the
-// SDK's bounded retention ring):
+// platform's bounded retention ring):
 //
 //   - 'live'/'frozen' , a non-empty ConversationMessageSnapshot[] from
 //     AgentManager.getConversationSnapshot(agentId), rendered through the
@@ -27,12 +27,12 @@
 // summary (renderFleetContractSummary) instead of a transcript.
 // ---------------------------------------------------------------------------
 
-import type { ContractView } from '@goodvibes-jev/engine/sdk/platform/contract';
+import type { ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
 import { cellText } from '../renderer/lane-graph/bead.ts';
 import { projectContractTree, contractStatusSummary } from '../core/work-tree-contract.ts';
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { createEmptyLine, type Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { createEmptyLine, type Line } from '@goodvibes-jev/engine/platform/platform/types';
 import type { MessageLineCache } from '../core/conversation-line-cache.ts';
 import type { ConversationRenderContext } from '../core/conversation-rendering.ts';
 import { renderConversationEventLine, renderConversationNotice } from '../renderer/conversation-surface.ts';
@@ -99,13 +99,13 @@ function renderFrozenTranscriptNotice(width: number): Line[] {
  * a pure renderer, same convention as fleet-read-model.ts).
  *
  * `isTerminal` distinguishes 'live' (the agent is still running, the
- * snapshot came from the SDK's live source, so it will change on the next
+ * snapshot came from the platform's live source, so it will change on the next
  * render) from 'frozen' (the agent finished, the snapshot is a static final
  * capture; caller is showing a completed conversation, not a live one).
  * An empty snapshot on a terminal agent means the source was never
  * registered or has been evicted, the caller falls back to
  * `renderFleetLedgerFallback`; an empty snapshot on a non-terminal agent
- * (e.g. the SDK hasn't sent a turn yet) legitimately means "no messages yet".
+ * (e.g. the platform hasn't sent a turn yet) legitimately means "no messages yet".
  */
 export function renderFleetAgentTranscript(
   snapshot: readonly ConversationMessageSnapshot[],

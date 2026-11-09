@@ -4,7 +4,7 @@
 // Command-layer test against a REAL CodeIndexStore (via
 // createCodeIndexServices) on a scratch fixture tree, no fake/stub store.
 // Degraded/lexical mode is expected and fine (no embedding provider is
-// configured beyond the SDK's own hashed default). Exercises: the
+// configured beyond the platform's own hashed default). Exercises: the
 // store-absent guard, status before/after a build, an explicit build, the
 // "already building" no-op path, search's honest empty-index state vs a
 // real post-build search labeled 'lexical', and config surfacing
@@ -17,13 +17,13 @@ import type { JudgmentPort } from '@goodvibes-jev/judgment/decisions';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
-import { MemoryEmbeddingProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/state';
-import type { CodeIndexStore } from '@goodvibes-jev/engine/sdk/platform/state';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import { MemoryEmbeddingProviderRegistry } from '@goodvibes-jev/engine/platform/platform/state';
+import type { CodeIndexStore } from '@goodvibes-jev/engine/platform/platform/state';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerCodebaseRuntimeCommands } from '../../input/commands/codebase-runtime.ts';
-import { CODE_INDEX_ENABLED_CONFIG_KEY, createCodeIndexServices } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { CODE_INDEX_ENABLED_CONFIG_KEY, createCodeIndexServices } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 const tempDirs: string[] = [];

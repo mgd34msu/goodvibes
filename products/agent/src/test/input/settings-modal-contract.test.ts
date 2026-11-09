@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { ConfigManager, CONFIG_SCHEMA, SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager, CONFIG_SCHEMA, SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createFeatureFlagManager } from '../../runtime/index.ts';
 import { SettingsModal, SETTINGS_CATEGORIES } from '../../input/settings-modal.ts';
 import { CATEGORY_LABELS } from '../../renderer/settings-modal-helpers.ts';

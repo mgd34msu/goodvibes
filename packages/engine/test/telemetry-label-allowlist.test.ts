@@ -6,14 +6,14 @@ import { describe, expect, test } from 'bun:test';
  */
 describe('label allowlist', () => {
   test('METRIC_LABEL_ALLOWLIST is exported and is a Set', async () => {
-    const { METRIC_LABEL_ALLOWLIST } = await import('../sdk/src/platform/runtime/telemetry/api-helpers.js');
+    const { METRIC_LABEL_ALLOWLIST } = await import('../platform/src/platform/runtime/telemetry/api-helpers.js');
     expect(METRIC_LABEL_ALLOWLIST).toBeInstanceOf(Set);
     // Lower bound: new low-cardinality labels may be added without breaking this test.
     expect(METRIC_LABEL_ALLOWLIST.size).toBeGreaterThanOrEqual(20);
   });
 
   test('METRIC_LABEL_ALLOWLIST contains expected low-cardinality keys', async () => {
-    const { METRIC_LABEL_ALLOWLIST } = await import('../sdk/src/platform/runtime/telemetry/api-helpers.js');
+    const { METRIC_LABEL_ALLOWLIST } = await import('../platform/src/platform/runtime/telemetry/api-helpers.js');
     expect(METRIC_LABEL_ALLOWLIST.has('domain')).toBe(true);
     expect(METRIC_LABEL_ALLOWLIST.has('provider')).toBe(true);
     expect(METRIC_LABEL_ALLOWLIST.has('status_class')).toBe(true);
@@ -21,7 +21,7 @@ describe('label allowlist', () => {
   });
 
   test('METRIC_LABEL_ALLOWLIST does not contain high-cardinality keys', async () => {
-    const { METRIC_LABEL_ALLOWLIST } = await import('../sdk/src/platform/runtime/telemetry/api-helpers.js');
+    const { METRIC_LABEL_ALLOWLIST } = await import('../platform/src/platform/runtime/telemetry/api-helpers.js');
     // These would cause cardinality explosion in metrics backends
     expect(METRIC_LABEL_ALLOWLIST.has('sessionId')).toBe(false);
     expect(METRIC_LABEL_ALLOWLIST.has('traceId')).toBe(false);
@@ -31,7 +31,7 @@ describe('label allowlist', () => {
   });
 
   test('filterMetricLabels strips non-allowlisted keys', async () => {
-    const { filterMetricLabels } = await import('../sdk/src/platform/runtime/telemetry/api-helpers.js');
+    const { filterMetricLabels } = await import('../platform/src/platform/runtime/telemetry/api-helpers.js');
     const input = { domain: 'turn', traceId: 'abc-123', provider: 'openai', taskId: 'task-999' };
     const filtered = filterMetricLabels(input);
     expect(filtered.domain).toBe('turn');
@@ -41,7 +41,7 @@ describe('label allowlist', () => {
   });
 
   test('filterMetricLabels passes all allowlisted keys through', async () => {
-    const { filterMetricLabels, METRIC_LABEL_ALLOWLIST } = await import('../sdk/src/platform/runtime/telemetry/api-helpers.js');
+    const { filterMetricLabels, METRIC_LABEL_ALLOWLIST } = await import('../platform/src/platform/runtime/telemetry/api-helpers.js');
     const input: Record<string, string> = {};
     for (const key of METRIC_LABEL_ALLOWLIST) {
       input[key] = 'value';

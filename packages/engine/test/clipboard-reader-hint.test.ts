@@ -9,7 +9,7 @@
  * looking for a broken key instead of running one install command.
  */
 import { describe, expect, test } from 'bun:test';
-import { missingClipboardReaderHint } from '../sdk/src/platform/utils/clipboard.ts';
+import { missingClipboardReaderHint } from '../platform/src/platform/utils/clipboard.ts';
 
 const nothingInstalled = () => false;
 

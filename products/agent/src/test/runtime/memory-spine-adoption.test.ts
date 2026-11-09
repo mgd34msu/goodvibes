@@ -9,7 +9,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { reconcileMemorySpineAdoption } from '../../runtime/memory-spine-adoption.ts';
-import type { MemorySpineClient, MemoryTransport } from '@goodvibes-jev/engine/sdk/platform/runtime/memory-spine';
+import type { MemorySpineClient, MemoryTransport } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 
 type SpyClient = Pick<MemorySpineClient, 'active' | 'activate' | 'deactivate'> & {
   readonly activateCalls: MemoryTransport[];

@@ -3,21 +3,21 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from
 import { join } from 'node:path';
 import { resolveInstalledDaemonUpdateArtifact } from '../../daemon/lifecycle.js';
 import { writeNativeInstallationFixture, writeNativeReaderInstallationFixture } from '../helpers/native-runtime-provenance.js';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { DaemonServer, HttpListener, PlatformServiceManager } from '@goodvibes-jev/engine/sdk/platform/daemon';
-import { persistProviders, loadPersistedProviders, type DiscoveredServer } from '@goodvibes-jev/engine/sdk/platform/discovery';
-import { HostedSessionManager, HostedSessionStore, HostedWorkspaceFloors, HOSTED_SESSION_WIRE_EVENT, type HostedSessionRecord, type HostedSessionUpdatePayload, type HostedWorkspaceFloor } from '@goodvibes-jev/engine/sdk/platform/hosted-sessions';
-import { registerInboxSurface } from '@goodvibes-jev/engine/sdk/platform/intake';
-import { Notifier } from '@goodvibes-jev/engine/sdk/platform/integrations';
-import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { createRuntimeStore } from '@goodvibes-jev/engine/sdk/platform/runtime/store';
-import * as contractRuntime from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import { UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { DaemonServer, HttpListener, PlatformServiceManager } from '@goodvibes-jev/engine/platform/platform/daemon';
+import { persistProviders, loadPersistedProviders, type DiscoveredServer } from '@goodvibes-jev/engine/platform/platform/discovery';
+import { HostedSessionManager, HostedSessionStore, HostedWorkspaceFloors, HOSTED_SESSION_WIRE_EVENT, type HostedSessionRecord, type HostedSessionUpdatePayload, type HostedWorkspaceFloor } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
+import { registerInboxSurface } from '@goodvibes-jev/engine/platform/platform/intake';
+import { Notifier } from '@goodvibes-jev/engine/platform/platform/integrations';
+import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
+import * as contractRuntime from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { createFeatureFlagManager, deriveFeatureStates, RuntimeEventBus } from '../../runtime/index.js';
 import { createDaemonHost, type DaemonHost, type DaemonHostFactories, type DaemonHostOptions } from '../../runtime/daemon-host.js';
 import { createDaemonBootOperations } from '../../runtime/boot-composition.js';
-import { NATIVE_READER_REQUIREMENT_FILE, assertNativeReaderCompatible, realUpdateFileIo } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { NATIVE_READER_REQUIREMENT_FILE, assertNativeReaderCompatible, realUpdateFileIo } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 
@@ -49,7 +49,7 @@ afterEach(async () => {
 });
 
 function fixture(configure?: (runtime: RuntimeServices) => void, extra: DaemonHostFactories = {},
-  native: Pick<DaemonHostOptions, 'updateArtifact' | 'hasOverriddenHome'> = {}) {
+  native: Pick<DaemonHostOptions, 'updateArtifact' | 'hasOverriddenHome' | 'httpListener'> = {}) {
   const root = makeOwnedTempDir('owned-daemon-host');
   const homeDirectory = join(root, 'home'); const workingDir = join(root, 'workspace');
   const configDir = join(homeDirectory, '.goodvibes', 'daemon');
@@ -301,7 +301,7 @@ test('actual server fail-fast startup retains held sibling acquisition until gra
 test('actual server failed-start cluster rollback is owned even when subsequent stops are no-ops', async () => {
   const stopping = keep(spyOn(DaemonServer.prototype, 'stop'));
   const entered = gate(); const release = gate(); let graphClosed = false; let consumerStopped = false;
-  const { inboxSurface } = await import('@goodvibes-jev/engine/sdk/platform/cluster');
+  const { inboxSurface } = await import('@goodvibes-jev/engine/platform/platform/cluster');
   const fx = fixture((runtime) => {
     runtime.clusterCoordinator.register({ id: 'held-startup-gate', surface: inboxSurface('owned-fixture'), async start() {},
       async stop() { entered.resolve(); await release.promise; consumerStopped = true; } });
@@ -933,6 +933,24 @@ test('close drains already accepted asynchronous discovery persistence before ru
   held.resolve(); await closing; expect(disposed).toBe(1);
 });
 
+test('a discovery abort listener reentering host close receives the original close promise', async () => {
+  const entered = gate(); let reentered: Promise<void> | undefined; let closes = 0;
+  const fx = fixture(runtime => {
+    const close = runtime.close;
+    keep(spyOn(runtime, 'close').mockImplementation(async () => { closes++; await close(); }));
+  }, { providerDiscovery: { scan: async signal => {
+    entered.resolve();
+    await new Promise<void>(resolve => {
+      signal.addEventListener('abort', () => { reentered = fx.host.close(); resolve(); }, { once: true });
+    });
+    return scanResult([]);
+  } } });
+  await fx.host.start(); await entered.promise;
+  const closing = fx.host.close();
+  expect(reentered).toBe(closing);
+  await closing; expect(closes).toBe(1);
+});
+
 test('close fences discovery immediately while accepted boot is still held', async () => {
   const bootEntered = gate(); const bootHeld = gate(); const scanHeld = gate(); const scanned = gate();
   let registrations = 0; let writes = 0; let disposed = 0;
@@ -984,11 +1002,113 @@ for (const retirement of ['payload', 'cancel'] as const) test(`late native start
 
 function inertNativeHostServer(): NonNullable<DaemonHost['daemon']> {
   let running = false;
-  return { enable() { return true; }, async start() { running = true; }, async stop() { running = false; }, fenceRestartAdmission() {},
+  return { enable() { return true; }, async start() { running = true; }, completeHostStartup() {}, async stop() { running = false; }, fenceRestartAdmission() {},
     async waitForRestart() {}, get isRunning() { return running; }, boundHost: '127.0.0.1', boundPort: 0, boundScheme: 'http' };
 }
 
-for (const ending of ['drain', 'cancel'] as const) test(`configured native recovery ${ending} owns facade handover before ordinary host cleanup`, async () => {
+for (const finish of ['ready', 'cancel'] as const) test(`host ${finish} defers native activation until its secondary listener and boot startup settle`, async () => {
+  const listenerEntered = gate(); const listenerRelease = gate();
+  const bootEntered = gate(); const bootRelease = gate();
+  let activations = 0;
+  const fx = fixture(runtime => {
+    const start = runtime.bootTasks!.start;
+    keep(spyOn(runtime.bootTasks!, 'start').mockImplementation(async () => {
+      bootEntered.resolve(); await bootRelease.promise; return start();
+    }));
+  }, {
+    createServer(config) {
+      expect(config?.deferNativeActivationUntilHostReady).toBe(true);
+      const server = new DaemonServer(config);
+      const activate = server.completeHostStartup.bind(server);
+      keep(spyOn(server, 'completeHostStartup').mockImplementation(() => { activations++; return activate(); }));
+      return server;
+    },
+    createListener(config) {
+      const listener = new HttpListener(config); const start = listener.start.bind(listener);
+      keep(spyOn(listener, 'start').mockImplementation(async () => {
+        listenerEntered.resolve(); await listenerRelease.promise; await start();
+      }));
+      return listener;
+    },
+  }, { httpListener: { host: '127.0.0.1', port: 0, token: 'secondary-startup-fixture' } });
+  const starting = fx.host.start();
+  await listenerEntered.promise; expect(activations).toBe(0);
+  listenerRelease.resolve(); await bootEntered.promise;
+  expect(activations).toBe(0); expect(fx.host.snapshot().state).toBe('starting');
+  const closing = finish === 'cancel' ? fx.host.close() : undefined;
+  bootRelease.resolve(); const started = await starting;
+  if (finish === 'ready') { expect(started.state).toBe('ready'); expect(activations).toBe(1); }
+  else { await closing; expect(activations).toBe(0); expect(fx.host.snapshot().state).toBe('closed'); }
+});
+
+for (const finish of ['drain', 'cancel'] as const) test(`host retains and ${finish}s a promotion handover returned after boot startup`, async () => {
+  const admitted = gate(); const release = gate(); let cancels = 0;
+  const fx = fixture(undefined, { createServer(config) {
+    const server = new DaemonServer(config);
+    keep(spyOn(server, 'completeHostStartup').mockImplementation(() => {
+      admitted.resolve();
+      return Object.freeze({ state: 'handover' as const, drain: release.promise, cancel() { cancels++; release.resolve(); } });
+    }));
+    return server;
+  } });
+  const starting = fx.host.start(); const done = settled(starting);
+  await admitted.promise; await tick(); expect(done()).toBe(false);
+  expect(fx.host.snapshot().state).toBe('starting');
+  if (finish === 'cancel') {
+    const closing = fx.host.close(); await starting; await closing;
+    expect(cancels).toBe(1); expect(fx.host.snapshot().state).toBe('closed');
+  } else {
+    release.resolve(); expect((await starting).state).toBe('handover'); expect(cancels).toBe(0);
+  }
+});
+
+test('synchronous close during native activation cannot publish ready afterward', async () => {
+  let closing: Promise<void> | undefined;
+  const fx = fixture(undefined, { createServer(config) {
+    const server = new DaemonServer(config);
+    keep(spyOn(server, 'completeHostStartup').mockImplementation(() => { closing = fx.host.close(); }));
+    return server;
+  } });
+  const started = await fx.host.start();
+  expect(started.state).not.toBe('ready'); expect(started.state).not.toBe('degraded');
+  if (!closing) throw new Error('Expected close reentry during completion');
+  await closing; expect(fx.host.snapshot().state).toBe('closed');
+});
+
+for (const finish of ['ready', 'failed'] as const) test(`native host ${finish} resets its failed-start marker only after the full boot finishes`, async () => {
+  const native = writeNativeInstallationFixture(makeOwnedTempDir('host-native-full-start'), '9.9.9-test');
+  const artifact = resolveInstalledDaemonUpdateArtifact({ isOverridden: false }, native.options);
+  if (!artifact) throw new Error('Native installation fixture admission missing');
+  const entered = gate(); const release = gate();
+  const fx = fixture(runtime => {
+    runtime.configManager.set('service.enabled', false);
+    runtime.configManager.set('update.auto', false);
+    runtime.configManager.set('controlPlane.webui.bundleDir', '');
+    runtime.configManager.set('web.staticAssetsDir', '');
+    const start = runtime.bootTasks!.start;
+    keep(spyOn(runtime.bootTasks!, 'start').mockImplementation(async () => {
+      const snapshot = await start(); entered.resolve(); await release.promise;
+      if (finish === 'failed') throw new Error('Synthetic post-listener boot failure');
+      return snapshot;
+    }));
+  }, {}, { updateArtifact: artifact, hasOverriddenHome: false });
+  const markerPath = join(fx.options.runtime.configManager.getControlPlaneConfigDir(), 'control-plane', 'daemon-lifecycle.json');
+  const starting = fx.host.start(); await entered.promise;
+  const attempt = readFileSync(markerPath, 'utf8');
+  expect(JSON.parse(attempt).failedStarts).toBe(1);
+  expect(fx.host.daemon?.isRunning).toBe(true); expect(fx.host.snapshot().state).toBe('starting');
+  release.resolve();
+  if (finish === 'ready') {
+    expect((await starting).state).toBe('ready');
+    expect(JSON.parse(readFileSync(markerPath, 'utf8'))).toMatchObject({ state: 'running', failedStarts: 0 });
+  } else {
+    await expect(starting).rejects.toThrow('boot startup'); await fx.host.close();
+    expect(readFileSync(markerPath, 'utf8')).toBe(attempt);
+    expect(fx.host.snapshot().state).toBe('failed');
+  }
+});
+
+for (const ending of ['drain', 'cancel', 'failed-secondary', 'failed-secondary-restart'] as const) test(`configured native recovery ${ending} owns facade handover before ordinary host cleanup`, async () => {
   const rollbackFailures: unknown[] = [];
   const logError = logger.error.bind(logger);
   keep(spyOn(logger, 'error').mockImplementation((message, details) => {
@@ -1010,6 +1130,7 @@ for (const ending of ['drain', 'cancel'] as const) test(`configured native recov
   const artifact = resolveInstalledDaemonUpdateArtifact({ isOverridden: false }, native.options);
   expect(artifact).toBeDefined(); if (!artifact) throw new Error('Native recovery fixture admission missing');
   const entered = gate(); const release = gate(); let bootStarts = 0; let graphCloses = 0; let installs = 0;
+  const failedSecondary = ending === 'failed-secondary' || ending === 'failed-secondary-restart';
   // Unsupported native manager is inert: reach its actual refusal, never spawn a system command.
   keep(spyOn(PlatformServiceManager.prototype, 'status').mockReturnValue({ platform: 'manual', serviceName: 'fixture', path: '',
     installed: false, autostart: false, running: false, commandPreview: '', suggestedCommands: [] }));
@@ -1025,7 +1146,23 @@ for (const ending of ['drain', 'cancel'] as const) test(`configured native recov
     keep(spyOn(runtime, 'close').mockImplementation(async () => { graphCloses++; await close(); }));
     const startBoot = runtime.bootTasks!.start;
     keep(spyOn(runtime.bootTasks!, 'start').mockImplementation(() => { bootStarts++; return startBoot(); }));
-  }, {}, { updateArtifact: artifact, hasOverriddenHome: false });
+  }, {}, { updateArtifact: artifact, hasOverriddenHome: false,
+    ...(failedSecondary ? { httpListener: { host: '127.0.0.1', port: 0, token: 'synthetic-secondary' } } : {}),
+  });
+  if (ending === 'failed-secondary') {
+    const stop = HttpListener.prototype.stop; let stops = 0;
+    keep(spyOn(HttpListener.prototype, 'stop').mockImplementation(async function (this: HttpListener) {
+      await stop.call(this);
+      if (++stops === 1) throw new Error('private secondary stop failure');
+    }));
+  }
+  if (ending === 'failed-secondary-restart') {
+    const wait = HttpListener.prototype.waitForRestart; let waits = 0;
+    keep(spyOn(HttpListener.prototype, 'waitForRestart').mockImplementation(async function (this: HttpListener) {
+      await wait.call(this);
+      if (++waits === 1) throw new Error('private secondary restart failure');
+    }));
+  }
   const controlPlaneDirectory = join(fx.options.runtime.configManager.getControlPlaneConfigDir(), 'control-plane');
   mkdirSync(controlPlaneDirectory, { recursive: true });
   writeFileSync(join(controlPlaneDirectory, 'daemon-lifecycle.json'), JSON.stringify({ state: 'clean-shutdown', at: Date.now(),
@@ -1033,20 +1170,30 @@ for (const ending of ['drain', 'cancel'] as const) test(`configured native recov
   const starting = fx.host.start(); const started = settled(starting);
   await entered.promise; await tick();
   expect(started(), JSON.stringify(rollbackFailures)).toBe(false); expect(graphCloses).toBe(0); expect(bootStarts).toBe(0);
+  expect(() => fx.host.services!.processRegistry.query()).not.toThrow();
   expect(fx.host.daemon?.isRunning).toBe(false);
   let closing: Promise<void> | undefined;
   if (ending === 'cancel') { closing = fx.host.close(); const closed = settled(closing); await tick(); expect(closed()).toBe(false); }
   release.resolve();
   const outcome = await starting;
-  if (ending === 'drain') expect(outcome.state).toBe('handover');
-  await (closing ?? fx.host.close());
+  if (ending === 'drain') { expect(outcome.state).toBe('handover'); expect(graphCloses).toBe(1); }
+  if (failedSecondary) {
+    expect(graphCloses).toBe(1);
+    await expect(fx.host.close()).rejects.toBeInstanceOf(AggregateError);
+  } else await (closing ?? fx.host.close());
   for (const [index, target] of native.targets.entries()) expect(readFileSync(target.path)).toEqual(readFileSync(previous.targets[index]!.path));
   const receipts = readFileSync(join(controlPlaneDirectory, 'daemon-receipts.json'), 'utf8');
   expect(receipts).toContain('rolled back to the previously installed version');
   if (ending === 'drain') { expect(receipts).toContain('incomplete (unsupported)'); expect(receipts).not.toContain('handover cancelled'); }
-  else expect(receipts).toContain('handover cancelled during orderly stop');
+  else if (ending === 'cancel') expect(receipts).toContain('handover cancelled during orderly stop');
+  else {
+    expect(receipts).toContain('owned runtime cleanup did not complete');
+    expect(receipts).not.toContain('private secondary stop failure');
+    expect(receipts).not.toContain('private secondary restart failure');
+    expect(receipts).not.toContain('incomplete (unsupported)');
+  }
   expect(installs).toBe(0); expect(bootStarts).toBe(0); expect(graphCloses).toBe(1);
-  expect(fx.host.snapshot().state).toBe('closed');
+  expect(fx.host.snapshot().state).toBe(failedSecondary ? 'failed' : 'closed');
 });
 
 test('configured native host forwards only its complete retained installation and resolved home policy', async () => {

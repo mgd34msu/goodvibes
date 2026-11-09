@@ -10,13 +10,13 @@ import { cycleSettingChoice, adjustedSettingValue } from '@goodvibes-jev/engine/
  * settings-modal-reset.ts and settings-modal-mutations.ts.
  */
 
-import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
 import type { FlagEntry, McpEntry, SettingEntry } from './settings-modal-types.ts';
 import { buildMcpEntries } from './settings-modal-data.ts';
 import './settings-modal-behavior.ts';
-import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
+import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
 
 // ---------------------------------------------------------------------------
 // adjustSelected

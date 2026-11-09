@@ -15,7 +15,7 @@
  * Esc on a preview question answers "no".
  */
 
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { SurfaceModal, SurfaceModalCloseReason, SurfaceModalHost } from './surface-modal-host.ts';
 import type { SurfaceLayer, KitHint } from '../renderer/surface-kit.ts';
 import type { KitRow } from '../renderer/surface-kit-list.ts';

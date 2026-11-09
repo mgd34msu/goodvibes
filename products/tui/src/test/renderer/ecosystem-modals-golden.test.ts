@@ -30,7 +30,7 @@ import { workPlanModalGoldenSurface } from '../../views/modals/work-plan-modal.t
 import { keybindingsModalGoldenSurface } from '../../views/modals/keybindings-modal.ts';
 import { pairingModalGoldenSurface } from '../../views/modals/pairing-modal.ts';
 import { planningModalGoldenSurface } from '../helpers/planning-modal-fixture.ts';
-import type { Cell, Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Cell, Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { frameFromLayer } from '../helpers/surface-frame.ts';
 
 const GOLDENS_DIR = new URL('./golden-frames/', import.meta.url).pathname;

@@ -1,7 +1,7 @@
 /**
  * Owner ruling (2026-07-10): automatic (turn-end/lifecycle) workspace
  * checkpoints run ONLY when the resolved workspace root is COVERED by the
- * shared registration store (../../config/workspace-registration.ts, SDK
+ * shared registration store (../../config/workspace-registration.ts, platform
  * 1.6.1 platform/workspace/registration), and explicit checkpoint creation
  * through the ws-only `checkpoints.create` gateway verb is refused with an
  * honest hint for an unregistered workspace. This exercises the real wiring
@@ -13,14 +13,14 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createEventEnvelope } from '@goodvibes-jev/engine/transport-core';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createShellPathService } from '@/runtime/index.ts';
 import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { createWorkspaceRegistrationStore, registerWorkspaceForCheckpoints } from '../../config/workspace-registration.ts';
-import { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/sdk/platform/workspace';
+import { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/platform/platform/workspace';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
@@ -53,7 +53,7 @@ async function buildServices(opts: { registered: boolean; workingDir?: string; h
   mkdirSync(configDir, { recursive: true });
   // `makeTempDir` (backed by `makeProjectTempDir`) places `workingDir` under
   // this repo's own `.test-tmp/`, which is itself INSIDE the real
-  // goodvibes-agent git tree. With the SDK's `preferGitRoot` default (true),
+  // goodvibes-agent git tree. With the platform's `preferGitRoot` default (true),
   // the checkpoint manager would walk up and resolve the REAL repo root as
   // the snapshot root, cross-test pollution at best, real commits into this
   // repo's own `.goodvibes/checkpoints` at worst. `preferGitRoot: false` here
@@ -203,9 +203,9 @@ describe('registered-workspaces-only automatic checkpoints', () => {
     expect(created).not.toBeNull();
   });
 
-  test('defense in depth: the SDK root guard still refuses a broad root even when registered', async () => {
+  test('defense in depth: the platform root guard still refuses a broad root even when registered', async () => {
     const workingDir = makeTempDir('gv-checkpoint-broad-root-');
-    // Deliberately equal to workingDir, to trigger the SDK's "this root looks
+    // Deliberately equal to workingDir, to trigger the platform's "this root looks
     // like a home directory" broad-root guard on both layers below.
     const shellPaths = createShellPathService({ workingDirectory: workingDir, homeDirectory: workingDir });
 
@@ -214,7 +214,7 @@ describe('registered-workspaces-only automatic checkpoints', () => {
     // store, the local registry it replaced had no write-time guard).
     await expect(createWorkspaceRegistrationStore(shellPaths).add(workingDir)).rejects.toThrow(/broad|home|refus/i);
 
-    // Layer 2: construct the SDK manager directly (not through
+    // Layer 2: construct the platform manager directly (not through
     // createRuntimeServices) so a root that somehow got INTO the registry
     // anyway (e.g. a pre-guard migrated record) is still refused at
     // checkpoint-creation time by the manager's own construction-time guard,
@@ -232,7 +232,7 @@ describe('registered-workspaces-only automatic checkpoints', () => {
 });
 
 /**
- * Worktree-link inheritance (SDK 1.6.1 shared registration store): a linked
+ * Worktree-link inheritance (platform 1.6.1 shared registration store): a linked
  * git worktree of a registered repo is COVERED without being registered
  * itself, the resolver follows `git rev-parse --git-common-dir`, not path
  * ancestry, so an orchestration-spawned sibling worktree outside the

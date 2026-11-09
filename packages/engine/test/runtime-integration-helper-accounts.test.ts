@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { AccountsSnapshotResponseSchema } from '../contracts/src/zod-schemas/accounts.js';
-import { IntegrationHelperService } from '../sdk/src/platform/runtime/integration/helpers.js';
+import { IntegrationHelperService } from '../platform/src/platform/runtime/integration/helpers.js';
 
 function createIntegrationHelperService(): IntegrationHelperService {
   return new IntegrationHelperService({

@@ -1,7 +1,7 @@
 /**
  * cost-attribution-format.ts, pure rendering helpers for /cost attribution.
  *
- * cost.attribution.get (SDK 1.6.1) is honest-unpriced by design: an unknown
+ * cost.attribution.get (platform 1.6.1) is honest-unpriced by design: an unknown
  * model contributes to unpricedRecordCount with a null cost rather than a
  * fabricated amount, and costState is 'priced' | 'estimated' | 'unpriced'
  * (a mix across contributors). These helpers preserve that distinction all
@@ -9,7 +9,7 @@
  * "estimated" is always labeled, and a dollar figure only ever comes from a
  * real priced/estimated costUsd.
  */
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/sdk';
+import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
 
 export type CostAttributionResult = OperatorMethodOutput<'cost.attribution.get'>;
 export type CostAttributionDimension = CostAttributionResult['dimension'];

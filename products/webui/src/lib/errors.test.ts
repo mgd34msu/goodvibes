@@ -138,14 +138,14 @@ describe('error formatting', () => {
   });
 
   // Since the 1.0.0 delete-means-delete change, the daemon carries
-  // code: 'METHOD_NOT_FOUND' on this 404 (SDKErrorCodes.METHOD_NOT_FOUND).
+  // code: 'METHOD_NOT_FOUND' on this 404 (EngineErrorCodes.METHOD_NOT_FOUND).
   // Machine codes remain structural; prose requires a genuine, awaited reading.
   test('recognizes the machine code METHOD_NOT_FOUND (an upgraded daemon), no message-sniff needed', () => {
     expect(isMethodUnavailableError({
       status: 404,
       body: { code: 'METHOD_NOT_FOUND', error: 'Unknown gateway method: sessions.delete' },
     })).toBe(true);
-    // Wire shape via transport (the SDK client's real error envelope), not a bare body.
+    // Wire shape via transport (the platform client's real error envelope), not a bare body.
     expect(isMethodUnavailableError(Object.assign(new Error('Request failed'), {
       transport: { status: 404, body: { code: 'METHOD_NOT_FOUND' } },
     }))).toBe(true);
@@ -158,7 +158,7 @@ describe('error formatting', () => {
     })).toBe(false);
   });
 
-  // sessions.permissionMode.get/set + sessions.contextUsage.get (SDK 1.6.1): the daemon's
+  // sessions.permissionMode.get/set + sessions.contextUsage.get (platform 1.6.1): the daemon's
   // honest 404 for a session id that is not its own live local runtime.
   test('detects the honest 404 SESSION_NOT_LOCAL refusal', () => {
     expect(isSessionNotLocalError({ status: 404, body: { code: 'SESSION_NOT_LOCAL', error: 'This daemon does not host a live runtime for session s-1.' } })).toBe(true);

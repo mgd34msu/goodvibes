@@ -1,7 +1,7 @@
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { prepareJudgmentResult, snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { prepareJudgmentResult, snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import { noticeSeverity, type NoticeSeverity } from './batteries/notice-severity.js';
-import { decisionOrClassic } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { decisionOrClassic } from '@goodvibes-jev/engine/platform/platform/runtime';
 
 export interface NoticeSeverityReading {
   readonly provenance?: 'classic';

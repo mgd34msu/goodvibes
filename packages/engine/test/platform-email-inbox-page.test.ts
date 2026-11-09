@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { Socket } from 'node:net';
-import type { ImapUidCheckpoint } from '../sdk/src/platform/intake/provider-adapter.js';
-import type { EmailInboxPageRead } from '../sdk/src/platform/email/email-inbox-page.js';
+import type { ImapUidCheckpoint } from '../platform/src/platform/intake/provider-adapter.js';
+import type { EmailInboxPageRead } from '../platform/src/platform/email/email-inbox-page.js';
 import { PageSocket } from './_helpers/mail-inbox-page.js';
 import { snapshotFixture, SnapshotSocket } from './_helpers/mail-inbox-snapshot.js';
 import { deferred, tick } from './_helpers/mail-subject-source.js';

@@ -8,7 +8,7 @@
  */
 
 import type { BookmarkModal } from '../bookmark-modal.js';
-import type { BookmarkEntry } from '@goodvibes-jev/engine/sdk/platform/bookmarks';
+import type { BookmarkEntry } from '@goodvibes-jev/engine/platform/platform/bookmarks';
 import { activeTokens } from './theme.js';
 import {
   beginModal,

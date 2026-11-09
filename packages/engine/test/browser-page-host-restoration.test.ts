@@ -4,10 +4,10 @@
 import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { BrowserSessionManager } from '../sdk/src/platform/browser/browser-sessions.js';
-import { captureBrowserPageConnection } from '../sdk/src/platform/browser/browser-page-connection-data.js';
-import { DRIVER_VERSION } from '../sdk/src/platform/browser/browser-provision-io.js';
-import type { BrowserProvisionIo } from '../sdk/src/platform/browser/browser-types.js';
+import { BrowserSessionManager } from '../platform/src/platform/browser/browser-sessions.js';
+import { captureBrowserPageConnection } from '../platform/src/platform/browser/browser-page-connection-data.js';
+import { DRIVER_VERSION } from '../platform/src/platform/browser/browser-provision-io.js';
+import type { BrowserProvisionIo } from '../platform/src/platform/browser/browser-types.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const cleanup: Array<() => Promise<void>> = [];
@@ -16,7 +16,7 @@ function fixture(change?: 'target' | 'context' | 'document') {
   const root = makeProjectTempDir('browser-host-original-page'), scriptPath = join(root, 'host.mjs');
   const eventsPath = join(root, 'events.json');
   const endpoint = 'ws://127.0.0.1:9222/devtools/browser/retained?private=fixture';
-  writeFileSync(scriptPath, readFileSync(new URL('../sdk/src/platform/browser/browser-host.mjs', import.meta.url)));
+  writeFileSync(scriptPath, readFileSync(new URL('../platform/src/platform/browser/browser-host.mjs', import.meta.url)));
   const moduleRoot = join(root, 'node_modules', 'playwright-core'); mkdirSync(moduleRoot, { recursive: true });
   writeFileSync(join(moduleRoot, 'package.json'), JSON.stringify({ name: 'playwright-core', version: '1.62.0', main: 'index.cjs' }));
   const pages = [

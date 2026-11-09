@@ -6,12 +6,12 @@
 import { expect, test } from 'bun:test';
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { FakeClusterClock, MemoryClusterBus, inboxSurface, surfaceIdFor } from '@goodvibes-jev/engine/sdk/platform/cluster';
-import { registerInboxSurface, type InboundProviderAdapter, type InboxListOutput, type InboxSurfaceRegistration } from '@goodvibes-jev/engine/sdk/platform/intake';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { FakeClusterClock, MemoryClusterBus, inboxSurface, surfaceIdFor } from '@goodvibes-jev/engine/platform/platform/cluster';
+import { registerInboxSurface, type InboundProviderAdapter, type InboxListOutput, type InboxSurfaceRegistration } from '@goodvibes-jev/engine/platform/platform/intake';
 import { createDaemonHandlerComposition, type DaemonInboxControls } from '../../runtime/daemon-handler-composition.js';
-import type { NativeDataWriteOwner } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import type { NativeDataWriteOwner } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { createClusterComposition, inboxPollerGate } from '../../runtime/cluster-composition.js';
 import { createClusterServices, startClusterServices } from '../../runtime/cluster-group-composition.js';
 import { createShellPathService, DistributedRuntimeManager } from '../../runtime/index.js';

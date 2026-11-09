@@ -13,7 +13,7 @@ test('the real API command accepts a literal permutation without rewriting its b
   }
   symlinkSync(resolve(engine, '../../node_modules/typescript'), join(fixture, 'node_modules/typescript'));
   writeFileSync(join(fixture, 'package.json'), JSON.stringify({ name: 'synthetic-api', type: 'module', exports: {
-    './sdk': { types: './sdk/dist/index.d.ts' }, './terminal-shell': { types: './terminal-shell/dist/index.d.ts' },
+    './platform': { types: './platform/dist/index.d.ts' }, './terminal-shell': { types: './terminal-shell/dist/index.d.ts' },
   } }));
   const source = join(fixture, 'sdk/dist/index.d.ts');
   const baseline = 'export type Choice = "a" | "b"; export interface Options { required: boolean; }';

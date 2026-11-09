@@ -14,7 +14,7 @@
  * the other files here, and deliberately not through `src`.
  *
  * `ExpectationMatcher` is internal wiring and is not on the package's export
- * map: importing it through `@goodvibes-jev/engine/sdk` would mean publishing a
+ * map: importing it through `@goodvibes-jev/engine/platform` would mean publishing a
  * subpath for it, which would make the very seam this gate narrows part of the
  * public surface. Reaching into `src` instead does not work either, it drags
  * the whole implementation tree into this project, which has no `node` types
@@ -28,8 +28,8 @@
 import type {
   ExpectationMatcher,
   InboundExpectationRegistry,
-} from '../../sdk/dist/platform/email/inbound/expectation-registry.js';
-import type { VerificationMatch } from '../../sdk/dist/platform/google/verification-expectations.js';
+} from '../../platform/dist/platform/email/inbound/expectation-registry.js';
+import type { VerificationMatch } from '../../platform/dist/platform/google/verification-expectations.js';
 
 declare const matcher: ExpectationMatcher;
 declare const candidate: Parameters<ExpectationMatcher['matchCandidate']>[0];

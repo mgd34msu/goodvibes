@@ -1,6 +1,6 @@
 /** Synthetic crash fixture: deliberately exits before normal store close. */
-import { InboxCursorStore } from '../../sdk/src/platform/intake/cursor-store.ts';
-import type { ImapUidCheckpointAdvance, InboundChannelItem } from '../../sdk/src/platform/intake/provider-adapter.ts';
+import { InboxCursorStore } from '../../platform/src/platform/intake/cursor-store.ts';
+import type { ImapUidCheckpointAdvance, InboundChannelItem } from '../../platform/src/platform/intake/provider-adapter.ts';
 const dir = process.argv[2]!;
 const mode = process.argv[3]!;
 const store = new InboxCursorStore(dir, undefined, { sweepIntervalMs: 0 });

@@ -3,9 +3,9 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { acquireCrossProcessLock, writeJsonFileAtomic, confirmFileDurable, AtomicWriteDurabilityError,
-  type AtomicJsonWriteOptions, type CrossProcessLockOptions } from '@goodvibes-jev/engine/sdk/platform/state/durable-file-io';
-import * as originalFile from '../sdk/src/platform/utils/atomic-json-store.js';
-import * as originalLock from '../sdk/src/platform/workspace/checkpoint/cross-process-lock.js';
+  type AtomicJsonWriteOptions, type CrossProcessLockOptions } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
+import * as originalFile from '../platform/src/platform/utils/atomic-json-store.js';
+import * as originalLock from '../platform/src/platform/workspace/checkpoint/cross-process-lock.js';
 
 test('public Node journal seam retains the existing strict lock and required publication implementations', async () => {
   expect(writeJsonFileAtomic).toBe(originalFile.writeJsonFileAtomic);

@@ -8,7 +8,7 @@
  *
  * `testDescribeSenderClaim` is a TEST DOUBLE for a product's trust-boundary
  * module, not a second implementation for anything to import: shipped code
- * lives in the surface that renders the claim, and the SDK deliberately does
+ * lives in the surface that renders the claim, and the platform deliberately does
  * not carry a copy. It mirrors the wording a surface produces so that
  * assertions on the sentence a human reads stay meaningful.
  */
@@ -16,12 +16,12 @@
 import type {
   SenderAuthenticationChecks,
   SenderProtocolResult,
-} from '../../sdk/src/platform/google/sender-authentication.ts';
+} from '../../platform/src/platform/google/sender-authentication.ts';
 import type {
   EmailSenderClaim,
   EmailSenderConfidence,
-} from '../../sdk/src/platform/email/sender-claim.ts';
-import type { EmailTransportPort } from '../../sdk/src/platform/email/email-service.ts';
+} from '../../platform/src/platform/email/sender-claim.ts';
+import type { EmailTransportPort } from '../../platform/src/platform/email/email-service.ts';
 
 function summarizeChecks(checks: SenderAuthenticationChecks): EmailSenderConfidence {
   const results = [checks.dkim, checks.spf, checks.dmarc].filter(

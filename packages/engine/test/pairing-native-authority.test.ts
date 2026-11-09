@@ -4,11 +4,11 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { PairingTokenManager, PairingTokenStoreBusyError } from '../sdk/src/platform/pairing/pairing-token-store.js';
-import * as atomic from '../sdk/src/platform/utils/atomic-json-store.js';
-import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../sdk/src/platform/daemon/control-plane.js';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.js';
-import type { NativeExecutionAuthority } from '../sdk/src/platform/security/http-auth.js';
+import { PairingTokenManager, PairingTokenStoreBusyError } from '../platform/src/platform/pairing/pairing-token-store.js';
+import * as atomic from '../platform/src/platform/utils/atomic-json-store.js';
+import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../platform/src/platform/daemon/control-plane.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
+import type { NativeExecutionAuthority } from '../platform/src/platform/security/http-auth.js';
 
 function ownerLockPath(file: string): string { return join(dirname(file), '.pairing-owner-locks', `${basename(file)}.lock`); }
 
@@ -169,7 +169,7 @@ describe('persisted paired native authority', () => {
 
   test('the native ownership fence is shared by a separate process', async () => {
     const item = fixture(); const capability = item.helper.createNativeExecutionAuthority(item.paired.token)!;
-    const modulePath = fileURLToPath(new URL('../sdk/src/platform/pairing/pairing-token-store.ts', import.meta.url));
+    const modulePath = fileURLToPath(new URL('../platform/src/platform/pairing/pairing-token-store.ts', import.meta.url));
     await capability.withCurrent(capability.current()!, async assertCurrent => {
       const child = spawnSync(process.execPath, ['-e', `
         import { PairingTokenManager } from ${JSON.stringify(modulePath)};

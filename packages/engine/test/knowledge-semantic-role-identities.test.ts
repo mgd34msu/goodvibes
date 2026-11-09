@@ -1,4 +1,4 @@
-import { homeGraphSourceIdentityIndexes } from '../sdk/src/platform/knowledge/store-homegraph-source-selector.js';
+import { homeGraphSourceIdentityIndexes } from '../platform/src/platform/knowledge/store-homegraph-source-selector.js';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { Database } from 'bun:sqlite';
 /** Authored source regressions; runtime qualification is deferred. */
@@ -6,14 +6,14 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { createSemanticNodeIdentityPlanner } from '../sdk/src/platform/knowledge/semantic/node-identity-plan.js';
-import { prepareGeneratedKnowledgeNodeIdentity } from '../sdk/src/platform/knowledge/source-structural-references.js';
-import { upsertRefinementTaskForGap } from '../sdk/src/platform/knowledge/semantic/self-improvement-tasks.js';
-import { prepareSemanticIssueIdentity, prepareSemanticRefinementTaskIdentity } from '../sdk/src/platform/knowledge/semantic/auxiliary-identities.js';
-import { semanticNodeCandidateParams, semanticNodeCandidateSql, type SemanticNodeSelector } from '../sdk/src/platform/knowledge/store-semantic-node-selector.js';
-import { SemanticIdentityHeldError } from '../sdk/src/platform/knowledge/store-semantic-fact-selector.js';
-import type { SQLiteStore } from '../sdk/src/platform/state/sqlite-store.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { createSemanticNodeIdentityPlanner } from '../platform/src/platform/knowledge/semantic/node-identity-plan.js';
+import { prepareGeneratedKnowledgeNodeIdentity } from '../platform/src/platform/knowledge/source-structural-references.js';
+import { upsertRefinementTaskForGap } from '../platform/src/platform/knowledge/semantic/self-improvement-tasks.js';
+import { prepareSemanticIssueIdentity, prepareSemanticRefinementTaskIdentity } from '../platform/src/platform/knowledge/semantic/auxiliary-identities.js';
+import { semanticNodeCandidateParams, semanticNodeCandidateSql, type SemanticNodeSelector } from '../platform/src/platform/knowledge/store-semantic-node-selector.js';
+import { SemanticIdentityHeldError } from '../platform/src/platform/knowledge/store-semantic-fact-selector.js';
+import type { SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
 const roots: string[] = [], stores: KnowledgeStore[] = [];
 afterEach(async () => { for (const store of stores.splice(0)) await store.close(); for (const path of roots.splice(0)) rmSync(path, { recursive: true, force: true }); });
 async function open(dbPath?: string) {

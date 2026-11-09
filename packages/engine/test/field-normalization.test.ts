@@ -8,8 +8,8 @@
  * These helpers are the canonical implementation of field preference order.
  */
 import { describe, expect, test } from 'bun:test';
-import { readCompanionChatMessageBody } from '../sdk/src/platform/companion/companion-chat-routes.js';
-import { readSharedSessionMessageBody } from '../daemon-sdk/src/runtime-session-routes.js';
+import { readCompanionChatMessageBody } from '../platform/src/platform/companion/companion-chat-routes.js';
+import { readSharedSessionMessageBody } from '../daemon-api/src/runtime-session-routes.js';
 
 // ---------------------------------------------------------------------------
 // Companion-chat normalization: body > content > ''

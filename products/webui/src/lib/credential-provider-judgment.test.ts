@@ -1,5 +1,5 @@
 import { afterEach, expect, mock, test } from "bun:test";
-import type { BrowserJudgmentRequest } from "@goodvibes-jev/engine/daemon-sdk";
+import type { BrowserJudgmentRequest } from "@goodvibes-jev/engine/daemon-api";
 import { invalidateClientLifetime } from "./client-lifetime";
 
 type Request = BrowserJudgmentRequest<"webui.credentials.provider-key">;

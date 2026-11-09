@@ -1,7 +1,7 @@
 /**
  * The Agent as a push destination: what actually lands, and where.
  *
- * The SDK owns the destination, the target parsing and the failure reporting; this
+ * The platform owns the destination, the target parsing and the failure reporting; this
  * file owns the landing. So the properties worth pinning are the ones a wrong
  * landing would break:
  *
@@ -23,7 +23,7 @@ import {
   installAgentConversationSender,
   type AgentSenderConversation,
 } from '../../runtime/agent-conversation-sender.ts';
-import type { AgentConversationMessage, AgentConversationSender } from '@goodvibes-jev/engine/sdk/platform/channels';
+import type { AgentConversationMessage, AgentConversationSender } from '@goodvibes-jev/engine/platform/platform/channels';
 import { installOccasionsNudging } from '../../runtime/occasions-boot.ts';
 
 const NUDGE_BODY = "Sarah's birthday is coming up. Do you want to sort something for it?";
@@ -266,7 +266,7 @@ describe('installOccasionsNudging wires BOTH halves, so neither can ship alone',
     // The property this pins is that they arrive together. A change that dropped
     // either half would leave the other looking complete: push-only loses every
     // nudge a failed send would have covered, and pull-only is the pull-only
-    // build the SDK seam exists to replace.
+    // build the platform seam exists to replace.
     const registered: AgentConversationSender[] = [];
     const disposals: Array<() => void> = [];
     const conv = conversation();

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { createSessionTitleGenerator, sanitizeSessionTitle } from '../../sdk/src/platform/sessions/index.js';
-import type { ConversationMessageSnapshot } from '../../sdk/src/platform/core/conversation.js';
+import { createSessionTitleGenerator, sanitizeSessionTitle } from '../../platform/src/platform/sessions/index.js';
+import type { ConversationMessageSnapshot } from '../../platform/src/platform/core/conversation.js';
 
 const firstUser: ConversationMessageSnapshot[] = [{ role: 'user', content: 'help me refactor the auth module' }];
 

@@ -10,10 +10,10 @@
  *
  * What changed is where the port's BODY comes from. It used to be assembled
  * here, delegating to the agent's own untrusted-content module. The policy has
- * since moved into the SDK (`platform/security`), because the daemon now serves
+ * since moved into the platform (`platform/security`), because the daemon now serves
  * `browser.*` and `email.*` with no surface attached and needed the same
  * contract, and a second copy of the rule text and refusal wording would have
- * drifted from this one. So the port itself is the SDK's factory, and this
+ * drifted from this one. So the port itself is the platform's factory, and this
  * module is the two facts about THIS surface that the factory needs: the
  * surface a page is labelled with, and the tool named in a refusal.
  *
@@ -22,8 +22,8 @@
  * wrong provenance in front of the reader.
  */
 
-import type { UntrustedContentPort } from '@goodvibes-jev/engine/sdk/platform/browser';
-import { createUntrustedContentPort } from '@goodvibes-jev/engine/sdk/platform/security';
+import type { UntrustedContentPort } from '@goodvibes-jev/engine/platform/platform/browser';
+import { createUntrustedContentPort } from '@goodvibes-jev/engine/platform/platform/security';
 import type { UntrustedContentLedger } from './untrusted-content.ts';
 
 export interface AgentUntrustedContentPortOptions {

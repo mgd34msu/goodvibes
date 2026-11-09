@@ -20,7 +20,7 @@ import {
   runTaskSuite,
   formatTaskSuiteResult,
   type TaskSessionExecutor,
-} from '../sdk/src/platform/runtime/eval/task-suite.ts';
+} from '../platform/src/platform/runtime/eval/task-suite.ts';
 
 const FIXTURE_SUITE = join(import.meta.dir, 'fixtures', 'eval', 'task-suite');
 

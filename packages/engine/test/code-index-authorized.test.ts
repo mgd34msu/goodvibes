@@ -2,9 +2,9 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CodeIndexStore, type AuthorizedCodePrepareInput } from '../sdk/src/platform/state/code-index-store.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
-import { MemoryEmbeddingProviderRegistry, embedMemoryText, type MemoryEmbeddingRequest } from '../sdk/src/platform/state/memory-embeddings.js';
+import { CodeIndexStore, type AuthorizedCodePrepareInput } from '../platform/src/platform/state/code-index-store.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { MemoryEmbeddingProviderRegistry, embedMemoryText, type MemoryEmbeddingRequest } from '../platform/src/platform/state/memory-embeddings.js';
 
 const roots: string[] = [];
 const stores: CodeIndexStore[] = [];

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createDaemonProviderDiscovery } from '../../runtime/provider-discovery.js';
-import type { DiscoveredServer } from '@goodvibes-jev/engine/sdk/platform/discovery';
+import type { DiscoveredServer } from '@goodvibes-jev/engine/platform/platform/discovery';
 
 const roots = { homeDirectory: '/synthetic-unused', surfaceRoot: 'tui' };
 const server: DiscoveredServer = { name: 'fixture', host: '127.0.0.1', port: 9,

@@ -348,7 +348,7 @@ describe('every schema key is reachable in the model', () => {
   });
 });
 
-describe('voice.local.* and fleet.maxSize (SDK 1.8.0): grouping verification', () => {
+describe('voice.local.* and fleet.maxSize (platform 1.8.0): grouping verification', () => {
   const groups = buildSettingsModel({});
 
   function groupContaining(key: string): typeof groups[number] | undefined {
@@ -441,7 +441,7 @@ describe('payments.* and daemon.timezone (payment capability round)', () => {
     const field = daemonGroup?.plainRows.find((f) => f.key === 'daemon.timezone');
     expect(field).toBeDefined();
     expect(field!.description.length).toBeGreaterThan(0);
-    // Ruled and fixed upstream (SDK config-ownership.ts) after this round's
+    // Ruled and fixed upstream (platform config-ownership.ts) after this round's
     // engineering report flagged the omission: daemon.timezone is the one
     // daemon.* key that is NOT a per-installation switch, see
     // config-ownership.test.ts.

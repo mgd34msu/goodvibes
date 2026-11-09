@@ -4,20 +4,20 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigManager } from '../sdk/src/platform/config/index.js';
-import { createClientRuntimeServices } from '../sdk/src/platform/runtime/bootstrap.js';
-import { createRuntimeStore, RuntimeEventBus } from '../sdk/src/platform/runtime/state.js';
-import { createLaunchTolerantProviderRegistry } from '../sdk/src/platform/providers/index.js';
+import { ConfigManager } from '../platform/src/platform/config/index.js';
+import { createClientRuntimeServices } from '../platform/src/platform/runtime/bootstrap.js';
+import { createRuntimeStore, RuntimeEventBus } from '../platform/src/platform/runtime/state.js';
+import { createLaunchTolerantProviderRegistry } from '../platform/src/platform/providers/index.js';
 import {
   captureContractInput,
   materializeContractInput,
   contractInputPath,
-} from '../sdk/src/platform/contract/input-snapshot.js';
+} from '../platform/src/platform/contract/input-snapshot.js';
 import {
   createContractInputAuthority,
   revokeContractInputAuthority,
-} from '../sdk/src/platform/contract/input-authority.js';
-import type { Contract } from '../sdk/src/platform/contract/types.js';
+} from '../platform/src/platform/contract/input-authority.js';
+import type { Contract } from '../platform/src/platform/contract/types.js';
 import { installJudgmentPort } from '../errors/src/index.js';
 import { fakePort, noulAnswer, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { hashState, SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';

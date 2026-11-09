@@ -4,7 +4,7 @@ import { renderConfigModal } from '../../../renderer/config-modal.ts';
 import { frameFromLayer } from '../../helpers/surface-frame.ts';
 import { createDevicesModalSurface, devicesModalGoldenSurface } from '../../../views/modals/devices-modal.ts';
 import type { ConfigModalSurface } from '../../../input/config-modal-types.ts';
-import type { MintedPairingToken, PublicPairingToken } from '@goodvibes-jev/engine/sdk/platform/pairing';
+import type { MintedPairingToken, PublicPairingToken } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { actionCtx, open, tabText } from './modal-surface-test-helpers.ts';
 
 /** Render a surface to plain text rows at the given terminal size. */

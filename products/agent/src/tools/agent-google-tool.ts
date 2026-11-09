@@ -1,6 +1,6 @@
 import { assertDecisionModelsEnabled } from '@goodvibes-jev/engine/errors';
 import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
-import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/sdk/platform/security';
+import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
 /**
  * The `google` tool: Gmail and Google Calendar, natively, in this process.
  *
@@ -50,13 +50,13 @@ import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/sdk/platform/se
  * around, and then there is no guard.
  */
 
-import { assertCurrentToolEffect, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
+import { assertCurrentToolEffect, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { retainSurfaceMethods } from './agent-surface-effect.ts';
-import { captureStrictJudgmentJson, snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { captureStrictJudgmentJson, snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import { isDeepStrictEqual } from 'node:util';
 import { CardMaterialRefusedError, screenOutboundForCardMaterial } from '../agent/payments-channel-guard.ts';
-import { assertDeliveryCurrent } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { assertDeliveryCurrent } from '@goodvibes-jev/engine/platform/platform/utils';
 import {
   beginGoogleConsent,
   openGoogleConnection,
@@ -65,11 +65,11 @@ import {
   type GoogleConsentSession,
   type GoogleLoopbackListenerFactory,
   type GoogleConsentCompletion,
-} from '@goodvibes-jev/engine/sdk/platform/google';
-import type { ConfigManager, SecretsManager } from '@goodvibes-jev/engine/sdk/platform/config';
+} from '@goodvibes-jev/engine/platform/platform/google';
+import type { ConfigManager, SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createGoogleSettingsProjector, commitGoogleSettings, retainGoogleConnectionOwners, retainGooglePreparedEffectSource, type GooglePendingCredential } from './agent-google-admission.ts';
-import { nodeGoogleFilePort } from '@goodvibes-jev/engine/sdk/platform/google/node';
-import { GOOGLE_CONFIG_KEYS } from '@goodvibes-jev/engine/sdk/platform/google';
+import { nodeGoogleFilePort } from '@goodvibes-jev/engine/platform/platform/google/node';
+import { GOOGLE_CONFIG_KEYS } from '@goodvibes-jev/engine/platform/platform/google';
 import {
   evaluateOutwardEffect,
   getSessionUntrustedContentLedger,
@@ -80,12 +80,12 @@ import {
   resolveOwnerAddresses,
   type OwnerApprovalStore,
   type TaintOptions,
-} from '@goodvibes-jev/engine/sdk/platform/security';
+} from '@goodvibes-jev/engine/platform/platform/security';
 import { rememberRefusedOutwardAction } from '../trust/outward-approvals.ts';
-import type { GoogleApiFailure, GoogleApiResult } from '@goodvibes-jev/engine/sdk/platform/google';
+import type { GoogleApiFailure, GoogleApiResult } from '@goodvibes-jev/engine/platform/platform/google';
 import { getSessionExpectationBook } from '../agent/signup/session-expectations.ts';
-import { deliveryEvidenceFromMessage, describeDeliveryEvidence, NO_ALIAS_MAILBOXES } from '@goodvibes-jev/engine/sdk/platform/google';
-import { readVerificationArtifact } from '@goodvibes-jev/engine/sdk/platform/google';
+import { deliveryEvidenceFromMessage, describeDeliveryEvidence, NO_ALIAS_MAILBOXES } from '@goodvibes-jev/engine/platform/platform/google';
+import { readVerificationArtifact } from '@goodvibes-jev/engine/platform/platform/google';
 
 const GOOGLE_ACTIONS = [
   'status',
@@ -232,7 +232,7 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
    * The owner's own addresses, from configuration only.
    *
    * Read per call because he can connect a mailbox mid-session. Never from a
-   * header, a sender, or anything else a message can influence, see the SDK's
+   * header, a sender, or anything else a message can influence, see the platform's
    * security/owner-identity.ts for what an attacker would have to control.
    */
 

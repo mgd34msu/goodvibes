@@ -3,9 +3,9 @@ import { join } from 'node:path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import type { CommandContext } from '../command-registry.ts';
 import { discoverSkills } from '../../views/skills-discovery.ts';
-import { buildSandboxReview } from '@goodvibes-jev/engine/sdk/platform/runtime/sandbox';
-import '@goodvibes-jev/engine/sdk/platform/plugins';
-import '@goodvibes-jev/engine/sdk/platform/config';
+import { buildSandboxReview } from '@goodvibes-jev/engine/platform/platform/runtime/sandbox';
+import '@goodvibes-jev/engine/platform/platform/plugins';
+import '@goodvibes-jev/engine/platform/platform/config';
 import type { SetupReviewSnapshot } from './local-setup-transfer.ts';
 import {
   requireProviderApi,

@@ -467,7 +467,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(thread?.certification?.publisher).toBe('goodvibes-daemon');
         expect(thread?.certification?.provenance?.join('\n')).toContain('gmail.threads.list');
         expect(thread?.certification?.receiptIds).toEqual(['gmail-reply-receipt-1', 'gmail-archive-receipt-1']);
-        expect(thread?.certification?.missingSignals).toEqual(['Native host or SDK inbox thread schema attestation is not published.']);
+        expect(thread?.certification?.missingSignals).toEqual(['Native host or platform inbox thread schema attestation is not published.']);
         expect(thread?.modelRoute).toContain('read_thread');
         expect(thread?.summary).toContain('token=[REDACTED]');
         expect(thread?.summary).not.toContain('SECRET123');
@@ -494,7 +494,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(event?.certification?.publicationGuarantee).toContain('credential=[REDACTED]');
         expect(event?.certification?.publicationGuarantee).not.toContain('caldav-pub-secret');
         expect(event?.certification?.receiptIds).toEqual(['caldav-edit-receipt-1', 'caldav-rsvp-receipt-1']);
-        expect(event?.certification?.missingSignals).toEqual(['Native host or SDK calendar event schema attestation is not published.']);
+        expect(event?.certification?.missingSignals).toEqual(['Native host or platform calendar event schema attestation is not published.']);
         expect(event?.summary).toContain('1 conflict signal');
         expect(event?.summary).toContain('credential=[REDACTED]');
         expect(event?.summary).not.toContain('calendar-secret');
@@ -533,7 +533,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(queue.queue.find((record) => record.capability === 'inbox-provider-thread')?.type).toBe('fresh-provider-read');
         expect(queue.queue.find((record) => record.capability === 'calendar-provider-event')?.type).toBe('fresh-provider-record');
         expect(queue.queue.find((record) => record.capability === 'inbox-provider-thread')?.certification?.schemaStatus).toBe('legacy');
-        expect(queue.queue.find((record) => record.capability === 'calendar-provider-event')?.certification?.missingSignals).toEqual(['Native host or SDK calendar event schema attestation is not published.']);
+        expect(queue.queue.find((record) => record.capability === 'calendar-provider-event')?.certification?.missingSignals).toEqual(['Native host or platform calendar event schema attestation is not published.']);
         expect(queue.nextActions.join('\n')).toContain('Inspect one current provider-backed queue record');
       }
 
@@ -670,7 +670,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(taskRecord?.certification?.publisher).toBe('goodvibes-daemon');
         expect(taskRecord?.certification?.provenance?.join('\n')).toContain('tasks.list');
         expect(taskRecord?.certification?.receiptIds).toEqual(['todoist-update-receipt-1', 'todoist-complete-receipt-1']);
-        expect(taskRecord?.certification?.missingSignals).toEqual(['Native host or SDK task schema attestation is not published.']);
+        expect(taskRecord?.certification?.missingSignals).toEqual(['Native host or platform task schema attestation is not published.']);
         expect(taskRecord?.modelRoute).toContain('read_task');
         expect(taskRecord?.summary).toContain('token=[REDACTED]');
         expect(taskRecord?.summary).not.toContain('TASKSECRET');
@@ -733,7 +733,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(reminderRecord?.certification?.publisher).toBe('goodvibes-daemon');
         expect(reminderRecord?.certification?.provenance?.join('\n')).toContain('reminders.list');
         expect(reminderRecord?.certification?.receiptIds).toEqual(['reminder-edit-receipt-1', 'reminder-snooze-receipt-1', 'reminder-delete-receipt-1']);
-        expect(reminderRecord?.certification?.missingSignals).toEqual(['Native host or SDK reminder schema attestation is not published.']);
+        expect(reminderRecord?.certification?.missingSignals).toEqual(['Native host or platform reminder schema attestation is not published.']);
         expect(reminderRecord?.modelRoute).toContain('laneId:"reminders"');
         expect(reminderRecord?.summary).toContain('password=[REDACTED]');
         expect(reminderRecord?.summary).not.toContain('REMINDERSECRET');
@@ -936,7 +936,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(inboxReceipt?.certification?.publicationGuarantee).toContain('token=[REDACTED]');
       expect(inboxReceipt?.certification?.publicationGuarantee).not.toContain('gmail-receipt-secret');
       expect(inboxReceipt?.certification?.receiptId).toBe('gmail-send-1');
-      expect(inboxReceipt?.certification?.missingSignals).toEqual(['Native host or SDK inbox provider-effect receipt schema attestation is not published.']);
+      expect(inboxReceipt?.certification?.missingSignals).toEqual(['Native host or platform inbox provider-effect receipt schema attestation is not published.']);
       expect(inboxReceipt?.followUpRoutes?.find((route) => route.id === 'inspect-effect-receipt')?.requiresConfirmation).toBe(false);
       expect(inboxReceipt?.followUpRoutes?.find((route) => route.id === 'continue-provider-lane')?.modelRoute).toContain('laneId:"inbox"');
 
@@ -962,7 +962,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(calendarReceipt?.certification?.publicationGuarantee).toContain('credential=[REDACTED]');
       expect(calendarReceipt?.certification?.publicationGuarantee).not.toContain('caldav-receipt-secret');
       expect(calendarReceipt?.certification?.receiptId).toBe('caldav-rsvp-1');
-      expect(calendarReceipt?.certification?.missingSignals).toEqual(['Native host or SDK calendar provider-effect receipt schema attestation is not published.']);
+      expect(calendarReceipt?.certification?.missingSignals).toEqual(['Native host or platform calendar provider-effect receipt schema attestation is not published.']);
       expect(calendarReceipt?.followUpRoutes?.find((route) => route.id === 'continue-provider-lane')?.modelRoute).toContain('laneId:"calendar"');
 
       const tasks = ops.lanes.find((lane) => lane.id === 'tasks');
@@ -976,7 +976,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(taskReceipt?.certification?.schemaStatus).toBe('legacy');
       expect(taskReceipt?.certification?.publicationGuarantee).toContain('secret=[REDACTED]');
       expect(taskReceipt?.certification?.receiptId).toBe('todoist-complete-1');
-      expect(taskReceipt?.certification?.missingSignals).toEqual(['Native host or SDK task provider-effect receipt schema attestation is not published.']);
+      expect(taskReceipt?.certification?.missingSignals).toEqual(['Native host or platform task provider-effect receipt schema attestation is not published.']);
 
       const reminders = ops.lanes.find((lane) => lane.id === 'reminders');
       const reminderReceipt = reminders?.liveRecords?.find((record) => record.id === 'provider-effect-receipt:artifact-4');
@@ -989,7 +989,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(reminderReceipt?.certification?.schemaStatus).toBe('legacy');
       expect(reminderReceipt?.certification?.publicationGuarantee).toContain('password=[REDACTED]');
       expect(reminderReceipt?.certification?.receiptId).toBe('reminder-snooze-1');
-      expect(reminderReceipt?.certification?.missingSignals).toEqual(['Native host or SDK reminder provider-effect receipt schema attestation is not published.']);
+      expect(reminderReceipt?.certification?.missingSignals).toEqual(['Native host or platform reminder provider-effect receipt schema attestation is not published.']);
     } finally {
       fixture.cleanup();
     }

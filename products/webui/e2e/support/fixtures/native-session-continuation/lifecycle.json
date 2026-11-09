@@ -137,7 +137,7 @@
       "session": {
         "id": "hosted-8692e1a0-93f3-4ac1-a243-e52488940ca6",
         "nativeConversation": true,
-        "workspaceRoot": "/tmp/goodvibes-sdk-testrun-369-fca73be7/native-intake-http-2ib1dz/workspace",
+        "workspaceRoot": "/tmp/goodvibes-platform-testrun-369-fca73be7/native-intake-http-2ib1dz/workspace",
         "title": "Native conversation",
         "status": "idle",
         "detachPolicy": "survive",
@@ -274,7 +274,7 @@
       "session": {
         "id": "hosted-8692e1a0-93f3-4ac1-a243-e52488940ca6",
         "nativeConversation": true,
-        "workspaceRoot": "/tmp/goodvibes-sdk-testrun-369-fca73be7/native-intake-http-2ib1dz/workspace",
+        "workspaceRoot": "/tmp/goodvibes-platform-testrun-369-fca73be7/native-intake-http-2ib1dz/workspace",
         "title": "Native conversation",
         "status": "idle",
         "detachPolicy": "survive",
@@ -616,7 +616,7 @@
       "session": {
         "id": "hosted-8692e1a0-93f3-4ac1-a243-e52488940ca6",
         "nativeConversation": true,
-        "workspaceRoot": "/tmp/goodvibes-sdk-testrun-369-fca73be7/native-intake-http-2ib1dz/workspace",
+        "workspaceRoot": "/tmp/goodvibes-platform-testrun-369-fca73be7/native-intake-http-2ib1dz/workspace",
         "title": "Native conversation",
         "status": "idle",
         "detachPolicy": "survive",
@@ -876,7 +876,7 @@
       "session": {
         "id": "hosted-e7087cf5-957b-4e80-912d-08c1b2bf73d0",
         "nativeConversation": true,
-        "workspaceRoot": "/tmp/goodvibes-sdk-testrun-369-fca73be7/native-intake-http-2ib1dz/workspace",
+        "workspaceRoot": "/tmp/goodvibes-platform-testrun-369-fca73be7/native-intake-http-2ib1dz/workspace",
         "title": "Native conversation",
         "status": "idle",
         "detachPolicy": "survive",

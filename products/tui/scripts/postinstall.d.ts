@@ -20,7 +20,7 @@ export {
 
 /**
  * Provision the wake-word model as part of installing. Declared here rather than
- * re-exported from elsewhere because it is the script's own step: the SDK owns
+ * re-exported from elsewhere because it is the script's own step: the engine owns
  * the policy, this owns deciding whether an npm install should run it (a source
  * checkout and the --no-download switch both decline).
  *

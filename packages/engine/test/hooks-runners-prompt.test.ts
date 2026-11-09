@@ -1,6 +1,6 @@
 import { describe, test, expect, mock, beforeEach } from 'bun:test';
-import type { HookDefinition, HookEvent } from '@goodvibes-jev/engine/sdk/platform/hooks';
-import { run } from '@goodvibes-jev/engine/sdk/platform/hooks';
+import type { HookDefinition, HookEvent } from '@goodvibes-jev/engine/platform/platform/hooks';
+import { run } from '@goodvibes-jev/engine/platform/platform/hooks';
 
 const mockChat = mock(async (_prompt: string): Promise<string> => '');
 const toolLLM = { chat: mockChat };

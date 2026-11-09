@@ -1,8 +1,8 @@
 /**
  * Per-turn knowledge injection record rendering.
  *
- * The SDK's passive per-turn retrieval engine
- * (packages/sdk/src/platform/agents/turn-knowledge-injection.ts) stores one
+ * The platform's passive per-turn retrieval engine
+ * (packages/engine/platform/src/platform/agents/turn-knowledge-injection.ts) stores one
  * `TurnInjectionRecord` per turn on `AgentRecord.turnInjections` (a bounded
  * ring, default 20 entries) and appends the same record to the agent's
  * session transcript as `{type:'knowledge_injection', turn, ...record}`.
@@ -13,7 +13,7 @@
  * record type now, and this names it.
  *
  * Reality check (since updated): the TUI's main interactive
- * session DOES route through this engine. The SDK `Orchestrator` runs per-turn
+ * session DOES route through this engine. The platform `Orchestrator` runs per-turn
  * passive injection on the evolving primary conversation and records each turn
  * on its own bounded ring, exposed via `Orchestrator.getTurnInjections()`, the
  * main-session counterpart to `AgentRecord.turnInjections` (there is no
@@ -23,7 +23,7 @@
  * record onto their own `AgentRecord.turnInjections`, rendered per-agent by
  * `buildTurnInjectionsText` when an explicit agent id is given.
  */
-import type { TurnInjectionRecord } from '@goodvibes-jev/engine/sdk/platform/agents';
+import type { TurnInjectionRecord } from '@goodvibes-jev/engine/platform/platform/agents';
 
 /** One per-turn injection record, under the name this renderer already used. */
 export type TurnInjectionEntry = TurnInjectionRecord;
@@ -87,7 +87,7 @@ function truncateQuery(query: string): string {
  *
  * An empty `entries` array is deliberately ambiguous about WHY it's empty
  * (flag disabled, no turn with new input has run yet, or every turn's token
- * budget had no headroom), the SDK does not distinguish these cases in the
+ * budget had no headroom), the platform does not distinguish these cases in the
  * ring itself, so this renders all three possibilities rather than guessing.
  */
 export function buildTurnInjectionsText(agentId: string, entries: readonly TurnInjectionEntry[]): string {

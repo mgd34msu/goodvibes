@@ -5,9 +5,9 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { spawnSync } from 'node:child_process';
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { ORIGINAL_OBLIGATION_COVERAGE, originalObligationSource } from '../../sdk/src/platform/contract/batteries/original-obligation-coverage.js';
-import { junitCompletion } from '../../sdk/src/platform/contract/gate-receipts.js';
-import { nativeSourcePlan } from '../../sdk/src/platform/contract/native-source.js';
+import { ORIGINAL_OBLIGATION_COVERAGE, originalObligationSource } from '../../platform/src/platform/contract/batteries/original-obligation-coverage.js';
+import { junitCompletion } from '../../platform/src/platform/contract/gate-receipts.js';
+import { nativeSourcePlan } from '../../platform/src/platform/contract/native-source.js';
 import { makeHarness, makeRepo, oneUnitPlan, runnerPort, startContract, waitFor, type Harness } from './runner-support.js';
 import { contractOf, finishes, terminal } from './steps-support.js';
 

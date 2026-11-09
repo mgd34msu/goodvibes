@@ -2,7 +2,7 @@
  * agent-conversation-sender.ts, this product as a PUSH destination for the
  * daemon.
  *
- * The SDK owns the destination and the contract: `agent` is a channel-delivery
+ * The platform owns the destination and the contract: `agent` is a channel-delivery
  * surface kind, a strategy in the router claims targets addressed to it, and
  * `AgentConversationMessage` is the shape it hands over
  * (platform/channels/delivery/strategies-agent.ts). What it cannot own is the
@@ -47,11 +47,11 @@
  * send" should find it.
  */
 
-import { assertDeliveryCurrent, logger, runDeliveryPublication, type DeliveryLifetime } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { assertDeliveryCurrent, logger, runDeliveryPublication, type DeliveryLifetime } from '@goodvibes-jev/engine/platform/platform/utils';
 import type {
   AgentConversationMessage,
   AgentConversationSender,
-} from '@goodvibes-jev/engine/sdk/platform/channels';
+} from '@goodvibes-jev/engine/platform/platform/channels';
 import type { ConversationManager } from '../core/conversation.ts';
 import { findSessionConversation } from './conversation-rewind-port.ts';
 
@@ -86,7 +86,7 @@ export function createAgentConversationSender(
   /**
    * Which conversation this message is for.
    *
-   * The same resolution order the SDK strategy already applied to build the
+   * The same resolution order the platform strategy already applied to build the
    * message: what the caller addressed, then the session it belongs to, then this
    * process's active conversation. An addressed id that resolves to nothing does
    * NOT silently fall back, see the throw below.
@@ -146,7 +146,7 @@ export function createAgentConversationSender(
       });
       // No id: this transcript has no stable per-message identifier to hand
       // back, and inventing one would make a delivery receipt point at nothing.
-      // The SDK strategy falls back to the conversation id it resolved.
+      // The platform strategy falls back to the conversation id it resolved.
       return undefined;
     },
   };

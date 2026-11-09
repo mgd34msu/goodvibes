@@ -1,14 +1,14 @@
 /** Exercises advertised capabilities against the real daemon dispatch chain. */
 
 import { describe, expect, test } from 'bun:test';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { GATEWAY_REST_ROUTES } from '../daemon-sdk/src/gateway-rest-routes.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { GATEWAY_REST_ROUTES } from '../daemon-api/src/gateway-rest-routes.ts';
 import {
-  createDaemonSdkRouteProbe,
+  createDaemonApiRouteProbe,
   findUnreconciledAdvertisements,
   reconcileCatalogRoutes,
   reconcileHttpDescriptor,
-} from '../sdk/src/platform/control-plane/method-catalog-route-reconcile.ts';
+} from '../platform/src/platform/control-plane/method-catalog-route-reconcile.ts';
 
 function liveCatalogDescriptors() {
   return new GatewayMethodCatalog().list();
@@ -16,7 +16,7 @@ function liveCatalogDescriptors() {
 
 describe('capability-advertisement honesty: route reconcile', () => {
   test('email.inbox.list: the dogfood finding is fixed, and the path it always advertised is the one now served', async () => {
-    const probe = createDaemonSdkRouteProbe();
+    const probe = createDaemonApiRouteProbe();
     const descriptors = liveCatalogDescriptors();
     const emailInboxList = descriptors.find((d) => d.id === 'email.inbox.list');
     expect(emailInboxList).toBeDefined();
@@ -34,7 +34,7 @@ describe('capability-advertisement honesty: route reconcile', () => {
   });
 
   test('every email.* method that advertises a route resolves to one, and none is marked unavailable', async () => {
-    const probe = createDaemonSdkRouteProbe();
+    const probe = createDaemonApiRouteProbe();
     const descriptors = liveCatalogDescriptors().filter((d) => d.category === 'email');
     const advertised = descriptors.filter((d) => d.http);
     // The four mail verbs promise /api/email/* paths. The expectation verbs
@@ -62,7 +62,7 @@ describe('capability-advertisement honesty: route reconcile', () => {
   });
 
   test('all five calendar.* methods resolve to a route and none is marked unavailable', async () => {
-    const probe = createDaemonSdkRouteProbe();
+    const probe = createDaemonApiRouteProbe();
     const descriptors = liveCatalogDescriptors().filter((d) => d.category === 'calendar');
     expect(descriptors).toHaveLength(5);
 
@@ -74,12 +74,12 @@ describe('capability-advertisement honesty: route reconcile', () => {
   });
 
   test('every browser.* method resolves to a route and none is marked unavailable', async () => {
-    // The browser engine was hoisted into the SDK and the daemon could link
+    // The browser engine was hoisted into the platform and the daemon could link
     // it, but no verb and no path existed, so nothing the daemon did on its
     // own could open a page. Serving the WHOLE surface is the point: a count
     // check here fails if a later change quietly drops one back out of the
     // route table while leaving its advertisement standing.
-    const probe = createDaemonSdkRouteProbe();
+    const probe = createDaemonApiRouteProbe();
     const descriptors = liveCatalogDescriptors().filter((d) => d.category === 'browser');
     expect(descriptors).toHaveLength(24);
 
@@ -127,7 +127,7 @@ describe('capability-advertisement honesty: route reconcile', () => {
   });
 
   test('every advertised unavailable route is marked unavailable', async () => {
-    const probe = createDaemonSdkRouteProbe();
+    const probe = createDaemonApiRouteProbe();
     const descriptors = liveCatalogDescriptors();
     const results = await reconcileCatalogRoutes(descriptors, probe);
 
@@ -137,7 +137,7 @@ describe('capability-advertisement honesty: route reconcile', () => {
   });
 
   test('a genuinely-served method still reconciles as live (no false-unavailable)', async () => {
-    const probe = createDaemonSdkRouteProbe();
+    const probe = createDaemonApiRouteProbe();
     const descriptors = liveCatalogDescriptors();
     const controlAuthCurrent = descriptors.find((d) => d.id === 'control.auth.current');
     expect(controlAuthCurrent).toBeDefined();
@@ -148,7 +148,7 @@ describe('capability-advertisement honesty: route reconcile', () => {
   });
 
   test('a method with no http binding is left unchecked, not flagged', async () => {
-    const probe = createDaemonSdkRouteProbe();
+    const probe = createDaemonApiRouteProbe();
     const descriptors = liveCatalogDescriptors();
     // fleet.snapshot is handler-registered with no http binding at
     // catalog-construction time (registered later, at RuntimeServices
@@ -161,7 +161,7 @@ describe('capability-advertisement honesty: route reconcile', () => {
   });
 
   test('a path served by a specialized sub-router is left unchecked, not falsely marked unavailable', async () => {
-    const probe = createDaemonSdkRouteProbe();
+    const probe = createDaemonApiRouteProbe();
     const descriptors = liveCatalogDescriptors();
     const mcpDescriptor = descriptors.find((d) => d.http?.path.startsWith('/api/mcp'));
     expect(mcpDescriptor).toBeDefined();
@@ -210,7 +210,7 @@ describe('route reconcile sees handlers, not just routes', () => {
 
     const result = await reconcileHttpDescriptor(
       descriptor!,
-      createDaemonSdkRouteProbe(),
+      createDaemonApiRouteProbe(),
       (id) => catalog.hasHandler(id),
     );
     expect(result.status).toBe('live');
@@ -229,7 +229,7 @@ describe('route reconcile sees handlers, not just routes', () => {
 
     const result = await reconcileHttpDescriptor(
       descriptor!,
-      createDaemonSdkRouteProbe(),
+      createDaemonApiRouteProbe(),
       (id) => catalog.hasHandler(id),
     );
     expect(result.status).toBe('unhandled');
@@ -244,7 +244,7 @@ describe('route reconcile sees handlers, not just routes', () => {
     const descriptors = catalog.list();
     const results = await reconcileCatalogRoutes(
       descriptors,
-      createDaemonSdkRouteProbe(),
+      createDaemonApiRouteProbe(),
       (id) => catalog.hasHandler(id),
     );
     // `invokable: false` says "cataloged, not callable". This method says it IS
@@ -264,7 +264,7 @@ describe('route reconcile sees handlers, not just routes', () => {
 
     const result = await reconcileHttpDescriptor(
       notGatewayRest!,
-      createDaemonSdkRouteProbe(),
+      createDaemonApiRouteProbe(),
       () => false, // no catalog handler anywhere
     );
     expect(result.status).not.toBe('unhandled');
@@ -273,7 +273,7 @@ describe('route reconcile sees handlers, not just routes', () => {
   test('omitting the handler probe keeps the old behaviour, so existing callers are unaffected', async () => {
     const catalog = new GatewayMethodCatalog();
     const descriptor = catalog.get(SERVED_BY_GATEWAY_REST)!;
-    const result = await reconcileHttpDescriptor(descriptor, createDaemonSdkRouteProbe());
+    const result = await reconcileHttpDescriptor(descriptor, createDaemonApiRouteProbe());
     expect(result.status).toBe('live');
   });
 });

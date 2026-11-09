@@ -22,7 +22,7 @@ import {
   type PolicyBundlePayload,
   type BundleProvenance,
   type SignedPolicyBundle,
-} from '../sdk/src/platform/runtime/permissions/index.ts';
+} from '../platform/src/platform/runtime/permissions/index.ts';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 

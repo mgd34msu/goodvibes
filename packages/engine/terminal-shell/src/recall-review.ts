@@ -1,5 +1,5 @@
-import type { MemoryApi } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import type { MemoryRecord, MemoryReviewPatch, MemoryScope } from '@goodvibes-jev/engine/sdk/platform/state';
+import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import type { MemoryRecord, MemoryReviewPatch, MemoryScope } from '@goodvibes-jev/engine/platform/platform/state';
 import { VALID_REVIEW_STATES, VALID_SCOPES, isValidReviewState, isValidScope, temporalStatusLabel } from './recall-shared.js';
 import { afterMemory, mutationArguments, type RecallQueryContext } from './recall-query.js';
 export interface RecallReviewPort {

@@ -3,7 +3,7 @@
  * exec.
  *
  * The engine's behaviour (a required boundary refuses an uncontained command,
- * the owner's terminal is denied outright) is the SDK's, and is proved there.
+ * the owner's terminal is denied outright) is the platform's, and is proved there.
  * What this daemon owns is the STATEMENT: which posture it hands the engine,
  * and what its operator prompt tells a hosted turn it owes.
  *
@@ -14,7 +14,7 @@
  */
 import { afterAll, beforeAll, describe, it, expect } from 'bun:test';
 import { rmSync } from 'node:fs';
-import { CONVERSATIONAL_DIAGNOSIS_SECTION } from '@goodvibes-jev/engine/sdk/platform/agents';
+import { CONVERSATIONAL_DIAGNOSIS_SECTION } from '@goodvibes-jev/engine/platform/platform/agents';
 import { createHostedSessionOptions } from '../../runtime/hosted-session-composition.ts';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 import { useGatewayFixture } from '../helpers/gateway-fixture.js';
@@ -73,7 +73,7 @@ describe('the exec posture this daemon states', () => {
 });
 
 describe("this daemon's hosted operator prompt", () => {
-  it('carries the conversational diagnosis contract, from the SDK rather than a second copy', () => {
+  it('carries the conversational diagnosis contract, from the platform rather than a second copy', () => {
     const options = createHostedSessionOptions(getTestRuntimeServices());
     const prompt = options.systemPrompt?.({ sessionId: 'hosted-1', workspaceRoot: '/tmp/ws' }) ?? '';
     expect(prompt).toContain(CONVERSATIONAL_DIAGNOSIS_SECTION);

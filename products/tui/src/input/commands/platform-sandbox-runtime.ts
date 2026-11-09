@@ -13,8 +13,8 @@ import {
   renderSandboxReview,
   type SandboxBundle,
   type SandboxProbe,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/sandbox';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+} from '@goodvibes-jev/engine/platform/platform/runtime/sandbox';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { renderSandboxDoctor } from '../../runtime/sandbox-public-gaps.ts';
 import { handleSandboxSessionCommand } from './platform-sandbox-session.ts';
 

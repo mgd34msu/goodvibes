@@ -8,8 +8,8 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { RuntimeEventBus, createEventEnvelope } from '../sdk/src/platform/runtime/events/index.ts';
-import type { SessionEvent } from '../sdk/src/events/session.js';
+import { RuntimeEventBus, createEventEnvelope } from '../platform/src/platform/runtime/events/index.ts';
+import type { SessionEvent } from '../platform/src/events/session.js';
 
 function makeEnvelope() {
   const payload: SessionEvent = {

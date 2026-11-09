@@ -82,7 +82,7 @@ export function personalOpsRecordCertification(source: {
   const receiptRoute = firstAcross(records, ['receiptRoute', 'inspectReceiptRoute', 'artifactRoute']);
   const proof = provenance(input.record, records, input.sourcePath);
   const missingSignals = [
-    `Native host or SDK ${input.recordKind} schema attestation is not published.`,
+    `Native host or platform ${input.recordKind} schema attestation is not published.`,
     ...(input.durableId ? [] : [`Durable ${input.recordKind} id is not published.`]),
     ...(publicationGuarantee ? [] : [`Provider-side ${input.recordKind} publication guarantee is not published.`]),
     ...(publisher ? [] : [`Provider-side ${input.recordKind} publisher is not published.`]),
@@ -100,6 +100,6 @@ export function personalOpsRecordCertification(source: {
     ...(receiptRoute ? { receiptRoute: redactedPreview(receiptRoute, 180) } : {}),
     ...(ids.length > 0 ? { receiptIds: ids } : {}),
     missingSignals,
-    policy: 'Native host or SDK schema attestation is unavailable for these records. Provider schema metadata, publication descriptions, provenance and receipt ids remain descriptive evidence and do not certify release evidence.',
+    policy: 'Native host or platform schema attestation is unavailable for these records. Provider schema metadata, publication descriptions, provenance and receipt ids remain descriptive evidence and do not certify release evidence.',
   };
 }

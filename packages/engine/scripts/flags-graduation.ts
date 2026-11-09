@@ -13,7 +13,7 @@
 import {
   buildFlagGraduationReport,
   evaluateGraduationReleaseGate,
-} from '../sdk/src/platform/runtime/feature-flags/graduation.ts';
+} from '../platform/src/platform/runtime/feature-flags/graduation.ts';
 
 function main(): void {
   const report = buildFlagGraduationReport();

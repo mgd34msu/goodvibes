@@ -7,8 +7,8 @@ import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { withDecisionModelPolicy } from '../../sdk/src/platform/runtime/decision-policy.js';
-import { createProtectedSourceOwner } from '../../sdk/src/platform/security/source-screening/owner.js';
+import { withDecisionModelPolicy } from '../../platform/src/platform/runtime/decision-policy.js';
+import { createProtectedSourceOwner } from '../../platform/src/platform/security/source-screening/owner.js';
 import { smokeLoadFailure } from '../../toolchain/src/batteries/smoke-load-failure.js';
 import { makeProjectTempDir } from '../_helpers/project-temp.js';
 

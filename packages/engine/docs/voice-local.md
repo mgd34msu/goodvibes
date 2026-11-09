@@ -90,8 +90,11 @@ STT per the sources above.
 
 `voice.local.install` provisions the STT engine (whisper.cpp) from a
 goodvibes-built, checksum-pinned bundle. Those bundles are hosted at ONE
-append-only GitHub release tag, **`voice-runtimes-v1`** on the SDK repo, with a
-`<asset>.sha256` sidecar next to every asset.
+pinned GitHub release tag, **`voice-runtimes-v1`**, in the existing
+[`mgd34msu/goodvibes-sdk` artifact storage](https://github.com/mgd34msu/goodvibes-sdk/releases/tag/voice-runtimes-v1).
+That release contains the verified deployed bytes and checksum sidecars. The
+source/package rename does not relocate those assets; future publication targets
+`mgd34msu/goodvibes`.
 
 Stability contract (relied on by the pinned manifest and every referencing
 script):

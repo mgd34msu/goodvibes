@@ -1,24 +1,24 @@
 import { createCliSecretsCommand } from '@goodvibes-jev/engine/terminal-shell/cli-secrets-command';
 import { createCliWorkspaceCommands } from '@goodvibes-jev/engine/terminal-shell/cli-workspace-commands';
 import { createCliSubscriptionView } from '@goodvibes-jev/engine/terminal-shell/cli-subscription-view';
-import '@goodvibes-jev/engine/sdk/platform/sessions';
+import '@goodvibes-jev/engine/platform/platform/sessions';
 import 'node:fs';
 import { join } from 'node:path';
 import { SecretsManager } from '../config/secrets.ts';
-import '@goodvibes-jev/engine/sdk/platform/config';
-import '@goodvibes-jev/engine/sdk/platform/config';
-import '@goodvibes-jev/engine/sdk/platform/config';
+import '@goodvibes-jev/engine/platform/platform/config';
+import '@goodvibes-jev/engine/platform/platform/config';
+import '@goodvibes-jev/engine/platform/platform/config';
 import '@/runtime/index.ts';
 import {
   generateQrMatrix,
   renderQrToString,
   PAIRING_HANDOFF_OFFER_KINDS,
   type PairingHandoffOfferKind,
-} from '@goodvibes-jev/engine/sdk/platform/pairing';
-import { ensurePublicBaseUrl } from '@goodvibes-jev/engine/sdk/platform/pairing';
-import { formatPairingOffers, formatPostureCapabilities, pairingPostureNotice } from '@goodvibes-jev/engine/sdk/platform/pairing';
-import { defaultPairingTokenName } from '@goodvibes-jev/engine/sdk/platform/pairing';
-import { stableUrlHostForBindHost } from '@goodvibes-jev/engine/sdk/platform/pairing';
+} from '@goodvibes-jev/engine/platform/platform/pairing';
+import { ensurePublicBaseUrl } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { formatPairingOffers, formatPostureCapabilities, pairingPostureNotice } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { defaultPairingTokenName } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { stableUrlHostForBindHost } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { formatRuntimeEndpointBinding, resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
 import { classifyBindPosture, isNetworkFacing } from './network-posture.ts';
 import type { CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';
@@ -120,8 +120,8 @@ interface PairingHandoffCreateResult {
   readonly offers: readonly { readonly kind: PairingHandoffOfferKind }[];
   readonly fragment: string;
   readonly deepLink?: string | undefined;
-  /** The honest TLS/capability posture of the origin the QR points at (SDK-computed). */
-  readonly posture?: import('@goodvibes-jev/engine/sdk/platform/pairing').OriginPosture | undefined;
+  /** The honest TLS/capability posture of the origin the QR points at (platform-computed). */
+  readonly posture?: import('@goodvibes-jev/engine/platform/platform/pairing').OriginPosture | undefined;
 }
 
 export async function renderPairing(runtime: CliCommandRuntime): Promise<string> {
@@ -159,7 +159,7 @@ export async function renderPairing(runtime: CliCommandRuntime): Promise<string>
       );
     }
     // The labeled browser-capability list and the one honest LAN line both render
-    // from the SDK posture the verb returned, never a locally-authored string.
+    // from the platform posture the verb returned, never a locally-authored string.
     const capabilities = formatPostureCapabilities(result.posture);
     if (capabilities.length > 0) lines.push('', 'This device will get:', ...capabilities);
     const notice = pairingPostureNotice(result.posture);

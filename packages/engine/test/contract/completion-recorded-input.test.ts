@@ -2,7 +2,7 @@
 import { expect, test } from 'bun:test';
 import { JudgmentContextLimitError, SqliteDecisionLog, observeJudgmentModel, recordedJudgmentInputHash, reuseObservedJudgmentResult, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort, installJudgmentPort, judgmentPort } from '@goodvibes-jev/engine/errors';
-import { prepareJudgmentResult } from '../../sdk/src/platform/gate/judgment-result.js';
+import { prepareJudgmentResult } from '../../platform/src/platform/gate/judgment-result.js';
 import { makeHarness, oneUnitPlan, startContract, waitFor } from './runner-support.js';
 import { finishes, terminal } from './steps-support.js';
 

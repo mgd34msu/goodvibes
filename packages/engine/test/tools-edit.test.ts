@@ -6,9 +6,9 @@ import { describe, test, expect, beforeEach, afterEach, setDefaultTimeout } from
 setDefaultTimeout(15_000);
 import { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { createEditTool } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { EditToolOptions } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { FileStateCache } from '@goodvibes-jev/engine/sdk/platform/state';
+import { createEditTool } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { EditToolOptions } from '@goodvibes-jev/engine/platform/platform/tools';
+import { FileStateCache } from '@goodvibes-jev/engine/platform/platform/state';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 

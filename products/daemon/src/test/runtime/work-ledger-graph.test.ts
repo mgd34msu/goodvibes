@@ -1,13 +1,13 @@
 import { expect, spyOn, test } from 'bun:test';
-import { createOperatorSdk } from '@goodvibes-jev/engine/operator-sdk';
-import { createOperatorWorkLedgerReadClient } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/operator-read-client';
+import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
+import { createOperatorWorkLedgerReadClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/operator-read-client';
 import { join } from 'node:path';
 import { setImmediate } from 'node:timers/promises';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { KnowledgeService, KnowledgeStore } from '@goodvibes-jev/engine/sdk/platform/knowledge';
-import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { registerInboxSurface } from '@goodvibes-jev/engine/sdk/platform/intake';
-import type { WorkLedgerActor } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { KnowledgeService, KnowledgeStore } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { registerInboxSurface } from '@goodvibes-jev/engine/platform/platform/intake';
+import type { WorkLedgerActor } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 import { startDaemonFixture, type DaemonFixture } from '../../testing/daemon-fixture.js';
 import * as ledgerComposition from '../../runtime/work-ledger-composition.js';
 import type { NativeWorkLedgerOwner } from '../../runtime/work-ledger-composition.js';
@@ -180,15 +180,15 @@ test('actual daemon exposes only authenticated project-bound ledger reads from i
     const projectId = fx.services.projectPlanningProjectId;
     const actor = owner.authority.issueActor({ actorId: 'fixture-coordinator', projectId, role: 'coordinator' });
     expect(await owner.service.execute(command, actor)).toMatchObject({ kind: 'accepted' });
-    const sdk = createOperatorSdk({ baseUrl: fx.baseUrl, authToken: fx.token });
-    const reader = createOperatorWorkLedgerReadClient(sdk, projectId);
+    const platformClient = createOperatorApiClient({ baseUrl: fx.baseUrl, authToken: fx.token });
+    const reader = createOperatorWorkLedgerReadClient(platformClient, projectId);
     try {
       const snapshot = await reader.readSnapshot();
       expect(snapshot.projectId).toBe(projectId); expect(snapshot.cursor).toBe(1);
       expect(snapshot.works).toHaveLength(1); expect('allowedActions' in snapshot.works[0]!).toBe(false);
       expect((await reader.history(0)).map(item => item.sequence)).toEqual([1]);
       expect((await fx.fetchAnonymous(`/api/work-ledger/snapshot?projectId=${encodeURIComponent(projectId)}`)).status).toBe(401);
-      const wrong = createOperatorWorkLedgerReadClient(sdk, 'different-project');
+      const wrong = createOperatorWorkLedgerReadClient(platformClient, 'different-project');
       await expect(wrong.readSnapshot()).rejects.toMatchObject({ status: 403 }); wrong.dispose();
       expect('authority' in reader).toBe(false); expect('execute' in reader).toBe(false);
       const revoke = spyOn(owner.authority, 'revokeActor');
@@ -197,7 +197,7 @@ test('actual daemon exposes only authenticated project-bound ledger reads from i
       await close;
       await expect(reader.readSnapshot()).rejects.toMatchObject({ status: 503 });
       revoke.mockRestore();
-    } finally { reader.dispose(); sdk.dispose(); }
+    } finally { reader.dispose(); platformClient.dispose(); }
   } finally {
     try { await fx?.stop(); }
     finally { composition.mockRestore(); benchmarks.mockRestore(); discovery.mockRestore(); }

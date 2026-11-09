@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { join } from 'path';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { FavoritesStore, type FavoritesData } from '@goodvibes-jev/engine/sdk/platform/providers';
+import { FavoritesStore, type FavoritesData } from '@goodvibes-jev/engine/platform/platform/providers';
 
 // ---------------------------------------------------------------------------
 // Test isolation, redirect favorites to a per-test temp directory

@@ -1,12 +1,12 @@
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.ts';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 import { spawnSync } from 'node:child_process';
 import { expect, test } from 'bun:test';
 import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.ts';
-import { ToolInputProjectionError, type ToolInputProjector, type ToolInputProjectionResult } from '../sdk/src/platform/tools/input-projection.ts';
-import type { Tool, ToolExecuteOptions } from '../sdk/src/platform/types/tools.ts';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
+import { ToolInputProjectionError, type ToolInputProjector, type ToolInputProjectionResult } from '../platform/src/platform/tools/input-projection.ts';
+import type { Tool, ToolExecuteOptions } from '../platform/src/platform/types/tools.ts';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -379,8 +379,8 @@ test('cancellation added during preparation stays bound when execution omits opt
 
 
 test('DOM-realm imports are harmless while missing native signal intrinsics fail closed', () => {
-  const projectionUrl = new URL('../sdk/src/platform/tools/input-projection.ts', import.meta.url).href;
-  const registryUrl = new URL('../sdk/src/platform/tools/registry.ts', import.meta.url).href;
+  const projectionUrl = new URL('../platform/src/platform/tools/input-projection.ts', import.meta.url).href;
+  const registryUrl = new URL('../platform/src/platform/tools/registry.ts', import.meta.url).href;
   const script = `
     const native = new AbortController();
     globalThis.AbortSignal = class UnsupportedSignal {};
@@ -502,7 +502,7 @@ test.each(['registered', 'prepared'] as const)('%s read publication checks the o
 
 
 test('local capture accepts large payloads, wide batches and deep JSON without a hosted budget', async () => {
-  const { captureOwnedJson, snapshotJudgmentInput } = await import('../sdk/src/platform/gate/judgment-input.js');
+  const { captureOwnedJson, snapshotJudgmentInput } = await import('../platform/src/platform/gate/judgment-input.js');
   const payload = 'x'.repeat(1_100_000);
   let nested: Record<string, unknown> = { value: payload };
   for (let i = 0; i < 1000; i++) nested = { child: nested };

@@ -17,8 +17,8 @@ import {
   evaluateDaemonCompatibility,
   evaluateDaemonStatusCompatibility,
   readDaemonVersion,
-} from '../sdk/src/platform/control-plane/daemon-compatibility.ts';
-import { evaluateClientCompatibility } from '../sdk/src/platform/control-plane/client-compatibility.ts';
+} from '../platform/src/platform/control-plane/daemon-compatibility.ts';
+import { evaluateClientCompatibility } from '../platform/src/platform/control-plane/client-compatibility.ts';
 
 describe('readDaemonVersion: /status already answers this', () => {
   test('reads the version out of a /status body', () => {

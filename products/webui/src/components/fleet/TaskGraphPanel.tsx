@@ -1,6 +1,6 @@
 /**
  * TaskGraphPanel, the fix-phase task graph for one workstream
- * (fleet.graph.get, SDK 1.8.0), rendered in the workstream/fleet detail pane.
+ * (fleet.graph.get, platform 1.8.0), rendered in the workstream/fleet detail pane.
  *
  * Deliberately a vertical list, not a node-link diagram: legible at phone
  * width is the bar (per the brief), and every state tell (ready/running/
@@ -14,7 +14,7 @@
  * then, never a fabricated "0 ready, 0 running".
  */
 import { useQuery } from '@tanstack/react-query';
-import { sdk } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import {
   graphNodeStateLabel,
@@ -74,7 +74,7 @@ function GraphNodeRow({ node }: { node: FleetGraphNode }) {
 export function TaskGraphPanel({ workstreamId }: TaskGraphPanelProps) {
   const graph = useQuery({
     queryKey: queryKeys.fleetGraph(workstreamId),
-    queryFn: () => sdk.operator.fleet.graph.get(workstreamId),
+    queryFn: () => platformClient.operator.fleet.graph.get(workstreamId),
     enabled: Boolean(workstreamId),
   });
 

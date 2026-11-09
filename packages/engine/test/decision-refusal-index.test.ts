@@ -2,11 +2,11 @@ import { expect, test } from 'bun:test';
 import { isDeepStrictEqual } from 'node:util';
 import { resolve } from 'node:path';
 import { JudgmentError } from '@goodvibes-jev/judgment';
-import { captureOwnedJson } from '../sdk/src/platform/gate/judgment-input.js';
+import { captureOwnedJson } from '../platform/src/platform/gate/judgment-input.js';
 import {
   captureDecisionModelPolicyOperation, decisionOrClassic, rememberDecisionRefusal, wasDecisionRefused, withDecisionModelPolicy,
   type RefusedDecisionAction,
-} from '../sdk/src/platform/runtime/decision-policy.js';
+} from '../platform/src/platform/runtime/decision-policy.js';
 
 function action(args: Readonly<Record<string, unknown>>, directory = '/workspace'): RefusedDecisionAction {
   return { tool: 'write', args, directory };
@@ -100,8 +100,8 @@ test('deep captured refusal data does not require a recursive encoder', () => {
 test('an older append-only writer remains visible after the new index has been read', async () => {
   // The old linear writer and the indexed reader share the same v1 host Set.
   // Inspect that private state only in a child; no new production debug API.
-  const policy = resolve(import.meta.dir, '../sdk/src/platform/runtime/decision-policy.ts');
-  const input = resolve(import.meta.dir, '../sdk/src/platform/gate/judgment-input.ts');
+  const policy = resolve(import.meta.dir, '../platform/src/platform/runtime/decision-policy.ts');
+  const input = resolve(import.meta.dir, '../platform/src/platform/gate/judgment-input.ts');
   const script = `
     import { strict as assert } from 'node:assert';
     import { isDeepStrictEqual } from 'node:util';

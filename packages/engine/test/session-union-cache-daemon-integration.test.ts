@@ -1,7 +1,7 @@
 /**
  * session-union-cache-daemon-integration.test.ts
  *
- * Acceptance evidence for the extracted SDK session-spine read facade: drives the SDK SessionUnionCache against a REAL
+ * Acceptance evidence for the extracted platform session-spine read facade: drives the platform SessionUnionCache against a REAL
  * bootDaemon over a real HttpTransport (no mocked wire). Proves the adopted-mode
  * union genuinely includes a session that exists ONLY on the daemon (registered by
  * a different surface), which the local reader alone would miss, and that losing
@@ -12,19 +12,19 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { bootDaemon, type BootedDaemon } from '../sdk/src/platform/daemon/boot.ts';
-import { createHttpTransport } from '../sdk/src/platform/runtime/transport.ts';
-import { SharedSessionBroker } from '../sdk/src/platform/control-plane/session-broker.ts';
+import { bootDaemon, type BootedDaemon } from '../platform/src/platform/daemon/boot.ts';
+import { createHttpTransport } from '../platform/src/platform/runtime/transport.ts';
+import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.ts';
 import { trackDisposables } from './_helpers/disposables.ts';
-import type { RouteBindingManager } from '../sdk/src/platform/channels/index.ts';
-import type { SharedSessionRecord } from '../sdk/src/platform/control-plane/index.ts';
+import type { RouteBindingManager } from '../platform/src/platform/channels/index.ts';
+import type { SharedSessionRecord } from '../platform/src/platform/control-plane/index.ts';
 import {
   SessionUnionCache,
   SessionSpineClient,
   TUI_SPINE_PARTICIPANT,
   type LocalSessionReader,
   type SpineTransport,
-} from '../sdk/src/platform/runtime/session-spine/index.ts';
+} from '../platform/src/platform/runtime/session-spine/index.ts';
 
 const TOKEN = 'union-integration-token';
 
@@ -45,9 +45,9 @@ interface Harness {
 }
 
 async function startHarness(): Promise<Harness> {
-  const homeDirectory = mkdtempSync(join(tmpdir(), 'goodvibes-sdk-union-home-'));
+  const homeDirectory = mkdtempSync(join(tmpdir(), 'goodvibes-platform-union-home-'));
   seedBenchmarkCache(homeDirectory, 'goodvibes');
-  const workingDir = mkdtempSync(join(tmpdir(), 'goodvibes-sdk-union-project-'));
+  const workingDir = mkdtempSync(join(tmpdir(), 'goodvibes-platform-union-project-'));
   const daemon = await bootDaemon({ homeDirectory, workingDir, port: 0, token: TOKEN });
   const transport = createHttpTransport({ baseUrl: daemon.url, authToken: TOKEN });
   return {
@@ -72,7 +72,7 @@ async function stopHarness(harness: Harness): Promise<void> {
   rmSync(harness.workingDir, { recursive: true, force: true });
 }
 
-describe('SDK SessionUnionCache against a real bootDaemon (adopted-mode union)', () => {
+describe('platform SessionUnionCache against a real bootDaemon (adopted-mode union)', () => {
   let harness: Harness | null = null;
   afterEach(async () => { if (harness) await stopHarness(harness); harness = null; });
 

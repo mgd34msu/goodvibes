@@ -1,12 +1,12 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
+import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { createResumeSessionHandler } from '../../runtime/bootstrap-hook-bridge.ts';
 import { createSessionSurface, readLastSessionPointer, writeLastSessionPointer } from '@/runtime/index.ts';
-import type { SharedSessionRecord } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import type { SharedSessionRecord } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { ConversationManager } from '../../core/conversation.ts';
-import { clearTurnAnchors, getTurnAnchors, recordTurnAnchor, persistTurnAnchors, restoreTurnAnchors } from '@goodvibes-jev/engine/sdk/platform/rewind';
+import { clearTurnAnchors, getTurnAnchors, recordTurnAnchor, persistTurnAnchors, restoreTurnAnchors } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 describe('bootstrap hook bridge session resume', () => {
@@ -97,7 +97,7 @@ describe('bootstrap hook bridge session resume', () => {
   });
 
   // Regression test for the arity-bug class: bootstrap.ts used to hand
-  // createResumeSessionHandler the raw, two-argument SDK `writeLastSessionPointer`
+  // createResumeSessionHandler the raw, two-argument platform `writeLastSessionPointer`
   // reference directly. That reference is structurally assignable to the
   // `(sessionId: string) => void` slot this handler declares (a function with
   // an extra optional parameter satisfies a caller expecting fewer), so it

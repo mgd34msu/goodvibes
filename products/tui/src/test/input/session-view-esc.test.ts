@@ -6,7 +6,7 @@ import { describe, expect, test } from 'bun:test';
 import { handleEscape, type EscapeState } from '../../input/handler-modal-stack.ts';
 import { handleSessionViewToken, type SessionViewRouteState } from '../../input/handler-session-view-route.ts';
 import { expandTextPastes } from '../../input/handler-content-actions.ts';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import { makeViewScene, type ViewScene } from '../helpers/session-view-scenes.ts';
 
 /** An EscapeState with no modal open, the given composer text and the scene's views. */

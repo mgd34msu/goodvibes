@@ -1,6 +1,6 @@
 /**
  * Changelog gate: verifies that CHANGELOG.md contains a section header
- * matching the current @goodvibes-jev/engine/sdk version before release.
+ * matching the current @goodvibes-jev/engine/platform version before release.
  *
  * Usage:
  *   bun scripts/check-changelog.ts
@@ -16,11 +16,11 @@ import { assertChangelogSection, readPackage } from './release-shared.ts';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
 
-const sdkPkgPath = resolve(ROOT, 'package.json');
+const enginePkgPath = resolve(ROOT, 'package.json');
 const changelogPath = resolve(ROOT, 'CHANGELOG.md');
 
-if (!existsSync(sdkPkgPath)) {
-  console.error(`[changelog-check] ERROR: package.json not found at ${sdkPkgPath}`);
+if (!existsSync(enginePkgPath)) {
+  console.error(`[changelog-check] ERROR: package.json not found at ${enginePkgPath}`);
   process.exit(1);
 }
 
@@ -32,8 +32,8 @@ if (!existsSync(changelogPath)) {
   process.exit(1);
 }
 
-const sdkPkg = readPackage('.');
-const version = sdkPkg.version;
+const enginePkg = readPackage('.');
+const version = enginePkg.version;
 
 if (!version || typeof version !== 'string') {
   console.error('[changelog-check] ERROR: Could not read version from package.json');

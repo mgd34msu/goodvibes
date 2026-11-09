@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { DiscoveredServer } from '@goodvibes-jev/engine/sdk/platform/discovery';
-import { HelperModel } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { DiscoveredServer } from '@goodvibes-jev/engine/platform/platform/discovery';
+import { HelperModel } from '@goodvibes-jev/engine/platform/platform/config';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { CommandRegistry } from '../../input/command-registry.ts';
 import { registerLocalProviderRuntimeCommands } from '../../input/commands/local-provider-runtime.ts';
@@ -16,7 +16,7 @@ import type {
   ProviderApiModelRecord,
   ProviderApiRuntimeQuery,
   ProviderApiRuntimeQueryResult,
-} from '@goodvibes-jev/engine/sdk/platform/providers';
+} from '@goodvibes-jev/engine/platform/platform/providers';
 import { createShellPathService } from '@/runtime/index.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 

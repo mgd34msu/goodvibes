@@ -15,7 +15,7 @@
  */
 import type { CommandRegistry } from '../command-registry.ts';
 import { describeOperatorRpcError, getOperatorRpc } from './operator-rpc.ts';
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/sdk';
+import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
 
 type Principal = OperatorMethodOutput<'principals.list'>['principals'][number];
 type PrincipalKind = Principal['kind'];
@@ -123,7 +123,7 @@ export function registerPrincipalsRuntimeCommands(registry: CommandRegistry): vo
 
       if (sub === 'list') {
         try {
-          const { principals } = await rpc.sdk.operator.invoke('principals.list', {});
+          const { principals } = await rpc.platformClient.operator.invoke('principals.list', {});
           if (principals.length === 0) {
             ctx.print('[principals] no principals registered.');
             return;
@@ -138,7 +138,7 @@ export function registerPrincipalsRuntimeCommands(registry: CommandRegistry): vo
       if (sub === 'get') {
         const id = args[1]!;
         try {
-          const { principal } = await rpc.sdk.operator.invoke('principals.get', { principalId: id });
+          const { principal } = await rpc.platformClient.operator.invoke('principals.get', { principalId: id });
           ctx.print(renderPrincipal(principal));
         } catch (error) {
           ctx.print(`[principals get] ${describeOperatorRpcError(error)}`);
@@ -151,7 +151,7 @@ export function registerPrincipalsRuntimeCommands(registry: CommandRegistry): vo
         const kind = args[2] as PrincipalKind;
         const identities = parseIdentities(args.slice(3));
         try {
-          const { principal } = await rpc.sdk.operator.invoke('principals.create', { name, kind, identities });
+          const { principal } = await rpc.platformClient.operator.invoke('principals.create', { name, kind, identities });
           ctx.print(`[principals create] created ${principal.id}\n${renderPrincipal(principal)}`);
         } catch (error) {
           ctx.print(`[principals create] ${describeOperatorRpcError(error)}`);
@@ -169,7 +169,7 @@ export function registerPrincipalsRuntimeCommands(registry: CommandRegistry): vo
         }
         const identitiesRaw = flags.get('identities');
         try {
-          const { principal } = await rpc.sdk.operator.invoke('principals.update', {
+          const { principal } = await rpc.platformClient.operator.invoke('principals.update', {
             principalId: id,
             ...(flags.has('name') ? { name: flags.get('name')! } : {}),
             ...(kind !== undefined ? { kind } : {}),
@@ -185,7 +185,7 @@ export function registerPrincipalsRuntimeCommands(registry: CommandRegistry): vo
       if (sub === 'delete') {
         const id = args[1]!;
         try {
-          const result = await rpc.sdk.operator.invoke('principals.delete', { principalId: id });
+          const result = await rpc.platformClient.operator.invoke('principals.delete', { principalId: id });
           ctx.print(result.deleted ? `[principals delete] deleted ${id}.` : `[principals delete] no principal found with id ${id}.`);
         } catch (error) {
           ctx.print(`[principals delete] ${describeOperatorRpcError(error)}`);
@@ -197,7 +197,7 @@ export function registerPrincipalsRuntimeCommands(registry: CommandRegistry): vo
         const channel = args[1]!;
         const value = args[2]!;
         try {
-          const result = await rpc.sdk.operator.invoke('principals.resolve', { channel, value });
+          const result = await rpc.platformClient.operator.invoke('principals.resolve', { channel, value });
           if (!result.known) {
             ctx.print(`[principals resolve] unknown principal: ${channel}:${value} is not mapped to any registered principal.`);
             return;

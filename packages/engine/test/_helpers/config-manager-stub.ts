@@ -18,7 +18,7 @@
  * Values are keyed by dotted config path, e.g. `{ 'display.themeMode': 'dark' }`. Keys with
  * no entry read back as `undefined`, matching a real manager with nothing persisted.
  */
-import type { ConfigManager, GoodVibesConfig } from '../../sdk/src/platform/config/index.ts';
+import type { ConfigManager, GoodVibesConfig } from '../../platform/src/platform/config/index.ts';
 
 /** A `get` that reads from `values`, for tests taking `Pick<ConfigManager, 'get'>`. */
 export function configGetStub(values: Record<string, unknown> = {}): ConfigManager['get'] {

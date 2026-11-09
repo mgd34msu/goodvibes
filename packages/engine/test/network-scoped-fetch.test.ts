@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import {
   createNetworkFetch, GlobalNetworkTransportInstaller,
-} from '../sdk/src/platform/runtime/network/outbound.js';
+} from '../platform/src/platform/runtime/network/outbound.js';
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });

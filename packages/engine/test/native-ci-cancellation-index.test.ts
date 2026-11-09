@@ -2,8 +2,8 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PairingTokenManager } from '../sdk/src/platform/pairing/pairing-token-store.ts';
-import { nativeCiSourceBinding } from '../sdk/src/platform/workflow/work-ledger/native-ci-continuation-types.ts';
+import { PairingTokenManager } from '../platform/src/platform/pairing/pairing-token-store.ts';
+import { nativeCiSourceBinding } from '../platform/src/platform/workflow/work-ledger/native-ci-continuation-types.ts';
 // Cancellation needs distinct syntactically valid synthetic bindings, not a
 // digest of fixture labels or a reproduction of a historical record recipe.
 const fixtureBindings = new Map<string, string>();

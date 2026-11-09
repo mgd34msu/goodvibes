@@ -13,7 +13,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createEmptyCell, type Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import { createEmptyCell, type Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { activeTokens, setActiveThemeMode, setActiveThemeName } from '../../renderer/theme.ts';
 import { auditFrame } from '../helpers/frame-audit.ts';
 

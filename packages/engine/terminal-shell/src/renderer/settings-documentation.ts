@@ -1,4 +1,4 @@
-import { getDisplayWidth } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils';
 import { activeTokens } from './theme.js';
 import { clipText, tailText, wrapLines } from './surface-kit.js';
 export interface DocLine {

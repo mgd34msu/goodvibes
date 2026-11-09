@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { decisionModelPolicyState, installJudgmentPort, type DecisionModelPolicy } from '@goodvibes-jev/engine/errors';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
-import { repairToolCall } from '../sdk/src/platform/tools/auto-repair.js';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.js';
-import type { ToolDefinition } from '../sdk/src/platform/types/tools.js';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
+import { repairToolCall } from '../platform/src/platform/tools/auto-repair.js';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.js';
+import type { ToolDefinition } from '../platform/src/platform/types/tools.js';
 
 const schema: ToolDefinition = { name: 'repair_fixture', description: 'Intercepted; no external effects.', parameters: {
   type: 'object', required: ['command'], properties: {

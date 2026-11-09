@@ -1,5 +1,5 @@
-import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { ToolDefinition } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ToolDefinition } from '@goodvibes-jev/engine/platform/platform/types';
 import { captureCatalogData } from './agent-harness-catalog-ranking.ts';
 
 const ownedDefinitions = new WeakSet<ToolDefinition>();

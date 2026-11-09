@@ -17,17 +17,17 @@ import { isConversationUsageAvailable } from './conversation-usage.ts';
  * never be reported as a real breach (mirrors the usage modal's "unpriced"
  * display convention).
  *
- * Text (owner ruling 2026-09-29, SDK runtime/turn-notification.ts): the
+ * Text (owner ruling 2026-09-29, platform runtime/turn-notification.ts): the
  * notice names the budget that tripped (cost against the configured
  * threshold) and the turn during which it tripped. When
  * behavior.notificationsMetadataOnly is not explicitly false the desktop and
  * webhook text carries the numbers only.
  */
-import { notifyCompletion } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
-import type { WebhookNotifier } from '@goodvibes-jev/engine/sdk/platform/integrations';
-import { calcSessionCost, computeBudgetBreach, isModelPriced } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { FocusTracker } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { notifyCompletion } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
+import { calcSessionCost, computeBudgetBreach, isModelPriced } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import {
   shouldFireAlert,
   FORCE_NOTIFY_DURATION_MS,
@@ -35,7 +35,7 @@ import {
   readNotificationsMetadataOnly,
   type ConfigGet,
   type BudgetNotificationFacts,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+} from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 
 export interface BudgetBreachUsageSnapshot {
   readonly input: number;
@@ -51,7 +51,7 @@ export interface BudgetBreachNotifierDeps {
   readonly sessionId: string;
   /** The name of the turn that just ended (the one during which the budget tripped). */
   readonly getTurnName?: (() => string | null) | undefined;
-  /** Desktop delivery; defaults to the SDK notifyCompletion. Tests pass a spy to read the text. */
+  /** Desktop delivery; defaults to the platform notifyCompletion. Tests pass a spy to read the text. */
   readonly notifyDesktop?: typeof notifyCompletion | undefined;
 }
 

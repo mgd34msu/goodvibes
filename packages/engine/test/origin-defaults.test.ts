@@ -21,8 +21,8 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { UserAuthManager } from '../sdk/src/platform/security/user-auth.js';
-import { HttpListener } from '../sdk/src/platform/daemon/http-listener.js';
+import { UserAuthManager } from '../platform/src/platform/security/user-auth.js';
+import { HttpListener } from '../platform/src/platform/daemon/http-listener.js';
 import { trackDisposables } from './_helpers/disposables.ts';
 import { stopListenerTimers } from './_helpers/listener-teardown.ts';
 
@@ -30,7 +30,7 @@ import { stopListenerTimers } from './_helpers/listener-teardown.ts';
 // constructor and is never start()ed, so `stop()` would early-return and leave
 // them running for the rest of the shared test process.
 const disposables = trackDisposables();
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
 
 function tempDir(suffix: string): string {
   const d = join(tmpdir(), `gv-origin-${suffix}-${Date.now()}`);

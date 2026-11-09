@@ -1,12 +1,12 @@
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import { assertCurrentToolInvocation, assertProjectionExecution, commitCurrentToolSettingsPlan, ToolInputProjectionError,
-  type ToolInputProjector, type ToolPreparedSettingsMutation, type ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+  type ToolInputProjector, type ToolPreparedSettingsMutation, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { assertPreparedConfigWriteRoute, resolvePreparedConfigWriteRoute, type ConfigKey, type PreparedConfigMutationRequest,
   type PreparedConfigMutationFacts, type ConfigWriteRoute, type SecretImportEntry, isSecretBearingConfigKey,
   captureRemoteSettingsImportPrecondition, assertRemoteSettingsImportPrecondition, inspectRemoteSettingsImportPrecondition,
-  assertCompletedRemoteSettingsImportPrecondition, type RemoteSettingsImportPrecondition } from '@goodvibes-jev/engine/sdk/platform/config';
-import { resolveWakeEnablementCompanion } from '@goodvibes-jev/engine/sdk/platform/voice';
+  assertCompletedRemoteSettingsImportPrecondition, type RemoteSettingsImportPrecondition } from '@goodvibes-jev/engine/platform/platform/config';
+import { resolveWakeEnablementCompanion } from '@goodvibes-jev/engine/platform/platform/voice';
 import { AGENT_WAKE_SURFACE } from '../audio/wake-surface.ts';
 import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
 import { bindSettingSchemaDescriptors, coerceHarnessSettingValue } from '../agent/harness-control.ts';

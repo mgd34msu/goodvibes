@@ -14,7 +14,7 @@
  *   composition root -> AutomationDeliveryManager -> ChannelDeliveryRouter
  *     -> createDefaultChannelDeliveryStrategies -> createTelegramDeliveryStrategy
  *
- * The SDK's own composition passed it. Two shipped forks (goodvibes-tui and
+ * The platform's own composition passed it. Two shipped forks (goodvibes-tui and
  * goodvibes-agent) did not, and nothing failed until a user sent a message on a
  * surface whose credential is a secret reference. Surfaces whose credential
  * lives in plain config or the environment kept working, which is why the
@@ -25,14 +25,14 @@
  * quietly at send time.
  */
 import { describe, expect, test } from 'bun:test';
-import { ChannelDeliveryRouter } from '../sdk/src/platform/channels/delivery-router.ts';
-import { AutomationDeliveryManager } from '../sdk/src/platform/automation/delivery-manager.ts';
-import { createTelegramDeliveryStrategy } from '../sdk/src/platform/channels/delivery/strategies-core.ts';
-import type { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import type { ServiceRegistry } from '../sdk/src/platform/config/service-registry.ts';
-import type { ArtifactStore } from '../sdk/src/platform/artifacts/index.ts';
-import type { SecretsManager } from '../sdk/src/platform/config/secrets.ts';
-import type { RouteBindingManager } from '../sdk/src/platform/channels/route-manager.ts';
+import { ChannelDeliveryRouter } from '../platform/src/platform/channels/delivery-router.ts';
+import { AutomationDeliveryManager } from '../platform/src/platform/automation/delivery-manager.ts';
+import { createTelegramDeliveryStrategy } from '../platform/src/platform/channels/delivery/strategies-core.ts';
+import type { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import type { ServiceRegistry } from '../platform/src/platform/config/service-registry.ts';
+import type { ArtifactStore } from '../platform/src/platform/artifacts/index.ts';
+import type { SecretsManager } from '../platform/src/platform/config/secrets.ts';
+import type { RouteBindingManager } from '../platform/src/platform/channels/route-manager.ts';
 
 const SECRET_REF = 'goodvibes://secrets/goodvibes/TELEGRAM_BOT_TOKEN';
 

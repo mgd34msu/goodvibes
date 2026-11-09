@@ -1,7 +1,7 @@
 /**
  * How the agent builds a browser.
  *
- * The engine, the session manager and the provisioning policy are the SDK's
+ * The engine, the session manager and the provisioning policy are the platform's
  * now, and they are deliberately surface-agnostic: they take a storage root, an
  * untrusted-content port, a host-script location and an install-kind profile
  * rather than knowing any of them. Those four answers are facts about THIS
@@ -23,8 +23,8 @@ import {
   driverSearchDirectories,
   managedDriverRoot,
   type BrowserSessionManagerDeps,
-} from '@goodvibes-jev/engine/sdk/platform/browser';
-import type { UntrustedContentPort } from '@goodvibes-jev/engine/sdk/platform/browser';
+} from '@goodvibes-jev/engine/platform/platform/browser';
+import type { UntrustedContentPort } from '@goodvibes-jev/engine/platform/platform/browser';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { createAgentUntrustedContentPort } from '../trust/untrusted-content-port.ts';
 import { recordAgentSessionWrite } from '../tools/agent-session-write-ledger.ts';
@@ -32,7 +32,7 @@ import { recordAgentSessionWrite } from '../tools/agent-session-write-ledger.ts'
 /**
  * What the agent tells someone whose browser host script is missing.
  *
- * The SDK ships no installer, so it cannot phrase this; the sentence is the
+ * The platform ships no installer, so it cannot phrase this; the sentence is the
  * same one the agent printed before the host client moved.
  */
 const MISSING_HOST_SCRIPT_FIX =
@@ -65,7 +65,7 @@ export function agentDriverSearchDirectories(homeDirectory: string): readonly st
 export interface AgentBrowserSessionManagerOptions {
   readonly profileRoot: string;
   readonly homeDirectory: string;
-  /** Test seams, forwarded to the SDK manager unchanged. */
+  /** Test seams, forwarded to the platform manager unchanged. */
   readonly io?: BrowserSessionManagerDeps['io'];
   readonly loadDriver?: BrowserSessionManagerDeps['loadDriver'];
   readonly probeEndpoint?: BrowserSessionManagerDeps['probeEndpoint'];
@@ -98,7 +98,7 @@ export interface AgentBrowserEngineOptions {
   readonly untrusted?: UntrustedContentPort;
 }
 
-/** The agent's browser: an SDK engine with this product's four answers bound in. */
+/** The agent's browser: a platform engine with this product's four answers bound in. */
 export function createAgentBrowserEngine(options: AgentBrowserEngineOptions): BrowserEngine {
   return new BrowserEngine(
     createAgentBrowserSessionManager({

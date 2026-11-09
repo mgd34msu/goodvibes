@@ -18,8 +18,8 @@
 // to forward to.
 // ---------------------------------------------------------------------------
 
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { PowerState } from '@goodvibes-jev/engine/sdk/platform/power';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { PowerState } from '@goodvibes-jev/engine/platform/platform/power';
 import { resolveOperatorRpc } from '../input/commands/operator-rpc.ts';
 
 export interface KeepAwakeRemoteDeps {
@@ -42,7 +42,7 @@ export async function forwardKeepAwakeToDaemon(enabled: boolean, deps: KeepAwake
   const rpc = (deps.resolveRpc ?? resolveOperatorRpc)({ configManager: deps.configManager, homeDirectory: deps.homeDirectory });
   if (!rpc.available) return;
   try {
-    await rpc.sdk.operator.invoke('power.keepAwake.set', { enabled });
+    await rpc.platformClient.operator.invoke('power.keepAwake.set', { enabled });
   } catch {
     // Best-effort by design; the local toggle already applied.
   }
@@ -69,7 +69,7 @@ export async function fetchDaemonPowerState(deps: KeepAwakeRemoteDeps): Promise<
   const rpc = (deps.resolveRpc ?? resolveOperatorRpc)({ configManager: deps.configManager, homeDirectory: deps.homeDirectory });
   if (!rpc.available) return null;
   try {
-    return await rpc.sdk.operator.invoke('power.status.get', {}) as unknown as PowerState;
+    return await rpc.platformClient.operator.invoke('power.status.get', {}) as unknown as PowerState;
   } catch {
     return null;
   }

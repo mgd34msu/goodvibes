@@ -21,7 +21,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { getOperatorContract } from '@goodvibes-jev/engine/sdk/contracts';
+import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
 import { getOperatorActions, OPERATOR_ACTION_IDS } from '../../agent/operator-actions.ts';
 import {
   OPERATOR_BRIEFING_METHOD_IDS,

@@ -1,6 +1,6 @@
 /** UNRUN: overload refuses before deferred callback creation, entered work drains. */
 import { expect, test } from 'bun:test';
-import { ClusterIngressWork } from '../sdk/src/platform/cluster/ingress-work.ts';
+import { ClusterIngressWork } from '../platform/src/platform/cluster/ingress-work.ts';
 function logger() { const warnings: string[] = []; return { warnings, debug() {}, info() {}, warn(message: string) { warnings.push(message); }, error() {} }; }
 test('authenticated handler admission is bounded without building a secondary backlog', async () => {
   const log = logger(), budget = new ClusterIngressWork(log, () => 0, 2), first = Promise.withResolvers<void>(), second = Promise.withResolvers<void>(); let entered = 0;

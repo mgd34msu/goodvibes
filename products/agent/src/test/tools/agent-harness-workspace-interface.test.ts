@@ -6,7 +6,7 @@ import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibe
 
 
 
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 
 
 import { registerOperatorRuntimeCommands } from '../../input/commands/operator-runtime.ts';

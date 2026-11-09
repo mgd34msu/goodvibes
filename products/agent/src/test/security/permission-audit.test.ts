@@ -7,7 +7,7 @@
 import { describe, test, expect } from 'bun:test';
 import { PermissionPromptUI } from '../../permissions/prompt.ts';
 import { activeTokens } from '../../renderer/theme.ts';
-import { analyzePermissionRequest, type PermissionRequestAnalysis } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import { analyzePermissionRequest, type PermissionRequestAnalysis } from '@goodvibes-jev/engine/platform/platform/permissions';
 
 // ---------------------------------------------------------------------------
 // 5. PermissionPromptUI, renders correct category label per category

@@ -1,6 +1,6 @@
 # Telegram integration
 
-Telegram support is an SDK-owned daemon surface. A Telegram bot becomes a way to
+Telegram support is a platform-owned daemon surface. A Telegram bot becomes a way to
 send the daemon work from a phone and get replies back, without exposing the
 daemon to the internet.
 

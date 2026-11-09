@@ -25,12 +25,12 @@ import {
   isStructuredCredentialReferenceConfigKey,
   isDeclaredSecretBearingConfigKey,
   readCredentialKey,
-} from '@goodvibes-jev/engine/sdk/platform/config';
+} from '@goodvibes-jev/engine/platform/platform/config';
 import { mapLimit } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { decisionOrClassic, isClassicOperation } from '@goodvibes-jev/engine/sdk/platform/runtime';
-import { captureOwnedJson, retainStrictJudgmentJson } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { redactSensitiveDataAsync, redactStructuredDataAsync } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { decisionOrClassic, isClassicOperation } from '@goodvibes-jev/engine/platform/platform/runtime';
+import { captureOwnedJson, retainStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
+import { redactSensitiveDataAsync, redactStructuredDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
 import { supportBundleFields } from './support-bundle-fields.js';
 
 export const REDACTED_VALUE = '<redacted>';

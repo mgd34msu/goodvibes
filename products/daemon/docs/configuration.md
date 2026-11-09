@@ -22,7 +22,7 @@ Relative overrides resolve from the invocation's current directory, before the
 selected workspace is applied. Blank home environment overrides are ignored.
 The CLI does not change the parent process's environment or working directory.
 See [CLI ownership](../src/cli/configuration.ts) and
-[home resolution](../../../packages/engine/sdk/src/platform/config/goodvibes-home.ts).
+[home resolution](../../../packages/engine/platform/src/platform/config/goodvibes-home.ts).
 
 ## Settings files and precedence
 
@@ -48,9 +48,9 @@ This is a precedence rule for the keys each tier owns, not permission for every
 tier to override every key. In particular, the current shared-file reader does
 not automatically load `provider.model` or `provider.reasoningEffort` as shared
 defaults. Ordinary `config set` writes those keys to the global surface file.
-See [settings loading and writes](../../../packages/engine/sdk/src/platform/config/manager.ts),
-[shared settings](../../../packages/engine/sdk/src/platform/config/shared-config-tier.ts),
-and [key ownership](../../../packages/engine/sdk/src/platform/config/config-ownership.ts).
+See [settings loading and writes](../../../packages/engine/platform/src/platform/config/manager.ts),
+[shared settings](../../../packages/engine/platform/src/platform/config/shared-config-tier.ts),
+and [key ownership](../../../packages/engine/platform/src/platform/config/config-ownership.ts).
 
 An existing settings file that cannot be safely read is not a fresh installation.
 The command can fail instead of replacing that file or silently using defaults.
@@ -88,7 +88,7 @@ Normal CLI construction runs the daemon-owned settings migration against the
 selected daemon store before loading settings. A migration failure is logged;
 it does not guarantee that every legacy value was moved.
 See [selected-store migration](../src/config/run-daemon-config-migration.ts) and
-the [daemon settings store](../../../packages/engine/sdk/src/platform/config/daemon-config-tier.ts).
+the [daemon settings store](../../../packages/engine/platform/src/platform/config/daemon-config-tier.ts).
 
 ## Overrides for one launch
 

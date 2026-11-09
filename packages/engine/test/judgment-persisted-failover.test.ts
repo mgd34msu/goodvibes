@@ -3,12 +3,12 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { noul, SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { DEFAULT_CONFIG } from '../sdk/src/platform/config/schema.ts';
-import { SecretsManager } from '../sdk/src/platform/config/secrets.ts';
-import { captureJudgmentFallbackSettings } from '../sdk/src/platform/config/judgment-fallback-settings.ts';
-import { createJudgmentSourceLifetime } from '../sdk/src/platform/runtime/judgment-source-lifetime.ts';
-import { createSettingsJudgmentPort, judgmentConfigFromSettings, type JudgmentSettingsSource } from '../sdk/src/platform/runtime/judgment-services.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { DEFAULT_CONFIG } from '../platform/src/platform/config/schema.ts';
+import { SecretsManager } from '../platform/src/platform/config/secrets.ts';
+import { captureJudgmentFallbackSettings } from '../platform/src/platform/config/judgment-fallback-settings.ts';
+import { createJudgmentSourceLifetime } from '../platform/src/platform/runtime/judgment-source-lifetime.ts';
+import { createSettingsJudgmentPort, judgmentConfigFromSettings, type JudgmentSettingsSource } from '../platform/src/platform/runtime/judgment-services.ts';
 
 const roots: string[] = [];
 afterEach(() => { for (const path of roots.splice(0)) rmSync(path, { recursive: true, force: true }); });

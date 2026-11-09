@@ -35,26 +35,26 @@
  * endpoint records what it received instead of shipping anything.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { withExecutionMode } from '../sdk/src/platform/gate/execution-context.ts';
+import { withExecutionMode } from '../platform/src/platform/gate/execution-context.ts';
 
 import {
   CardMaterialRedactor,
   REDACTED_MARKER,
-} from '../sdk/src/platform/payments/card-redaction.js';
+} from '../platform/src/platform/payments/card-redaction.js';
 import type {
   CardMaterial,
   CardMaterialStore,
-} from '../sdk/src/platform/payments/card-material.js';
+} from '../platform/src/platform/payments/card-material.js';
 import {
   CheckoutRegistry,
   MemoryCheckoutJournal,
   describeInterruption,
   verdictFor,
-} from '../sdk/src/platform/payments/checkout-registry.js';
+} from '../platform/src/platform/payments/checkout-registry.js';
 import {
   fillCard,
   FillCardRefusal,
-} from '../sdk/src/platform/payments/fill-card.js';
+} from '../platform/src/platform/payments/fill-card.js';
 import {
   runCheckout,
   type CheckoutControls,
@@ -63,10 +63,10 @@ import {
   type PurchaseLedger,
   type PurchaseRecord,
   type PurchaseRequest,
-} from '../sdk/src/platform/payments/checkout-flow.js';
-import { extractCheckout } from '../sdk/src/platform/payments/checkout-extraction.js';
-import { BudgetLedger, type BudgetLimits } from '../sdk/src/platform/payments/budget.js';
-import type { CardMetadata } from '../sdk/src/platform/payments/types.js';
+} from '../platform/src/platform/payments/checkout-flow.js';
+import { extractCheckout } from '../platform/src/platform/payments/checkout-extraction.js';
+import { BudgetLedger, type BudgetLimits } from '../platform/src/platform/payments/budget.js';
+import type { CardMetadata } from '../platform/src/platform/payments/types.js';
 /**
  * `OwnerSuppliedText` and `CurrencyCode` are branded, so a plain string literal
  * satisfies neither, the brands exist precisely so text that did not come from
@@ -81,17 +81,17 @@ import {
   unsafeOwnerSuppliedTextForTests,
   type CurrencyCode,
   type PostalAddress,
-} from '../sdk/src/platform/payments/types.js';
-import type { ChannelDelivery } from '../sdk/src/platform/payments/windows.js';
+} from '../platform/src/platform/payments/types.js';
+import type { ChannelDelivery } from '../platform/src/platform/payments/windows.js';
 
-import { UntrustedContentLedger } from '../sdk/src/platform/security/untrusted-content.js';
-import { takeSnapshot } from '../sdk/src/platform/browser/browser-snapshot.js';
+import { UntrustedContentLedger } from '../platform/src/platform/security/untrusted-content.js';
+import { takeSnapshot } from '../platform/src/platform/browser/browser-snapshot.js';
 import {
   createPaymentsCheckoutFillCardHandler,
   type PaymentFillCardResult,
   type PaymentsGatewayService,
-} from '../sdk/src/platform/control-plane/routes/payments.js';
-import { PAYMENTS_CHECKOUT_FILL_CARD_OUTPUT_SCHEMA } from '../sdk/src/platform/control-plane/operator-contract-schemas-payments.js';
+} from '../platform/src/platform/control-plane/routes/payments.js';
+import { PAYMENTS_CHECKOUT_FILL_CARD_OUTPUT_SCHEMA } from '../platform/src/platform/control-plane/operator-contract-schemas-payments.js';
 
 import {
   startFixtureMerchant,

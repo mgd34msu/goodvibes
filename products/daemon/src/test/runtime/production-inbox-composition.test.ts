@@ -1,16 +1,16 @@
 import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager, SecretsManager, createDaemonCredentialStore } from '@goodvibes-jev/engine/sdk/platform/config';
-import { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import { ConfigManager, SecretsManager, createDaemonCredentialStore } from '@goodvibes-jev/engine/platform/platform/config';
+import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { createProductionDaemonInboxFactory } from '../../runtime/production-inbox-composition.js';
 import type { HandlerContext } from '../../daemon/handlers/context.js';
 import type { DaemonInboxFactory } from '../../runtime/daemon-handler-composition.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 import { SecretsManager as NativeSecretsManager } from '../../config/secrets.js';
 import { registerOwnedMailInbox } from '../../runtime/owned-inbox-mail.js';
-import { createDiscordInboxOwner, createSlackInboxOwner, createEmailInboxOwner } from '@goodvibes-jev/engine/sdk/platform/intake';
-import type { OwnedInboxSource } from '@goodvibes-jev/engine/sdk/platform/intake';
+import { createDiscordInboxOwner, createSlackInboxOwner, createEmailInboxOwner } from '@goodvibes-jev/engine/platform/platform/intake';
+import type { OwnedInboxSource } from '@goodvibes-jev/engine/platform/platform/intake';
 import type { HostedInboxScreeningAcquisition } from '../../runtime/hosted-source-screening-composition.js';
 
 async function initialReady(created: ReturnType<DaemonInboxFactory>): Promise<void> {

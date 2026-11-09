@@ -1,7 +1,7 @@
 /** Reconstructed actual product fixture. Only discovery and external adapters are synthetic. */
 import { beforeAll, afterAll, spyOn } from 'bun:test';
-import { ProviderRegistry, BenchmarkStore } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { registerInboxSurface } from '@goodvibes-jev/engine/sdk/platform/intake';
+import { ProviderRegistry, BenchmarkStore } from '@goodvibes-jev/engine/platform/platform/providers';
+import { registerInboxSurface } from '@goodvibes-jev/engine/platform/platform/intake';
 import { startDaemonFixture, type DaemonFixture, type DaemonFixtureOptions } from '../../testing/daemon-fixture.js';
 import { makeOwnedTempDir } from './owned-temp.js';
 export function useGatewayFixture(options: Partial<DaemonFixtureOptions> = {}): () => DaemonFixture {

@@ -8,7 +8,7 @@ The host captures the original prompt as the goal, the current ACP session and p
 
 A current `act` claim selects only an original `allow_once` option. `reject` selects `reject_once` when offered. A deferred/revised decision, missing once option, duplicate option/request identity, unavailable judgment, cancellation, or changed authority cancels the request. No decision silently expands to `allow_always`.
 
-The response object is bound privately to its original request incarnation. The canonical claim is deferred until the SDK message sink performs the actual synchronous byte write; a stale result or replay cannot claim a reused RPC ID. Stopping invalidates permission work before waiting for ACP cancellation. Process exit, prompt completion, runtime disposal, and settings invalidation also retire pending work.
+The response object is bound privately to its original request incarnation. The canonical claim is deferred until the ACP message sink performs the actual synchronous byte write; a stale result or replay cannot claim a reused RPC ID. Stopping invalidates permission work before waiting for ACP cancellation. Process exit, prompt completion, runtime disposal, and settings invalidation also retire pending work.
 
 ## MCP elicitation
 
@@ -32,7 +32,7 @@ The [official transport specification](https://modelcontextprotocol.io/specifica
 
 ## Verification
 
-`external-autonomous-permissions.test.ts` uses synthetic recorded Jev answers and intercepted transports. It covers typed act/reject, conflicting prose, exact facts, unsupported/protected inputs, immutable/single-use responses, concurrent HTTP operations, process/session replacement, configuration invalidation, duplicate requests, and ACP stopping while cancellation is pending. A scripted ACP process exercises the actual SDK wire protocol. These are integration and mechanism tests, not live-model calibration evidence.
+`external-autonomous-permissions.test.ts` uses synthetic recorded Jev answers and intercepted transports. It covers typed act/reject, conflicting prose, exact facts, unsupported/protected inputs, immutable/single-use responses, concurrent HTTP operations, process/session replacement, configuration invalidation, duplicate requests, and ACP stopping while cancellation is pending. A scripted ACP process exercises the actual ACP wire protocol. These are integration and mechanism tests, not live-model calibration evidence.
 
 ## Autonomous MCP tool dispatch
 

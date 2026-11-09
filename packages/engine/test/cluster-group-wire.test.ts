@@ -10,17 +10,18 @@ import {
   canonicalizeEnvelope,
   decodeEnvelope,
   encodeEnvelope,
+  encodeEnvelopeWith,
   MAX_ENVELOPE_BYTES,
   peekEnvelope,
   signEnvelope,
+  isWireSurfaceId,
   type ClusterKeyring,
-} from '../sdk/src/platform/cluster/protocol-envelope.js';
-import { GroupWireRouter } from '../sdk/src/platform/cluster/group-transport.js';
-import { digestSurfaceId } from '../sdk/src/platform/cluster/group-crypto.js';
-import { surfaceIdFor } from '../sdk/src/platform/cluster/surface-id.js';
-import { decodeMessage, encodeMessage } from '../sdk/src/platform/cluster/protocol.js';
-import { CLUSTER_PROTOCOL_VERSION } from '../sdk/src/platform/cluster/types.js';
-import type { ClusterLogger, ClusterTransport } from '../sdk/src/platform/cluster/types.js';
+} from '../platform/src/platform/cluster/protocol-envelope.js';
+import { GroupWireRouter } from '../platform/src/platform/cluster/group-transport.js';
+import { surfaceIdFor, ntfySurface } from '../platform/src/platform/cluster/surface-id.js';
+import { decodeMessage, encodeMessage } from '../platform/src/platform/cluster/protocol.js';
+import { CLUSTER_PROTOCOL_VERSION } from '../platform/src/platform/cluster/types.js';
+import type { ClusterLogger, ClusterTransport } from '../platform/src/platform/cluster/types.js';
 
 function keyring(overrides: Partial<ClusterKeyring> = {}): ClusterKeyring {
   return {
@@ -110,22 +111,29 @@ describe('the envelope', () => {
       .toBe('unsupported-version');
   });
 
-  test('a surface identity on the wire is a digest, never a name', () => {
-    const digest = digestSurfaceId('ntfy://mikes-private-inbox', 'gTESTTESTTESTTEST');
-    expect(digest).toMatch(/^s[0-9a-f]{32}$/);
-    expect(digest).not.toContain('mikes');
-    // Already-digested values pass through untouched rather than being hashed twice.
-    expect(digestSurfaceId(digest, 'gTESTTESTTESTTEST')).toBe(digest);
+  test('the canonical consumer factory conceals even a topic whose raw text already looks like a wire ID', () => {
+    const topic = 'a'.repeat(32), key = ntfySurface('https://ntfy.sh', topic);
+    const id = surfaceIdFor(key);
+    expect(id).toMatch(/^[0-9a-f]{32}$/); expect(id).not.toBe(topic);
+    const raw = encodeEnvelope({ type: 'CLAIM', nodeId: 'n1', nodeVersion: '1.0.0', seq: 1, ts: 10, surfaceId: id }, keyring());
+    expect(JSON.parse(raw).surfaceId).toBe(id); expect(raw).not.toContain(topic);
+    expect(surfaceIdFor(key)).toBe(id);
   });
 
-  test('a surface id from the election layer passes through unhashed', () => {
-    // The per-surface election derives its own ids in surface-id.ts, bare hex,
-    // no prefix. Re-hashing one here would produce a value the far side cannot
-    // route and would break the election's own signature, which covers
-    // surfaceId. This pass-through is what makes the two layers agree.
-    const electionId = surfaceIdFor({ kind: 'ntfy', discriminator: 'mikes-private-inbox' });
-    expect(electionId).toMatch(/^[0-9a-f]{32}$/);
-    expect(digestSurfaceId(electionId, 'gTESTTESTTESTTEST')).toBe(electionId);
+  test('the existing envelope validator preserves actual old prefixed wire IDs without deriving another identity', () => {
+    const earlier = 's' + 'a'.repeat(32);
+    expect(isWireSurfaceId(earlier)).toBe(true); expect(isWireSurfaceId('ntfy://private-topic')).toBe(false);
+    const raw = encodeEnvelope({ type: 'CLAIM', nodeId: 'n1', nodeVersion: '1.0.0', seq: 1, ts: 10, surfaceId: earlier }, keyring());
+    expect(decodeEnvelope(raw, keyring()).envelope?.surfaceId).toBe(earlier);
+  });
+
+  test('both actual envelope writers refuse raw surface names before invoking their signing key or callback', () => {
+    const draft = { type: 'CLAIM', nodeId: 'n1', nodeVersion: '1.0.0', seq: 1, ts: 10, surfaceId: 'ntfy://private-topic' };
+    let signingCalls = 0;
+    const ring = keyring({ keyForGeneration: () => { signingCalls++; return 'key'; } });
+    expect(() => encodeEnvelope(draft, ring)).toThrow('already-derived surface ID');
+    expect(() => encodeEnvelopeWith(draft, ring.groupId, () => { signingCalls++; return 'signature'; })).toThrow('already-derived surface ID');
+    expect(signingCalls).toBe(0);
   });
 
   test('an envelope refuses a surfaceId that is not a digest', () => {
@@ -222,6 +230,17 @@ describe('the merged wire format: group fields and surface fields together', () 
     expect(canonical).toContain('gTESTTESTTESTTEST');
     expect(canonical).toContain(surfaceId);
     expect(parsed['sig']).toBe(signEnvelope(JSON.parse(rig.sent[0]!) as never, 'key-2'));
+  });
+
+  test('malformed raw surface names are refused before signing or sending an alternate identity', async () => {
+    const rig = loopback(); await rig.transport.start(() => {});
+    try {
+      for (const surfaceId of ['ntfy://private-topic', { topic: 'private-topic' }]) {
+        const message: Record<string, unknown> = JSON.parse(electionDatagram('').raw) as Record<string, unknown>;
+        message['surfaceId'] = surfaceId; await rig.transport.send(JSON.stringify(message));
+      }
+      expect(rig.sent).toEqual([]); expect(rig.router.counters.droppedMalformed).toBe(2);
+    } finally { await rig.transport.stop(); }
   });
 
   test('the election gets back the exact message it sent', async () => {

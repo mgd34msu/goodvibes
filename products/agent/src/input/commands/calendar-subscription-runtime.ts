@@ -5,7 +5,7 @@ import {
   type SubscriptionStatus,
   type SubscriptionSecretStore,
 } from '../../agent/calendar-subscription-registry.ts';
-import type { FeedFetcher } from '@goodvibes-jev/engine/sdk/platform/calendar';
+import type { FeedFetcher } from '@goodvibes-jev/engine/platform/platform/calendar';
 import type { CommandContext } from '../command-registry.ts';
 import { parseAgentLocalLibraryArgs } from './agent-local-library-args.ts';
 import { requireShellPaths } from './runtime-services.ts';
@@ -15,7 +15,7 @@ import { getSessionUntrustedContentLedger } from '../../trust/untrusted-content.
  * External-calendar SUBSCRIPTION verbs for /calendar, the no-OAuth read path.
  * Subscriptions are iCalendar feeds (Google secret address, Outlook
  * published .ics, or any .ics URL). The parse/RRULE/fetch-status engine is the
- * SDK's platform/calendar; this file is the /calendar command surface over the
+ * platform's platform/calendar; this file is the /calendar command surface over the
  * agent-side CalendarSubscriptionRegistry.
  *
  * A feed URL is secrets-adjacent (a Google secret address grants read access),
@@ -71,7 +71,7 @@ export function subscriptionRegistryForRead(ctx: CommandContext): CalendarSubscr
     createHttpFeedFetcher(),
     // Reading a subscribed feed's event text arms the outward-effect guard the
     // same way reading mail or loading a page does. This assignment is what
-    // type-checks the SDK recorder's `'calendar-event'` literal against
+    // type-checks the platform recorder's `'calendar-event'` literal against
     // UntrustedSurface.
     (ingest) => { ledger.record(ingest); },
   );

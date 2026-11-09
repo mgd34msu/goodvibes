@@ -4,15 +4,15 @@ import type { RuntimeServices } from '../runtime/services.ts';
 import 'node:fs';
 import 'node:path';
 
-import '@goodvibes-jev/engine/sdk/platform/config';
-import '@goodvibes-jev/engine/sdk/platform/providers';
+import '@goodvibes-jev/engine/platform/platform/config';
+import '@goodvibes-jev/engine/platform/platform/providers';
 import '../config/secrets.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
-import '@goodvibes-jev/engine/sdk/platform/providers';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import '@goodvibes-jev/engine/platform/platform/providers';
 
-import '@goodvibes-jev/engine/sdk/platform/config';
-import '@goodvibes-jev/engine/sdk/platform/config';
-import '@goodvibes-jev/engine/sdk/platform/config';
+import '@goodvibes-jev/engine/platform/platform/config';
+import '@goodvibes-jev/engine/platform/platform/config';
+import '@goodvibes-jev/engine/platform/platform/config';
 import '@/runtime/index.ts';
 import type { CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';
 import { formatProviderAuthRoute } from './provider-auth-routes.ts';

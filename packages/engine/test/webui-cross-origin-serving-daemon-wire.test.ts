@@ -5,7 +5,7 @@
  * against a REAL daemon booted on an ephemeral port with an isolated home. Never
  * touches the operator's real daemons (127.0.0.1:3421 / 0.0.0.0:4444).
  *
- * Coverage (per the SDK-DEPLOY brief):
+ * Coverage (per the platform-DEPLOY brief):
  *   1. Both capabilities OFF (default): GET / and OPTIONS behave exactly as today
  *      (401 without a token, 404 with one), and no Access-Control-Allow-Origin is
  *      ever emitted, byte-parity with the pre-change daemon.
@@ -26,9 +26,9 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { bootDaemon, type BootedDaemon } from '../sdk/src/platform/daemon/boot.ts';
-import { resolveWebuiServingPosture } from '../sdk/src/platform/daemon/http/webui-serving.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { bootDaemon, type BootedDaemon } from '../platform/src/platform/daemon/boot.ts';
+import { resolveWebuiServingPosture } from '../platform/src/platform/daemon/http/webui-serving.ts';
 
 const TOKEN = 'test-webui-serving-token';
 const ALLOWED_ORIGIN = 'http://localhost:5173';

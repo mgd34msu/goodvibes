@@ -13,13 +13,13 @@ import { judgmentProcessSignal } from '../../judgment/scripts/process-owner.ts';
  */
 import { createSystemOnePort, judgmentConfigFromEnv } from '@goodvibes-jev/judgment';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { PermissionManager, type PermissionConfigReader } from '../sdk/src/platform/permissions/manager.ts';
-import type { PermissionCheckResult } from '../sdk/src/platform/permissions/types.ts';
-import type { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.ts';
-import type { PermissionMode } from '../sdk/src/platform/config/schema.ts';
-import { UntrustedContentLedger } from '../sdk/src/platform/security/untrusted-content.ts';
-import { McpPermissionManager } from '../sdk/src/platform/runtime/mcp/permissions.ts';
-import { runSandboxJudgment } from '../sdk/src/platform/runtime/permissions/sandbox-judgment.ts';
+import { PermissionManager, type PermissionConfigReader } from '../platform/src/platform/permissions/manager.ts';
+import type { PermissionCheckResult } from '../platform/src/platform/permissions/types.ts';
+import type { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
+import type { PermissionMode } from '../platform/src/platform/config/schema.ts';
+import { UntrustedContentLedger } from '../platform/src/platform/security/untrusted-content.ts';
+import { McpPermissionManager } from '../platform/src/platform/runtime/mcp/permissions.ts';
+import { runSandboxJudgment } from '../platform/src/platform/runtime/permissions/sandbox-judgment.ts';
 
 installJudgmentPort(createSystemOnePort(judgmentConfigFromEnv(process.env, { signal: judgmentProcessSignal() })));
 

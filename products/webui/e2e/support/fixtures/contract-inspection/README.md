@@ -87,7 +87,7 @@ and the production hook's generated inspection schema before its single narrowin
 cast to the generated `ContractRecord`. There are no hand-maintained wire types.
 
 `src/views/work/ContractInspectionWire.test.tsx` passes the exact stored JSON bytes
-through `Response`, the real `sdk.operator.contracts` facade, `useContracts`, and
+through `Response`, the real `platform.operator.contracts` facade, `useContracts`, and
 `ContractDetail`. It checks full-value preservation (including `lastReport`, which
 has no separate parsed-report UI), ordinary output/answer/capture, original native
 text, defer receipts, admission, and real retry waiting. It also refreshes with

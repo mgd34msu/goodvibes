@@ -20,14 +20,14 @@ import { createPluginStartupTask } from '@goodvibes-jev/engine/terminal-shell/pl
  *   - lifecycle.ts: save/shutdown helpers
  */
 import { join } from 'node:path';
-import '@goodvibes-jev/engine/sdk/platform/core';
-import { AcpManager } from '@goodvibes-jev/engine/sdk/platform/acp';
-import { readTierPromptSupplement } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { factsFor } from '@goodvibes-jev/engine/sdk/platform/routing';
-import { resumeContracts } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
-import type { PermissionRequestHandler } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import type { WorkspaceTrustLevel } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import '@goodvibes-jev/engine/platform/platform/core';
+import { AcpManager } from '@goodvibes-jev/engine/platform/platform/acp';
+import { readTierPromptSupplement } from '@goodvibes-jev/engine/platform/platform/providers';
+import { factsFor } from '@goodvibes-jev/engine/platform/platform/routing';
+import { resumeContracts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { PermissionRequestHandler } from '@goodvibes-jev/engine/platform/platform/permissions';
+import type { WorkspaceTrustLevel } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { InputHistory } from '../input/input-history.ts';
 import type { GitStatusProvider, GitHeaderInfo } from '../renderer/git-status.ts';
@@ -48,11 +48,11 @@ import {
   type ExternalServicesHandle,
   createDeferredStartupCoordinator,
 } from '@/runtime/index.ts';
-import { bindWriteLastSessionPointerToSurface } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import { deriveSpineFooterStatus } from '@goodvibes-jev/engine/sdk/platform/runtime/session-spine';
+import { bindWriteLastSessionPointerToSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { deriveSpineFooterStatus } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
 import { createSpineAdoptionSync } from './client/spine-adoption.ts';
-import { pruneStaleOperatorTokens } from '@goodvibes-jev/engine/sdk/platform/pairing';
-import { resolveDaemonCompanionToken, workspaceOperatorTokenCandidates } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { pruneStaleOperatorTokens } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { resolveDaemonCompanionToken, workspaceOperatorTokenCandidates } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { UiRuntimeServices } from './ui-services.ts';
 import { initializeBootstrapCore } from './bootstrap-core.ts';
 import { createBootstrapShutdown } from './bootstrap-shutdown.ts';
@@ -68,7 +68,7 @@ import {
   autostartInstalledDaemon,
   createDaemonServiceControl,
   describeDaemonAutostart,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+} from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { createDaemonAttachHandshake } from './client/daemon-attach-handshake.ts';
 import { createPendingServiceStatus, hostServiceIsActive, hostServiceIsBlocked } from './client/host-service-status.ts';
 import { relayReadAccessors } from './relay-reachability-bridge.ts';
@@ -165,7 +165,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   const workingDir = options.workingDir;
   const configManager = options.configManager;
   const controlPlaneRecentEventsRef: {
-    value: (limit: number) => readonly import('@goodvibes-jev/engine/sdk/platform/control-plane').ControlPlaneRecentEvent[];
+    value: (limit: number) => readonly import('@goodvibes-jev/engine/platform/platform/control-plane').ControlPlaneRecentEvent[];
   } = {
     value: (_limit) => [],
   };
@@ -291,7 +291,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   }, ACP_TASK_SYNC_INTERVAL_MS);
   bootstrapUnsubs.push(() => clearInterval(acpTaskSyncInterval));
   orchestrator.registerDelegateTool(acpManager);
-  const opsTaskManager = createTaskManager(store, runtimeBus, userSessionId, services.featureFlags); // featureFlags required: without it runtime.unifiedTasks configured nothing (permissive fallback); SDK default matches shipped behaviour, so this is a no-op for existing installs.
+  const opsTaskManager = createTaskManager(store, runtimeBus, userSessionId, services.featureFlags); // featureFlags required: without it runtime.unifiedTasks configured nothing (permissive fallback); platform default matches shipped behaviour, so this is a no-op for existing installs.
   // Operator interventions ride the control-plane gateway capability
   // (controlPlane.gateway, on by default; the old never-registered gate id shipped this dead).
   const opsControlPlane = services.featureFlags.isEnabled('control-plane-gateway')
@@ -300,7 +300,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
 
   // One surface-bound pointer writer, shared by the resume seam below and the
   // context's `_writeLastSessionPointer`. Both slots want a one-argument
-  // function; handing them the SDK's two-argument export directly is what
+  // function; handing them the platform's two-argument export directly is what
   // silently stopped the pointer from ever being written (see
   // session-pointer-surface.ts).
   const writeSessionPointer = bindWriteLastSessionPointerToSurface(services.surface);
@@ -412,7 +412,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   // daemon is a separate product with its own binary and its own service unit.
   // The factories carry the shared bearer and the daemon's state directory so an
   // adopted daemon is authenticated the same way it always was, no factory that
-  // BUILDS anything is passed, and `adoptOnly` makes the SDK refuse to start one
+  // BUILDS anything is passed, and `adoptOnly` makes the platform refuse to start one
   // even if a future caller did.
   //
   // `daemonRuntimeDir` names the daemon's own STATE directory
@@ -427,7 +427,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
 
   // The one bounded recovery step: a daemon that is INSTALLED on this machine
   // and simply stopped gets started once and waited for, rather than becoming
-  // the user's homework. Every boundary is in the SDK's client/daemon-autostart.ts.
+  // the user's homework. Every boundary is in the platform's client/daemon-autostart.ts.
   const maybeStartInstalledDaemon = async (): Promise<void> => {
     try {
       const outcome = await autostartInstalledDaemon({
@@ -543,7 +543,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       // token files so only the canonical <daemonHomeDir>/operator-tokens.json survives.
       // The prune is best-effort, it silently skips missing files, no-ops when tokens
       // already match, and records un-deletable candidates in `failedPaths` for logging.
-      // See `pruneStaleOperatorTokens` in the SDK for semantics.
+      // See `pruneStaleOperatorTokens` in the platform for semantics.
       const prune = pruneStaleOperatorTokens({
         daemonHomeDir,
         candidatePaths: workspaceOperatorTokenCandidates(services.workingDirectory, GOODVIBES_TUI_SURFACE_ROOT),

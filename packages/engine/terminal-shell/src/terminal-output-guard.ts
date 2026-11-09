@@ -31,7 +31,7 @@
  * neither depends on the other being present.
  */
 import { format } from 'node:util';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { terminalOutputState } from './terminal-output-state.js';
 export { allowTerminalWrite } from './terminal-write.js';
 
@@ -109,7 +109,7 @@ function chunkToText(chunk: unknown): string {
 }
 
 // A standalone audible bell cannot move the cursor or write into the footer.
-// SDK completion/approval notifications share this path with direct host bells.
+// platform completion/approval notifications share this path with direct host bells.
 // Never allow text or other control sequences merely because they contain BEL.
 function isStandaloneBell(chunk: unknown): boolean {
   return chunk === '\x07' || (chunk instanceof Uint8Array && chunk.byteLength === 1 && chunk[0] === 7);

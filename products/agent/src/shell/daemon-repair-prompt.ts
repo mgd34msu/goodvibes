@@ -14,7 +14,7 @@
  * a two-method surface (`pending()` / `answer()`) instead of a state field plus
  * two callbacks it would have to thread and reassign.
  */
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import {
   DAEMON_ENABLED_KEY,
   runDaemonRepair,

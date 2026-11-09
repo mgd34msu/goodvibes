@@ -18,7 +18,7 @@ import { randomUUID } from 'node:crypto';
 import * as crypto from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ProcessManager } from '../sdk/src/platform/tools/shared/process-manager.ts';
+import { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.ts';
 import {
   buildDaemonRestartTermination,
   buildTermination,
@@ -37,7 +37,7 @@ import {
   type TriggerActionExecutor,
   type TriggerProcessHost,
   type TriggerActionGrant,
-} from '../sdk/src/platform/triggers/index.ts';
+} from '../platform/src/platform/triggers/index.ts';
 import { useToolReadings } from './_helpers/tool-readings.ts';
 
 // Background spawns read which environment variable names are credentials;

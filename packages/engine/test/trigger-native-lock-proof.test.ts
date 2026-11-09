@@ -3,7 +3,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { assertCrossProcessLockCurrent, tryAcquireCrossProcessLock } from '../sdk/src/platform/workspace/checkpoint/cross-process-lock.ts';
+import { assertCrossProcessLockCurrent, tryAcquireCrossProcessLock } from '../platform/src/platform/workspace/checkpoint/cross-process-lock.ts';
 test('a re-opened identical pathname cannot attest the original acquired claim or delete its replacement', () => {
   const root = mkdtempSync(join(tmpdir(), 'trigger-native-claim-')), path = join(root, 'owner.lock');
   try {

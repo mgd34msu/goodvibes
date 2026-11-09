@@ -28,7 +28,7 @@ mock.module('../../lib/goodvibes', () => ({
     loginCalls.push({ username, password });
     return Promise.resolve({});
   },
-  sdk: {},
+  client: {},
 }));
 
 // The scanner's own camera lifecycle is covered in

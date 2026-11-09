@@ -1,6 +1,6 @@
 /**
  * The Memory tab of the Library, the web UI's consumer of the canonical, cross-surface
- * memory store (memory.records.* SDK 1.1.0): search and browse, record detail with its
+ * memory store (memory.records.* platform 1.1.0): search and browse, record detail with its
  * review form and confirmed delete, and a read-only personas group (VIBE.md constraint
  * records). Adding a record is the page's primary action (AddMemoryDialog, in LibraryView).
  *
@@ -16,7 +16,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Database, Plus } from 'lucide-react';
 import {
-  sdk,
+  client as platformClient,
   VIBE_PERSONA_TAG,
   type MemoryClass,
   type MemoryRecord,
@@ -78,12 +78,12 @@ export function MemoryView({ query = '', onAddMemory, onServedChange }: MemoryVi
 
   const list = useQuery({
     queryKey: [...queryKeys.memoryList, appliedFilters],
-    queryFn: () => sdk.operator.memory.search(appliedFilters),
+    queryFn: () => platformClient.operator.memory.search(appliedFilters),
     placeholderData: keepPreviousData,
   });
   const personas = useQuery({
     queryKey: queryKeys.memoryPersonas,
-    queryFn: () => sdk.operator.memory.search(PERSONA_FILTER),
+    queryFn: () => platformClient.operator.memory.search(PERSONA_FILTER),
   });
 
   const personaRecords = useMemo(

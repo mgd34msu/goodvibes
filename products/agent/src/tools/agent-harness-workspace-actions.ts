@@ -2,7 +2,7 @@ import { captureCatalogMethods, captureCatalogSnapshot, rankHarnessCatalog, type
 import { captureCatalogReadRequest, captureHarnessCatalogSelectionSource, selectHarnessCatalog, selectHarnessCatalogGroup } from './agent-harness-catalog-selection.ts';
 import { captureStatefulCatalogRequest } from './agent-harness-stateful-catalog-source.ts';
 import { captureModelReadingSnapshotGuard, withModelReadingSource } from './agent-harness-model-reading-source.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext } from '../input/command-registry.ts';
 import { createAgentWorkspaceEditor } from '../input/agent-workspace-activation.ts';
 import { AGENT_WORKSPACE_CATEGORIES } from '../input/agent-workspace-categories.ts';

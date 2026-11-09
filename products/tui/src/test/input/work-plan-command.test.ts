@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'bun:test';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerWorkPlanRuntimeCommands } from '../../input/commands/work-plan-runtime.ts';
-import { WorkPlanStore } from '@goodvibes-jev/engine/sdk/platform/workflow';
+import { WorkPlanStore } from '@goodvibes-jev/engine/platform/platform/workflow';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 function makeContext(out: string[], opened: string[], store: WorkPlanStore): CommandContext {

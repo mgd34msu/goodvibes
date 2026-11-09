@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/sdk/platform/config';
+import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
 import { isKnownConfigKey } from '../../config/config-key-guard.ts';
 
 describe('isKnownConfigKey', () => {

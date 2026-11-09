@@ -4,7 +4,7 @@
  *
  * ── What this replaces ────────────────────────────────────────────────────
  *
- * The SDK's client raiser (approval-raiser.ts) raises an ask on the daemon and
+ * The platform's client raiser (approval-raiser.ts) raises an ask on the daemon and
  * prompts locally at the same time, and then has to learn about a decision made
  * on another surface, a phone, the web UI, a second terminal. Without a push
  * channel wired it learns by RE-READING the record on an interval, which is
@@ -22,19 +22,19 @@
  * and the subscription and no push channel can deliver what happened before it
  * opened.
  *
- * ── Why the product owns this and the SDK does not ────────────────────────
+ * ── Why the product owns this and the platform does not ────────────────────────
  *
  * Resolving "which daemon" and proving this surface may subscribe to it are
- * trust-boundary concerns the SDK core deliberately never reaches into (the
+ * trust-boundary concerns the platform core deliberately never reaches into (the
  * same carve-out `DaemonVerbCaller` records). The resolution here is the one
  * every other client seam in this repo uses: operator-endpoint.ts.
  */
-import { watchApprovalUpdates } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
-import type { ApprovalUpdateSubscriber } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { resolveDaemonEnabled } from '@goodvibes-jev/engine/sdk/platform/config';
-import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/sdk/platform/pairing';
-import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { watchApprovalUpdates } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import type { ApprovalUpdateSubscriber } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
+import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { resolveControlPlaneBaseUrl, resolveDaemonStateDirectory } from './operator-endpoint.ts';
 
 export interface TerminalApprovalUpdateSubscriberOptions {
@@ -45,7 +45,7 @@ export interface TerminalApprovalUpdateSubscriberOptions {
 }
 
 /**
- * Build the subscriber the SDK raiser takes.
+ * Build the subscriber the platform raiser takes.
  *
  * Every refusal is a null return, never a throw: this runs on the path that
  * decides a tool call, and a subscription that cannot be opened must degrade to

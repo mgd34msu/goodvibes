@@ -1,11 +1,11 @@
 import { describe, expect, spyOn, test } from 'bun:test';
-import type { ContractEvent } from '@goodvibes-jev/engine/sdk/events';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { emitContractEvent, type ContractView } from '@goodvibes-jev/engine/sdk/platform/contract';
-import type { ConversationFollowUpItem } from '@goodvibes-jev/engine/sdk/platform/core';
-import { DiscordIntegration, SlackIntegration } from '@goodvibes-jev/engine/sdk/platform/integrations';
-import { RuntimeEventBus } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
-import { createDomainDispatch, createRuntimeStore } from '@goodvibes-jev/engine/sdk/platform/runtime/store';
+import type { ContractEvent } from '@goodvibes-jev/engine/platform/events';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { emitContractEvent, type ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
+import type { ConversationFollowUpItem } from '@goodvibes-jev/engine/platform/platform/core';
+import { DiscordIntegration, SlackIntegration } from '@goodvibes-jev/engine/platform/platform/integrations';
+import { RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { createDomainDispatch, createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
 import { registerAgentRuntimeEvents } from '../../runtime/agent-runtime-events.ts';
 import { createRuntimeNotifier } from '../../runtime/bootstrap-notifier.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';

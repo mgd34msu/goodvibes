@@ -3,7 +3,7 @@ import { expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { boundedLatestRelease, probeVersionLine, resolveSelfDirectory } from '../sdk/src/platform/runtime/reachability-check.ts';
+import { boundedLatestRelease, probeVersionLine, resolveSelfDirectory } from '../platform/src/platform/runtime/reachability-check.ts';
 test('a failed version process printing our banner remains unidentified', () => {
   const root = mkdtempSync(join(tmpdir(), 'reachability-failed-version-'));
   try {

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
 import { createRoot, type Root } from 'react-dom/client';
 import { flushSync } from 'react-dom';
-import type { NativeHostedSessionLookup } from '@goodvibes-jev/engine/sdk/platform/hosted-sessions/native-turn-client';
+import type { NativeHostedSessionLookup } from '@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client';
 import type { ComponentProps } from 'react';
 import type { NativeIntakeForm } from '../work/NativeIntakeForm';
 import { getClientLifetime, invalidateClientLifetime } from '../../lib/client-lifetime';

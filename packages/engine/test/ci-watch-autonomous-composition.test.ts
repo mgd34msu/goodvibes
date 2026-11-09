@@ -1,4 +1,4 @@
-import { WorkspaceTrustManager } from '../sdk/src/platform/runtime/workspace-trust.ts';
+import { WorkspaceTrustManager } from '../platform/src/platform/runtime/workspace-trust.ts';
 /** Reconstructed against recovered source; all external responses are offline fixtures. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -6,19 +6,19 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { withDecisionLog, type JudgmentRequest, type Questions } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { createClientRuntimeServices } from '../sdk/src/platform/runtime/client-services.ts';
-import { createRuntimeStore } from '../sdk/src/platform/runtime/store/index.ts';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
-import { createShellPathService } from '../sdk/src/platform/runtime/shell-paths.ts';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
-import { composeCiWatchGatewayVerbs, type CiWatchCompositionDeps } from '../sdk/src/platform/control-plane/routes/ci-watch-composition.ts';
-import { ToolRegistry } from '../sdk/src/platform/tools/registry.ts';
-import { EXEC_TOOL_SCHEMA } from '../sdk/src/platform/tools/exec/schema.ts';
-import { executeToolCalls } from '../sdk/src/platform/core/orchestrator-tool-runtime.ts';
-import { ToolCallAbortRegistry } from '../sdk/src/platform/core/orchestrator-live-turn.ts';
-import { currentExternalOperationSource, withExternalOperationSource } from '../sdk/src/platform/permissions/external-operation-scope.ts';
-import type { ExternalPermissionHost } from '../sdk/src/platform/permissions/external-request.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { createClientRuntimeServices } from '../platform/src/platform/runtime/client-services.ts';
+import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.ts';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
+import { createShellPathService } from '../platform/src/platform/runtime/shell-paths.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { composeCiWatchGatewayVerbs, type CiWatchCompositionDeps } from '../platform/src/platform/control-plane/routes/ci-watch-composition.ts';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
+import { EXEC_TOOL_SCHEMA } from '../platform/src/platform/tools/exec/schema.ts';
+import { executeToolCalls } from '../platform/src/platform/core/orchestrator-tool-runtime.ts';
+import { ToolCallAbortRegistry } from '../platform/src/platform/core/orchestrator-live-turn.ts';
+import { currentExternalOperationSource, withExternalOperationSource } from '../platform/src/platform/permissions/external-operation-scope.ts';
+import type { ExternalPermissionHost } from '../platform/src/platform/permissions/external-request.ts';
 import { toolReadingsPort } from './_helpers/tool-readings.ts';
 import { forgetGateReadings } from './_helpers/gate-readings.ts';
 

@@ -9,8 +9,8 @@
  */
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
 import type { ConfigManager } from '../config/index.ts';
-import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { RuntimeServices } from './services.ts';
 import { missingConversationalCaptureTools } from './agent-conversational-capture.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
@@ -46,7 +46,7 @@ import { registerAgentVibeTool } from '../tools/agent-vibe-tool.ts';
 import { registerAgentWorkspaceTool } from '../tools/agent-workspace-tool.ts';
 import { compactRegisteredToolDefinitions } from '../tools/tool-definition-compaction.ts';
 import { wireCapabilityIndex } from './bootstrap-capability-wiring.ts';
-import { registerClientPhoneTool } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+import { registerClientPhoneTool } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 
 export interface AgentToolRegistrationDeps {
   readonly toolRegistry: ToolRegistry;

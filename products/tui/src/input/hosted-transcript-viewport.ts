@@ -1,4 +1,4 @@
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import type { HostedSessionFeedState } from '../views/hosted-session-feed.ts';
 import { hostedTranscriptLines, type HostedTranscriptLine } from './agents-modal-text.ts';
 

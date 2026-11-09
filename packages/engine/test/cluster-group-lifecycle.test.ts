@@ -2,14 +2,14 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ClusterGroupRuntime, resolveClusterGroupSettings, type ClusterClock, type ClusterTransport } from '../sdk/src/platform/cluster/index.js';
+import { ClusterGroupRuntime, resolveClusterGroupSettings, type ClusterClock, type ClusterTransport } from '../platform/src/platform/cluster/index.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function deferred() { let release!: () => void; const promise = new Promise<void>((resolve) => { release = resolve; }); return { promise, release: () => release() }; }
 async function turns() { for (let i = 0; i < 10; i++) await Promise.resolve(); }
 function fixture(get: () => Promise<string | null>, startHook?: () => Promise<void>) {
-  if (process.env.GOODVIBES_SDK_TEST_RUNNER !== '1') throw new Error('Use guarded runner');
+  if (process.env.GOODVIBES_ENGINE_TEST_RUNNER !== '1') throw new Error('Use guarded runner');
   const root = mkdtempSync(join(tmpdir(), 'cluster-lifecycle-fixture-')); roots.push(root);
   const timers = new Set<() => void>(); let running = false; let starts = 0; let stops = 0;
   const clock: ClusterClock = { now: () => 1000, monotonicNow: () => 1000, setTimer(fn) { timers.add(fn); return () => { timers.delete(fn); }; } };

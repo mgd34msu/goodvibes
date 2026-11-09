@@ -11,7 +11,7 @@
  * the first call.
  */
 import { describe, expect, test } from 'bun:test';
-import { globBodyToRegexSource, globToRegex, buildGlobMatcher } from '../sdk/src/platform/utils/glob-to-regex.js';
+import { globBodyToRegexSource, globToRegex, buildGlobMatcher } from '../platform/src/platform/utils/glob-to-regex.js';
 
 describe('globBodyToRegexSource: single-pass glob body', () => {
   test('maps **, *, and ? to the caller-chosen sub-expressions', () => {

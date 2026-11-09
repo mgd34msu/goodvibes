@@ -1,9 +1,9 @@
 /** Shared keyboard mechanics over host-owned picker/control ports. */
 import { readFileSync } from 'node:fs';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { SelectionResult, SelectionAction } from './selection-modal.js';
 import { isTextBackspace } from './delete-key-policy.js';
-import { resolveAndValidatePath, logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { resolveAndValidatePath, logger } from '@goodvibes-jev/engine/platform/platform/utils';
 interface PickerCommandContext {
     readonly jumpToBookmark?: ((key: string) => void) | undefined;
     readonly workspace: {

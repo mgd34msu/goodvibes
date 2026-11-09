@@ -9,7 +9,7 @@
  * the path dims toward the root.
  */
 
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import type { FilePickerModal } from '../file-picker.js';
 import { activeTokens } from './theme.js';
 import { renderPopup } from './surface-kit-parts.js';

@@ -1,11 +1,11 @@
 import { expect, test } from 'bun:test';
-import { readDeclaredProviderCredential } from '../sdk/src/platform/judgment-browser/batteries/catalogs.ts';
-import { BUILTIN_COMPAT_PROVIDERS, BUILTIN_PROVIDER_ENV_KEYS, getBuiltinProviderEnvVars } from '../sdk/src/platform/providers/builtin-catalog.ts';
+import { readDeclaredProviderCredential } from '../platform/src/platform/judgment-browser/batteries/catalogs.ts';
+import { BUILTIN_COMPAT_PROVIDERS, BUILTIN_PROVIDER_ENV_KEYS, getBuiltinProviderEnvVars } from '../platform/src/platform/providers/builtin-catalog.ts';
 import {
   BUILTIN_PROVIDER_ENV_KEYS as canonicalEnvKeys,
   getBuiltinProviderEnvVars as canonicalEnvVars,
   readDeclaredProviderCredential as canonicalCredentialReading,
-} from '../sdk/src/platform/config/provider-credential-catalog.ts';
+} from '../platform/src/platform/config/provider-credential-catalog.ts';
 
 test('browser projection reuses canonical declarations, including aliases with no shared provider spelling', () => {
   expect(BUILTIN_PROVIDER_ENV_KEYS).toBe(canonicalEnvKeys);

@@ -21,7 +21,7 @@ const answerReadings = useKnowledgeAnswerReadings({ extractedKinds: semanticRepa
 ] });
 useSemanticActivationFixtures(answerReadings);
 
-import type { KnowledgeSemanticGapRepairRequest } from '../sdk/src/platform/knowledge/semantic/types.js';
+import type { KnowledgeSemanticGapRepairRequest } from '../platform/src/platform/knowledge/semantic/types.js';
 import * as crypto from 'node:crypto';
 import { describe, expect, spyOn, test } from 'bun:test';
 import {
@@ -30,7 +30,7 @@ import {
   HomeGraphService,
   KnowledgeSemanticService,
   homeAssistantKnowledgeSpaceId,
-} from '../sdk/src/platform/knowledge/index.js';
+} from '../platform/src/platform/knowledge/index.js';
 import {
   FakeKnowledgeLlm,
   ForegroundRepairLlm,
@@ -1181,7 +1181,7 @@ describe('semantic knowledge/wiki enrichment: answer quality', () => {
   });
 
   test('feature fact quality uses declared readings for precise values and broken fragments', async () => {
-    const { createKnowledgePageFactUsefulnessReader } = await import('../sdk/src/platform/knowledge/semantic/repair-usefulness/reader.js');
+    const { createKnowledgePageFactUsefulnessReader } = await import('../platform/src/platform/knowledge/semantic/repair-usefulness/reader.js');
     const { installJudgmentPort } = await import('@goodvibes-jev/engine/errors');
     const { fakePort, noulAnswer } = await import('@goodvibes-jev/judgment/testing');
     const fixtures: readonly (readonly [string, number])[] = [
@@ -1221,8 +1221,8 @@ describe('semantic knowledge/wiki enrichment: answer quality', () => {
   });
 
   test('measured sufficiency accepts sparse evidence and rejects many facts missing the requested detail', async () => {
-    const { verifyKnowledgeAnswer } = await import('../sdk/src/platform/knowledge/semantic/answer-verification/reader.js');
-    const { answerNeedsEvidenceGap } = await import('../sdk/src/platform/knowledge/semantic/answer-quality.js');
+    const { verifyKnowledgeAnswer } = await import('../platform/src/platform/knowledge/semantic/answer-verification/reader.js');
+    const { answerNeedsEvidenceGap } = await import('../platform/src/platform/knowledge/semantic/answer-quality.js');
     const query = 'How many HDMI ports does the TV have?';
     const sparse = await verifyKnowledgeAnswer({ query,
       evidence: [{ reference: 'evidence-1', text: 'The TV has four HDMI ports.' }],

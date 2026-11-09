@@ -6,7 +6,7 @@
 // No named facade exists on the in-process OperatorClient, so, exactly like
 // the memory-consolidation and voice-provisioning gateways, it goes over the
 // generic operator invoke path (operator-rpc.ts's resolveOperatorRpc ->
-// sdk.operator.invoke), reaching the SAME daemon the command layer does.
+// platform.operator.invoke), reaching the SAME daemon the command layer does.
 //
 // A daemon that predates the memory governor answers an honest 501 (the verb is
 // cataloged but has no handler when no live governor is composed) or a 404 (an
@@ -16,10 +16,10 @@
 // and its tests round-trip against a mocked daemon.
 // ---------------------------------------------------------------------------
 
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { GoodVibesSdkError } from '@goodvibes-jev/engine/sdk';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { GoodVibesError } from '@goodvibes-jev/engine/platform';
 import { resolveOperatorRpc, describeOperatorRpcError } from '../input/commands/operator-rpc.ts';
-import { memoryStatusLines, type MemoryGovernorSnapshotResult } from '@goodvibes-jev/engine/sdk/platform/runtime/memory';
+import { memoryStatusLines, type MemoryGovernorSnapshotResult } from '@goodvibes-jev/engine/platform/platform/runtime/memory';
 
 /** The narrow async verb surface the /health memory (doctor) surface drives. */
 export interface MemoryDiagnosticsGateway {
@@ -49,10 +49,10 @@ export interface MemoryDiagnosticsGatewayDeps {
 export function createMemoryDiagnosticsGateway(deps: MemoryDiagnosticsGatewayDeps): MemoryDiagnosticsGatewayResolution {
   const rpc = resolveOperatorRpc({ configManager: deps.configManager, homeDirectory: deps.homeDirectory });
   if (!rpc.available) return { available: false, reason: rpc.reason };
-  const { sdk } = rpc;
+  const { platformClient } = rpc;
   return {
     available: true,
-    gateway: { fetchSnapshot: () => sdk.operator.invoke('ops.memory.get', {}) },
+    gateway: { fetchSnapshot: () => platformClient.operator.invoke('ops.memory.get', {}) },
   };
 }
 
@@ -71,7 +71,7 @@ export const MEMORY_DIAGNOSTICS_UNAVAILABLE = 'this daemon does not serve memory
  * 401/403, 500) is a generic error.
  */
 export function classifyMemoryDiagnosticsError(error: unknown): MemoryDiagnosticsFailure {
-  if (error instanceof GoodVibesSdkError && (error.status === 501 || error.status === 404)) {
+  if (error instanceof GoodVibesError && (error.status === 501 || error.status === 404)) {
     return { kind: 'unavailable', reason: MEMORY_DIAGNOSTICS_UNAVAILABLE };
   }
   return { kind: 'error', message: describeOperatorRpcError(error) };

@@ -1,7 +1,7 @@
 /**
  * notification-dispatch.ts, how this daemon dispatches notices without a screen.
  *
- * The SDK's NotificationRouter decides where a domain notification goes and
+ * The platform's NotificationRouter decides where a domain notification goes and
  * collapses bursts and batches. Its three targets, `conversation`,
  * `status_bar`, `panel_only`, are all SCREEN targets: an inline conversation
  * line, a status bar, a panel. There is no channel member in that type, and
@@ -30,9 +30,9 @@
  * destination is configured. Sent, or written down; never dropped.
  */
 
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { RuntimeEventBus } from './index.js';
-import { memoryPressureLine, memoryPressureLevel, type MemoryPressurePayload } from '@goodvibes-jev/engine/sdk/platform/runtime/memory';
+import { memoryPressureLine, memoryPressureLevel, type MemoryPressurePayload } from '@goodvibes-jev/engine/platform/platform/runtime/memory';
 
 /**
  * Where a channel-shaped notice leaves the daemon.

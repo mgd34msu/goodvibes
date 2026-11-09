@@ -14,14 +14,14 @@ import {
   type RewindConversationPort,
   type RewindRestoreResult,
   type RewindWorkspacePort,
-} from '../sdk/src/platform/rewind/index.js';
-import { ConversationRewindHostBroker } from '../sdk/src/platform/rewind/conversation-host-broker.js';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.js';
+} from '../platform/src/platform/rewind/index.js';
+import { ConversationRewindHostBroker } from '../platform/src/platform/rewind/conversation-host-broker.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
 import {
   createConversationRewindHostBroker,
   registerRewindConversationHostGatewayMethods,
-} from '../sdk/src/platform/control-plane/routes/rewind-conversation-hosts.js';
-import type { WorkspaceEvent } from '../sdk/src/events/workspace.js';
+} from '../platform/src/platform/control-plane/routes/rewind-conversation-hosts.js';
+import type { WorkspaceEvent } from '../platform/src/events/workspace.js';
 
 function fakeWorkspace(overrides: Partial<{
   checkpoints: RewindCheckpointView[];

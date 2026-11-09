@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { useGateReadings } from './_helpers/gate-readings.ts';
-import { PermissionManager, type PermissionConfigReader } from '../sdk/src/platform/permissions/manager.ts';
-import type { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.ts';
+import { PermissionManager, type PermissionConfigReader } from '../platform/src/platform/permissions/manager.ts';
+import type { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
 
 const WORKSPACE = '/tmp/gv-cred-read-workspace';
 

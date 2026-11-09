@@ -2,15 +2,15 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'bun:test';
-import { ArtifactStore } from '../sdk/src/platform/artifacts/index.js';
-import { ConfigManager } from '../sdk/src/platform/config/manager.js';
+import { ArtifactStore } from '../platform/src/platform/artifacts/index.js';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import {
   GOODVIBES_AGENT_KNOWLEDGE_DB_FILE,
   HOME_GRAPH_KNOWLEDGE_DB_FILE,
   REGULAR_KNOWLEDGE_DB_FILE,
-} from '../sdk/src/platform/knowledge/store-config.js';
-import { HomeGraphService, KnowledgeService, KnowledgeStore } from '../sdk/src/platform/knowledge/index.js';
-import type { MemoryAddOptions, MemoryRecord, MemoryStore } from '../sdk/src/platform/state/index.js';
+} from '../platform/src/platform/knowledge/store-config.js';
+import { HomeGraphService, KnowledgeService, KnowledgeStore } from '../platform/src/platform/knowledge/index.js';
+import type { MemoryAddOptions, MemoryRecord, MemoryStore } from '../platform/src/platform/state/index.js';
 import { trackDisposables } from './_helpers/disposables.ts';
 import { useKnowledgeAnswerReadings } from './_helpers/knowledge-answer-readings.ts';
 

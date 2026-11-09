@@ -10,12 +10,12 @@
  */
 import { EXEC_GATE_TABLE, useGateReadings } from './_helpers/gate-readings.ts';
 import { describe, expect, spyOn, test } from 'bun:test';
-import { PermissionManager, type PermissionConfigReader } from '../sdk/src/platform/permissions/manager.js';
-import type { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.js';
-import type { PermissionMode, BackgroundAgentsMode } from '../sdk/src/platform/config/schema.js';
-import type { PermissionPromptRequest } from '../sdk/src/platform/permissions/prompt.js';
-import { gateBackgroundToolCall } from '../sdk/src/platform/agents/background-permission-gate.js';
-import { PLAN_MODE_DENIAL_REASON } from '../sdk/src/platform/permissions/denial.js';
+import { PermissionManager, type PermissionConfigReader } from '../platform/src/platform/permissions/manager.js';
+import type { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.js';
+import type { PermissionMode, BackgroundAgentsMode } from '../platform/src/platform/config/schema.js';
+import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.js';
+import { gateBackgroundToolCall } from '../platform/src/platform/agents/background-permission-gate.js';
+import { PLAN_MODE_DENIAL_REASON } from '../platform/src/platform/permissions/denial.js';
 
 // ── helpers ────────────────────────────────────────────────────────────────
 

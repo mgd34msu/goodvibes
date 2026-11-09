@@ -6,10 +6,10 @@ import {
   collectContinuityIssues,
 } from '@goodvibes-jev/engine/terminal-shell/health-findings';
 import { renderSandboxDoctor } from '../../runtime/sandbox-public-gaps.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { probeTermCaps } from '../../renderer/term-caps.ts';
 import { evaluateSessionMaintenance, formatSessionMaintenanceLines } from '@/runtime/index.ts';
-import { estimateConversationTokens } from '@goodvibes-jev/engine/sdk/platform/core';
+import { estimateConversationTokens } from '@goodvibes-jev/engine/platform/platform/core';
 import type { CommandRegistry } from '../command-registry.ts';
 import { buildSetupReviewSnapshot } from './local-setup-review.ts';
 import '@/runtime/index.ts';
@@ -223,7 +223,7 @@ export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
         // the read:telemetry scope; a scope refusal is rendered as such, never
         // as zero counters.
         try {
-          const metrics = await rpc.sdk.operator.invoke('runtime.metrics.get', {});
+          const metrics = await rpc.platformClient.operator.invoke('runtime.metrics.get', {});
           lines.push(...renderMetricMap('counters', metrics.counters as Record<string, unknown>));
           lines.push(...renderMetricMap('gauges', metrics.gauges as Record<string, unknown>));
           lines.push(...renderMetricMap('histograms', metrics.histograms as Record<string, unknown>));
@@ -241,7 +241,7 @@ export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
         const provider = (args[1] ?? ctx.session.runtime.provider ?? '').trim();
         if (provider) {
           try {
-            const quota = await rpc.sdk.operator.invoke('quota.snapshot.get', { provider });
+            const quota = await rpc.platformClient.operator.invoke('quota.snapshot.get', { provider });
             lines.push(formatQuotaSnapshotLine(provider, quota));
           } catch (error) {
             const scopeLine = telemetryScopeRefusalLine(error, `quota (${provider})`);

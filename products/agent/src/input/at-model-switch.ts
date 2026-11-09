@@ -13,8 +13,8 @@
  * whole submission over one mistyped token.
  */
 
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 
 const AT_MODEL_RE = /@model:([^\s]+)/g;
 

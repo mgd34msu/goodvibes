@@ -1,4 +1,4 @@
-/** Real SDK fetch/SSE facade and SessionDetail, replaying engine-owned HTTP captures. */
+/** Real platform fetch/SSE facade and SessionDetail, replaying engine-owned HTTP captures. */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
@@ -84,7 +84,7 @@ function harness(holdFirst = false) {
   };
 }
 
-test('captured known→unknown→configured usage flows through real SDK SSE invalidation and compaction refresh', async () => {
+test('captured known→unknown→configured usage flows through real platform SSE invalidation and compaction refresh', async () => {
   const h = harness(); h.render();
   await settle(() => h.context().includes('~40%') && h.ready('providers') && h.ready('compaction'));
   h.setScenario('accepted_floor');
@@ -101,7 +101,7 @@ test('captured known→unknown→configured usage flows through real SDK SSE inv
   expect(h.requests.filter(path => path.endsWith('/context-usage'))).toHaveLength(3);
 });
 
-test('provider event supersedes an initial buffered known-window response through the real SDK', async () => {
+test('provider event supersedes an initial buffered known-window response through the real platform', async () => {
   const h = harness(true); h.render();
   await settle(() => h.ready('providers') && h.requests.some(path => path.endsWith('/context-usage')));
   h.setScenario('no_model');

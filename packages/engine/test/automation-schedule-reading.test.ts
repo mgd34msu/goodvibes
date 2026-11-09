@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { readNaturalLanguageSchedule } from '@goodvibes-jev/engine/sdk/platform/automation';
+import { readNaturalLanguageSchedule } from '@goodvibes-jev/engine/platform/platform/automation';
 
 const now = Date.parse('2026-07-10T23:50:00Z');
 function fixture(parts: Record<string, string>, weak?: string) {
@@ -161,7 +161,7 @@ describe('engine-owned natural-language schedule reading', () => {
 });
 
 test('schedule reading is discoverable for live calibration without implying a live pass', async () => {
-  const { registry } = await import('../sdk/src/platform/automation/judgment-registry.ts');
+  const { registry } = await import('../platform/src/platform/automation/judgment-registry.ts');
   const decision = registry.list()[0]!;
   expect(decision.name).toBe('automation.schedule');
   expect(decision.fixtureCount).toBeGreaterThanOrEqual(35);

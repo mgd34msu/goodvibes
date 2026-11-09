@@ -61,7 +61,7 @@ mistaken for hidden contracts.
 - Projection and ingest affordances depend on the declared engine exports and
   methods available on the selected daemon.
 - If regular Knowledge results contain Home Graph records by default, that is an
-  SDK/daemon scoping issue. WebUI should report exact endpoints and ids rather
+  platform/daemon scoping issue. WebUI should report exact endpoints and ids rather
   than adding client-side filters.
 
 ## Providers and models

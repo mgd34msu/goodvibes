@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { WorkPlanStore, type WorkPlanStoreOptions } from '../sdk/src/platform/workflow/work-plan-store.js';
+import { WorkPlanStore, type WorkPlanStoreOptions } from '../platform/src/platform/workflow/work-plan-store.js';
 import { makeProjectTempDir } from './_helpers/project-temp.js';
 
 function options(projectId = 'project:test', projectRoot = '/projects/test'): WorkPlanStoreOptions {
@@ -115,7 +115,7 @@ describe('exact work-plan project ownership', () => {
 
   test('simultaneous first opens in separate processes converge on one assignment per exact project', async () => {
     const o = options(), start = join(o.homeDirectory, 'start');
-    const modulePath = new URL('../sdk/src/platform/workflow/work-plan-store.ts', import.meta.url).href;
+    const modulePath = new URL('../platform/src/platform/workflow/work-plan-store.ts', import.meta.url).href;
     const script = `import { existsSync, writeFileSync } from 'node:fs';
       import { WorkPlanStore } from ${JSON.stringify(modulePath)};
       const [raw, ready, start] = process.argv.slice(1);

@@ -22,11 +22,11 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
-import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
-import { createRuntimeStore } from '../sdk/src/platform/runtime/store/index.ts';
-import { createRuntimeServices, type RuntimeServices } from '../sdk/src/platform/runtime/services.ts';
-import type { ProjectIndex } from '../sdk/src/platform/state/project-index.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
+import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.ts';
+import { createRuntimeServices, type RuntimeServices } from '../platform/src/platform/runtime/services.ts';
+import type { ProjectIndex } from '../platform/src/platform/state/project-index.ts';
 
 /**
  * `getFullRegistry(cwd)` is private, it is reached from `execute()` with a

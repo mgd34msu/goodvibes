@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { withinSelectedFamily } from '../../sdk/src/platform/routing/route-scope.js';
-import type { ModelDefinition } from '../../sdk/src/platform/providers/registry-types.js';
+import { withinSelectedFamily } from '../../platform/src/platform/routing/route-scope.js';
+import type { ModelDefinition } from '../../platform/src/platform/providers/registry-types.js';
 const selected = { id: 'selected', provider: 'test', registryKey: 'test:selected', displayName: 'Selected' } as ModelDefinition;
 const alternate = { ...selected, id: 'alternate', registryKey: 'test:alternate' };
 let previous: ReturnType<typeof installJudgmentPort>;

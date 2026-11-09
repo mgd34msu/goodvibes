@@ -5,10 +5,10 @@
  * with group headers, quality-tier badges, pin markers, and configured-via flags.
  * All functions are stateless.
  */
-import type { ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { EFFORT_DESCRIPTIONS, getQualityTier, getQualityTierFromScore } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { BenchmarkStore } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
+import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
+import { EFFORT_DESCRIPTIONS, getQualityTier, getQualityTierFromScore } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { BenchmarkStore } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import { POPULAR_PROVIDERS, detectFamily, tierToCategoryFilter, } from './model-picker-types.js';
 import type { GroupByMode, ModelItemsCache, PickerItem, ProviderItemsCache, } from './model-picker-types.js';
 import { getSyntheticSubgroup, setKey, mapKey } from './model-picker-filter.js';

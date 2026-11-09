@@ -11,8 +11,8 @@
  */
 import { describe, expect, test } from 'bun:test';
 
-import { dispatchMcpRoutes } from '../sdk/src/platform/daemon/http/mcp-routes.ts';
-import type { McpEffectiveConfig } from '../sdk/src/platform/mcp/config.ts';
+import { dispatchMcpRoutes } from '../platform/src/platform/daemon/http/mcp-routes.ts';
+import type { McpEffectiveConfig } from '../platform/src/platform/mcp/config.ts';
 
 const LOCATION = {
   scope: 'project' as const,

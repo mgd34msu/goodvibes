@@ -1,24 +1,24 @@
-import { readWorkLedgerState } from '../sdk/src/platform/workflow/work-ledger/service.js';
+import { readWorkLedgerState } from '../platform/src/platform/workflow/work-ledger/service.js';
 import { createHash } from 'node:crypto';
-import { canonicalNativeConversationContinuation, type NativeConversationContinuation } from '../sdk/src/platform/workflow/work-ledger/native-continuation-context.js';
-import type { NativeConversationContinuationOwner } from '../sdk/src/platform/workflow/work-ledger/native-intake.js';
+import { canonicalNativeConversationContinuation, type NativeConversationContinuation } from '../platform/src/platform/workflow/work-ledger/native-continuation-context.js';
+import type { NativeConversationContinuationOwner } from '../platform/src/platform/workflow/work-ledger/native-intake.js';
 /** Owned persisted fixtures prove source admission, cancellation and recovery through the real owner. */
 import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { JudgmentError, SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
-import { nativeConversationIntakeCaptureRequestSchema } from '../sdk/src/platform/workflow/work-ledger/native-intake-wire.js';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
+import { nativeConversationIntakeCaptureRequestSchema } from '../platform/src/platform/workflow/work-ledger/native-intake-wire.js';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { PairingTokenManager, PairingTokenStoreBusyError } from '../sdk/src/platform/pairing/pairing-token-store.js';
-import { WorkspaceRegistrationStore } from '../sdk/src/platform/workspace/registration/store.js';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.js';
-import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../sdk/src/platform/daemon/control-plane.js';
-import { createNativeConversationIntakeHost } from '../sdk/src/platform/workflow/work-ledger/native-intake.js';
-import type { NativeRequirementProposer } from '../sdk/src/platform/workflow/work-ledger/native-intake-proposer.js';
-import type { NativeConversationIntakeResult } from '../sdk/src/platform/workflow/work-ledger/native-intake-wire.js';
-import type { NativeConversationStorage } from '../sdk/src/platform/workflow/work-ledger/native-intake-types.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { PairingTokenManager, PairingTokenStoreBusyError } from '../platform/src/platform/pairing/pairing-token-store.js';
+import { WorkspaceRegistrationStore } from '../platform/src/platform/workspace/registration/store.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
+import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../platform/src/platform/daemon/control-plane.js';
+import { createNativeConversationIntakeHost } from '../platform/src/platform/workflow/work-ledger/native-intake.js';
+import type { NativeRequirementProposer } from '../platform/src/platform/workflow/work-ledger/native-intake-proposer.js';
+import type { NativeConversationIntakeResult } from '../platform/src/platform/workflow/work-ledger/native-intake-wire.js';
+import type { NativeConversationStorage } from '../platform/src/platform/workflow/work-ledger/native-intake-types.js';
 import { makeRepo } from './contract/runner-support.js';
 
 const cleanups: (() => Promise<void>)[] = [];

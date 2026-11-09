@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { captureCatalogData, captureCatalogSnapshot, captureCatalogSnapshotGuard } from '../../tools/agent-harness-catalog-ranking.ts';
 import { captureModelReadingInput, withModelReadingSource } from '../../tools/agent-harness-model-reading-source.ts';

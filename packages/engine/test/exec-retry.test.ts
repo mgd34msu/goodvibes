@@ -9,7 +9,7 @@
  * 5. Jittered delays differ between retry attempts
  */
 import { describe, expect, test } from 'bun:test';
-import { isRetryableExecResult } from '../sdk/src/platform/tools/exec/runtime.js';
+import { isRetryableExecResult } from '../platform/src/platform/tools/exec/runtime.js';
 import { useToolReadings } from './_helpers/tool-readings.ts';
 
 // Jev reads which kind of failure a run hit; these fakes stand in for it.

@@ -201,7 +201,7 @@ test('failed close is also stable on repeat and does not repeat effects', async 
   expect(order.filter(entry => entry === 'graph-dispose')).toHaveLength(1);
 });
 
-test('unavailable title does not prevent SDK shutdown and graph disposal', async () => {
+test('unavailable title does not prevent platform shutdown and graph disposal', async () => {
   const order: string[] = [];
   const failure = new Error('title getter failed');
   await expect(createRuntimeShutdown(makeDeps(order, { conversationTitle: () => { throw failure; } }))(SESSION_DATA)).rejects.toBe(failure);

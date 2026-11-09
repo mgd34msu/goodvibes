@@ -13,7 +13,7 @@ import applicability from '../fixtures/e2e-judgments/completion-applicability.js
 import ambientDraftGate from '../fixtures/e2e-judgments/ambient-draft-gate.json';
 import tuiCompletionTools from '../fixtures/e2e-judgments/tui-completion-tools.json';
 import { checkAnswers, type Questions } from '@goodvibes-jev/judgment';
-import { fieldKind, redactionCredential, residualCredential } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { fieldKind, redactionCredential, residualCredential } from '@goodvibes-jev/engine/platform/platform/utils';
 import { noticeSeverity } from '@goodvibes-jev/engine/terminal-shell';
 
 /** Keep recorded old envelopes intact; derive this adapter's current subjects. */

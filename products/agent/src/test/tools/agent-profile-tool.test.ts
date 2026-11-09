@@ -15,9 +15,9 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { admitLocalState } from '../helpers/local-state-admission.ts';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { PROFILE_FIELDS, PROSE_ONLY_SECTIONS } from '@goodvibes-jev/engine/sdk/platform/owner-profile';
-import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { PROFILE_FIELDS, PROSE_ONLY_SECTIONS } from '@goodvibes-jev/engine/platform/platform/owner-profile';
+import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ProfileGatewayInvoke, ProfileGatewayResult } from '../../agent/owner-profile-gateway.ts';
 import { createAgentProfileTool, registerAgentProfileTool } from '../../tools/agent-profile-tool.ts';
 import type { ProfileMethodId } from '../../tools/agent-profile-types.ts';
@@ -596,8 +596,8 @@ describe('profile tool: the declared field catalog', () => {
   // The drift test. The live failure was a free-form `fieldId` filled with
   // `full_name`, `preferred_name`, `home_address`, `timezone` and `wife`, none
   // of them fields, so the declaration must now be the registry itself, in
-  // registry order, and must stay that way when the SDK adds or renames one.
-  test('declares exactly the SDK field registry ids, in registry order', () => {
+  // registry order, and must stay that way when the platform adds or renames one.
+  test('declares exactly the platform field registry ids, in registry order', () => {
     expect(fieldIdProperty().enum).toEqual(PROFILE_FIELDS.map((field) => field.id));
   });
 

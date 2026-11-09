@@ -14,11 +14,11 @@ import {
   getSandboxPreset,
   isRunningInWsl,
   renderSandboxReview,
-} from '../sdk/src/platform/runtime/sandbox/manager.js';
+} from '../platform/src/platform/runtime/sandbox/manager.js';
 import {
   buildSandboxLaunchPlan,
   probeSandboxBackends,
-} from '../sdk/src/platform/runtime/sandbox/backend.js';
+} from '../platform/src/platform/runtime/sandbox/backend.js';
 
 const sandboxConfig = {
   'sandbox.replIsolation': 'shared-vm',

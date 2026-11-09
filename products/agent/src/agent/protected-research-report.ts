@@ -1,7 +1,7 @@
 import { types as nodeTypes } from 'node:util';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { SOURCE_SCREENING_LIMITS, type ProtectedSourceOwner, type ProtectedSource, type ProtectedResearchReference, type SourceScreeningReceipt, type ResearchReferenceScreeningReceipt } from '@goodvibes-jev/engine/sdk/platform/security';
-import { ToolInputProjectionError, type ToolInputProjector, type ToolInputProjectionRequest, type ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
+import { SOURCE_SCREENING_LIMITS, type ProtectedSourceOwner, type ProtectedSource, type ProtectedResearchReference, type SourceScreeningReceipt, type ResearchReferenceScreeningReceipt } from '@goodvibes-jev/engine/platform/platform/security';
+import { ToolInputProjectionError, type ToolInputProjector, type ToolInputProjectionRequest, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { prepareAgentResearchReportInput, omittedReferencePattern } from './research-report-input.ts';
 
 const WITHHELD = '[source URL withheld]';

@@ -1,4 +1,4 @@
-import type { ContractRunner, ContractView } from '@goodvibes-jev/engine/sdk/platform/contract';
+import type { ContractRunner, ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
 
 /** Share one detached contract snapshot across the shell's agent lookups. */
 export function createSessionContractViews(runner: Pick<ContractRunner, 'list' | 'on'>, sessionId: () => string): {

@@ -1,8 +1,8 @@
 import { expect, spyOn, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.js';
-import { DraftSyncStore, registerDraftMethods, type DraftHostContext } from '../sdk/src/platform/channels/host-drafts/index.js';
-import type { AtRestCipher } from '../sdk/src/platform/config/daemon-credential-store.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
+import { DraftSyncStore, registerDraftMethods, type DraftHostContext } from '../platform/src/platform/channels/host-drafts/index.js';
+import type { AtRestCipher } from '../platform/src/platform/config/daemon-credential-store.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const cipher: AtRestCipher = { async encrypt(text) { return `fixture:${Buffer.from(text).toString('base64')}`; }, async decrypt() { throw new Error('Read paths must not decrypt'); } };

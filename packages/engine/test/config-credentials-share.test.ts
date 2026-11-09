@@ -17,10 +17,10 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { bootDaemon, type BootedDaemon } from '../sdk/src/platform/daemon/boot.ts';
+import { bootDaemon, type BootedDaemon } from '../platform/src/platform/daemon/boot.ts';
 import { seedBenchmarkCache } from './_helpers/benchmark-cache.ts';
-import { SecretsManager } from '../sdk/src/platform/config/secrets.ts';
-import { CONFIG_SNAPSHOT_SCHEMA } from '../sdk/src/platform/control-plane/operator-contract-schemas-admin.ts';
+import { SecretsManager } from '../platform/src/platform/config/secrets.ts';
+import { CONFIG_SNAPSHOT_SCHEMA } from '../platform/src/platform/control-plane/operator-contract-schemas-admin.ts';
 
 const TOKEN = 'w6c1-credentials-token';
 const STORED_PLAINTEXT = 'super-secret-plaintext-value-do-not-leak';

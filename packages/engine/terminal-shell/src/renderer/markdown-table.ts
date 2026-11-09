@@ -1,4 +1,4 @@
-import { requireDefined } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { requireDefined } from '@goodvibes-jev/engine/platform/platform/utils';
 /**
  * markdown-table.ts, box-drawn markdown tables whose cells WRAP.
  *
@@ -39,9 +39,9 @@ import { requireDefined } from '@goodvibes-jev/engine/sdk/platform/utils';
  * still emitted in full.
  */
 
-import { type Line, type Cell, createStyledCell } from '@goodvibes-jev/engine/sdk/platform/types';
+import { type Line, type Cell, createStyledCell } from '@goodvibes-jev/engine/platform/platform/types';
 import { stringToLine } from './string-to-line.js';
-import { getDisplayWidth } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils';
 import { activeTheme, activeTokens } from './theme.js';
 import { renderInlineMarkdown } from './markdown-inline.js';
 

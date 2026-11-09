@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { rankHomeGraphPageCandidates } from '../sdk/src/platform/knowledge/home-graph/page-priority.js';
-import { homeGraphPagePriority } from '../sdk/src/platform/knowledge/home-graph/batteries/page-priority.js';
+import { rankHomeGraphPageCandidates } from '../platform/src/platform/knowledge/home-graph/page-priority.js';
+import { homeGraphPagePriority } from '../platform/src/platform/knowledge/home-graph/batteries/page-priority.js';
 import { useKnowledgeAnswerReadings } from './_helpers/knowledge-answer-readings.js';
 import { createHomeGraphService, useHomeGraphFixtures } from './_helpers/homegraph-service-fixtures.js';
 

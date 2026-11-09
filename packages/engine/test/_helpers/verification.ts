@@ -1,4 +1,4 @@
-import type { VerificationWriter } from '../../sdk/src/platform/core/verification/types.js';
+import type { VerificationWriter } from '../../platform/src/platform/core/verification/types.js';
 
 /** A predictable proposal producer for exercising native qualification and
  * lifetime behavior. Semantic correctness is tested separately with live Jev. */

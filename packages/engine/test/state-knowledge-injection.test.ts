@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { buildKnowledgeInjectionPrompt } from '@goodvibes-jev/engine/sdk/platform/state';
-import { renderPacket } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import { buildKnowledgeInjectionPrompt } from '@goodvibes-jev/engine/platform/platform/state';
+import { renderPacket } from '@goodvibes-jev/engine/platform/platform/knowledge';
 
 describe('knowledge prompt trust boundaries', () => {
   test('frames injected memory as untrusted reference material', () => {

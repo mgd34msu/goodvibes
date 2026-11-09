@@ -1,5 +1,5 @@
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { WebhookNotifier } from '@goodvibes-jev/engine/sdk/platform/integrations';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { requireYesFlag, stripYesFlag } from './command-confirmation.js';
 interface NotifyContext {

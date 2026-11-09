@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { CommandRegistry } from '../../input/command-registry.ts';
 import { handleCommandModeToken, type CommandModeRouteState } from '../../input/handler-command-route.ts';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
+import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 
 function makeEnterToken(): InputToken {
   return { type: 'key', logicalName: 'enter', raw: '\r', modifiers: {} } as unknown as InputToken;

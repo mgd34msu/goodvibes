@@ -1,9 +1,9 @@
 import { screeningAnswers } from './_helpers/screening-answers.js';
 import { afterEach, expect, spyOn, test } from 'bun:test';
-import * as directClient from '../sdk/src/platform/security/source-screening/direct-client.ts';
-import { createProtectedSourceOwner } from '../sdk/src/platform/security/source-screening/owner.ts';
-import { createScreeningTransport, HOSTED_SOURCE_SCREENING_ROUTES as routes } from '../sdk/src/platform/security/source-screening/transport.ts';
-import type { HostedProtectedSourceOwnerOptions, ProtectedSourceOwner } from '../sdk/src/platform/security/source-screening/types.ts';
+import * as directClient from '../platform/src/platform/security/source-screening/direct-client.ts';
+import { createProtectedSourceOwner } from '../platform/src/platform/security/source-screening/owner.ts';
+import { createScreeningTransport, HOSTED_SOURCE_SCREENING_ROUTES as routes } from '../platform/src/platform/security/source-screening/transport.ts';
+import type { HostedProtectedSourceOwnerOptions, ProtectedSourceOwner } from '../platform/src/platform/security/source-screening/types.ts';
 
 const abacusApiKey = 'synthetic-abacus-private-key';
 const typesafeApiKey = 'synthetic-typesafe-private-key';

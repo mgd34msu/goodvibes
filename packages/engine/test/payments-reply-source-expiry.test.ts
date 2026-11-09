@@ -1,16 +1,16 @@
 import { afterEach, expect, test } from 'bun:test';
-import { createTelegramSourceAccountOwner, type TelegramSourceAccountReader } from '../sdk/src/platform/channels/telegram/source-account.js';
-import { PaymentReplyInbox } from '../sdk/src/platform/payments/reply-inbox.js';
-import { channelBackedPaymentNotifier } from '../sdk/src/platform/payments/host/notifier.js';
-import { DaemonSurfaceActionHelper } from '../sdk/src/platform/daemon/surface-actions.js';
-import { PaymentReplySourceOwner } from '../sdk/src/platform/payments/reply-source-owner.js';
-import { TelegramPollingReceiveProgress } from '../sdk/src/platform/channels/telegram/receive-progress.js';
+import { createTelegramSourceAccountOwner, type TelegramSourceAccountReader } from '../platform/src/platform/channels/telegram/source-account.js';
+import { PaymentReplyInbox } from '../platform/src/platform/payments/reply-inbox.js';
+import { channelBackedPaymentNotifier } from '../platform/src/platform/payments/host/notifier.js';
+import { DaemonSurfaceActionHelper } from '../platform/src/platform/daemon/surface-actions.js';
+import { PaymentReplySourceOwner } from '../platform/src/platform/payments/reply-source-owner.js';
+import { TelegramPollingReceiveProgress } from '../platform/src/platform/channels/telegram/receive-progress.js';
 import { withPaymentsReadings } from './helpers/payments-readings.js';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { configureDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
-import { tryResolvePaymentReplyFromChannel } from '../sdk/src/platform/daemon/payment-reply.js';
-import type { ChannelPolicyDecision } from '../sdk/src/platform/channels/types.js';
+import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
+import { tryResolvePaymentReplyFromChannel } from '../platform/src/platform/daemon/payment-reply.js';
+import type { ChannelPolicyDecision } from '../platform/src/platform/channels/types.js';
 
 const cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });

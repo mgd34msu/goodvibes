@@ -2,7 +2,7 @@
  * recall-files-config.ts, TUI-local synthetic setting for the memory file
  * projection directory (`memory.projection.dir`).
  *
- * `memory.projection.dir` is not in the SDK's ConfigKey union, same
+ * `memory.projection.dir` is not in the platform's ConfigKey union, same
  * situation as worktree.setup.commands (see worktree-setup-config.ts, which
  * this file mirrors): a brand-new top-level config section with no
  * DEFAULT_CONFIG entry, so ConfigManager.get()/set() path resolution can
@@ -13,7 +13,7 @@
  * directory, under the project's own `.goodvibes/` control directory,
  * alongside the (separate) KV-state memory directory used by the state tool.
  */
-import type { ConfigKey, ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { ConfigKey, ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
 
 export const MEMORY_PROJECTION_DIR_CONFIG_KEY = 'memory.projection.dir' as ConfigKey;
 

@@ -4,7 +4,7 @@
  * frame's bytes leak into it and both messages are lost.
  */
 import { describe, expect, test } from 'bun:test';
-import { LspClient } from '../sdk/src/platform/intelligence/lsp/client.ts';
+import { LspClient } from '../platform/src/platform/intelligence/lsp/client.ts';
 
 describe('LSP framing by byte length', () => {
   test('two frames with non-ASCII bodies are both parsed and nothing is left over', () => {

@@ -22,14 +22,14 @@
  *
  * `TURN_SUBMITTED` marks a session busy; `TURN_COMPLETED` / `TURN_ERROR` /
  * `TURN_CANCEL` mark it idle again. Those three terminal events are the same
- * set the SDK's own power work-signals use, so a cancelled or failed turn
+ * set the platform's own power work-signals use, so a cancelled or failed turn
  * releases the busy flag rather than pinning it until the next successful one.
  * A turn that never reports a terminal event would leave a session busy
  * forever, which errs toward "do not consolidate memory / do not restart the
  * binary", the safe direction for both consumers.
  */
-import type { RuntimeEventBus } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
-import type { TurnEvent } from '@goodvibes-jev/engine/sdk/events';
+import type { RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import type { TurnEvent } from '@goodvibes-jev/engine/platform/events';
 export interface HostedSessionRegistry {
   /** Start counting this session id as hosted here. Idempotent. */
   adopt(sessionId: string): void;

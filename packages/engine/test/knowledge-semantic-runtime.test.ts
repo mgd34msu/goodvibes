@@ -1,6 +1,6 @@
 import { extractionValueFixtureFor } from './_helpers/knowledge-extraction-value-readings.js';
 import { gapAssessmentFixture, intrinsicAssessmentFixture, answerGapAssessmentFixtures, semanticRepairAssessmentCoverage } from './_helpers/knowledge-self-improvement-readings.js';
-import { KnowledgeRepairBudgetError } from '../sdk/src/platform/knowledge/semantic/self-improvement-budget.js';
+import { KnowledgeRepairBudgetError } from '../platform/src/platform/knowledge/semantic/self-improvement-budget.js';
 import { seedHomeAssistantObservation } from './_helpers/homegraph-observation-fixtures.js';
 import { seedKnowledgeResearchTask, useSemanticActivationFixtures } from './_helpers/knowledge-semantic-activation-fixtures.js';
 import { useKnowledgeAnswerReadings } from './_helpers/knowledge-answer-readings.js';
@@ -9,16 +9,16 @@ const answerReadings = useKnowledgeAnswerReadings({ extractedKinds: semanticRepa
 useSemanticActivationFixtures(answerReadings);
 
 import { describe, expect, test } from 'bun:test';
-import { JudgmentInputError, judgmentInputProblem } from '../sdk/src/platform/gate/judgment-input.js';
-import { prepareKnowledgeRecordAdmission } from '../sdk/src/platform/knowledge/store-record-snapshot.js';
-import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
+import { JudgmentInputError, judgmentInputProblem } from '../platform/src/platform/gate/judgment-input.js';
+import { prepareKnowledgeRecordAdmission } from '../platform/src/platform/knowledge/store-record-snapshot.js';
+import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import {
   createProviderBackedKnowledgeSemanticLlm,
   createWebKnowledgeGapRepairer,
   HomeGraphService,
   KnowledgeSemanticService,
   homeAssistantKnowledgeSpaceId,
-} from '../sdk/src/platform/knowledge/index.js';
+} from '../platform/src/platform/knowledge/index.js';
 import {
   BoilerplateAnswerLlm,
   FakeKnowledgeLlm,

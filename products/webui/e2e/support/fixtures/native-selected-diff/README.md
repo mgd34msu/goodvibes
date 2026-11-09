@@ -8,7 +8,7 @@ and shared execution owner. Native outcome response bodies are unchanged
 this is orchestration evidence, not live-provider semantic calibration.
 
 The browser loader validates every recorded method, request, successful response
-and source identity against the generated operator contract and SDK schemas. It
+and source identity against the generated operator contract and platform schemas. It
 checks generic-invoke request envelopes against their exact serialized bytes. It
 independently hashes the full exact unified diff, checks the host-written
 `nativeRevision`, and verifies the host-selected full hunk. All

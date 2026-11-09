@@ -25,8 +25,8 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { Compositor } from '../../renderer/compositor.ts';
 import type { CompositeRequest } from '../../renderer/compositor.ts';
-import { createStyledCell } from '@goodvibes-jev/engine/sdk/platform/types';
-import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import { createStyledCell } from '@goodvibes-jev/engine/platform/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { InputHandler } from '../../input/handler.ts';
 import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
 import { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';

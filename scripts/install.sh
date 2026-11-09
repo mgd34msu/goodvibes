@@ -33,7 +33,8 @@ UNINSTALL="${GOODVIBES_UNINSTALL:-0}"
 # because the daemon is configured to serve one directory by absolute path, and
 # unpacking a new version over a running daemon's directory would swap files
 # under it mid-request. A new version lands in its own directory, the daemon is
-# pointed at it, and the previous one is removed only after that succeeds.
+# pointed at it, and previous/custom bundles stay available to running readers
+# and explicit rollback. Their directory names do not prove they can be deleted.
 WEBUI_ROOT="$INSTALL_DIR/webui"
 
 # Set by install_webui() once the daemon has actually been configured to serve
@@ -51,6 +52,9 @@ INSTALL_CLAIM_DIR=""
 INSTALL_CLAIM_COUNT=0
 INSTALL_SWAP_BEGUN=0
 INSTALL_SWAP_FINISHED=0
+INSTALL_DAEMON_CLAIM_ID=""
+INSTALL_TUI_CLAIM_ID=""
+INSTALL_AGENT_CLAIM_ID=""
 
 # The marker string written into every installer-created service unit/plist.
 # The uninstall path keys on it to tell an installer-managed unit (safe to
@@ -427,39 +431,89 @@ prepare_daemon_receipt() {
   ' "$WORKDIR/$_receipt_asset.ci-artifact.json" "$_reader_source" "$_compiled_readers" "${VERSION#v}" "$WORKDIR/daemon-installation.json" || fail 'The verified daemon release metadata could not be confirmed. No installed program was replaced.'
 }
 
+# A claim's payload is diagnostic, never an authority key. Retain its actual
+# native inode/device/owner/mode across both public and private hardlink names.
+# Root descriptors5/6/7 retain all original claim inodes until final release,
+# preventing inode reuse even when a publication subshell reuses its inherited
+# descriptor numbers. Link count/ctime change during our own unlink sequence.
+install_claim_file_identity() {
+  [ -f "$1" ] && [ ! -L "$1" ] || return 1
+  # The filesystem tool belongs to the actual host, independently of an
+  # injected release-platform selector. GNU and BSD expose different flags.
+  stat -c '%d:%i:%u:%g:%f' "$1" 2>/dev/null || stat -f '%d:%i:%u:%g:%p' "$1"
+}
+expected_install_claim_identity() {
+  case "$1" in
+    goodvibes-daemon) printf '%s' "$INSTALL_DAEMON_CLAIM_ID" ;;
+    goodvibes) printf '%s' "$INSTALL_TUI_CLAIM_ID" ;;
+    goodvibes-agent) printf '%s' "$INSTALL_AGENT_CLAIM_ID" ;;
+    *) return 1 ;;
+  esac
+}
+
+install_claim_directories_current() {
+  [ ! -L "$INSTALL_CLAIM_DIR" ] && [ "$INSTALL_CLAIM_DIR" -ef /dev/fd/9 ] || return 1
+  [ ! -L "$INSTALL_CLAIM_OWNER" ] && [ "$INSTALL_CLAIM_OWNER" -ef /dev/fd/8 ] || return 1
+}
+
 release_install_claims() {
   [ -n "$INSTALL_CLAIM_OWNER" ] || return 0
-  _claim_failed=0
+  install_claim_directories_current || return 1
   _claim_index=0
   for _claim_product in goodvibes-daemon goodvibes goodvibes-agent; do
     _claim_index=$((_claim_index + 1))
     [ "$_claim_index" -le "$INSTALL_CLAIM_COUNT" ] || break
     _claim_path="$INSTALL_CLAIM_DIR/$_claim_product.update-transaction"
-    if [ -L "$_claim_path" ]; then
-      _claim_failed=1
-    elif [ -e "$_claim_path" ]; then
-      if [ "$_claim_path" -ef "$INSTALL_CLAIM_OWNER/$_claim_product" ]; then
-        if rm -f "$_claim_path"; then rm -f "$INSTALL_CLAIM_OWNER/$_claim_product" || _claim_failed=1
-        else _claim_failed=1
-        fi
-      else _claim_failed=1
-      fi
-    else _claim_failed=1
+    _claim_reference="$INSTALL_CLAIM_OWNER/$_claim_product"
+    _claim_expected=$(expected_install_claim_identity "$_claim_product") || return 1
+    [ -n "$_claim_expected" ] || return 1
+    install_claim_directories_current || return 1
+    [ -f "$_claim_reference" ] && [ ! -L "$_claim_reference" ] || return 1
+    exec 3< "$_claim_reference"
+    if ! install_claim_directories_current || [ -L "$_claim_path" ] || [ ! "$_claim_path" -ef /dev/fd/3 ] \
+      || [ -L "$_claim_reference" ] || [ ! "$_claim_reference" -ef /dev/fd/3 ] \
+      || [ "$(install_claim_file_identity "$_claim_path")" != "$_claim_expected" ] \
+      || [ "$(install_claim_file_identity "$_claim_reference")" != "$_claim_expected" ]; then
+      exec 3<&-
+      return 1
     fi
+    if ! rm -f "$_claim_path"; then exec 3<&-; return 1; fi
+    # The first unlink is an effect boundary. Never use its success to adopt
+    # a replacement private reference or delete a reappeared foreign claim.
+    if ! install_claim_directories_current || [ -e "$_claim_path" ] || [ -L "$_claim_path" ] \
+      || [ -L "$_claim_reference" ] || [ ! "$_claim_reference" -ef /dev/fd/3 ] \
+      || [ "$(install_claim_file_identity "$_claim_reference")" != "$_claim_expected" ]; then
+      exec 3<&-
+      return 1
+    fi
+    if ! rm -f "$_claim_reference"; then exec 3<&-; return 1; fi
+    exec 3<&-
+    install_claim_directories_current || return 1
+    [ ! -e "$_claim_reference" ] && [ ! -L "$_claim_reference" ] || return 1
   done
-  [ "$_claim_failed" = 0 ] || return 1
+  install_claim_directories_current || return 1
   rmdir "$INSTALL_CLAIM_OWNER" || return 1
+  [ ! -e "$INSTALL_CLAIM_OWNER" ] && [ ! -L "$INSTALL_CLAIM_OWNER" ] || return 1
   INSTALL_CLAIM_OWNER=""
   INSTALL_CLAIM_COUNT=0
+  exec 5<&-
+  exec 6<&-
+  exec 7<&-
+  exec 8<&-
   exec 9<&-
 }
 
 assert_install_claims() {
   [ "$INSTALL_CLAIM_COUNT" = 3 ] || fail 'The complete suite installation claims are not retained.'
-  [ "$INSTALL_CLAIM_DIR" -ef /dev/fd/9 ] || fail 'The selected installation directory changed; no further program replacement is allowed.'
+  install_claim_directories_current || fail 'The original installation or private claim directory changed; no further program replacement is allowed.'
   for _assert_product in goodvibes-daemon goodvibes goodvibes-agent; do
     _assert_claim="$INSTALL_CLAIM_DIR/$_assert_product.update-transaction"
-    [ ! -L "$_assert_claim" ] && [ "$_assert_claim" -ef "$INSTALL_CLAIM_OWNER/$_assert_product" ] || fail 'Installation ownership changed; no further program replacement is allowed.'
+    _assert_expected=$(expected_install_claim_identity "$_assert_product") || fail 'Original installation claim identity is unavailable.'
+    [ -n "$_assert_expected" ] && [ ! -L "$_assert_claim" ] && [ ! -L "$INSTALL_CLAIM_OWNER/$_assert_product" ] \
+      && [ "$_assert_claim" -ef "$INSTALL_CLAIM_OWNER/$_assert_product" ] \
+      && [ "$(install_claim_file_identity "$_assert_claim")" = "$_assert_expected" ] \
+      && [ "$(install_claim_file_identity "$INSTALL_CLAIM_OWNER/$_assert_product")" = "$_assert_expected" ] \
+      || fail 'Original installation claim ownership changed; no further program replacement is allowed.'
   done
 }
 
@@ -482,6 +536,7 @@ cleanup_release_install() {
 }
 
 claim_release_install() {
+  command -v stat >/dev/null 2>&1 || fail 'The native stat utility is required to retain original installation ownership.'
   mkdir -p "$INSTALL_DIR"
   INSTALL_CLAIM_DIR=$(CDPATH= cd -- "$INSTALL_DIR" && pwd -P) || fail 'Could not retain the installation directory.'
   # Publish only to the selected directory, even when the original option was
@@ -491,15 +546,34 @@ claim_release_install() {
   INSTALL_DIR=$INSTALL_CLAIM_DIR
   WEBUI_ROOT="$INSTALL_DIR/webui"
   INSTALL_CLAIM_OWNER=$(mktemp -d "$INSTALL_CLAIM_DIR/.goodvibes-install-claim.XXXXXX")
+  [ ! -L "$INSTALL_CLAIM_OWNER" ] || fail 'The private installation claim directory changed.'
+  exec 8< "$INSTALL_CLAIM_OWNER"
+  install_claim_directories_current || fail 'Could not retain the original private claim directory.'
   for _claim_product in goodvibes-daemon goodvibes goodvibes-agent; do
     # Occupied native transaction slots never grant execution, even while
     # their owner writes the receipt. Noclobber creates exclusively without
     # following a symlink or treating an existing directory as a destination.
     _claim_path="$INSTALL_CLAIM_DIR/$_claim_product.update-transaction"
     [ ! -e "$_claim_path" ] && [ ! -L "$_claim_path" ] || fail 'Another update or interrupted installation owns this directory. Inspect its retained transaction files first.'
-    (set -C; printf 'GoodVibes suite installation %s\nInterrupted replacement: inspect installed programs and retained claims before recovery.\n' "$VERSION" > "$_claim_path") || fail 'Another update or interrupted installation owns this directory. Inspect its retained transaction files first.'
+    (umask 077; set -C; printf 'GoodVibes suite installation %s\nInterrupted replacement: inspect installed programs and retained claims before recovery.\n' "$VERSION" > "$_claim_path") || fail 'Another update or interrupted installation owns this directory. Inspect its retained transaction files first.'
     INSTALL_CLAIM_COUNT=$((INSTALL_CLAIM_COUNT + 1))
+    case "$_claim_product" in
+      goodvibes-daemon) exec 5< "$_claim_path"; _created_claim_fd=/dev/fd/5 ;;
+      goodvibes) exec 6< "$_claim_path"; _created_claim_fd=/dev/fd/6 ;;
+      goodvibes-agent) exec 7< "$_claim_path"; _created_claim_fd=/dev/fd/7 ;;
+    esac
+    [ ! -L "$_claim_path" ] && [ "$_claim_path" -ef "$_created_claim_fd" ] || fail 'The original installation claim changed during capture.'
+    _created_claim_id=$(install_claim_file_identity "$_claim_path") || fail 'Could not retain the original native installation claim.'
+    [ ! -L "$_claim_path" ] && [ "$_claim_path" -ef "$_created_claim_fd" ] || fail 'The native installation claim changed during observation.'
+    case "$_claim_product" in
+      goodvibes-daemon) INSTALL_DAEMON_CLAIM_ID=$_created_claim_id ;;
+      goodvibes) INSTALL_TUI_CLAIM_ID=$_created_claim_id ;;
+      goodvibes-agent) INSTALL_AGENT_CLAIM_ID=$_created_claim_id ;;
+    esac
     ln "$_claim_path" "$INSTALL_CLAIM_OWNER/$_claim_product" || fail 'The installer could not retain its transaction ownership. Inspect the retained claim before retrying.'
+    [ ! -L "$_claim_path" ] && [ ! -L "$INSTALL_CLAIM_OWNER/$_claim_product" ] \
+      && [ "$_claim_path" -ef "$_created_claim_fd" ] && [ "$INSTALL_CLAIM_OWNER/$_claim_product" -ef "$_created_claim_fd" ] \
+      || fail 'The original installation claim changed before retention.'
   done
   # An interrupted updater may have retained a companion slot even when its
   # primary claim is missing. Never overwrite that recovery evidence.
@@ -2042,17 +2116,164 @@ install_agent() {
 # binaries it drives are downloaded separately into the agent's managed cache).
 # The suite verification pass requires the asset and its checksum, extracts it
 # privately and checks the entrypoints before any installed program is changed.
+# Publish an already checksum-verified directory without deleting any installed
+# tree. The native suite updater uses this same per-directory claim pathname.
+# Descriptor checks bind each rename/compensation to its original physical root;
+# a changed or ambiguous source is retained with its claim for inspection.
+publish_release_directory() (
+  _directory_source=$1
+  _directory_target=$2
+  _directory_parent=${_directory_target%/*}
+  umask 077
+  assert_install_claims
+  case "$_directory_parent" in
+    "$INSTALL_DIR") : ;;
+    "$INSTALL_DIR/webui")
+      [ ! -L "$_directory_parent" ] || fail 'The WebUI directory is an alias; its existing deployment was preserved.'
+      if [ ! -e "$_directory_parent" ]; then
+        assert_install_claims
+        # The scoped umask makes this new original level mode700.
+        mkdir "$_directory_parent" || fail 'Could not exclusively create the WebUI directory.'
+      fi ;;
+    *) fail 'Released directories must belong to this original suite installation.' ;;
+  esac
+  [ -d "$_directory_parent" ] && [ ! -L "$_directory_parent" ] || fail 'The original directory publication parent is unavailable.'
+  exec 0< "$_directory_parent"
+  [ "$_directory_parent" -ef /dev/fd/0 ] || fail 'Could not retain the original directory publication parent.'
+  [ -d "$_directory_source" ] && [ ! -L "$_directory_source" ] || fail 'Verified directory staging is unavailable.'
+  exec 7< "$_directory_source"
+  [ "$_directory_source" -ef /dev/fd/7 ] || fail 'Verified directory staging changed.'
+  [ ! -e "$_directory_target.incoming" ] && [ ! -L "$_directory_target.incoming" ] || fail 'An existing incoming directory requires inspection; it was preserved.'
+  _directory_had_old=0
+  if [ -e "$_directory_target" ] || [ -L "$_directory_target" ]; then
+    [ -d "$_directory_target" ] && [ ! -L "$_directory_target" ] || fail 'The existing directory target is a custom file or alias; it was preserved.'
+    exec 6< "$_directory_target"
+    [ "$_directory_target" -ef /dev/fd/6 ] || fail 'Could not retain the original installed directory.'
+    _directory_had_old=1
+  fi
+  _directory_work=$(mktemp -d "$_directory_parent/.goodvibes-directory-install.XXXXXX") || fail 'Could not reserve private directory staging.'
+  exec 5< "$_directory_work"
+  _directory_incoming="$_directory_work/incoming"
+  _directory_outgoing="$_directory_work/outgoing"
+  _directory_claim="$_directory_target.directory-update.lock"
+  _directory_claim_owned=0
+  _directory_incoming_owned=0
+  _directory_done=0
+
+  _directory_base_current() {
+    (assert_install_claims) || return 1
+    [ ! -L "$_directory_parent" ] && [ "$_directory_parent" -ef /dev/fd/0 ] || return 1
+    [ ! -L "$_directory_work" ] && [ "$_directory_work" -ef /dev/fd/5 ] || return 1
+  }
+  _directory_claim_current() {
+    _directory_base_current || return 1
+    [ "$_directory_claim_owned" = 1 ] || return 1
+    [ ! -L "$_directory_claim" ] && [ "$_directory_claim" -ef /dev/fd/3 ] || return 1
+    [ ! -L "$_directory_work/claim" ] && [ "$_directory_work/claim" -ef /dev/fd/3 ] || return 1
+  }
+  _directory_original_current() {
+    _directory_claim_current || return 1
+    [ ! -L "$_directory_source" ] && [ "$_directory_source" -ef /dev/fd/7 ] || return 1
+    [ ! -L "$_directory_incoming" ] && [ "$_directory_incoming" -ef /dev/fd/4 ] || return 1
+    if [ "$_directory_had_old" = 1 ]; then
+      [ ! -L "$_directory_target" ] && [ "$_directory_target" -ef /dev/fd/6 ] || return 1
+    else
+      [ ! -e "$_directory_target" ] && [ ! -L "$_directory_target" ] || return 1
+    fi
+  }
+  _directory_release_claim() {
+    _directory_claim_current || return 1
+    rm -f "$_directory_claim" || return 1
+    _directory_base_current || return 1
+    [ ! -e "$_directory_claim" ] && [ ! -L "$_directory_claim" ] || return 1
+    [ ! -L "$_directory_work/claim" ] && [ "$_directory_work/claim" -ef /dev/fd/3 ] || return 1
+    rm -f "$_directory_work/claim" || return 1
+    _directory_base_current || return 1
+    [ ! -e "$_directory_work/claim" ] && [ ! -L "$_directory_work/claim" ] || return 1
+    _directory_claim_owned=0
+  }
+  _directory_compensate() {
+    _directory_claim_current || return 1
+    # A throwing rename may already have completed. Inspect the exact retained
+    # descriptors instead of treating an exit status as proof of rollback.
+    if [ "$_directory_incoming_owned" = 1 ] && [ ! -L "$_directory_target" ] && [ "$_directory_target" -ef /dev/fd/4 ]; then
+      [ ! -e "$_directory_incoming" ] && [ ! -L "$_directory_incoming" ] || return 1
+      mv "$_directory_target" "$_directory_incoming" || :
+      _directory_claim_current || return 1
+      [ ! -L "$_directory_incoming" ] && [ "$_directory_incoming" -ef /dev/fd/4 ] || return 1
+    fi
+    if [ "$_directory_had_old" = 1 ]; then
+      if [ ! -e "$_directory_target" ] && [ ! -L "$_directory_target" ]; then
+        [ ! -L "$_directory_outgoing" ] && [ "$_directory_outgoing" -ef /dev/fd/6 ] || return 1
+        mv "$_directory_outgoing" "$_directory_target" || :
+      fi
+      _directory_claim_current || return 1
+      [ ! -L "$_directory_target" ] && [ "$_directory_target" -ef /dev/fd/6 ] || return 1
+    else
+      [ ! -e "$_directory_target" ] && [ ! -L "$_directory_target" ] || return 1
+    fi
+  }
+  _directory_finish() {
+    _directory_exit=$?
+    trap - EXIT INT TERM
+    if [ "$_directory_done" != 1 ]; then
+      if [ "$_directory_claim_owned" = 1 ] && _directory_compensate && _directory_release_claim; then
+        say "install.sh: the original directory was kept or restored; private staging was retained at $_directory_work." >&2
+      else
+        say "install.sh: directory publication needs inspection; preserve $_directory_work and $_directory_claim before retrying." >&2
+      fi
+      [ "$_directory_exit" != 0 ] || _directory_exit=1
+    elif ! _directory_release_claim; then
+      say "install.sh: the directory is published, but its changed ownership claim requires inspection at $_directory_work and $_directory_claim." >&2
+      _directory_exit=1
+    else
+      # Empty removal cannot delete unknown children. Existing trees and any
+      # unexpected siblings remain in their original owned private directory.
+      if _directory_base_current && rmdir "$_directory_work" 2>/dev/null; then :
+      else say "  retained   $_directory_work (previous directory or additional files)"
+      fi
+    fi
+    exit "$_directory_exit"
+  }
+  trap _directory_finish EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  _directory_base_current || fail 'Original directory staging changed.'
+  [ ! -e "$_directory_claim" ] && [ ! -L "$_directory_claim" ] || fail 'Another directory update or interrupted publication owns this target.'
+  (set -C; printf 'GoodVibes directory installation %s\n' "$VERSION" > "$_directory_claim") || fail 'Could not claim the original directory target.'
+  ln "$_directory_claim" "$_directory_work/claim" || fail 'Could not retain the directory claim; inspect it before retrying.'
+  exec 3< "$_directory_work/claim"
+  _directory_claim_owned=1
+  _directory_claim_current || fail 'The directory claim changed before staging.'
+  mkdir "$_directory_incoming" || fail 'Could not exclusively create incoming directory staging.'
+  exec 4< "$_directory_incoming"
+  _directory_incoming_owned=1
+  _directory_original_current || fail 'Original directory sources changed before copying.'
+  cp -Rp "$_directory_source/." "$_directory_incoming/" || fail 'Could not copy the verified directory into its private publication stage.'
+  _directory_original_current || fail 'Original directory sources changed while copying.'
+  chmod 755 "$_directory_incoming" || fail 'Could not set incoming directory permissions.'
+  _directory_original_current || fail 'Original directory sources changed before publication.'
+  if [ "$_directory_had_old" = 1 ]; then
+    [ ! -e "$_directory_outgoing" ] && [ ! -L "$_directory_outgoing" ] || fail 'An unknown outgoing directory slot appeared.'
+    mv "$_directory_target" "$_directory_outgoing" || fail 'Could not park the original directory.'
+    _directory_claim_current || fail 'Original directory ownership changed after parking.'
+    [ ! -L "$_directory_outgoing" ] && [ "$_directory_outgoing" -ef /dev/fd/6 ] || fail 'The parked original directory changed.'
+  fi
+  [ ! -e "$_directory_target" ] && [ ! -L "$_directory_target" ] || fail 'A foreign live directory appeared; it was preserved.'
+  [ ! -L "$_directory_incoming" ] && [ "$_directory_incoming" -ef /dev/fd/4 ] || fail 'The original incoming directory changed.'
+  mv "$_directory_incoming" "$_directory_target" || fail 'Could not publish the retained incoming directory.'
+  _directory_claim_current || fail 'Original directory ownership changed after publication.'
+  [ ! -L "$_directory_target" ] && [ "$_directory_target" -ef /dev/fd/4 ] || fail 'The directory rename result is unknown.'
+  _directory_done=1
+)
+
 install_browser_driver() {
   driver_staging="$WORKDIR/browser-driver-staging"
   assert_install_claims
-  # Local release bookkeeping lets a later suite rollback require the same
-  # release for directory assets and programs. It is not an integrity pin.
+  # Local release bookkeeping is not an integrity pin or a deletion receipt.
   write_directory_release_marker "$driver_staging/playwright-core"
   driver_target="$INSTALL_DIR/playwright-core"
-  rm -rf "$driver_target.incoming"
-  mv -f "$driver_staging/playwright-core" "$driver_target.incoming"
-  rm -rf "$driver_target"
-  mv -f "$driver_target.incoming" "$driver_target"
+  publish_release_directory "$driver_staging/playwright-core" "$driver_target"
   say "  installed  $driver_target"
 }
 
@@ -2072,7 +2293,8 @@ install_browser_driver() {
 # the daemon is pointed at it afterwards. Unpacking over the directory a running
 # daemon is serving would swap files under it mid-request; this way the running
 # daemon keeps serving the old directory until it is restarted onto the new one.
-# Older versioned directories are pruned once the new one is configured.
+# Older versioned and custom directories remain available to running readers
+# and explicit recovery. A version name does not prove ownership or inactivity.
 #
 # CONFIGURATION IS DONE BY THE DAEMON BINARY, not by writing settings from
 # shell: `goodvibes-daemon webui enable --bundle-dir <dir>` owns the key names,
@@ -2097,11 +2319,7 @@ install_webui() {
   assert_install_claims
   write_directory_release_marker "$webui_staging/goodvibes-webui"
   webui_target="$WEBUI_ROOT/$webui_plain_version"
-  mkdir -p "$WEBUI_ROOT"
-  rm -rf "$webui_target.incoming"
-  mv -f "$webui_staging/goodvibes-webui" "$webui_target.incoming"
-  rm -rf "$webui_target"
-  mv -f "$webui_target.incoming" "$webui_target"
+  publish_release_directory "$webui_staging/goodvibes-webui" "$webui_target"
   say "  installed  $webui_target"
 
   # Point the daemon at it. The binary owns the settings; this reads its receipt
@@ -2126,7 +2344,6 @@ install_webui() {
   # derivation in shell is how a printed URL starts disagreeing with the daemon.
   WEBUI_URL=$(printf '%s\n' "$webui_output" | awk '/^[[:space:]]*https?:\/\//{print $1; exit}')
 
-  prune_old_webui_bundles "$webui_plain_version"
   WEBUI_INSTALLED=1
 }
 
@@ -2139,19 +2356,9 @@ write_directory_release_marker() {
   chmod 644 "$_marker_path" || fail 'Could not set directory release metadata permissions.'
 }
 
-# Remove versioned bundle directories other than the one just configured. Runs
-# only AFTER the daemon has been pointed at the new directory, so a failed
-# configure never leaves the machine with no bundle at all.
-prune_old_webui_bundles() {
-  _keep="$1"
-  [ -d "$WEBUI_ROOT" ] || return 0
-  for _old in "$WEBUI_ROOT"/*; do
-    [ -d "$_old" ] || continue
-    [ "${_old##*/}" = "$_keep" ] && continue
-    rm -rf "$_old"
-    say "  removed    $_old (superseded)"
-  done
-}
+# Previous/custom WebUI directories are deliberately retained. The directory
+# name and release marker do not identify all contents or tell us whether an
+# existing daemon still serves them, so installation never prunes them.
 
 # --- PATH shadowing: is the install we just wrote the one the shell runs? ---
 #

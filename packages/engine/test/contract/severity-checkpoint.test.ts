@@ -153,6 +153,9 @@ test('a failed late checkpoint is a local failure and the drained terminal write
     expect(saved.failureKind).toBe('other');
     expect(saved.error).toBe('The severity usage checkpoint could not be saved');
     expect(saved.judgmentUsage).toEqual({ calls: before.calls + 1, inputTokens: before.inputTokens + 7001, outputTokens: before.outputTokens + 3001 });
-    expect(failure).toHaveBeenCalledTimes(2);
+    // Failed late write, explicit failure checkpoint, then the mandatory final
+    // settlement checkpoint after executor/metered-response drainage.
+    expect(failure).toHaveBeenCalledTimes(3);
+    expect(failure.mock.results.map(result => result.type === 'return' ? result.value : undefined)).toEqual([false, true, true]);
   } finally { failure.mockRestore(); }
 });

@@ -32,7 +32,12 @@ test('loading an old unstarted collision preserves accepted work and resumes onl
   const accepted = JSON.stringify(old);
   const contract = makeContract({ id: 'ctr-12345678', status: 'fixing', fixRounds: 1,
     groups: [old.group, fresh.group], units: [...old.units, ...fresh.units] });
-  const restored = deserializeContract(serializeContract(contract, 1)!)!;
+  // The current writer refuses duplicate baseline locations. This is an
+  // actual older payload from before that guard, not a new broken checkpoint.
+  expect(serializeContract(contract, 1)).toBeNull();
+  const restored = deserializeContract(JSON.stringify({ schemaVersion: 5, writtenAt: 1,
+    contract: { ...contract, schemaVersion: 5 } }))!;
+  expect(restored).not.toBeNull();
   expect(JSON.stringify({ group: restored.groups[0], units: restored.units.slice(0, 2) })).toBe(accepted);
   expect(restored.groups[1]!.id).toBe('ctr-12345678.f2');
   expect(restored.units[3]!.dependsOn).toEqual(['ctr-12345678.f2.u1']);

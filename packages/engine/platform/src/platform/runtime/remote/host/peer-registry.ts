@@ -345,6 +345,11 @@ export class PeerRegistry {
         throw new Error('PeerRegistry closed during initialization.');
       }
       this.initialized = true;
+    }, (error: unknown) => {
+      // Native storage is terminal after close. Preserve the registry's own
+      // retired-generation boundary even if its native init rejects first.
+      if (generation !== this.generation) throw new Error('PeerRegistry closed during initialization.', { cause: error });
+      throw error;
     });
     this.initPromise = pending;
     try {

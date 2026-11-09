@@ -23,19 +23,20 @@ afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await c
 async function fixture(declare?: (format: string) => void) {
   const root = mkdtempSync(join(tmpdir(), 'native-explicit-v3-')); cleanup.push(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, '.goodvibes'));
+  const workspace = join(root, 'workspace'); mkdirSync(workspace);
   const tokens = new PairingTokenManager(join(root, '.goodvibes', 'pairing.json')), token = tokens.mint({ name: 'Synthetic explicit source fixture' });
   const helper = new DaemonControlPlaneHelper({ pairingTokens: tokens, authToken: () => 'synthetic-shared', gatewayMethods: new GatewayMethodCatalog(),
     controlPlaneGateway: { touchWebSocketClient() {} } } as unknown as DaemonControlPlaneContext);
   const authority = helper.createNativeExecutionAuthority(token.token)!;
-  const scopes = new WorkspaceRegistrationStore({ path: join(root, '.goodvibes', 'workspaces.json'), homeDir: root, daemonStateDir: join(root, '.goodvibes', 'daemon') }); await scopes.add(root);
+  const scopes = new WorkspaceRegistrationStore({ path: join(root, '.goodvibes', 'workspaces.json'), homeDir: root, daemonStateDir: join(root, '.goodvibes', 'daemon') }); await scopes.add(workspace);
   const file = join(root, '.goodvibes', 'knowledge.sqlite'), store = new KnowledgeStore({ dbPath: file, ...(declare ? { nativeDataWriter: { declare } } : {}) });
   cleanup.push(() => store.close()); const storage = await store.openWorkLedgerStorage('project');
   const ledger = createWorkLedger({ projectId: 'project', storage, clock });
-  const deps = { projectId: 'project', projectRoot: root, sessionId: 'native-session', service: ledger.service, authority: ledger.authority, scopes };
+  const deps = { projectId: 'project', projectRoot: workspace, sessionId: 'native-session', service: ledger.service, authority: ledger.authority, scopes };
   const host = createNativeWorkSubmissionHost(deps); cleanup.push(() => host.close());
   const actor = ledger.authority.issueActor({ actorId: authority.current()!.principalId, projectId: 'project', role: 'coordinator' });
   const input = { requestId: 'original-request', inputId: 'original-input', expectedRevision: 0, goal: '  Keep exact source. 🌻\r\n', criteria: ['  Keep order.  ', 'Keep duplicates.', 'Keep duplicates.'] };
-  return { root, file, store, storage, tokens, token, authority, ledger, deps, host, actor, input };
+  return { root, workspace, file, store, storage, tokens, token, authority, ledger, deps, host, actor, input };
 }
 
 test('real paired explicit source v3 creates one opaque identity; concurrent/restarted replay preserves the full original event', async () => {

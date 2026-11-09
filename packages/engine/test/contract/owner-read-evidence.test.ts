@@ -101,14 +101,21 @@ test('cached owner observations follow exact journal bytes through same-size edi
 });
 
 test('correction proposal identity ignores bookkeeping but changes when actual owner observations change', () => {
-  const f = fixture(); const work = { ...contractWorkReceipts(f.contract, { ownerEvidence: f.read(f.contract, '') }),
-    privateArchiveChecks: [{ unitId: 'repair', gate: 'preservation', passed: true, output: 'Matched.', durationMs: 1 }] };
+  const f = fixture(); const work = Object.assign(contractWorkReceipts(f.contract, { ownerEvidence: f.read(f.contract, '') }), {
+    privateArchiveChecks: [{ unitId: 'repair', gate: 'preservation', passed: true, output: 'Matched.', durationMs: 1 }] });
   const first = JSON.stringify(workReceiptIdentity(work));
-  const later = JSON.parse(JSON.stringify(work));
+  expect(() => workReceiptIdentity({ ...work })).toThrow('original native receipt');
+  const later = work;
   later.privateArchiveChecks[0].durationMs = 89;
-  later.ownerPriorReads.sources[0].bytes += 100;
+  const owner = later.ownerPriorReads;
+  if (!owner || typeof owner !== 'object' || Array.isArray(owner)
+    || !Array.isArray(owner['sources']) || !Array.isArray(owner['sourceReads'])) throw new Error('Missing actual owner observations');
+  const source = owner['sources'][0], read = owner['sourceReads'][0];
+  if (!source || typeof source !== 'object' || Array.isArray(source) || typeof source['bytes'] !== 'number'
+    || !read || typeof read !== 'object' || Array.isArray(read)) throw new Error('Incomplete actual owner observations');
+  source['bytes'] += 100;
   expect(JSON.stringify(workReceiptIdentity(later))).toBe(first);
-  later.ownerPriorReads.sourceReads[0].returnedRanges = ['1-2'];
+  read['returnedRanges'] = ['1-2'];
   expect(JSON.stringify(workReceiptIdentity(later))).not.toBe(first);
 });
 

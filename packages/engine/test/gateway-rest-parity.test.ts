@@ -71,6 +71,24 @@ function buildHarness(options?: {
 }
 
 describe('gateway REST parity: advertised paths reach the gateway handler', () => {
+  test.each(['purchased', 'not-purchased'] as const)('merchant-history %s finding reaches the actual reconcile verb with its exact operation', async outcome => {
+    const { calls, handlers } = buildHarness();
+    const body = { purchaseId: 'purchase-original', operationId: 'operation-original', outcome, inspectedMerchantHistory: true, confirm: true };
+    const response = await dispatchDaemonApiRoutes(makeRequest('POST', 'http://localhost/api/payments/purchase/reconcile', body), handlers);
+    expect(response?.status).toBe(200);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ methodId: 'payments.purchase.reconcile', body, admin: true });
+  });
+
+  test('reconcile REST keeps the real admin gate before invoking the payment handler', async () => {
+    const { calls, handlers } = buildHarness({ access: 'admin', denyAdmin: true });
+    const response = await dispatchDaemonApiRoutes(makeRequest('POST', 'http://localhost/api/payments/purchase/reconcile', {
+      purchaseId: 'purchase-original', operationId: 'operation-original', outcome: 'not-purchased', inspectedMerchantHistory: true, confirm: true,
+    }), handlers);
+    expect(response?.status).toBe(403);
+    expect(calls).toHaveLength(0);
+  });
+
   test('POST expected-turn cancellation reaches the native verb with both identities', async () => {
     const { calls, handlers } = buildHarness();
     const response = await dispatchDaemonApiRoutes(makeRequest('POST', 'http://localhost/api/sessions/hosted-1/turns/cancel', { expectedTurnId: 'turn-1' }), handlers);

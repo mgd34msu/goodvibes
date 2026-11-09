@@ -16,7 +16,8 @@ const cleanup: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
 
 function fixture(options: Partial<RemoteDispatcherOptions> = {}) {
-  const registry = new PeerRegistry(makeProjectTempDir('remote-dispatch-lifecycle'));
+  const directory = makeProjectTempDir('remote-dispatch-lifecycle');
+  const registry = new PeerRegistry(directory);
   cleanup.push(() => registry.close());
   const backend: Backend = { kind: 'local-process', dispatch: async () => result };
   const dispatcher = new RemoteDispatcher({
@@ -25,7 +26,7 @@ function fixture(options: Partial<RemoteDispatcherOptions> = {}) {
     backends: new Map([[backend.kind, backend]]), ...options,
   });
   cleanup.push(() => dispatcher.teardown());
-  return { registry, dispatcher };
+  return { directory, registry, dispatcher };
 }
 
 async function seed(registry: PeerRegistry) {
@@ -35,9 +36,11 @@ async function seed(registry: PeerRegistry) {
 
 describe('remote dispatcher lifecycle', () => {
   test('first dispatch loads a persisted cold registry', async () => {
-    const { registry, dispatcher } = fixture();
-    await seed(registry);
-    registry.close();
+    // A closed HandlerSqliteStore is a retired native owner. Seed through a
+    // separate producer, then let the genuine cold consumer initialize itself.
+    const { directory, registry, dispatcher } = fixture();
+    const producer = new PeerRegistry(directory);
+    try { await seed(producer); } finally { producer.close(); }
     expect((await dispatcher.dispatch(request)).stdout).toBe('fixture');
     await dispatcher.teardown();
     expect(registry.get(peer.peerId)?.peerId).toBe(peer.peerId); // caller owns the registry

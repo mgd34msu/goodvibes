@@ -111,10 +111,18 @@ async function fixture(options: {
   const journal = new NativeHostedTurnJournal(journalPath, options.journalIO);
   const getHooks: (() => void | Promise<void>)[] = [];
   const admitHooks: (() => void | Promise<void>)[] = [];
+  const readSource = (inputId: string): NativeConversationIntakeResult => {
+    const original = additionalSources.get(inputId) ?? current;
+    const detached = structuredClone(original);
+    // Preserve only the actual manager-issued immutable snapshot. A JSON
+    // copy deliberately has no native continuation owner (covered below).
+    return original.kind === 'turn' && detached.kind === 'turn' && original.continuation
+      ? { ...detached, continuation: original.continuation } : detached;
+  };
   const deps = { projectId, projectRoot: workspace, journalPath, journal, broker,
     intake: {
-      get: async ({ inputId }: { inputId: string }) => { counts.gets++; await getHooks.shift()?.(); return structuredClone(additionalSources.get(inputId) ?? current); },
-      admit: async ({ inputId }: { inputId: string }) => { counts.admits++; await admitHooks.shift()?.(); return structuredClone(additionalSources.get(inputId) ?? current); },
+      get: async ({ inputId }: { inputId: string }) => { counts.gets++; await getHooks.shift()?.(); return readSource(inputId); },
+      admit: async ({ inputId }: { inputId: string }) => { counts.admits++; await admitHooks.shift()?.(); return readSource(inputId); },
     },
     manager: {
       get: (sessionId: string) => manager.get(sessionId),

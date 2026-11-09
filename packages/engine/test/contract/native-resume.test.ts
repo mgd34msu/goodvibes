@@ -7,6 +7,7 @@ import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { contractPath, createContractIntake, type Contract, type NativeContractSource } from '../../platform/src/platform/contract/index.js';
 import type { NativeContractDecisionHost } from '../../platform/src/platform/contract/native-decisions.js';
 import { nativeSourceCriteria } from '../../platform/src/platform/contract/native-source.js';
+import { readContractSnapshot } from '../../platform/src/platform/contract/store.js';
 import { makeContract } from './fixtures.js';
 import { makeHarness, makeRepo, oneUnitPlan, startContract, waitFor, type Harness } from './runner-support.js';
 import { plannerOutput, shapeOf } from './plan-support.js';
@@ -103,10 +104,15 @@ test('historical native unshown wait rechecks evidence without an owner approval
   const path = contractPath(directory, id); const saved = (JSON.parse(readFileSync(path, 'utf8')) as { contract: Contract }).contract;
   delete saved.nativeDecisions; delete saved.nativeProgress; delete saved.nativeWaiting; saved.status = 'awaiting-owner'; saved.statusBeforeOwner = 'running'; saved.units[0]!.status = 'awaiting-owner'; saved.units[0]!.criteria[0]!.status = 'unshown';
   saved.escalations = [{ id: `${id}.old`, at: 10, scope: 'unit', targetId: 'u1', reason: 'unsettled', question: 'Historical request for approval', unmetCriterionIds: [] }];
+  // Schema3 predates physical review descriptors. Keep its actual optional
+  // check shape instead of relabeling schema6 native bookkeeping as old data.
+  for (const unit of saved.units) unit.checks = unit.checks.map(({ reviewedFiles: _newPhysicalDescriptors, ...check }) => check);
   writeSnapshot(path, { ...saved, schemaVersion: 3 }, 3);
+  expect(readContractSnapshot(readFileSync(path, 'utf8'))).toHaveProperty('snapshot');
   const h = add(makeHarness({ root: directory, recordNative: true, decisionLog: log, contract: { maxFixRounds: 0 }, scripts: {}, port: context => context.name === 'disposition' ? choiceAnswer(context.question, 'reject', 0.99) : context.name.startsWith('criterion_') ? noulAnswer(0.99) : undefined }));
   await h.runner.resumeAll(); await waitFor(() => terminal(h, id), 'fresh refusal of unchanged evidence'); await h.runner.join(id);
   const done = h.store.get(id)!; expect(done.status).toBe('failed'); expect(done.units[0]!.criteria[0]!.status).toBe('unmet'); expect(h.agentsOf('u1')).toHaveLength(0);
+  expect(done.units[0]!.checks.length).toBeGreaterThan(saved.units[0]!.checks.length);
   expect(done.nativeDecisions?.history ?? []).toHaveLength(0); expect(done.escalations[0]!.reply).toBeUndefined();
   expect(h.events.some(event => event.type === 'CONTRACT_OWNER_REPLIED' || event.type === 'CONTRACT_ESCALATED')).toBe(false);
 }, 20_000);

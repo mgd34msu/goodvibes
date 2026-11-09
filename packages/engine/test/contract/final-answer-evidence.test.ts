@@ -42,7 +42,7 @@ function fixture() {
   writeFileSync(join(root, 'review.md'), 'Ready.\n');
   const current = currentFileObservations(root, ['review.md'])[0];
   if (!current || typeof current !== 'object' || Array.isArray(current)) throw new Error('Missing native current-file fixture');
-  const evidence = { orchestration: { currentFiles: [current], continuationEvidence: 'Initial work was unfinished.',
+  const evidence = { orchestration: { contractId: contract.id, currentFiles: [current], continuationEvidence: 'Initial work was unfinished.',
     units: [{ id: 'u1', status: 'passed', acceptedAnswer: contract.units[0]!.answer!,
       latestCheck: contract.units[0]!.checks[0]!, criteria: [{ text: 'The review is complete', verdict: 'met' }], readObservations: [] }] },
     diff: '-Initial limited draft\n+Ready.', hostOperations: [current],

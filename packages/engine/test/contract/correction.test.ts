@@ -293,11 +293,14 @@ function failsUntilRepairedWork(kind: 'group' | 'deliverable') {
   let rejectedBasis: string | undefined;
   return (context: AnswerContext): unknown => {
     if (judgeOf(context) !== kind) return undefined;
-    const { finalAnswerReview: _review, previousFulfillmentAssessment: _previous, ...work } = context.state['evidence'] as Record<string, unknown>;
-    // A verifier phase or its new decision receipts do not repair task work.
-    // Compare the actual substantive work, excluding only that phase metadata.
-    const basis = JSON.stringify({ output: context.state['output'], work }, (key, value) =>
-      key === 'nativeJudgmentExecutions' || key === 'currentValidation' ? undefined : value);
+    const work = context.state['evidence'] as Record<string, unknown>;
+    // Initial fulfillment and the second pass use different read-accounting
+    // projections. Only changed actual output, diff or artifact contents can
+    // repair this authored task; new receipts/compact metadata cannot.
+    const basis = JSON.stringify({ output: context.state['output'], diff: work['diff'] ?? null,
+      artifacts: Array.isArray(work['currentArtifacts']) ? work['currentArtifacts'].map(artifact => ({ path: artifact.path, content: artifact.content })) : [],
+      changes: Array.isArray(work['currentTextualChanges']) ? work['currentTextualChanges'].map(change => ({ path: change.path, diff: change.diff })) : [],
+    });
     rejectedBasis ??= basis;
     return noulAnswer(basis === rejectedBasis ? UNMET : MET);
   };

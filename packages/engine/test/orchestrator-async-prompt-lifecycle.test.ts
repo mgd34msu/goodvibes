@@ -4,7 +4,7 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { waitFor } from './_helpers/test-timeout.js';
 import type { ChatResponse } from '../platform/src/platform/providers/interface.js';
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -84,14 +84,21 @@ describe('Orchestrator async prompt lifecycle wiring', () => {
     };
     let submitted = false, keyBefore: string | null = null, keyAfter: string | null = null, duplicate: unknown;
     const text = 'private submission sentinel';
-    runtimeBus.on('TURN_SUBMITTED', () => {
-      if (submitted) return;
-      submitted = true;
-      keyBefore = f.orchestrator.currentSubmissionKey;
-      duplicate = actual.runTurnPreflight(text, undefined, undefined);
-      keyAfter = f.orchestrator.currentSubmissionKey;
+    const emit = runtimeBus.emit.bind(runtimeBus);
+    // Subscribers intentionally run in microtasks, after the transcript may
+    // have advanced. Re-enter the actual synchronous publication boundary to
+    // test the original active position, forwarding every real event normally.
+    const publish = spyOn(runtimeBus, 'emit').mockImplementation((domain, envelope) => {
+      if (envelope.type === 'TURN_SUBMITTED' && !submitted) {
+        submitted = true;
+        keyBefore = f.orchestrator.currentSubmissionKey;
+        duplicate = actual.runTurnPreflight(text, undefined, undefined);
+        keyAfter = f.orchestrator.currentSubmissionKey;
+      }
+      emit(domain, envelope);
     });
-    await f.orchestrator.handleUserInput(text);
+    try { await f.orchestrator.handleUserInput(text); }
+    finally { publish.mockRestore(); }
     expect(submitted).toBe(true);
     expect(duplicate).toBeNull();
     expect(keyBefore).toBeTruthy();

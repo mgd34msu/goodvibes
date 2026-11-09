@@ -12,15 +12,17 @@ const LOCAL = { peerId: 'local', displayName: 'Local', backendKind: 'local-proce
 
 describe('remote registry lifecycle', () => {
   test('close during background init cannot reopen the registry after teardown', async () => {
-    const { registry } = makeRegistry();
+    const { directory, registry } = makeRegistry();
     const initializing = registry.init();
     registry.close();
     await expect(initializing).rejects.toThrow('closed during initialization');
     expect(() => registry.list()).toThrow('not initialized');
-    await registry.init();
-    await registry.register(LOCAL);
-    expect(registry.get('local')?.displayName).toBe('Local');
-    registry.close();
+    const reopened = new PeerRegistry(directory);
+    try {
+      await reopened.init();
+      await reopened.register(LOCAL);
+      expect(reopened.get('local')?.displayName).toBe('Local');
+    } finally { reopened.close(); }
   });
 
   test('concurrent init and writes persist every peer at the historical path', async () => {
@@ -37,7 +39,7 @@ describe('remote registry lifecycle', () => {
     } finally { reopened.close(); }
   });
 
-  test('close is idempotent and post-close operations require a new init', async () => {
+  test('close is idempotent and post-close operations cannot revive the retired owner', async () => {
     const { registry } = makeRegistry();
     await registry.init();
     registry.close();

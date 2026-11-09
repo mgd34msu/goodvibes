@@ -166,14 +166,17 @@ test('late WeakMap overrides cannot launder an unverified historical criteria re
 test('ordinary native decisions reuse their action incarnation without hashing a deferred-operation cache key', async () => {
   await recorded(async (_fake, log) => {
     const value = contract({ criteriaId: 'current-criteria' }, null), hash = spyOn(crypto, 'createHash');
+    const logHash = spyOn(Bun.CryptoHasher, 'hash');
     try {
       const result = await decide(value);
       expect(result.decision.outcome).toBe('act');
       const record = value.nativeDecisions!.history.at(-1)!;
       expect(record.operationRevision).toBe(record.decision.binding.actionRevision);
-      expect(hash.mock.calls.filter(call => call[0] === 'sha256')).toHaveLength(log.query().length);
+      expect(log.query()).toHaveLength(1);
+      expect(logHash.mock.calls.filter(call => call[0] === 'sha256')).toHaveLength(log.query().length);
+      expect(hash.mock.calls.filter(call => call[0] === 'sha256')).toHaveLength(0);
       result.recordClaim();
       result.assertCurrent();
-    } finally { hash.mockRestore(); }
+    } finally { logHash.mockRestore(); hash.mockRestore(); }
   });
 });

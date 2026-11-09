@@ -40,6 +40,7 @@ import {
   type KeyObject,
 } from 'node:crypto';
 import { bootDaemon, type BootedDaemon } from '../platform/src/platform/daemon/boot.ts';
+import { AsyncDisposalError } from '../platform/src/platform/runtime/disposal.ts';
 import { SecretsManager } from '../platform/src/platform/config/secrets.ts';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { VapidManager, VAPID_SECRET_KEY } from '../platform/src/platform/push/index.ts';
@@ -265,23 +266,21 @@ function attention(reason: ProcessAttentionReason): Pick<ProcessNode, 'needsAtte
   return { needsAttention: { reason } };
 }
 
-beforeAll(async () => {
-  home = mkdtempSync(join(tmpdir(), 'vapidchain-home-'));
-  seedBenchmarkCache(home, 'goodvibes');
-  work = mkdtempSync(join(tmpdir(), 'vapidchain-work-'));
-  sink = Bun.serve({
-    port: 0,
-    async fetch(req) {
-      const url = new URL(req.url);
-      const body = Buffer.from(await req.arrayBuffer());
-      const headers: Record<string, string> = {};
-      req.headers.forEach((value, key) => { headers[key] = value; });
-      captured.push({ path: url.pathname, headers, body });
-      const status = url.pathname.startsWith('/gone') ? 410 : url.pathname.startsWith('/fail') ? 500 : 201;
-      return new Response(null, { status });
-    },
-  });
-  sinkOrigin = `http://127.0.0.1:${sink.port}`;
+async function stopCurrentDaemon(): Promise<void> {
+  try { await daemon?.stop(); }
+  catch (error) {
+    if (error instanceof AsyncDisposalError) throw new Error(
+      `Web push fixture cleanup failed in: ${error.failures.map(failure => failure.label).join(', ')}`,
+      { cause: error },
+    );
+    throw error;
+  }
+}
+
+async function restartDaemon(): Promise<void> {
+  detachBridge?.(); detachBridge = undefined;
+  expect(snapshotListeners.size).toBe(0);
+  await stopCurrentDaemon();
   daemon = await bootDaemon({
     homeDirectory: home,
     workingDir: work,
@@ -299,12 +298,35 @@ beforeAll(async () => {
     },
     bus: daemon.server.eventBus,
   });
+  expect(snapshotListeners.size).toBe(1);
+}
+
+beforeAll(async () => {
+  home = mkdtempSync(join(tmpdir(), 'vapidchain-home-'));
+  seedBenchmarkCache(home, 'goodvibes');
+  work = mkdtempSync(join(tmpdir(), 'vapidchain-work-'));
+  sink = Bun.serve({
+    port: 0,
+    async fetch(req) {
+      const url = new URL(req.url);
+      const body = Buffer.from(await req.arrayBuffer());
+      const headers: Record<string, string> = {};
+      req.headers.forEach((value, key) => { headers[key] = value; });
+      captured.push({ path: url.pathname, headers, body });
+      const status = url.pathname.startsWith('/gone') ? 410 : url.pathname.startsWith('/fail') ? 500 : 201;
+      return new Response(null, { status });
+    },
+  });
+  sinkOrigin = `http://127.0.0.1:${sink.port}`;
+  await restartDaemon();
 });
 
 afterAll(async () => {
-  detachBridge?.();
-  await daemon?.stop();
-  sink?.stop(true);
+  detachBridge?.(); detachBridge = undefined;
+  const failures: unknown[] = [];
+  try { await stopCurrentDaemon(); } catch (error) { failures.push(error); }
+  try { await sink?.stop(true); } catch (error) { failures.push(error); }
+  if (failures.length) throw new AggregateError(failures, 'Web push fixture original cleanup failed');
   rmSync(home, { recursive: true, force: true });
   rmSync(work, { recursive: true, force: true });
 });
@@ -357,25 +379,14 @@ describe('web push: VAPID keypair lifecycle (generate once, reuse forever)', () 
     await invokeVerb('push.subscriptions.delete', { subscriptionId: id });
   });
 
-  test('a SECOND daemon booted over the same home serves the same key', async () => {
+  test('a replacement daemon booted after original shutdown serves the same key', async () => {
     const first = (await invokeVerb('push.vapid.get')).json.publicKey as string;
     const storedBefore = await readStoredKeypair();
 
-    const second = await bootDaemon({
-      homeDirectory: home,
-      workingDir: work,
-      daemonHomeDir: join(home, 'daemon'),
-      port: 0,
-      host: '127.0.0.1',
-      token: TOKEN,
-    });
-    try {
-      const fromRestart = await invokeOn(second.url, 'push.vapid.get');
-      expect(fromRestart.status).toBe(200);
-      expect(fromRestart.json.publicKey).toBe(first);
-    } finally {
-      await second.stop();
-    }
+    await restartDaemon();
+    const fromRestart = await invokeVerb('push.vapid.get');
+    expect(fromRestart.status).toBe(200);
+    expect(fromRestart.json.publicKey).toBe(first);
     expect(await readStoredKeypair()).toBe(storedBefore);
   });
 
@@ -514,26 +525,15 @@ describe('web push: subscription storage survives a restart', () => {
     expect(persisted?.endpoint).toBe(`${sinkOrigin}/push/persisted`);
     expect(persisted?.keys.p256dh).toBe(p256dh);
 
-    // A second daemon over the same home serves it back and can deliver to it.
-    const second = await bootDaemon({
-      homeDirectory: home,
-      workingDir: work,
-      daemonHomeDir: join(home, 'daemon'),
-      port: 0,
-      host: '127.0.0.1',
-      token: TOKEN,
-    });
-    try {
-      const list = await invokeOn(second.url, 'push.subscriptions.list');
-      const ids = (list.json.subscriptions as ReadonlyArray<{ id: string }>).map((s) => s.id);
-      expect(ids).toContain(id);
-      const before = captured.length;
-      const verify = await invokeOn(second.url, 'push.subscriptions.verify', { subscriptionId: id });
-      expect((verify.json.receipt as { outcome: string }).outcome).toBe('delivered');
-      expect(captured[before]?.path).toBe('/push/persisted');
-    } finally {
-      await second.stop();
-    }
+    // A real restart drains the original writer before admitting its replacement.
+    await restartDaemon();
+    const list = await invokeVerb('push.subscriptions.list');
+    const ids = (list.json.subscriptions as ReadonlyArray<{ id: string }>).map(subscription => subscription.id);
+    expect(ids).toContain(id);
+    const before = captured.length;
+    const verify = await invokeVerb('push.subscriptions.verify', { subscriptionId: id });
+    expect((verify.json.receipt as { outcome: string }).outcome).toBe('delivered');
+    expect(captured[before]?.path).toBe('/push/persisted');
     await invokeVerb('push.subscriptions.delete', { subscriptionId: id });
   });
 });

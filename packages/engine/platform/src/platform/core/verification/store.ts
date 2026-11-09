@@ -70,6 +70,7 @@ export class VerificationStore {
   private readonly written = new Map<string, unknown>();
   private readonly histories = new Map<string, VerificationArchive['histories'][number]>();
   private readonly historyKeys = new WeakMap<object, string>();
+  private readonly archiveHistoryKeys = new Map<string, readonly string[]>();
   private readonly originals = new Map<string, VerificationJournalRecord>();
   private readonly repairCheckpoints = new Map<string, VerificationRepairCheckpoint | null>();
   private readonly latestRepairOriginals = new Map<string, Pick<VerificationRepairCheckpoint, 'requestSource' | 'sourceIds'>>();
@@ -172,6 +173,8 @@ export class VerificationStore {
               ...(entry.runtimeMessages ? { runtimeMessages: entry.runtimeMessages } : {}),
               ...(entry.messageRecords ? { messageRecords: entry.messageRecords } : {}) };
             this.archives.set(this.archive.branch!, this.archive);
+            if (Array.isArray(metadata.historyKeys)) this.archiveHistoryKeys.set(this.archive.branch!, Object.freeze([...metadata.historyKeys]));
+            else this.archiveHistoryKeys.delete(this.archive.branch!);
           }
         }
         if (value.kind === 'source' || value.kind === 'proposal' || value.kind === 'history' || value.kind === 'index' || value.kind === 'evidence' || value.kind === 'original' || value.kind === 'repair') {
@@ -332,8 +335,10 @@ export class VerificationStore {
     if (!previous || !isDeepStrictEqual(previous.derived, value.derived)
       || !isDeepStrictEqual(previous.runtimeMessages ?? [], value.runtimeMessages ?? [])
       || !isDeepStrictEqual(previous.messageRecords ?? [], value.messageRecords ?? [])
-      || !isDeepStrictEqual(previous.histories.map(history => this.historyKeys.get(history)), keys))
+      || !isDeepStrictEqual(this.archiveHistoryKeys.get(branch), keys)) {
       this.append('archive', branch, position);
+      this.archiveHistoryKeys.set(branch, Object.freeze([...keys]));
+    }
     const metadata = captureOwnedJson({ branch, derived: value.derived,
       ...(value.runtimeMessages ? { runtimeMessages: value.runtimeMessages } : {}),
       ...(value.messageRecords ? { messageRecords: value.messageRecords } : {}) }) as Omit<VerificationArchive, 'histories'>;

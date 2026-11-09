@@ -166,9 +166,15 @@ test('an orphan opaque mirror cannot mint a replacement mapping after registry l
   const f = fixture();
   const selected = resolveAccountInboxIdentity(await acquireAccountInboxIdentity(f.owner, slack), slack);
   const mirror = new InboxCursorStore(f.root, selected.mirrorFileName, { sweepIntervalMs: 0 });
-  await mirror.init(); await mirror.flush(); await mirror.close(); unlinkSync(f.path);
+  await mirror.init();
+  mirror.upsertItems([{ id: 'slack:orphan-original', provider: 'slack', kind: 'dm', fromDigest: 'cafebabedeadbeef',
+    subjectPreview: '', bodyPreview: 'Original orphan preview', receivedAt: Date.now(), unread: true }]);
+  await mirror.flush(); await mirror.close();
+  const mirrorPath = join(f.directory, selected.mirrorFileName), originalBytes = readFileSync(mirrorPath);
+  unlinkSync(f.path);
   await expect(acquireAccountInboxIdentity(f.owner, slack)).rejects.toThrow('unavailable');
   expect(existsSync(f.path)).toBe(false);
+  expect(readFileSync(mirrorPath)).toEqual(originalBytes);
 });
 
 test('physical registry replacement during before-write declaration is refused even for identical bytes', async () => {

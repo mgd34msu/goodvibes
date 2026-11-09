@@ -114,5 +114,5 @@ export async function updateInboxIdentityRegistry<R, T>(owner: InboxIdentityRegi
       if (realpathSync(owner.workingDirectory) !== root || parents.some(parent => directoryStamp(parent.path) !== parent.stamp)) throw unavailable();
     } };
   } catch { throw unavailable(); }
-  finally { release(); }
+  finally { try { release(); } catch { throw unavailable(); } }
 }

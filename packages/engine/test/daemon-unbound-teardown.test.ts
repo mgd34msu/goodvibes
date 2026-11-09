@@ -25,6 +25,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { prepareConfiguredProjectContext } from '../platform/src/platform/knowledge/project-planning/configured-project.ts';
 import { DaemonServer } from '../platform/src/platform/daemon/facade.ts';
 import { HttpListener } from '../platform/src/platform/daemon/http-listener.ts';
 import { UserAuthManager } from '../platform/src/platform/security/user-auth.ts';
@@ -103,11 +104,12 @@ beforeAll(async () => {
   seedBenchmarkCache(home, 'goodvibes');
   work = mkdtempSync(join(tmpdir(), 'unbound-work-'));
 
+  const configManager = new ConfigManager({
+    surfaceRoot: 'daemon', configDir: join(home, 'cfg'), workingDir: work, homeDir: home,
+  });
+  await prepareConfiguredProjectContext(configManager, work, 'knowledge-wiki.sqlite', { activate: true });
   install();
   try {
-    const configManager = new ConfigManager({
-      surfaceRoot: 'daemon', configDir: join(home, 'cfg'), workingDir: work, homeDir: home,
-    });
     // Enabled, and never started. `serveFactory` is supplied but never called:
     // the point of the case is that nothing ever binds.
     const daemon = new DaemonServer({

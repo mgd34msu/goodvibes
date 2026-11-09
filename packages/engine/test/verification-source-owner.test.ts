@@ -102,6 +102,10 @@ test('existing history identities remain opaque and inline archive originals rec
   const inline = new VerificationStore(f.root, f.session);
   inline.rememberArchive(inline.archive!);
   const saved = readFileSync(f.path, 'utf8');
+  const migrated: unknown = JSON.parse(saved.trim().split('\n').at(-1) ?? 'null');
+  expect(migrated).toMatchObject({ kind: 'archive', key: 'inline', value: {
+    branch: 'inline', historyKeys: [expect.stringMatching(/^history-/)], derived: [],
+  } });
   const reopened = new VerificationStore(f.root, f.session);
   reopened.rememberArchive(reopened.archive!);
   expect(readFileSync(f.path, 'utf8')).toBe(saved);

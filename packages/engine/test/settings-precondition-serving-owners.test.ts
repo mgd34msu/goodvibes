@@ -224,7 +224,7 @@ function stoppingFacade() {
     channelHealth: { stop() {} }, replyPoller: null,
     pendingSurfaceReplies: new Map(), httpRouter: { dispose() {} },
     surfaceActionHelper: { closeDelegatedTelegram() {} },
-    companionChatManager: { dispose() {} },
+    companionChatManager: { async close() {} },
     clusterCoordinator: { async stop() {} }, automationManager: { stop() {} },
     sessionBroker: { async stop() {} },
     runtimeServices: { powerManager: { async stop() {} } }, ownsRuntimeServices: false,

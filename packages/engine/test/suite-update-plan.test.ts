@@ -51,6 +51,11 @@ test('retains the actual directly downloaded invoking path without inventing a d
   expect(plan.files.some(file => file.path === join(root, 'goodvibes'))).toBe(false);
 });
 
+test('a directly downloaded executable never silently leaves a canonical sibling at another release', () => {
+  const root = fixture(['goodvibes-linux-x64', 'goodvibes']);
+  expect(() => resolveSuiteUpdatePlan({ execPath: join(root, 'goodvibes-linux-x64'), platform: 'linux', arch: 'x64', version: '3.1.2' })).toThrow('Run ' + join(root, 'goodvibes'));
+});
+
 test('does not infer a selected WebUI from unrelated old version directories', () => {
   const root = fixture(['goodvibes']); mkdirSync(join(root, 'webui', '3.0.0'), { recursive: true });
   const plan = resolveSuiteUpdatePlan({ execPath: join(root, 'goodvibes'), platform: 'darwin', arch: 'arm64', version: '3.1.2' });

@@ -61,6 +61,8 @@ export function resolveSuiteUpdatePlan(options: {
   const suffix = `${platform === 'darwin' ? 'macos' : platform}-${arch}`;
   const invoking = products.find(product => basename(options.execPath) === product.name || basename(options.execPath) === `${product.name}-${suffix}`);
   if (!invoking) throw new Error('The invoking executable is not a GoodVibes suite product');
+  const canonical = join(root, invoking.name);
+  if (options.execPath !== canonical && observe(canonical) !== null) throw new Error(`Both a directly downloaded and canonical ${invoking.name} exist here. Run ${canonical} to update the installed suite.`);
   const observations = products.map(product => {
     const path = product === invoking ? options.execPath : join(root, product.name);
     return { product, path, original: observe(path) };

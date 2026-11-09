@@ -20,7 +20,7 @@ export function suiteArchive(files: Readonly<Record<string, string>>): Buffer {
   return gzipSync(Buffer.concat([...blocks, Buffer.alloc(1024)]));
 }
 export function suiteReleaseFixture() {
-  const root = mkdtempSync(join(tmpdir(), 'goodvibes-suite-update-')); 
+  const root = mkdtempSync(join(tmpdir(), 'goodvibes-suite-update-'));
   const programs = [
     { name: 'goodvibes', packageName: '@goodvibes-jev/tui' },
     { name: 'goodvibes-agent', packageName: '@goodvibes-jev/agent' },
@@ -64,4 +64,3 @@ export function suiteReleaseFixture() {
   return { cleanup() { rmSync(root, { recursive: true, force: true }); }, root, webui, driver, programs, release, original, fetchImpl, options: { execPath: join(root, 'goodvibes'), platform: 'darwin' as const, arch: 'x64', version: '3.1.3',
     webuiDirectory: webui, downloadBaseUrl: 'https://fixture.invalid/v3.1.3', fetchImpl } };
 }
-

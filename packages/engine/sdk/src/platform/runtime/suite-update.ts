@@ -192,11 +192,12 @@ export async function applySuiteUpdate(options: SuiteUpdateOptions): Promise<Sui
     if (uncertain) {
       // Leave directory ownership fences intact alongside the actual core
       // transaction receipt. No speculative rollback against unknown bytes.
-      for (const directory of prepared) directory.preserve();
-      throw new SuiteUpdateRecoveryError(plan.directories.map(directory => directory.path), [], error,
+      const paths = [...plan.directories.map(directory => directory.path), ...prepared.flatMap(directory => [...directory.preserve().preservedPaths]),
+        ...(error instanceof NativeDirectoryUpdateError ? error.preservedPaths : []), ...(error instanceof UpdateTransactionError ? error.receipt.recoveryPaths : [])];
+      throw new SuiteUpdateRecoveryError(Object.freeze([...new Set(paths)]), [], error,
         committed || error instanceof UpdateTransactionError && error.receipt.committed);
     }
-    const problems: unknown[] = [], preservedPaths: string[] = [];
+    const problems: unknown[] = [], preservedPaths: string[] = error instanceof NativeDirectoryUpdateError ? [...error.preservedPaths] : [];
     for (const directory of [...prepared].reverse()) {
       try { directory.restore(); preservedPaths.push(...directory.dispose().preservedPaths); } catch (failure) { problems.push(failure); }
     }
@@ -267,11 +268,12 @@ export function rollbackSuiteUpdate(options: SuiteRollbackOptions): SuiteUpdateR
   } catch (error) {
     if (committed || error instanceof UpdateTransactionError && (error.receipt.committed || error.receipt.recoveryRequired)
       || error instanceof NativeDirectoryUpdateError && error.recoveryRequired) {
-      for (const directory of directories) directory.preserve();
-      throw new SuiteUpdateRecoveryError(plan.directories.map(directory => directory.path), [], error,
+      const paths = [...plan.directories.map(directory => directory.path), ...directories.flatMap(directory => [...directory.preserve().preservedPaths]),
+        ...(error instanceof NativeDirectoryUpdateError ? error.preservedPaths : []), ...(error instanceof UpdateTransactionError ? error.receipt.recoveryPaths : [])];
+      throw new SuiteUpdateRecoveryError(Object.freeze([...new Set(paths)]), [], error,
         committed || error instanceof UpdateTransactionError && error.receipt.committed);
     }
-    const problems: unknown[] = [], preservedPaths: string[] = [];
+    const problems: unknown[] = [], preservedPaths: string[] = error instanceof NativeDirectoryUpdateError ? [...error.preservedPaths] : [];
     for (const directory of [...directories].reverse()) {
       try { directory.restore(); preservedPaths.push(...directory.dispose().preservedPaths); } catch (failure) { problems.push(failure); }
     }

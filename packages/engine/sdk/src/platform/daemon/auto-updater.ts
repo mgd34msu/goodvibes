@@ -74,6 +74,8 @@ import { PeriodicUpdateLoop, type PeriodicCheckOutcome } from '../runtime/update
 import { formatReceiptTime, type DaemonReceiptStore } from './receipts.js';
 import { CLIENT_COMPATIBILITY_FLOOR } from '../control-plane/client-compatibility.js';
 import type { ServiceHandoverOutcome } from './service-handover.js';
+import { hasNativeUpdateObservations } from '../runtime/update-file-io.js';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { applySuiteUpdate, installedSuiteNeedsRepair, retainSuiteUpdateConfiguration, SuiteUpdateRecoveryError, type SuiteUpdateResult } from '../runtime/suite-update.js';
 
 export interface AutoUpdateServiceActions {
@@ -470,7 +472,20 @@ export class DaemonAutoUpdater {
     };
     const installedTargets = resolveDaemonNativeTargets(this.options.execPath, this.options.platform, this.options.arch);
     if (!installedTargets) return;
-    const installed = inspectDaemonNativeInstallation(this.options.execPath, this.options.platform, this.options.arch, '', io);
+    const readerOwner = this.options.currentReader;
+    const retainedNative = readerOwner !== undefined && hasNativeUpdateObservations(io, io.readFile, io.observe);
+    const retainedCurrent = () => {
+      if (!retainedNative || !readerOwner) return;
+      const result: unknown = readerOwner.assertCurrent();
+      if (result !== undefined) { drainOwned(result); throw new Error('The original installed daemon reader must be synchronous'); }
+    };
+    // Native startup already verified this exact installed cohort. Its original
+    // source assertion detects replacement or edits without rehashing every
+    // program/runtime/library on each idle update tick. Borrowed installations
+    // without that original owner still need their initial integrity check.
+    retainedCurrent();
+    const installed = inspectDaemonNativeInstallation(this.options.execPath, this.options.platform, this.options.arch, '', io, { integrity: !retainedNative });
+    retainedCurrent();
     if (!installed || compareVersions(installed.version, this.options.currentVersion) !== 0) throw new Error('Running daemon does not own the complete installed native cohort');
     const assertInstallationCurrent = retainDaemonNativeFiles(installedTargets, io);
     const assertCurrent = () => { assertLifecycleCurrent(); assertInstallationCurrent(); };

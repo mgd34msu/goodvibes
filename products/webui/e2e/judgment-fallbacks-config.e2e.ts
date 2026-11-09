@@ -41,7 +41,7 @@ test("fallback-reference arrays save and reload without exposing inline credenti
   try {
     host.manager.set("judgment.fallbacks", original);
     host.reload();
-    const dialog = await openSettings(page, "all");
+    const dialog = await openSettings(page, "models");
     const field = dialog.locator('[data-config-key="judgment.fallbacks"]');
     await field.getByText("Advanced JSON", { exact: true }).click();
     const editor = field.getByRole("textbox", { name: "judgment.fallbacks", exact: true });
@@ -52,7 +52,7 @@ test("fallback-reference arrays save and reload without exposing inline credenti
     expect(host.persisted()).toMatchObject({ judgment: { fallbacks: replacement } });
     host.reload();
     expect(host.manager.get("judgment.fallbacks")).toEqual(replacement);
-    await openSettings(page, "all");
+    await openSettings(page, "models");
     await field.getByText("Advanced JSON", { exact: true }).click();
     await expect(editor).toHaveValue(JSON.stringify(replacement, null, 2));
     await expectNoHorizontalScroll(page);
@@ -68,6 +68,8 @@ test("fallback-reference arrays save and reload without exposing inline credenti
 
     // The escape hatch reaches genuine server validation rather than admitting
     // an inline credential through a second write path.
+    await openSettings(page, "all");
+    await dialog.getByRole("navigation", { name: "Sections in General", exact: true }).getByRole("button", { name: "Advanced", exact: true }).click();
     const advanced = dialog.locator(".settings-advanced");
     await advanced.getByPlaceholder("settings.path").fill("judgment.fallbacks");
     await advanced.getByPlaceholder("JSON or text").fill(JSON.stringify(malformed));
@@ -95,7 +97,7 @@ test("fallback-reference arrays save and reload without exposing inline credenti
     }
   } finally {
     try {
-      await page.unroute("**/config");
+      if (!page.isClosed()) await page.unroute("**/config");
     } finally {
       host.cleanup();
     }

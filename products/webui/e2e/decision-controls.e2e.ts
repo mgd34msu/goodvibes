@@ -13,7 +13,7 @@ test("decision controls save models, provider, policy and ordered fallbacks thro
     host.manager.set("judgment.keySource", "env");
     host.manager.set("judgment.fallbacks", []);
     host.reload();
-    const dialog = await openSettings(page, "all");
+    const dialog = await openSettings(page, "models");
     const model = dialog.getByRole("combobox", { name: "Decision model", exact: true });
     for (const profile of DECISION_MODEL_PROFILES) {
       await model.click();
@@ -56,7 +56,7 @@ test("decision controls save models, provider, policy and ordered fallbacks thro
     expect(host.persisted()).toMatchObject({
       judgment: { policy: "Classic - Off", model: "english" },
     });
-    await openSettings(page, "all");
+    await openSettings(page, "models");
     await expect(
       dialog.getByRole("combobox", { name: "Decision model", exact: true })
     ).toContainText("Laya");
@@ -66,7 +66,7 @@ test("decision controls save models, provider, policy and ordered fallbacks thro
     await expectNoHorizontalScroll(page);
   } finally {
     try {
-      await page.unroute("**/config");
+      if (!page.isClosed()) await page.unroute("**/config");
     } finally {
       host.cleanup();
     }

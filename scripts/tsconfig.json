@@ -7,7 +7,13 @@
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "skipLibCheck": true,
-    "types": ["bun", "node"]
+    "types": [
+      "bun",
+      "node"
+    ]
   },
-  "include": ["*.ts"]
+  "include": [
+    "*.ts",
+    "../packages/engine/sdk/src/platform/types/*.d.ts"
+  ]
 }

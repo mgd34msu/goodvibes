@@ -361,7 +361,7 @@ export class ArtifactStore {
     // Existing stores receive the same directory boundary as new stores.
     chmodSync(this.rootDir, 0o700);
     this.storageOwner = new ArtifactStorageOwner(this.rootDir);
-    this.#originalOwner = Object.freeze({ records: this.records, files: this.recordFiles, storage: this.storageOwner, storageSlots: Object.freeze(Object.entries(Object.getOwnPropertyDescriptors(this.storageOwner)).map(([key, descriptor]) => Object.freeze({ key, descriptor: Object.freeze(descriptor) }))), entries: new WeakMap(), slots: Object.freeze(['rootDir', 'storageOwner', 'records', 'recordFiles'].map(key => { const descriptor = Object.getOwnPropertyDescriptor(this, key); if (!descriptor || !('value' in descriptor)) throw new Error('Artifact original owner is unavailable.'); return Object.freeze({ key, descriptor: Object.freeze(descriptor) }); })) });
+    this.#originalOwner = Object.freeze({ records: this.records, files: this.recordFiles, storage: this.storageOwner, storageSlots: Object.freeze(Object.entries(Object.getOwnPropertyDescriptors(this.storageOwner)).map(([key, descriptor]) => Object.freeze({ key, descriptor: Object.freeze(descriptor) }))), entries: new WeakMap<ArtifactRecord, { readonly content: string; readonly metadata: string }>(), slots: Object.freeze(['rootDir', 'storageOwner', 'records', 'recordFiles'].map(key => { const descriptor = Object.getOwnPropertyDescriptor(this, key); if (!descriptor || !('value' in descriptor)) throw new Error('Artifact original owner is unavailable.'); return Object.freeze({ key, descriptor: Object.freeze(descriptor) }); })) });
     this.loadExisting();
     nativeApply(nativeWeakSet, cleanupInspectors, [this, () => this.#inspectCleanupCandidates()]);
   }

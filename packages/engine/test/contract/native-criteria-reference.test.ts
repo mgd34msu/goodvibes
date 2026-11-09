@@ -56,6 +56,21 @@ test('exact generated criteria ID reaches recorded native decisions through its 
   });
 });
 
+test('fresh native decisions retain distinct action incarnations while exact live evidence still governs claims', async () => {
+  await recorded(async () => {
+    const value = contract(), evidence = { plan: 'Keep every original requirement.' };
+    const first = await decide(value, evidence);
+    const second = await decide(value, evidence);
+    expect(first.decision.binding.actionRevision).not.toBe(second.decision.binding.actionRevision);
+    expect(first.decision.evidence.find(ref => ref.id === 'operation-evidence')?.revision).toBe(first.decision.binding.actionRevision);
+    expect(second.decision.evidence.find(ref => ref.id === 'operation-evidence')?.revision).toBe(second.decision.binding.actionRevision);
+    first.assertCurrent(); second.assertCurrent();
+    evidence.plan = 'Replace the original requirements.';
+    expect(() => first.recordClaim()).toThrow();
+    expect(() => second.recordClaim()).toThrow();
+  });
+});
+
 test.each(['unbound', 'different-work', 'suffix', 'raw-pan', 'prefixed-pan', 'credential'] as const)(
   '%s criteria metadata cannot acquire the generated-reference exception', async mode => {
     const id = mode === 'suffix' ? `${criteriaId}:suffix` : mode === 'raw-pan' ? '4111111111111111'

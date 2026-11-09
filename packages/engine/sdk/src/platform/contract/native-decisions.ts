@@ -248,7 +248,11 @@ export async function decideNativeContract(contract: Contract, services: NativeC
     const conditions = [...(owner.host.conditions?.(structuredClone(contract), input.stage, input.targetId) ?? [])];
     const capturedConditions = conditions.map(condition => ({ ref: { ...condition.ref }, description: condition.description }));
     const operationRevision = hashState({ action: input.action, allowAct: input.allowAct, evidence, source, continuations: input.continuations } as unknown as EntryType);
-    const actionRevision = hashState({ operationRevision, conditions: capturedConditions.map(condition => condition.ref) } as unknown as EntryType);
+    // This is one offered action's incarnation, not a content checksum.
+    // active() below compares the exact owned evidence and condition facts.
+    // The persisted operationRevision comparison above/below still supports
+    // existing deferred records until that saved format is migrated.
+    const actionRevision = crypto.randomUUID();
     const previous = state.pending[key];
     if (previous?.decision.outcome === 'defer' && previous.operationRevision === operationRevision) {
       const until = previous.decision.until;
@@ -283,7 +287,9 @@ export async function decideNativeContract(contract: Contract, services: NativeC
     const result = await decideAutonomous({ port: nativeSemanticPort(contract, owner, input.signal),
       site: `contract.native.${input.stage}`, instructions: INSTRUCTIONS, actionDescription: input.action, binding,
       state: { source: autonomousSourceEvidence(source), evidence, externalConditions: capturedConditions.map(condition => ({ description: condition.description })) } as unknown as EntryType,
-      evidence: [{ id: 'native-source', revision: hashState(source as unknown as EntryType) }, { id: 'operation-evidence', revision: hashState(evidence) },
+      // These references name the snapshots retained by this action. They do
+      // not need a second digest of data already guarded by their native owner.
+      evidence: [{ id: 'native-source', revision: actionRevision }, { id: 'operation-evidence', revision: actionRevision },
         nativeCriteriaEvidence(contract), { id: 'source-revision', revision: contract.nativeSource!.sourceRevision }],
       supportingDecisionIds: input.decisionIds,
       continuations: input.continuations.map(continuation => ({ ref: { id: continuation.id, kind: continuation.kind, revision: actionRevision }, description: continuation.description, input: continuation.input ?? null })),

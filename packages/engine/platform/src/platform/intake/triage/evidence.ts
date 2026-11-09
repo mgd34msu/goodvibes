@@ -87,13 +87,18 @@ const round = (p: number): number => Math.round(p * 100) / 100;
 export function labelToTag(label: TriageLabel): string {
   return ({ spam: 'GoodVibes/Spam', priority: 'GoodVibes/Priority', normal: 'GoodVibes/Normal' })[label];
 }
-export function settleTriage(binding: TriageBinding, spam: YesNoReading, urgency: YesNoReading): TriageReceipt {
-  if (spam.outcome !== 'act' || urgency.outcome !== 'act') return Object.freeze({ ...binding, status: 'held' });
+/** The same model conclusion serves persisted receipts and explicit previews. */
+export function triageConclusion(spam: YesNoReading, urgency: YesNoReading):
+  Omit<TriageEvidence, keyof TriageBinding> | { readonly status: 'held' } {
+  if (spam.outcome !== 'act' || urgency.outcome !== 'act') return Object.freeze({ status: 'held' });
   const label: TriageLabel = spam.verdict === 'yes' && spam.probability >= urgency.probability ? 'spam'
     : urgency.verdict === 'yes' ? 'priority' : 'normal';
   const score = round(label === 'spam' ? spam.probability : label === 'priority' ? urgency.probability : 1 - Math.max(spam.probability, urgency.probability));
-  return Object.freeze({ ...binding, status: 'settled', spam: Object.freeze({...spam}), urgency: Object.freeze({...urgency}),
+  return Object.freeze({ status: 'settled', spam: Object.freeze({...spam}), urgency: Object.freeze({...urgency}),
     label, score, tags: Object.freeze([labelToTag(label)]), signals: Object.freeze({ spam: round(spam.probability), urgency: round(urgency.probability) }) });
+}
+export function settleTriage(binding: TriageBinding, spam: YesNoReading, urgency: YesNoReading): TriageReceipt {
+  return Object.freeze({ ...binding, ...triageConclusion(spam, urgency) });
 }
 /** Validate untrusted evidence as data, re-derive its conclusions, and return an immutable owned value. */
 export function checkTriageReceipt(value: unknown): TriageReceipt {

@@ -45,6 +45,13 @@ export type TriageFailureReceipt = Omit<TriageBinding, 'inputHash' | 'receiptVer
 export type TriageReceipt = TriageEvidence | TriageFailureReceipt | (TriageBinding & {
   readonly status: 'held' | 'unavailable';
 });
+/** Nonpersisted explicit preview. No input commitment or persisted receipt
+ * version is issued merely to display a model conclusion. */
+export type TriagePreview = (Omit<TriageEvidence, 'inputHash' | 'receiptVersion'>
+  | Omit<TriageFailureReceipt, 'inputHash' | 'receiptVersion'>) & {
+  readonly inputHash?: never;
+  readonly receiptVersion?: never;
+};
 export interface TriageStoredRecord {
   readonly latest: TriageReceipt;
   /** Last settled evidence is historical when latest is held/unavailable. */

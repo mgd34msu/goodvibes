@@ -1,5 +1,6 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
+import * as crypto from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
@@ -84,7 +85,15 @@ test('default mirror ownership remains held after mirror retirement while triage
 test('empty and dry runs never open triage storage; missing authority sends zero judgments', async () => {
   const empty = await setup({ rows: [] }); await empty.read(); expect(await empty.owned.runInboxTriage()).toMatchObject({ receipts: [], total: 0 });
   expect(empty.path()).toEqual([]); expect(empty.fake.requests).toHaveLength(0);
-  const dry = await setup(); await dry.owned.runInboxTriage({}, { dryRun: true }); expect(dry.path()).toEqual([]);
+  const dry = await setup(), hashes = spyOn(crypto, 'createHash');
+  try {
+    const preview = await dry.owned.runInboxTriage({}, { dryRun: true });
+    expect(preview.receipts[0]).toMatchObject({ status: 'settled', label: 'priority' });
+    expect(Object.hasOwn(preview.receipts[0]!, 'inputHash')).toBe(false);
+    expect(Object.hasOwn(preview.receipts[0]!, 'receiptVersion')).toBe(false);
+    expect(hashes).not.toHaveBeenCalled(); expect(dry.path()).toEqual([]);
+    expect((await dry.read()).items[0]?.triageLabel).toBeUndefined();
+  } finally { hashes.mockRestore(); }
   const missing = await setup({ noAuthority: true }); await missing.read();
   await expect(missing.owned.runInboxTriage()).rejects.toMatchObject({ code: 'INBOX_TRIAGE_AUTHORITY_UNAVAILABLE' });
   expect(missing.fake.requests).toHaveLength(0); expect(missing.path()).toEqual([]);

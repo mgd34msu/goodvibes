@@ -5,9 +5,13 @@
  * missed reworded internal descriptions; that semantic coverage remains.
  */
 
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { makeProjectTempDir } from './_helpers/project-temp.ts';
+import * as storedReadings from '../scripts/ci-readings/stored-readings.ts';
 import { packageReadme } from '../scripts/ci-readings/package-readme.ts';
-import { readmeAdvisories, readmeProblems } from '../scripts/ci-readings/package-readmes.ts';
+import { evaluateReadmeReadings, readmeAdvisories, readmeProblems, readmeState } from '../scripts/ci-readings/package-readmes.ts';
 import { decisionId, readingModel, stateHash, type StoredAnswer, type StoredEntry } from '../scripts/ci-readings/stored-readings.ts';
 
 const SETTLED_YES: StoredAnswer = { verdict: 'yes', outcome: 'act', probability: 0.95 };
@@ -80,4 +84,33 @@ describe('package README readings', () => {
       readings,
     })).toEqual(readmeProblems('.', REWORDED_INTERNAL, true, readings));
   });
+});
+
+
+test('one actual current README evaluation reuses its computed saved lookup for both displayed entry and findings', () => {
+  const readings = stored(REWORDED_INTERNAL, { documents: SETTLED_YES, stale: SETTLED_NO });
+  const expected = Object.values(readings)[0];
+  const original = storedReadings.stateHash;
+  let computations = 0;
+  const hash = spyOn(storedReadings, 'stateHash').mockImplementation(state => { computations++; return original(state); });
+  try {
+    const evaluation = evaluateReadmeReadings('.', REWORDED_INTERNAL, true, readings);
+    expect(evaluation.entry).toBe(expected); expect(evaluation.problems).toEqual([]);
+    expect(computations).toBe(1);
+  } finally { hash.mockRestore(); }
+});
+
+test('a real README changed while its original reading awaited cannot inherit the old answers or throw during current evaluation', async () => {
+  const root = makeProjectTempDir('readme-read-await-');
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ name: '@acme/engine', description: 'A public engine' }));
+  writeFileSync(join(root, 'README.md'), '# Public engine before the read\n');
+  const original = readmeState(root), saved = stored(original, { documents: SETTLED_YES, stale: SETTLED_NO });
+  const reading = Promise.withResolvers<Record<string, StoredEntry>>();
+  const completed = reading.promise.then(readings => evaluateReadmeReadings('.', readmeState(root), true, readings));
+  writeFileSync(join(root, 'README.md'), '# Different current README after admission\n');
+  reading.resolve(saved);
+  const current = await completed;
+  expect(current.entry).toBeUndefined(); expect(current.problems).toHaveLength(1);
+  expect(current.problems[0]).toContain('missing or stale content evidence');
+  expect(Object.values(saved)[0]?.answers).toEqual({ documents: SETTLED_YES, stale: SETTLED_NO });
 });

@@ -1,18 +1,24 @@
 import { fanOut, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { inboxTriage } from './battery.js';
-import { captureTriageData, captureTriageInputs, captureTriageReceiptScope, settleTriage, triageBinding, type CapturedTriageInput } from './evidence.js';
+import { captureTriageData, captureTriageInputs, captureTriageReceiptScope, triageConclusion, triageBinding, type CapturedTriageInput } from './evidence.js';
 import { captureTriageJudgment, triageConfiguredModel } from './model-result.js';
-import type { TriageFailureReceipt, TriageInput, TriageReceipt, TriageReceiptScope } from './types.js';
+import type { TriageInput, TriagePreview, TriageReceipt, TriageReceiptScope } from './types.js';
 
-export async function scoreCapturedTriage(items: readonly CapturedTriageInput[], port?: JudgmentPort, signal?: AbortSignal, receiptScope?: TriageReceiptScope): Promise<readonly TriageReceipt[]> {
+export function scoreCapturedTriage(items: readonly CapturedTriageInput[], port?: JudgmentPort, signal?: AbortSignal, receiptScope?: TriageReceiptScope): Promise<readonly TriageReceipt[]>;
+export function scoreCapturedTriage(items: readonly CapturedTriageInput[], port: JudgmentPort | undefined, signal: AbortSignal | undefined,
+  receiptScope: TriageReceiptScope | undefined, preview: true): Promise<readonly TriagePreview[]>;
+export async function scoreCapturedTriage(items: readonly CapturedTriageInput[], port?: JudgmentPort, signal?: AbortSignal,
+  receiptScope?: TriageReceiptScope, preview = false): Promise<readonly (TriageReceipt | TriagePreview)[]> {
   const scope = captureTriageReceiptScope(receiptScope);
   // Only settled evidence has a later exact-input matching consumer. A failed
   // attempt needs enough metadata to withdraw an old label, never a hash of the
   // discarded private preview. Missing ports and cancellation perform no hashing.
   const metadata = items.map(item => Object.freeze({ id: item.id, battery: inboxTriage.name,
-    batteryVersion: inboxTriage.version, receiptVersion: 3 as const }));
-  const unavailable = (): readonly TriageFailureReceipt[] => Object.freeze(metadata.map(binding => Object.freeze({ ...binding, status: 'unavailable' as const })));
+    batteryVersion: inboxTriage.version }));
+  const unavailable = (): readonly (TriageReceipt | TriagePreview)[] => Object.freeze(metadata.map(binding => preview
+    ? Object.freeze({ ...binding, status: 'unavailable' as const })
+    : Object.freeze({ ...binding, receiptVersion: 3 as const, status: 'unavailable' as const })));
   if (!items.length) return Object.freeze([]);
   if (!port || signal?.aborted) return unavailable();
   // Each part is the same registered decision, addressed to one batch item.
@@ -54,12 +60,15 @@ export async function scoreCapturedTriage(items: readonly CapturedTriageInput[],
     return Object.freeze(items.map((item, i) => {
       const readings = run.readings[`item${i}`]!;
       const attribution = { model: run.result.requestedModel, actualModel: run.result.model, targetModel: answeredTarget };
-      if (readings.spam.outcome !== 'act' || readings.urgency.outcome !== 'act') {
-        return Object.freeze({ ...metadata[i]!, ...attribution, status: 'held' as const });
+      const conclusion = triageConclusion(readings.spam, readings.urgency);
+      if (preview) return Object.freeze({ ...metadata[i]!, ...attribution, ...conclusion });
+      if (conclusion.status !== 'settled') {
+        return Object.freeze({ ...metadata[i]!, receiptVersion: 3 as const, ...attribution, ...conclusion });
       }
-      // One commitment at actual settled publication. Read-only enrichment
-      // independently compares it without retaining the prior message preview.
-      return settleTriage({ ...triageBinding(item, scope), ...attribution }, readings.spam, readings.urgency);
+      // One commitment for actual settled evidence. Explicit previews never
+      // issue a persistence binding; normal enrichment compares saved evidence
+      // without retaining the prior protected message preview.
+      return Object.freeze({ ...triageBinding(item, scope), ...attribution, ...conclusion });
     }));
   } catch (error) { drainOwned(error); return unavailable(); }
 }

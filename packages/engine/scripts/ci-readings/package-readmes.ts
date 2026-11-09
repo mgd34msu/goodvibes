@@ -38,13 +38,14 @@ export function readmeQuestions(isPublic: boolean): ('documents' | 'stale')[] {
   return isPublic ? ['documents', 'stale'] : ['documents'];
 }
 
-/** Editorial findings from current readings; empty only when all requested answers are favorable and settled. */
-export function readmeProblems(
+/** Evaluate one current input once; diagnostics and displayed answers must
+ * come from the same real saved content commitment, never a supplied key. */
+export function evaluateReadmeReadings(
   dir: string,
   state: PackageReadmeState,
   isPublic: boolean,
   readings: Readonly<Record<string, StoredEntry>>,
-): string[] {
+): { readonly entry: StoredEntry | undefined; readonly problems: string[] } {
   const entry = readings[stateHash(state)];
   const problems: string[] = [];
   for (const question of readmeQuestions(isPublic)) {
@@ -64,7 +65,17 @@ export function readmeProblems(
         : `${dir}/README.md is not settled as free of stale internal or umbrella wording (${describeAnswer(answer)}); describe it as the published package`);
     }
   }
-  return problems;
+  return { entry, problems };
+}
+
+/** Editorial findings from current readings; empty only when all requested answers are favorable and settled. */
+export function readmeProblems(
+  dir: string,
+  state: PackageReadmeState,
+  isPublic: boolean,
+  readings: Readonly<Record<string, StoredEntry>>,
+): string[] {
+  return evaluateReadmeReadings(dir, state, isPublic, readings).problems;
 }
 
 /** Preserve model and battery provenance when reporting editorial evidence. */

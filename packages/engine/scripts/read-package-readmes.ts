@@ -15,7 +15,7 @@
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { packageReadme } from './ci-readings/package-readme.ts';
-import { READINGS_PATH, readmeProblems, readmeQuestions, readmeState } from './ci-readings/package-readmes.ts';
+import { READINGS_PATH, evaluateReadmeReadings, readmeQuestions, readmeState } from './ci-readings/package-readmes.ts';
 import {
   currentReadings,
   decisionId,
@@ -55,7 +55,10 @@ saveStoredReadings(READINGS_PATH, { decision: decisionId(packageReadme), model: 
 console.log(`[package-readmes] ${read} read, ${packageDirs.length - read} reused, ${packageDirs.length} package README(s)`);
 for (const dir of packageDirs) {
   const state = readmeState(resolve(ENGINE_ROOT, dir));
-  const entry = readings[stateHash(state)]!;
-  console.log(`  ${dir}/README.md  ${Object.entries(entry.answers).map(([question, answer]) => `${question}: ${answer.verdict}, ${answer.outcome}, ${answer.probability}`).join('; ')}`);
-  for (const problem of readmeProblems(dir, state, publicPackageDirs.includes(dir), readings)) console.log(`    ${problem}`);
+  const { entry, problems } = evaluateReadmeReadings(dir, state, publicPackageDirs.includes(dir), readings);
+  const summary = entry ? Object.entries(entry.answers)
+    .map(([question, answer]) => `${question}: ${answer.verdict}, ${answer.outcome}, ${answer.probability}`).join('; ')
+    : 'missing or stale readings for the current input';
+  console.log(`  ${dir}/README.md  ${summary}`);
+  for (const problem of problems) console.log(`    ${problem}`);
 }

@@ -10,7 +10,7 @@ import { createOwnedInboxSource, registerCompositeInboxSurface, type InboxSurfac
 import { captureTriageInputs } from './evidence.js';
 import { readTriageMetadataBatch, runInboxTriage } from './pipeline.js';
 import { SqliteTriageStore } from './store.js';
-import type { TriageInput, TriageReceipt } from './types.js';
+import type { TriageInput, TriagePreview, TriageReceipt } from './types.js';
 import { acquireOwnedTriageIdentity } from '../providers/account-identity.js';
 
 /**
@@ -43,7 +43,7 @@ export interface OwnedTriagedInboxOptions extends Omit<RegisterInboxSurfaceOptio
   readonly authority?: InboxTriageAuthority;
 }
 export interface OwnedInboxTriageResult {
-  readonly receipts: readonly TriageReceipt[];
+  readonly receipts: readonly (TriageReceipt | TriagePreview)[];
   readonly total: number;
   readonly hasMore: boolean;
   readonly nextCursor?: string;

@@ -8,7 +8,7 @@ import { collectInternalIdentifierCandidates, INTERNAL_ID_ROOT, scanTargetsFromE
 import { isInternalIdentifierExempt } from './internal-identifier-rule.ts';
 import { collectDeferredSourceCandidates, TODO_ROOT } from './no-todo-markers.ts';
 import { sourceMarkerAnchors } from './no-todo-marker-rules.ts';
-import { captureStaticInputs, withStaticSourcePolicyPass, loadStaticSourceCheckpoint, loadStaticSourceJournal, loadStaticSourceReadings, openStaticSourceJournal, projectCurrentStaticSourceReadings, readStaticInput, revalidateStaticInput, saveStaticSourceReadings, sha256, STATIC_READINGS_PATH, STATIC_SOURCE_READING_PLAN_VERSION, staticDecisionSourceHash, staticDecisionSourceManifest, staticInputCaptureComplete, staticInputKey, staticInputStanding, type StaticSourceInput, type StaticSourceReadings, type StaticSourceReceipt } from './static-source-readings.ts';
+import { captureStaticInputs, withStaticSourcePolicyPass, loadStaticSourceCheckpoint, loadStaticSourceJournal, loadStaticSourceReadings, openStaticSourceJournal, projectCurrentStaticSourceReadings, readStaticInput, revalidateStaticInput, saveStaticSourceReadings, STATIC_READINGS_PATH, STATIC_SOURCE_READING_PLAN_VERSION, staticDecisionSourceHash, staticDecisionSourceManifest, staticInputCaptureComplete, staticInputKey, staticInputStanding, type StaticSourceInput, type StaticSourceReadings, type StaticSourceReceipt } from './static-source-readings.ts';
 
 export function collectStaticInputs(): StaticSourceInput[] {
   const internal = collectInternalIdentifierCandidates(INTERNAL_ID_ROOT, scanTargetsFromEnvironment(process.env.INTERNAL_ID_DIRS_JSON))
@@ -62,12 +62,12 @@ async function main(): Promise<void> {
     ...(values.inputs ? { inputs: resolve(values.inputs) } : {}) });
   const inputs = collectStaticInputs();
   const decisionSourceHash = staticDecisionSourceHash();
-  const snapshot = sha256(JSON.stringify(inputs.map(input => staticInputKey(input))));
+  const inputKeys = inputs.map(input => staticInputKey(input));
   const counts = Object.fromEntries(['internal-identifier', 'deferred-work'].map(kind => [kind, inputs.filter(input => input.kind === kind).length]));
   console.log(`[static-source] ${inputs.length} complete inputs: ${JSON.stringify(counts)}`);
   if (values.inputs) {
     mkdirSync(dirname(resolve(values.inputs)), { recursive: true });
-    writeFileSync(resolve(values.inputs), `${JSON.stringify({ readingPlanVersion: STATIC_SOURCE_READING_PLAN_VERSION, decisionSourceHash, snapshot, inputs }, null, 2)}\n`);
+    writeFileSync(resolve(values.inputs), `${JSON.stringify({ readingPlanVersion: STATIC_SOURCE_READING_PLAN_VERSION, decisionSourceHash, inputs }, null, 2)}\n`);
   }
   if (values['inventory-only']) return;
   if (!values.log) throw new Error('--log is required to retain genuine provider evidence');
@@ -139,7 +139,9 @@ async function main(): Promise<void> {
     await Promise.all(workers);
     persist();
     const after = collectStaticInputs();
-    if (staticDecisionSourceHash() !== decisionSourceHash || sha256(JSON.stringify(after.map(input => staticInputKey(input)))) !== snapshot) {
+    const afterKeys = after.map(input => staticInputKey(input));
+    if (staticDecisionSourceHash() !== decisionSourceHash || afterKeys.length !== inputKeys.length
+      || afterKeys.some((key, index) => key !== inputKeys[index])) {
       throw new Error(`Source changed during preparation; reusable genuine observations retained in ${checkpointPath}, canonical artifact was not published`);
     }
     const result: StaticSourceReadings = projectCurrentStaticSourceReadings(inputs, current);

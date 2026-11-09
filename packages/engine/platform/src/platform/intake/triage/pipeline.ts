@@ -2,13 +2,17 @@ import { isDeepStrictEqual } from 'node:util';
 import { captureTriageData, captureTriageInputs, captureTriageReceiptScope, checkTriageReceipt, triageBinding } from './evidence.js';
 import { scoreCapturedTriage } from './scorer.js';
 import { SqliteTriageStore } from './store.js';
-import type { RunInboxTriageOptions, TriageEvidence, TriageInput, TriageReceipt, TriageStore, TriageStoredRecord, TriageReceiptScope } from './types.js';
+import type { RunInboxTriageOptions, TriageEvidence, TriageInput, TriagePreview, TriageReceipt, TriageStore, TriageStoredRecord, TriageReceiptScope } from './types.js';
 
 /** Scores first, then atomically publishes; dry-run does not open, read, close or write a store. */
-export async function runInboxTriage(items: readonly TriageInput[], options: RunInboxTriageOptions = {}): Promise<readonly TriageReceipt[]> {
+export function runInboxTriage(items: readonly TriageInput[], options: RunInboxTriageOptions & { readonly dryRun: true }): Promise<readonly TriagePreview[]>;
+export function runInboxTriage(items: readonly TriageInput[], options?: RunInboxTriageOptions & { readonly dryRun?: false | undefined }): Promise<readonly TriageReceipt[]>;
+export function runInboxTriage(items: readonly TriageInput[], options: RunInboxTriageOptions): Promise<readonly (TriageReceipt | TriagePreview)[]>;
+export async function runInboxTriage(items: readonly TriageInput[], options: RunInboxTriageOptions = {}): Promise<readonly (TriageReceipt | TriagePreview)[]> {
   const input = captureTriageInputs(items);
+  if (options.dryRun) return scoreCapturedTriage(input, options.port, options.signal, options.receiptScope, true);
   const receipts = await scoreCapturedTriage(input, options.port, options.signal, options.receiptScope);
-  if (options.dryRun || !receipts.length || options.signal?.aborted) return receipts;
+  if (!receipts.length || options.signal?.aborted) return receipts;
   const injected = options.store;
   if (!injected && !options.workingDirectory) throw new Error('Triage persistence requires a store or working directory.');
   const store = injected ?? new SqliteTriageStore(options.workingDirectory!, undefined, options.beforeReceiptWrite);

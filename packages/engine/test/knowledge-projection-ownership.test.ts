@@ -6,6 +6,7 @@ import { ArtifactStore } from '../sdk/src/platform/artifacts/index.js';
 import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
 import { upsertObservedKnowledgeNode } from '../sdk/src/platform/knowledge/store-node-observation.js';
 import { materializeGeneratedKnowledgeProjection, type GeneratedKnowledgeProjectionInput } from '../sdk/src/platform/knowledge/generated-projections.js';
+import { knowledgeRawRepresentation } from '../sdk/src/platform/knowledge/store-record-representation.js';
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 async function fixture() {
@@ -21,6 +22,39 @@ async function fixture() {
   return { store, artifactStore, target, input, first };
 }
 describe('generated page original output ownership', () => {
+  test('an older saved page retains its exact-content clocks without retaining a digest cache', async () => {
+    const item = await fixture();
+    await item.store.replaceSourceRecord({ ...item.first.source, metadata: { ...item.first.source.metadata, generatedContentHash: 'a'.repeat(40) } });
+    const previous = item.store.getSource(item.first.source.id);
+    if (!previous) throw new Error('Saved generated page missing');
+    const oldClock = knowledgeRawRepresentation(previous.metadata).generatedAt;
+    const oldCrawl = knowledgeRawRepresentation(previous).lastCrawledAt;
+    const next = await materializeGeneratedKnowledgeProjection(item.input);
+    expect(next.artifactCreated).toBe(false);
+    expect(next.artifact.id).toBe(previous.artifactId);
+    expect(knowledgeRawRepresentation(next.source.metadata).generatedAt).toBe(oldClock);
+    expect(knowledgeRawRepresentation(next.source).lastCrawledAt).toBe(oldCrawl);
+    expect(next.source.metadata.generatedContentHash).toBeNull();
+  });
+  test('a stale saved content digest cannot conceal changed actual page bytes', async () => {
+    const item = await fixture();
+    const revised = '# Device\nChanged actual page.';
+    await item.store.replaceSourceRecord({ ...item.first.source, metadata: { ...item.first.source.metadata, generatedContentHash: 'obsolete-cache' } });
+    const next = await materializeGeneratedKnowledgeProjection({ ...item.input, markdown: revised });
+    expect(next.artifactCreated).toBe(true);
+    expect(next.artifact.id).not.toBe(item.first.artifact.id);
+    expect((await item.artifactStore.readContent(next.artifact.id)).buffer.equals(Buffer.from(revised))).toBe(true);
+    expect(next.source.metadata.generatedContentHash).toBeNull();
+  });
+  test('invalid UTF-8 bytes are not reused as a page containing the replacement character', async () => {
+    const item = await fixture();
+    const other = await item.artifactStore.create({ kind: 'document', mimeType: 'text/markdown', filename: 'invalid.md', dataBase64: '/w==', retentionMs: 0 });
+    await item.store.replaceSourceRecord({ ...item.first.source, artifactId: other.id });
+    const next = await materializeGeneratedKnowledgeProjection({ ...item.input, markdown: '\ufffd' });
+    expect(next.artifactCreated).toBe(true);
+    expect(next.artifact.id).not.toBe(other.id);
+    expect((await item.artifactStore.readContent(next.artifact.id)).buffer).toEqual(Buffer.from('\ufffd'));
+  });
   test('ordinary guarded success and exact-content artifact reuse retain coherent receipts', async () => {
     const item = await fixture();
     expect(item.store.getSource(item.first.source.id)).toBe(item.first.source);

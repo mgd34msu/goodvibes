@@ -1,7 +1,8 @@
 import type { KnowledgeStore } from '../../store.js';
 import { captureKnowledgeSourceReferences } from '../../source-structural-references.js';
 import type { KnowledgeSourceRecord, KnowledgeExtractionRecord, KnowledgeNodeRecord } from '../../types.js';
-import { supportHash } from './projection.js';
+import { captureOwnedJson } from '../../../gate/judgment-input.js';
+import { sameKnowledgeRecord } from '../../store-record-representation.js';
 import { KnowledgeGeneratedFactSupportHeldError, type GeneratedFactSupportInput } from './types.js';
 
 /** Internal producer capability. Never populated from JSON or a stored ID prefix. */
@@ -12,7 +13,7 @@ export interface EngineGeneratedSupportReferences {
 
 interface GeneratedClaimScope {
   readonly store: KnowledgeStore;
-  readonly minted: WeakMap<KnowledgeNodeRecord, { readonly id: string; readonly hash: string }>;
+  readonly minted: WeakMap<KnowledgeNodeRecord, { readonly id: string; readonly snapshot: unknown }>;
 }
 /** Opaque operation-local token, never serialized or recovered from receipts. */
 export type GeneratedClaimRelinking = object;
@@ -29,14 +30,16 @@ export function createGeneratedClaimReferenceScope(store: KnowledgeStore) {
   claimScopes.set(relinking, { store, minted });
   return { relinking, rememberGenerated(record: KnowledgeNodeRecord): void {
     if (store.getNode(record.id) !== record) throw new KnowledgeGeneratedFactSupportHeldError('stale');
-    minted.set(record, { id: record.id, hash: supportHash(record) });
+    // This proof never leaves the operation. Retain its exact detached value;
+    // a digest adds no authority and needlessly hashes every later check.
+    minted.set(record, { id: record.id, snapshot: captureOwnedJson(record) });
   } };
 }
 export function generatedClaimSupportReferences(token: GeneratedClaimRelinking, store: KnowledgeStore,
   record: KnowledgeNodeRecord): EngineGeneratedSupportReferences | undefined {
   const known = claimScope(token, store).minted.get(record);
   if (!known) return undefined;
-  if (known.id !== record.id || known.hash !== supportHash(record) || store.getNode(record.id) !== record) {
+  if (known.id !== record.id || !sameKnowledgeRecord(known.snapshot, record) || store.getNode(record.id) !== record) {
     throw new KnowledgeGeneratedFactSupportHeldError('stale');
   }
   return { claimId: known.id };
@@ -46,10 +49,10 @@ export function retainRevalidatedGeneratedClaim(token: GeneratedClaimRelinking, 
   previous: KnowledgeNodeRecord, current: KnowledgeNodeRecord): void {
   const { minted } = claimScope(token, store), known = minted.get(previous);
   if (!known) return;
-  if (known.id !== current.id || known.hash !== supportHash(previous) || store.getNode(current.id) !== current) {
+  if (known.id !== current.id || !sameKnowledgeRecord(known.snapshot, previous) || store.getNode(current.id) !== current) {
     throw new KnowledgeGeneratedFactSupportHeldError('stale');
   }
-  minted.set(current, { id: current.id, hash: supportHash(current) });
+  minted.set(current, { id: current.id, snapshot: captureOwnedJson(current) });
 }
 interface RegisteredReferences {
   readonly claimId: string;
@@ -79,7 +82,7 @@ export function withEngineGeneratedSupportReferences(
 export function withStoredKnowledgeSourceReferences(input: GeneratedFactSupportInput, store: KnowledgeStore, source: KnowledgeSourceRecord, extraction: KnowledgeExtractionRecord | null): GeneratedFactSupportInput {
   const proof = captureKnowledgeSourceReferences(store, source, extraction);
   if (!proof) return input;
-  if (supportHash(input.source) !== supportHash(source) || supportHash(input.extraction ?? null) !== supportHash(extraction)) throw new KnowledgeGeneratedFactSupportHeldError('stale');
+  if (!sameKnowledgeRecord(input.source, source) || !sameKnowledgeRecord(input.extraction ?? null, extraction)) throw new KnowledgeGeneratedFactSupportHeldError('stale');
   sourceReferences.set(input, proof); return input;
 }
 export function storedKnowledgeSourceReferences(input: GeneratedFactSupportInput): object | undefined { return sourceReferences.get(input); }

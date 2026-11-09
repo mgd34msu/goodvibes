@@ -16,6 +16,7 @@ import { JudgmentInputError, judgmentInputProblem } from '../sdk/src/platform/ga
 import { KnowledgeGeneratedFactSupportHeldError, type GeneratedFactSupportPlan } from '../sdk/src/platform/knowledge/semantic/verification/types.js';
 import type { KnowledgeNodeRecord } from '../sdk/src/platform/knowledge/types.js';
 import { seedHomeAssistantObservation } from './_helpers/homegraph-observation-fixtures.js';
+import { createGeneratedClaimReferenceScope, generatedClaimSupportReferences, retainRevalidatedGeneratedClaim } from '../sdk/src/platform/knowledge/semantic/verification/structural-references.js';
 
 let previous: JudgmentPort | undefined;
 const roots: string[] = [], stores: KnowledgeStore[] = [];
@@ -71,6 +72,42 @@ async function fixture(batched = false, extractionClock?: number) {
   expect(judgmentInputProblem({ id: fact.id })).toBe('card-material');
   return { store, source, extraction, subject, fact, plan, fake, spaceId, input };
 }
+
+test('operation-local generated claims retain the whole snapshot and never lend proof to a copy or another store', async () => {
+  const item = await fixture();
+  const scope = createGeneratedClaimReferenceScope(item.store);
+  scope.rememberGenerated(item.fact);
+  expect(generatedClaimSupportReferences(scope.relinking, item.store, item.fact)).toEqual({ claimId: item.fact.id });
+  expect(generatedClaimSupportReferences(scope.relinking, item.store, structuredClone(item.fact))).toBeUndefined();
+  const other = new KnowledgeStore({ dbPath: ':memory:' }); stores.push(other); await other.init();
+  expect(() => generatedClaimSupportReferences(scope.relinking, other, item.fact)).toThrow(KnowledgeGeneratedFactSupportHeldError);
+  const next = await item.store.upsertNode({ ...item.fact, metadata: { ...item.fact.metadata, refreshed: true } });
+  expect(() => generatedClaimSupportReferences(scope.relinking, item.store, item.fact)).toThrow(KnowledgeGeneratedFactSupportHeldError);
+  retainRevalidatedGeneratedClaim(scope.relinking, item.store, item.fact, next);
+  expect(generatedClaimSupportReferences(scope.relinking, item.store, next)).toEqual({ claimId: next.id });
+});
+
+test('operation-local generated claim checks reject nested mutation without evaluating an accessor', async () => {
+  const item = await fixture();
+  // A controlled mutable decoder result exercises in-place changes separately
+  // from the store replacement/generation cases above.
+  const record = structuredClone(item.fact);
+  record.metadata.localTail = { value: 'original' };
+  const lookup = spyOn(item.store, 'getNode').mockReturnValue(record);
+  try {
+    const scope = createGeneratedClaimReferenceScope(item.store);
+    scope.rememberGenerated(record);
+    const tail = record.metadata.localTail;
+    if (!tail || typeof tail !== 'object') throw new Error('Mutable decoder fixture missing');
+    Object.defineProperty(tail, 'value', { value: 'changed', enumerable: true, configurable: true });
+    expect(() => generatedClaimSupportReferences(scope.relinking, item.store, record)).toThrow(KnowledgeGeneratedFactSupportHeldError);
+    Object.defineProperty(tail, 'value', { value: 'original', enumerable: true, configurable: true });
+    let calls = 0;
+    Object.defineProperty(tail, 'value', { get() { calls += 1; return 'original'; }, enumerable: true, configurable: true });
+    expect(() => generatedClaimSupportReferences(scope.relinking, item.store, record)).toThrow();
+    expect(calls).toBe(0);
+  } finally { lookup.mockRestore(); }
+});
 
 test('actual generated writer admits its exact current whole record without sending native identifiers', async () => {
   const item = await fixture(), calls = item.fake.requests.length;

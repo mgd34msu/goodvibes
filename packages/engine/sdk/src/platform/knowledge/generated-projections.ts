@@ -1,4 +1,3 @@
-import { knowledgeContentHash } from './content-hash.js';
 import { knowledgeClockIso, knowledgeClockNumber, knowledgeRawRepresentation, retainKnowledgeRepresentation, sameKnowledgeRecord } from './store-record-representation.js';
 import { KnowledgeSourceQualityHeldError } from './source-quality.js';
 import { createHash } from 'node:crypto';
@@ -115,20 +114,6 @@ async function materializeProjection(
       || readLinked() !== originalLinked || JSON.stringify(readLinked()) !== linkedVersion)) stale();
   };
   check();
-  const contentHash = knowledgeContentHash(input.markdown, 40);
-  const existingMetadata = readRecord(existing?.metadata);
-  const existingGeneratedAt = knowledgeRawRepresentation(existingMetadata).generatedAt;
-  const contentUnchanged = existingMetadata.generatedContentHash === contentHash;
-  const generatedAt = contentUnchanged && existingGeneratedAt !== undefined ? existingGeneratedAt : knowledgeClockIso(Date.now());
-  const projectionMetadata = {
-    ...(input.metadata ?? {}),
-    generatedKnowledgePage: true,
-    generatedProjection: true,
-    projectionKind: input.projectionKind,
-    generatedAt,
-    generatedContentHash: contentHash,
-    pageEditable: true,
-  };
   const stagedTarget = target?.kind === 'node' && graph?.nodes.some(node => node.id === target.id);
   if (input.target && !stagedTarget) {
     assertGeneratedProjectionTarget(input.artifactStore, input.store, {
@@ -139,6 +124,23 @@ async function materializeProjection(
   check();
   const reusedArtifact = await findReusableGeneratedArtifact(input.artifactStore, existing, input.markdown);
   check();
+  const existingMetadata = readRecord(existing?.metadata);
+  const existingGeneratedAt = knowledgeRawRepresentation(existingMetadata).generatedAt;
+  // Artifact reuse already compares the actual complete bytes. A second hash
+  // of the same markdown neither improves that comparison nor proves custody.
+  const contentUnchanged = reusedArtifact !== undefined;
+  const generatedAt = contentUnchanged && existingGeneratedAt !== undefined ? existingGeneratedAt : knowledgeClockIso(Date.now());
+  const projectionMetadata = {
+    ...(input.metadata ?? {}),
+    generatedKnowledgePage: true,
+    generatedProjection: true,
+    projectionKind: input.projectionKind,
+    generatedAt,
+    // Clear the obsolete cache field when source metadata is merged with an
+    // older saved page. Older readers treat null as a cache miss, not proof.
+    generatedContentHash: null,
+    pageEditable: true,
+  };
   const artifact = reusedArtifact ?? await input.artifactStore.create({
     kind: 'document',
     mimeType: 'text/markdown',
@@ -149,7 +151,7 @@ async function materializeProjection(
       ...projectionMetadata,
       ...(input.artifactMetadata ?? {}),
       generatedAt,
-      generatedContentHash: contentHash,
+      generatedContentHash: null,
     },
   });
   const sourceInputView = {
@@ -172,7 +174,7 @@ async function materializeProjection(
       filename: artifact.filename,
       ...(input.sourceMetadata ?? {}),
       generatedAt,
-      generatedContentHash: contentHash,
+      generatedContentHash: null,
     },
   };
   const sourceInput = retainKnowledgeRepresentation(sourceInputView, { ...knowledgeRawRepresentation(sourceInputView),
@@ -321,7 +323,7 @@ async function findReusableGeneratedArtifact(
   if (!artifact) return undefined;
   try {
     const { buffer } = await artifactStore.readContent(artifact.id);
-    return buffer.toString('utf-8') === markdown ? artifact : undefined;
+    return buffer.equals(Buffer.from(markdown, 'utf-8')) ? artifact : undefined;
   } catch (error) {
     logger.warn('Generated knowledge projection artifact reuse failed', {
       sourceId: source.id,

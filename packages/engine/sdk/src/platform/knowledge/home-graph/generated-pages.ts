@@ -580,21 +580,12 @@ async function materializeGeneratedMarkdown(input: HomeGraphPageContext & {
   readonly artifactCreated: boolean;
   readonly nodes?: readonly KnowledgeNodeRecord[];
 }> {
-  const contentHash = knowledgeContentHash(input.markdown, 16);
-  const existingSource = input.store.getSource(homeGraphSourceId(input.spaceId, 'generated-page', input.canonicalValue));
-  const existingMetadata = readRecord(existingSource?.metadata);
-  const existingGeneratedAt = knowledgeRawRepresentation(existingMetadata).generatedAt;
-  const generatedAt = existingMetadata.generatedContentHash === contentHash && existingGeneratedAt !== undefined
-    ? existingGeneratedAt
-    : knowledgeClockIso(Date.now());
   const regeneration = readRecord(input.metadata).automation === 'snapshot-sync' ? 'automatic' : 'manual';
   const metadata = {
     ...(input.metadata ?? {}),
     homeGraphSourceKind: 'generated-page',
     homeGraphGeneratedPage: true,
     projectionKind: input.projectionKind,
-    generatedAt,
-    generatedContentHash: contentHash,
     pagePolicyVersion: HOME_GRAPH_PAGE_POLICY_VERSION,
     pageEditable: true,
     regeneration,

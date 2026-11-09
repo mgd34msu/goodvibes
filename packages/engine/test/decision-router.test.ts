@@ -91,6 +91,23 @@ test('empty categories use General without an extra decision or answer-provider 
   expect(f.fake.requests).toHaveLength(1); expect(f.calls).toHaveLength(1);
 });
 
+test('route effort uses the exact documented model controls when discovery has no effort metadata', async () => {
+  const f = fixture(['general']);
+  const sol = model('openai-subscriber', 'gpt-6.1-sol');
+  delete sol.reasoningEffort;
+  for (const effort of ['xhigh', 'max']) {
+    const router = new DecisionRouterProvider({
+      settings: () => ({ categories: { general: { target: { provider: sol.provider, model: sol.id, effort } } } }),
+      resolveTarget: () => ({ provider: f.target, model: sol }),
+      capturePort: () => ({ port: f.fake.port, assertCurrent() {} }),
+    });
+    const route = await router.prepare({ messages: [{ role: 'user', content: 'Hello' }] });
+    expect(route.effort.value).toBe(effort);
+    expect(route.info.effort).toBe(effort);
+    expect(route.effort.spec.values).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+  }
+});
+
 test('uncertainty expands bounded context once, then uses General; it never expands the answer transcript', async () => {
   const f = fixture(['coding-implementation'], 0.5);
   const messages: ChatRequest['messages'] = [{ role: 'user', content: 'prior'.repeat(20000) }, { role: 'assistant', content: 'reference'.repeat(20000) }, { role: 'user', content: 'do that' }];

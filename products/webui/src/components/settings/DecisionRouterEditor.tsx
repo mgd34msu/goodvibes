@@ -190,7 +190,8 @@ export function DecisionRouterEditor({
         <Input
           aria-label="Initial routing context (characters)"
           type="number"
-          min={1}
+          min={512}
+          max={32000}
           value={settings.initialContextChars}
           onChange={(event) =>
             draft.change(
@@ -203,7 +204,8 @@ export function DecisionRouterEditor({
         <Input
           aria-label="Expanded routing context (characters)"
           type="number"
-          min={1}
+          min={512}
+          max={65536}
           value={settings.expandedContextChars}
           onChange={(event) =>
             draft.change(

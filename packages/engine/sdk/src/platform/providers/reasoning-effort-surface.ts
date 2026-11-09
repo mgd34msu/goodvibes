@@ -28,16 +28,16 @@
  */
 
 import {
-  EFFORT_DESCRIPTIONS,
   budgetTokensForLevel,
   describeReasoningWire,
   reasoningEffortLevels,
   resolveEffortForModel,
-  resolveReasoningEffortSpec,
   setActiveReasoningEffortOptions,
   type ReasoningEffortSpec,
   type ResolvedReasoningEffort,
-} from './index.js';
+} from './reasoning-effort.js';
+import { resolveReasoningEffortSpec } from './reasoning-effort-families.js';
+import { EFFORT_DESCRIPTIONS } from './effort-levels.js';
 
 /** The subset of a model this module needs; `ModelDefinition` satisfies it. */
 export interface EffortModelLike {
@@ -75,6 +75,7 @@ export function effortSpecForModel(model: EffortModelLike): ReasoningEffortSpec 
   const declared = isReasoningEffortSpec(model.reasoningEffort) ? model.reasoningEffort : undefined;
   return resolveReasoningEffortSpec({
     modelId: model.id,
+    ...(model.provider === undefined ? {} : { provider: model.provider }),
     ...(declared ? { spec: declared } : {}),
   });
 }

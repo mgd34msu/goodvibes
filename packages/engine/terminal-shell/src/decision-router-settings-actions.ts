@@ -20,8 +20,15 @@ export function openDecisionRouterSettings(ctx: DecisionRouterPickerContext, cha
   let settings: ReturnType<typeof captureDecisionRouterSettings>;
   try { settings = captureDecisionRouterSettings(config.get('provider.decisionRouter')); }
   catch (error) { ctx.print('Unable to read routing settings: ' + summarizeError(error)); return true; }
+  const openedRevision = JSON.stringify(settings);
+  const current = () => {
+    if (JSON.stringify(captureDecisionRouterSettings(config.get('provider.decisionRouter'))) === openedRevision) return true;
+    ctx.print('Routing settings changed while this picker was open. Reopen it before saving.');
+    changed(); ctx.renderRequest(); return false;
+  };
   const save = (id: string, model: ModelDefinition | null, effort?: string) => {
     try {
+      if (!current()) return;
       const latest = captureDecisionRouterSettings(config.get('provider.decisionRouter'));
       const category = latest.categories[id];
       if (!category) throw new Error('Routing category changed; reopen its settings.');
@@ -42,15 +49,15 @@ export function openDecisionRouterSettings(ctx: DecisionRouterPickerContext, cha
     if (!selected) return;
     const id = selected.item.id;
     if (id === '__advanced__') {
-      const current = JSON.stringify(config.get('provider.decisionRouter'));
-      open('Advanced Decision Router — JSON', [{ id: current, label: current }], {
+      const currentJson = JSON.stringify(config.get('provider.decisionRouter'));
+      open('Advanced Decision Router — JSON', [{ id: currentJson, label: currentJson }], {
         allowSearch: true, customItem: query => {
           try { captureDecisionRouterSettings(JSON.parse(query)); return { id: query, label: 'Use routing configuration', detail: query }; }
           catch { return null; }
         },
       }, result => {
         if (!result) return;
-        try { config.setDynamic('provider.decisionRouter', captureDecisionRouterSettings(JSON.parse(result.item.id))); changed(); ctx.renderRequest(); }
+        try { if (!current()) return; config.setDynamic('provider.decisionRouter', captureDecisionRouterSettings(JSON.parse(result.item.id))); changed(); ctx.renderRequest(); }
         catch (error) { ctx.print('Unable to save routing settings: ' + summarizeError(error)); }
       });
       return;

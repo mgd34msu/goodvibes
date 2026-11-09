@@ -56,6 +56,7 @@ export function openSettingsChoice(
   };
   let fallbackIndex: number | null = null;
   const fallbackChain = (): readonly JudgmentFallbackSettings[] => config.get('judgment.fallbacks');
+  const editingFallback = () => action === 'judgment-fallbacks' && fallbackIndex !== null ? fallbackChain()[fallbackIndex] : undefined;
   const save = (patch: ReadonlyArray<readonly [ConfigKey, unknown]>) => {
     if (!current()) return;
     const previous = patch.map(([key]) => [key, config.get(key)] as const);
@@ -88,7 +89,7 @@ export function openSettingsChoice(
     return true;
   }
   const chooseEndpoint = (profile: DecisionModelProfile) => {
-    const previousTarget = action === 'judgment-fallbacks' && fallbackIndex !== null ? fallbackChain()[fallbackIndex] : undefined;
+    const previousTarget = editingFallback();
     const current = previousTarget?.endpoint ?? String(config.get('judgment.endpoint') ?? '');
     const hosted = profile.id === 'jev' ? 'https://api.typesafe.ai' : '';
     const valid = (text: string): boolean => {
@@ -107,7 +108,7 @@ export function openSettingsChoice(
         if (!result) return;
         const endpoint = result.item.id;
         const persist = (keySource: JudgmentFallbackSettings['keySource'], keyName: string) => {
-        const priorBackend = endpoint === current ? captureJudgmentBackendSettings(previousTarget?.backend ?? config.get('judgment.backend')) : {};
+        const priorBackend = endpoint === current ? captureJudgmentBackendSettings(previousTarget ? previousTarget.backend : config.get('judgment.backend')) : {};
         const limits = { ...(priorBackend.maxInputBytes === undefined ? {} : { maxInputBytes: priorBackend.maxInputBytes }), ...(priorBackend.maxQuestions === undefined ? {} : { maxQuestions: priorBackend.maxQuestions }) };
         const backend = { ...limits, adapter: profile.adapter, ...(profile.responseModels ? { responseModels: profile.responseModels } : {}) };
         if (action === 'judgment-fallbacks') {
@@ -151,11 +152,12 @@ export function openSettingsChoice(
       });
   };
   const chooseModel = (adapter?: string) => {
+    const previousTarget = editingFallback();
     const profiles = DECISION_MODEL_PROFILES.filter(profile => !adapter || profile.adapter === adapter);
     const items: SelectionItem[] = profiles.map(profile => ({ id: profile.id, label: profile.name, detail: profile.model, category: PROVIDERS.find(provider => provider.id === profile.adapter)?.label ?? profile.adapter, primaryAction: 'select' }));
     open('Choose decision model', items, {
       allowSearch: true,
-      preSelectId: profiles.find(profile => profile.model === config.get('judgment.model'))?.id,
+      preSelectId: profiles.find(profile => profile.model === (previousTarget?.model ?? config.get('judgment.model')))?.id,
       customItem: query => adapter !== 'cloudflare-workers-ai' && /^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,255}$/.test(query)
         ? { id: `custom:${query}`, label: `Custom model: ${query}`, detail: 'Use the current endpoint and protocol.', primaryAction: 'select' } : null,
     }, result => {
@@ -163,7 +165,7 @@ export function openSettingsChoice(
       const profile = profiles.find(profile => profile.id === result.item.id);
       if (profile) chooseEndpoint(profile);
       else if (result.item.id.startsWith('custom:')) {
-        const existing = captureJudgmentBackendSettings(config.get('judgment.backend'));
+        const existing = captureJudgmentBackendSettings(previousTarget ? previousTarget.backend : config.get('judgment.backend'));
         const selectedAdapter = PROVIDERS.find(provider => provider.id === adapter)?.id ?? existing.adapter ?? 'system-one';
         chooseEndpoint({ id: 'custom', name: 'Custom model', model: result.item.id.slice(7), adapter: selectedAdapter,
           ...(selectedAdapter === 'laya' ? { responseModels: existing.responseModels ?? ['laya-rl-agent'] } : {}), documentation: '' });

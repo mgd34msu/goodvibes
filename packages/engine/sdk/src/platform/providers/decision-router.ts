@@ -5,7 +5,8 @@ import { toJson, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { captureDecisionRouterSettings, type DecisionRouterTarget } from '../config/decision-router-settings.js';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { decisionRouterCategory } from '../routing/batteries/decision-router.js';
-import { resolveEffortForModel, type ResolvedReasoningEffort } from './reasoning-effort.js';
+import type { ResolvedReasoningEffort } from './reasoning-effort.js';
+import { resolveEffortForModelSurface } from './reasoning-effort-surface.js';
 import type { ChatRequest, ChatResponse, LLMProvider, ProviderModelSource } from './interface.js';
 import type { ModelDefinition } from './registry-types.js';
 import { buildDecisionRoutingPreview, rememberRoutingTask, routingMessageText, type DecisionRoutingContext } from './decision-router-context.js';
@@ -105,7 +106,7 @@ export class DecisionRouterProvider implements LLMProvider {
     if (target.provider === this.name || resolved.provider.name === this.name) throw new Error('Decision Router cannot route to itself.');
     const current = () => { input.signal?.throwIfAborted(); input.assertCurrent?.(); };
     current();
-    const effort = resolveEffortForModel(target.effort, resolved.model);
+    const effort = resolveEffortForModelSurface(target.effort, resolved.model);
     return { provider: resolved.provider, model: resolved.model, effort, assertCurrent: current,
       info: Object.freeze({ category: 'general', resolvedCategory: 'general', provider: resolved.provider.name,
         model: resolved.model.id, ...(target.effort === undefined ? {} : { requestedEffort: target.effort }),
@@ -164,7 +165,7 @@ export class DecisionRouterProvider implements LLMProvider {
       const resolvedCategory = configured?.target ? category : 'general';
       const resolved = target === general ? generalTarget : this.options.resolveTarget(target);
       if (target.provider === this.name || resolved.provider.name === this.name) throw new Error('Decision Router cannot route to itself.');
-      const effort = resolveEffortForModel(target.effort, resolved.model);
+      const effort = resolveEffortForModelSurface(target.effort, resolved.model);
       selected.recordAction(`Route ${category} to ${resolved.provider.name}:${resolved.model.id}`);
       if (sessionId && category && category !== 'lookup-navigation' && category !== 'general' && !uncertain) {
         const user = input.messages.findLast(message => message.role === 'user');

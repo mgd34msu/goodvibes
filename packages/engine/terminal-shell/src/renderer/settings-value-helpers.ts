@@ -29,6 +29,10 @@ export function createSettingsValueHelpers<Entry extends SettingsValueEntry>(pol
   }
   function formatValue(entry: Entry): string {
     const value = entry.currentValue;
+    if (entry.setting.key === 'judgment.fallbacks' && Array.isArray(value)) {
+      return `${value.length} fallback target${value.length === 1 ? '' : 's'} (Enter to ${value.length ? 'edit order' : 'add'})`;
+    }
+    if (entry.setting.key === 'provider.decisionRouter') return 'Enter to configure category routes';
     if (entry.setting.key === 'judgment.backend' && value && typeof value === 'object' && !Array.isArray(value)) {
       const adapter = (value as { adapter?: unknown }).adapter;
       return adapter === 'cloudflare-workers-ai' ? 'Cloudflare Workers AI' : adapter === 'laya' ? 'Laya' : 'System One';

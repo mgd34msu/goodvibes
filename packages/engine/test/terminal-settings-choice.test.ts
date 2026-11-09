@@ -10,6 +10,7 @@ import { handleSelectionModalToken } from '../terminal-shell/src/modal-input-rou
 import { DECISION_MODEL_PROFILES } from '@goodvibes-jev/judgment';
 import { openDecisionRouterSettings } from '../terminal-shell/src/decision-router-settings-actions.js';
 import type { ModelDefinition } from '../sdk/src/platform/providers/registry-types.js';
+import { createSettingsValueHelpers } from '../terminal-shell/src/renderer/settings-value-helpers.js';
 
 const owned: string[] = [];
 afterEach(() => { for (const root of owned.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -117,6 +118,20 @@ test('a stale fallback picker cannot delete a replacement target', () => {
   expect(f.errors[0]).toContain('Settings changed');
 });
 
+test('editing a custom fallback preserves that target protocol rather than inheriting the primary provider', () => {
+  const f = fixture('judgment-fallbacks');
+  f.config.set('judgment.backend', { adapter: 'system-one' });
+  f.config.set('judgment.fallbacks', [{ endpoint: 'http://127.0.0.1:4322', model: 'english', keySource: 'none', keyName: '',
+    backend: { adapter: 'laya', responseModels: ['laya-rl-agent', 'local-checkpoint'] } }]);
+  f.reopen(); f.choose('0'); f.choose('edit');
+  expect(f.modal.getSelected()?.id).toBe('laya');
+  f.type('custom-checkpoint'); f.enter(); f.choose('http://127.0.0.1:4322'); f.choose('none');
+  expect(f.config.get('judgment.fallbacks')[0]).toMatchObject({ model: 'custom-checkpoint',
+    backend: { adapter: 'laya', responseModels: ['laya-rl-agent', 'local-checkpoint'] } });
+  expect(f.config.get('judgment.backend')).toEqual({ adapter: 'system-one' });
+  expect(f.errors).toEqual([]);
+});
+
 test('execution permission selection uses the active-session owner callback', () => {
   const f = fixture('permission-mode'); const selected: string[] = [];
   openSettingsChoice(f.context, 'permission-mode', () => {}, value => selected.push(value));
@@ -140,4 +155,36 @@ test('Decision Router category controls save provider, model and supported effor
   expect(f.config.get('provider.decisionRouter').categories['coding-implementation']?.target).toBeNull();
   expect(f.config.get('provider.model')).toBe(chat);
   expect(f.errors).toEqual([]);
+});
+
+test('a stale Decision Router advanced editor cannot overwrite a newer category target', () => {
+  const f = fixture('decision-policy');
+  const context = { ...f.context, provider: { providerRegistry: { listModels: () => [] } } };
+  openDecisionRouterSettings(context); f.choose('__advanced__');
+  const old = f.modal.items[0]?.id;
+  expect(old).toBeDefined();
+  const replacement = { categories: { general: { target: { provider: 'answer', model: 'newer' } } } };
+  f.config.set('provider.decisionRouter', replacement);
+  f.choose(old!);
+  expect(f.config.get('provider.decisionRouter').categories['general']?.target?.model).toBe('newer');
+  expect(f.errors[0]).toContain('Routing settings changed');
+});
+
+test('a stale Decision Router category picker cannot clear a newer override', () => {
+  const f = fixture('decision-policy');
+  const context = { ...f.context, provider: { providerRegistry: { listModels: () => [] } } };
+  openDecisionRouterSettings(context); f.choose('research');
+  f.config.set('provider.decisionRouter', { categories: { research: { target: { provider: 'answer', model: 'newer' } } } });
+  f.choose('__general__');
+  expect(f.config.get('provider.decisionRouter').categories['research']?.target?.model).toBe('newer');
+  expect(f.errors[0]).toContain('Routing settings changed');
+});
+
+test('structured terminal settings describe their actual picker controls', () => {
+  const helpers = createSettingsValueHelpers({ richValues: true, featureLabels: false,
+    isSecretKey: () => false, isSecretReference: () => false, labels: {}, panelDescription: '', bothDescription: '' });
+  const value = (key: string, currentValue: unknown) => helpers.formatValue({ setting: { key }, currentValue, isDefault: false });
+  expect(value('judgment.fallbacks', [])).toBe('0 fallback targets (Enter to add)');
+  expect(value('judgment.fallbacks', [{ model: 'english' }])).toBe('1 fallback target (Enter to edit order)');
+  expect(value('provider.decisionRouter', {})).toBe('Enter to configure category routes');
 });

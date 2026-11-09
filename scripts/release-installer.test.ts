@@ -118,6 +118,11 @@ test('released suite installs all products, companions and native receipt withou
   }
   expect(existsSync(join(home, 'bin/playwright-core/cli.js'))).toBe(true);
   expect(existsSync(join(home, `bin/webui/${version}/index.html`))).toBe(true);
+  for (const directory of ['playwright-core', `webui/${version}`]) {
+    const marker = join(home, 'bin', directory, '.goodvibes-release.json');
+    expect(JSON.parse(readFileSync(marker, 'utf8'))).toEqual({ schema: 1, version });
+    expect(statSync(marker).mode & 0o777).toBe(0o644);
+  }
   expect(JSON.parse(readFileSync(join(home, 'bin/daemon-installation.json'), 'utf8')).version).toBe(version);
   expect(statSync(join(home, 'bin/lib/sqlite-vec-linux-x64/vec0.so')).mode & 0o777).toBe(0o644);
   const urls = readFileSync(join(root, 'fetches'), 'utf8').trim().split('\n');

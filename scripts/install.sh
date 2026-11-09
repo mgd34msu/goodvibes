@@ -2045,6 +2045,9 @@ install_agent() {
 install_browser_driver() {
   driver_staging="$WORKDIR/browser-driver-staging"
   assert_install_claims
+  # Local release bookkeeping lets a later suite rollback require the same
+  # release for directory assets and programs. It is not an integrity pin.
+  write_directory_release_marker "$driver_staging/playwright-core"
   driver_target="$INSTALL_DIR/playwright-core"
   rm -rf "$driver_target.incoming"
   mv -f "$driver_staging/playwright-core" "$driver_target.incoming"
@@ -2092,6 +2095,7 @@ install_webui() {
   say "Installing the web UI $WEBUI_VERSION ..."
   webui_staging="$WORKDIR/webui-staging"
   assert_install_claims
+  write_directory_release_marker "$webui_staging/goodvibes-webui"
   webui_target="$WEBUI_ROOT/$webui_plain_version"
   mkdir -p "$WEBUI_ROOT"
   rm -rf "$webui_target.incoming"
@@ -2124,6 +2128,15 @@ install_webui() {
 
   prune_old_webui_bundles "$webui_plain_version"
   WEBUI_INSTALLED=1
+}
+
+write_directory_release_marker() {
+  _marker_root=$1
+  _marker_path="$_marker_root/.goodvibes-release.json"
+  [ -d "$_marker_root" ] && [ ! -L "$_marker_root" ] || fail 'Released directory staging is unavailable.'
+  [ ! -e "$_marker_path" ] && [ ! -L "$_marker_path" ] || fail 'The release archive collides with local directory bookkeeping.'
+  (umask 022; set -C; printf '{"schema":1,"version":"%s"}\n' "${VERSION#v}" > "$_marker_path") || fail 'Could not record the selected directory release.'
+  chmod 644 "$_marker_path" || fail 'Could not set directory release metadata permissions.'
 }
 
 # Remove versioned bundle directories other than the one just configured. Runs

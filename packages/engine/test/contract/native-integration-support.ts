@@ -83,7 +83,7 @@ export async function createNativeIntegrationFixture(options: {
     const work = claimed.event.work; const attempt = claimed.event.attempts[0]!;
     const target = { workId: work.id, workRevision: work.revision, criteriaRevision: work.criteriaRevision, attemptId: attempt.id, attemptRevision: attempt.revision };
     return { work, attempt, target,
-      key: { workId: work.id, criteriaId: criteriaSetIdForWork(work.id), criteriaRevision: String(work.criteriaRevision), attemptId: attempt.id },
+      get key() { const current = storage.currentByAttempt(attempt.id); return current.record?.request.key ?? current.intent?.request.key ?? { workId: work.id, criteriaId: criteriaSetIdForWork(work.id), criteriaRevision: String(work.criteriaRevision), attemptId: attempt.id }; },
       identity: { workId: work.id, attemptId: attempt.id, expectedRevision: { work: work.revision, criteria: work.criteriaRevision, attempt: attempt.revision } } };
   }
   const owned = await addWork();
@@ -160,7 +160,7 @@ export async function createNativeIntegrationFixture(options: {
     await Promise.all(harness.runner.list({ includeTerminal: true }).map(contract => harness.runner.join(contract.id)));
     await ledger.service.close(); await store.close(); log[Symbol.dispose](); rmSync(root, { recursive: true, force: true });
   }
-  return { root, ...owned, addWork, tokens, paired, helper, authority, catalog, scopes, store, storage, ledger, log, host, hostOptions,
+  return { root, ...owned, get key() { return owned.key; }, addWork, tokens, paired, helper, authority, catalog, scopes, store, storage, ledger, log, host, hostOptions,
     harness, engines, client, sdk, fetch, reader, requests, replaceHostForRecovery, get acquisitions() { return acquisitions; }, dispose };
 }
 

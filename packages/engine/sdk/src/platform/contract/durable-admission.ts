@@ -11,6 +11,9 @@ import { acquireCrossProcessLock } from '../workspace/checkpoint/cross-process-l
 import { CONTRACT_ORIGINS, isContractId, type ContractView, type StartContractInput } from './types.js';
 import { captureNativeContractSource } from './native-source.js';
 import { delegationForbidden } from './batteries/request-shape.js';
+const nativeAdmissionApply = Reflect.apply, nativeRequestGet = WeakMap.prototype.get, nativeRequestSet = WeakMap.prototype.set, freezeNativeAdmission = Object.freeze;
+const nativeRequests = new WeakMap<DurableContractRequest, { revision?: string }>();
+const nativeRequest = (value: DurableContractRequest) => nativeAdmissionApply(nativeRequestGet, nativeRequests, [value]) as { revision?: string } | undefined;
 
 export interface DurableContractKey {
   readonly workId: string;
@@ -119,7 +122,7 @@ function canonical(value: unknown): string {
 function freeze<T>(value: T): T {
   if (value !== null && typeof value === 'object') {
     for (const member of Object.values(value)) freeze(member);
-    Object.freeze(value);
+    freezeNativeAdmission(value);
   }
   return value;
 }
@@ -157,6 +160,7 @@ export function sameDurableRequest(first: DurableContractRequest, second: Durabl
 }
 
 export function freezeDurableRequest(value: DurableContractRequest): DurableContractRequest {
+  if (nativeRequest(value)) return value;
   // Clone before the first await: caller mutation cannot change the operation being admitted.
   let detached: unknown;
   try { detached = JSON.parse(canonical(value)); } catch { throw new DurableContractAdmissionError('invalid'); }
@@ -181,19 +185,25 @@ export function freezeDurableRequest(value: DurableContractRequest): DurableCont
       || source.criteriaId !== key['criteriaId'] || source.criteriaRevision !== key['criteriaRevision']) throw new DurableContractAdmissionError('invalid');
     input['nativeSource'] = source;
   }
-  return freeze(detached as unknown as DurableContractRequest);
+  const request = freeze(detached as unknown as DurableContractRequest);
+  nativeAdmissionApply(nativeRequestSet, nativeRequests, [request, {}]); return request;
 }
 
+/** Actual saved admission/checkpoint payload commitment. Only this native
+ * immutable constructor result may reuse it; public JSON and flags cannot. */
 export function durablePayloadRevision(request: DurableContractRequest): string {
-  return createHash('sha256').update(canonical(request)).digest('hex');
+  const held = nativeRequest(request); if (held?.revision) return held.revision;
+  const revision = createHash('sha256').update(canonical(request)).digest('hex');
+  if (held) held.revision = revision; return revision;
 }
 
-export function parseDurableAdmission(value: unknown): DurableContractAdmission {
+export function parseDurableAdmission(value: unknown, original?: DurableContractRequest): DurableContractAdmission {
   if (!record(value) || (value['schemaVersion'] !== 1 && value['schemaVersion'] !== 2)
     || Object.keys(value).length !== (value['schemaVersion'] === 2 ? 8 : 7)
     || !isContractId(value['contractId']) || typeof value['ownerAgentId'] !== 'string' || value['ownerAgentId'].length === 0
     || typeof value['payloadRevision'] !== 'string') throw new DurableContractAdmissionError('invalid');
-  const request = freezeDurableRequest({ key: value['key'], binding: value['binding'], input: value['input'] } as DurableContractRequest);
+  const parsed = freezeDurableRequest({ key: value['key'], binding: value['binding'], input: value['input'] } as DurableContractRequest);
+  const request = original && nativeRequest(original) && sameDurableRequest(original, parsed) ? original : parsed;
   if (durablePayloadRevision(request) !== value['payloadRevision']) throw new DurableContractAdmissionError('invalid');
   let execution: DurableContractExecution | undefined;
   if (value['schemaVersion'] === 2) {

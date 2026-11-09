@@ -158,7 +158,8 @@ test('mutation callbacks cannot change the comparison baseline or regress an ass
     const mutable = current.intent as unknown as { authorityScopes: string[] };
     mutable.authorityScopes.push('*');
     return { next: null, nextIntent: current.intent, value: undefined };
-  })).rejects.toMatchObject({ code: 'conflict' });
+  })).rejects.toThrow();
+  expect(f.storage.current(f.key).intent?.authorityScopes).toEqual(f.intent.authorityScopes);
   await f.storage.transaction(f.key, current => ({ next: f.record, nextIntent: { ...current.intent!, state: 'associated' }, value: undefined }));
   const bytes = readFileSync(f.file);
   for (const state of ['admitting', 'refused'] as const) await expect(f.storage.transaction(f.key, current => ({ next: null, nextIntent: { ...current.intent!, state }, value: undefined }))).rejects.toThrow();

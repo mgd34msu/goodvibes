@@ -58,7 +58,7 @@ async function fixture(options: { harness?: Partial<HarnessOptions>; decoratePor
     nativeDecisions: host.nativeOwner.decisions, durableAdmission: host.nativeOwner.admission, ...options.harness });
   host.attachRunner(harness.runner);
   cleanups.push(async () => { await host.close(); harness.dispose(); await Promise.all(harness.runner.list({ includeTerminal: true }).map(item => harness.runner.join(item.id))); await ledger.service.close(); await store.close(); log[Symbol.dispose](); rmSync(root, { recursive: true, force: true }); });
-  return { root, tokens, paired, catalog, helper, authority, scopes, store, ledger, actor, work, target, key, log, storage, host, hostOptions, harness, plan };
+  return { root, tokens, paired, catalog, helper, authority, scopes, store, ledger, actor, work, target, get key() { const current = storage.currentByAttempt(target.attemptId); return current.record?.request.key ?? current.intent?.request.key ?? key; }, log, storage, host, hostOptions, harness, plan };
 }
 async function completed(harness: Harness, id: string) {
   await waitFor(() => ['passed', 'failed', 'cancelled'].includes(harness.runner.get(id)?.status ?? ''), 'native bridge completion', 15000);

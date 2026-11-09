@@ -4,6 +4,13 @@
 
 ### Fixed
 
+- Persist opaque native execution and CI-successor identities once instead of
+  recomputing descriptive hashes during live checks. Preserve original paired
+  owner, scope, receipt, replay and cancellation bindings; existing records
+  remain readable. New formats establish their installed-reader capability
+  before publication. Capture CI repair evidence before waiting, and drain
+  pending repairs during host shutdown.
+
 - Give fresh explicit work submissions an opaque source identity. Concurrent
   retries and restarts adopt the exact original request receipt, preserving
   source text, ordered criteria and old submission identities. New source

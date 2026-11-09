@@ -1,4 +1,5 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
+import * as crypto from 'node:crypto';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -17,6 +18,24 @@ function fixture() {
   return { root, configuration, owner, policy, restart: () => new ConfigManager(options),
     changeScope: (revision: string, nextScopes = scopes) => { scopeRevision = revision; scopes = nextScopes; } };
 }
+
+test('fresh CI2 policy compares opaque actual revisions directly; only historical CI1 adoption uses its saved recipe', () => {
+  let configuration = 'opaque-configuration-original', scope = 'opaque-scope-original';
+  const original = { captureDurableConfigurationIncarnation: () => configuration, getDurableConfigurationIncarnation: () => configuration, onDidChangeIncarnation: (_listener: () => void) => () => {} };
+  const selected = { current: () => ({ revision: scope, scopes: ['read:work-ledger'] }) }, policy = createDaemonContinuationPolicy(original, selected);
+  const hash = spyOn(crypto, 'createHash'), count = () => hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256').length;
+  try {
+    const issued = policy.capture(2); expect(issued).toBe(JSON.stringify([configuration, scope]));
+    for (let i = 0; i < 20; i++) expect(policy.current(2)).toBe(issued);
+    expect(count()).toBe(0);
+    const legacy = policy.current(1); expect(count()).toBe(1);
+    for (let i = 0; i < 20; i++) expect(policy.current(1)).toBe(legacy);
+    expect(count()).toBe(1);
+    configuration = 'opaque-configuration-next'; scope = 'opaque-scope-next'; expect(policy.current(2)).not.toBe(issued);
+    const successor = policy.capture(2); expect(successor).toBe(JSON.stringify([configuration, scope])); expect(count()).toBe(1);
+    expect(createDaemonContinuationPolicy(original, selected).current(2)).toBe(successor);
+  } finally { hash.mockRestore(); }
+});
 
 test('current live checks preserve the existing saved native CI policy representation', () => {
   const f = fixture(), binding = f.policy.capture();

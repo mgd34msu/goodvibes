@@ -202,6 +202,8 @@ export class KnowledgeStore {
   private readonly nativeConversationStorage = new Map<string, NativeConversationStorage>();
   private readonly declareNativeConversationFormat: (() => void) | undefined;
   private readonly declareNativeExplicitSourceFormat: (() => void) | undefined;
+  private readonly declareNativeExecutionFormat: (() => void) | undefined;
+  private readonly declareNativeCiFormat: (() => void) | undefined;
   private readonly ledgerStorage = new Map<string, KnowledgeWorkLedgerStorage>();
   private initPromise: Promise<void> | null = null;
   private readonly sources = new Map<string, KnowledgeSourceRecord>();
@@ -231,6 +233,8 @@ export class KnowledgeStore {
     const beforeInitialRead = config.beforeInitialRead?.bind(config);
     this.declareNativeConversationFormat = declareNativeData ? () => declareNativeData('native-conversation-captures-v2') : undefined;
     this.declareNativeExplicitSourceFormat = declareNativeData ? () => declareNativeData('native-explicit-sources-v3') : undefined;
+    this.declareNativeExecutionFormat = declareNativeData ? () => declareNativeData('native-execution-bindings-v2') : undefined;
+    this.declareNativeCiFormat = declareNativeData ? () => declareNativeData('native-ci-continuations-v2') : undefined;
     this.sqlite = new SQLiteStore(this.dbPath, { coordinated: true, beforePersist: () => declareNativeData?.('knowledge-schema-v12'), ...(beforeInitialRead ? { beforeInitialRead } : {}) });
     nativePublicationApply(nativePublicationAdd, nativeNodePublicationOwners, [this]);
     void this.init().catch((error: unknown) => {
@@ -273,7 +277,7 @@ export class KnowledgeStore {
     if (this.closed) throw new Error('KnowledgeStore is closed');
     let storage = this.nativeExecutionStorage.get(projectId);
     if (!storage) {
-      storage = createNativeWorkExecutionStorage(this.sqlite, projectId, () => this.refreshSnapshot());
+      storage = createNativeWorkExecutionStorage(this.sqlite, projectId, () => this.refreshSnapshot(), this.declareNativeExecutionFormat, this.declareNativeCiFormat);
       this.nativeExecutionStorage.set(projectId, storage);
     }
     return storage;

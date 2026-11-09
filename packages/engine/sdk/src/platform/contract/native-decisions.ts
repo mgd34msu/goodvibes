@@ -223,6 +223,12 @@ function nativeCriteriaEvidence(contract: Contract): JevVersionRef {
   const admission = contract.durableAdmission;
   if (admission !== undefined) {
     assertDurableCheckpoint(contract, admission);
+    // Fresh native requests store this exact opaque reference once. It needs
+    // no derived work-id checksum or special privacy exemption.
+    if (/^criteria-v2:[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/.test(source.criteriaId)
+      && admission.key.criteriaId === source.criteriaId && source.criteriaRevision === admission.key.criteriaRevision) {
+      return { id: source.criteriaId, revision: source.criteriaRevision };
+    }
     const canonicalId = criteriaSetIdForWork(admission.key.workId);
     if (source.criteriaId === canonicalId && admission.key.criteriaId === canonicalId
       && source.criteriaRevision === admission.key.criteriaRevision) {

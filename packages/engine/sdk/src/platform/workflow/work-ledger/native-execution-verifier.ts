@@ -116,10 +116,10 @@ export async function verifyNativeWorkExecution(options: {
   readonly now?: () => number;
 }): Promise<VerifiedNativeWorkExecution> {
   // Parse a detached record before any borrowed hook. No original mutable requirement survives.
-  const record = freeze(parseNativeWorkExecutionRecord(structuredClone(options.execution)));
+  const record = parseNativeWorkExecutionRecord(options.execution);
   const settings = freeze(structuredClone(options.settings));
   if (!record.receipt || record.state !== 'launch-claimed') throw new Error('Native execution has no claimed durable receipt');
-  const admission = parseDurableAdmission({ ...record.receipt, input: record.request.input });
+  const admission = parseDurableAdmission({ ...record.receipt, input: record.request.input }, record.request);
   const source = record.request.input.nativeSource!;
   const current = () => { options.signal.throwIfAborted(); options.assertCurrent(); options.signal.throwIfAborted(); };
   current(); await options.runner.join(admission.contractId); current();

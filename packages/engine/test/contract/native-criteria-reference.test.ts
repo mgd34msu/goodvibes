@@ -8,6 +8,7 @@ import { decideNativeContract } from '../../sdk/src/platform/contract/native-dec
 import { captureNativeContractSource, nativeSourceCriteria } from '../../sdk/src/platform/contract/native-source.js';
 import type { Contract, NativeContractSource } from '../../sdk/src/platform/contract/types.js';
 import { judgmentInputProblem } from '../../sdk/src/platform/gate/judgment-input.js';
+import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 
 const workId = 'work-a73a83d8-d064-4be3-8217-012ebfe72275';
 const criteriaId = 'criteria:d6b72d9f28026994604091a0bbac8dfa87467c68300f6960922429de420bbdfb';
@@ -53,6 +54,15 @@ test('exact generated criteria ID reaches recorded native decisions through its 
     expect(log.query()).toHaveLength(1);
     expect(fake.requests[0]!.state).toMatchObject({ originalSource: { goal: value.goal, criteria: ['Preserve all requirements.'] } });
     result.assertCurrent();
+  });
+});
+
+test('fresh stored opaque criteria references reach actual native decisions without deriving or forwarding a work-id checksum', async () => {
+  const id = 'criteria-v2:' + opaqueUuid();
+  await recorded(async (_fake, log) => {
+    const value = contract({ criteriaId: id }), result = await decide(value);
+    expect(result.decision.outcome).toBe('act'); expect(result.decision.evidence).toContainEqual({ id, revision: '1' });
+    expect(value.durableAdmission!.key.criteriaId).toBe(id); expect(log.query()).toHaveLength(1);
   });
 });
 

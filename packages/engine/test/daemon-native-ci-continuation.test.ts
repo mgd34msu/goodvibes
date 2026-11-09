@@ -10,6 +10,7 @@ import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
 import { createNativeWorkSubmissionHost } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-submission';
 import { CiWatchAutoMinter, CiWatchService, CiWatchStore } from '@goodvibes-jev/engine/sdk/platform/ci-watch';
 import { startAdmittedCiRepair } from '@goodvibes-jev/engine/sdk/platform/ci-watch';
+import { nativeCiWatchOwner } from '../sdk/src/platform/ci-watch/native-owner.js';
 import { expect, spyOn, test } from 'bun:test';
 import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -121,7 +122,7 @@ async function fixture(pairingOwner?: PairingTokenManager) {
 
 
 
-for (const mode of ['direct', 'restart', 'concurrent', 'partial-claim-restart', 'launched-restart', 'policy-aba-restart', 'delete-after-policy-restart', 'catalog-aba-restart', 'ledger-aba', 'token-revoke', 'watch-edit', 'record-edit', 'record-forge', 'delete-replay', 'closed-owner', 'scope-aba', 'chain', 'cancel-original-restart', 'cancel-successor-restart', 'cancel-delegated-restart', 'cancel-unrelated-owner', 'cancel-unknown-attempt', 'cancel-changed-authority-scopes'] as const) test(`registered native CI continuation: ${mode}`, async () => {
+for (const mode of ['direct', 'restart', 'concurrent', 'brief-mutation', 'brief-close-drain', 'partial-claim-restart', 'launched-restart', 'policy-aba-restart', 'delete-after-policy-restart', 'catalog-aba-restart', 'ledger-aba', 'token-revoke', 'watch-edit', 'record-edit', 'record-forge', 'delete-replay', 'closed-owner', 'scope-aba', 'chain', 'cancel-original-restart', 'cancel-successor-restart', 'cancel-delegated-restart', 'cancel-unrelated-owner', 'cancel-unknown-attempt', 'cancel-changed-authority-scopes'] as const) test(`registered native CI continuation: ${mode}`, async () => {
   const restart = mode.endsWith('restart');
   const discovery = spyOn(ProviderRegistry.prototype, 'refreshLiveModelDiscovery').mockResolvedValue([]);
   const benchmarks = spyOn(BenchmarkStore.prototype, 'refreshBenchmarks').mockResolvedValue(undefined);
@@ -143,6 +144,7 @@ for (const mode of ['direct', 'restart', 'concurrent', 'partial-claim-restart', 
   let reopenedKnowledge: KnowledgeStore | undefined;
   let releaseRepair: (() => void) | undefined;
   let repairBlocked = false;
+  let holdOriginalJoin = false;
   let consumptionFault: ReturnType<typeof spyOn> | undefined;
   let delegatedStart: ReturnType<typeof spyOn> | undefined;
   let delegatedFactory: ReturnType<typeof spyOn> | undefined;
@@ -174,6 +176,12 @@ for (const mode of ['direct', 'restart', 'concurrent', 'partial-claim-restart', 
         return owned;
       });
     }
+    if (mode === 'brief-mutation' || mode === 'brief-close-drain') {
+      const actualFactory = nativeHostFactory.createNativeWorkExecutionHost;
+      delegatedFactory = spyOn(nativeHostFactory, 'createNativeWorkExecutionHost').mockImplementation(options => actualFactory({ ...options,
+        async joinForeground(id) { await options.joinForeground?.(id); if (holdOriginalJoin) { repairBlocked = true; await new Promise<void>(resolve => { releaseRepair = resolve; }); } },
+      }));
+    }
     let execution = await f.activation.acquire();
     const source = { async fetchJobs() { return [{ name: 'build', status: 'completed' as const, conclusion: 'failure', headSha: 'sha-original', runId: 'run-original', jobId: 'job-original' }]; }, async fetchFailureLogs() { return logs; } };
     const store = new CiWatchStore(join(f.root, 'ci-watches.json'));
@@ -199,9 +207,35 @@ for (const mode of ['direct', 'restart', 'concurrent', 'partial-claim-restart', 
     for (let i = 0; i < 100 && !watches.length; i++) { await Bun.sleep(10); watches = await ci.listWatches(); }
     expect(originalResult.nativeSource).toMatchObject({ goal: f.goal, criteria: f.criteria }); expect(watches, JSON.stringify(warnings)).toHaveLength(1);
     expect(watches[0]!.continuationId).toBeDefined();
+    const continuationStorage = (await f.knowledgeStore.openNativeWorkExecutionStorage('project')).continuations!;
+    const issuedContinuation = continuationStorage.current(watches[0]!.continuationId!).record!;
+    expect(issuedContinuation.version).toBe(2);
+    if (issuedContinuation.version !== 2) throw new Error('Expected actual native CI2 publication');
+    expect(issuedContinuation.issue.successorAttemptId).toMatch(/^attempt-ci-[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/);
+    expect(issuedContinuation.issue.policyRevision).toBe(JSON.stringify([f.options.configManager.getDurableConfigurationIncarnation(), f.continuationScopeOwner.current().revision]));
     for (let i = 0; i < 100 && !(await store.load()).length; i++) await Bun.sleep(10);
     expect(await store.load()).toHaveLength(1);
     await waitFor(() => execution.status(original.admission.key, f.authority).settlement?.state === 'published', 'original native settlement').catch(error => { throw new Error(JSON.stringify({ error: String(error), state: execution.status(original.admission.key, f.authority), warnings })); });
+    if (mode === 'brief-mutation' || mode === 'brief-close-drain') {
+      const operation = execution.recoverCiWatchOwner(watches[0]!)!, owner = nativeCiWatchOwner(operation)!;
+      const brief = { repo: 'fixture/native', ref: 'main', failingJobs: ['build'], logs, jobs: [{ name: 'build', status: 'completed' as const, conclusion: 'failure', headSha: 'sha-original', runId: 'run-original', jobId: 'job-original' }] };
+      holdOriginalJoin = true; const repairing = owner.startRepair(brief); void repairing.catch(() => {});
+      await waitFor(() => repairBlocked, 'actual native original execution drain');
+      if (mode === 'brief-close-drain') {
+        let finished = false; const closing = f.activation.close().then(() => { finished = true; });
+        await Promise.resolve(); await Promise.resolve(); expect(finished).toBe(false);
+        holdOriginalJoin = false; releaseRepair?.(); await expect(repairing).rejects.toThrow(); await closing;
+        expect(finished).toBe(true); expect((await f.ledger.service.readSnapshot(f.actor)).works[0]!.attempt!.id).toBe(f.target.attemptId);
+        expect(f.requests.filter(isWorkerRequest)).toHaveLength(2); return;
+      }
+      brief.logs = 'Changed while original work drained'; brief.failingJobs[0] = 'changed'; brief.jobs[0]!.headSha = 'changed';
+      holdOriginalJoin = false; releaseRepair?.(); await repairing;
+      const work = (await f.ledger.service.readSnapshot(f.actor)).works[0]!, next = execution.statusByAttempt(work.work.id, work.attempt!.id, f.authority);
+      if (next.kind !== 'execution') throw new Error('Missing actual native repair');
+      expect(next.execution.request.input.taskEvidence).toContain(logs); expect(next.execution.request.input.taskEvidence).not.toContain(brief.logs);
+      expect(next.execution.request.binding.actionId).toBe(issuedContinuation.issue.successorSourceBinding);
+      return;
+    }
     if (mode === 'policy-aba-restart' || mode === 'delete-after-policy-restart') {
       const before = f.options.configManager.get('display.showTokenSpeed');
       f.options.configManager.setRuntimeOverride('display.showTokenSpeed', !before); f.options.configManager.setRuntimeOverride('display.showTokenSpeed', before);
@@ -228,7 +262,7 @@ for (const mode of ['direct', 'restart', 'concurrent', 'partial-claim-restart', 
       await sqlite.transactPersisted(db => {
         const row = JSON.parse(String(db.exec('SELECT state_json FROM native_ci_continuations')[0]!.values[0]![0]));
         if (mode === 'record-edit') row.watch.repo = 'edited/together';
-        else { row.issue.seedRevision = 'f'.repeat(64); row.grant.binding = nativeCiDigest(row.issue); }
+        else { row.issue.successorSourceBinding = 'f'.repeat(64); row.grant.binding = nativeCiDigest(row.issue); }
         db.run('UPDATE native_ci_continuations SET state_json = ?', [JSON.stringify(row)]);
         return { changed: true, value: undefined };
       }, () => {});
@@ -349,6 +383,9 @@ for (const mode of ['direct', 'restart', 'concurrent', 'partial-claim-restart', 
     const successor = execution.statusByAttempt(current.work.id, current.attempt!.id, f.authority);
     expect(successor.kind).toBe('execution');
     if (successor.kind !== 'execution') throw new Error('No native successor receipt');
+    expect(current.attempt!.id).toBe(issuedContinuation.issue.successorAttemptId);
+    expect(successor.execution.version).toBe(2);
+    expect(successor.execution.request.binding.actionId).toBe(issuedContinuation.issue.successorSourceBinding);
     await waitFor(() => execution.statusByAttempt(current.work.id, current.attempt!.id, f.authority).kind === 'execution'
       && f.requests.filter(isWorkerRequest).length >= 3, 'genuine native repair member');
     expect(successor.execution.request.input.nativeSource).toMatchObject({ sourceId: original.contract.nativeSource!.sourceId,

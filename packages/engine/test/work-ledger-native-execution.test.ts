@@ -7,7 +7,7 @@ import { registerNativeWorkSubmissionGatewayMethods } from '../sdk/src/platform/
 import * as nativeFs from 'node:fs';
 import type { SQLitePublicationIO } from '../sdk/src/platform/state/sqlite-store-persistence.js';
 /** Real paired authority, workspace scope and KnowledgeStore bridge into the real durable runner. */
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -37,7 +37,8 @@ import { plannerOutput } from './contract/plan-support.js';
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
-async function fixture(options: { harness?: Partial<HarnessOptions>; decoratePort?: (port: JudgmentPort) => JudgmentPort; register?: boolean } = {},
+async function fixture(options: { harness?: Partial<HarnessOptions>; decoratePort?: (port: JudgmentPort) => JudgmentPort; register?: boolean;
+  wrapRunner?: (runner: Harness['runner']) => Parameters<ReturnType<typeof createNativeWorkExecutionHost>['attachRunner']>[0] } = {},
 ) {
   const root = makeRepo(); mkdirSync(join(root, '.goodvibes'), { recursive: true });
   const tokens = new PairingTokenManager(join(root, '.goodvibes', 'pairing.json'));
@@ -112,7 +113,7 @@ async function fixture(options: { harness?: Partial<HarnessOptions>; decoratePor
     durableAdmission: host.nativeOwner.admission,
     ...options.harness,
   });
-  host.attachRunner(harness.runner);
+  host.attachRunner(options.wrapRunner?.(harness.runner) ?? harness.runner);
   cleanups.push(async () => {
     await host.close();
     harness.dispose();
@@ -135,7 +136,7 @@ async function fixture(options: { harness?: Partial<HarnessOptions>; decoratePor
     actor,
     work,
     target,
-    key,
+    get key() { const current = storage.currentByAttempt(target.attemptId); return current.record?.request.key ?? current.intent?.request.key ?? key; },
     log,
     storage,
     host,
@@ -159,8 +160,9 @@ test('actual bridge commits association before launch, preserves source and exac
   expect(record.request.input.nativeSource).toMatchObject({ goal: f.work.goal, criteria: f.work.criteria });
   expect(record.request.input.ask).toBe('Small display label');
   expect(record.decision.outcome).toBe('act');
-  for (const field of ['authorityId', 'authorityRevision', 'scopeId', 'scopeRevision'] as const)
-    expect(record.request.binding[field]).toMatch(/^[a-f0-9]{64}$/);
+  for (const field of ['authorityId', 'scopeId', 'scopeRevision'] as const)
+    expect(record.request.binding[field]).toMatch(/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/);
+  expect(record.request.binding.authorityRevision).toMatch(/^[a-f0-9]{64}$/);
   expect(record.request.binding.authorityId).not.toContain(f.paired.id);
   for (const id of record.decision.judgmentDecisionIds) expect(f.log.get(id)?.status).toBe('answered');
   const result = await completed(f.harness, started.admission.contractId);
@@ -794,11 +796,67 @@ test('target-aware cancellation wins before the first start without inventing an
   expect('progress' in cancelled).toBe(false);
   expect(f.storage.current(f.key).record).toBeNull();
   expect(f.storage.current(f.key).intent?.state).toBe('cancelled');
+  const original = f.storage.currentByAttempt(f.target.attemptId).intent!;
+  expect(original.version).toBe(2); expect(original.request.key.criteriaId).toMatch(/^criteria-v2:[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/);
   expect(await client.cancel(wire.identity)).toEqual(cancelled);
   expect(await client.start(wire.identity)).toEqual(cancelled);
   expect(await client.resume(wire.identity)).toEqual(cancelled);
+  expect(f.storage.currentByAttempt(f.target.attemptId, original).intent).toEqual(original);
   expect(f.harness.runner.list({ includeTerminal: true })).toHaveLength(0);
   expect(f.log.query({ site: 'work-ledger.native-start' })).toHaveLength(0);
+});
+
+test('fresh native execution persists opaque refs and the exact private paired/scope owner before runner admission', async () => {
+  const f = await fixture(), started = await f.host.start(f.target, f.authority);
+  const execution = f.storage.currentByAttempt(f.target.attemptId).record!, identity = f.authority.current()!, scope = f.scopes.currentScope(f.root);
+  expect(execution.version).toBe(2); expect(execution.owner).toEqual({ principalId: identity.principalId, authorityRevision: identity.authorityRevision, scopeId: scope.scopeId, scopeRevision: scope.scopeRevision });
+  expect(execution.request.key).toEqual(started.admission.key);
+  expect(execution.request.key.criteriaId).toMatch(/^criteria-v2:[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/);
+  for (const value of [identity.principalId, identity.authorityRevision, scope.scopeId, scope.scopeRevision]) expect(JSON.stringify(execution.request.binding)).not.toContain(value);
+  expect(execution.request.binding.authorityRevision).toMatch(/^[a-f0-9]{64}$/);
+  const wire = transport(f), client = createOperatorNativeWorkExecutionClient(wire.sdk(), 'project');
+  try {
+    const projected = await client.status(wire.identity);
+    expect(JSON.stringify(projected)).not.toContain(identity.principalId);
+    expect(JSON.stringify(projected)).not.toContain(scope.scopeId);
+    expect(JSON.stringify(projected)).not.toContain('authorityScopes');
+  } finally { client.dispose(); }
+});
+
+test('unused successor cancellation retains its preallocated source even when its saved tombstone retires the delegated owner', async () => {
+  const f = await fixture(), sourceAction = 'e'.repeat(64);
+  const retiring: typeof f.authority = {
+    ...f.authority,
+    continuationSourceAction: () => sourceAction,
+    current() { return f.storage.currentByAttempt(f.target.attemptId).intent?.state === 'cancelled' ? null : f.authority.current(); },
+    withCurrent(expected, callback) { return f.authority.withCurrent(expected, checked => callback(() => {
+      checked(); const current = retiring.current(); if (!current) throw new Error('Synthetic retired successor'); return current;
+    })); },
+  };
+  await f.host.cancelTarget(f.target, retiring, 'Prevent the unused original successor');
+  const original = f.storage.currentByAttempt(f.target.attemptId).intent!;
+  expect(original.state).toBe('cancelled'); expect(original.request.binding.actionId).toBe(sourceAction); expect(retiring.current()).toBeNull();
+  expect(f.harness.runner.list({ includeTerminal: true })).toHaveLength(0); expect(f.log.query({ site: 'work-ledger.native-start' })).toHaveLength(0);
+  const before = readFileSync(join(f.root, '.goodvibes', 'knowledge.sqlite'));
+  await expect(f.host.start(f.target, f.authority)).rejects.toThrow();
+  expect(f.storage.currentByAttempt(f.target.attemptId, original).intent).toEqual(original);
+  expect(readFileSync(join(f.root, '.goodvibes', 'knowledge.sqlite'))).toEqual(before);
+});
+
+test('native original record retention ends only after real executor drainage, retaining the saved receipt identity for later status', async () => {
+  let release!: () => void, drained!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; }), joined = new Promise<void>(resolve => { drained = resolve; });
+  const f = await fixture({ wrapRunner: runner => ({ startDurable: request => runner.startDurable(request), resumeDurable: key => runner.resumeDurable(key), get: id => runner.get(id), list: filter => runner.list(filter),
+    cancel: (id, reason) => runner.cancel(id, reason), join: async id => { await runner.join(id); drained(); await gate; },
+    ...(runner.inspectDurable ? { inspectDurable: runner.inspectDurable.bind(runner) } : {}), ...(runner.joinDurable ? { joinDurable: runner.joinDurable.bind(runner) } : {}) }) }).catch(error => { release(); throw error; });
+  const originalCurrent = f.storage.current.bind(f.storage); let retained: Parameters<typeof f.storage.current>[1];
+  const read = spyOn(f.storage, 'current').mockImplementation((key, original) => { retained = original; return originalCurrent(key, original); });
+  try {
+    const started = await f.host.start(f.target, f.authority); await joined;
+    f.host.status(started.admission.key, f.authority); expect(retained).toBeDefined();
+    release(); await waitFor(() => { f.host.status(started.admission.key, f.authority); return retained === undefined; }, 'native record retirement after actual drainage');
+    expect(f.host.status(started.admission.key, f.authority).execution.receipt?.payloadRevision).toBe(started.admission.payloadRevision);
+  } finally { release(); read.mockRestore(); }
 });
 
 test('REST cancellation publishes its tombstone while Jev is held, then joins an abort-ignoring late reading', async () => {

@@ -1,12 +1,12 @@
-/** Compare live native owners directly. The v1 digest remains only at the
- * durable-format boundary: issuing a binding, or opening a previously issued
- * one after restart. Rechecking unchanged owners does not rehash their IDs. */
+/** Compare actual configuration/scope incarnations directly. Fresh CI2 stores
+ * their exact opaque revision tuple; old CI1 grants retain their original
+ * digest recipe only on actual legacy capture/adoption, never every guard. */
 import { createHash } from 'node:crypto';
 import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 
 type ConfigurationOwner = Pick<ConfigManager, 'captureDurableConfigurationIncarnation' | 'getDurableConfigurationIncarnation' | 'onDidChangeIncarnation'>;
 interface ScopeOwner { current(): { readonly revision: string; readonly scopes: readonly string[] } }
-interface PolicySnapshot { readonly configuration: string; readonly scope: string; readonly binding: string }
+interface PolicySnapshot { readonly configuration: string; readonly scope: string }
 const CHANGED = 'native-continuation-policy-changed';
 
 export function createDaemonContinuationPolicy(configuration: ConfigurationOwner, scope: ScopeOwner) {
@@ -18,7 +18,7 @@ export function createDaemonContinuationPolicy(configuration: ConfigurationOwner
   const subscribe = configuration.onDidChangeIncarnation.bind(configuration);
   const methods = { capture: configuration.captureDurableConfigurationIncarnation, current: configuration.getDurableConfigurationIncarnation,
     scope: scope.current, subscribe: configuration.onDidChangeIncarnation };
-  let snapshot: PolicySnapshot | undefined;
+  let snapshot: PolicySnapshot | undefined; let legacyBinding: string | undefined;
   let retired = false;
   const assertReaders = () => {
     if (retired || configuration.captureDurableConfigurationIncarnation !== methods.capture || configuration.getDurableConfigurationIncarnation !== methods.current
@@ -38,25 +38,23 @@ export function createDaemonContinuationPolicy(configuration: ConfigurationOwner
   };
   const same = (value: { readonly configuration: string; readonly scope: string }): boolean =>
     snapshot !== undefined && value.configuration === snapshot.configuration && value.scope === snapshot.scope;
-  const establish = (value: { readonly configuration: string; readonly scope: string }): string => {
-    // Existing v1 continuation grants bind this exact array representation.
-    // This is still an open persistence-format migration, not authentication
-    // supplied by a hash or a justification for hashes on every live guard.
-    snapshot = Object.freeze({ ...value, binding: createHash('sha256').update(JSON.stringify([value.configuration, value.scope])).digest('hex') });
-    return snapshot.binding;
+  const establish = (value: { readonly configuration: string; readonly scope: string }): void => {
+    snapshot = Object.freeze({ ...value }); legacyBinding = undefined;
+  };
+  const binding = (version: 1 | 2): string => {
+    if (!snapshot) throw new Error('Native continuation policy is unavailable');
+    if (version === 2) return JSON.stringify([snapshot.configuration, snapshot.scope]);
+    // Existing private CI1 grants independently compare this exact saved value.
+    return legacyBinding ??= createHash('sha256').update(JSON.stringify([snapshot.configuration, snapshot.scope])).digest('hex');
   };
   return Object.freeze({
-    capture(): string {
-      const selected = read(true);
-      return same(selected) && snapshot ? snapshot.binding : establish(selected);
+    capture(version: 1 | 2 = 1): string {
+      const selected = read(true); if (!same(selected)) establish(selected); return binding(version);
     },
-    current(): string {
+    current(version: 1 | 2 = 1): string {
       const selected = read(false);
-      // On recovery there is no live snapshot yet. Read-only observation of
-      // actual durable revisions reconstructs the pre-existing v1 binding;
-      // it does not call capture() to fabricate missing owner history.
-      if (!snapshot) return establish(selected);
-      return same(selected) ? snapshot.binding : CHANGED;
+      if (!snapshot) establish(selected);
+      return same(selected) ? binding(version) : CHANGED;
     },
     scopes(): readonly string[] { assertReaders(); const selected = readScope(); assertReaders(); return selected.scopes; },
     onDidInvalidate(listener: () => void): () => void { assertReaders(); return subscribe(listener); },

@@ -3,7 +3,11 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PairingTokenManager } from '../sdk/src/platform/pairing/pairing-token-store.ts';
-import { nativeCiDigest, nativeCiSourceBinding } from '../sdk/src/platform/workflow/work-ledger/native-ci-continuation-types.ts';
+import { nativeCiSourceBinding } from '../sdk/src/platform/workflow/work-ledger/native-ci-continuation-types.ts';
+import { createHash } from 'node:crypto';
+// Synthetic old-format grants exercise the exact historical persisted recipe.
+const nativeCiDigest = (value: unknown): string => createHash('sha256').update(JSON.stringify(value, (_key, item: unknown) => item !== null && typeof item === 'object' && !Array.isArray(item)
+  ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item)).digest('hex');
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, {recursive: true, force: true}); });
 const guard = () => {};

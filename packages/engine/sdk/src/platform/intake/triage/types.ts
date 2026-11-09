@@ -48,7 +48,13 @@ export interface TriageStore {
   commit(receipts: readonly TriageReceipt[], signal?: AbortSignal): Promise<void>;
   close(): Promise<void>;
 }
+/** Private receipt comparison domain, never model input or execution authority. */
+export interface TriageReceiptScope {
+  readonly providerId: string;
+  readonly accountScopeId: string;
+}
 export interface RunInboxTriageOptions {
+  readonly receiptScope?: TriageReceiptScope | undefined;
   readonly port?: JudgmentPort;
   readonly store?: TriageStore;
   readonly workingDirectory?: string;

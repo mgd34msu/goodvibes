@@ -160,3 +160,14 @@ doctor reports, repairs, lifecycle state, directory lookup, target resolution,
 policies, allowlists, route bindings, and delivery inspection. The generated
 [Operator API reference](./reference-operator.md) is the exact method/schema
 inventory.
+
+## Inbox triage
+
+When a host enables account-owned inbox triage, saved labels apply only to the
+same account, provider, and unchanged message preview. Reading the inbox does
+not score messages or rewrite receipts. Switching accounts cannot inherit a
+saved label, even when message IDs and previews coincide.
+
+Older receipts without an account binding remain stored but do not supply
+account-owned labels until explicit scoring produces a matching receipt. The
+account selector stays local and is omitted from the decision model's input.

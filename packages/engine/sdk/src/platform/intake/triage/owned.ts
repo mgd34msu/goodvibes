@@ -83,6 +83,7 @@ async function createTriagedSource(
   ctx = Object.freeze({ ...ctx });
   options = Object.freeze({ ...options, adapters: new Map(options.adapters) });
   const { providerId, accountScopeId } = options;
+  const receiptScope = Object.freeze({ providerId, accountScopeId });
   for (const selectedFile of [options.storeFileName, options.triageStoreFileName]) if (selectedFile !== undefined && (typeof selectedFile !== 'string'
     || selectedFile.length > 200 || selectedFile.includes('/') || selectedFile.includes('\\')
     || selectedFile.startsWith('.') || !selectedFile.endsWith('.sqlite'))) {
@@ -165,7 +166,7 @@ async function createTriagedSource(
           // Input/privacy rejection is not an optional database failure.
           captureTriageInputs(batch);
           try {
-            const evidence = await readTriageMetadataBatch(batch, getStore());
+            const evidence = await readTriageMetadataBatch(batch, getStore(), receiptScope);
             for (const [id, row] of evidence) out.set(id, { triageScore: row.score, triageLabel: row.label, triageTags: row.tags });
           } catch {
             assertAuthority();
@@ -211,7 +212,7 @@ async function createTriagedSource(
         assertCurrent();
         // Recheck at the actual outbound call, rather than only before fan-out.
         const guardedPort: JudgmentPort = { get model() { return port!.model; }, async ask(request) { assertCurrent(); return port!.ask({ ...request, beforeAttempt: assertCurrent }); } };
-        const receipts = await runInboxTriage(batch, { port: guardedPort, signal, dryRun,
+        const receipts = await runInboxTriage(batch, { port: guardedPort, signal, dryRun, receiptScope,
           // This seam is not caller-injectable. The canonical store enforces the
           // exact proof immediately before rename, with no intervening await.
           store: { readBatch: ids => getStore().readBatch(ids), close: async () => {},

@@ -10,7 +10,8 @@ import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
 import { FakeClusterClock, MemoryClusterBus, inboxSurface, surfaceIdFor } from '@goodvibes-jev/engine/sdk/platform/cluster';
 import { registerInboxSurface, type InboundProviderAdapter, type InboxListOutput, type InboxSurfaceRegistration } from '@goodvibes-jev/engine/sdk/platform/intake';
-import { createDaemonHandlerComposition } from '../../runtime/daemon-handler-composition.js';
+import { createDaemonHandlerComposition, type DaemonInboxControls } from '../../runtime/daemon-handler-composition.js';
+import type { NativeDataWriteOwner } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 import { createClusterComposition, inboxPollerGate } from '../../runtime/cluster-composition.js';
 import { createClusterServices, startClusterServices } from '../../runtime/cluster-group-composition.js';
 import { createShellPathService, DistributedRuntimeManager } from '../../runtime/index.js';
@@ -32,7 +33,7 @@ function invoke(catalog: GatewayMethodCatalog): Promise<InboxListOutput> {
   return catalog.invoke('channels.inbox.list', { body: {}, context: { scopes: ['read:channels'] } }) as Promise<InboxListOutput>;
 }
 
-async function node(bus: MemoryClusterBus, clock: FakeClusterClock, label: string, adapters: InboundProviderAdapter[], seed = false) {
+async function node(bus: MemoryClusterBus, clock: FakeClusterClock, label: string, adapters: InboundProviderAdapter[], seed = false, nativeDataWriter?: NativeDataWriteOwner) {
   const root = makeOwnedTempDir('daemon-inbox-gate');
   const workingDirectory = join(root, 'workspace'); const homeDirectory = join(root, 'home');
   const shellPaths = createShellPathService({ workingDirectory, homeDirectory });
@@ -52,18 +53,20 @@ async function node(bus: MemoryClusterBus, clock: FakeClusterClock, label: strin
   const manager = new DistributedRuntimeManager(join(root, 'remote.json'));
   const ready = manager.start();
   let inbox!: InboxSurfaceRegistration;
-  const graph = await createDaemonHandlerComposition({ gatewayMethods,
+  let receiptWrite: DaemonInboxControls['beforeInboxTriageReceiptWrite'];
+  const graph = await createDaemonHandlerComposition({ gatewayMethods, nativeDataWriter,
     // This graph only needs the in-memory credential port, never an OS keyring.
     secretsManager: secretsManager as Parameters<typeof createDaemonHandlerComposition>[0]['secretsManager'], configManager,
     workingDirectory, homeDirectory, shellPaths, distributedRuntime: manager, distributedRuntimeReady: ready,
     clusterCoordinator: cluster.clusterCoordinator, checkoutSeam: () => undefined,
     channelDeliveryRouter: { async deliver() { throw new Error('Unexpected fixture delivery'); } },
     inboxFactory: (context, _routing, controls) => {
+      receiptWrite = controls.beforeInboxTriageReceiptWrite;
       inbox = registerInboxSurface(context, { ...controls, adapters: new Map(adapters.map((value) => [value.id, value])) });
       return inbox;
     },
   });
-  return { ...cluster, graph, inbox, gatewayMethods, workingDirectory,
+  return { ...cluster, graph, inbox, gatewayMethods, workingDirectory, receiptWrite,
     async close() { await graph.close(); await cluster.clusterCoordinator.stop('fixture cleanup'); await cluster.clusterGroup.stop(); await manager.writes.drain(); } };
 }
 async function advance(clock: FakeClusterClock, nodes: Awaited<ReturnType<typeof node>>[], ms = 2000) {
@@ -229,4 +232,19 @@ test('an elected registration cannot commit UID ownership evidence after the acc
     expect(await invoke(owner.gatewayMethods)).toMatchObject({ total: 0, partial: true, providers: [{ state: 'error' }] });
   } finally { release.resolve(); await owner.close(); }
   expect(clock.pendingTimers).toBe(0);
+});
+
+
+test('actual daemon receipt publication callback declares both model and account reader capabilities and surfaces refusal', async () => {
+  const declared: string[] = []; let allowed = true;
+  const host = await node(new MemoryClusterBus(), new FakeClusterClock(), 'receipt-floor', [adapter(account)], false, {
+    declare(format) { declared.push(format); if (format === 'inbox-triage-account-bindings-v1' && !allowed) throw new Error('Original account reader refused'); },
+  });
+  try {
+    declared.length = 0; expect(host.receiptWrite).toBeDefined(); host.receiptWrite!();
+    expect(declared).toEqual(['inbox-triage-model-receipts-v2', 'inbox-triage-account-bindings-v1']);
+    allowed = false; declared.length = 0;
+    expect(() => host.receiptWrite!()).toThrow('Original account reader refused');
+    expect(declared).toEqual(['inbox-triage-model-receipts-v2', 'inbox-triage-account-bindings-v1']);
+  } finally { await host.close(); }
 });

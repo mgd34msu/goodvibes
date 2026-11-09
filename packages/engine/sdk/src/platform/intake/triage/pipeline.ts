@@ -1,13 +1,13 @@
 import { isDeepStrictEqual } from 'node:util';
-import { captureTriageData, captureTriageInputs, checkTriageReceipt, triageBinding } from './evidence.js';
+import { captureTriageData, captureTriageInputs, captureTriageReceiptScope, checkTriageReceipt, triageBinding } from './evidence.js';
 import { scoreCapturedTriage } from './scorer.js';
 import { SqliteTriageStore } from './store.js';
-import type { RunInboxTriageOptions, TriageEvidence, TriageInput, TriageReceipt, TriageStore, TriageStoredRecord } from './types.js';
+import type { RunInboxTriageOptions, TriageEvidence, TriageInput, TriageReceipt, TriageStore, TriageStoredRecord, TriageReceiptScope } from './types.js';
 
 /** Scores first, then atomically publishes; dry-run does not open, read, close or write a store. */
 export async function runInboxTriage(items: readonly TriageInput[], options: RunInboxTriageOptions = {}): Promise<readonly TriageReceipt[]> {
   const input = captureTriageInputs(items);
-  const receipts = await scoreCapturedTriage(input, options.port, options.signal);
+  const receipts = await scoreCapturedTriage(input, options.port, options.signal, options.receiptScope);
   if (options.dryRun || !receipts.length || options.signal?.aborted) return receipts;
   const injected = options.store;
   if (!injected && !options.workingDirectory) throw new Error('Triage persistence requires a store or working directory.');
@@ -18,8 +18,8 @@ export async function runInboxTriage(items: readonly TriageInput[], options: Run
 }
 
 /** One batched read; historical evidence is projected only when the latest receipt still agrees. */
-export async function readTriageMetadataBatch(items: readonly TriageInput[], store: TriageStore): Promise<ReadonlyMap<string, TriageEvidence>> {
-  const input = captureTriageInputs(items);
+export async function readTriageMetadataBatch(items: readonly TriageInput[], store: TriageStore, receiptScope?: TriageReceiptScope): Promise<ReadonlyMap<string, TriageEvidence>> {
+  const input = captureTriageInputs(items), scope = captureTriageReceiptScope(receiptScope);
   const current = new Map(input.map(item => [item.id, item]));
   if (!current.size) return new Map();
   const records = await store.readBatch([...current.keys()]);
@@ -40,7 +40,7 @@ export async function readTriageMetadataBatch(items: readonly TriageInput[], sto
       // match. Only a genuine candidate receipt needs the persisted commitment;
       // do not hash every unscored message during routine inbox refreshes.
       if (settled.status === 'settled' && isDeepStrictEqual(settled, latest)
-        && latest.inputHash === triageBinding(original).inputHash) out.set(id, settled);
+        && latest.inputHash === triageBinding(original, scope).inputHash) out.set(id, settled);
     } catch { /* Invalid stored evidence is never converted into a current label. */ }
   }
   return out;

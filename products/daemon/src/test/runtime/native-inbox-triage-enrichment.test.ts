@@ -2,7 +2,7 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { createNativeDataWriteOwner, NATIVE_READER_REQUIREMENT_FILE } from '@goodvibes-jev/engine/sdk/platform/runtime/native-reader-compatibility';
+import { createNativeDataWriteOwner, NATIVE_READER_REQUIREMENT_FILE } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
 import { FakeClusterClock } from '@goodvibes-jev/engine/sdk/platform/cluster';
@@ -214,9 +214,25 @@ for (const provider of providers) {
     await expect(missing.owned.runInboxTriage()).rejects.toMatchObject({ code: 'INBOX_TRIAGE_AUTHORITY_UNAVAILABLE' });
     expect(missing.fake.requests).toHaveLength(0); expect(missing.log.query()).toHaveLength(0);
     await missing.close();
-    const first = await fixture(provider, { directory: missing.directory }); await first.owned.runInboxTriage(); await first.close();
+    const first = await fixture(provider, { directory: missing.directory }); await first.owned.runInboxTriage();
+    const receiptPath = join(first.storage, 'inbox-triage-synthetic-discord.sqlite'), originalBytes = readFileSync(receiptPath); await first.close();
     const changed = await fixture(provider, { directory: missing.directory, scope: `different-${provider}-account` });
-    expect((await changed.read()).items[0]?.triageLabel).toBeUndefined(); expect(changed.fake.requests).toHaveLength(0);
+    expect((await changed.read()).items[0]?.triageLabel).toBeUndefined(); expect(changed.fake.requests).toHaveLength(0); expect(changed.log.query()).toHaveLength(0);
+    expect(readFileSync(receiptPath)).toEqual(originalBytes); await changed.close();
+    const reopened = await fixture(provider, { directory: missing.directory });
+    expect((await reopened.read()).items[0]?.triageLabel).toBe('priority'); expect(reopened.fake.requests).toHaveLength(0);
+    expect(readFileSync(receiptPath)).toEqual(originalBytes);
+  });
+
+  test(`${provider} a refused scoped receipt reader floor preserves the original SQLite receipt and labels`, async () => {
+    let allowed = true, declarations = 0;
+    const f = await fixture(provider, { beforeReceiptWrite() { declarations++; if (!allowed) throw new Error('Scoped receipt reader unavailable'); } });
+    await f.owned.runInboxTriage(); const path = join(f.storage, 'inbox-triage-synthetic-discord.sqlite'), before = readFileSync(path);
+    allowed = false; declarations = 0;
+    await expect(f.owned.runInboxTriage()).rejects.toThrow('Scoped receipt reader unavailable');
+    expect(declarations).toBe(1); expect(readFileSync(path)).toEqual(before);
+    expect((await f.read()).items[0]?.triageLabel).toBe('priority'); expect(f.fake.requests).toHaveLength(2);
+    expect(JSON.stringify(f.fake.requests.map(request => request.state))).not.toContain(`synthetic-${provider}-account`);
   });
 
   test(`${provider} actual caller retains its native lease and mirror lock while a cancelled scoring read drains`, async () => {

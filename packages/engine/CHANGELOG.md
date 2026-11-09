@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Bind saved inbox triage labels to their original provider and account as well
+  as the message preview. Account changes cannot inherit another account's
+  labels, and reading the inbox does not rescore or rewrite old receipts.
+
 - Track injected code using its actual captured file revision and index
   generation. Unchanged code stays deduplicated and changed code can be
   included again without restoring content hashing.

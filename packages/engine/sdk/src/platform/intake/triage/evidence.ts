@@ -3,7 +3,7 @@ import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
 import { readYesNo, isPinnedJudgmentModel, matchesJudgmentModel, type YesNoReading } from '@goodvibes-jev/judgment';
 import { JudgmentInputError, snapshotJudgmentInput } from '../../gate/judgment-input.js';
 import { inboxTriage, TRIAGE_MODEL } from './battery.js';
-import type { TriageBinding, TriageEvidence, TriageInput, TriageLabel, TriageReceipt } from './types.js';
+import type { TriageBinding, TriageEvidence, TriageInput, TriageLabel, TriageReceipt, TriageReceiptScope } from './types.js';
 
 /** Descriptor-only capture checks every property, including hidden data, without invoking user code. */
 export function captureTriageData(value: unknown): unknown {
@@ -62,13 +62,25 @@ export function captureTriageInputs(items: readonly TriageInput[]): readonly Cap
       unread: (item['unread'] ?? false) as boolean });
   }));
 }
+/** Capture only a private comparison domain. No scope text enters the model
+ * request; the original account constructor independently owns authorization. */
+export function captureTriageReceiptScope(scope: TriageReceiptScope | undefined): TriageReceiptScope | undefined {
+  if (scope === undefined) return undefined;
+  const captured = captureTriageData(scope);
+  if (!captured || typeof captured !== 'object' || Array.isArray(captured)) return invalid();
+  const value = captured as Record<string, unknown>;
+  if (Object.keys(value).length !== 2 || typeof value.providerId !== 'string' || !value.providerId || value.providerId.length > 100
+    || typeof value.accountScopeId !== 'string' || !value.accountScopeId || value.accountScopeId.length > 500) return invalid();
+  return captured as TriageReceiptScope;
+}
 /**
  * Persisted exact-input commitment used only for receipt/enrichment matching.
  * It avoids duplicating protected message previews in the receipt DB. It is
  * dictionary-recoverable, not anonymization, secrecy, authority or a live fence.
  */
-export function triageBinding(input: CapturedTriageInput): TriageBinding {
-  return Object.freeze({ id: input.id, inputHash: createHash('sha256').update(JSON.stringify(input)).digest('hex'),
+export function triageBinding(input: CapturedTriageInput, scope?: TriageReceiptScope): TriageBinding {
+  return Object.freeze({ id: input.id, inputHash: createHash('sha256').update(JSON.stringify(scope === undefined ? input
+    : ['goodvibes/inbox-triage/account/v1', scope.providerId, scope.accountScopeId, input])).digest('hex'),
     battery: inboxTriage.name, batteryVersion: inboxTriage.version, receiptVersion: 2 });
 }
 const round = (p: number): number => Math.round(p * 100) / 100;

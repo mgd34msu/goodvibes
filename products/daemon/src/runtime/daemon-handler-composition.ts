@@ -99,7 +99,10 @@ export async function createDaemonHandlerComposition(
       beforeDiscordIdentityWrite: () => options.nativeDataWriter?.declare('discord-inbox-identities-v1'),
       beforeAccountIdentityWrite: () => options.nativeDataWriter?.declare('account-inbox-identities-v1'),
       beforeInboxTriageIdentityWrite: () => options.nativeDataWriter?.declare('inbox-triage-identities-v1'),
-      beforeInboxTriageReceiptWrite: () => options.nativeDataWriter?.declare('inbox-triage-model-receipts-v2'),
+      beforeInboxTriageReceiptWrite: () => {
+        options.nativeDataWriter?.declare('inbox-triage-model-receipts-v2');
+        options.nativeDataWriter?.declare('inbox-triage-account-bindings-v1');
+      },
       gatePollingOwned: (providerId, control) => options.clusterCoordinator.registerOwned(inboxPollerGate(providerId, control)),
     }, { configManager: options.configManager, secretsManager: options.secretsManager }, options.triagePermissionHost),
     registerDrafts: registerDraftMethods,

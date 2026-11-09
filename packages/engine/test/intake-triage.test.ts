@@ -210,3 +210,37 @@ test('late triage imports keep earlier native decision policies current while tr
     clearTimeout(deadline); if (!exited) child.kill(); await child.exited;
   }
 });
+
+
+test('account receipt domains distinguish saved evidence without changing generic bindings or exposing scope to the decision model', async () => {
+  const items = [item()], port = answer(.01, .99), genericStore = memory(), scopedStore = memory();
+  const scope = { providerId: 'private-provider-selector', accountScopeId: 'private-account-selector' };
+  const generic = await runInboxTriage(items, { port: port.port, store: genericStore });
+  const scoped = await runInboxTriage(items, { port: port.port, store: scopedStore, receiptScope: scope });
+  expect(scoped[0]!.inputHash).not.toBe(generic[0]!.inputHash);
+  expect((await readTriageMetadataBatch(items, genericStore)).size).toBe(1);
+  expect((await readTriageMetadataBatch(items, genericStore, scope)).size).toBe(0);
+  expect((await readTriageMetadataBatch(items, scopedStore, scope)).size).toBe(1);
+  expect((await readTriageMetadataBatch(items, scopedStore)).size).toBe(0);
+  expect((await readTriageMetadataBatch(items, scopedStore, { ...scope, accountScopeId: 'another-private-account' })).size).toBe(0);
+  expect((await readTriageMetadataBatch(items, scopedStore, { ...scope, providerId: 'another-private-provider' })).size).toBe(0);
+  expect(port.requests[1]!.state).toEqual(port.requests[0]!.state);
+  expect(JSON.stringify(port.requests.map(request => request.state))).not.toContain('private-account-selector');
+  expect(JSON.stringify(scoped)).not.toContain('private-account-selector');
+});
+
+test('scope matching captures the original private domain before an awaited store read', async () => {
+  const items = [item()], source = memory(), scope = { providerId: 'synthetic', accountScopeId: 'account-original' };
+  await runInboxTriage(items, { port: answer(.01, .99).port, store: source, receiptScope: scope });
+  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  const reading = readTriageMetadataBatch(items, { ...source, async readBatch() { entered.resolve(); await release.promise; return source.rows; } }, scope);
+  await entered.promise; scope.accountScopeId = 'replacement'; release.resolve();
+  expect((await reading).size).toBe(1);
+});
+
+test('malformed account scope cannot invoke accessors, dispatch a model request or open receipt storage', async () => {
+  let invoked = 0; const port = answer(), store = memory();
+  const scope = { providerId: 'synthetic', get accountScopeId() { invoked++; return 'not-original'; } };
+  await expect(runInboxTriage([item()], { port: port.port, store, receiptScope: scope })).rejects.toThrow();
+  expect(invoked).toBe(0); expect(port.requests).toHaveLength(0); expect(store.calls).toEqual([]);
+});

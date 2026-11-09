@@ -1,12 +1,13 @@
 import { fanOut, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { inboxTriage } from './battery.js';
-import { captureTriageData, captureTriageInputs, settleTriage, triageBinding, type CapturedTriageInput } from './evidence.js';
+import { captureTriageData, captureTriageInputs, captureTriageReceiptScope, settleTriage, triageBinding, type CapturedTriageInput } from './evidence.js';
 import { captureTriageJudgment, triageConfiguredModel } from './model-result.js';
-import type { TriageInput, TriageReceipt } from './types.js';
+import type { TriageInput, TriageReceipt, TriageReceiptScope } from './types.js';
 
-export async function scoreCapturedTriage(items: readonly CapturedTriageInput[], port?: JudgmentPort, signal?: AbortSignal): Promise<readonly TriageReceipt[]> {
+export async function scoreCapturedTriage(items: readonly CapturedTriageInput[], port?: JudgmentPort, signal?: AbortSignal, receiptScope?: TriageReceiptScope): Promise<readonly TriageReceipt[]> {
   // Issue one saved exact-input receipt commitment, not an execution/currentness token.
-  const bindings = items.map(triageBinding);
+  const scope = captureTriageReceiptScope(receiptScope);
+  const bindings = items.map(item => triageBinding(item, scope));
   const unavailable = () => Object.freeze(bindings.map(binding => Object.freeze({ ...binding, status: 'unavailable' as const })));
   if (!items.length) return Object.freeze([]);
   if (!port || signal?.aborted) return unavailable();

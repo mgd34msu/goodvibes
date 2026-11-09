@@ -9,12 +9,13 @@ import { join } from 'node:path';
 import { applyVerifiedUpdate, CHECKSUM_MANIFEST_NAME, DEFAULT_UPDATE_TIMEOUT_MS, parseChecksumFile, rollbackKeptPrevious, sha256, UpdateTransactionError,
   verifyChecksum, withUpdateBudget, type DaemonCurrentReader, type UpdateFetchLike, type UpdateRequestOptions } from './self-update.js';
 import { assertStagedClientReaderCompatible } from './client-reader-update.js';
-import { captureUpdateFileIo, hasNativeUpdateObservations, realUpdateFileIo, type UpdateFileIo } from './update-file-io.js';
+import { captureUpdateFileIo, hasNativeUpdateObservations, realUpdateFileIo, retainNativeUpdateDirectory, type UpdateFileIo } from './update-file-io.js';
 import { NativeDirectoryUpdateError, prepareNativeDirectoryRollback, prepareNativeUpdateDirectory, retainNativeUpdateTree, type NativeUpdateDirectory } from './update-directories.js';
 import { resolveSuiteUpdatePlan, type SuiteProgram, type SuiteUpdatePlan } from './suite-update-plan.js';
 import { inspectDaemonNativeInstallation, resolveDaemonInstallationReaders, resolveDaemonNativeTargets } from './daemon-native-cohort.js';
 import { assertNativeReaderCompatible, nativeReaderCapabilities } from './native-reader-compatibility.js';
 import { parseClientReaderArtifact } from './client-reader-artifact.js';
+import { retainNativeUpdateSources } from './native-file-sources.js';
 
 export interface SuiteUpdateOptions extends UpdateRequestOptions {
   readonly execPath: string;
@@ -37,6 +38,15 @@ export interface SuiteUpdateResult {
   readonly directoryPaths: readonly string[];
   /** Earlier unlabelled backups are retained instead of deleted by filename. */
   readonly preservedPaths: readonly string[];
+}
+const nativeApply = Reflect.apply, nativeWeakGet = WeakMap.prototype.get, nativeWeakSet = WeakMap.prototype.set;
+const publications = new WeakMap<SuiteUpdateResult, () => void>();
+/** Only the exact native transaction's result retains its published outputs.
+ * A copied view or caller-provided paths cannot authorize native re-execution. */
+export function assertSuiteUpdateCurrent(result: SuiteUpdateResult): void {
+  const current = nativeApply(nativeWeakGet, publications, [result]) as (() => void) | undefined;
+  if (!current) throw new Error('Original suite publication is unavailable');
+  current();
 }
 export class SuiteUpdateRecoveryError extends Error {
   override readonly name = 'SuiteUpdateRecoveryError';
@@ -166,8 +176,28 @@ export async function applySuiteUpdate(options: SuiteUpdateOptions): Promise<Sui
       ? Promise.resolve(new Response(manifest.text)) : options.fetchImpl(url, init);
     const daemonTargets = daemon ? resolveDaemonNativeTargets(daemon.path, options.platform, options.arch) ?? [] : [];
     const daemonPaths = new Set(daemonTargets.map(file => file.path));
+    let publishedFiles: (() => void) | undefined;
+    let publishedTrees: readonly ReturnType<typeof retainNativeUpdateTree>[] = [];
     await applyVerifiedUpdate({ fetchImpl, downloadBaseUrl: options.downloadBaseUrl, targets: plan.files, io,
       platform: options.platform, native: true, readerExecPath: options.execPath,
+      ...(hasNativeUpdateObservations(io, io.readFile, io.observe) ? { retainPublication(currentFiles: () => void) {
+        currentFiles();
+        for (const directory of prepared) directory.assertCurrent();
+        publishedTrees = plan.directories.map(directory => retainNativeUpdateTree(directory.path));
+        for (const directory of prepared) directory.assertCurrent();
+        // Transfer the original completed image under the transaction's own
+        // before/after proof. Keep native metadata, not the core's byte buffers
+        // or released claim descriptors, across the caller's next await.
+        const files = retainNativeUpdateSources(plan.files.flatMap(file => ['', '.previous', '.update-download', '.update-previous', '.rollback-exchange'].map(suffix => file.path + suffix)), io);
+        const root = retainNativeUpdateDirectory(plan.root);
+        currentFiles(); files(); root.assertCurrent();
+        publishedFiles = () => {
+          root.assertCurrent(); files();
+          for (const file of plan.files) if (io.exists(file.path + '.update-transaction')) throw new Error('Published suite has a new unfinished transaction');
+          for (const directory of plan.directories) if (io.exists(directory.path + '.directory-update.lock')) throw new Error('Published suite directory has a new unfinished transaction');
+          root.assertCurrent();
+        };
+      } } : {}),
       ...(options.signal ? { signal: options.signal } : {}), timeoutMs: remaining(), assertCurrent: current,
       ...(daemon ? { daemonNative: { execPath: daemon.path, platform: options.platform, arch: options.arch, version: plan.version,
         additionalTargets: plan.files.filter(file => !daemonPaths.has(file.path)),
@@ -185,9 +215,15 @@ export async function applySuiteUpdate(options: SuiteUpdateOptions): Promise<Sui
     committed = true;
     const preservedPaths: string[] = [];
     for (const directory of prepared) preservedPaths.push(...directory.finish().preservedPaths);
-    return Object.freeze({ version: plan.version, programs: Object.freeze(plan.programs.map(program => program.name)),
+    const result = Object.freeze({ version: plan.version, programs: Object.freeze(plan.programs.map(program => program.name)),
       files: Object.freeze(plan.files.map(file => Object.freeze({ label: file.label, path: file.path }))),
       directoryPaths: Object.freeze(plan.directories.map(directory => directory.path)), preservedPaths: Object.freeze(preservedPaths) });
+    if (publishedFiles) {
+      const files = publishedFiles, trees = publishedTrees;
+      const current = () => { files(); for (const tree of trees) tree.assertCurrent(); files(); };
+      current(); nativeApply(nativeWeakSet, publications, [result, current]);
+    }
+    return result;
   } catch (error) {
     const uncertain = committed || error instanceof UpdateTransactionError && (error.receipt.committed || error.receipt.recoveryRequired)
       || error instanceof NativeDirectoryUpdateError && error.recoveryRequired;

@@ -15,7 +15,7 @@ import { getPackageVersion, renderDaemonBoundEndpoint, renderDaemonStartupBanner
 import { createDaemonHost } from '../runtime/daemon-host.js';
 import { resolveInstalledDaemonUpdateArtifact } from '../daemon/lifecycle.js';
 import type { RuntimeServicesOptions } from '../runtime/services.js';
-import { runDaemonProcess, type DaemonProcessOptions } from '../daemon/process-lifecycle.js';
+import { runDaemonProcess, type DaemonProcessHandle, type DaemonProcessOptions } from '../daemon/process-lifecycle.js';
 import type { DaemonCliConfiguration } from './configuration.js';
 import type { DaemonCliFlags } from './types.js';
 import { persistDaemonStartupPublicUrl, pruneDaemonStartupTokens, reconcileDaemonStartup } from './startup-maintenance.js';
@@ -57,17 +57,29 @@ export function runConfiguredDaemonCli(
   stdout: (message: string) => void = (message) => { writeSync(1, `${message}\n`); },
   pairingOutput: ((message: string) => void) | undefined = process.stdout.isTTY === true
     ? (message) => { writeSync(1, `${message}\n`); } : undefined,
+  activateConfiguration?: ((signal: AbortSignal) => Promise<DaemonCliConfiguration | null>) | undefined,
 ) {
-  const { config, homeDirectory, daemonHomeDirectory, workingDirectory, isOverridden } = configuration;
   // runDaemonProcess constructs its owner even when shutdown won admission.
   // Keep token and graph acquisition inside start, after that admission fence.
-  return runDaemonProcess(() => {
+  const restarted = Symbol('native suite replacement completed');
+  let processHandle: DaemonProcessHandle;
+  processHandle = runDaemonProcess(() => {
     let host: ReturnType<typeof createDaemonHost> | undefined;
     let closed = false;
     const maintenance = new AbortController();
+    let configurationWork: Promise<DaemonCliConfiguration | null> | undefined;
     return {
       async start() {
         if (closed) return undefined;
+        let active = configuration;
+        if (activateConfiguration) {
+          configurationWork = activateConfiguration(maintenance.signal);
+          const selected = await configurationWork;
+          if (closed) return undefined;
+          if (selected === null) return restarted;
+          active = selected;
+        }
+        const { config, homeDirectory, daemonHomeDirectory, workingDirectory, isOverridden } = active;
         const version = getPackageVersion();
         const intended = resolveHostBinding(config.get('controlPlane.hostMode'), config.get('controlPlane.host'),
           config.get('controlPlane.port'), 'controlPlane');
@@ -85,7 +97,7 @@ export function runConfiguredDaemonCli(
         }
         // An injected reporting port can synchronously request shutdown.
         if (closed) return undefined;
-        if (pruneDaemonStartupTokens(configuration) > 0) {
+        if (pruneDaemonStartupTokens(active) > 0) {
           stderr('[goodvibes-daemon] warning: some stale workspace operator-token files could not be pruned.');
           if (closed) return undefined;
         }
@@ -111,7 +123,7 @@ export function runConfiguredDaemonCli(
         if (closed) return undefined;
         requireRunning();
         try {
-          const receipt = await reconcileDaemonStartup(configuration, env, maintenance.signal);
+          const receipt = await reconcileDaemonStartup(active, env, maintenance.signal);
           if (closed) return undefined;
           if (receipt && receipt.reason !== 'no-legacy-unit') {
             stderr(`[goodvibes-daemon] legacy-unit reconcile: ${receipt.action} (${receipt.reason}).`);
@@ -124,7 +136,7 @@ export function runConfiguredDaemonCli(
         if (closed) return undefined;
         requireRunning();
         const actual = { host: daemon.boundHost, port: daemon.boundPort, scheme: daemon.boundScheme };
-        try { persistDaemonStartupPublicUrl(configuration, actual); }
+        try { persistDaemonStartupPublicUrl(active, actual); }
         catch { stderr('[goodvibes-daemon] warning: the startup public URL could not be persisted.'); }
         if (closed) return undefined;
         requireRunning();
@@ -150,11 +162,19 @@ export function runConfiguredDaemonCli(
         requireRunning();
         return snapshot;
       },
-      close() {
+      async close() {
         closed = true;
         maintenance.abort();
-        return host?.close() ?? Promise.resolve();
+        // Fence the live host synchronously, then drain both original owners.
+        const closing = host?.close() ?? Promise.resolve();
+        const results = await Promise.allSettled([configurationWork ?? Promise.resolve(), closing]);
+        // Startup's own original promise already reports its rejection. A
+        // separate host cleanup failure must still fail the process drain.
+        const cleanup = results[1]!;
+        if (cleanup.status === 'rejected') throw cleanup.reason;
       },
     };
   }, processOptions);
+  void processHandle.ready.then(value => { if (value === restarted) void processHandle.shutdown(); }, () => {});
+  return processHandle;
 }

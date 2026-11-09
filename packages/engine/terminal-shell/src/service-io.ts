@@ -1,5 +1,5 @@
 import net from 'node:net';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 export async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | 'timeout'> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -32,8 +32,46 @@ export function restartOntoUpdatedBinary(options: RestartOntoUpdatedBinaryOption
     ...options.env,
     [receiptEnvironmentKey]: options.fromVersion,
   });
-  return status ?? 0;
+  return status ?? 1;
 }
+/** Await the replacement's real close, retaining cancellation ownership while
+ * the original image waits without starting another graph. */
+export async function restartOntoUpdatedBinaryAsync(
+  options: Omit<RestartOntoUpdatedBinaryOptions, 'spawn'> & {
+    readonly signal: AbortSignal;
+    readonly spawn?: ((execPath: string, argv: readonly string[], env: NodeJS.ProcessEnv) => ChildProcess) | undefined;
+  },
+  receiptEnvironmentKey: string,
+): Promise<number> {
+  const { execPath, argv, fromVersion, signal } = options;
+  const env = { ...options.env, [receiptEnvironmentKey]: fromVersion };
+  const launch = options.spawn ?? ((path: string, args: readonly string[], environment: NodeJS.ProcessEnv) =>
+    spawn(path, [...args], { stdio: 'inherit', env: environment }));
+  signal.throwIfAborted();
+  return await new Promise<number>((resolve, reject) => {
+    let child: ChildProcess;
+    try { child = launch(execPath, [...argv], env); } catch (error) { reject(error); return; }
+    let error: unknown, aborted = false, escalation: ReturnType<typeof setTimeout> | undefined;
+    const abort = () => {
+      if (aborted) return;
+      aborted = true;
+      try { child.kill('SIGTERM'); } catch { /* Real close/error still owns completion. */ }
+      escalation = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* Await close. */ } }, 2_000);
+      escalation.unref?.();
+    };
+    child.once('error', failure => { error = failure; });
+    child.once('close', (code, terminationSignal) => {
+      clearTimeout(escalation); signal.removeEventListener('abort', abort);
+      if (error !== undefined) reject(error);
+      else if (aborted) reject(signal.reason);
+      else if (code === null) reject(new Error(`Updated process terminated without an exit status (${terminationSignal ?? 'unknown signal'})`));
+      else resolve(code);
+    });
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) abort();
+  });
+}
+
 export async function probeTcp(
   host: string,
   port: number,

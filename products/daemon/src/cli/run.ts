@@ -118,7 +118,7 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
       return result(runWebuiCommand(cli.commandArgs, { configManager: configuration.config, baseDirectory: configuration.workingDirectory }));
     }
     const configuration = createDaemonCliConfiguration(cli.flags, env, options.cwd,
-      cli.command === 'serve' ? { diagnosticMode: 'structural' } : {});
+      cli.command === 'serve' ? { readOnly: true, diagnosticMode: 'structural' } : {});
     const { config, homeDirectory, daemonHomeDirectory, workingDirectory } = configuration;
     const remoteFlags = { host: cli.flags.host, port: cli.flags.port, token: cli.flags.token, json: cli.flags.json };
     const remote = { configManager: config, daemonHomeDir: daemonHomeDirectory, controlPlaneConfigDir: config.getControlPlaneConfigDir() };
@@ -142,7 +142,17 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
         const { prepareDaemonCliServe, runConfiguredDaemonCli } = await import('./serve.js');
         const errors = prepareDaemonCliServe(config, cli.flags);
         if (errors.length) return result({ exitCode: 2, lines: errors });
-        const processHandle = runConfiguredDaemonCli(configuration, runtime!, env, options.process, stderr, stdout, options.pairingOutput);
+        const { repairDaemonSuiteBeforeStartup } = await import('./startup-suite-repair.js');
+        const originalArgv = [...argv];
+        const processHandle = runConfiguredDaemonCli(configuration, runtime!, env, options.process, stderr, stdout, options.pairingOutput,
+          async signal => {
+            if (await repairDaemonSuiteBeforeStartup({ configuration, argv: originalArgv, env, signal, print: stdout })) return null;
+            signal.throwIfAborted();
+            const active = createDaemonCliConfiguration(cli.flags, env, options.cwd, { diagnosticMode: 'structural' });
+            const currentErrors = prepareDaemonCliServe(active.config, cli.flags);
+            if (currentErrors.length) throw new Error('Daemon serving configuration changed before activation');
+            signal.throwIfAborted(); return active;
+          });
         return await processHandle.finished;
       }
       default: {

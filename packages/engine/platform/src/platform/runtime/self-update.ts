@@ -2,7 +2,7 @@ import { tryAcquireCrossProcessLock } from '../workspace/checkpoint/cross-proces
 import { withVerifiedUpdateStage, type VerifiedUpdateStage, type VerifiedUpdateMember } from './verified-update-stage.js';
 export { verifiedUpdateStageMembers } from './verified-update-stage.js';
 export type { VerifiedUpdateStage, VerifiedUpdateMember } from './verified-update-stage.js';
-export { applySuiteUpdate, rollbackSuiteUpdate, configuredSuiteWebuiDirectory, retainSuiteUpdateConfiguration, installedSuiteNeedsRepair, suiteUpdateRequiresRecovery, SuiteUpdateRecoveryError, SuiteUpdatePreparationError } from './suite-update.js';
+export { applySuiteUpdate, assertSuiteUpdateCurrent, rollbackSuiteUpdate, configuredSuiteWebuiDirectory, retainSuiteUpdateConfiguration, installedSuiteNeedsRepair, suiteUpdateRequiresRecovery, SuiteUpdateRecoveryError, SuiteUpdatePreparationError } from './suite-update.js';
 export type { SuiteUpdateOptions, SuiteUpdateResult, SuiteRollbackOptions, SuiteUpdateConfigurationSource } from './suite-update.js';
 export { resolveSuiteUpdatePlan } from './suite-update-plan.js';
 export type { SuiteUpdatePlan, SuiteProgram } from './suite-update-plan.js';
@@ -379,7 +379,7 @@ function transact(
   stage: (write: (path: string, bytes: Buffer, mode: number) => void) => void,
   beforeCommit: (() => void) | undefined,
   commit: (rename: (from: string, to: string) => void) => void,
-  restrictions: { readonly current?: () => void; readonly directory?: NativeUpdateDirectoryOwner; readonly readerExecPath?: string; readonly prepareNativeGuard?: () => DaemonNativeRenameGuard } = {},
+  restrictions: { readonly current?: () => void; readonly directory?: NativeUpdateDirectoryOwner; readonly readerExecPath?: string; readonly prepareNativeGuard?: () => DaemonNativeRenameGuard; readonly retainPublication?: ((assertCurrent: () => void) => void) | undefined } = {},
 ): void {
   if (paths.length === 0) return;
   if (!io.writeExclusive || !io.remove) throw new Error('update I/O adapter must support writeExclusive and remove; refusing mutation');
@@ -445,6 +445,15 @@ function transact(
     phase = 'cleanup';
     for (const path of paths) removeBackup(path.saved);
     for (const path of staged) removeCreated(path);
+    if (restrictions.retainPublication) {
+      if (!nativeGuard) throw new Error('Native publication observation is unavailable');
+      nativeGuard.assertCurrent();
+      let retained: unknown;
+      try { retained = restrictions.retainPublication(nativeGuard.assertCurrent.bind(nativeGuard)); }
+      catch (error) { drainOwned(error); throw error; }
+      if (retained !== undefined) { drainOwned(retained); throw new Error('Publication observation must complete synchronously'); }
+      nativeGuard.assertCurrent();
+    }
     for (const claim of claims) removeCreated(claim);
     readerLease?.(); readerLease = undefined;
   } catch (cause) {
@@ -476,7 +485,7 @@ interface StagedUpdate {
 
 function installVerifiedBuffers(
   verified: readonly StagedUpdate[], io: UpdateFileIo, _platform: NodeJS.Platform, beforeCommit?: () => void,
-  restrictions: { readonly current?: () => void; readonly directory?: NativeUpdateDirectoryOwner; readonly readerExecPath?: string; readonly prepareNativeGuard?: () => DaemonNativeRenameGuard } = {},
+  restrictions: { readonly current?: () => void; readonly directory?: NativeUpdateDirectoryOwner; readonly readerExecPath?: string; readonly prepareNativeGuard?: () => DaemonNativeRenameGuard; readonly retainPublication?: ((assertCurrent: () => void) => void) | undefined } = {},
 ): void {
   const paths = validateTargets(verified.map(({ target }) => target));
   transact('update', paths, io, (write) => {
@@ -534,6 +543,9 @@ export interface ApplyVerifiedUpdateOptions extends UpdateRequestOptions {
   readonly native?: boolean;
   /** Explicit installation root for the shared saved-data reader lease. */
   readonly readerExecPath?: string;
+  /** Synchronous native publication observation while the original claims are
+   * held. Failure retains a committed recovery receipt; it is not a UI notification. */
+  readonly retainPublication?: ((assertCurrent: () => void) => void) | undefined;
   /** Construction-owned effect lifetime, checked before each forward native filesystem mutation. */
   readonly assertCurrent?: () => void;
 }
@@ -680,7 +692,7 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
     assertCurrent();
     assertNativeCurrent?.();
     if (native) assertNativeReaderCompatible(native.execPath, native.version, options.io ?? realUpdateFileIo, nativeReaders);
-  }, { current: assertCurrent, ...(directory ? { directory } : {}), ...(readerExecPath ? { readerExecPath } : {}), ...(native || options.native ? { prepareNativeGuard: () => {
+  }, { current: assertCurrent, ...(options.retainPublication ? { retainPublication: options.retainPublication } : {}), ...(directory ? { directory } : {}), ...(readerExecPath ? { readerExecPath } : {}), ...(native || options.native ? { prepareNativeGuard: () => {
     const io = options.io ?? realUpdateFileIo;
     if (!io.readFile || !io.observe) throw new Error('Native daemon staged owner is unavailable');
     for (const member of verified) {

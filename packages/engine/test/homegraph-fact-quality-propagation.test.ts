@@ -118,9 +118,9 @@ describe('Home Graph complete-fact quality propagation', () => {
         const oldArtifacts = context.artifactStore.list();
         const currentFact = context.store.getNode(context.fact.id)!;
         await context.store.replaceNodeRecord({ ...currentFact, summary: 'Replace the appliance filter every six months. Keep a spare filter.' });
-        const create = context.artifactStore.create.bind(context.artifactStore);
-        const intercepted = spyOn(context.artifactStore, 'create').mockImplementation(async (input) => {
-          const artifact = await create(input);
+        const create = context.artifactStore.createForPublication.bind(context.artifactStore);
+        const intercepted = spyOn(context.artifactStore, 'createForPublication').mockImplementation(async (input, ownership) => {
+          const artifact = await create(input, ownership);
           if (retirement === 'object') {
             const selected = context.store.getNode(context.fact.id)!;
             await context.store.replaceNodeRecord({ ...selected, summary: `${selected.summary} Replacement by another writer.` });
@@ -132,6 +132,7 @@ describe('Home Graph complete-fact quality propagation', () => {
         });
         try {
           await expect(generate(context, kind)).rejects.toThrow();
+          expect(intercepted).toHaveBeenCalled();
           expect(context.store.getSource(previousPage.source!.id)).toEqual(previousPage.source!);
           expect(context.artifactStore.list()).toEqual(oldArtifacts);
         } finally { intercepted.mockRestore(); }
@@ -197,9 +198,9 @@ for (const outcome of ['success', 'cancel', 'failure', 'authority'] as const) {
     let enter!: () => void, release!: () => void;
     const entered = new Promise<void>((resolve) => { enter = resolve; });
     const pause = new Promise<void>((resolve) => { release = resolve; });
-    const original = context.artifactStore.create.bind(context.artifactStore);
+    const original = context.artifactStore.createForPublication.bind(context.artifactStore);
     let calls = 0;
-    const create = spyOn(context.artifactStore, 'create').mockImplementation(async (...args) => {
+    const create = spyOn(context.artifactStore, 'createForPublication').mockImplementation(async (...args) => {
       calls += 1;
       if (calls === 1) { enter(); await pause; if (outcome === 'failure') throw new Error('First artifact unavailable'); }
       return original(...args);
@@ -227,8 +228,8 @@ for (const outcome of ['success', 'cancel', 'failure', 'authority'] as const) {
 for (const change of ['fact', 'twice', 'source', 'subject', 'port', 'cancel'] as const) {
   test(`Ask page recovery rejudges genuine fact changes once and preserves ${change} lifetime`, async () => {
     const context = await fixture(); const controller = new AbortController();
-    const original = context.artifactStore.create.bind(context.artifactStore); let creations = 0;
-    const create = spyOn(context.artifactStore, 'create').mockImplementation(async (...args) => {
+    const original = context.artifactStore.createForPublication.bind(context.artifactStore); let creations = 0;
+    const create = spyOn(context.artifactStore, 'createForPublication').mockImplementation(async (...args) => {
       const artifact = await original(...args); creations += 1;
       if (creations === 1 || change === 'twice') {
         const fact = context.store.getNode(context.fact.id)!;

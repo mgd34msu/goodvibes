@@ -51,8 +51,8 @@ test('the selected-source enrichment tail starts after actual ask page publicati
       return [];
     } catch (error) { entered.reject(error); throw error; }
   });
-  const createArtifact = f.artifactStore.create.bind(f.artifactStore);
-  const create = spyOn(f.artifactStore, 'create').mockImplementation(async (input, ownership) => {
+  const createArtifact = f.artifactStore.createForPublication.bind(f.artifactStore);
+  const create = spyOn(f.artifactStore, 'createForPublication').mockImplementation(async (input, ownership) => {
     if (input.metadata?.automation === 'ask-refresh') expect(enrichmentCalls).toBe(0);
     return createArtifact(input, ownership);
   });
@@ -61,6 +61,7 @@ test('the selected-source enrichment tail starts after actual ask page publicati
     expect(answer.results.some(result => result.source?.id === f.source.id)).toBe(true);
     await entered.promise;
     expect(enrichmentCalls).toBe(1);
+    expect(create).toHaveBeenCalled();
   } finally {
     await f.service.dispose(); create.mockRestore(); enrich.mockRestore();
     await f.store.close(); rmSync(f.root, { recursive: true, force: true });
@@ -93,8 +94,8 @@ test('manual publication aborts and drains the active selected-source tail befor
     try { return await enrichSources(sources, input); }
     finally { drained = true; finished.resolve(); }
   });
-  const createArtifact = f.artifactStore.create.bind(f.artifactStore);
-  const create = spyOn(f.artifactStore, 'create').mockImplementation(async (input, ownership) => {
+  const createArtifact = f.artifactStore.createForPublication.bind(f.artifactStore);
+  const create = spyOn(f.artifactStore, 'createForPublication').mockImplementation(async (input, ownership) => {
     if (manualPublication && input.metadata?.generatedKnowledgePage === true) expect(drained).toBe(true);
     return createArtifact(input, ownership);
   });
@@ -110,6 +111,7 @@ test('manual publication aborts and drains the active selected-source tail befor
     const result = await page;
     expect(drained).toBe(true);
     expect(f.artifactStore.get(result.artifact.id)).toBeDefined();
+    expect(create).toHaveBeenCalled();
   } finally {
     const closing = f.service.dispose(); release.resolve(); await closing; if (activeSignal) await finished.promise;
     create.mockRestore(); enrich.mockRestore();
@@ -193,8 +195,8 @@ for (const pageKind of ['passport', 'room', 'reindex'] as const) {
       try { return await selfImprove(input, options); }
       finally { backgroundDrained = true; finished.resolve(); }
     });
-    const createArtifact = artifactStore.create.bind(artifactStore);
-    const artifact = spyOn(artifactStore, 'create').mockImplementation(async (input, ownership) => {
+    const createArtifact = artifactStore.createForPublication.bind(artifactStore);
+    const artifact = spyOn(artifactStore, 'createForPublication').mockImplementation(async (input, ownership) => {
       if (input.metadata?.generatedKnowledgePage === true) {
         generatedArtifacts += 1;
         expect(backgroundSignal?.aborted).toBe(true);

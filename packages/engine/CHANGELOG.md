@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Exercise Home Graph publication interruptions at the actual artifact lease
+  boundary, and finish async fixture disposal before deleting its directories.
+
 - Reserve full contract IDs before placement or owner startup, and publish the
   initial checkpoint exclusively before registering execution. Preserve existing
   history, refuse concurrent creation and keep earlier contract IDs readable.

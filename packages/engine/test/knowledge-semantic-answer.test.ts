@@ -844,8 +844,8 @@ describe('semantic knowledge/wiki enrichment: answer quality', () => {
     // Force a distinct intrinsic-gap repair while the foreground page owns
     // its original source/extraction, rather than depending on the pump timer.
     let repeatedDuringForeground = false;
-    const createArtifact = artifactStore.create.bind(artifactStore);
-    const repeatAtArtifact = spyOn(artifactStore, 'create').mockImplementation(async (input, ownership) => {
+    const createArtifact = artifactStore.createForPublication.bind(artifactStore);
+    const repeatAtArtifact = spyOn(artifactStore, 'createForPublication').mockImplementation(async (input, ownership) => {
       if (!repeatedDuringForeground && officialSourceId && lastRepairRequest && input.metadata?.generatedKnowledgePage === true && input.metadata.automation === 'ask-refresh') {
         repeatedDuringForeground = true;
         const source = store.getSource(officialSourceId)!;

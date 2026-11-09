@@ -24,8 +24,8 @@ const liveServices: HomeGraphService[] = [];
  * the semantic service, and therefore fetch, for the rest of the process).
  */
 export function useHomeGraphFixtures(): void {
-  afterEach(() => {
-    for (const service of liveServices.splice(0)) service.dispose();
+  afterEach(async () => {
+    await Promise.all(liveServices.splice(0).map(service => service.dispose()));
     for (const root of tmpRoots.splice(0)) {
       rmSync(root, { recursive: true, force: true });
     }

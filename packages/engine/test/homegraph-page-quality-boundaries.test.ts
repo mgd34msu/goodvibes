@@ -18,7 +18,7 @@ import {
   generateHomeGraphRoomPage,
   refreshHomeGraphDevicePassport,
 } from '../sdk/src/platform/knowledge/home-graph/generated-pages.js';
-import { buildHomeGraphMetadata, homeGraphSourceId } from '../sdk/src/platform/knowledge/home-graph/helpers.js';
+import { buildHomeGraphMetadata } from '../sdk/src/platform/knowledge/home-graph/helpers.js';
 import { renderRoomPage } from '../sdk/src/platform/knowledge/home-graph/rendering.js';
 import { readHomeGraphState } from '../sdk/src/platform/knowledge/home-graph/state.js';
 import type { HomeGraphAskResult } from '../sdk/src/platform/knowledge/home-graph/types.js';
@@ -266,15 +266,16 @@ describe('Home Graph page quality persistence boundaries', () => {
       const context = await fixture();
       await addSource(context, 'artifact-boundary-reference');
       readings();
-      const createArtifact = context.artifactStore.create.bind(context.artifactStore);
+      const createArtifact = context.artifactStore.createForPublication.bind(context.artifactStore);
       let corrected: KnowledgeNodeRecord | undefined;
-      const artifactWrite = spyOn(context.artifactStore, 'create').mockImplementation(async input => {
-        const artifact = await createArtifact(input);
+      const artifactWrite = spyOn(context.artifactStore, 'createForPublication').mockImplementation(async (input, ownership) => {
+        const artifact = await createArtifact(input, ownership);
         corrected = await seedHomeAssistantObservation(context.store, { ...context.device, summary: 'Operator corrected the device during artifact creation.' });
         return artifact;
       });
       try {
         await expect(generate(context, kind)).rejects.toMatchObject({ reason: 'stale' });
+        expect(artifactWrite).toHaveBeenCalled();
         expect(corrected).toBeDefined();
         expect(context.store.getNode(context.device.id)).toEqual(corrected!);
         expect(context.store.listSourcesInSpace(spaceId).filter(source => source.metadata.homeGraphGeneratedPage === true)).toEqual([]);
@@ -289,15 +290,16 @@ describe('Home Graph page quality persistence boundaries', () => {
       readings();
       const writer = new KnowledgeStore({ dbPath: context.store.storagePath });
       await writer.init();
-      const createArtifact = context.artifactStore.create.bind(context.artifactStore);
+      const createArtifact = context.artifactStore.createForPublication.bind(context.artifactStore);
       const correction = { ...source, title: 'Operator corrected the reference during artifact creation.' };
-      const artifactWrite = spyOn(context.artifactStore, 'create').mockImplementation(async input => {
-        const artifact = await createArtifact(input);
+      const artifactWrite = spyOn(context.artifactStore, 'createForPublication').mockImplementation(async (input, ownership) => {
+        const artifact = await createArtifact(input, ownership);
         await writer.replaceSourceRecord(correction);
         return artifact;
       });
       try {
         const error = await generate(context, kind).then(() => undefined, (failure: unknown) => failure);
+        expect(artifactWrite).toHaveBeenCalled();
         expect(context.store.getSource(source.id)).toEqual(source);
         expect(context.store.getSourceSnapshot({ id: source.id }).source).toEqual(correction);
         expect(context.store.listSourcesInSpace(spaceId).filter(row => row.metadata.homeGraphGeneratedPage === true)).toEqual([]);
@@ -316,11 +318,11 @@ describe('Home Graph page quality persistence boundaries', () => {
         if (!edge) throw new Error('Synthetic device reference edge was not seeded.');
         const writer = new KnowledgeStore({ dbPath: context.store.storagePath });
         await writer.init();
-        const createArtifact = context.artifactStore.create.bind(context.artifactStore);
+        const createArtifact = context.artifactStore.createForPublication.bind(context.artifactStore);
         const correctedEdge = { ...edge, metadata: { ...edge.metadata, operatorCorrection: 'This reference association was corrected.' } };
         let correctedSubject: KnowledgeNodeRecord | undefined;
-        const artifactWrite = spyOn(context.artifactStore, 'create').mockImplementation(async input => {
-          const artifact = await createArtifact(input);
+        const artifactWrite = spyOn(context.artifactStore, 'createForPublication').mockImplementation(async (input, ownership) => {
+          const artifact = await createArtifact(input, ownership);
           if (changed === 'subject') correctedSubject = await seedHomeAssistantObservation(writer, {
             ...context.device, summary: 'The operator corrected the subject in another persisted store.',
           });
@@ -329,6 +331,7 @@ describe('Home Graph page quality persistence boundaries', () => {
         });
         try {
           const error = await generate(context, kind).then(() => undefined, (failure: unknown) => failure);
+          expect(artifactWrite).toHaveBeenCalled();
           expect(context.store.getNode(context.device.id)).toEqual(context.device);
           expect(context.store.edgesFor('source', source.id).find(row => row.id === edge.id)).toEqual(edge);
           if (changed === 'subject') {
@@ -352,9 +355,9 @@ describe('Home Graph page quality persistence boundaries', () => {
       const writer = new KnowledgeStore({ dbPath: context.store.storagePath });
       await writer.init();
       const correction = { ...unrelated, summary: 'An unrelated operator correction must survive the publication attempt.' };
-      const createArtifact = context.artifactStore.create.bind(context.artifactStore);
-      const artifactWrite = spyOn(context.artifactStore, 'create').mockImplementation(async input => {
-        const artifact = await createArtifact(input);
+      const createArtifact = context.artifactStore.createForPublication.bind(context.artifactStore);
+      const artifactWrite = spyOn(context.artifactStore, 'createForPublication').mockImplementation(async (input, ownership) => {
+        const artifact = await createArtifact(input, ownership);
         await writer.replaceSourceRecord(correction);
         return artifact;
       });
@@ -363,6 +366,7 @@ describe('Home Graph page quality persistence boundaries', () => {
           ? generateHomeGraphRoomPage({ ...context, input: { areaId } }).then(result => ({ pageKind: 'room' as const, result }))
           : refreshHomeGraphDevicePassport({ ...context, input: { deviceId } }).then(result => ({ pageKind: 'passport' as const, result }));
         const receipt = await generated.then(page => ({ kind: 'written' as const, ...page }), (error: unknown) => ({ kind: 'held' as const, error }));
+        expect(artifactWrite).toHaveBeenCalled();
         expect(context.store.getSourceSnapshot({ id: unrelated.id }).source).toEqual(correction);
         if (receipt.kind === 'written') {
           const source = receipt.result.source;
@@ -377,9 +381,13 @@ describe('Home Graph page quality persistence boundaries', () => {
         } else {
           expect(receipt.error).toBeInstanceOf(Error);
           expect(context.store.listSourcesInSpace(spaceId).filter(row => row.metadata.homeGraphGeneratedPage === true)).toEqual([]);
-          const canonicalValue = kind === 'room' ? `room-page:${areaId}` : `device-passport:${deviceId}`;
-          const sourceId = homeGraphSourceId(spaceId, 'generated-page', canonicalValue);
-          expect(context.store.getSourceSnapshot({ id: sourceId }).source).toBeNull();
+          // Inspect the actual saved rows through an independent reader;
+          // generated source IDs are opaque and must not be reconstructed.
+          const native = new KnowledgeStore({ dbPath: context.store.storagePath });
+          try {
+            await native.init();
+            expect(native.listSourcesInSpace(spaceId).filter(row => row.metadata.homeGraphGeneratedPage === true)).toEqual([]);
+          } finally { await native.close(); }
           expect(context.store.listNodesInSpace(spaceId).filter(node => node.kind === 'ha_device_passport')).toEqual([]);
           expect(context.artifactStore.list()).toEqual([]);
         }
@@ -633,7 +641,7 @@ describe('Home Graph page quality persistence boundaries', () => {
     } finally {
       pause.release();
       await result;
-      service.dispose();
+      await service.dispose();
     }
   });
 
@@ -679,7 +687,7 @@ describe('Home Graph page quality persistence boundaries', () => {
       pause.release();
       await result;
       await ledger.service.close();
-      service.dispose();
+      await service.dispose();
     }
   });
 
@@ -736,7 +744,7 @@ describe('Home Graph page quality persistence boundaries', () => {
         } finally { await reopened.close(); }
       } finally {
         await result;
-        service.dispose();
+        await service.dispose();
       }
     });
   }

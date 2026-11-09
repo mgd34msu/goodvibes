@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { StaticRule, SourceAnchor, StaticSourceInput, StaticSourceReadings, StaticCallEvidence, StaticSourceReceipt, StaticSourceProgress, StaticInputStanding } from './static-source-reading-types.ts';
+import type { StaticRule, SourceAnchor, StaticSourceInput, StaticSourceReadings, StaticCallEvidence, StaticSourceReceipt, StaticSourceProgress, StaticInputStanding, StaticSourceWindow, StaticPolicyObservation } from './static-source-reading-types.ts';
 export type { StaticRule, SourceAnchor, StaticSourceInput, StaticSourceReadings, StaticCallEvidence, StaticSourceReceipt, StaticSourceProgress, StaticInputStanding } from './static-source-reading-types.ts';
 import { currentStaticSourcePolicyPass, withStaticSourcePolicyPass as runStaticSourcePolicyPass } from './static-source-policy-lifetime.ts';
 import { fileObservationIdentity, readFileObservation } from '../sdk/src/platform/utils/file-observation.ts';
@@ -27,13 +27,7 @@ const policyFiles = [
   '../../judgment/src/readings/bands.ts', '../../judgment/src/port/answers.ts',
   '../../judgment/src/port/config.ts',
 ] as const;
-interface PolicyObservation {
-  readonly manifest: ReadonlyArray<readonly [string, string]>;
-  readonly hash: string;
-  readonly batterySources: ReadonlyMap<string, string>;
-  assertCurrent(): void;
-}
-const policyObservations = new WeakMap<object, PolicyObservation>();
+const policyObservations = new WeakMap<object, StaticPolicyObservation>();
 /** Last callback/await cannot publish a result after changing its policy owner. */
 export function withStaticSourcePolicyPass<T>(operation: () => T): T {
   if (currentStaticSourcePolicyPass()) return operation();
@@ -46,7 +40,7 @@ export function withStaticSourcePolicyPass<T>(operation: () => T): T {
 }
 /** Original physical files are checked on every reuse; only the battery body
  * needed by existing historical-policy readers survives the initial hash pass. */
-function currentPolicyObservation(): PolicyObservation {
+function currentPolicyObservation(): StaticPolicyObservation {
   const owner = currentStaticSourcePolicyPass(), previous = owner && policyObservations.get(owner);
   if (owner && previous) {
     try { previous.assertCurrent(); return previous; }
@@ -80,14 +74,22 @@ export function staticDecisionSourceManifest(): ReadonlyArray<readonly [string, 
 }
 export function staticDecisionSourceHash(): string { return currentPolicyObservation().hash; }
 
-/** Structural windows retain every offered line or AST anchor and context on both sides. */
+/** Complete captures retain the existing portable full-source identity. */
 export function captureStaticInputs(kind: StaticRule, path: string, text: string, offered?: readonly SourceAnchor[]): StaticSourceInput[] {
+  const windows = captureStaticWindows(kind, path, text, offered); if (!windows.length) return [];
+  const sourceHash = sha256(text); return windows.map(window => ({ ...window, sourceHash }));
+}
+/** Missing-store advisories need exact scopes, never a saved identity. */
+export function captureUnrecordedStaticScopes(kind: StaticRule, path: string, text: string, offered?: readonly SourceAnchor[]) {
+  return captureStaticWindows(kind, path, text, offered).map(({ firstLine }) => ({ firstLine, reason: 'missing or stale decision source' }));
+}
+/** Structural windows retain every offered line or AST anchor and context. */
+function captureStaticWindows(kind: StaticRule, path: string, text: string, offered?: readonly SourceAnchor[]): StaticSourceWindow[] {
   const lines = text.split('\n');
   const anchors = offered ?? (kind === 'internal-identifier' ? internalSourceAnchors(path, text)
     : lines.flatMap((line, index) => line.trim().length === 0 ? [] : [{ id: `line_${index + 1}`, line: index + 1, col: 1, text: line }]));
   if (anchors.length === 0) return [];
   const structuredContext = structuredSourceContext(path, text);
-  const sourceHash = sha256(text);
   const lineOffsets = [0];
   for (const line of lines) lineOffsets.push(lineOffsets.at(-1)! + line.length + 1);
   const groups: SourceAnchor[][] = [];
@@ -101,7 +103,7 @@ export function captureStaticInputs(kind: StaticRule, path: string, text: string
     group.push(anchor); chars += anchor.text.length;
   }
   if (group.length) groups.push(group);
-  const window = (current: readonly SourceAnchor[]): StaticSourceInput => {
+  const window = (current: readonly SourceAnchor[]): StaticSourceWindow => {
     const firstLine = current[0]!.line;
     const lastLine = Math.max(...current.map(anchor => anchor.line + anchor.text.split('\n').length - 1));
     const start = Math.max(1, firstLine - 20);
@@ -118,11 +120,11 @@ export function captureStaticInputs(kind: StaticRule, path: string, text: string
       if (previous && range.firstLine <= previous.lastLine + 1) previous.lastLine = Math.max(previous.lastLine, range.lastLine);
       else merged.push({ ...range });
     }
-    return { kind, path: path.split('\\').join('/'), sourceHash, firstLine, lastLine,
+    return { kind, path: path.split('\\').join('/'), firstLine, lastLine,
       source: merged.flatMap(range => lines.slice(range.firstLine - 1, range.lastLine)
         .map((line, index) => `${range.firstLine + index}| ${line}`)).join('\n'), anchors: current };
   };
-  const bounded = (current: readonly SourceAnchor[]): StaticSourceInput[] => {
+  const bounded = (current: readonly SourceAnchor[]): StaticSourceWindow[] => {
     const input = window(current);
     try {
       validateContextBudget(staticInputState(input), { violation: batteryFor(kind).items.violation.question });
@@ -143,7 +145,7 @@ export function captureStaticInputs(kind: StaticRule, path: string, text: string
   return groups.flatMap(bounded);
 }
 
-export function staticInputState(input: StaticSourceInput): EntryType {
+export function staticInputState(input: StaticSourceWindow): EntryType {
   return { path: input.path, source: input.source, anchors: input.anchors.map(anchor => ({ ...anchor })) };
 }
 export function staticInputKey(input: StaticSourceInput): string {
@@ -486,10 +488,10 @@ export function openStaticSourceJournal(path: string) {
 
 const batteryFor = (kind: StaticRule) => kind === 'internal-identifier' ? internalIdentifier : deferredWork;
 const ruleFor = (kind: StaticRule): string => kind === 'internal-identifier' ? INTERNAL_IDENTIFIER_INSTRUCTIONS : DEFERRED_WORK_INSTRUCTIONS;
-export const staticSelectionContext = (input: StaticSourceInput) => ({ rule: ruleFor(input.kind), source: input.source, path: input.path });
-export const staticSelectionCandidates = (input: StaticSourceInput) => input.anchors.map(anchor => ({ id: anchor.id, content: { ...anchor } }));
+export const staticSelectionContext = (input: StaticSourceWindow) => ({ rule: ruleFor(input.kind), source: input.source, path: input.path });
+export const staticSelectionCandidates = (input: StaticSourceWindow) => input.anchors.map(anchor => ({ id: anchor.id, content: { ...anchor } }));
 
-function selectionInput(input: StaticSourceInput, weakSelection = false) {
+function selectionInput(input: StaticSourceWindow, weakSelection = false) {
   return buildSelectionInput({ instructions: weakSelection ? STATIC_WEAK_ANCHOR_INSTRUCTIONS : STATIC_ANCHOR_INSTRUCTIONS,
     fitInstructions: weakSelection ? STATIC_WEAK_ANCHOR_FIT_INSTRUCTIONS : STATIC_ANCHOR_FIT_INSTRUCTIONS },
     staticSelectionContext(input), staticSelectionCandidates(input));

@@ -1,5 +1,5 @@
 import ts from 'typescript';
-import { captureStaticInputs, staticInputStanding, withStaticSourcePolicyPass, type SourceAnchor, type StaticSourceReadings } from './static-source-readings.ts';
+import { captureStaticInputs, captureUnrecordedStaticScopes, staticInputStanding, withStaticSourcePolicyPass, type SourceAnchor, type StaticSourceReadings } from './static-source-readings.ts';
 
 export interface SourceMarkerFinding {
   readonly line: number;
@@ -145,7 +145,10 @@ export function sourceMarkerAnchors(path: string, text: string): SourceAnchor[] 
 
 export function sourceMarkerFindings(path: string, text: string, readings: StaticSourceReadings | null = null): SourceMarkerFinding[] {
   return withStaticSourcePolicyPass<SourceMarkerFinding[]>(() => {
-    const inputs = captureStaticInputs('deferred-work', path, text, sourceMarkerAnchors(path, text));
+    const anchors = sourceMarkerAnchors(path, text);
+    if (readings === null) return captureUnrecordedStaticScopes('deferred-work', path, text, anchors)
+      .map<SourceMarkerFinding>(scope => ({ line: scope.firstLine, col: 1, marker: 'evidence-held', text: `${scope.reason}; run static-source:read` }));
+    const inputs = captureStaticInputs('deferred-work', path, text, anchors);
     return inputs.flatMap(input => {
       const standing = staticInputStanding(input, readings);
       if (standing.kind === 'clear') return [];

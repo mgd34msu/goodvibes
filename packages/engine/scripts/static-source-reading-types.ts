@@ -65,3 +65,12 @@ export interface StaticSourceProgress {
 export type StaticInputStanding = { readonly kind: 'clear' }
   | { readonly kind: 'violation'; readonly anchor: SourceAnchor }
   | { readonly kind: 'held'; readonly reason: string };
+
+/** Structural capture before any persisted source identity is needed. */
+export type StaticSourceWindow = Omit<StaticSourceInput, 'sourceHash'>;
+export interface StaticPolicyObservation {
+  readonly manifest: ReadonlyArray<readonly [string, string]>;
+  readonly hash: string;
+  readonly batterySources: ReadonlyMap<string, string>;
+  assertCurrent(): void;
+}

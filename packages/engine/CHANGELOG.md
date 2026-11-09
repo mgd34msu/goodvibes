@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Skip full-source hashing in offline checker advisories that have no saved
+  readings to compare. Preserve the same source scopes and retain complete
+  source bindings for actual preparation and saved-reading checks.
+
 - Preserve the actual checkpoint read when quarantining malformed contracts,
   without replacing earlier forensic copies. Apply the existing owned archive
   retention across both checkpoint directories, and preserve unknown or newer

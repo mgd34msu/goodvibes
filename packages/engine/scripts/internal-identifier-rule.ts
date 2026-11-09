@@ -1,4 +1,4 @@
-import { captureStaticInputs, staticInputStanding, withStaticSourcePolicyPass, type StaticSourceReadings } from './static-source-readings.ts';
+import { captureStaticInputs, captureUnrecordedStaticScopes, staticInputStanding, withStaticSourcePolicyPass, type StaticSourceReadings } from './static-source-readings.ts';
 
 export interface InternalIdentifierCandidate {
   readonly relPath: string;
@@ -46,6 +46,11 @@ export function checkNoInternalIdentifiers(
     const violations: string[] = [];
     for (const { relPath, text } of candidates) {
       if (isInternalIdentifierExempt(relPath)) continue;
+      if (readings === null) {
+        for (const scope of captureUnrecordedStaticScopes('internal-identifier', relPath, text))
+          onHeld?.(`${relPath}:${scope.firstLine}: internal-identifier evidence held (${scope.reason}); review source or run static-source:read [internal-identifier]`);
+        continue;
+      }
       for (const input of captureStaticInputs('internal-identifier', relPath, text)) {
         const standing = staticInputStanding(input, readings);
         if (standing.kind === 'clear') continue;

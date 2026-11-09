@@ -1,15 +1,16 @@
 /** Source-only regressions; no provider calls or recorded-reading rewrites. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs';
+import * as crypto from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import * as atomic from '../sdk/src/platform/utils/atomic-json-store.ts';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { captureStaticInputs, readStaticInput, staticDecisionSourceHash, staticDecisionSourceManifest,
+import { captureStaticInputs, staticInputKey, readStaticInput, staticDecisionSourceHash, staticDecisionSourceManifest,
   withStaticSourcePolicyPass } from '../scripts/static-source-readings.ts';
 import { checkNoInternalIdentifiers } from '../scripts/internal-identifier-rule.ts';
-import { sourceMarkerFindings } from '../scripts/no-todo-marker-rules.ts';
+import { sourceMarkerAnchors, sourceMarkerFindings } from '../scripts/no-todo-marker-rules.ts';
 import { preparedStaticReadings } from './_helpers/static-source-evidence.ts';
 
 const roots: string[] = [];
@@ -127,4 +128,33 @@ test('actual static reader rechecks the owned policy after its provider await an
     expect(fake.requests).toHaveLength(1);
     expect(log.query({ status: 'answered' })).toHaveLength(1);
   } finally { release(); f.close(); }
+});
+
+
+test('actual missing-store gates keep identical structural held scopes without any SHA producer', () => {
+  const internalText = Array.from({ length: 240 }, (_, index) => `Paragraph ${index} is complete.`).join('\n\n');
+  const deferredText = Array.from({ length: 240 }, (_, index) => `// Persistence reader ${index} is documented.`).join('\n\n');
+  const internal = captureStaticInputs('internal-identifier', 'docs/example.md', internalText);
+  const deferred = captureStaticInputs('deferred-work', 'sdk/src/example.ts', deferredText, sourceMarkerAnchors('sdk/src/example.ts', deferredText));
+  expect(internal.length).toBeGreaterThan(1); expect(deferred.length).toBeGreaterThan(1);
+  const hash = spyOn(crypto, 'createHash'), nativeHash = spyOn(Bun.CryptoHasher, 'hash');
+  try {
+    const held: string[] = [];
+    expect(checkNoInternalIdentifiers([{ relPath: 'docs/example.md', text: internalText }], null, value => { held.push(value); })).toEqual([]);
+    expect(held).toEqual(internal.map(input => `docs/example.md:${input.firstLine}: internal-identifier evidence held (missing or stale decision source); review source or run static-source:read [internal-identifier]`));
+    expect(sourceMarkerFindings('sdk/src/example.ts', deferredText, null)).toEqual(deferred.map(input => ({ line: input.firstLine, col: 1,
+      marker: 'evidence-held', text: 'missing or stale decision source; run static-source:read' })));
+    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+    expect(nativeHash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+  } finally { hash.mockRestore(); nativeHash.mockRestore(); }
+});
+
+test('default explicit preparation still binds the complete source beyond its offered window', () => {
+  const first = '// Visible original source.', text = [first, ...Array.from({ length: 80 }, () => ''), '// Remote original source.'].join('\n');
+  const anchors = [{ id: 'original', line: 1, col: 1, text: first }];
+  const before = captureStaticInputs('deferred-work', 'sdk/src/example.ts', text, anchors)[0]!;
+  const after = captureStaticInputs('deferred-work', 'sdk/src/example.ts', text.replace('Remote original', 'Remote modified'), anchors)[0]!;
+  expect(before).toHaveProperty('sourceHash'); expect(before.sourceHash).toMatch(/^[a-f0-9]{64}$/);
+  expect(before.source).toBe(after.source); expect(before.anchors).toEqual(after.anchors);
+  expect(before.sourceHash).not.toBe(after.sourceHash); expect(staticInputKey(before)).not.toBe(staticInputKey(after));
 });

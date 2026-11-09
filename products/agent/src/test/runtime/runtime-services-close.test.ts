@@ -62,8 +62,8 @@ test.each(['HomeGraph', 'rewind'] as const)('Agent close waits for %s last while
   const watcherStop = spyOn(services.watcherRegistry, 'dispose');
   const triggerDrainEntered = Promise.withResolvers<void>();
   const releaseTriggerDrain = Promise.withResolvers<void>();
-  const nativeTriggerJoin = services.workflow.triggerManager.join.bind(services.workflow.triggerManager);
-  const triggerJoin = spyOn(services.workflow.triggerManager, 'join').mockImplementation(async () => {
+  const nativeTriggerJoin = services.triggerManager.join.bind(services.triggerManager);
+  const triggerJoin = spyOn(services.triggerManager, 'join').mockImplementation(async () => {
     triggerDrainEntered.resolve();
     await releaseTriggerDrain.promise;
     await nativeTriggerJoin();

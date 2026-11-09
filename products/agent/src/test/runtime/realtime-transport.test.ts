@@ -173,7 +173,7 @@ describe('RealtimeTransport', () => {
     let agentId: string | undefined;
     try {
       const task = await transport.operator.tasks.submit({ task: 'cancel me over realtime transport' });
-      agentId = task.agentId;
+      agentId = task.agentId ?? undefined;
       if (!agentId) throw new Error('The admitted task must name its actual agent');
       expect(agentId).toEqual(expect.any(String));
       expect(agentId?.length).toBeGreaterThan(0);

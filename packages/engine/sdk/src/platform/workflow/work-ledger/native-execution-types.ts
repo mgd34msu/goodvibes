@@ -56,6 +56,11 @@ const originals = new WeakMap<NativeExecutionOriginal, NativeRecordOrigin>();
 const requestOwners = new WeakMap<DurableContractRequest, NativeRequestOwner>();
 const decodedJson = new WeakSet<object>();
 const origin = (value: NativeExecutionOriginal) => nativeApply(nativeGet, originals, [value]) as NativeRecordOrigin | undefined;
+/** Internal parser provenance for a synchronous full-schema reading. A copied
+ * record or caller flag never supplies a retained original request owner. */
+export function nativeExecutionOriginalFor(value: NativeExecutionOriginal | undefined, projectId: string, attemptId: string): NativeExecutionOriginal | undefined {
+  return value && origin(value) && value.projectId === projectId && value.target.attemptId === attemptId ? value : undefined;
+}
 function immutable(value: NativeExecutionOriginal) { return { version: value.version, projectId: value.projectId, target: value.target, authorityScopes: value.authorityScopes, request: value.request, ...(value.owner ? { owner: value.owner } : {}) }; }
 /** Public revision counters already travel in the actual recorded decision.
  * They need neither another digest nor an extra private/public protocol token. */

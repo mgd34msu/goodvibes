@@ -6,7 +6,7 @@ import { nativeSettlementDigest, nativeWorkSettlementSchema, nativeSettlementSto
 import type { SQLiteStore, SqlDatabase } from '../state/sqlite-store.js';
 import { durableKeyIdentity, durableKeyHash, durablePayloadRevision, sameDurableRequest, type DurableContractKey, type DurableContractRequest, type DurableContractReceipt } from '../contract/durable-admission.js';
 import { readWorkLedgerState, createEmptyWorkLedgerState, reduceWorkLedgerSettlement } from '../workflow/work-ledger/service.js';
-import { NativeWorkExecutionError, parseNativeWorkExecutionRecord, parseNativeWorkExecutionIntent, parseNativeWorkExecutionRecordJson, parseNativeWorkExecutionIntentJson, nativeExecutionStorageKey, type NativeExecutionOriginal, type NativeWorkExecutionIntent, type NativeWorkExecutionRecord, type NativeWorkExecutionMutation, type NativeWorkExecutionStorage, type NativeWorkExecutionTransaction } from '../workflow/work-ledger/native-execution-types.js';
+import { NativeWorkExecutionError, nativeExecutionOriginalFor, parseNativeWorkExecutionRecord, parseNativeWorkExecutionIntent, parseNativeWorkExecutionRecordJson, parseNativeWorkExecutionIntentJson, nativeExecutionStorageKey, type NativeExecutionOriginal, type NativeWorkExecutionIntent, type NativeWorkExecutionRecord, type NativeWorkExecutionMutation, type NativeWorkExecutionStorage, type NativeWorkExecutionTransaction } from '../workflow/work-ledger/native-execution-types.js';
 
 type Lookup = DurableContractKey | { readonly attemptId: string };
 type SqlReader = Pick<SqlDatabase, 'exec'>;
@@ -16,6 +16,16 @@ interface SettlementSource { readonly receipt: NativeWorkSettlementReceipt; read
 // request owner. Independent saved adoption validates its commitment once;
 // copied public JSON cannot acquire this source lifetime.
 const settlementSources = new WeakMap<DurableContractRequest, SettlementSource>();
+// Full-schema validation executes inside this exact synchronous storage read.
+// Retain only its existing immutable native original, never prompt/body copies.
+// Nested reads restore the prior context even when validation throws.
+let validationOriginal: NativeExecutionOriginal | undefined;
+function withValidationOriginal<T>(original: NativeExecutionOriginal | undefined, read: () => T): T {
+  const previous = validationOriginal;
+  validationOriginal = original;
+  try { return read(); } finally { validationOriginal = previous; }
+}
+
 const historicalSettlementKeys = new WeakMap<DurableContractRequest, string>();
 function oldSettlementKey(record: NativeWorkExecutionRecord): string {
   if (record.version === 1) return nativeExecutionStorageKey(record);
@@ -61,7 +71,7 @@ export function validateNativeWorkSettlementTable(db: SqlReader): void {
   for (const row of db.exec('SELECT project_id, key_hash, format_version, state_json FROM native_work_execution_settlements')[0]?.values ?? []) {
     const receipt = nativeWorkSettlementSchema.parse(JSON.parse(String(row[3])));
     if (row[0] !== receipt.projectId || row[1] !== nativeSettlementStorageKey(receipt) || row[2] !== receipt.version) throw new NativeWorkExecutionError('invalid');
-    const current = read(db, receipt.projectId, { attemptId: receipt.target.attemptId });
+    const current = read(db, receipt.projectId, { attemptId: receipt.target.attemptId }, nativeExecutionOriginalFor(validationOriginal, receipt.projectId, receipt.target.attemptId));
     if (!current.settlement || !isDeepStrictEqual(current.settlement, receipt)) throw new NativeWorkExecutionError('invalid');
   }
 }
@@ -91,7 +101,7 @@ export function validateNativeWorkExecutionTable(db: SqlReader): void {
 export function validateNativeWorkExecutionIntentTable(db: SqlReader): void {
   validateColumns(db, 'native_work_execution_intents', knowledgeSchemaColumns.intent);
   for (const row of db.exec('SELECT project_id, attempt_id, format_version, state_json FROM native_work_execution_intents')[0]?.values ?? []) {
-    const intent = parseNativeWorkExecutionIntentJson(String(row[3]));
+    const intent = parseNativeWorkExecutionIntentJson(String(row[3]), nativeExecutionOriginalFor(validationOriginal, String(row[0]), String(row[1])));
     if (row[0] !== intent.projectId || row[1] !== intent.target.attemptId || row[2] !== intent.version) throw new NativeWorkExecutionError('invalid');
   }
 }
@@ -252,8 +262,8 @@ export function createNativeWorkExecutionStorage(sqlite: SQLiteStore, projectId:
   }
   return {
     continuations: createNativeCiContinuationStorage(sqlite, projectId, refresh, (db, key, original) => read(db, projectId, key, original), beforeCiV2Write),
-    current(key, original) { if (closed) throw new NativeWorkExecutionError('closed'); return sqlite.readPersisted(db => read(db, projectId, key, original)); },
-    currentByAttempt(attemptId, original) { if (closed) throw new NativeWorkExecutionError('closed'); if (!attemptId || typeof attemptId !== 'string') throw new NativeWorkExecutionError('invalid'); return sqlite.readPersisted(db => read(db, projectId, { attemptId }, original)); },
+    current(key, original) { if (closed) throw new NativeWorkExecutionError('closed'); return withValidationOriginal(original, () => sqlite.readPersisted(db => read(db, projectId, key, original))); },
+    currentByAttempt(attemptId, original) { if (closed) throw new NativeWorkExecutionError('closed'); if (!attemptId || typeof attemptId !== 'string') throw new NativeWorkExecutionError('invalid'); return withValidationOriginal(original, () => sqlite.readPersisted(db => read(db, projectId, { attemptId }, original))); },
     transaction,
     transactionByAttempt(attemptId, decide, afterDurable, original) { return transaction({ attemptId }, decide, afterDurable, original); },
     settle(key, decide, assertCurrent, original) {

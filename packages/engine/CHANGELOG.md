@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Reuse an authentic native record's existing validation during its synchronous
+  schema read. Repeated settlement reads retain full value checks without
+  recomputing that record's request and publication hashes.
+
 - Compare complete knowledge record representations, including named array
   fields and sparse slots, when checking whether captured evidence is current.
   Reuse the existing representation cache without adding hashing.

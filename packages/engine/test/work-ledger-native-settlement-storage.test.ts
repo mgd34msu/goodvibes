@@ -1,15 +1,14 @@
 /** Owned synthetic SQLite and paired-host fixtures; no user settings, credentials, or external services. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
-import * as nativeFs from 'node:fs';
+import * as atomicStore from '../sdk/src/platform/utils/atomic-json-store.js';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { canonicalJson, toJson, SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
 import { KNOWLEDGE_SCHEMA_VERSION } from '../sdk/src/platform/knowledge/store-schema.js';
 import { loadSqlJsEngine, SQLiteStore, type SqlDatabase } from '../sdk/src/platform/state/sqlite-store.js';
-import type { SQLitePublicationIO } from '../sdk/src/platform/state/sqlite-store-persistence.js';
 import { criteriaSetIdForWork, durableKeyIdentity, durablePayloadRevision, freezeDurableRequest } from '../sdk/src/platform/contract/durable-admission.js';
 import { checkSettings } from '../sdk/src/platform/contract/check.js';
 import { CONTRACT_CONFIG_DEFAULTS } from '../sdk/src/platform/contract/config.js';
@@ -63,6 +62,7 @@ async function fixture(options: { root?: string; actorId?: string; associate?: b
     await opened.storage.transaction(key, () => ({ next: null, nextIntent: intent, value: undefined }));
     await opened.storage.transaction(key, () => ({ next: record, nextIntent: { ...intent, state: 'associated' }, value: undefined }));
   }
+  if (!record.receipt) throw new Error('Fixture launch receipt is missing');
   const receiptDigest = nativeSettlementDigest(record.receipt); const contractDigest = nativeSettlementDigest({ fixture: 'terminal-contract' });
   const references = [{ kind: 'test' as const, ref: 'fixture:acceptance', digest: nativeSettlementDigest('acceptance') },
     { kind: 'test' as const, ref: `receipt:${record.receipt.contractId}`, digest: receiptDigest },
@@ -73,7 +73,7 @@ async function fixture(options: { root?: string; actorId?: string; associate?: b
   };
   return { ...opened, root, file, ledger, actor, actorId, work, target, key, intent, record, publication, create, claim, created, claimed };
 }
-async function settle(storage: NativeWorkExecutionStorage, f: Pick<Awaited<ReturnType<typeof fixture>>, 'key' | 'publication'>, assertCurrent: () => void = () => {}) {
+async function settle(storage: NativeWorkExecutionStorage, f: Pick<Awaited<ReturnType<typeof fixture>>, 'key'> & { publication: NativeWorkSettlementPublication }, assertCurrent: () => void = () => {}) {
   if (!storage.settle) throw new Error('Fixture requires settlement storage');
   const receipt = await storage.settle(f.key, () => f.publication, assertCurrent);
   if (receipt.version !== 1) throw new Error('Historical publication fixture changed version'); return receipt;
@@ -85,8 +85,20 @@ async function inspectImage<T>(file: string, inspect: (db: SqlDatabase) => T): P
 async function mutateImage(file: string, mutate: (db: SqlDatabase) => void) {
   await inspectImage(file, db => { mutate(db); writeFileSync(file, db.export()); });
 }
-function persistence(store: KnowledgeStore) {
-  return (store as unknown as { sqlite: { persistence: { io: SQLitePublicationIO } } }).sqlite.persistence;
+/** Inject at the active publisher; the private original IO is deliberately
+ * captured and cannot be substituted by assigning a similarly named field. */
+function publicationFault(path: string, phase: 'before-rename' | 'after-rename') {
+  const write = atomicStore.writeFileAtomic; let failed = false;
+  const fault = () => { failed = true; throw new Error('Owned settlement persistence failure'); };
+  const hook = spyOn(atomicStore, 'writeFileAtomic').mockImplementation((selected, bytes, options) => {
+    if (selected !== path || failed) return write(selected, bytes, options);
+    if (phase === 'before-rename') return fault();
+    return write(selected, bytes, { ...options, onEffect: published => {
+      options?.onEffect?.(published);
+      if (published) fault();
+    } });
+  });
+  return { get failed() { return failed; }, restore: () => hook.mockRestore() };
 }
 async function assertImage(file: string, expectedRevision: number, expectedSettlements: number) {
   await inspectImage(file, db => {
@@ -118,15 +130,28 @@ function currentPublication(f: Awaited<ReturnType<typeof fixture>>): CurrentNati
 
 test('settlement2 stores the exact bounded runner receipt and adjacent publication once, without decorative content hashes', async () => {
   const f = await fixture(), publication = currentPublication(f), original = f.storage.current(f.key).record!;
-  const hash = spyOn(crypto, 'createHash'); let receipt: NativeWorkSettlementReceipt | undefined;
+  const updates: Array<() => readonly unknown[]> = [], restoreUpdates: Array<() => void> = [];
+  const create = crypto.createHash;
+  const hash = spyOn(crypto, 'createHash').mockImplementation((algorithm, options) => {
+    const hasher = create(algorithm, options);
+    if (algorithm === 'sha256') {
+      const update = spyOn(hasher, 'update');
+      updates.push(() => update.mock.calls.map(([input]) => input));
+      restoreUpdates.push(() => update.mockRestore());
+    }
+    return hasher;
+  });
+  let receipt: NativeWorkSettlementReceipt | undefined;
   try {
     receipt = await f.storage.settle!(f.key, () => publication, () => {}, original);
     expect(receipt.version).toBe(2); expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(1);
     for (let index = 0; index < 8; index++) expect(f.storage.current(f.key, original).settlement).toEqual(receipt);
+    const inputs = updates.flatMap(read => read());
+    expect(inputs.filter(input => input === canonicalJson(toJson(publication)))).toHaveLength(1);
     expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(1);
-  } finally { hash.mockRestore(); }
+  } finally { for (const restore of restoreUpdates) restore(); hash.mockRestore(); }
   if (!receipt || receipt.version !== 2) throw new Error('Fixture current settlement');
-  expect(receipt.receipt).toEqual(f.record.receipt);
+  expect<unknown>(receipt.receipt).toEqual(f.record.receipt);
   expect(receipt.publicationDigest).toBe(nativeSettlementPublicationCommitment(captureNativeSettlementPublication(publication)));
   expect(receipt).not.toHaveProperty('receiptDigest'); expect(receipt).not.toHaveProperty('contractDigest'); expect(receipt).not.toHaveProperty('keyHash');
   expect(receipt.reportRequestId).toMatch(/^native-report-v2:[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/);
@@ -141,6 +166,33 @@ test('settlement2 stores the exact bounded runner receipt and adjacent publicati
   expect(await reopened.storage.settle!(f.key, () => null, () => { throw new Error('No new proof on saved reconciliation'); })).toEqual(receipt);
   expect(await reopened.storage.settle!(f.key, () => publication, () => {})).toEqual(receipt);
   expect(readFileSync(f.file)).toEqual(bytes); await assertImage(f.file, 4, 1);
+});
+
+test('copied or getter-bearing records cannot inherit original settlement proof, and a foreign original cannot replace it', async () => {
+  const f = await fixture(), original = f.storage.current(f.key).record!, publication = currentPublication(f);
+  const receipt = await f.storage.settle!(f.key, () => publication, () => {}, original);
+  const bytes = readFileSync(f.file); let getters = 0;
+  const borrowed = [structuredClone(original), { ...original, get projectId() { getters++; return original.projectId; } }];
+  const hash = spyOn(crypto, 'createHash');
+  try {
+    for (const copy of borrowed) {
+      hash.mockClear();
+      // A foreign-shaped previous row is merely data. This path must verify
+      // the actual saved image independently rather than reuse the old proof.
+      expect(f.storage.current(f.key, copy).settlement).toEqual(receipt);
+      expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256').length).toBeGreaterThan(0);
+    }
+    expect(getters).toBe(0);
+    hash.mockClear();
+    expect(f.storage.currentByAttempt(f.target.attemptId, original).settlement).toEqual(receipt);
+    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+  } finally { hash.mockRestore(); }
+  const other = await fixture(), foreign = other.storage.current(other.key).record!;
+  expect(() => f.storage.current(f.key, foreign)).toThrow('invalid');
+  // Throwing through the temporary validator context cannot retire the actual
+  // original or leak the other project's source into the next current read.
+  expect(f.storage.current(f.key, original).settlement).toEqual(receipt);
+  expect(readFileSync(f.file).equals(bytes)).toBe(true);
 });
 
 test('an old native execution can publish settlement2 but real old settlement1 still wins exact replay unchanged', async () => {
@@ -170,11 +222,12 @@ test('a borrowed publication cannot execute report getters or echo malformed pri
 });
 
 for (const phase of ['before-rename', 'after-rename'] as const) test(`settlement2 ${phase} failure never promotes a private candidate into confirmed saved ownership`, async () => {
-  const f = await fixture(), original = f.storage.current(f.key).record!, publication = currentPublication(f), owner = persistence(f.store); let injected = false;
-  owner.io = { ...nativeFs,
-    renameSync(from, to) { if (phase === 'before-rename' && !injected) { injected = true; throw new Error('Synthetic candidate publication failure'); } nativeFs.renameSync(from, to); },
-    fsyncSync(fd) { if (phase === 'after-rename' && !injected && nativeFs.fstatSync(fd).isDirectory()) { injected = true; throw new Error('Synthetic candidate durability failure'); } nativeFs.fsyncSync(fd); } };
-  try { await expect(f.storage.settle!(f.key, () => publication, () => {}, original)).rejects.toThrow(); } finally { owner.io = nativeFs; }
+  const f = await fixture(), original = f.storage.current(f.key).record!, publication = currentPublication(f), before = readFileSync(f.file);
+  const fault = publicationFault(f.file, phase);
+  try { await expect(f.storage.settle!(f.key, () => publication, () => {}, original)).rejects.toThrow('persistence failure'); } finally { fault.restore(); }
+  expect(fault.failed).toBe(true);
+  if (phase === 'before-rename') expect(readFileSync(f.file)).toEqual(before);
+  await assertImage(f.file, phase === 'after-rename' ? 4 : 2, phase === 'after-rename' ? 1 : 0);
   const reopened = await open(f.file), saved = reopened.storage.current(f.key).settlement;
   const confirmed = await reopened.storage.settle!(f.key, () => publication, () => {});
   if (saved) expect(confirmed).toEqual(saved); expect(confirmed.version).toBe(2); await assertImage(f.file, 4, 1);
@@ -236,24 +289,23 @@ for (const failingGuard of [1, 2, 3]) test(`guard ${failingGuard} failure rolls 
 });
 
 for (const phase of ['before-rename', 'after-rename'] as const) test(`${phase} failure exposes either no settlement or the whole settlement and recovers exactly once`, async () => {
-  const f = await fixture(); const before = readFileSync(f.file); const owner = persistence(f.store); let injected = false;
-  owner.io = { ...nativeFs,
-    renameSync(from, to) { if (phase === 'before-rename' && !injected) { injected = true; throw new Error('owned rename failure'); } nativeFs.renameSync(from, to); },
-    fsyncSync(fd) { if (phase === 'after-rename' && !injected && nativeFs.fstatSync(fd).isDirectory()) { injected = true; throw new Error('owned directory sync failure'); } nativeFs.fsyncSync(fd); },
-  };
-  try { await expect(settle(f.storage, f)).rejects.toThrow('persistence failure'); } finally { owner.io = nativeFs; }
-  expect(injected).toBe(true);
+  const f = await fixture(); const before = readFileSync(f.file), fault = publicationFault(f.file, phase);
+  try { await expect(settle(f.storage, f)).rejects.toThrow('persistence failure'); } finally { fault.restore(); }
+  expect(fault.failed).toBe(true);
   if (phase === 'before-rename') expect(readFileSync(f.file)).toEqual(before);
   await assertImage(f.file, phase === 'after-rename' ? 4 : 2, phase === 'after-rename' ? 1 : 0);
   const reopened = await open(f.file); const previous = reopened.storage.current(f.key).settlement;
-  let renames = 0; const recoveryOwner = persistence(reopened.store);
-  recoveryOwner.io = { ...nativeFs, renameSync(from, to) { renames++; nativeFs.renameSync(from, to); } };
+  let publications = 0; const write = atomicStore.writeFileAtomic;
+  const recovery = spyOn(atomicStore, 'writeFileAtomic').mockImplementation((path, bytes, options) => {
+    if (path === f.file) publications++;
+    return write(path, bytes, options);
+  });
   try {
     const recovered = await settle(reopened.storage, f);
-    if (phase === 'after-rename') { expect(previous).not.toBeNull(); expect(recovered).toEqual(previous!); }
-    expect(renames).toBe(phase === 'after-rename' ? 0 : 1);
+    if (phase === 'after-rename') { expect(previous).not.toBeNull(); expect<unknown>(recovered).toEqual(previous!); }
+    expect(publications).toBe(phase === 'after-rename' ? 0 : 1);
     expect(await settle(reopened.storage, f)).toEqual(recovered);
-  } finally { recoveryOwner.io = nativeFs; }
+  } finally { recovery.mockRestore(); }
   await assertImage(f.file, 4, 1);
 });
 
@@ -421,7 +473,7 @@ test('independent paired hosts fail closed on owner contention and explicitly re
   const harness = makeHarness({ root, plan, scripts: { u1: finishes('Complete concurrent native result') }, decisionLog: log, nativeDecisions: host.nativeOwner.decisions, durableAdmission: host.nativeOwner.admission });
   host.attachRunner(harness.runner);
   cleanups.push(async () => { gate.resolve(); await host.close(); harness.dispose(); await Promise.all(harness.runner.list({ includeTerminal: true }).map(contract => harness.runner.join(contract.id))); log[Symbol.dispose](); });
-  const started = await host.start(f.target, authority);
+  const started = await host.start(f.target, authority), key = started.admission.key;
   await waitFor(() => ['passed', 'failed', 'cancelled'].includes(harness.runner.get(started.admission.contractId)?.status ?? ''), 'concurrent native contract completion', 15000);
   await harness.runner.join(started.admission.contractId); expect(harness.runner.get(started.admission.contractId)?.status).toBe('passed');
   const other = await open(f.file); const otherAuthority = pairedAuthority(new PairingTokenManager(tokenFile), token.token);
@@ -429,10 +481,10 @@ test('independent paired hosts fail closed on owner contention and explicitly re
   let forbiddenEffects = 0;
   second.attachRunner({ ...harness.runner, startDurable: async () => { forbiddenEffects++; throw new Error('Settlement cannot start work'); }, resumeDurable: async () => { forbiddenEffects++; throw new Error('Settlement cannot resume work'); } });
   cleanups.push(() => second.close());
-  const one = host.settle(f.key, authority); const two = second.settle(f.key, otherAuthority);
+  const one = host.settle(key, authority); const two = second.settle(key, otherAuthority);
   try {
     await Promise.race([ready.promise, Promise.all([one, two]).then(() => { throw new Error('Both hosts must enter terminal verification before publication'); })]);
-    expect(f.storage.current(f.key).ledger.revision).toBe(2); expect(entered.size).toBe(2);
+    expect(f.storage.current(key).ledger.revision).toBe(2); expect(entered.size).toBe(2);
   } finally { gate.resolve(); }
   const outcomes = await Promise.allSettled([one, two]);
   const successful = outcomes.filter(outcome => outcome.status === 'fulfilled');
@@ -443,10 +495,10 @@ test('independent paired hosts fail closed on owner contention and explicitly re
   expect(busy[0]!.reason).toMatchObject({ code: 'PAIRING_TOKEN_STORE_BUSY' });
   const receipt = successful[0]!.value; await assertImage(f.file, 4, 1);
   const beforeRetry = semanticCalls; const bytes = readFileSync(f.file);
-  const retried = outcomes[0]!.status === 'rejected' ? await host.settle(f.key, authority) : await second.settle(f.key, otherAuthority);
+  const retried = outcomes[0]!.status === 'rejected' ? await host.settle(key, authority) : await second.settle(key, otherAuthority);
   expect(retried).toEqual(receipt); expect(semanticCalls).toBe(beforeRetry); expect(readFileSync(f.file)).toEqual(bytes);
   expect(forbiddenEffects).toBe(0); expect(harness.agentsOf('u1')).toHaveLength(1);
-  expect(other.storage.current(f.key).settlement).toEqual(receipt); await assertImage(f.file, 4, 1);
+  expect(other.storage.current(key).settlement).toEqual(receipt); await assertImage(f.file, 4, 1);
 });
 
 test('valid pre-intent native records retain settlement support without inventing an intent', async () => {

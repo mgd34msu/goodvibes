@@ -1,3 +1,5 @@
+import type { ArtifactOriginalObservation } from '../artifacts/types.js';
+import type { ArtifactCleanupResult } from './artifact-reference-ensemble.js';
 import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import type { KnowledgeIngestOwnership } from './ingest-context.js';
@@ -335,6 +337,12 @@ export class KnowledgeService {
   /** The append-only revision history of a node, oldest first. */
   listNodeRevisions(nodeId: string): KnowledgeNodeRevisionRecord[] {
     return this.store.listNodeRevisions(nodeId);
+  }
+
+  /** Host-local original receipt only; parsed artifact IDs cannot request
+   * automatic cleanup through this seam. */
+  cleanupUnreferencedArtifact(original: ArtifactOriginalObservation): Promise<ArtifactCleanupResult> {
+    return this.store.cleanupUnreferencedArtifact(original);
   }
 
   /** Honest hard delete of a single node, removes the row and its history. */

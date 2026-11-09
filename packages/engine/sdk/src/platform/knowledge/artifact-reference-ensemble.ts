@@ -17,9 +17,9 @@ interface ReferenceEnsemble {
   readonly artifactStore: ArtifactStore;
   readonly artifactRoot: string;
   readonly owners: readonly KnowledgeArtifactReferenceOwner[];
-  readonly state: { retired: boolean; discover: boolean; requested: boolean; work: Promise<void> | undefined;
+  readonly state: { retired: boolean; discover: boolean; requested: boolean; capacityReported: boolean; preservedReported: boolean; work: Promise<void> | undefined;
     readonly pending: Map<string, { readonly store: KnowledgeStore; readonly original: ArtifactOriginalObservation }>;
-    readonly unsubscribe: Array<() => void>; readonly active: Set<Promise<ArtifactCleanupResult>> };
+    readonly unsubscribe: Array<() => void>; readonly active: Set<Promise<unknown>> };
   assertCurrent(): void;
 }
 const apply = Reflect.apply, weakGet = WeakMap.prototype.get, weakSet = WeakMap.prototype.set;
@@ -63,7 +63,7 @@ export function configureKnowledgeArtifactReferences(options: {
     } else owners.push(inactive);
   }
   if (selected.size !== active.length || new Set(owners.map(owner => owner.path)).size !== owners.length) throw new Error('Knowledge artifact reference families overlap or are outside the configured ensemble.');
-  const state: ReferenceEnsemble['state'] = { retired: false, discover: true, requested: false, work: undefined, pending: new Map(), unsubscribe: [], active: new Set() };
+  const state: ReferenceEnsemble['state'] = { retired: false, discover: true, requested: false, capacityReported: false, preservedReported: false, work: undefined, pending: new Map(), unsubscribe: [], active: new Set() };
   const ensemble: ReferenceEnsemble = Object.freeze({ state, artifactStore, artifactRoot: resolve(controlPlaneDirectory, 'artifacts'),
     owners: Object.freeze(owners.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)), assertCurrent: () => { directory.assertCurrent(); if (state.retired) throw new Error('Knowledge artifact cleanup owner was retired.'); } });
   directory.assertCurrent();
@@ -85,7 +85,7 @@ export function configureKnowledgeArtifactReferences(options: {
 async function cleanOriginalBatch(ensemble: ReferenceEnsemble, originals: readonly ArtifactOriginalObservation[]): Promise<ReadonlyMap<ArtifactOriginalObservation, ArtifactCleanupResult>> {
   const outcomes = new Map<ArtifactOriginalObservation, ArtifactCleanupResult>(originals.map(original => [original, 'held']));
   const candidates: Array<{ readonly original: ArtifactOriginalObservation; readonly id: string; readonly assertOriginal: () => void; readonly lease: ArtifactPublicationLease }> = [];
-  if (originals.length === 0 || originals.length > 64) return outcomes;
+  if (originals.length === 0 || originals.length > 64 || ensemble.state.retired) return outcomes;
   const selected: Array<{ readonly original: ArtifactOriginalObservation; readonly id: string; readonly assertOriginal: () => void }> = [];
   for (const original of originals) {
     try {
@@ -96,7 +96,7 @@ async function cleanOriginalBatch(ensemble: ReferenceEnsemble, originals: readon
   }
   selected.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   for (const candidate of selected) {
-    try { const lease = tryAcquireArtifactPublication(candidate.original); if (lease) candidates.push({ ...candidate, lease }); }
+    try { ensemble.assertCurrent(); const lease = tryAcquireArtifactPublication(candidate.original); if (lease) candidates.push({ ...candidate, lease }); }
     catch { /* A replaced original cannot obtain its original publication lease. */ }
   }
   const guards: Array<() => void> = [], referenced = new Set<string>();
@@ -132,30 +132,39 @@ async function cleanOriginalBatch(ensemble: ReferenceEnsemble, originals: readon
   }
   return outcomes;
 }
-async function cleanOriginal(ensemble: ReferenceEnsemble, observation: ArtifactOriginalObservation): Promise<ArtifactCleanupResult> {
-  return (await cleanOriginalBatch(ensemble, [observation])).get(observation) ?? 'held';
-}
 
 const MAX_PENDING_CLEANUPS = 1_024;
 function retainPending(ensemble: ReferenceEnsemble, store: KnowledgeStore, original: ArtifactOriginalObservation): void {
   if (ensemble.state.retired) return;
   const id = artifactOriginalId(original);
   if (ensemble.state.pending.has(id) || ensemble.state.pending.size < MAX_PENDING_CLEANUPS) ensemble.state.pending.set(id, { store, original });
-  else logger.warn('Generated artifact cleanup capacity is full; the original artifact was preserved for later inspection.');
+  else if (!ensemble.state.capacityReported) { ensemble.state.capacityReported = true; logger.warn('Generated artifact cleanup capacity is full; original artifacts were preserved for later inspection.'); }
 }
-export function cleanupKnowledgeArtifact(store: KnowledgeStore, original: ArtifactOriginalObservation): Promise<ArtifactCleanupResult> {
-  const ensemble = getEnsemble(store); if (!ensemble) return Promise.resolve('unavailable');
-  if (ensemble.state.retired) return Promise.resolve('held');
+/** Direct maintenance uses the same bounded image batches as restart retry;
+ * a large reset never decodes each whole family database once per candidate. */
+export function cleanupKnowledgeArtifacts(store: KnowledgeStore, originals: readonly ArtifactOriginalObservation[]): Promise<ReadonlyMap<ArtifactOriginalObservation, ArtifactCleanupResult>> {
+  const input = Object.freeze([...originals]), ensemble = getEnsemble(store);
+  if (!ensemble || ensemble.state.retired) return Promise.resolve(new Map<ArtifactOriginalObservation, ArtifactCleanupResult>(input.map(original => [original, ensemble ? 'held' : 'unavailable'])));
   const work = Promise.resolve().then(async () => {
-  const result = await cleanOriginal(ensemble, original);
-  if (result === 'held') {
-    try { artifactOriginalOwner(original).assertCurrent(); retainPending(ensemble, store, original); requestRetry(ensemble, store); } catch { /* A replaced original is not a retry candidate. */ }
-  } else if (result === 'deleted' || result === 'referenced') ensemble.state.pending.delete(artifactOriginalId(original));
-  return result;
+    const outcomes = new Map<ArtifactOriginalObservation, ArtifactCleanupResult>();
+    for (let offset = 0; offset < input.length; offset += 64) {
+      const batch = input.slice(offset, offset + 64), results = await cleanOriginalBatch(ensemble, batch);
+      for (const original of batch) {
+        const result = results.get(original) ?? 'held'; outcomes.set(original, result);
+        if (result === 'held') {
+          try { artifactOriginalOwner(original).assertCurrent(); retainPending(ensemble, store, original); requestRetry(ensemble, store); }
+          catch { /* A replaced original cannot become another retry candidate. */ }
+        } else if (result === 'deleted' || result === 'referenced') ensemble.state.pending.delete(artifactOriginalId(original));
+      }
+    }
+    return outcomes;
   });
   ensemble.state.active.add(work);
   void work.then(() => { ensemble.state.active.delete(work); }, () => { ensemble.state.active.delete(work); });
   return work;
+}
+export async function cleanupKnowledgeArtifact(store: KnowledgeStore, original: ArtifactOriginalObservation): Promise<ArtifactCleanupResult> {
+  return (await cleanupKnowledgeArtifacts(store, [original])).get(original) ?? 'held';
 }
 /** One owned task outside any held SQL writer queue. Clean publications only
  * coalesce a request; there are no free-running timers or persistent journals. */
@@ -169,7 +178,7 @@ function requestRetry(ensemble: ReferenceEnsemble, store: KnowledgeStore): void 
       const inventory = inspectGeneratedArtifactCleanupCandidates(ensemble.artifactStore);
       state.discover = inventory.more;
       for (const original of inventory.candidates) retainPending(ensemble, store, original);
-      if (inventory.preserved) logger.warn('Older or unattributed generated artifacts were preserved. Inspect their metadata and content before intentional deletion after older publishers have stopped.');
+      if (inventory.preserved && !state.preservedReported) { state.preservedReported = true; logger.debug('Older or unattributed generated artifacts were retained for metadata and content inspection.'); }
       if (inventory.more) state.requested = true;
     }
     const pending = [...state.pending];

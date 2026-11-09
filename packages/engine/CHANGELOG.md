@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- Preserve shared artifacts during HomeGraph resets and failed multimodal
+  writeback. Cleanup now checks original files and saved references across all
+  configured knowledge stores, with separate counts for retained candidates.
+  Keep analysis publication owned through ingestion and preserve full generated
+  analysis IDs.
+
 - Keep generated knowledge pages separate for each space and target, including
   All spaces. Preserve older pages with unknown scope and offer explicit WebUI
   inspection. Fix projection item and dashboard dispatch, selected-result

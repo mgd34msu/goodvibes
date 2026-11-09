@@ -1,3 +1,4 @@
+import { configureKnowledgeArtifactReferences } from '../sdk/src/platform/knowledge/artifact-reference-ensemble.js';
 import { extractionValueFixtureFor, extractionValueFixtureReading } from './_helpers/knowledge-extraction-value-readings.js';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer, choiceAnswer } from '@goodvibes-jev/judgment/testing';
@@ -73,9 +74,11 @@ function fakeMemoryRegistry(): Pick<MemoryRegistry, 'add' | 'getAll' | 'getStore
   };
 }
 
-const tmpRoots: string[] = [];
+const tmpRoots: string[] = [], openStores: KnowledgeStore[] = [];
 
-afterEach(() => {
+afterEach(async () => {
+  await disposables.flush();
+  for (const store of openStores.splice(0)) await store.close();
   for (const root of tmpRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -90,16 +93,16 @@ function disposeKnowledgeService(service: KnowledgeService): void {
 function createStore(dbFileName = 'knowledge.sqlite', extra: Record<string, unknown> = {}): KnowledgeStore {
   const root = mkdtempSync(join(tmpdir(), 'goodvibes-wiki-honesty-'));
   tmpRoots.push(root);
-  return new KnowledgeStore({ dbPath: join(root, dbFileName), ...extra });
+  const store = new KnowledgeStore({ dbPath: join(root, dbFileName), ...extra }); openStores.push(store); return store;
 }
 
 function createStores(): { store: KnowledgeStore; artifactStore: ArtifactStore } {
   const root = mkdtempSync(join(tmpdir(), 'goodvibes-wiki-honesty-'));
   tmpRoots.push(root);
-  return {
-    store: new KnowledgeStore({ dbPath: join(root, 'knowledge-home-graph.sqlite'), family: 'home-graph' }),
-    artifactStore: new ArtifactStore({ rootDir: join(root, 'artifacts') }),
-  };
+  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge-home-graph.sqlite'), family: 'home-graph' }); openStores.push(store);
+  const artifactStore = new ArtifactStore({ rootDir: join(root, 'artifacts') });
+  configureKnowledgeArtifactReferences({ artifactStore, controlPlaneDirectory: root, stores: [store] });
+  return { store, artifactStore };
 }
 
 function reviewState(node: KnowledgeNodeRecord | undefined): string | undefined {
@@ -248,7 +251,7 @@ describe('knowledge wiki honesty: review gate', () => {
       confidence: 10, metadata: {}, createdAt: 1, updatedAt: 1,
     };
     writeKnowledgeNodeRow(sqlite, legacy); await sqlite.save();
-    const store = new KnowledgeStore({ dbPath: initial.storagePath }); await store.init();
+    const store = new KnowledgeStore({ dbPath: initial.storagePath }); openStores.push(store); await store.init();
     expect(await store.upsertNode({ ...legacy })).toEqual(legacy);
     await expect(store.upsertNode({ ...legacy, title: 'Legacy v2' })).rejects.toBeInstanceOf(KnowledgeNodeActivationHeldError);
     expect(store.getNode(legacy.id)).toEqual(legacy);
@@ -543,6 +546,6 @@ describe('knowledge wiki honesty: constructor family assert', () => {
     const root = mkdtempSync(join(tmpdir(), 'goodvibes-wiki-honesty-'));
     tmpRoots.push(root);
     expect(() => new KnowledgeStore({ dbPath: join(root, 'knowledge-wiki.sqlite'), family: 'home-graph' })).toThrow(/family mismatch/i);
-    expect(() => new KnowledgeStore({ dbPath: join(root, 'knowledge-home-graph.sqlite'), family: 'home-graph' })).not.toThrow();
+    expect(() => { const store = new KnowledgeStore({ dbPath: join(root, 'knowledge-home-graph.sqlite'), family: 'home-graph' }); openStores.push(store); }).not.toThrow();
   });
 });

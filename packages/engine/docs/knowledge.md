@@ -948,3 +948,10 @@ inactive families participate through readonly owners. An unbound or custom
 artifact root returns `unavailable` for automatic generated-artifact cleanup and
 preserves its data. The binding is a host declaration of the reference locations,
 not a claim that arbitrary external programs or databases are included.
+
+A Home Graph reset acknowledges its data reset separately from artifact cleanup.
+Its `artifactCleanup` result counts referenced, held, unavailable and explicitly
+skipped candidates. `deletedArtifacts` counts confirmed original removals;
+`preservedArtifacts` counts candidates this reset did not remove. Another family
+can preserve a shared artifact even when the artifact has no knowledge-space
+metadata. A dry run or `preserveArtifacts` request skips artifact removal.

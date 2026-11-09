@@ -587,6 +587,14 @@ export interface HomeGraphResetResult {
     readonly schedules: number;
   };
   readonly artifactDeleteCandidates: number;
+  /** Counts of non-deleted candidates; unavailable also includes an original
+   * pair that could not be captured. skipped means dry-run/preserve requested. */
+  readonly artifactCleanup: {
+    readonly referenced: number;
+    readonly held: number;
+    readonly unavailable: number;
+    readonly skipped: number;
+  };
   readonly deletedArtifacts: number;
   readonly preservedArtifacts: number;
   readonly artifactsDeleted: boolean;

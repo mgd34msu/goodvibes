@@ -1,9 +1,10 @@
+import { drainOwned, opaqueUuid } from '@goodvibes-jev/judgment/decisions';
+import { logger } from '../utils/logger.js';
 import { captureJudgmentPort, decisionModelPolicyState, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import { readMultimodalPdf } from './pdf-source.js';
 import { assertJudgmentInput, captureOwnedJson } from '../gate/judgment-input.js';
 import { activateClassicFallback, isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { rankMultimodalEntities, MultimodalEntityHeldError } from './entity-centrality.js';
-import { randomUUID } from 'node:crypto';
 import { ArtifactStore } from '../artifacts/index.js';
 import type { ArtifactDescriptor, ArtifactRecord } from '../artifacts/types.js';
 import { MediaProviderRegistry } from '../media/index.js';
@@ -254,15 +255,17 @@ export class MultimodalService {
     } = {},
     options: { readonly signal?: AbortSignal | undefined; readonly assertCurrent?: (() => void) | undefined } = {},
   ): Promise<MultimodalWritebackResult> {
-    const retained = this.ownedResult(result);
+    const retained = this.ownedResult(result), signal = options.signal, assertOwner = options.assertCurrent?.bind(options);
     const owned = { result: retained.result, assertCurrent: () => {
-      if (options.signal?.aborted) throw new MultimodalEntityHeldError('stale');
-      options.assertCurrent?.(); retained.assertCurrent();
+      if (signal?.aborted) throw new MultimodalEntityHeldError('stale');
+      const value: unknown = assertOwner?.();
+      if (value !== undefined) { drainOwned(value); throw new TypeError('Multimodal write owner must complete synchronously and return no value.'); }
+      retained.assertCurrent();
     } };
     result = owned.result;
     input = captureOwnedJson(input) as typeof input;
     owned.assertCurrent();
-    const analysisArtifact = await this.artifactStore.create({
+    const created = await this.artifactStore.createForPublication({
       kind: 'document',
       mimeType: 'application/json',
       filename: `${result.artifact.filename ?? result.artifact.id}.analysis.json`,
@@ -274,11 +277,15 @@ export class MultimodalService {
         providerIds: [...result.providerIds],
         ...(result.metadata.provenance === 'classic' ? { provenance: 'classic', entityAssessment: 'not-evaluated' } : {}),
       },
-    }, { signal: options.signal, assertCurrent: owned.assertCurrent });
+    }, { signal, assertCurrent: owned.assertCurrent });
+    const analysisArtifact = created.artifact;
+    const assertAnalysisCurrent = () => { owned.assertCurrent(); created.original.assertCurrent(); created.lease.assertCurrent(); };
+    let released = false;
+    const release = () => { if (released) return; released = true; try { created.lease.release(); } catch { logger.warn('Multimodal artifact publication release could not be confirmed.'); } };
     let committedSourceId: string | undefined;
     let completionWarning: string | undefined;
     try {
-      owned.assertCurrent();
+      assertAnalysisCurrent();
       const ingest = await this.knowledgeService.ingestArtifact({
         artifactId: analysisArtifact.id,
         title: input.title ?? `${result.artifact.filename ?? result.artifact.id} analysis`,
@@ -299,7 +306,7 @@ export class MultimodalService {
           providerIds: [...result.providerIds],
           ...(result.metadata.provenance === 'classic' ? { provenance: 'classic', entityAssessment: 'not-evaluated' } : {}),
         },
-      }, { signal: options.signal, assertCurrent: owned.assertCurrent, onCommitted: (id) => { committedSourceId = id; } });
+      }, { signal, assertCurrent: assertAnalysisCurrent, onCommitted: (id) => { committedSourceId = id; } });
       committedSourceId ??= ingest.source.id;
       // Once the guarded knowledge transaction commits, its receipt is final.
       // Usage is optional bookkeeping and must not revive a canceled operation.
@@ -318,12 +325,18 @@ export class MultimodalService {
       } catch { /* The committed source remains valid; no stale usage is written. */ }
     } catch (error) {
       if (!committedSourceId) {
-        const current = this.artifactStore.get(analysisArtifact.id);
-        if (JSON.stringify(current) === JSON.stringify(analysisArtifact)) this.artifactStore.delete(analysisArtifact.id);
+        // Failure may race another persisted reference or an uncertain rename.
+        // Release our own publication lease before the aggregate original-only
+        // cleanup tries the same lock; retain every uncertain/foreign artifact.
+        release();
+        try {
+          const cleanup = await this.knowledgeService.cleanupUnreferencedArtifact(created.original);
+          if (cleanup === 'held' || cleanup === 'unavailable') logger.debug('Multimodal writeback retained an artifact whose cleanup was deferred or unavailable.');
+        } catch { logger.warn('Multimodal artifact cleanup was not confirmed; the primary writeback failure was preserved.'); }
         throw error;
       }
       completionWarning = 'The knowledge transaction committed, but post-commit persistence or bookkeeping did not finish. The committed records were retained; durable completion needs verification.';
-    }
+    } finally { release(); }
     return {
       analysisArtifact,
       knowledgeSourceId: committedSourceId,
@@ -410,7 +423,7 @@ export class MultimodalService {
       ...(summary ? [{ kind: 'summary' as const, text: summary, metadata: {} }] : []),
     ];
     return this.source({
-      id: `mm-${randomUUID().slice(0, 8)}`,
+      id: `mm-${opaqueUuid()}`,
       kind: 'image',
       artifact: descriptor,
       providerIds: [result.providerId],
@@ -454,7 +467,7 @@ export class MultimodalService {
       metadata: {},
     }));
     return this.source({
-      id: `mm-${randomUUID().slice(0, 8)}`,
+      id: `mm-${opaqueUuid()}`,
       kind: 'audio',
       artifact: descriptor,
       providerIds: [transcript.providerId],
@@ -489,7 +502,7 @@ export class MultimodalService {
     }));
     const text = compactText([extraction.summary ?? '', extraction.excerpt ?? ''].join('\n\n'), 4_000);
     return this.source({
-      id: `mm-${randomUUID().slice(0, 8)}`,
+      id: `mm-${opaqueUuid()}`,
       kind: 'document',
       artifact: this.artifactStore.get(record.id)!,
       providerIds: ['knowledge-extractors'],
@@ -617,7 +630,7 @@ export class MultimodalService {
     ].filter(Boolean).join(' '), 320) ?? 'Video metadata is available but no keyframes or transcripts were provided for deeper analysis.';
 
     return this.source({
-      id: `mm-${randomUUID().slice(0, 8)}`,
+      id: `mm-${opaqueUuid()}`,
       kind: 'video',
       artifact: descriptor,
       providerIds: [...providerIds].length > 0 ? [...providerIds] : ['knowledge-extractors'],

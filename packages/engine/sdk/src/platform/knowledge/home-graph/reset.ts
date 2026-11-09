@@ -1,3 +1,6 @@
+import type { ArtifactOriginalObservation } from '../../artifacts/types.js';
+import { cleanupKnowledgeArtifacts } from '../artifact-reference-ensemble.js';
+import { logger } from '../../utils/logger.js';
 import type { ArtifactStore } from '../../artifacts/index.js';
 import { getExplicitKnowledgeSpaceId, getKnowledgeSpaceId, normalizeKnowledgeSpaceId } from '../spaces.js';
 import type { KnowledgeStore } from '../store.js';
@@ -14,11 +17,29 @@ export async function resetHomeGraphSpace(
   const dryRun = input.dryRun === true;
   const preserveArtifacts = input.preserveArtifacts === true;
   const artifactIds = collectKnowledgeSpaceArtifactIds(store, artifactStore, spaceId);
+  // Capture the exact original pairs BEFORE the asynchronous database reset.
+  // A file/record replacement during that await is never adopted for removal.
+  const originals = new Map<string, ArtifactOriginalObservation>();
+  if (!dryRun && !preserveArtifacts) for (const id of artifactIds) {
+    try { originals.set(id, artifactStore.captureOriginal(id)); }
+    catch { /* Unknown/missing originals remain non-deleted candidates. */ }
+  }
   const deleted = await store.deleteKnowledgeSpace(spaceId, { dryRun });
-  const deletedArtifacts = dryRun || preserveArtifacts ? 0 : artifactStore.deleteMany(artifactIds);
-  const preservedArtifacts = dryRun || preserveArtifacts
-    ? artifactIds.length
-    : Math.max(0, artifactIds.length - deletedArtifacts);
+  const artifactCleanup = { referenced: 0, held: 0, unavailable: 0, skipped: 0 };
+  let deletedArtifacts = 0;
+  if (dryRun || preserveArtifacts) artifactCleanup.skipped = artifactIds.length;
+  else {
+    try {
+      const outcomes = await cleanupKnowledgeArtifacts(store, [...originals.values()]);
+      for (const id of artifactIds) {
+        const original = originals.get(id), result = original ? outcomes.get(original) ?? 'held' : 'unavailable';
+        if (result === 'deleted') deletedArtifacts++;
+        else artifactCleanup[result]++;
+      }
+    } catch { artifactCleanup.held = artifactIds.length; }
+    if (artifactCleanup.held || artifactCleanup.unavailable) logger.debug('Home Graph data reset completed with retained artifact cleanup candidates.');
+  }
+  const preservedArtifacts = Math.max(0, artifactIds.length - deletedArtifacts);
   return {
     ok: true,
     spaceId,
@@ -28,6 +49,7 @@ export async function resetHomeGraphSpace(
     artifactDeleteCandidates: artifactIds.length,
     deletedArtifacts,
     preservedArtifacts,
+    artifactCleanup,
     artifactsDeleted: deletedArtifacts > 0,
   };
 }
@@ -35,13 +57,9 @@ export async function resetHomeGraphSpace(
 function collectKnowledgeSpaceArtifactIds(store: KnowledgeStore, artifactStore: ArtifactStore, spaceId: string): string[] {
   const normalized = normalizeKnowledgeSpaceId(spaceId);
   const ids = new Set<string>();
-  // Scope-checked deletion: the ArtifactStore is shared across the
-  // wiki / home-graph / agent families. A blob that a *different* family owns,
-  // identifiable by its own explicit knowledge-space stamp, must never be deleted
-  // by a home-graph reset, even if a home-graph source references it, because that
-  // would orphan the other family's reference. We err toward preserving: an
-  // artifact is a delete candidate only when it is not explicitly owned by another
-  // space.
+  // Metadata classifies a candidate; it cannot prove absence of references.
+  // Actual deletion below still requires fresh typed refs in every configured
+  // family under their original publication locks.
   const ownedByOtherSpace = (artifactId: string): boolean => {
     const descriptor = artifactStore.get(artifactId);
     if (!descriptor) return false;

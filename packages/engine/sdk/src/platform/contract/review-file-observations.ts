@@ -2,7 +2,7 @@
  * facts; only the explicit checkpoint writer projects them onto local disk. */
 import { isDeepStrictEqual } from 'node:util';
 import type { JsonValue } from '@goodvibes-jev/judgment';
-import type { Contract } from './types.js';
+import type { Contract, ContractUnit } from './types.js';
 import { currentFileReviewFacts, currentFileMatchesSavedDigest, parseCurrentFileReviewFacts, retainCurrentFileLabels, type CurrentFileReviewFacts } from './current-file-observations.js';
 import { ownedContractCheckpointText, type OwnedContractCheckpointRead } from './owned-checkpoint-read.js';
 
@@ -51,11 +51,34 @@ function serializeReference(descriptor: ReviewedFileReference) {
     origin: retained.persistableNative ? 'native-host-filesystem' : 'unverified-import' } };
 }
 
+/** Attempts are real units with their own checks, including nested attempts.
+ * Keep the traversal explicit so unrelated model data never acquires facts. */
+function* reviewUnits(roots: readonly ContractUnit[]): Generator<ContractUnit> {
+  const pending = [...roots].reverse(), seen = new Set<ContractUnit>();
+  while (pending.length) {
+    const unit = pending.pop();
+    if (!unit) throw invalid();
+    if (seen.has(unit)) throw invalid();
+    seen.add(unit); yield unit;
+    if (unit.attemptUnits !== undefined) for (let index = unit.attemptUnits.length - 1; index >= 0; index--) {
+      const attempt = unit.attemptUnits[index]; if (!attempt) throw invalid(); pending.push(attempt);
+    }
+  }
+}
+
 /** Walk only the real unit/check locations. A generic JSON replacer could leak
  * facts if a native descriptor were also referenced by unrelated model data. */
 export function contractWithStoredReviewObservations(contract: Contract): Contract {
-  return { ...contract, units: contract.units.map(unit => ({ ...unit, checks: unit.checks.map(check => check.reviewedFiles === undefined ? check
-    : { ...check, reviewedFiles: check.reviewedFiles.map(serializeReference) }) })) };
+  const copies = new Map<ContractUnit, ContractUnit>();
+  for (const unit of reviewUnits(contract.units)) copies.set(unit, { ...unit,
+    checks: unit.checks.map(check => check.reviewedFiles === undefined ? check
+      : { ...check, reviewedFiles: check.reviewedFiles.map(serializeReference) }),
+  });
+  const copyOf = (unit: ContractUnit): ContractUnit => {
+    const copy = copies.get(unit); if (!copy) throw invalid(); return copy;
+  };
+  for (const [unit, copy] of copies) if (unit.attemptUnits !== undefined) copy.attemptUnits = unit.attemptUnits.map(copyOf);
+  return { ...contract, units: contract.units.map(copyOf) };
 }
 function physicalFacts(value: unknown): CurrentFileReviewFacts {
   if (!record(value) || Object.keys(value).sort().join(',') !== 'directories,file,origin,version'
@@ -67,7 +90,7 @@ function physicalFacts(value: unknown): CurrentFileReviewFacts {
 export function hydrateStoredReviewObservations(contract: Contract, schemaVersion: number, serialized: string,
   receipt?: OwnedContractCheckpointRead): void {
   const native = receipt !== undefined && ownedContractCheckpointText(receipt) === serialized;
-  for (const unit of contract.units) for (const check of unit.checks) {
+  for (const unit of reviewUnits(contract.units)) for (const check of unit.checks) {
     if (check.reviewedFiles === undefined) continue;
     if (!Array.isArray(check.reviewedFiles)) throw invalid();
     const descriptors = check.reviewedFiles.map((source: unknown): ReviewedFileReference => {
@@ -96,8 +119,12 @@ export function hydrateStoredReviewObservations(contract: Contract, schemaVersio
  * its owned checkpoint copy. Copies themselves never inherit WeakMap proof. */
 export function retainOriginalReviewDescriptors(original: Contract, copy: Contract): void {
   retainCurrentFileLabels(original, copy);
-  for (const [unitIndex, unit] of original.units.entries()) {
-    const target = copy.units[unitIndex]; if (!target || target.id !== unit.id) throw invalid();
+  const sources = [...reviewUnits(original.units)], targets = [...reviewUnits(copy.units)];
+  if (sources.length !== targets.length || original.units.length !== copy.units.length) throw invalid();
+  for (const [unitIndex, unit] of sources.entries()) {
+    const target = targets[unitIndex];
+    if (!target || target.id !== unit.id || target.checks.length !== unit.checks.length
+      || target.attemptUnits?.length !== unit.attemptUnits?.length) throw invalid();
     for (const [checkIndex, check] of unit.checks.entries()) {
       const cloned = target.checks[checkIndex]; if (!cloned || cloned.id !== check.id) throw invalid();
       if (check.reviewedFiles !== undefined) Object.defineProperty(cloned, 'reviewedFiles', {

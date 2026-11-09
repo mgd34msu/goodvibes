@@ -63,7 +63,7 @@ export function createLegacyImportHostFixture() {
       commands.push(command); commandBytes.push(JSON.stringify(record.body));
       assert.deepEqual(command.manifest, prepared.manifest);
       // The journal must already be durably reserved and unknown at the wire boundary.
-      const journal = new LegacyImportJournal(journalPath);
+      const journal = new LegacyImportJournal(journalPath, undefined, { layout: 'shared-v2' });
       try { const saved = journal.read(binding()); assert.ok(saved); assert.equal(saved.state, 'unknown'); assert.deepEqual(saved.command, command); assert.equal(saved.attempts, commands.filter(prior => prior.requestId === command.requestId).length); } finally { journal.close(); }
       if (reply === 'decision' || reply === 'uncommitted-act') return Response.json({ kind: 'decision', decision: importHostDecision(reply === 'decision' ? 'reject' : 'act', String(commands.length)) });
       if (reply === 'rejected') return Response.json({ kind: 'rejected', code: 'stale_source', reason: 'Synthetic source changed before admission', revision: 0 });
@@ -82,7 +82,7 @@ export function createLegacyImportHostFixture() {
     setReply(value: ImportHostReply) { reply = value; }, setScopes(value: string[]) { scopes = value; }, setAdmin(value: boolean) { admin = value; },
     onRequest(callback: (path: string) => void) { duringRequest = callback; },
     redirect(path: string, destination: string) { redirect = { path, destination }; },
-    read() { const journal = new LegacyImportJournal(journalPath); try { return journal.read(binding()); } finally { journal.close(); } },
+    read() { const journal = new LegacyImportJournal(journalPath, undefined, { layout: 'shared-v2' }); try { return journal.read(binding()); } finally { journal.close(); } },
     assertPreserved() { assert.equal(readFileSync(sourceFile, 'utf8'), sourceBytes); assert.deepEqual(JSON.parse(sourceBytes), original.sources); assert.deepEqual(unexpected, []); },
     async stop() { await server.stop(true); rmSync(root, { recursive: true, force: true }); },
   };

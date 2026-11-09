@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- Store terminal historical-import recovery in one shared SQLite journal with
+  exact workspace/project slots instead of digest-derived filenames. Status
+  reads create no state. Preserve existing journals and unknown requests, refuse
+  conflicting copies, and bind writes/recovery to the original private file,
+  selected configuration and installed reader capability.
+
 - Compare exact historical-import source images and duplicate fields instead of
   repeatedly hashing them. Fresh manifests retain one complete saved-review
   commitment; older per-source receipts remain readable. Live checks preserve

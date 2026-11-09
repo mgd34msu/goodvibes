@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -65,9 +66,12 @@ test('old journal upgrades preserve unresolved command and empty decision proven
 test('canonical shared journal aliases converge and old journals or fsync failures fail closed', () => {
   const f = setup(); const alias = join(f.root, 'alias'); const workspace = join(f.root, 'workspace'); mkdirSync(workspace); symlinkSync(workspace, alias);
   const a = resolveLegacyImportJournalLocation({ workspace, projectId: 'p', stateDirectory: f.root });
-  expect(resolveLegacyImportJournalLocation({ workspace: alias, projectId: 'p', stateDirectory: f.root })).toEqual(a);
-  expect(() => new LegacyImportJournal(f.path, () => { throw new Error('fsync failed'); })).toThrow('fsync failed');
-  const old = a.journalPath.replace('/shared/', '/agent/'); mkdirSync(join(f.root, 'agent', 'legacy-import'), { recursive: true }); symlinkSync('/missing-file', old);
+  const b = resolveLegacyImportJournalLocation({ workspace: alias, projectId: 'p', stateDirectory: f.root });
+  expect({ workspace: b.workspace, path: b.journalPath, layout: b.layout }).toEqual({ workspace: a.workspace, path: a.journalPath, layout: 'shared-v2' });
+  const failed = new LegacyImportJournal(f.path, () => { throw new Error('fsync failed'); });
+  try { expect(() => failed.reserve(f.binding, () => f.command)).toThrow('fsync failed'); } finally { failed.close(); }
+  const key = createHash('sha256').update(JSON.stringify([workspace, 'p'])).digest('hex');
+  const old = join(f.root, 'agent', 'legacy-import', `${key}.sqlite`); mkdirSync(join(f.root, 'agent', 'legacy-import'), { recursive: true }); symlinkSync('/missing-file', old);
   expect(() => resolveLegacyImportJournalLocation({ workspace, projectId: 'p', stateDirectory: f.root })).toThrow('earlier Agent');
 });
 test('independent processes retain the winning exact command after the first process is killed', async () => {

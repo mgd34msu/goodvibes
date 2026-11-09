@@ -74,6 +74,21 @@ async function nativeHost() {
   try { await pairImportProofHost(host); return host; } catch (error) { await host.stop(); throw error; }
 }
 
+test('actual TUI command forwards its installed journal reader owner before native mutation', async () => {
+  const f = await nativeHost(); let allowed = false; const formats: string[] = [];
+  const selected = { ...f, nativeDataWriter: { declare(format: string) { formats.push(format); if (!allowed) throw new Error('Installed journal reader unavailable'); } } };
+  try {
+    expect(await runTuiImportProof(selected, ['status', f.projectId])).toContain('No saved legacy import');
+    expect(formats).toEqual([]); expect(existsSync(f.journalPath)).toBe(false);
+    expect(await runTuiImportProof(selected, ['submit', f.projectId])).toContain('Installed journal reader unavailable');
+    expect(formats).toEqual(['terminal-import-journals-v2']); expect(existsSync(f.journalPath)).toBe(false); expect(f.commands).toHaveLength(0);
+    allowed = true;
+    expect(await runTuiImportProof(selected, ['submit', f.projectId])).toContain('Legacy import status: accepted');
+    expect(formats.every(format => format === 'terminal-import-journals-v2')).toBe(true); expect(f.commands).toHaveLength(1);
+    expect(f.read()).toMatchObject({ state: 'accepted', attempts: 1 });
+  } finally { await f.stop(); }
+});
+
 test('TUI keyboard submits complete sources through the real SDK and registry status never resubmits', async () => {
   const f = await nativeHost();
   try {

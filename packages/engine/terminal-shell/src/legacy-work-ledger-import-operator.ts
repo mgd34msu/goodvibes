@@ -1,15 +1,16 @@
 import { randomUUID } from 'node:crypto';
-import { parseJevDecision } from '@goodvibes-jev/judgment/decisions';
+import { drainOwned, parseJevDecision } from '@goodvibes-jev/judgment/decisions';
 import { createOperatorSdk } from '@goodvibes-jev/engine/operator-sdk';
 import { array, boolean, enum as enumSchema, literal, object, record, strictObject, string, union, unknown } from 'zod/v4';
 import { validateLegacyWorkLedgerManifest, type LegacyMigrationPreparation } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger';
-import { bindingKey, LegacyImportJournal, type LegacyImportBinding, type LegacyImportEntry, type LegacyImportCommand, legacyImportResultSchema } from './legacy-work-ledger-import-journal.js';
+import { bindingKey, LegacyImportJournal, type LegacyImportBinding, type LegacyImportEntry, type LegacyImportCommand, type LegacyImportJournalOptions, legacyImportResultSchema } from './legacy-work-ledger-import-journal.js';
 
 export interface LegacyImportHost { readonly baseUrl: string; readonly token: string; readonly workspace: string; readonly selectionIdentity?: string }
 export interface LegacyImportOperatorClient { currentAuth(signal?: AbortSignal): Promise<unknown>; invoke(method: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<unknown>; dispose(): void }
 export interface LegacyImportOperatorOptions {
   readonly resolve: () => LegacyImportHost | { readonly reason: string };
   readonly projectId: string; readonly journalPath: string;
+  readonly journalOptions?: LegacyImportJournalOptions;
   readonly createClient?: (host: LegacyImportHost) => LegacyImportOperatorClient;
 }
 const authSchema = object({ authenticated: boolean(), admin: boolean(), principalId: string().min(1).nullable(), principalKind: enumSchema(['bot', 'service', 'token', 'user']).nullable(), scopes: array(string()) });
@@ -38,22 +39,30 @@ export interface LegacyImportOperatorSession {
   dispose(): void;
 }
 export async function openLegacyImportOperator(options: LegacyImportOperatorOptions): Promise<LegacyImportOperatorSession> {
-  const selected = options.resolve(); if ('reason' in selected) throw new Error(selected.reason);
+  // Capture this session's actual selection before a resolver, client factory or
+  // authentication callback can retarget the caller-owned options object.
+  const projectId = options.projectId, journalPath = options.journalPath;
+  const resolve = options.resolve.bind(options), createClient = options.createClient?.bind(options);
+  const journalOwner = options.journalOptions, journalGuard = journalOwner?.assertCurrent?.bind(journalOwner), journalWrite = journalOwner?.beforeWrite?.bind(journalOwner);
+  const journalLayout = journalOwner?.layout;
+  const selected = resolve(); if ('reason' in selected) throw new Error(selected.reason);
   const host = { ...selected };
-  bindingKey({ endpoint: host.baseUrl, projectId: options.projectId, workspaceId: host.workspace, principalId: 'unresolved', principalKind: 'unresolved' });
+  bindingKey({ endpoint: host.baseUrl, projectId, workspaceId: host.workspace, principalId: 'unresolved', principalKind: 'unresolved' });
   if (!host.token.trim()) throw new Error('An existing authenticated host credential is required');
   const lifetime = new AbortController();
   let closed = false; let binding: LegacyImportBinding | undefined;
   const selection = () => {
-    const current = options.resolve();
+    const current = resolve();
     if (closed || 'reason' in current || current.baseUrl !== host.baseUrl || current.token !== host.token || current.workspace !== host.workspace || current.selectionIdentity !== host.selectionIdentity) throw new Error('Selected host, credentials or workspace changed');
+    const checked: unknown = journalGuard?.();
+    if (checked !== undefined) { drainOwned(checked); throw new Error('Import journal selection must complete synchronously'); }
   };
-  const client = options.createClient ? options.createClient(host) : clientFor(host, selection);
+  const client = createClient ? createClient(host) : clientFor(host, selection);
   const authenticate = async (write = false) => {
     selection(); const auth = authSchema.parse(await client.currentAuth(lifetime.signal)); selection();
     if (!auth.authenticated || !auth.admin || !auth.principalId || !auth.principalKind || !['read:work-ledger', 'read:knowledge'].every(scope => auth.scopes.includes('*') || auth.scopes.includes(scope))) throw new Error('Current admin, read:work-ledger and read:knowledge required');
     if (write && !auth.scopes.some(scope => scope === '*' || scope === 'write:work-ledger-import')) throw new Error('Current write:work-ledger-import required');
-    const current = { endpoint: host.baseUrl, workspaceId: host.workspace, projectId: options.projectId, principalId: auth.principalId, principalKind: auth.principalKind };
+    const current = { endpoint: host.baseUrl, workspaceId: host.workspace, projectId, principalId: auth.principalId, principalKind: auth.principalKind };
     if (binding && bindingKey(binding) !== bindingKey(current)) throw new Error('Authenticated principal changed');
     binding = current;
   };
@@ -61,12 +70,12 @@ export async function openLegacyImportOperator(options: LegacyImportOperatorOpti
     try { return await operation(); } catch (error) { throw new Error((error instanceof Error ? error.message : String(error)).split(host.token).join('[redacted]')); }
   };
   const journal = <T>(operation: (store: LegacyImportJournal) => T): T => {
-    selection(); const store = new LegacyImportJournal(options.journalPath);
+    selection(); const store = new LegacyImportJournal(journalPath, undefined, { ...(journalLayout ? { layout: journalLayout } : {}), beforeWrite: journalWrite, assertCurrent: selection });
     try { return operation(store); } finally { store.close(); }
   };
   const status = async () => { await authenticate(); return journal(store => store.read(binding!)); };
   const selectedEntry = (requestId: string): LegacyImportEntry => journal(store => {
-    const entry = store.read(binding!);
+    const entry = store.readForUpdate(binding!);
     if (!entry || entry.command.requestId !== requestId) throw new Error('Selected import request does not match the saved command');
     return entry;
   });
@@ -79,18 +88,18 @@ export async function openLegacyImportOperator(options: LegacyImportOperatorOpti
         if ((page.hasMore && (!page.nextCursor || !page.items.length)) || (!page.hasMore && page.nextCursor != null)) throw new Error('Incomplete source discovery: inconsistent cursor');
         for (const source of page.items) {
           if (seen.has(source.id)) throw new Error('Source discovery repeated an identity'); seen.add(source.id);
-          if (source.connectorId === 'goodvibes-project-planning' && source.metadata.projectPlanning === true && source.metadata.projectId === options.projectId) sourceIds.push(source.id);
+          if (source.connectorId === 'goodvibes-project-planning' && source.metadata.projectPlanning === true && source.metadata.projectId === projectId) sourceIds.push(source.id);
         }
         if (seen.size >= 5000 || sourceIds.length > 500) throw new Error('Source discovery limit prevents proving completeness');
         cursor = page.hasMore ? page.nextCursor! : undefined;
         if (cursor) { if (cursors.has(cursor)) throw new Error('Source cursor repeated'); cursors.add(cursor); }
       } while (cursor);
       if (!sourceIds.length) throw new Error('No complete persisted legacy sources found');
-      await authenticate(); const result = await client.invoke('workLedger.prepareLegacyImport', { projectId: options.projectId, sourceIds: sourceIds.sort() }, lifetime.signal); await authenticate();
+      await authenticate(); const result = await client.invoke('workLedger.prepareLegacyImport', { projectId, sourceIds: sourceIds.sort() }, lifetime.signal); await authenticate();
       const prepared = preparationSchema.parse(result);
       if (prepared.kind === 'blocked') return prepared;
       const manifest = prepared.manifest;
-      if (manifest.projectId !== options.projectId || JSON.stringify(manifest.sources.map(item => String(item.source.id)).sort()) !== JSON.stringify(sourceIds)) throw new Error('Prepared source selection changed');
+      if (manifest.projectId !== projectId || JSON.stringify(manifest.sources.map(item => String(item.source.id)).sort()) !== JSON.stringify(sourceIds)) throw new Error('Prepared source selection changed');
       return { kind: 'prepared', manifest };
   };
   const dispatch = async (entry: LegacyImportEntry): Promise<LegacyImportEntry> => {
@@ -111,7 +120,7 @@ export async function openLegacyImportOperator(options: LegacyImportOperatorOpti
   };
   const create = async (replaceRequestId?: string): Promise<LegacyImportEntry> => {
     await authenticate(true);
-    const prior = journal(store => store.read(binding!));
+    const prior = journal(store => store.readForUpdate(binding!));
     if (prior && !replaceRequestId) return prior;
     if (replaceRequestId && (!prior || prior.command.requestId !== replaceRequestId || !['rejected', 'cancelled'].includes(prior.state))) throw new Error('Only the selected rejected or undispatched cancelled import can be replaced');
     const prepared = await prepareSources();

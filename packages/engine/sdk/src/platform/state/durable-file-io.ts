@@ -7,5 +7,6 @@
  */
 export { writeFileAtomic, writeJsonFileAtomic, confirmFileDurable, AtomicWriteDurabilityError } from '../utils/atomic-json-store.js';
 export type { AtomicWriteOptions, AtomicJsonWriteOptions, AtomicWriteDurabilityPhase } from '../utils/atomic-json-store.js';
+export { captureExistingDirectory } from '../utils/atomic-json-store.js';
 export { acquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
 export type { CrossProcessLockOptions } from '../workspace/checkpoint/cross-process-lock.js';

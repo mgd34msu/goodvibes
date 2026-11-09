@@ -150,9 +150,24 @@ test('Agent refuses a serialized act decision without a committed receipt and re
   } finally { await f.stop(); }
 });
 
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { agentHostPairingStorePath } from '../../runtime/connected-host-pairing-store.ts';
+
+test('actual Agent command forwards its installed journal reader owner before native mutation', async () => {
+  const f = await nativeHost(); let allowed = false; const formats: string[] = [];
+  const selected = { ...f, nativeDataWriter: { declare(format: string) { formats.push(format); if (!allowed) throw new Error('Installed journal reader unavailable'); } } };
+  try {
+    expect(await runAgentImportProof(selected, ['status', f.projectId])).toContain('No saved legacy import');
+    expect(formats).toEqual([]); expect(existsSync(f.journalPath)).toBe(false);
+    expect(await runAgentImportProof(selected, ['submit', f.projectId])).toContain('Installed journal reader unavailable');
+    expect(formats).toEqual(['terminal-import-journals-v2']); expect(existsSync(f.journalPath)).toBe(false); expect(f.commands).toHaveLength(0);
+    allowed = true;
+    expect(await runAgentImportProof(selected, ['submit', f.projectId])).toContain('Legacy import status: accepted');
+    expect(formats.every(format => format === 'terminal-import-journals-v2')).toBe(true); expect(f.commands).toHaveLength(1);
+    expect(f.read()).toMatchObject({ state: 'accepted', attempts: 1 });
+  } finally { await f.stop(); }
+});
 
 for (const mode of ['paired-with-global-and-env', 'global-only', 'environment-only'] as const) test(`Agent native import ${mode} never uses unbound credentials`, async () => {
   const f = await nativeHost();

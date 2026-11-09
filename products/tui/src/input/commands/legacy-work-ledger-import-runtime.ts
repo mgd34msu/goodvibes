@@ -2,7 +2,7 @@ import { OwnedSelectionObservation } from '@goodvibes-jev/engine/sdk/platform/ru
 import { createOperatorSdk } from '@goodvibes-jev/engine/operator-sdk';
 import { createNativeHostFetch } from '../../runtime/client/native-host-fetch.ts';
 import { realpathSync } from 'node:fs';
-import { openLegacyImportOperator, registerLegacyImportCommands, resolveLegacyImportJournalLocation, type LegacyImportOperatorSession } from '@goodvibes-jev/engine/terminal-shell/legacy-work-ledger-import';
+import { openLegacyImportOperator, registerLegacyImportCommands, resolveLegacyImportJournalLocation, retainLegacyImportJournalOwner, type LegacyImportOperatorSession } from '@goodvibes-jev/engine/terminal-shell/legacy-work-ledger-import';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { resolveNativeHostCredential } from '../../runtime/client/native-host-credential.ts';
 import { requireShellPaths } from './runtime-services.ts';
@@ -13,10 +13,11 @@ export function registerTuiLegacyImportCommands(registry: CommandRegistry, _daem
   const selected = resolveNativeHostCredential({ configManager: context.platform.configManager, homeDirectory: paths.homeDirectory, observation: credentialObservation });
   if (!selected.available) throw new Error(selected.reason);
   const workspace = realpathSync(paths.workingDirectory);
-  const { journalPath } = resolveLegacyImportJournalLocation({ workspace, projectId, stateDirectory: paths.resolveUserPath() });
+  const configOwner = context.platform.configManager, stateDirectory = paths.resolveUserPath();
+  const location = resolveLegacyImportJournalLocation({ workspace, projectId, stateDirectory });
   // Keep the engine import session bound to the private store generation as
   // well as endpoint/token/workspace, including replacement with the same token.
-  return openLegacyImportOperator({ projectId, journalPath,
+  return openLegacyImportOperator({ projectId, journalPath: location.journalPath, journalOptions: retainLegacyImportJournalOwner(location, configOwner, stateDirectory, () => ({ config: context.platform.configManager, stateDirectory: requireShellPaths(context).resolveUserPath() })),
     createClient(host) {
       let disposed = false;
       const client = createOperatorSdk({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: createNativeHostFetch({ current: () => {

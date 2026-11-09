@@ -17,14 +17,14 @@ import { registerLegacyWorkLedgerImportCommands } from '../../input/commands/leg
 import { runCommand } from '../../tools/agent-harness-command-runner.ts';
 import type { AgentHarnessToolDeps } from '../../tools/agent-harness-tool-types.ts';
 
-export interface ImportProofSelection { home: string; workspace: string; baseUrl: string }
+export interface ImportProofSelection { home: string; workspace: string; baseUrl: string; nativeDataWriter?: { declare(format: string): void } }
 export async function pairImportProofHost(selection: ImportProofSelection): Promise<void> {
   const attemptId = crypto.randomUUID(); const name = 'Owned legacy import product fixture';
   assert.deepEqual(await beginAgentHostPairing(selection.home, selection.baseUrl, { attemptId, name, startedAt: 1 }), { status: 'begun' });
   assert.deepEqual(await completeAgentHostPairing(selection.home, selection.baseUrl, attemptId, { token: IMPORT_FIXTURE_TOKEN, tokenId: 'synthetic-paired-owner', name, createdAt: 2 }), { status: 'paired' });
 }
 function context(selection: ImportProofSelection, print: (line: string) => void) {
-  return { print, platform: { configManager: { get(key: string) {
+  return { print, platform: { configManager: { getNativeDataWriter() { return selection.nativeDataWriter; }, get(key: string) {
     const url = new URL(selection.baseUrl);
     return key === 'daemon.connectedHost.enabled' || key === 'daemon.enabled' ? true : key === 'controlPlane.host' ? url.hostname : key === 'controlPlane.port' ? Number(url.port) : key === 'controlPlane.publicBaseUrl' ? selection.baseUrl : undefined;
   } } }, workspace: { get shellPaths() { return createShellPathService({ workingDirectory: selection.workspace, homeDirectory: selection.home }); } } };

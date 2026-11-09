@@ -1479,6 +1479,11 @@
       "types": "./platform/dist/browser-decision-policy.d.ts",
       "import": "./platform/dist/browser-decision-policy.js"
     },
+    "./platform/browser/reasoning-effort": {
+      "bun": "./platform/src/browser-reasoning-effort.ts",
+      "types": "./platform/dist/browser-reasoning-effort.d.ts",
+      "import": "./platform/dist/browser-reasoning-effort.js"
+    },
     "./terminal-shell/session-focus": {
       "bun": "./terminal-shell/src/session-focus.ts",
       "types": "./terminal-shell/dist/session-focus.d.ts",

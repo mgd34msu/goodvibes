@@ -4,7 +4,7 @@ import { BookOpen, CalendarDays, LayoutGrid, Mail } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getClientLifetime, isClientLifetimeCurrent } from '../lib/client-lifetime';
 import { client as platformClient } from '../lib/goodvibes';
-import { getOperatorMethod } from '@goodvibes-jev/engine/contracts';
+import { REASONING_EFFORT_SEVERITY } from '@goodvibes-jev/engine/platform/browser/reasoning-effort';
 import { asRecord, bestId, bestTitle, firstString } from '../lib/object';
 import { queryKeys } from '../lib/queries';
 import { useProviderModelOptions } from '../lib/use-provider-model-options';
@@ -50,14 +50,9 @@ export type { ChatViewProps };
 
 type SessionRoutePatch = Parameters<typeof platformClient.chat.sessions.update>[1];
 type SessionEffort = NonNullable<SessionRoutePatch['reasoningEffort']>;
-/** Read the actual session wire enum; model-advertised custom strings are not session contracts. */
+/** The canonical vocabulary also produces the actual companion chat wire enum. */
 function isSessionEffort(value: string): value is SessionEffort {
-  const schema = asRecord(asRecord(getOperatorMethod('companion.chat.sessions.update')?.inputSchema).properties).reasoningEffort;
-  const alternatives = asRecord(schema).anyOf;
-  return Array.isArray(alternatives) && alternatives.some(alternative => {
-    const branch = asRecord(alternative);
-    return branch.type === 'string' && Array.isArray(branch.enum) && branch.enum.includes(value);
-  });
+  return REASONING_EFFORT_SEVERITY.includes(value);
 }
 
 const SUGGESTION_ICONS: Record<SuggestionIcon, typeof Mail> = {

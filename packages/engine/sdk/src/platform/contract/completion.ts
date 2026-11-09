@@ -126,11 +126,10 @@ interface FinalAnswerReviewReceipt {
 }
 
 interface OriginalObligationReceipt {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly policy: { readonly name: string; readonly version: number };
   readonly sourceDigest: string;
   readonly outputDigest: string;
-  readonly evidenceDigest: string;
   readonly stateHash: string;
   readonly reading: Pick<YesNoReading, 'probability' | 'verdict' | 'outcome'>;
   readonly decisionIds: readonly string[];
@@ -330,6 +329,10 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     } }, { goal: input.goal, brief: '', files: [] });
     const rawEvidence = judgeEvidence(evidence) as Record<string, JsonValue>;
     const primary = input.scope === 'deliverable' ? finalAnswerEvidence(contract, rawEvidence, input.summaries, changes, input.output) : undefined;
+    // The saved final/claim/goal/original receipts bind one immutable output.
+    // Compute its private persisted commitment at most once, only if needed.
+    let retainedOutputDigest: string | undefined;
+    const outputDigestForCurrentAnswer = (): string => retainedOutputDigest ??= hashState(evidence.output);
     const acceptanceEvidence = primary?.evidence ?? rawEvidence;
     const judgedCriteria = judged(input.criteria);
     const site = input.scope === 'group' ? COMPLETION_SITES.group : COMPLETION_SITES.deliverable;
@@ -388,7 +391,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     if (run.terminal) { judgment.recordAction('discarded: the contract already ended'); return null; }
     let answerReview: FinalAnswerReviewReceipt | undefined;
     if (input.scope === 'deliverable') {
-      const fulfillmentAssessment = { targetId: input.targetId, outputDigest: hashState(evidence.output), evidenceDigest: hashState(fulfillmentEvidence),
+      const fulfillmentAssessment = { targetId: input.targetId,
         goal: { probabilityUnmet: judgment.goal.probability, verdict: criterionVerdict(judgment.goal), outcome: judgment.goal.outcome },
         criteria: judgedCriteria.map((criterion, index) => ({ id: criterion.id, probabilityUnmet: judgment.criteria[index]!.probability,
           verdict: criterionVerdict(judgment.criteria[index]!), outcome: judgment.criteria[index]!.outcome })),
@@ -397,7 +400,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
       const state = { goal: input.goal, criteria: judged(input.criteria).map(criterion => criterion.text), output: evidence.output,
         evidence: { ...finalContentEvidence(fulfillmentEvidence), fulfillmentAssessment }, ...(contract.nativeSource === undefined ? {} : { nativeSource: nativeContractSourceData(contract.nativeSource) }) };
       const evidenceDigest = completionEvidenceCommitment({ state, policy: { name: reviewBattery.name, version: reviewBattery.version, stakes: config().acceptanceStakes } }, rawEvidence);
-      const outputDigest = hashState(evidence.output);
+      const outputDigest = outputDigestForCurrentAnswer();
       const targetId = `${contract.id}.final-answer-review`;
       // A later verifier request failure does not invalidate an unchanged
       // negative review. Reuse its rejection as a hold, never as approval.
@@ -604,7 +607,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
         const { probability, verdict, outcome } = result.readings.omitted;
         const passed = criterionVerdict(result.readings.omitted) === 'met';
         if (!stateHash) throw new Error('Goal-obligation reading has no original-source binding');
-        goalProof = { schemaVersion: 1, policy: { name: battery.name, version: battery.version }, literalSourceDigest, outputDigest: hashState(evidence.output), stateHash,
+        goalProof = { schemaVersion: 1, policy: { name: battery.name, version: battery.version }, literalSourceDigest, outputDigest: outputDigestForCurrentAnswer(), stateHash,
           sourceJudgmentDecisionIds: [...judgment.decisionIds], sourceGoal: { probability: judgment.goal.probability, verdict: judgment.goal.verdict, outcome: judgment.goal.outcome },
           reading: { probability, verdict, outcome }, decisionIds: result.result.decisionId ? [result.result.decisionId] : [], passed };
         run.decide('checked', `${contract.id}.goal-obligations`, JSON.stringify(goalProof), [...goalProof.decisionIds]);
@@ -640,7 +643,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
         finalAnswerReview: toJson(answerReview) };
       const state = { original, assignedGoal: input.goal, output: evidence.output, evidence: coverageEvidence,
         hostStages: ['native-acceptance', 'artifact-application', 'answer-delivery'] };
-      const binding = { sourceDigest: hashState(original), outputDigest: hashState(evidence.output), evidenceDigest: hashState(coverageEvidence) };
+      const binding = { sourceDigest: hashState(original), outputDigest: outputDigestForCurrentAnswer() };
       const usage = emptyJudgmentUsage();
       try {
         const site = 'contract.check.original-obligation-coverage';
@@ -661,7 +664,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
         if (!stateHash || !result.result.decisionId) throw new JudgmentError('unrecorded', 'Original-obligation coverage requires its actual recorded input and decision.');
         const { probability, verdict, outcome } = result.readings.original_obligations_unmet;
         originalObligations = {
-          schemaVersion: 1, policy: { name: originalCoverage.name, version: originalCoverage.version },
+          schemaVersion: 2, policy: { name: originalCoverage.name, version: originalCoverage.version },
           ...binding, stateHash,
           reading: { probability, verdict, outcome },
           decisionIds: [result.result.decisionId],
@@ -923,9 +926,11 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
           const owner = captureJudgmentPort(site, { signal: run.abort.signal, assertCurrent: () => assertOwnedContractSource(contract) });
           try {
             let stateHash: string | undefined;
-            const observed: typeof owner.port = { ...owner.port, ask(request) {
-              stateHash = hashState(request.state);
-              return owner.port.ask(request);
+            const observed: typeof owner.port = { ...owner.port, async ask(request) {
+              const result = await owner.port.ask(request);
+              stateHash = recordedJudgmentInputHash(result, request);
+              if (stateHash === undefined) throw new JudgmentError('unrecorded', 'Publication assessment requires its actual recorded input.');
+              return result;
             } };
             const checked = await publicationOwner.run(meteredPort(nativeContractPort(contract, context.native, observed, run.abort.signal), usage),
               evidence as never, { site, signal: owner.signal, beforeAttempt: owner.assertCurrent });

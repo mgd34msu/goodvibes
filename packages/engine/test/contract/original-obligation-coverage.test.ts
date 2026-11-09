@@ -113,8 +113,9 @@ test.each([false, true])('original coverage records the actual source, output an
   expect(captured[0]!.hostStages).toEqual(['native-acceptance', 'artifact-application', 'answer-delivery']);
   const coverage = current.decisions.find(decision => decision.targetId === `${contract.id}.original-obligations`)!;
   const receipt = JSON.parse(coverage.reason);
-  expect(receipt).toMatchObject({ passed: true, sourceDigest: hashState(originalObligationSource(contract)),
+  expect(receipt).toMatchObject({ schemaVersion: 2, passed: true, sourceDigest: hashState(originalObligationSource(contract)),
     outputDigest: hashState(captured[0]!.output as string), decisionIds: coverage.decisionIds });
+  expect(receipt).not.toHaveProperty('evidenceDigest');
   const recorded = log.get(coverage.decisionIds[0]!)!;
   expect(recorded).toMatchObject({ status: 'answered', context: { site: 'contract.check.original-obligation-coverage' } });
   expect(recorded.stateHash).toBe(receipt.stateHash);

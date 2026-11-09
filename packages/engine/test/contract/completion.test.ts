@@ -9,7 +9,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { hashState, JudgmentError, SqliteDecisionLog, type JsonValue } from '@goodvibes-jev/judgment';
+import { hashState, JudgmentError, SqliteDecisionLog } from '@goodvibes-jev/judgment';
 import { CONTRACT_PASSED_WITHOUT_OUTPUT, describeCommitOutcome, describeContractOutcome, renderContractAnswer } from '../../sdk/src/platform/contract/index.js';
 import { makeHarness, oneUnitPlan, startContract, twoUnitPlan, waitFor, type AgentScript, type Harness } from './runner-support.js';
 import { contractOf, finishes, git, judgeOf, terminal } from './steps-support.js';
@@ -275,14 +275,15 @@ test('group and final checks receive actual plan-validation and unit-acceptance 
     expect(protocol.scope).toBe('criteria' in evidence ? 'deliverable' : 'group');
     expect(protocol.targetId).toBe('criteria' in evidence ? id : (evidence['units'] as { id: string }[])[0]!.id === 'u1' ? 'g1' : 'g2');
     expect(protocol).not.toHaveProperty('outputDigest');
+    expect(typeof checkedOutputs.get(evidence)).toBe('string');
     expect(protocol.status).toBe('in-progress');
     if (protocol.scope === 'deliverable') {
       expect(protocol.publicationRule).toContain('only commits and delivers this checked answer after this judgment passes');
       expect(evidence).not.toHaveProperty('finalAnswerReview');
-      const assessment = contentEvidence!['fulfillmentAssessment'] as { outputDigest: string; evidenceDigest: string; decisionIds: string[];
+      const assessment = contentEvidence!['fulfillmentAssessment'] as { decisionIds: string[];
         goal: { verdict: string }; criteria: { id: string; verdict: string }[] };
-      expect(assessment.outputDigest).toBe(hashState(checkedOutputs.get(evidence)!));
-      expect(assessment.evidenceDigest).toBe(hashState(evidence as Record<string, JsonValue>));
+      expect(assessment).not.toHaveProperty('outputDigest');
+      expect(assessment).not.toHaveProperty('evidenceDigest');
       expect(assessment.goal.verdict).toBe('met');
       expect(assessment.criteria.map(criterion => [criterion.id, criterion.verdict])).toEqual(done.criteria.map(criterion => [criterion.id, 'met']));
       expect(assessment.decisionIds).toHaveLength(1);
@@ -430,11 +431,12 @@ test('a rejected native answer review holds publication even when fulfillment re
       }
       if (context.name === 'unfinished') {
         order.push('final-answer-content');
-        const evidence = context.state['evidence'] as { fulfillmentAssessment: { goal: { verdict: string }; outputDigest: string } };
+        const evidence = context.state['evidence'] as { fulfillmentAssessment: { goal: { verdict: string } } };
         expect(evidence.fulfillmentAssessment.goal.verdict).toBe('met');
         const output = context.state['output'];
         if (typeof output !== 'string') throw new Error('Content review must receive the exact final answer.');
-        expect(evidence.fulfillmentAssessment.outputDigest).toBe(hashState(output));
+        expect(evidence.fulfillmentAssessment).not.toHaveProperty('outputDigest');
+        expect(evidence.fulfillmentAssessment).not.toHaveProperty('evidenceDigest');
         return noulAnswer(0.98);
       }
       return undefined;

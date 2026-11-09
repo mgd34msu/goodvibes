@@ -205,6 +205,26 @@ test('native settlement requires recorded original-obligation coverage bound to 
   expect(f.storage.current(f.key).settlement).toBeNull();
 });
 
+test('original-coverage v2 verifies without an unused digest, actual v1 stays readable and future or mixed receipt versions refuse', async () => {
+  const f = await fixture(), started = await f.host.start(f.target, f.authority);
+  const contract = await completed(f.harness, started.admission.contractId);
+  const targetId = `${contract.id}.original-obligations`, decision = contract.decisions.findLast(value => value.targetId === targetId)!;
+  const original = JSON.parse(decision.reason) as Record<string, unknown>;
+  expect(original['schemaVersion']).toBe(2); expect(original).not.toHaveProperty('evidenceDigest');
+  for (const format of ['current-v2', 'historical-v1', 'future-v3', 'mixed-v2'] as const) {
+    const receipt = format === 'historical-v1' ? { ...original, schemaVersion: 1, evidenceDigest: 'a'.repeat(64) }
+      : format === 'future-v3' ? { ...original, schemaVersion: 3 }
+      : format === 'mixed-v2' ? { ...original, evidenceDigest: 'unused-field-from-a-different-version' } : original;
+    const image = { ...contract, decisions: contract.decisions.map(value => value === decision ? { ...value, reason: JSON.stringify(receipt) } : value) };
+    const operation = verifyNativeWorkExecution({ execution: f.storage.current(f.key).record!,
+      runner: { get: id => id === contract.id ? image : f.harness.runner.get(id), join: id => f.harness.runner.join(id) },
+      port: f.hostOptions.port, decisionLog: f.log, settings: checkSettings(CONTRACT_CONFIG_DEFAULTS), readAccessFilter: async () => true,
+      signal: new AbortController().signal, assertCurrent() {} });
+    if (format === 'current-v2' || format === 'historical-v1') await expect(operation).resolves.toMatchObject({ attestation: { outcome: 'verified' } });
+    else await expect(operation).rejects.toThrow('genuine original-obligation coverage');
+  }
+});
+
 test('native settlement proves every original question across actual deliverable batches and refuses incomplete or mixed proof', async () => {
   let refused = false, refusedContent = false;
   const f = await fixture({ harness: { port: context => {

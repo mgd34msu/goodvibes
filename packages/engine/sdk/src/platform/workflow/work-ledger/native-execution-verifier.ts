@@ -269,12 +269,17 @@ export async function verifyNativeWorkExecution(options: {
   const originalProbability = originalQuestion ? rawNo(originalQuestion.answer, originalBattery.items.original_obligations_unmet.band) : null;
   const originalReading = object(original?.['reading']);
   const originalPolicy = object(original?.['policy']);
-  if (!original || original['schemaVersion'] !== 1 || original['passed'] !== true || !originalId || !originalEntry
+  // The v1 evidenceDigest was only a presence check, not an independent
+  // verification. Read actual older receipts; fresh v2 relies on the genuine
+  // recorded complete input plus the separately verified source/output binds.
+  const originalVersionValid = original?.['schemaVersion'] === 1 ? typeof original['evidenceDigest'] === 'string'
+    : original?.['schemaVersion'] === 2 && !Object.hasOwn(original, 'evidenceDigest');
+  if (!original || !originalVersionValid || original['passed'] !== true || !originalId || !originalEntry
     || originalEntry.status !== 'answered' || originalEntry.context.battery !== originalBattery.name
     || originalEntry.context.batteryVersion !== originalBattery.version || originalEntry.stateHash !== original['stateHash']
     || originalPolicy?.['name'] !== originalBattery.name || originalPolicy['version'] !== originalBattery.version
     || original['sourceDigest'] !== hashState(originalObligationSource(contract)) || original['outputDigest'] !== hashState(contract.answer ?? '')
-    || typeof original['evidenceDigest'] !== 'string' || !originalQuestion || originalProbability === null
+    || !originalQuestion || originalProbability === null
     || originalReading?.['probability'] !== originalProbability || originalReading['verdict'] !== 'no' || originalReading['outcome'] !== 'act'
     || !isDeepStrictEqual(originalQuestion.question, originalBattery.items.original_obligations_unmet.question)
     || !isDeepStrictEqual(originalDecision?.decisionIds, originalIds)

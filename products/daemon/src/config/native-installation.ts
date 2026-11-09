@@ -8,7 +8,7 @@ import { statSync } from 'node:fs';
 import type { GoodVibesHomeOwnership } from '@goodvibes-jev/engine/sdk/platform/config';
 import type { DaemonUpdateArtifact } from '@goodvibes-jev/engine/sdk/platform/daemon';
 import { captureUpdateFileIo, isCompiledBunModuleUrl, DAEMON_NATIVE_TARGETS, inspectDaemonNativeInstallation, nativeReaderCapabilities, realUpdateFileIo,
-  createNativeDataWriteOwner, createInstalledReaderCohort, type NativeDataWriteOwner,
+  createNativeDataWriteOwner, createInstalledReaderCohort, type NativeDataWriteOwner, type DarwinDaemonInstallation,
   inspectDarwinDaemonInstallation,
   resolveDaemonNativePayloads, resolveDaemonNativeTargets, retainDaemonNativeFiles } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 import { detectInstallKind } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
@@ -18,6 +18,9 @@ export { captureOriginalDarwinDaemonInstallation, initializeOriginalDarwinDaemon
 export type { OriginalDarwinDaemonInstallation } from './original-darwin-installation.js';
 import { originalDarwinSelection, originalDarwinProof, type OriginalDarwinDaemonInstallation } from './original-darwin-installation.js';
 const darwinWriters = new WeakMap<OriginalDarwinDaemonInstallation, NativeDataWriteOwner>();
+// Only this module's actual inspector can populate the verification cache.
+// The early loader's shared source record is immutable and carries no cache slot.
+const darwinInstallations = new WeakMap<OriginalDarwinDaemonInstallation, DarwinDaemonInstallation>();
 
 export interface ResolveDaemonUpdateArtifactOptions {
   /** The executable to identify; defaults to process.execPath. */
@@ -61,14 +64,14 @@ export function resolveInstalledDaemonUpdateArtifact(
     const selected = options.darwinInstallation ?? originalDarwinSelection(), proof = selected && originalDarwinProof(selected);
     if (!selected || !proof || selected.execPath !== execPath || selected.version !== version || proof.sqlite.owner.target !== `darwin-${arch}`) throw new Error('Original compiled Darwin daemon selection is unavailable');
     selected.assertCurrent();
-    const installation = proof.installation ?? inspectDarwinDaemonInstallation(execPath, arch, '', proof.io, {
+    const installation = darwinInstallations.get(selected) ?? inspectDarwinDaemonInstallation(execPath, arch, '', proof.io, {
       expectedSqliteOwner: proof.sqlite.owner, assertCompiledSqliteCurrent: proof.sqlite.assertCurrent,
     });
     if (!installation || installation.version !== version || !installation.compiledSqliteVerified) throw new Error('Running Darwin daemon does not own a complete verified installation');
     selected.assertCurrent(); installation.assertCurrent();
     const actualReaders = nativeReaderCapabilities(version);
     if (installation.readers.formats.length !== actualReaders.formats.length || actualReaders.formats.some(format => !installation.readers.formats.includes(format))) throw new Error('Darwin daemon reader profile differs from its actual compiled readers');
-    proof.installation = installation;
+    darwinInstallations.set(selected, installation);
     const original = () => { signal?.throwIfAborted(); selected.assertCurrent(); installation.assertCurrent(); };
     const assertCurrent = () => {
       original();

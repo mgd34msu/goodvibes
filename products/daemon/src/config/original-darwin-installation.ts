@@ -1,12 +1,11 @@
 /** Private original pre-await capture; imports only narrow filesystem/location helpers. */
 import { isAbsolute, resolve } from 'node:path';
 import { isCompiledBunModuleUrl, detectInstallKind, captureUpdateFileIo, realUpdateFileIo, resolveDarwinDaemonTargets, retainNativeUpdateSources } from '@goodvibes-jev/engine/sdk/platform/runtime/compiled-native-startup';
-import type { DarwinDaemonInstallation } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 import type { DaemonSqliteAdmission } from '../cli/native-sqlite-runtime.js';
 import { COMPILED_VERSION } from '../version.js';
 /** Original synchronous bundled-entry observation, not a late pathname guess. */
 export interface OriginalDarwinDaemonInstallation { readonly execPath: string; readonly version: string; assertCurrent(): void }
-const darwinOriginals = new WeakMap<OriginalDarwinDaemonInstallation, { readonly sqlite: DaemonSqliteAdmission; readonly targets: NonNullable<ReturnType<typeof resolveDarwinDaemonTargets>>; readonly io: ReturnType<typeof captureUpdateFileIo>; installation?: DarwinDaemonInstallation }>();
+const darwinOriginals = new WeakMap<OriginalDarwinDaemonInstallation, Readonly<{ readonly sqlite: DaemonSqliteAdmission; readonly targets: NonNullable<ReturnType<typeof resolveDarwinDaemonTargets>>; readonly io: ReturnType<typeof captureUpdateFileIo> }>>();
 let earlyDarwinInstallation: OriginalDarwinDaemonInstallation | undefined;
 export function captureOriginalDarwinDaemonInstallation(sqlite: DaemonSqliteAdmission | undefined, options: {
   readonly execPath?: string; readonly platform?: string; readonly arch?: string; readonly version?: string; readonly bundled?: boolean;
@@ -20,7 +19,7 @@ export function captureOriginalDarwinDaemonInstallation(sqlite: DaemonSqliteAdmi
   const io = captureUpdateFileIo(realUpdateFileIo), retained = retainNativeUpdateSources(targets.flatMap(target => [target.path, target.path + '.previous']), io);
   const current = () => { sqlite.assertCurrent(); retained(); sqlite.assertCurrent(); };
   current(); const selected = Object.freeze({ execPath, version, assertCurrent: current });
-  darwinOriginals.set(selected, { sqlite, targets, io }); return selected;
+  darwinOriginals.set(selected, Object.freeze({ sqlite, targets, io })); return selected;
 }
 /** Called exactly by the native entry before its first service import/await. */
 export function initializeOriginalDarwinDaemonInstallation(sqlite: DaemonSqliteAdmission | undefined): void {

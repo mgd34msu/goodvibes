@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test';
 import { copyFileSync, existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { captureOriginalDarwinDaemonInstallation, createOriginalDarwinDaemonDataWriter, resolveInstalledDaemonUpdateArtifact } from '../../config/native-installation.js';
+import { originalDarwinProof } from '../../config/original-darwin-installation.js';
 import { inspectDarwinDaemonInstallation, parseClientReaderArtifact, realUpdateFileIo, resolveDarwinDaemonTargets } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 import { darwinInstallationFixture } from '../helpers/darwin-installation.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
@@ -24,6 +25,14 @@ test('Darwin requires the actual early token; matching late pathname/version/sha
   expect(() => resolveInstalledDaemonUpdateArtifact(homes, { ...f.options, darwinInstallation: { ...original } })).toThrow('Original compiled Darwin');
   expect(resolveInstalledDaemonUpdateArtifact(homes, { ...f.options, bundled: false })).toBeUndefined();
   expect(resolveInstalledDaemonUpdateArtifact({ isOverridden: true }, f.options)).toBeUndefined();
+});
+test('the shared early source record cannot supply or replace late verified installation cache entries', () => {
+  const f = darwinInstallationFixture(makeOwnedTempDir('darwin-native-private-cache'));
+  const original = originalDarwinProof(f.original)!;
+  expect(Object.isFrozen(original)).toBe(true);
+  expect(Reflect.set(original, 'installation', { version: f.version, compiledSqliteVerified: true, assertCurrent() {} })).toBe(false);
+  expect(() => resolveInstalledDaemonUpdateArtifact(homes, f.options)).not.toThrow();
+  expect(Object.hasOwn(original, 'installation')).toBe(false);
 });
 test('same-byte image replacement after early capture is refused and never adopted as the running image', () => {
   const f = darwinInstallationFixture(makeOwnedTempDir('darwin-native-image'));

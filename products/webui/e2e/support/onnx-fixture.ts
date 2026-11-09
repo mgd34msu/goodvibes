@@ -134,27 +134,37 @@ export interface WakeModelFixture {
   readonly base64: string;
 }
 
+export function wakeArtifactPin(bytes: Uint8Array): string {
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
 function fixture(bytes: Uint8Array): WakeModelFixture {
   return {
     bytes,
-    sha256: createHash('sha256').update(bytes).digest('hex'),
+    sha256: wakeArtifactPin(bytes),
     base64: Buffer.from(bytes).toString('base64'),
   };
 }
 
 /** A loadable stand-in for the pinned speech-embedding model. */
 export function wakeEmbeddingFixture(): WakeModelFixture {
-  return fixture(onnxIdentityModel('embedding', WAKE_EMBEDDING_DIMS));
+  return fixture(wakeEmbeddingBytes());
 }
 
 /** A loadable stand-in for the pinned hey_goodvibes classifier. */
 export function wakeClassifierFixture(): WakeModelFixture {
-  return fixture(onnxIdentityModel('classifier', WAKE_CLASSIFIER_DIMS));
+  return fixture(wakeClassifierBytes());
 }
 
 /** The model card. Real text, no shape contract to satisfy. */
 export function wakeNoticeFixture(): WakeModelFixture {
-  return fixture(new TextEncoder().encode(
-    '# hey_goodvibes\n\nSynthetic-recall-only evaluation. Test fixture, not the pinned model.\n',
-  ));
+  return fixture(wakeNoticeBytes());
+}
+
+/** Size/status fixtures retain only fresh bytes; integrity is computed only
+ * when an actual model-transfer response needs to publish a checksum. */
+export function wakeEmbeddingBytes(): Uint8Array { return onnxIdentityModel('embedding', WAKE_EMBEDDING_DIMS); }
+export function wakeClassifierBytes(): Uint8Array { return onnxIdentityModel('classifier', WAKE_CLASSIFIER_DIMS); }
+export function wakeNoticeBytes(): Uint8Array {
+  return new TextEncoder().encode('# hey_goodvibes\n\nSynthetic-recall-only evaluation. Test fixture, not the pinned model.\n');
 }

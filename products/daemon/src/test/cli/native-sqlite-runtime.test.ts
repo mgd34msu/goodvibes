@@ -2,6 +2,7 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as childProcess from 'node:child_process';
 import { compileDaemonSqliteLibrary } from '../../../scripts/build-sqlite-runtime.ts';
 import { createHash } from 'node:crypto';
+import * as crypto from 'node:crypto';
 import { chmodSync, mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -34,10 +35,14 @@ test('selects each declared architecture after captured owner, bytes and metadat
 });
 
 test('unbundled source and Linux do not select custom SQLite', () => {
-  const f = fixture(); let calls = 0; const setCustomSQLite = () => { calls++; return true; };
-  initializeDaemonNativeSqlite({ ...f.options, bundled: false, setCustomSQLite });
-  initializeDaemonNativeSqlite({ ...f.options, platform: 'linux', setCustomSQLite });
-  expect(calls).toBe(0);
+  const root = mkdtempSync(join(realpathSync(tmpdir()), 'daemon-sqlite-inapplicable-')); roots.push(root);
+  const execPath = join(root, 'absent-daemon'); let calls = 0;
+  const setCustomSQLite = () => { calls++; return true; }, hash = spyOn(crypto, 'createHash');
+  try {
+    initializeDaemonNativeSqlite({ platform: 'darwin', arch: 'arm64', bundled: false, execPath, capturedOwner: null, setCustomSQLite });
+    initializeDaemonNativeSqlite({ platform: 'linux', arch: 'arm64', bundled: true, execPath, capturedOwner: null, setCustomSQLite });
+    expect(calls).toBe(0); expect(hash).not.toHaveBeenCalled();
+  } finally { hash.mockRestore(); }
 });
 
 test('retired target or absent compiled owner refuses before selection', () => {

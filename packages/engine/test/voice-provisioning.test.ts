@@ -6,8 +6,9 @@
  * path resolution precedence, config pre-configuration that preserves user-set
  * keys, and honest provision states. NO real network, all fetch is mocked.
  */
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import * as crypto from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -71,11 +72,13 @@ describe('downloadVerifiedFile: atomic + checksum', () => {
     const dir = scratch();
     const dest = join(dir, 'model.onnx');
     const bytes = new TextEncoder().encode('short');
-    const result = await downloadVerifiedFile({ spec: { url: 'u', bytes: 9999, sha256: sha256(bytes) }, destPath: dest, fetchImpl: mockFetchBytes(bytes) });
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.reason).toBe('size-mismatch');
-    expect(existsSync(dest)).toBe(false);
-    rmSync(dir, { recursive: true, force: true });
+    expect(existsSync(dest)).toBe(false); const hash = spyOn(crypto, 'createHash');
+    try {
+      const result = await downloadVerifiedFile({ spec: { url: 'u', bytes: 9999, sha256: '0'.repeat(64) }, destPath: dest, fetchImpl: mockFetchBytes(bytes) });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toBe('size-mismatch');
+      expect(existsSync(dest)).toBe(false); expect(hash).not.toHaveBeenCalled();
+    } finally { hash.mockRestore(); rmSync(dir, { recursive: true, force: true }); }
   });
 });
 

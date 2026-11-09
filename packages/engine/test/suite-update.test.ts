@@ -2,8 +2,9 @@
  * but intentionally UNRUN until the coding pass is complete. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { applySuiteUpdate, configuredSuiteWebuiDirectory, installedSuiteNeedsRepair, retainSuiteUpdateConfiguration, rollbackSuiteUpdate } from '../platform/src/platform/runtime/suite-update.js';
 import { ConfigManager } from '../platform/src/platform/config/index.js';
 import { realUpdateFileIo } from '../platform/src/platform/runtime/self-update.js';
@@ -14,18 +15,26 @@ afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: 
 function fixture() { const result = suiteReleaseFixture(); roots.push(result.root); return result; }
 
 test('an explicit installed WebUI remains selected while disabled and served external fallback still refuses', async () => {
-  const f = fixture();
-  const values: Record<string, unknown> = { 'controlPlane.webui.bundleDir': f.webui, 'controlPlane.webui.serve': false, 'web.staticAssetsDir': '/external/assets' };
+  const root = mkdtempSync(join(tmpdir(), 'suite-external-webui-')); roots.push(root);
+  const executable = join(root, 'goodvibes'), originalBytes = Buffer.from('Original installed terminal');
+  writeFileSync(executable, originalBytes, { mode: 0o755 }); const webui = join(root, 'webui', '3.1.2');
+  const values: Record<string, unknown> = { 'controlPlane.webui.bundleDir': webui, 'controlPlane.webui.serve': false, 'web.staticAssetsDir': '/external/assets' };
   const config = { get: (key: string) => values[key] };
   const original = retainSuiteUpdateConfiguration(config);
-  expect(original.webuiDirectory).toBe(f.webui);
+  expect(original.webuiDirectory).toBe(webui);
   values['controlPlane.webui.serve'] = true;
   original.assertCurrent();
   values['controlPlane.webui.bundleDir'] = '';
   expect(() => original.assertCurrent()).toThrow('selection changed');
   expect(configuredSuiteWebuiDirectory(config)).toBe('/external/assets');
-  await expect(applySuiteUpdate({ ...f.options, webuiDirectory: configuredSuiteWebuiDirectory(config) })).rejects.toThrow('separately managed');
-  for (const [path, bytes] of f.original) expect(readFileSync(path).equals(bytes)).toBe(true);
+  let fetches = 0; const hash = spyOn(crypto, 'createHash');
+  try {
+    await expect(applySuiteUpdate({ execPath: executable, platform: 'linux', arch: 'x64', version: '3.1.3',
+      downloadBaseUrl: 'https://release.invalid/v3.1.3', webuiDirectory: configuredSuiteWebuiDirectory(config),
+      async fetchImpl() { fetches += 1; throw new Error('An external WebUI must refuse before download.'); } })).rejects.toThrow('separately managed');
+    expect(fetches).toBe(0); expect(hash).not.toHaveBeenCalled();
+    expect(readFileSync(executable).equals(originalBytes)).toBe(true);
+  } finally { hash.mockRestore(); }
 });
 
 test('saved no-WebUI defaults preserve opt-out and permit complete program/driver update and rollback', async () => {

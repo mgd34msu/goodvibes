@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Drain an older Telegram webhook retraction before registering its replacement.
+  A delayed disable request cannot remove the newer registration or overwrite
+  its status, and retained Telegram updates are not discarded.
+
 - Bind saved inbox triage labels to their original provider and account as well
   as the message preview. Account changes cannot inherit another account's
   labels, and reading the inbox does not rescore or rewrite old receipts.

@@ -222,17 +222,27 @@ export class TelegramIngressSupervisor {
     if (generation !== this.generation) return this.status;
 
     if (!enabled) {
-      // A webhook registered by a previous run is state living on Telegram's
-      // servers, not ours: switching the surface off must retract it, or
-      // Telegram keeps POSTing to a daemon that no longer wants the traffic.
-      if (token) await this.retractOwnWebhook(token);
-      // A token with the surface switched off is a common half-finished setup;
-      // say so rather than staying silent, because the user believes it is on.
-      return token
-        ? this.settle('inactive',
-            'a Telegram bot token is configured but surfaces.telegram.enabled is false; set it to true to receive messages',
-            false, 'warn')
-        : this.settle('inactive', 'the Telegram surface is disabled (surfaces.telegram.enabled=false)');
+      // Retraction is setup work too: a later stop/start must abort and drain
+      // this exact original provider request before registering a replacement.
+      if (!token) return this.settle('inactive', 'the Telegram surface is disabled (surfaces.telegram.enabled=false)');
+      const lifetime = new AbortController(); this.abort = lifetime;
+      const owned = () => generation === this.generation && this.abort === lifetime && !lifetime.signal.aborted;
+      const setup = Promise.resolve().then(async () => {
+        if (!owned()) return this.status;
+        await this.retractOwnWebhook(token, lifetime.signal, owned);
+        if (!owned()) return this.status;
+        // A configured token with the surface off is a common unfinished setup.
+        return this.settle('inactive',
+          'a Telegram bot token is configured but surfaces.telegram.enabled is false; set it to true to receive messages',
+          false, 'warn');
+      });
+      // Publish before provider code can reenter stop, as in webhook setup.
+      this.webhookSetup = setup;
+      try { return await setup; }
+      finally {
+        if (this.webhookSetup === setup) this.webhookSetup = null;
+        if (this.abort === lifetime) this.abort = null;
+      }
     }
     if (!token) {
       return this.settle('inactive',
@@ -961,16 +971,18 @@ export class TelegramIngressSupervisor {
    * same bot token may legitimately be driven by another deployment, and
    * deleting its registration would break a system we do not own.
    */
-  private async retractOwnWebhook(token: string): Promise<void> {
+  private async retractOwnWebhook(token: string, signal: AbortSignal, owned: () => boolean): Promise<void> {
     const base = String(this.deps.configManager.get('web.publicBaseUrl') ?? '').replace(/\/+$/, '');
-    if (!base) return;
+    if (!base || !owned()) return;
     const api = this.deps.createApi?.(token) ?? new TelegramBotApi(token);
     try {
-      const info = await api.getWebhookInfo();
-      if (!info.url || info.url !== `${base}${TELEGRAM_WEBHOOK_PATH}`) return;
-      await api.deleteWebhook(false);
+      const info = await api.getWebhookInfo(signal);
+      if (!owned() || !info.url || info.url !== `${base}${TELEGRAM_WEBHOOK_PATH}`) return;
+      await api.deleteWebhook(false, signal);
+      if (!owned()) return;
       logger.info('Telegram ingress: retracted the webhook for a disabled surface', { url: info.url });
     } catch (error) {
+      if (!owned()) return;
       logger.warn('Telegram ingress: could not retract the webhook for a disabled surface', {
         error: summarizeError(error),
       });

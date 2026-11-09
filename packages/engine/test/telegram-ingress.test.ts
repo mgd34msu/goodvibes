@@ -22,14 +22,14 @@ import { PaymentReplyHistoryError } from '../sdk/src/platform/payments/reply-his
 
 // ── fakes ───────────────────────────────────────────────────────────────────
 
-interface ApiCall { readonly method: string; readonly body: Record<string, unknown>; }
+interface ApiCall { readonly method: string; readonly body: Record<string, unknown>; readonly signal: AbortSignal | null | undefined; }
 
 /** Queued Bot API responses; once drained, getUpdates long-polls until aborted. */
 class FakeTelegram {
   readonly calls: ApiCall[] = [];
-  private readonly queues = new Map<string, Array<() => Response>>();
+  private readonly queues = new Map<string, Array<() => Response | Promise<Response>>>();
 
-  queue(method: string, ...responses: Array<() => Response>): void {
+  queue(method: string, ...responses: Array<() => Response | Promise<Response>>): void {
     const existing = this.queues.get(method) ?? [];
     this.queues.set(method, [...existing, ...responses]);
   }
@@ -41,10 +41,12 @@ class FakeTelegram {
   fetch = async (input: string, init: RequestInit): Promise<Response> => {
     const method = input.split('/').pop() ?? '';
     const body = JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>;
-    this.calls.push({ method, body });
+    this.calls.push({ method, body, signal: init.signal });
 
     const next = this.queues.get(method)?.shift();
     if (next) return next();
+
+    if (method === 'getWebhookInfo') return ok({ url: '', pending_update_count: 0 });
 
     if (method === 'getUpdates') {
       // Model Telegram's hold-open long poll: never resolve on its own, so the
@@ -205,6 +207,7 @@ describe('telegram ingress: mode selection is explicit and exclusive', () => {
 
   test('polling mode clears any registered webhook before polling, and never registers one', async () => {
     const h = makeHarness();
+    h.telegram.queue('getWebhookInfo', () => ok({ url: 'https://older-deployment.example/webhook/telegram', pending_update_count: 3 }));
     try {
       const status = await h.supervisor.start();
       expect(status.mode).toBe('polling');
@@ -216,11 +219,13 @@ describe('telegram ingress: mode selection is explicit and exclusive', () => {
       // getUpdates with 409 while a webhook is registered, so polling must
       // delete it first, and must never register one itself.
       const methods = h.telegram.calls.map((call) => call.method);
-      expect(methods[0]).toBe('deleteWebhook');
+      // Observe prior webhook custody before clearing it, then poll only
+      // after Telegram acknowledges removal. The retained queue is untouched.
+      expect(methods.slice(0, 3)).toEqual(['getWebhookInfo', 'deleteWebhook', 'getUpdates']);
       expect(methods).toContain('getUpdates');
       expect(methods).not.toContain('setWebhook');
       // Queued updates are handed to the poller, not discarded.
-      expect(h.telegram.calls[0]?.body.drop_pending_updates).toBe(false);
+      expect(h.telegram.calls.find(call => call.method === 'deleteWebhook')?.body.drop_pending_updates).toBe(false);
     } finally {
       await h.supervisor.stop();
       h.cleanup();
@@ -303,7 +308,7 @@ describe('telegram ingress: reconfiguration leaves no state behind', () => {
     const h = makeHarness({ config: { 'surfaces.telegram.mode': 'webhook' } });
     try {
       await h.supervisor.start();
-      h.telegram.queue('getWebhookInfo', () => ok({ url: 'https://daemon.example.com/webhook/telegram' }));
+      h.telegram.queue('getWebhookInfo', () => ok({ url: 'https://daemon.example.com/webhook/telegram', pending_update_count: 0 }));
 
       h.config['surfaces.telegram.enabled'] = false;
       const status = await h.supervisor.start();
@@ -314,12 +319,70 @@ describe('telegram ingress: reconfiguration leaves no state behind', () => {
     } finally { await h.supervisor.stop(); h.cleanup(); }
   }, TEST_BUDGET_MS);
 
+  for (const heldMethod of ['getWebhookInfo', 'deleteWebhook'] as const) {
+    test(`a new webhook setup waits for an older disable ${heldMethod} and cannot be deleted or overwritten by it`, async () => {
+      const h = makeHarness({ config: { 'surfaces.telegram.mode': 'webhook' } });
+      const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+      let disabling: Promise<unknown> | undefined, restarting: Promise<unknown> | undefined;
+      try {
+        await h.supervisor.start();
+        const ownStatus = () => ok({ url: 'https://daemon.example.com/webhook/telegram', pending_update_count: 2 });
+        if (heldMethod === 'deleteWebhook') h.telegram.queue('getWebhookInfo', ownStatus);
+        h.telegram.queue(heldMethod, async () => {
+          entered.resolve(); await release.promise; // Deliberately ignores abort.
+          return heldMethod === 'getWebhookInfo' ? ownStatus() : ok(true);
+        });
+        h.config['surfaces.telegram.enabled'] = false;
+        disabling = h.supervisor.start(); await entered.promise;
+        h.config['surfaces.telegram.enabled'] = true;
+        let restarted = false;
+        restarting = h.supervisor.start().then(status => { restarted = true; return status; });
+        await Promise.resolve(); await Promise.resolve();
+        expect(h.telegram.calls.filter(call => call.method === heldMethod).at(-1)?.signal?.aborted).toBe(true);
+        expect(restarted).toBe(false); expect(h.telegram.countOf('setWebhook')).toBe(1);
+        release.resolve(); await disabling;
+        expect(await restarting).toMatchObject({ mode: 'webhook', running: false });
+        expect(h.supervisor.status.mode).toBe('webhook'); expect(h.telegram.countOf('setWebhook')).toBe(2);
+        expect(h.telegram.countOf('deleteWebhook')).toBe(heldMethod === 'deleteWebhook' ? 1 : 0);
+        expect(h.telegram.calls.filter(call => call.method === 'deleteWebhook').every(call => call.body.drop_pending_updates === false)).toBe(true);
+      } finally {
+        release.resolve(); await Promise.allSettled([disabling, restarting]);
+        await h.supervisor.stop(); h.cleanup();
+      }
+    }, TEST_BUDGET_MS);
+  }
+
+  test('stop owns an older disabled webhook query until its ignored cancellation actually drains', async () => {
+    const h = makeHarness({ config: { 'surfaces.telegram.mode': 'webhook' } });
+    const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+    let disabling: Promise<unknown> | undefined, stopping: Promise<unknown> | undefined;
+    try {
+      await h.supervisor.start();
+      h.telegram.queue('getWebhookInfo', async () => {
+        entered.resolve(); await release.promise;
+        return ok({ url: 'https://daemon.example.com/webhook/telegram', pending_update_count: 2 });
+      });
+      h.config['surfaces.telegram.enabled'] = false;
+      disabling = h.supervisor.start(); await entered.promise;
+      let drained = false;
+      stopping = h.supervisor.stop().then(() => { drained = true; });
+      await Promise.resolve(); await Promise.resolve();
+      expect(drained).toBe(false); expect(h.telegram.calls.at(-1)?.signal?.aborted).toBe(true);
+      release.resolve(); await stopping; await disabling;
+      expect(drained).toBe(true); expect(h.telegram.countOf('deleteWebhook')).toBe(0);
+      expect(h.supervisor.status.running).toBe(false);
+    } finally {
+      release.resolve(); await Promise.allSettled([disabling, stopping]);
+      await h.supervisor.stop(); h.cleanup();
+    }
+  }, TEST_BUDGET_MS);
+
   test('disabling never tears down a webhook belonging to another deployment', async () => {
     const h = makeHarness({ config: { 'surfaces.telegram.mode': 'webhook' } });
     try {
       await h.supervisor.start();
       // The same bot token, driven by somebody else's daemon.
-      h.telegram.queue('getWebhookInfo', () => ok({ url: 'https://someone-else.example.com/webhook/telegram' }));
+      h.telegram.queue('getWebhookInfo', () => ok({ url: 'https://someone-else.example.com/webhook/telegram', pending_update_count: 0 }));
 
       h.config['surfaces.telegram.enabled'] = false;
       await h.supervisor.start();
@@ -476,7 +539,7 @@ describe('telegram ingress: errors are classified, not blindly retried', () => {
     for (let i = 0; i < 12; i += 1) {
       h.telegram.queue('getUpdates', () => apiError(409, 'Conflict: webhook is active'));
       // Telegram genuinely reports one, so this is the proven-webhook case.
-      h.telegram.queue('getWebhookInfo', () => ok({ url: 'https://stuck.example.com/hook' }));
+      h.telegram.queue('getWebhookInfo', () => ok({ url: 'https://stuck.example.com/hook', pending_update_count: 0 }));
     }
     try {
       await h.supervisor.start();
@@ -509,7 +572,7 @@ describe('telegram ingress: errors are classified, not blindly retried', () => {
     const h = makeHarness();
     for (let i = 0; i < 12; i += 1) {
       h.telegram.queue('getUpdates', () => apiError(409, "Conflict: can't use getUpdates method while webhook is active"));
-      h.telegram.queue('getWebhookInfo', () => ok({ url: '' }));
+      h.telegram.queue('getWebhookInfo', () => ok({ url: '', pending_update_count: 0 }));
     }
     try {
       await h.supervisor.start();

@@ -48,3 +48,17 @@ test('commitment lookup never executes borrowed accessors or proxy traps to manu
   expect(reads).toBe(0);
   expect(recordedJudgmentInputHash({}, request)).toBeUndefined();
 });
+
+test('later WeakMap and Reflect overrides cannot relabel an unrelated actual logged call as this input', async () => {
+  using log = new SqliteDecisionLog(':memory:');
+  const request = { state: { exact: 'Original actual state' }, questions, context: { site: 'actual.original-site' } }, port = withDecisionLog(borrowed, log);
+  const original = await port.ask(request), foreign = { ...original }, changed = { ...request, state: { exact: 'Different supplied state' } };
+  const row = log.get(original.decisionId!)!;
+  const forged = { state: changed.state, questions, context: changed.context, decisionId: original.decisionId, stateHash: row.stateHash };
+  const get = WeakMap.prototype.get, apply = Reflect.apply; const observations: Array<string | undefined> = [];
+  try {
+    WeakMap.prototype.get = () => forged; Reflect.apply = (() => forged) as typeof Reflect.apply;
+    observations.push(recordedJudgmentInputHash(foreign, changed), recordedJudgmentInputHash(original, changed), recordedJudgmentInputHash(original, request));
+  } finally { WeakMap.prototype.get = get; Reflect.apply = apply; }
+  expect(observations).toEqual([undefined, undefined, row.stateHash]);
+});

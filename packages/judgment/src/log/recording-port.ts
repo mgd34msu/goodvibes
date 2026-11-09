@@ -21,6 +21,7 @@ interface RecordedInput {
 // Reuse the actual recorder's immutable input and existing commitment, never
 // another copy or a text-keyed global cache. Original result GC releases it.
 const recordedInputResults = new WeakMap<object, RecordedInput>();
+const applyRecordedInput = Reflect.apply, getRecordedInput = WeakMap.prototype.get, setRecordedInput = WeakMap.prototype.set;
 
 /** Descriptor-only JSON comparison. Never execute a getter/toJSON/thenable in
  * a borrowed requested image merely to recover its recorded commitment. */
@@ -49,7 +50,7 @@ function sameRecordedData(left: unknown, right: unknown): boolean {
  * hashing and conveys no authority beyond the actual saved call identity. */
 export function recordedJudgmentInputHash(value: unknown, request: unknown): string | undefined {
   if (!value || typeof value !== 'object' || !request || typeof request !== 'object' || nodeTypes.isProxy(request)) return undefined;
-  const recorded = recordedInputResults.get(value); if (!recorded || typeof recorded.decisionId !== 'string' || !recorded.decisionId) return undefined;
+  const recorded = applyRecordedInput(getRecordedInput, recordedInputResults, [value]) as RecordedInput | undefined; if (!recorded || typeof recorded.decisionId !== 'string' || !recorded.decisionId) return undefined;
   try {
     const id = Object.getOwnPropertyDescriptor(value, 'decisionId'), state = Object.getOwnPropertyDescriptor(request, 'state'), questions = Object.getOwnPropertyDescriptor(request, 'questions'), context = Object.getOwnPropertyDescriptor(request, 'context');
     if (!id || !('value' in id) || id.value !== recorded.decisionId || !state || !questions || !('value' in state) || !('value' in questions)
@@ -326,7 +327,7 @@ export function withDecisionLog(inner: JudgmentPort, log: DecisionLog, now: () =
       assertLogCurrent(logAssertion);
       const decisionId = recorded(() => log.record(entry));
       const returned = recordImmutableJudgmentResult(retainNativeModelObservation(originalResult, { ...resultToReturn, decisionId }));
-      recordedInputResults.set(returned, { state: input.state, questions: input.questions, context: call.context, stateHash: call.stateHash, decisionId });
+      applyRecordedInput(setRecordedInput, recordedInputResults, [returned, { state: input.state, questions: input.questions, context: call.context, stateHash: call.stateHash, decisionId }]);
       return returned;
     },
   };

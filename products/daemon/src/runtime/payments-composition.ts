@@ -138,6 +138,9 @@ export function createPaymentsServices(options: PaymentsCompositionOptions): Pay
     declareNativeData ? () => declareNativeData('payment-retained-holds-v2') : undefined,
     declareNativeData ? () => declareNativeData('payment-operation-reconciliation-v2') : undefined,
     id => operations.get(id)?.outcome?.startsWith('owner-reconciliation-pending-') === true,
+    () => purchases.list({ limit: 1, dayKey: undefined }).total > 0
+      || operations.list().some(operation => operation.totalMinorUnits !== null
+        && operation.phase !== null && ['awaiting-window', 'arming-payment', 'submit-pending', 'submitted'].includes(operation.phase)),
   );
   const checkout: CheckoutComposition = {
     seam: options.checkoutSeam,

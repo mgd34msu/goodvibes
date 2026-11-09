@@ -1187,6 +1187,15 @@ journal closes only after that write is confirmed. An interrupted reconciliation
 keeps its saved finding and resumes bookkeeping on the next payment-host start;
 the owner can also refresh and repeat that same finding.
 
+Until its accounting receipt is durable, an interrupted finding keeps the
+original committed budget entry even beyond ordinary history pruning. Once the
+receipt exists, old daily spend can be pruned without repeating that settlement.
+The budget also retains its original private file source: external replacement,
+loss, changed ownership/permissions, or unsafe links make accounting unavailable.
+Repair the original evidence and restart the payment host. When purchase or
+financial-operation history exists, a missing budget is unavailable rather than
+a fresh spending allowance; nothing silently recreates it as empty.
+
 Original merchant receipts retain their verified or unverified provenance.
 The owner’s finding is a separate append-only `reconciliations` entry in purchase
 history; when no receipt exists, no tax/shipping breakdown or merchant receipt

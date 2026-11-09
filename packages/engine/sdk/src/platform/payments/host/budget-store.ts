@@ -1,16 +1,21 @@
 /** Durable payment accounting. Missing state is an unused ledger; damaged or
  * unsupported state disables budget operations without taking down the daemon.
+ * A native host with known purchase/operation history cannot interpret a
+ * missing budget as unused. Retain the actual selected physical file across
+ * awaits and writes; another owner's replacement never becomes this owner's.
  * Never discard accounting entries and then offer their money again.
  *
  * Checkout holds persist until a known-safe release or commit. Version 1 holds
  * upgrade conservatively because their records did not distinguish temporary
- * reservations from unresolved checkouts. New schema 2 stores that distinction.
+ * reservations from unresolved checkouts. Schema 2 stores that distinction;
+ * schema 3 adds the once-only owner-reconciliation accounting receipts.
  * A failed post-charge write keeps the spend in memory and retries persistence;
  * its on-disk checkout hold remains protected if the process dies first.
  */
 import { atomicWriteFileSync } from '../../config/atomic-write.js';
 import { drainOwned } from '@goodvibes-jev/judgment';
-import { readFileObservation } from '../../utils/file-observation.js';
+import { fileObservationIdentity, readFileObservation, type FileObservation } from '../../utils/file-observation.js';
+import { lstatSync } from 'node:fs';
 import { logger } from '../../utils/logger.js';
 import { BudgetLedger } from '../budget.js';
 import type {
@@ -96,6 +101,7 @@ function isReservation(value: unknown): value is BudgetReservation {
 }
 
 interface LoadedBudget {
+  readonly observed?: FileObservation;
   readonly state?: BudgetStateSnapshot;
   readonly unavailable?: true;
   readonly migrate?: true;
@@ -106,8 +112,10 @@ function loadInitialState(filePath: string): LoadedBudget {
     return { unavailable: true };
   };
   let parsed: unknown;
+  let observed: FileObservation;
   try {
-    parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(readFileObservation(filePath).bytes));
+    observed = readFileObservation(filePath);
+    parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(observed.bytes));
   } catch (error) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return {};
     return invalid();
@@ -141,7 +149,7 @@ function loadInitialState(filePath: string): LoadedBudget {
       toleranceMinorUnits: entry.toleranceMinorUnits, expiresAtMs: entry.expiresAtMs,
       retainUntilSettled: entry.retainUntilSettled === true })) },
   );
-  return { state: { spend, reservations, ...(reconciliations.length === 0 ? {} : { reconciliations }) }, ...(file.version === 1 ? { migrate: true as const } : {}) };
+  return { observed, state: { spend, reservations, ...(reconciliations.length === 0 ? {} : { reconciliations }) }, ...(file.version === 1 ? { migrate: true as const } : {}) };
 }
 
 export class PaymentBudgetUnavailableError extends Error {
@@ -161,6 +169,8 @@ export class DurableBudgetLedger extends BudgetLedger {
   private readonly beforeFormatWrite: (() => void) | undefined;
   private readonly beforeReconciliationWrite: (() => void) | undefined;
   private readonly retainPendingSpend: ((purchaseId: string) => boolean) | undefined;
+  private readonly expectExisting: (() => boolean) | undefined;
+  private observed: FileObservation | null;
   /**
    * Set when a write to disk failed and was not retried at that moment.
    * Checked at the START of every mutating method below, before its own
@@ -177,19 +187,21 @@ export class DurableBudgetLedger extends BudgetLedger {
    * to do with retention.
    */
   constructor(filePath: string, now: () => number = Date.now, beforeFormatWrite?: () => void, beforeReconciliationWrite?: () => void,
-    retainPendingSpend?: (purchaseId: string) => boolean) {
+    retainPendingSpend?: (purchaseId: string) => boolean, expectExisting?: () => boolean) {
     const loaded = loadInitialState(filePath);
     super(loaded.state);
     this.filePath = filePath;
     this.beforeFormatWrite = beforeFormatWrite;
     this.beforeReconciliationWrite = beforeReconciliationWrite;
     this.retainPendingSpend = retainPendingSpend;
+    this.expectExisting = expectExisting;
+    this.observed = loaded.observed ?? null;
     this.unavailable = loaded.unavailable === true;
     if (this.unavailable) return;
     // An existing v2 hold can have been imported from another supported
     // installation. Admit its reader requirement before exposing accounting,
     // even when neither migration nor pruning needs to rewrite the file.
-    try { this.declareRetainedHolds(); this.declareReconciliations(); }
+    try { this.assertAvailable(); this.declareRetainedHolds(); this.declareReconciliations(); }
     catch { this.unavailable = true; return; }
     const before = super.state().spend.length;
     try { super.prune(now(), this.retainPendingSpend); }
@@ -205,6 +217,28 @@ export class DurableBudgetLedger extends BudgetLedger {
 
   private assertAvailable(): void {
     if (this.unavailable) throw new PaymentBudgetUnavailableError();
+    try {
+      if (this.observed !== null) {
+        // The inode/owner/mode/size/nanosecond time stamp fences the selected
+        // native source. No digest or whole-ledger read on ordinary snapshots.
+        if (fileObservationIdentity(this.filePath) !== this.observed.physical) throw new Error();
+      } else {
+        try { lstatSync(this.filePath); }
+        catch (error) {
+          if (!error || typeof error !== 'object' || !('code' in error) || error.code !== 'ENOENT') throw error;
+          const expected: unknown = this.expectExisting ? this.expectExisting() : false;
+          if (typeof expected !== 'boolean') { drainOwned(expected); throw new Error(); }
+          if (!expected) return;
+          throw new Error();
+        }
+        // Missing on construction does not authorize replacing a later file,
+        // dangling symlink, or another host's newly created accounting.
+        throw new Error();
+      }
+    } catch {
+      this.unavailable = true;
+      throw new PaymentBudgetUnavailableError();
+    }
   }
 
   override snapshot(limits: BudgetLimits, nowMs: number, timezone: string): PoolSnapshot {
@@ -341,10 +375,20 @@ export class DurableBudgetLedger extends BudgetLedger {
     // before that fact can reach disk. Early compatible writes keep rollback.
     this.declareRetainedHolds();
     this.declareReconciliations();
-    assertCurrent?.();
+    const current = () => { this.assertAvailable(); assertCurrent?.(); this.assertAvailable(); };
+    current();
     const state = super.state();
     const contents: BudgetFile = { version: state.reconciliations?.length ? 3 : BUDGET_FILE_VERSION, ...state };
-    atomicWriteFileSync(this.filePath, `${JSON.stringify(contents, null, 2)}\n`, { mode: 0o600, mkdirp: true, assertCurrent });
+    const bytes = `${JSON.stringify(contents, null, 2)}\n`;
+    atomicWriteFileSync(this.filePath, bytes, { mode: 0o600, mkdirp: true, assertCurrent: current,
+      onEffect: published => {
+        if (!published) return;
+        try {
+          const observed = readFileObservation(this.filePath);
+          if (!observed.bytes.equals(Buffer.from(bytes))) throw new Error();
+          this.observed = observed;
+        } catch { this.unavailable = true; throw new PaymentBudgetUnavailableError(); }
+      } });
     this.persistPending = false;
   }
 

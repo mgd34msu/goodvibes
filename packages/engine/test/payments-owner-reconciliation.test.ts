@@ -1,6 +1,6 @@
-/** Regression source: deliberately unrun until the coding worklist is done. */
+/** Explicit owner findings settle original funds without another submission. */
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DurablePaymentOperations } from '../sdk/src/platform/payments/host/operation-store.js';
@@ -123,6 +123,19 @@ test('an identical-value hold reissued while the ledger append awaits is not the
   expect(f.budget.state().reconciliations).toBeUndefined();
   expect((await f.journal.list())).toHaveLength(1);
   expect(f.operations.get(f.view.purchaseId)?.outcome).toBe('owner-reconciliation-pending-purchased');
+});
+
+test('an identical-value budget file replacement during the ledger await cannot be overwritten or reconciled', async () => {
+  const f = await fixture(), entered = gate(), resume = gate();
+  const original = f.purchases.recordOwnerReconciliation.bind(f.purchases);
+  f.purchases.recordOwnerReconciliation = async (checkpoint, current) => { entered.release(); await resume.pending; current(); await original(checkpoint, current); };
+  const pending = f.reconcile('not-purchased'); await entered.pending;
+  const budgetPath = join(f.root, 'budget.json'), bytes = readFileSync(budgetPath), replacement = join(f.root, 'foreign-budget.json');
+  writeFileSync(replacement, bytes); renameSync(replacement, budgetPath);
+  resume.release(); await expect(pending).rejects.toThrow();
+  expect(readFileSync(budgetPath)).toEqual(bytes);
+  expect(f.operations.get(f.view.purchaseId)?.outcome).toBe('owner-reconciliation-pending-not-purchased');
+  expect((await f.journal.list())).toHaveLength(1);
 });
 
 test('replacing a retained journal method during the ledger await refuses before accounting or cleanup', async () => {

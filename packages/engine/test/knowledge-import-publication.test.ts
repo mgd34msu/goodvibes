@@ -176,3 +176,54 @@ test('Classic import rejects a retired native guard before publishing any staged
     expect(cacheState(store)).toEqual(before); expect(readFileSync(store.storagePath)).toEqual(bytes); expect(committed).toBe(0);
   });
 });
+
+/** UNRUN: completion observers cannot revoke an acknowledged native import. */
+import { logger } from '../sdk/src/platform/utils/logger.js';
+
+test('throwing postcommit notification retains the real receipt and native rows across reopen', async () => {
+  const store = await fixture(), warnings: unknown[] = [], secret = 'SYNTHETIC_PRIVATE_OBSERVER_ERROR';
+  const warn = spyOn(logger, 'warn').mockImplementation((...args) => { warnings.push(args); });
+  try {
+    const receipt = await store.applyPreparedIngest(input, graph, {}, () => { throw new Error(secret); });
+    expect(receipt.sources[0]).toBe(store.getSource('generated'));
+    expect(receipt.nodes[0]).toBe(store.getNode('generated-node'));
+    expect(localGeneratedRows(store)).toEqual([1, 1, 1, 1, 1, 1]);
+    const reopened = await open(store.storagePath);
+    expect(reopened.getSource('generated')?.artifactId).toBe('generated-artifact');
+    expect(reopened.getNode('generated-node')).toEqual(receipt.nodes[0]);
+    expect(JSON.stringify(warnings)).toContain('completion notification failed');
+    expect(JSON.stringify(warnings)).not.toContain(secret);
+  } finally { warn.mockRestore(); }
+});
+
+test('returned async observer is drained without delaying or rejecting the committed receipt', async () => {
+  const store = await fixture(), release = Promise.withResolvers<void>(), seen: unknown[] = [], warnings: unknown[] = [];
+  const unhandled = (reason: unknown) => { seen.push(reason); };
+  process.on('unhandledRejection', unhandled);
+  const warn = spyOn(logger, 'warn').mockImplementation((...args) => { warnings.push(args); });
+  let called = 0, settled = false;
+  try {
+    const receipt = await store.applyPreparedIngest(input, graph, {}, async () => {
+      called++; await release.promise; settled = true; throw new Error('SYNTHETIC_PRIVATE_LATE_NOTIFICATION');
+    });
+    expect(called).toBe(1); expect(settled).toBe(false);
+    expect(receipt.sources[0]).toBe(store.getSource('generated'));
+    expect((await open(store.storagePath)).getSource('generated')?.artifactId).toBe('generated-artifact');
+    release.resolve();
+    await new Promise<void>(resolve => setImmediate(resolve));
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(settled).toBe(true); expect(seen).toEqual([]);
+    expect(JSON.stringify(warnings)).toContain('asynchronous completion notification');
+    expect(JSON.stringify(warnings)).not.toContain('SYNTHETIC_PRIVATE_LATE_NOTIFICATION');
+  } finally { release.resolve(); warn.mockRestore(); process.off('unhandledRejection', unhandled); }
+});
+
+test('ordinary primitive notification returns do not produce a spurious warning', async () => {
+  const store = await fixture(), notifications: string[] = [], warnings: unknown[] = [];
+  const warn = spyOn(logger, 'warn').mockImplementation((...args) => { warnings.push(args); });
+  try {
+    const receipt = await store.applyPreparedIngest(input, graph, {}, () => notifications.push('committed'));
+    expect(notifications).toEqual(['committed']); expect(receipt.sources[0]).toBe(store.getSource('generated'));
+    expect(JSON.stringify(warnings)).not.toContain('notification');
+  } finally { warn.mockRestore(); }
+});

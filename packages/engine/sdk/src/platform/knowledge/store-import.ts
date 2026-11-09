@@ -1,3 +1,4 @@
+import { notifyKnowledgeCommitted } from './commit-notification.js';
 import { knowledgeRecordSnapshotFromRows, type KnowledgeRecordSnapshot } from './store-record-snapshot.js';
 import { captureKnowledgeStoreInput, copyKnowledgeRepresentation } from './store-record-representation.js';
 import type { SQLiteStore } from '../state/sqlite-store.js';
@@ -165,6 +166,6 @@ export async function applyKnowledgeImport(store: KnowledgeStore, view: Knowledg
   const receipt = Object.freeze({ nodes: Object.freeze(nodes.map(({ record }) => record)), sources: Object.freeze([...sourceWrites]), edges: Object.freeze([...edgeWrites]) });
   // A visible but indeterminate publication retains its internal mirror and
   // artifact references; only a durable acknowledgment reaches this callback.
-  onCommitted?.();
+  notifyKnowledgeCommitted(onCommitted);
   return receipt;
 }

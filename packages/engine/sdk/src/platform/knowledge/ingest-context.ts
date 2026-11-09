@@ -24,6 +24,8 @@ export interface KnowledgeIngestOwnership {
   readonly deferSemanticEnrichment?: boolean | undefined;
   readonly signal?: AbortSignal | undefined;
   readonly assertCurrent?: (() => void) | undefined;
-  /** Called after the guarded atomic commit; later cancellation cannot undo that commit. */
+  /** Synchronous notification after the guarded durable commit; not an
+   * admission check. Observer errors/async returns cannot undo the publication
+   * or replace its receipt; returned async work is drained without awaiting. */
   readonly onCommitted?: ((sourceId: string) => void) | undefined;
 }

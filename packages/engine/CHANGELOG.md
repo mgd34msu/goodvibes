@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Return the committed knowledge import receipt when a completion observer
+  throws, and observe async notification failures without waiting on them.
+  Later memory-sync failures remain visible without a false extraction-failed
+  event after publication.
+
 - Skip full-source hashing in offline checker advisories that have no saved
   readings to compare. Preserve the same source scopes and retain complete
   source bindings for actual preparation and saved-reading checks.

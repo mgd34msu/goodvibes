@@ -1,3 +1,5 @@
+import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
+import type { KnowledgeIngestContext } from '../sdk/src/platform/knowledge/ingest-context.js';
 import { configureKnowledgeArtifactReferences } from '../sdk/src/platform/knowledge/artifact-reference-ensemble.js';
 import type { ArtifactCreatedLeaf } from '../sdk/src/platform/artifacts/storage-ownership.js';
 import type { ArtifactStreamCreateInput } from '../sdk/src/platform/artifacts/types.js';
@@ -82,10 +84,70 @@ test('guarded ingestion reports the true commit before a later generic completio
   const artifacts = new ArtifactStore({ rootDir: join(root, 'artifacts') });
   const store = new KnowledgeStore({ dbPath: join(root, 'knowledge-wiki.sqlite') }); stores.push(store); await store.init();
   const artifact = await artifacts.create({ kind: 'document', mimeType: 'text/plain', text: 'AI is the central topic.' });
-  const context = { store, artifactStore: artifacts, connectorRegistry: new KnowledgeConnectorRegistry(), emitIfReady() {},
+  const bus = new RuntimeEventBus(), emitted = spyOn(bus, 'emit');
+  const context: KnowledgeIngestContext = { store, artifactStore: artifacts, connectorRegistry: new KnowledgeConnectorRegistry(),
+    emitIfReady(fn, sessionId) { fn(bus, { traceId: 'ingest-commit', sessionId: sessionId ?? 'ingest-session', source: 'test' }); },
     syncReviewedMemory: async () => { throw new Error('Synthetic post-commit completion failure'); }, lint: async () => [], listConnectors: () => [] };
   let committed: string | undefined;
-  await expect(ingestKnowledgeArtifact(context, { artifactId: artifact.id }, { assertCurrent() {}, onCommitted: id => { committed = id; } })).rejects.toThrow('Synthetic');
+  await expect(ingestKnowledgeArtifact(context, { artifactId: artifact.id }, { assertCurrent() {}, onCommitted: id => { committed = id; throw new Error('Synthetic observer failure after actual commit'); } })).rejects.toThrow('Synthetic post-commit completion failure');
   expect(committed).toBeDefined(); expect(store.getSource(committed!)?.status).toBe('indexed');
   expect(artifacts.get(artifact.id)).not.toBeNull();
+  const events = emitted.mock.calls.map(([, envelope]) => envelope.type);
+  expect(events).toContain('KNOWLEDGE_EXTRACTION_COMPLETED');
+  expect(events).not.toContain('KNOWLEDGE_EXTRACTION_FAILED');
+  emitted.mockRestore();
+});
+
+
+test('ordinary precommit extraction failure still emits the actual failed event without a published extraction', async () => {
+  const { createKnowledgeIngestUriCanonicalizer } = await import('../sdk/src/platform/knowledge/uri-canonicalization/ingest-owner.js');
+  const { prepareKnowledgeExtraction } = await import('../sdk/src/platform/knowledge/prepared-extraction.js');
+  const { finalizeKnowledgeIngestedSource } = await import('../sdk/src/platform/knowledge/ingest-compile.js');
+  const root = mkdtempSync(join(tmpdir(), 'knowledge-precommit-failed-event-')); roots.push(root);
+  previous = installJudgmentPort(fakePort(() => noulAnswer(0.99)).port); installed = true;
+  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') }); stores.push(store); await store.init();
+  const artifacts = new ArtifactStore({ rootDir: join(root, 'artifacts') });
+  const artifact = await artifacts.create({ kind: 'document', mimeType: 'text/plain', text: 'A synthetic document.' });
+  const original = await store.upsertSource({ id: 'precommit-source', connectorId: 'manual', sourceType: 'document', status: 'indexed' });
+  const bus = new RuntimeEventBus(), emitted = spyOn(bus, 'emit');
+  const context: KnowledgeIngestContext = { store, artifactStore: artifacts, connectorRegistry: new KnowledgeConnectorRegistry(),
+    emitIfReady(fn, sessionId) { fn(bus, { traceId: 'precommit', sessionId: sessionId ?? 'session', source: 'test' }); },
+    syncReviewedMemory: async () => {}, lint: async () => [], listConnectors: () => [] };
+  const uris = createKnowledgeIngestUriCanonicalizer(context); uris.reserveSource(original.id); uris.attachArtifact(artifact.id);
+  const token = await prepareKnowledgeExtraction(context, original.id, artifact.id, uris);
+  const failure = spyOn(store, 'applyPreparedIngest').mockRejectedValue(new Error('Synthetic precommit failure'));
+  try {
+    await expect(finalizeKnowledgeIngestedSource(context, { sourceId: original.id, artifactId: artifact.id, preparedExtraction: token,
+      sourceType: 'document', connectorId: 'manual', tags: [], metadata: {} }, uris)).rejects.toThrow('Synthetic precommit failure');
+    expect(store.getSource(original.id)).toBe(original); expect(store.getExtractionBySourceId(original.id)).toBeNull();
+    const events = emitted.mock.calls.map(([, envelope]) => envelope.type);
+    expect(events).toContain('KNOWLEDGE_EXTRACTION_FAILED'); expect(events).not.toContain('KNOWLEDGE_EXTRACTION_COMPLETED');
+  } finally { failure.mockRestore(); emitted.mockRestore(); }
+});
+
+
+test('actual ingest drains a returned async ownership notification and returns the indexed source before it settles', async () => {
+  const { ingestKnowledgeArtifact } = await import('../sdk/src/platform/knowledge/ingest-inputs.js');
+  const root = mkdtempSync(join(tmpdir(), 'ingest-async-notification-')); roots.push(root);
+  previous = installJudgmentPort(fakePort(() => noulAnswer(0.99)).port); installed = true;
+  const artifacts = new ArtifactStore({ rootDir: join(root, 'artifacts') });
+  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') }); stores.push(store); await store.init();
+  const artifact = await artifacts.create({ kind: 'document', mimeType: 'text/plain', text: 'A synthetic original document.' });
+  const context: KnowledgeIngestContext = { store, artifactStore: artifacts, connectorRegistry: new KnowledgeConnectorRegistry(),
+    emitIfReady() {}, syncReviewedMemory: async () => {}, lint: async () => [], listConnectors: () => [] };
+  const release = Promise.withResolvers<void>(), unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+  process.on('unhandledRejection', onUnhandled);
+  let notified: string | undefined, settled = false;
+  try {
+    const result = await ingestKnowledgeArtifact(context, { artifactId: artifact.id }, {
+      assertCurrent() {}, deferSemanticEnrichment: true,
+      async onCommitted(id) { notified = id; await release.promise; settled = true; throw Error('Synthetic delayed ownership notification rejection'); },
+    });
+    expect(notified).toBe(result.source.id); expect(settled).toBe(false);
+    expect(result.source.status).toBe('indexed'); expect(store.getSource(result.source.id)).toBe(result.source);
+    expect(store.getExtractionBySourceId(result.source.id)?.artifactId).toBe(artifact.id);
+    release.resolve(); await new Promise<void>(resolve => setImmediate(resolve)); await new Promise<void>(resolve => setImmediate(resolve));
+    expect(settled).toBe(true); expect(unhandled).toEqual([]); expect(artifacts.getRecord(artifact.id)).not.toBeNull();
+  } finally { release.resolve(); process.off('unhandledRejection', onUnhandled); }
 });

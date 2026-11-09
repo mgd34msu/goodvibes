@@ -1,10 +1,11 @@
+import { notifyKnowledgeCommitted } from './commit-notification.js';
 import { assertKnowledgeRestriction } from './extraction-ownership.js';
 import { isClassicOperation } from '../runtime/decision-policy.js';
 import { createKnowledgeIngestUriCanonicalizer, assertKnowledgeIngestUriOperation, retireKnowledgeIngestUriOperation, type KnowledgeIngestUriCanonicalizer } from './uri-canonicalization/ingest-owner.js';
 import type { KnowledgeUriCanonicalizer } from './uri-canonicalization/reader.js';
 import { knowledgeSourceCrawledNow } from './store-record-representation.js';
 import { prepareKnowledgeSourceRecord, prepareKnowledgeExtractionRecord } from './store-evidence-writes.js';
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
+import { drainOwned, opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { snapshotNodeInput } from './activation/projection.js';
 import { knowledgeIngestGuard } from './ingest-preparation.js';
 import { KnowledgeExtractionJudgmentHoldError } from './extraction-policy.js';
@@ -75,7 +76,7 @@ export async function finalizeKnowledgeIngestedSource(
   const canonicalCurrent = knowledgeIngestGuard(context, input.sourceId, canonicalUri ?? undefined, signal);
   const assertCurrent = () => { assertKnowledgeRestriction(ownership.assertCurrent); assertKnowledgeIngestUriOperation(context, uris, input.sourceId, input.artifactId); sourceCurrent(); canonicalCurrent(); };
   assertCurrent();
-  let consumed = false;
+  let consumed = false, published = false;
   try {
     const token = input.preparedExtraction ?? await prepareKnowledgeExtraction(context, input.sourceId, input.artifactId, uris, { signal, assertCurrent });
     const { record, extracted, assertCurrent: assertExtractionCurrent } = consumeKnowledgeExtraction(context, token, input.sourceId, input.artifactId, uris);
@@ -134,7 +135,10 @@ export async function finalizeKnowledgeIngestedSource(
       await compileKnowledgeSourceRecords(context, source, extraction, entityHints, draft.writer, uris);
       check();
       return { nodes: [...draft.nodes.values()], edges: draft.edges, issues: [], assertCurrent: assertPrepared };
-    }, { signal }, () => ownership.onCommitted?.(input.sourceId));
+    }, { signal }, () => {
+      published = true;
+      notifyKnowledgeCommitted(() => ownership.onCommitted?.(input.sourceId));
+    });
     const { source, extraction } = committed!;
     context.emitIfReady((bus, ctx) => emitKnowledgeExtractionCompleted(bus, ctx, {
       sourceId: input.sourceId, extractionId: extraction.id, format: extraction.format, estimatedTokens: extraction.estimatedTokens,
@@ -155,10 +159,17 @@ export async function finalizeKnowledgeIngestedSource(
     await context.syncReviewedMemory();
     return { source, artifactId: input.artifactId, extraction };
   } catch (error) {
-    context.emitIfReady((bus, ctx) => emitKnowledgeExtractionFailed(bus, ctx, {
-      sourceId: input.sourceId,
-      error: summarizeError(error),
-    }), input.sessionId);
+    if (published) {
+      // A later event/memory followup failure is still returned to its caller,
+      // but cannot truthfully be reported as failed extraction/publication.
+      try { logger.warn('Knowledge source committed; a later ingest completion step failed.'); }
+      catch (reportingError) { drainOwned(reportingError); }
+    } else {
+      context.emitIfReady((bus, ctx) => emitKnowledgeExtractionFailed(bus, ctx, {
+        sourceId: input.sourceId,
+        error: summarizeError(error),
+      }), input.sessionId);
+    }
     throw error;
   } finally { if (consumed) retireKnowledgeIngestUriOperation(uris); }
 }

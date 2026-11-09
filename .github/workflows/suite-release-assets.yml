@@ -76,6 +76,9 @@ jobs:
           retention-days: 7
           if-no-files-found: error
   collect:
+    concurrency:
+      group: native-release-publication-${{ inputs.tag }}
+      cancel-in-progress: false
     needs: package
     runs-on: ubuntu-24.04
     timeout-minutes: 15

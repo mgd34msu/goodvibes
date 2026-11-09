@@ -365,15 +365,13 @@ jobs:
           name: installer-release-assets
           path: /tmp/installer-release-assets
       - name: Complete the admitted native release
+        env:
+          RELEASE_TAG: ${{ needs.verify-tag-version.outputs.tag }}
+          SOURCE_SHA: ${{ needs.verify-tag-version.outputs.sha }}
         run: |
-          # Retain original CI-admitted bytes on collisions; add missing targets,
-          # browser driver and WebUI from the same verified source release.
-          for asset in /tmp/installer-release-assets/*; do
-            name=$(basename "$asset")
-            if [ ! -e "/tmp/native-release-assets/$name" ]; then
-              cp "$asset" "/tmp/native-release-assets/$name"
-            fi
-          done
+          # CI-admitted bytes win collisions; all selected reader/companion
+          # pins must match those actual bytes before adding any missing files.
+          python3 .github/scripts/merge-suite-release-assets.py /tmp/native-release-assets /tmp/installer-release-assets "$RELEASE_TAG" "$SOURCE_SHA"
       - name: Upload admitted native release assets
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

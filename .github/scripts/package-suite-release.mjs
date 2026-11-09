@@ -15,6 +15,10 @@ const root = process.cwd();
 // Reader evidence must come from the exact selected release source, not that
 // coordinator's former relative directory or a nearby installed engine.
 const { inspectTerminalReaderArtifact, retainTerminalReaderCohort } = await import(pathToFileURL(join(root, 'packages/engine/toolchain/src/lib/client-reader-artifact.ts')).href);
+const { clientReaderPayloadPaths, clientReaderMemberAsset } = await import(pathToFileURL(join(root, 'packages/engine/sdk/src/platform/runtime/client-reader-artifact.ts')).href);
+const { resolveDaemonNativePayloads, retainDaemonNativeFiles, parseDaemonCiArtifact, assertDaemonNativePayloadPins } = await import(pathToFileURL(join(root, 'packages/engine/sdk/src/platform/runtime/daemon-native-cohort.ts')).href);
+const { realUpdateFileIo } = await import(pathToFileURL(join(root, 'packages/engine/sdk/src/platform/runtime/update-file-io.ts')).href);
+const { parseNativeReaderCapabilities } = await import(pathToFileURL(join(root, 'packages/engine/sdk/src/platform/runtime/native-reader-compatibility.ts')).href);
 const run = (command, args, cwd = root) => execFileSync(command, args, { cwd, stdio: ['ignore', 'pipe', 'inherit'], timeout: 300_000 }).toString().trim();
 const source = run('git', ['rev-parse', 'HEAD']);
 const sourceTree = run('git', ['rev-parse', 'HEAD^{tree}']);
@@ -38,26 +42,46 @@ for (const [product, command, output] of [['tui', 'goodvibes', 'dist'], ['agent'
   run('bun', ['run', product === 'tui' ? 'build' : 'build:binary', '--target', target], join(root, 'products', product));
   const directory = join(root, 'products', product, output);
   const binary = join(directory, `${command}-${suffix}`);
+  const extension = platform === 'linux' ? 'so' : 'dylib';
+  const daemonPayloads = product === 'daemon' && platform === 'linux' ? resolveDaemonNativePayloads(platform, arch) : undefined;
+  const readerCurrent = daemonPayloads ? retainDaemonNativeFiles(daemonPayloads.map(payload => ({ label: payload.relativePath, path: join(directory, payload.relativePath), assetName: payload.assetName, executable: payload.executable })), realUpdateFileIo)
+    : retainTerminalReaderCohort(directory, `@goodvibes-jev/${product}`, target);
+  readerCurrent?.();
   assert.equal(run(binary, ['--version']), `${command} ${tag.slice(1)}`);
-  const readerCurrent = product === 'daemon' && platform !== 'darwin' ? undefined : retainTerminalReaderCohort(directory, `@goodvibes-jev/${product}`, target);
+  readerCurrent?.();
   put(binary);
   if (platform === 'linux') for (const ending of ['.bun', '.bun.json', '.bun.LICENSE.md']) put(binary + ending);
-  if (readerCurrent) {
-    const names = [basename(binary), ...(platform === 'linux' ? ['.bun', '.bun.LICENSE.md', '.bun.json'].map(ending => basename(binary) + ending) : [])];
-    const artifact = inspectTerminalReaderArtifact({ directory, packageName: `@goodvibes-jev/${product}`, version: tag.slice(1),
-      target, sourceCommit: source, sourceTree, headCommit: source, assertCurrent: readerCurrent,
-      files: names.map(path => ({ path, ...files[path], mode: path === basename(binary) || path.endsWith('.bun') ? 0o755 : 0o644 })) });
-    readerCurrent();
-    const name = `${basename(binary)}.reader-ci-artifact.json`;
-    writeFileSync(join(destination, name), JSON.stringify(artifact, null, 2) + '\n', { flag: 'wx', mode: 0o644 });
-    const bytes = readFileSync(join(destination, name));
-    files[name] = { sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length };
-  }
-  const extension = platform === 'linux' ? 'so' : 'dylib';
+  // Complete actual Darwin daemon companions precede inspection. Pins are
+  // computed once by put(), then mapped from flat assets to fixed runtime paths.
   put(join(directory, `lib/sqlite-vec-${target}/vec0.${extension}`), `sqlite-vec-${target}.${extension}`);
   if (product === 'daemon' && platform === 'darwin') {
     put(join(directory, `lib/sqlite-${target}/libsqlite3.dylib`), `sqlite-${target}.dylib`);
     put(join(directory, `lib/sqlite-${target}/libsqlite3.dylib.json`), `sqlite-${target}.dylib.json`);
+  }
+  const emitReader = (name, artifact) => {
+    const bytes = Buffer.from(JSON.stringify(artifact, null, 2) + '\n');
+    writeFileSync(join(destination, name), bytes, { flag: 'wx', mode: 0o644 });
+    files[name] = { sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length };
+  };
+  if (daemonPayloads) {
+    readerCurrent();
+    const declared = parseNativeReaderCapabilities(JSON.parse(execFileSync(binary, ['check-install-reader', '--describe'], {
+      encoding: 'utf8', timeout: 15_000, maxBuffer: 32 * 1024, stdio: ['ignore', 'pipe', 'pipe'],
+      env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: directory, LANG: 'C' },
+    })));
+    readerCurrent(); assert.equal(declared.version, tag.slice(1));
+    const descriptor = parseDaemonCiArtifact({ schema: 2, sourceCommit: source, sourceTree, headCommit: source, target,
+      files: daemonPayloads.map(payload => ({ path: payload.relativePath, ...files[payload.assetName], mode: payload.executable ? 0o755 : 0o644 })), readers: declared }, target);
+    assertDaemonNativePayloadPins(descriptor, descriptor.files, readFileSync(binary + '.bun.json')); readerCurrent();
+    const { readers: _readers, ...base } = descriptor;
+    emitReader(`${basename(binary)}.ci-artifact.json`, { ...base, schema: 1 });
+    emitReader(`${basename(binary)}.reader-ci-artifact.json`, descriptor);
+  } else {
+    const packageName = `@goodvibes-jev/${product}`, names = clientReaderPayloadPaths(packageName, target);
+    const artifact = inspectTerminalReaderArtifact({ directory, packageName, version: tag.slice(1),
+      target, sourceCommit: source, sourceTree, headCommit: source, assertCurrent: readerCurrent,
+      files: names.map(path => ({ path, ...files[clientReaderMemberAsset({packageName,target}, path)], mode: path === basename(binary) || path.endsWith('.bun') ? 0o755 : 0o644 })) });
+    readerCurrent(); emitReader(`${basename(binary)}.reader-ci-artifact.json`, artifact);
   }
 }
 const addonStage = join(destination, '.addon');

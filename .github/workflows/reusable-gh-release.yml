@@ -7,8 +7,10 @@ name: Reusable GitHub release
 #   per-release notes file wins; otherwise the tag's CHANGELOG section is
 #   extracted), generates a SHA256SUMS manifest over the staged assets via the
 #   toolchain `sha256sums` CLI (a missing asset is fatal), and uploads the
-#   assets with a pinned softprops/action-gh-release. One copy, parameterized by
-#   the asset manifest.
+#   assets with a pinned softprops/action-gh-release. An existing release instead
+#   fills only missing assets after validating metadata against the original
+#   published bytes; reruns never replace an existing program. One copy,
+#   parameterized by the asset manifest.
 #
 #   Call it:
 #     jobs:
@@ -91,6 +93,9 @@ permissions:
 
 jobs:
   gh-release:
+    concurrency:
+      group: native-release-publication-${{ inputs.tag }}
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -161,7 +166,46 @@ jobs:
             tr -s ' \t' '\n' <<< "$RAW_GLOBS" | sed '/^$/d'
             echo 'GOODVIBES_GLOBS_EOF'
           } >> "$GITHUB_OUTPUT"
+      - name: Inspect existing release without treating API failures as absence
+        id: publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          python3 - <<'PY_RELEASE'
+          import json, os, re, subprocess
+          tag, repo = os.environ['RELEASE_TAG'], os.environ['GITHUB_REPOSITORY']
+          assert re.fullmatch(r'v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?', tag)
+          result = subprocess.run(['gh', 'api', f'repos/{repo}/releases/tags/{tag}'], capture_output=True, text=True)
+          value = json.loads(result.stdout)
+          if result.returncode:
+              assert str(value.get('status')) == '404', 'Release lookup failed; refusing to assume a fresh release'
+              exists = False
+          else:
+              assert value['tag_name'] == tag and not value['draft'], 'Unexpected release state'
+              exists = True
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('exists=' + str(exists).lower() + '\n')
+          PY_RELEASE
+      - name: Complete an existing release without replacing published payloads
+        if: steps.publication.outputs.exists == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          NORMALIZED_GLOBS: ${{ steps.globs.outputs.paths }}
+          SHA256_NAME: ${{ inputs.sha256-name }}
+        run: |
+          set -euo pipefail
+          export COMPLETION_DIR="$RUNNER_TEMP/native-release-completion"
+          python3 - <<'PY_STAGE'
+          import os, sys
+          sys.path.insert(0, '.github/scripts')
+          from release_asset_pins import stage_release_assets
+          stage_release_assets(os.environ['COMPLETION_DIR'], os.environ['NORMALIZED_GLOBS'], os.environ['SHA256_NAME'])
+          PY_STAGE
+          python3 .github/scripts/publish-missing-suite-assets.py "$COMPLETION_DIR" "$RELEASE_TAG" "$SHA256_NAME"
       - name: Generate SHA256SUMS (missing asset is fatal)
+        if: steps.publication.outputs.exists == 'false'
         env:
           NORMALIZED_GLOBS: ${{ steps.globs.outputs.paths }}
           ASSETS_GLOB: ${{ inputs.assets-glob }}
@@ -189,12 +233,14 @@ jobs:
             exit 1
           fi
       - name: Create GitHub release
+        if: steps.publication.outputs.exists == 'false'
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
           tag_name: ${{ inputs.tag }}
           name: ${{ inputs.tag }}
           body_path: ${{ steps.changelog.outputs.body }}
           fail_on_unmatched_files: true
+          overwrite_files: false
           files: |
             ${{ steps.globs.outputs.paths }}
             ${{ inputs.sha256-name }}

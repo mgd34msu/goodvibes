@@ -148,10 +148,10 @@ describe('DraftSyncStore', () => {
     await store.save(); await store.close();
     const existing = new HandlerSqliteStore({ workingDirectory: dir, fileName: 'drafts.sqlite', schema: [] });
     await existing.init();
-    let ciphertext: unknown;
+    let ciphertext: { bodyEnc: string; webhookEnc: string } | null = null;
     try {
       existing.run("ALTER TABLE drafts ADD COLUMN messageDigest TEXT NOT NULL DEFAULT 'previous-body-digest'");
-      ciphertext = existing.get('SELECT bodyEnc, webhookEnc FROM drafts WHERE id = ?', [draft.id]);
+      ciphertext = existing.get<{ bodyEnc: string; webhookEnc: string }>('SELECT bodyEnc, webhookEnc FROM drafts WHERE id = ?', [draft.id]);
       expect(ciphertext).not.toBeNull();
       await existing.save();
     } finally { await existing.close(); }

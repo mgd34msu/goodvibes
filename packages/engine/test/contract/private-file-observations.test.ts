@@ -73,7 +73,12 @@ test('actual owned checkpoint restart preserves unchanged refusal and repair sou
   // Both actual consumers are used: completion's evidence digest and the
   // repair candidate's workReceiptIdentity source scope.
   const refusalDigest = hashState({ currentFiles: originalFiles });
-  const repairDigest = hashState(toJson(workReceiptIdentity(contractWorkReceipts(f.contract, { readObservations: true }))));
+  const repairIdentity = (contract: typeof f.contract) => {
+    const value = toJson(workReceiptIdentity(contractWorkReceipts(contract, { readObservations: true })));
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('Missing native work receipt object');
+    return value;
+  };
+  const repairDigest = hashState(repairIdentity(f.contract));
   f.store.hold(f.contract); expect(f.store.write(f.contract.id)).toBe(true);
   const envelope = JSON.parse(readFileSync(contractPath(f.root, f.contract.id), 'utf8'));
   expect(envelope.nativeFileLabels.entries).toHaveLength(2);
@@ -82,7 +87,7 @@ test('actual owned checkpoint restart preserves unchanged refusal and repair sou
   expect(JSON.stringify(restored)).not.toContain('nativeFileObservation');
   const restoredFiles = observe(restored);
   expect(hashState({ currentFiles: restoredFiles })).toBe(refusalDigest);
-  expect(hashState(toJson(workReceiptIdentity(contractWorkReceipts(restored, { readObservations: true }))))).toBe(repairDigest);
+  expect(hashState(repairIdentity(restored))).toBe(repairDigest);
   expect(currentFileMatchesText(restoredFiles[0]!, 'Ready.\n')).toBe(true);
   expect(currentFileMatchesText(structuredClone(restoredFiles[0]!), 'Ready.\n')).toBe(false);
   // Public import cannot seed those labels, even from the same saved bytes.

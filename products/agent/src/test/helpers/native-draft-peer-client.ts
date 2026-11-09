@@ -83,7 +83,7 @@ async function main() {
     assert.equal(admission.result.approved, true);
     const result = await registry.executePrepared(call, admission);
     assert.equal(result.success, true); assert(result.output);
-    const receipt = { result, localStatus: getDraft(paths, privateId)?.status, delivery,
+    const receipt = { result, localStatus: getDraft(paths, privateId)?.status, localWireReference: getDraft(paths, privateId)?.wireReference, delivery,
       modelRequests: scripted.requests, screeningRequests: screening.calls,
       autonomousReadings: log.query({ site: 'engine.gate.autonomous-tool' }).length };
     assert.equal(receipt.autonomousReadings, 0);

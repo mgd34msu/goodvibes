@@ -16,4 +16,4 @@ export type {
   DraftStatus,
 } from './draft-store.js';
 export type { DraftHostContext } from './types.js';
-export { channelDraftWireReference } from './wire-reference.js';
+export { channelDraftWireReference, createChannelDraftWireReference, historicalChannelDraftWireReference, matchesHistoricalDraftWireReference, isNativeDraftWireReference } from './wire-reference.js';

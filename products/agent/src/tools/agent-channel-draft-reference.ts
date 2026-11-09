@@ -3,7 +3,7 @@ import { readFileObservation, type FileObservation } from '@goodvibes-jev/engine
 import { dirname } from 'node:path';
 import { assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector, type ToolNativeReferencesCapture } from '@goodvibes-jev/engine/sdk/platform/tools';
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { channelDraftWireReference } from '@goodvibes-jev/engine/sdk/platform/channels';
+import { channelDraftWireReference, historicalChannelDraftWireReference, matchesHistoricalDraftWireReference } from '@goodvibes-jev/engine/sdk/platform/channels';
 import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
 import type { CommandContext } from '../input/command-registry.ts';
 import { channelDraftFilePath, getDraft, readChannelDrafts } from '../agent/channel-draft.ts';
@@ -26,7 +26,7 @@ interface Capture {
   released: boolean;
 }
 const captures = new WeakMap<object, Capture>();
-const mutableReceiptFields = new Set(['status', 'updatedAt', 'daemonSyncState', 'syncError', 'sendError', 'sentResponseId', 'origin']);
+const mutableReceiptFields = new Set(['wireReference', 'status', 'updatedAt', 'daemonSyncState', 'syncError', 'sendError', 'sentResponseId', 'origin']);
 const record = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ToolInputProjectionError('held');
   return captureCatalogData(value) as Record<string, unknown>;
@@ -61,13 +61,16 @@ export function createChannelDraftReferenceCapture(context?: CommandContext): No
     if (parsed.version !== 1 || !Array.isArray(parsed.drafts)) throw new ToolInputProjectionError('held');
     const requestedId = request.args.draftId;
     const matching = parsed.drafts.map(record).filter(draft => typeof draft.id === 'string'
-      && (draft.id === requestedId || channelDraftWireReference(draft.id) === requestedId));
+      && (draft.id === requestedId || draft.wireReference === requestedId || (draft.wireReference === undefined || draft.wireReference !== draft.id) && matchesHistoricalDraftWireReference(draft.id, requestedId)));
     if (matching.length === 0) return undefined;
     if (matching.length !== 1) throw new ToolInputProjectionError('held');
     const selected = matching[0]!;
     const originalId = selected.id;
     if (typeof originalId !== 'string' || !getDraft(paths, originalId)) throw new ToolInputProjectionError('held');
-    const reference = channelDraftWireReference(originalId);
+    // Only a retained pre-field row uses the historical bridge. The authorized
+    // save adopts the daemon canonical label; capture never writes the store.
+    const reference = typeof selected.wireReference === 'string'
+      ? channelDraftWireReference(originalId, selected.wireReference) : historicalChannelDraftWireReference(originalId);
     const safeArgs = { ...request.args, draftId: reference, nativeReferenceSubjects: { kind: 'channel-draft', draft: { ...selected, id: reference } } };
     // The entire selected native record and every remaining caller field cross
     // the unchanged privacy floor before ordinary projection or model lookup.

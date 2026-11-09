@@ -14,9 +14,10 @@
  * error was returned.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import * as crypto from 'node:crypto';
+import { mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import {
   saveDraft,
@@ -26,6 +27,8 @@ import {
   mergeDraftViews,
   syncChannelDrafts,
   readChannelDrafts,
+  channelDraftFilePath,
+  getDraft,
   CHANNEL_DRAFTS_SAVE_METHOD,
   CHANNEL_DRAFTS_LIST_METHOD,
   CHANNEL_DRAFTS_DELETE_METHOD,
@@ -95,7 +98,7 @@ describe('saving a draft: the daemon takes it', () => {
   test('the record says the daemon holds it', async () => {
     const result = await saveDraft(shellPaths, { message: 'hello' }, { invoke: acceptingDaemon([]) });
 
-    expect(result.daemon).toEqual({ synced: true });
+    expect(result.daemon).toMatchObject({ synced: true });
     expect(result.draft.daemonSyncState).toBe('synced');
     expect(result.draft.syncError).toBeUndefined();
   });
@@ -219,7 +222,7 @@ describe('deleting a draft', () => {
     const result = await deleteDraft(shellPaths, saved.draft.id, { invoke: acceptingDaemon(calls) });
 
     expect(result.deleted).toBe(true);
-    expect(result.daemon).toEqual({ synced: true });
+    expect(result.daemon).toMatchObject({ synced: true });
     expect(calls[0]!.methodId).toBe(CHANNEL_DRAFTS_DELETE_METHOD);
     expect(calls[0]!.input).toMatchObject({ draftId: saved.draft.id, confirm: true });
   });
@@ -267,4 +270,52 @@ describe('syncing drafts the daemon does not hold', () => {
     expect(report.refused).toBe(1);
     expect(readChannelDrafts(shellPaths).drafts).toHaveLength(1);
   });
+});
+
+
+test('an old reader dropping the optional label is repaired by the next authorized real sync, with no private ID on wire', async () => {
+  const id = 'draft-20261011000001-deadbeef';
+  const path = channelDraftFilePath(shellPaths);
+  mkdirSync(dirname(path), { recursive: true });
+  const saved = { version: 1, id, createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z',
+    message: 'original private draft', status: 'draft', daemonSyncState: 'synced' };
+  writeFileSync(path, JSON.stringify({ version: 1, drafts: [saved] }));
+  const before = readFileSync(path, 'utf8');
+  const hashing = spyOn(crypto, 'createHash');
+  const canonical = 'draft-reference-v2-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  const calls: Record<string, unknown>[] = [];
+  try {
+    expect(readChannelDrafts(shellPaths).drafts[0]?.id).toBe(id);
+    expect(readFileSync(path, 'utf8')).toBe(before);
+    expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+    const invoke: DaemonOperatorInvoke = async (methodId, input = {}) => {
+      calls.push(input);
+      return { ok: true, methodId, route: '', body: { created: false, draft: { ...input, id: canonical, wireReference: canonical } } };
+    };
+    const result = await saveDraft(shellPaths, { id, message: saved.message }, { invoke });
+    expect(calls[0]?.id).toMatch(/^draft-reference-[a-p]{32}$/);
+    expect(JSON.stringify(calls)).not.toContain(id);
+    expect(result.draft.wireReference).toBe(canonical);
+    expect(getDraft(shellPaths, canonical)?.id).toBe(id);
+    hashing.mockClear(); calls.length = 0;
+    await saveDraft(shellPaths, { id: canonical, message: 'next edit' }, { invoke });
+    expect(calls[0]?.id).toBe(canonical);
+    expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+    expect(readChannelDrafts(shellPaths).drafts).toHaveLength(1);
+    const { wireReference: _dropped, ...oldReader } = result.draft;
+    writeFileSync(path, JSON.stringify({ version: 1, drafts: [oldReader] }));
+    await saveDraft(shellPaths, { id, message: 'old reader edit' }, { invoke });
+    expect(getDraft(shellPaths, canonical)?.wireReference).toBe(canonical);
+  } finally { hashing.mockRestore(); }
+});
+
+
+test('unsupported future local draft files are preserved instead of rewritten as an empty mirror', async () => {
+  const path = channelDraftFilePath(shellPaths);
+  mkdirSync(dirname(path), { recursive: true });
+  const original = JSON.stringify({ version: 99, drafts: [{ future: 'private preserved data' }] });
+  writeFileSync(path, original);
+  const calls: Call[] = [];
+  await expect(saveDraft(shellPaths, { message: 'new draft' }, { invoke: acceptingDaemon(calls) })).rejects.toThrow();
+  expect(calls).toHaveLength(0); expect(readFileSync(path, 'utf8')).toBe(original);
 });

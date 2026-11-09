@@ -20,6 +20,7 @@
  * to save are REJECTED, the agent must redact ('[redacted]') or pass a
  * goodvibes://secrets/ reference before transmission.
  */
+import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import type { DraftHostContext as HandlerContext } from './types.js';
 import { createAtRestCipher } from '../../config/daemon-credential-store.js';
 import { HandlerError } from '../../control-plane/host-handlers.js';
@@ -198,6 +199,8 @@ function parseSaveInput(body: unknown): DraftSaveInput {
   };
   const id = optionalString(record.id, 'id');
   if (id !== undefined) input.id = id;
+  const wireReference = optionalString(record.wireReference, 'wireReference');
+  if (wireReference !== undefined) input.wireReference = wireReference;
   const version = optionalVersion(record.version);
   if (version !== undefined) input.version = version;
   const title = optionalString(record.title, 'title');
@@ -318,7 +321,7 @@ export function registerDraftMethods(
   const listHandler: TypedHandler<unknown, ListResponse> = async ({ body }) => {
     await ensureInit();
     const query = parseListQuery(body);
-    const drafts = store.list(query).map(record => ({ ...record, id: channelDraftWireReference(record.id) }));
+    const drafts = store.list(query).map(record => ({ ...record, id: channelDraftWireReference(record.id, record.wireReference) }));
     return { drafts, total: store.count(query.status) };
   };
 
@@ -328,7 +331,7 @@ export function registerDraftMethods(
     const privateId = isNativeDraftWireReference(id) ? store.resolveReferenceId(id) : id;
     const record = privateId === undefined ? null : store.get(privateId);
     if (record === null) { snapshotJudgmentInput({ draftId: id }); return { notFound: true, id }; }
-    return { ...record, id: channelDraftWireReference(record.id) };
+    return { ...record, id: channelDraftWireReference(record.id, record.wireReference) };
   };
 
   const saveHandler: TypedHandler<unknown, SaveResponse> = async ({ body, context }) => {
@@ -350,7 +353,12 @@ export function registerDraftMethods(
       assertRequest(); context.signal?.throwIfAborted();
       if (reference) validateWebhook(reference.target.webhook);
       if (reference) input.id = reference.id;
-      const selectedId = input.id ?? crypto.randomUUID();
+      else if (input.id !== undefined && isNativeDraftWireReference(input.id)) {
+        const selected = store.resolveReferenceId(input.id);
+        if (selected === undefined) throw new HandlerError('Native draft reference is unavailable', 'NATIVE_DRAFT_REFERENCE_UNAVAILABLE', 404);
+        input.id = selected;
+      }
+      const selectedId = input.id ?? opaqueUuid();
       if (autonomous) input.id = selectedId;
       const target = reference ?? (autonomous ? store.retainTarget(selectedId) : undefined);
       return await runNativeMutation({ host: ctx.nativeMutationHost, method: SAVE_ID, body, context,
@@ -363,7 +371,7 @@ export function registerDraftMethods(
         async mutate(assertCurrent, _admission, withPublication) {
           const result = await store.upsert(input, autonomous ? assertCurrent : undefined, withPublication);
           if (!autonomous) await store.save();
-          if (!reference) return result;
+          if (!reference) return { ...result, draft: { ...result.draft, id: result.draft.wireReference } };
           if (result.draft.id !== reference.id) throw new HandlerError('Native draft publication changed', 'NATIVE_DRAFT_REFERENCE_STALE', 409);
           return { ...result, draft: { ...result.draft, id: reference.reference } };
         } });
@@ -389,8 +397,10 @@ export function registerDraftMethods(
       if (referenceRequest) assertNativeDraftReferenceRequest(referenceRequest);
       assertRequest(); context.signal?.throwIfAborted();
       if (reference) validateWebhook(reference.target.webhook);
-      const draftId = reference?.id ?? parseDraftId(body);
-      const publicId = reference?.reference ?? draftId;
+      const requestedId = parseDraftId(body);
+      const draftId = reference?.id ?? (isNativeDraftWireReference(requestedId) ? store.resolveReferenceId(requestedId) : requestedId);
+      if (draftId === undefined) throw new HandlerError('Native draft reference is unavailable', 'NATIVE_DRAFT_REFERENCE_UNAVAILABLE', 404);
+      const publicId = reference?.reference ?? requestedId;
       const target = reference ?? (autonomous ? store.retainTarget(draftId) : undefined);
       return await runNativeMutation({ host: ctx.nativeMutationHost, method: DELETE_ID, body, context,
         target: { id: publicId, current: target?.target ?? null }, assertTargetCurrent: () => {

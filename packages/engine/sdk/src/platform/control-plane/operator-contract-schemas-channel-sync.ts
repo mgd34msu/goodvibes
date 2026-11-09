@@ -99,6 +99,7 @@ export const CHANNEL_ROUTING_RULE_SCHEMA = objectSchema({
 }, ['id', 'createdAt', 'updatedAt', 'surfaceKind', 'profileId']);
 
 export const CHANNEL_DRAFT_PROPERTIES = {
+  wireReference: STRING_SCHEMA,
   version: NUMBER_SCHEMA,
   id: STRING_SCHEMA,
   createdAt: STRING_SCHEMA,

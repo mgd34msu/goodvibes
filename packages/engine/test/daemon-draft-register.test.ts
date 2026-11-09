@@ -102,6 +102,19 @@ describe('registerDraftMethods', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  test('confirmed updates and deletes resolve the stored wire identity instead of creating alias rows', async () => {
+    const privateId = 'draft-20261011000001-deadbeef';
+    const saved = await store.upsert({ id: privateId, message: 'original' });
+    const reference = saved.draft.wireReference;
+    const updated = await catalog.invoke(SAVE, confirmedSave({ id: reference, message: 'edited' }));
+    expect(updated).toMatchObject({ created: false, draft: { id: reference, wireReference: reference } });
+    expect(store.count()).toBe(1); expect(store.get(reference)).toBeNull();
+    expect(store.get(privateId)?.wireReference).toBe(reference);
+    expect(await catalog.invoke(DELETE, invocation({ draftId: reference, confirm: true }, { explicit: true })))
+      .toMatchObject({ deleted: true, draftId: reference });
+    expect(store.get(privateId)).toBeNull();
+  });
+
   test('attaches handlers to the four canonical SDK descriptors', () => {
     for (const id of [LIST, GET, SAVE, DELETE]) {
       expect(catalog.get(id)).not.toBeNull();

@@ -28,7 +28,8 @@
  * Persistence: JSON file at {agentRoot}/channels/drafts.json via ShellPathService.
  */
 
-import { randomUUID } from 'node:crypto';
+import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
+import { channelDraftWireReference, createChannelDraftWireReference, historicalChannelDraftWireReference, isNativeDraftWireReference, matchesHistoricalDraftWireReference } from '@goodvibes-jev/engine/sdk/platform/channels';
 import { existsSync, readFileSync } from 'node:fs';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { writeStoreFile } from '@/utils/store-file.ts';
@@ -47,7 +48,7 @@ export type ChannelDraftSyncState = 'synced' | 'pending';
 
 /** The result of offering one draft to the daemon. */
 export type ChannelDraftSyncOutcome =
-  | { readonly synced: true }
+  | { readonly synced: true; readonly wireReference?: string }
   | { readonly synced: false; readonly kind: DaemonInvokeFailureKind | 'not_attempted'; readonly error: string };
 
 // ---------------------------------------------------------------------------
@@ -57,6 +58,7 @@ export type ChannelDraftSyncOutcome =
 export type ChannelDraftStatus = 'draft' | 'queued' | 'sent' | 'failed';
 
 export interface ChannelDraft {
+  readonly wireReference?: string;
   readonly version: 1;
   readonly id: string;
   readonly createdAt: string;
@@ -179,6 +181,7 @@ function parseDraft(value: unknown): ChannelDraft | null {
   return {
     version: DRAFT_VERSION,
     id,
+    ...(value.wireReference === undefined ? {} : { wireReference: channelDraftWireReference(id, readString(value.wireReference)) }),
     createdAt,
     updatedAt,
     status: parseDraftStatus(value.status),
@@ -221,7 +224,8 @@ export function readChannelDrafts(shellPaths: ShellPaths): ChannelDraftSnapshot 
   const path = channelDraftFilePath(shellPaths);
   if (!existsSync(path)) return { path, exists: false, drafts: [] };
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
+    if (!isRecord(parsed) || parsed.version !== DRAFT_FILE_VERSION || !Array.isArray(parsed.drafts)) throw new Error('Unsupported draft file');
     return { path, exists: true, drafts: parseDraftFile(parsed).drafts };
   } catch (error) {
     return {
@@ -231,6 +235,12 @@ export function readChannelDrafts(shellPaths: ShellPaths): ChannelDraftSnapshot 
       parseError: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+function writableDraftSnapshot(paths: ShellPaths): ChannelDraftSnapshot {
+  const snapshot = readChannelDrafts(paths);
+  if (snapshot.parseError !== undefined) throw new ToolInputProjectionError('held');
+  return snapshot;
 }
 
 function writeDrafts(path: string, drafts: readonly ChannelDraft[], assertCurrent?: () => void,
@@ -256,7 +266,7 @@ function writeDrafts(path: string, drafts: readonly ChannelDraft[], assertCurren
 }
 
 function generateDraftId(): string {
-  return `draft-${randomUUID().replaceAll('-', '_')}`;
+  return `draft-${opaqueUuid()}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -278,22 +288,30 @@ const NOT_ATTEMPTED: ChannelDraftSyncOutcome = {
 async function offerDraftToDaemon(
   invoke: DaemonOperatorInvoke | undefined,
   draft: ChannelDraft,
-  options: ChannelStoreEffectOptions = {},
+  options: ChannelStoreEffectOptions & { readonly historicalId?: string } = {},
 ): Promise<ChannelDraftSyncOutcome> {
   if (!invoke) return NOT_ATTEMPTED;
   const { daemonSyncState: _state, syncError: _error, origin: _origin, ...wire } = draft;
+  const offeredId = options.historicalId === undefined
+    ? draft.wireReference ?? draft.id : historicalChannelDraftWireReference(options.historicalId);
   const result = await invoke(
     CHANNEL_DRAFTS_SAVE_METHOD,
-    { ...wire, confirm: true },
+    { ...wire, id: offeredId, confirm: true },
     { signal: options.signal, assertCurrent: options.assertCurrent, explicitUserRequest: options.explicitUserRequest ?? true },
   );
-  return result.ok ? { synced: true } : { synced: false, kind: result.kind, error: result.error };
+  if (!result.ok) return { synced: false, kind: result.kind, error: result.error };
+  const body = isRecord(result.body) && isRecord(result.body.draft) ? result.body.draft : undefined;
+  const canonical = body && typeof body.wireReference === 'string' ? body.wireReference
+    : body && typeof body.id === 'string' && isNativeDraftWireReference(body.id) ? body.id
+    : options.historicalId === undefined ? draft.wireReference : offeredId;
+  const wireReference = canonical === undefined ? undefined : channelDraftWireReference(draft.id, canonical);
+  return { synced: true, ...(wireReference === undefined ? {} : { wireReference }) };
 }
 
 function withDraftSyncOutcome(draft: ChannelDraft, outcome: ChannelDraftSyncOutcome): ChannelDraft {
   if (outcome.synced) {
     const { syncError: _dropped, ...rest } = draft;
-    return { ...rest, daemonSyncState: 'synced' };
+    return { ...rest, ...(outcome.wireReference === undefined ? {} : { wireReference: outcome.wireReference }), daemonSyncState: 'synced' };
   }
   return { ...draft, daemonSyncState: 'pending', syncError: outcome.error };
 }
@@ -330,15 +348,17 @@ export async function saveDraft(
 
   const path = channelDraftFilePath(shellPaths);
   const assertCurrent = retainChannelStoreSource(path, options);
-  const snapshot = readChannelDrafts(shellPaths);
+  const snapshot = writableDraftSnapshot(shellPaths);
   const now = new Date().toISOString();
 
-  const existingIndex = input.id ? snapshot.drafts.findIndex((d) => d.id === input.id) : -1;
+  const existingIndex = input.id ? matchingDraftIndex(snapshot.drafts, input.id) : -1;
   const existing = existingIndex >= 0 ? snapshot.drafts[existingIndex] : null;
 
+  const id = existing?.id ?? generateDraftId();
   const drafted: ChannelDraft = {
     version: DRAFT_VERSION,
-    id: existing?.id ?? generateDraftId(),
+    id,
+    wireReference: existing?.wireReference ?? createChannelDraftWireReference(id),
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
     status: input.status ?? existing?.status ?? 'draft',
@@ -351,7 +371,8 @@ export async function saveDraft(
     ...(input.tags && input.tags.length > 0 ? { tags: input.tags } : {}),
   };
 
-  const daemon = await offerDraftToDaemon(options.invoke, drafted, { ...options, assertCurrent });
+  const daemon = await offerDraftToDaemon(options.invoke, drafted, { ...options, assertCurrent,
+    ...(existing && existing.wireReference === undefined ? { historicalId: existing.id } : {}) });
   assertCurrent();
   const draft = withDraftSyncOutcome(drafted, daemon);
 
@@ -406,8 +427,8 @@ export function mergeDraftViews(
   localDrafts: readonly ChannelDraft[],
 ): readonly ChannelDraft[] {
   const byId = new Map<string, ChannelDraft>();
-  for (const draft of localDrafts) byId.set(draft.id, { ...draft, origin: 'local' });
-  for (const draft of daemonDrafts) byId.set(draft.id, draft);
+  for (const draft of localDrafts) byId.set(draft.wireReference ?? draft.id, { ...draft, origin: 'local' });
+  for (const draft of daemonDrafts) byId.set(draft.wireReference ?? draft.id, draft);
   return [...byId.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
@@ -427,10 +448,19 @@ export function listDrafts(
   return { ...snapshot, drafts };
 }
 
+/** Resolve only actual stored rows; a legacy handle cannot choose an ambiguous row. */
+function matchingDraftIndex(drafts: readonly ChannelDraft[], requestedId: string): number {
+  const matches = drafts.flatMap((draft, index) => draft.id === requestedId || draft.wireReference === requestedId
+    || (draft.wireReference === undefined || draft.wireReference !== draft.id)
+      && matchesHistoricalDraftWireReference(draft.id, requestedId) ? [index] : []);
+  if (matches.length > 1) throw new ToolInputProjectionError('held');
+  return matches[0] ?? -1;
+}
+
 /** Get a single draft by id. Returns null if not found. */
 export function getDraft(shellPaths: ShellPaths, draftId: string): ChannelDraft | null {
   const snapshot = readChannelDrafts(shellPaths);
-  return snapshot.drafts.find((d) => d.id === draftId) ?? null;
+  return snapshot.drafts[matchingDraftIndex(snapshot.drafts, draftId)] ?? null;
 }
 
 /**
@@ -447,11 +477,14 @@ export async function deleteDraft(
   draftId: string,
   options: { readonly invoke?: DaemonOperatorInvoke } = {},
 ): Promise<ChannelDraftDeleteResult> {
+  const initial = writableDraftSnapshot(shellPaths);
+  const selected = initial.drafts[matchingDraftIndex(initial.drafts, draftId)];
+  const reference = options.invoke && selected ? selected.wireReference ?? historicalChannelDraftWireReference(selected.id) : draftId;
   const daemon: ChannelDraftSyncOutcome = options.invoke
     ? await (async () => {
         const result = await options.invoke!(
           CHANNEL_DRAFTS_DELETE_METHOD,
-          { draftId, confirm: true },
+          { draftId: reference, confirm: true },
           { explicitUserRequest: true },
         );
         return result.ok
@@ -460,9 +493,10 @@ export async function deleteDraft(
       })()
     : NOT_ATTEMPTED;
 
-  const snapshot = readChannelDrafts(shellPaths);
+  const snapshot = writableDraftSnapshot(shellPaths);
   const before = snapshot.drafts.length;
-  const updated = snapshot.drafts.filter((d) => d.id !== draftId);
+  const selectedIndex = matchingDraftIndex(snapshot.drafts, draftId);
+  const updated = snapshot.drafts.filter((_d, index) => index !== selectedIndex);
   if (updated.length === before) return { deleted: false, daemon };
   writeDrafts(channelDraftFilePath(shellPaths), updated);
   return { deleted: true, daemon };
@@ -485,7 +519,7 @@ export async function syncChannelDrafts(
   shellPaths: ShellPaths,
   invoke: DaemonOperatorInvoke,
 ): Promise<ChannelDraftSyncReport> {
-  const snapshot = readChannelDrafts(shellPaths);
+  const snapshot = writableDraftSnapshot(shellPaths);
   const pending = snapshot.drafts.filter((draft) => draft.daemonSyncState !== 'synced');
   if (pending.length === 0) return { attempted: 0, synced: 0, refused: 0 };
 
@@ -493,7 +527,7 @@ export async function syncChannelDrafts(
   let synced = 0;
   let refused = 0;
   for (const draft of pending) {
-    const outcome = await offerDraftToDaemon(invoke, draft);
+    const outcome = await offerDraftToDaemon(invoke, draft, draft.wireReference === undefined ? { historicalId: draft.id } : {});
     updatedById.set(draft.id, withDraftSyncOutcome(draft, outcome));
     if (outcome.synced) synced += 1;
     else refused += 1;
@@ -559,8 +593,8 @@ export function markDraftSent(
   options: ChannelStoreEffectOptions = {},
 ): ChannelDraft {
   const assertCurrent = retainChannelStoreSource(channelDraftFilePath(shellPaths), options);
-  const snapshot = readChannelDrafts(shellPaths);
-  const existing = snapshot.drafts.find((d) => d.id === draftId);
+  const snapshot = writableDraftSnapshot(shellPaths);
+  const existing = snapshot.drafts[matchingDraftIndex(snapshot.drafts, draftId)];
   if (!existing) throw new Error(`Draft not found: ${draftId}`);
   const now = new Date().toISOString();
   const patched: ChannelDraft = {
@@ -569,7 +603,7 @@ export function markDraftSent(
     status: 'sent',
     ...(responseId ? { sentResponseId: responseId } : {}),
   };
-  const updatedDrafts = snapshot.drafts.map((d) => (d.id === draftId ? patched : d));
+  const updatedDrafts = snapshot.drafts.map((d) => (d.id === existing.id ? patched : d));
   writeDrafts(channelDraftFilePath(shellPaths), updatedDrafts, assertCurrent, options);
   return patched;
 }
@@ -584,8 +618,8 @@ export function markDraftFailed(
   options: ChannelStoreEffectOptions = {},
 ): ChannelDraft {
   const assertCurrent = retainChannelStoreSource(channelDraftFilePath(shellPaths), options);
-  const snapshot = readChannelDrafts(shellPaths);
-  const existing = snapshot.drafts.find((d) => d.id === draftId);
+  const snapshot = writableDraftSnapshot(shellPaths);
+  const existing = snapshot.drafts[matchingDraftIndex(snapshot.drafts, draftId)];
   if (!existing) throw new Error(`Draft not found: ${draftId}`);
   const now = new Date().toISOString();
   const patched: ChannelDraft = {
@@ -594,7 +628,7 @@ export function markDraftFailed(
     status: 'failed',
     sendError: error,
   };
-  const updatedDrafts = snapshot.drafts.map((d) => (d.id === draftId ? patched : d));
+  const updatedDrafts = snapshot.drafts.map((d) => (d.id === existing.id ? patched : d));
   writeDrafts(channelDraftFilePath(shellPaths), updatedDrafts, assertCurrent, options);
   return patched;
 }

@@ -120,7 +120,7 @@ function guardedCommsInvoke(context: CommandContext, args: Record<string, unknow
     assertCurrent();
     if (method !== CHANNEL_DRAFTS_SAVE_METHOD && method !== CHANNEL_ROUTING_ASSIGN_METHOD) throw new ToolInputProjectionError('held');
     const { confirm: _confirm, explicitUserRequest: _request, admission: _admission, ...request } = input;
-    if (nativeReference && (method !== CHANNEL_DRAFTS_SAVE_METHOD || request.id !== nativeReference.draftId)) {
+    if (nativeReference && (method !== CHANNEL_DRAFTS_SAVE_METHOD || (request.id !== nativeReference.draftId && request.id !== nativeReference.reference))) {
       throw new ToolInputProjectionError('held');
     }
     const nativeInput = { ...request, ...(nativeReference ? { id: nativeReference.reference } : {}), admission: 'autonomous' };

@@ -1,11 +1,11 @@
+import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { logger } from '../../utils/logger.js';
 import type { AtRestCipher } from '../../config/daemon-credential-store.js';
 import { HandlerSqliteStore } from '../../state/daemon-handler-sqlite-store.js';
 import { retainMutationStorage } from '../../control-plane/native-mutation.js';
 import { captureMutationDescriptors, type MutationPublication } from '../../utils/file-mutation.js';
-import { JudgmentInputError } from '../../gate/judgment-input.js';
 import { HandlerError } from '../../control-plane/host-handlers.js';
-import { channelDraftWireReference } from './wire-reference.js';
+import { channelDraftWireReference, createChannelDraftWireReference, isHistoricalDraftWireReference, matchesHistoricalDraftWireReference } from './wire-reference.js';
 
 // ---------------------------------------------------------------------------
 // Draft Sync Backend store (rebased onto the daemon handler foundation).
@@ -52,6 +52,7 @@ export const MAX_DRAFT_LIST_LIMIT = 200;
 export interface DraftRecord {
   version: number;
   id: string;
+  wireReference: string;
   createdAt: string; // ISO-8601
   updatedAt: string; // ISO-8601
   status: DraftStatus;
@@ -69,6 +70,7 @@ export interface DraftRecord {
 /** Normalized input accepted by upsert(). `message` is the FULL plaintext body. */
 export interface DraftSaveInput {
   id?: string;
+  wireReference?: string;
   version?: number;
   title?: string;
   message: string;
@@ -102,7 +104,7 @@ export interface DraftSyncStoreOptions {
   cipher: AtRestCipher;
   /** Override the sqlite filename (tests). Defaults to 'drafts.sqlite'. */
   fileName?: string;
-  /** UUID generator injection point (tests). Defaults to crypto.randomUUID. */
+  /** UUID generator injection point (tests). Defaults to opaqueUuid. */
   generateId?: () => string;
   /** Clock injection point (tests). Defaults to () => new Date().toISOString(). */
   now?: () => string;
@@ -111,6 +113,8 @@ export interface DraftSyncStoreOptions {
 const SCHEMA: string[] = [
   `CREATE TABLE IF NOT EXISTS drafts (
      id TEXT PRIMARY KEY,
+     wireReference TEXT,
+     legacyWireReference INTEGER NOT NULL DEFAULT 1,
      version INTEGER NOT NULL,
      createdAt TEXT NOT NULL,
      updatedAt TEXT NOT NULL,
@@ -131,6 +135,8 @@ const SCHEMA: string[] = [
 
 interface DraftRow {
   id: string;
+  wireReference: string | null;
+  legacyWireReference: number;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -206,7 +212,7 @@ export class DraftSyncStore {
       schema: SCHEMA,
     });
     this.cipher = options.cipher;
-    this.generateId = options.generateId ?? (() => crypto.randomUUID());
+    this.generateId = options.generateId ?? (() => opaqueUuid());
     this.now = options.now ?? (() => new Date().toISOString());
   }
 
@@ -225,6 +231,17 @@ export class DraftSyncStore {
         this.store.run('ALTER TABLE drafts DROP COLUMN messageDigest');
         await this.store.save();
       }
+      // Old explicit INSERT/UPDATE statements leave this additive column intact.
+      // Allocate a private-safe label once, never a digest of new caller metadata.
+      const columns = this.store.all<{ name: string }>('PRAGMA table_info(drafts)');
+      if (!columns.some(column => column.name === 'legacyWireReference')) this.store.run('ALTER TABLE drafts ADD COLUMN legacyWireReference INTEGER NOT NULL DEFAULT 1');
+      if (!columns.some(column => column.name === 'wireReference')) this.store.run('ALTER TABLE drafts ADD COLUMN wireReference TEXT');
+      for (const row of this.store.all<{ id: string; wireReference: string | null }>('SELECT id, wireReference FROM drafts')) {
+        if (row.wireReference === null) this.store.run('UPDATE drafts SET wireReference = ? WHERE id = ? AND wireReference IS NULL', [createChannelDraftWireReference(row.id), row.id]);
+        else channelDraftWireReference(row.id, row.wireReference);
+      }
+      this.store.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_drafts_wireReference ON drafts (wireReference)');
+      await this.store.save();
       if (!this.closed) this.initialized = true;
     });
     this.initializing = pending;
@@ -301,6 +318,22 @@ export class DraftSyncStore {
     const existing = input.id !== undefined ? this.getRow(input.id) : null;
     const created = existing === null;
     const id = existing?.id ?? input.id ?? this.generateId();
+    if (input.wireReference !== undefined) channelDraftWireReference(id, input.wireReference);
+    const wireReference = existing?.wireReference ?? input.wireReference ?? createChannelDraftWireReference(id);
+    channelDraftWireReference(id, wireReference);
+    const conflict = this.store.get<{ id: string }>('SELECT id FROM drafts WHERE id <> ? AND (wireReference = ? OR id = ? OR wireReference = ?)', [id, wireReference, wireReference, id]);
+    if (conflict) throw new HandlerError('Native draft reference is ambiguous', 'NATIVE_DRAFT_REFERENCE_UNAVAILABLE', 409);
+    if (input.wireReference !== undefined && input.wireReference !== wireReference
+      && this.store.get('SELECT id FROM drafts WHERE id <> ? AND (wireReference = ? OR id = ?)', [id, input.wireReference, input.wireReference])) {
+      throw new HandlerError('Native draft reference is ambiguous', 'NATIVE_DRAFT_REFERENCE_UNAVAILABLE', 409);
+    }
+    // Only an actual incoming historical-shaped selector requests this old
+    // compatibility lookup. A new row must not shadow another row's old handle.
+    for (const reference of new Set([id, wireReference, input.wireReference])) {
+      if (reference === undefined || !isHistoricalDraftWireReference(reference)) continue;
+      const owner = this.resolveReferenceId(reference);
+      if (owner !== undefined && owner !== id) throw new HandlerError('Native draft reference is ambiguous', 'NATIVE_DRAFT_REFERENCE_UNAVAILABLE', 409);
+    }
     const timestamp = this.now();
     const createdAt = existing?.createdAt ?? input.createdAt ?? timestamp;
     const updatedAt = input.updatedAt ?? timestamp;
@@ -321,10 +354,11 @@ export class DraftSyncStore {
     const write = (target: Pick<HandlerSqliteStore, 'run' | 'get'>) => {
       target.run(
       `INSERT INTO drafts (
-         id, version, createdAt, updatedAt, status, title, bodyEnc,
+         id, wireReference, legacyWireReference, version, createdAt, updatedAt, status, title, bodyEnc,
          channel, route, webhookEnc, link, tags, sentResponseId, sendError
-       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
        ON CONFLICT(id) DO UPDATE SET
+         wireReference = excluded.wireReference,
          version = excluded.version,
          updatedAt = excluded.updatedAt,
          status = excluded.status,
@@ -337,6 +371,8 @@ export class DraftSyncStore {
          tags = excluded.tags`,
       [
         id,
+        wireReference,
+        existing?.legacyWireReference ?? 0,
         version,
         createdAt,
         updatedAt,
@@ -356,7 +392,7 @@ export class DraftSyncStore {
     );
 
       const row = target.get<DraftRow>('SELECT * FROM drafts WHERE id = ?', [id]);
-      return { draft: toRecord(row ?? this.fallbackRow(id, version, createdAt, updatedAt, status, webhookEnc, input)), created };
+      return { draft: toRecord(row ?? this.fallbackRow(id, wireReference, version, createdAt, updatedAt, status, webhookEnc, input)), created };
     };
     const result = current ? await this.store.persistTransaction(write, current, withPublication) : write(this.store);
     this.generations.set(id, (this.generations.get(id) ?? 0) + 1);
@@ -383,12 +419,8 @@ export class DraftSyncStore {
   resolveReferenceId(reference: string): string | undefined {
     this.requireInit();
     const matching: string[] = [];
-    for (const { id } of this.store.all<{ id: string }>('SELECT id FROM drafts')) {
-      try {
-        if (channelDraftWireReference(id) === reference) matching.push(id);
-      } catch (error) {
-        if (!(error instanceof JudgmentInputError)) throw error;
-      }
+    for (const { id, wireReference, legacyWireReference } of this.store.all<{ id: string; wireReference: string | null; legacyWireReference: number }>('SELECT id, wireReference, legacyWireReference FROM drafts')) {
+      if (id === reference || wireReference === reference || legacyWireReference === 1 && matchesHistoricalDraftWireReference(id, reference)) matching.push(id);
     }
     if (matching.length > 1) throw new HandlerError('Native draft reference is ambiguous', 'NATIVE_DRAFT_REFERENCE_UNAVAILABLE', 409);
     return matching[0];
@@ -443,13 +475,13 @@ export class DraftSyncStore {
     const rows =
       query.status !== undefined
         ? this.store.all<DraftRow>(
-            `SELECT id, version, createdAt, updatedAt, status, title,
+            `SELECT id, wireReference, legacyWireReference, version, createdAt, updatedAt, status, title,
                     channel, route, webhookEnc, link, tags, sentResponseId, sendError
              FROM drafts WHERE status = ? ORDER BY updatedAt DESC, id ASC LIMIT ?`,
             [query.status, limit],
           )
         : this.store.all<DraftRow>(
-            `SELECT id, version, createdAt, updatedAt, status, title,
+            `SELECT id, wireReference, legacyWireReference, version, createdAt, updatedAt, status, title,
                     channel, route, webhookEnc, link, tags, sentResponseId, sendError
              FROM drafts ORDER BY updatedAt DESC, id ASC LIMIT ?`,
             [limit],
@@ -487,7 +519,7 @@ export class DraftSyncStore {
 
   private getRow(id: string): DraftRow | null {
     return this.store.get<DraftRow>(
-      `SELECT id, version, createdAt, updatedAt, status, title,
+      `SELECT id, wireReference, legacyWireReference, version, createdAt, updatedAt, status, title,
               channel, route, webhookEnc, link, tags, sentResponseId, sendError
        FROM drafts WHERE id = ?`,
       [id],
@@ -498,6 +530,7 @@ export class DraftSyncStore {
   // the row we just wrote); keeps upsert total even under a degraded backend.
   private fallbackRow(
     id: string,
+    wireReference: string,
     version: number,
     createdAt: string,
     updatedAt: string,
@@ -507,6 +540,8 @@ export class DraftSyncStore {
   ): DraftRow {
     return {
       id,
+      wireReference,
+      legacyWireReference: 0,
       version,
       createdAt,
       updatedAt,
@@ -542,6 +577,7 @@ export function toRecord(row: DraftRow): DraftRecord {
   const record: DraftRecord = {
     version: row.version,
     id: row.id,
+    wireReference: channelDraftWireReference(row.id, row.wireReference ?? undefined),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     status: row.status as DraftStatus,

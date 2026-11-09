@@ -1,4 +1,6 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import * as crypto from 'node:crypto';
+import { historicalChannelDraftWireReference } from '../sdk/src/platform/channels/host-drafts/wire-reference.js';
 import { rmSync } from 'node:fs';
 import type { AtRestCipher } from '../sdk/src/platform/config/daemon-credential-store.js';
 import { HandlerSqliteStore } from '../sdk/src/platform/state/daemon-handler-sqlite-store.js';
@@ -57,6 +59,59 @@ describe('DraftSyncStore', () => {
   afterEach(async () => {
     await store.close();
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('new arbitrary protected IDs retain one opaque wire identity through restart without SHA', async () => {
+    const hashing = spyOn(crypto, 'createHash');
+    try {
+      const id = 'draft-20261011000001-deadbeef';
+      const first = await store.upsert({ id, message: 'private body' });
+      const reference = first.draft.wireReference;
+      expect(reference).toMatch(/^draft-reference-v2-[a-p-]+$/);
+      expect(store.resolveReferenceId(reference)).toBe(id);
+      expect(store.list()[0]?.wireReference).toBe(reference);
+      expect((await store.upsert({ id, message: 'edited' })).draft.wireReference).toBe(reference);
+      await store.close(); store = makeStore(dir, cipher); await store.init();
+      expect(store.get(id)?.wireReference).toBe(reference);
+      expect(store.resolveReferenceId(reference)).toBe(id);
+      expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+      await expect(store.upsert({ id: 'different', wireReference: reference, message: 'conflicting label' })).rejects.toThrow('ambiguous');
+    } finally { hashing.mockRestore(); }
+  });
+
+  test('only actual pre-field rows match old handles; old explicit writers preserve new labels', async () => {
+    const id = 'draft-20261011000001-deadbeef';
+    await store.upsert({ id, message: 'retained original body' }); await store.close();
+    const old = new HandlerSqliteStore({ workingDirectory: dir, fileName: 'drafts.sqlite', schema: [] });
+    await old.init();
+    old.run('DROP INDEX idx_drafts_wireReference');
+    old.run('ALTER TABLE drafts DROP COLUMN wireReference');
+    old.run('ALTER TABLE drafts DROP COLUMN legacyWireReference');
+    const ciphertext = old.get('SELECT bodyEnc FROM drafts WHERE id = ?', [id]);
+    await old.close();
+    const handle = historicalChannelDraftWireReference(id);
+    store = makeStore(dir, cipher); await store.init();
+    const canonical = store.get(id)!.wireReference;
+    expect(store.resolveReferenceId(handle)).toBe(id);
+    expect(canonical).not.toBe(handle);
+    await expect(store.upsert({ id: 'fresh-row', wireReference: handle, message: 'shadow old alias' })).rejects.toThrow('ambiguous');
+    await expect(store.upsert({ id: handle, message: 'shadow old alias as ID' })).rejects.toThrow('ambiguous');
+    expect(store.count()).toBe(1);
+    await store.close();
+    const oldWriter = new HandlerSqliteStore({ workingDirectory: dir, fileName: 'drafts.sqlite', schema: [] });
+    await oldWriter.init();
+    oldWriter.run('UPDATE drafts SET title = ? WHERE id = ?', ['old reader edit', id]);
+    expect(oldWriter.get('SELECT wireReference FROM drafts WHERE id = ?', [id])).toEqual({ wireReference: canonical });
+    expect(oldWriter.get('SELECT bodyEnc FROM drafts WHERE id = ?', [id])).toEqual(ciphertext);
+    // Already ambiguous data from an actual old explicit-column writer is
+    // retained, but no historical handle may arbitrarily choose either row.
+    oldWriter.run('INSERT INTO drafts (id, version, createdAt, updatedAt, status, bodyEnc) VALUES (?,1,?,?,?,?)',
+      [handle, '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z', 'draft', 'enc:ZGlmZmVyZW50']);
+    await oldWriter.close();
+    store = makeStore(dir, cipher); await store.init();
+    expect(store.get(id)).toMatchObject({ wireReference: canonical, title: 'old reader edit' });
+    // Both a direct ID and an actual old content-derived alias match: refuse.
+    expect(() => store.resolveReferenceId(handle)).toThrow('ambiguous');
   });
 
   test('create assigns a uuid, defaults version 1, reports created:true', async () => {

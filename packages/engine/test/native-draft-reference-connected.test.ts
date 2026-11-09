@@ -14,8 +14,9 @@ import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-c
 import { PairingTokenManager } from '../sdk/src/platform/pairing/pairing-token-store.js';
 import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../sdk/src/platform/daemon/control-plane.js';
 import { registerDraftMethods } from '../sdk/src/platform/channels/host-drafts/register.js';
+import { HandlerSqliteStore } from '../sdk/src/platform/state/daemon-handler-sqlite-store.js';
 import { DraftSyncStore } from '../sdk/src/platform/channels/host-drafts/draft-store.js';
-import { channelDraftWireReference } from '../sdk/src/platform/channels/host-drafts/wire-reference.js';
+import { channelDraftWireReference, historicalChannelDraftWireReference } from '../sdk/src/platform/channels/host-drafts/wire-reference.js';
 import { createDaemonControlRouteHandlers } from '../daemon-sdk/src/control-routes.js';
 import { dispatchGatewayRestRoutes } from '../daemon-sdk/src/gateway-rest-routes.js';
 import { gateReadingsPort, forgetGateReadings } from './_helpers/gate-readings.js';
@@ -49,7 +50,7 @@ afterEach(async () => {
   installJudgmentPort(previous); log[Symbol.dispose](); forgetGateReadings();
 });
 
-async function fixture(message = ORIGINAL_BODY, webhook?: string) {
+async function fixture(message = ORIGINAL_BODY, webhook?: string, preField = false) {
   const directory = mkdtempSync(join(tmpdir(), 'gv-native-reference-'));
   cleanup.push(() => rmSync(directory, { recursive: true, force: true }));
   const config = new ConfigManager({ workingDir: directory, homeDir: directory, surfaceRoot: 'test-native-reference' });
@@ -65,7 +66,7 @@ async function fixture(message = ORIGINAL_BODY, webhook?: string) {
   const helper = new DaemonControlPlaneHelper({ gatewayMethods: catalog, pairingTokens: pairing,
     authToken: () => 'synthetic-reference-shared', userAuth: { validateSession: () => null },
   } as unknown as DaemonControlPlaneContext);
-  const drafts = new DraftSyncStore({ workingDirectory: directory, cipher });
+  let drafts = new DraftSyncStore({ workingDirectory: directory, cipher });
   cleanup.push(() => drafts.close());
   await drafts.init();
   const seed = { id: LEGACY_ID, message, status: 'draft' as const, version: 1, title: 'Original title',
@@ -73,6 +74,16 @@ async function fixture(message = ORIGINAL_BODY, webhook?: string) {
     ...(webhook === undefined ? {} : { webhook }),
     createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z' };
   await drafts.upsert(seed); await drafts.save();
+  if (preField) {
+    await drafts.close();
+    const old = new HandlerSqliteStore({ workingDirectory: directory, fileName: 'drafts.sqlite', schema: [] });
+    await old.init();
+    old.run('DROP INDEX idx_drafts_wireReference');
+    old.run('ALTER TABLE drafts DROP COLUMN wireReference');
+    old.run('ALTER TABLE drafts DROP COLUMN legacyWireReference');
+    await old.close();
+    drafts = new DraftSyncStore({ workingDirectory: directory, cipher }); await drafts.init();
+  }
   const surface = registerDraftMethods({ catalog, workingDirectory: directory, credentials, nativeMutationHost,
     logger: { info() {}, warn() {}, error() {} } }, { store: drafts });
   cleanup.push(() => surface.close());
@@ -94,7 +105,8 @@ async function fixture(message = ORIGINAL_BODY, webhook?: string) {
     return response;
   } });
   cleanup.push(() => server.stop(true));
-  const reference = channelDraftWireReference(LEGACY_ID);
+  const reference = drafts.get(LEGACY_ID)!.wireReference;
+  const synchronizedSeed = preField ? seed : { ...seed, wireReference: reference };
   const call = async (method: string, path: string, body?: Record<string, unknown>, token = paired.token) => {
     const response = await fetch(`http://127.0.0.1:${server.port}${path}`, { method,
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
@@ -103,8 +115,8 @@ async function fixture(message = ORIGINAL_BODY, webhook?: string) {
     const data: unknown = JSON.parse(text);
     return { status: response.status, ok: response.ok, data, text };
   };
-  const input = () => ({ ...seed, id: reference, message: 'Complete queued native draft body', status: 'queued', admission: 'autonomous' });
-  return { directory, config, manager, secrets, credentials, cipher, drafts, pairing, paired, reference, seed, input, call, wire, responses, lifetime, invalidations, port: server.port, humans: () => humans };
+  const input = () => ({ ...synchronizedSeed, id: reference, message: 'Complete queued native draft body', status: 'queued', admission: 'autonomous' });
+  return { directory, config, manager, secrets, credentials, cipher, drafts, pairing, paired, reference, seed: synchronizedSeed, input, call, wire, responses, lifetime, invalidations, port: server.port, humans: () => humans };
 }
 
 function expectNoNativeAdmission(token: string, protectedValue?: string) {
@@ -118,7 +130,7 @@ function expectNoNativeAdmission(token: string, protectedValue?: string) {
 
 test('real connected native legacy draft save/get/list/delete keeps private IDs off wire and recorded readings', async () => {
   const f = await fixture();
-  expect(f.reference).toMatch(/^draft-reference-[a-p]{32}$/);
+  expect(f.reference).toMatch(/^draft-reference-v2-[a-p-]+$/);
   expect(channelDraftWireReference('ordinary-native-id')).toBe('ordinary-native-id');
   const saved = await f.call('POST', '/api/channels/drafts', f.input());
   expect(saved.status).toBe(200);
@@ -139,8 +151,8 @@ test('real connected native legacy draft save/get/list/delete keeps private IDs 
   expect(f.humans()).toBe(0);
 });
 
-test('actual registered Agent admission publishes its owned legacy draft through the real paired peer before delivery', async () => {
-  const f = await fixture();
+for (const preField of [false, true]) test(`actual registered Agent admission publishes its owned draft through paired peer (${preField ? 'old row bridge' : 'stored label'})`, async () => {
+  const f = await fixture(ORIGINAL_BODY, undefined, preField);
   const clientRoot = mkdtempSync(join(tmpdir(), 'gv-agent-reference-peer-'));
   cleanup.push(() => rmSync(clientRoot, { recursive: true, force: true }));
   const inputPath = join(clientRoot, 'native-client-input.json');
@@ -158,7 +170,8 @@ test('actual registered Agent admission publishes its owned legacy draft through
   expect(stderr).not.toContain(LEGACY_ID); expect(stderr).not.toContain(f.paired.token);
   expect({ exitCode, stderr, stdout }).toMatchObject({ exitCode: 0 });
   const receipt: unknown = JSON.parse(stdout);
-  expect(receipt).toMatchObject({ result: { success: true, output: expect.stringContaining(f.reference) },
+  expect(receipt).toMatchObject({ result: { success: true, output: expect.stringContaining(preField ? historicalChannelDraftWireReference(LEGACY_ID) : f.reference) },
+    localWireReference: f.reference,
     localStatus: 'sent', delivery: [ORIGINAL_BODY], autonomousReadings: expect.any(Number) });
   expect(f.drafts.get(LEGACY_ID)?.status).toBe('queued'); expect(f.drafts.get(f.reference)).toBeNull();
   expect(f.responses).toEqual([{ method: 'POST', status: 200, nativeStatus: 'queued' }]);

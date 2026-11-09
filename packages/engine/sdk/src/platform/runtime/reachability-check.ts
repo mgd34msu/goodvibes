@@ -33,7 +33,8 @@ import {
   detectInstallKind,
   fallbackUpdateCommand,
 } from './install-kind.js';
-import { scanCommandShadows, splitPathEntries, type ShadowScanResult } from './path-shadow.js';
+import { createGlobalPackageOwnerResolver } from './global-package-owner.js';
+import { scanCommandShadows, splitPathEntries, type GlobalPackageOwner, type ShadowScanResult } from './path-shadow.js';
 import { buildReachabilityNotices, type ReachabilityNotice } from './reachability-notice.js';
 
 /** The commands one install of this platform places side by side in a directory. */
@@ -44,13 +45,6 @@ const VERSION_PROBE_TIMEOUT_MS = 3000;
 /** How long the latest-release lookup may take before startup moves on without it. */
 export const LATEST_LOOKUP_TIMEOUT_MS = 2500;
 
-function safeRealPath(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch {
-    return path;
-  }
-}
 
 function isExecutableFile(path: string): boolean {
   try {
@@ -72,11 +66,12 @@ export function probeVersionLine(path: string): string | undefined {
   try {
     const result = spawnSync(path, ['--version'], {
       timeout: VERSION_PROBE_TIMEOUT_MS,
+      maxBuffer: 16 * 1024,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
       windowsHide: true,
     });
-    if (result.error || typeof result.stdout !== 'string') return undefined;
+    if (result.error || result.status !== 0 || result.signal !== null || typeof result.stdout !== 'string') return undefined;
     return result.stdout.split('\n')[0];
   } catch {
     return undefined;
@@ -105,11 +100,13 @@ export function resolveSelfDirectory(input: {
   readonly realPath: (path: string) => string;
   readonly isExecutableFile: (path: string) => boolean;
 }): string | undefined {
-  const self = input.realPath(input.execPath);
+  let self: string;
+  try { self = input.realPath(input.execPath); } catch { return undefined; }
   for (const directory of input.pathEntries) {
     const candidate = join(directory, input.command);
-    if (!input.isExecutableFile(candidate)) continue;
-    if (input.realPath(candidate) === self) return directory;
+    try {
+      if (input.isExecutableFile(candidate) && input.realPath(candidate) === self) return directory;
+    } catch { /* One unresolved PATH entry cannot prevent inspecting the rest. */ }
   }
   if (detectInstallKind(input.execPath) === 'binary') return dirname(self);
   return undefined;
@@ -143,6 +140,7 @@ export interface ReachabilityCheckInput {
   // paths and never spawns anything. Production passes none of these.
   readonly isExecutableFile?: ((path: string) => boolean) | undefined;
   readonly realPath?: ((path: string) => string) | undefined;
+  readonly globalPackageOwner?: ((name: string, root: string) => GlobalPackageOwner | undefined) | undefined;
   readonly probeVersion?: ((path: string) => string | undefined) | undefined;
 }
 
@@ -151,11 +149,12 @@ export interface ReachabilityCheckInput {
  * Returns the notices to print; an empty list is the healthy case.
  */
 export async function runReachabilityCheck(input: ReachabilityCheckInput): Promise<ReachabilityCheckResult> {
+  input = { ...input };
   const command = input.commandName ?? basename(input.execPath);
   const pathEntries = splitPathEntries(input.pathValue);
   const installKind = detectInstallKind(input.execPath);
   const fileIsExecutable = input.isExecutableFile ?? isExecutableFile;
-  const resolvePath = input.realPath ?? safeRealPath;
+  const resolvePath = input.realPath ?? realpathSync;
   const versionProbe = input.probeVersion ?? probeVersionLine;
 
   // A source checkout is not an install: there is no maintained copy to be
@@ -184,7 +183,7 @@ export async function runReachabilityCheck(input: ReachabilityCheckInput): Promi
   // Existence-only first: nothing is spawned while there is nothing to report.
   const cheapScan = scanCommandShadows(base);
   const scan = cheapScan.hasProblem
-    ? scanCommandShadows({ ...base, probeVersion: versionProbe })
+    ? scanCommandShadows({ ...base, probeVersion: versionProbe, globalPackageOwner: input.globalPackageOwner ?? createGlobalPackageOwnerResolver() })
     : cheapScan;
 
   const latestVersion = scan.hasProblem || installKind !== 'binary'
@@ -213,18 +212,17 @@ export async function boundedLatestRelease(
   lookup: () => Promise<string | undefined>,
   timeoutMs: number = LATEST_LOOKUP_TIMEOUT_MS,
 ): Promise<string | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const timed = await Promise.race([
-      lookup(),
+    return await Promise.race([
+      Promise.resolve().then(lookup),
       new Promise<undefined>((resolve) => {
-        const timer = setTimeout(() => resolve(undefined), timeoutMs);
+        timer = setTimeout(() => resolve(undefined), timeoutMs);
         timer.unref?.();
       }),
     ]);
-    return timed ?? undefined;
-  } catch {
-    return undefined;
-  }
+  } catch { return undefined; }
+  finally { if (timer !== undefined) clearTimeout(timer); }
 }
 
 /**

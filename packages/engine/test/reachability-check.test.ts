@@ -21,7 +21,7 @@ import { scanCommandShadows } from '../sdk/src/platform/runtime/path-shadow.ts';
 const HOME = '/home/owner';
 const INSTALL_DIR = `${HOME}/.local/bin`;
 const BUN_BIN = `${HOME}/.bun/bin`;
-const BUN_PACKAGE = `${HOME}/.bun/install/global/node_modules/@goodvibes-jev/agent/bin/goodvibes-agent`;
+const BUN_PACKAGE = `${HOME}/.bun/install/global/node_modules/@pellux/goodvibes-tui/bin/goodvibes`;
 
 interface FakeHost {
   readonly files: Record<string, { readonly link?: string; readonly version?: string }>;
@@ -30,6 +30,7 @@ interface FakeHost {
 
 function hostIo(host: FakeHost) {
   return {
+    globalPackageOwner: () => ({ manager: 'bun' as const, root: `${HOME}/.bun/install/global/node_modules`, bin: BUN_BIN }),
     isExecutableFile: (path: string) => Object.hasOwn(host.files, path),
     realPath: (path: string) => host.files[path]?.link ?? path,
     probeVersion: (path: string) => {
@@ -65,7 +66,7 @@ describe('the startup check fires on an earlier-PATH copy', () => {
     expect(text).toContain('version 1.18.1');
     expect(text).toContain(`${INSTALL_DIR}/goodvibes`);
     expect(text).toContain('version 1.25.0');
-    expect(text).toContain('bun remove -g @goodvibes-jev/agent');
+    expect(text).toContain('bun remove -g --ignore-scripts @pellux/goodvibes-tui');
   });
 
   test('a shadow reports both problems at once when the build is also behind', async () => {
@@ -201,7 +202,7 @@ describe('being behind is stated plainly, and only when it is known', () => {
     const text = reachabilityNoticeLines(result.notices).join('\n');
     expect(text).toContain('This build is v1.18.1. The current release is v1.25.0');
     expect(text).toContain('genuinely absent from this build');
-    expect(text).toContain('bun add -g @goodvibes-jev/tui');
+    expect(text).toContain('curl -fsSL https://goodvibes.sh/install.sh | sh');
   });
 
   test('an unknown latest version says nothing rather than guessing', () => {

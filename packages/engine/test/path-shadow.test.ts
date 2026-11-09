@@ -43,13 +43,18 @@ function scanWith(options: {
     homeDir: options.homeDir ?? HOME,
     isExecutableFile: (path) => Object.hasOwn(files, path),
     realPath: (path) => files[path]?.link ?? path,
+    globalPackageOwner: (_name, root) => root.startsWith(`${HOME}/.bun/install/global/node_modules/`)
+      ? { manager: 'bun', root: `${HOME}/.bun/install/global/node_modules`, bin: `${HOME}/.bun/bin` }
+      : root.startsWith(`${HOME}/.npm-global/lib/node_modules/`)
+        ? { manager: 'npm', root: `${HOME}/.npm-global/lib/node_modules`, prefix: `${HOME}/.npm-global` }
+        : undefined,
     probeVersion: options.withProbe === false
       ? undefined
       : (path) => files[path]?.version,
   };
 }
 
-const BUN_GLOBAL_LINK = `${HOME}/.bun/install/global/node_modules/@goodvibes-jev/agent/bin/goodvibes-agent`;
+const BUN_GLOBAL_LINK = `${HOME}/.bun/install/global/node_modules/@pellux/goodvibes-agent/bin/goodvibes-agent`;
 
 describe('splitPathEntries', () => {
   test('keeps search order, drops empties, collapses duplicates to the winning position', () => {
@@ -64,12 +69,12 @@ describe('splitPathEntries', () => {
 
 describe('owningPackageName', () => {
   test('recognises one of our packages behind a global link', () => {
-    expect(owningPackageName(BUN_GLOBAL_LINK)).toBe('@goodvibes-jev/agent');
+    expect(owningPackageName(BUN_GLOBAL_LINK)).toBe('@pellux/goodvibes-agent');
   });
 
   test('a nested install belongs to the innermost package', () => {
-    expect(owningPackageName('/x/node_modules/@other/thing/node_modules/@goodvibes-jev/tui/bin/g'))
-      .toBe('@goodvibes-jev/tui');
+    expect(owningPackageName('/x/node_modules/@other/thing/node_modules/@pellux/goodvibes-tui/bin/g'))
+      .toBe('@pellux/goodvibes-tui');
   });
 
   test('another publisher, another scope, and a plain path are all not ours', () => {
@@ -138,7 +143,7 @@ describe('a shadowed install is detected', () => {
     expect(lines).toContain('version 1.18.1');
     expect(lines).toContain(`${INSTALL_DIR}/goodvibes-agent`);
     expect(lines).toContain('version 1.21.0');
-    expect(lines).toContain('bun remove -g @goodvibes-jev/agent');
+    expect(lines).toContain('bun remove -g --ignore-scripts @pellux/goodvibes-agent');
   });
 });
 
@@ -205,13 +210,13 @@ describe('removal offers only recognised copies of our own program', () => {
       commands: ['goodvibes-agent'],
     }));
     expect(removableShadows(bun).map((copy) => copy.removal?.command))
-      .toEqual(['bun remove -g @goodvibes-jev/agent']);
+      .toEqual([`BUN_INSTALL_GLOBAL_DIR=${HOME}/.bun/install/global BUN_INSTALL_BIN=${HOME}/.bun/bin bun remove -g --ignore-scripts @pellux/goodvibes-agent`]);
 
     const npm = scanCommandShadows(scanWith({
       pathEntries: [`${HOME}/.npm-global/bin`, INSTALL_DIR],
       files: {
         [`${HOME}/.npm-global/bin/goodvibes-agent`]: {
-          link: `${HOME}/.npm-global/lib/node_modules/@goodvibes-jev/agent/bin/goodvibes-agent`,
+          link: `${HOME}/.npm-global/lib/node_modules/@pellux/goodvibes-agent/bin/goodvibes-agent`,
           version: 'goodvibes-agent 1.18.1',
         },
         [`${INSTALL_DIR}/goodvibes-agent`]: { version: 'goodvibes-agent 1.21.0' },
@@ -219,7 +224,7 @@ describe('removal offers only recognised copies of our own program', () => {
       commands: ['goodvibes-agent'],
     }));
     expect(removableShadows(npm).map((copy) => copy.removal?.command))
-      .toEqual(['npm rm -g @goodvibes-jev/agent']);
+      .toEqual([`npm --prefix ${HOME}/.npm-global rm -g --ignore-scripts @pellux/goodvibes-agent`]);
   });
 
   test('a standalone file that answers --version as us is offered for deletion', () => {
@@ -234,7 +239,7 @@ describe('removal offers only recognised copies of our own program', () => {
     const removable = removableShadows(result);
     expect(removable).toHaveLength(1);
     expect(removable[0]!.ownership).toBe('our-binary');
-    expect(removable[0]!.removal).toEqual({ kind: 'file', command: `rm ${HOME}/bin/goodvibes-agent` });
+    expect(removable[0]!.removal).toEqual({ kind: 'file', command: `rm -- ${HOME}/bin/goodvibes-agent` });
   });
 
   test('an unrelated program with the same name is reported and never offered', () => {
@@ -257,7 +262,7 @@ describe('removal offers only recognised copies of our own program', () => {
       pathEntries: ['/usr/local/bin', INSTALL_DIR],
       files: {
         '/usr/local/bin/goodvibes-agent': {
-          link: '/usr/local/lib/node_modules/@goodvibes-jev/agent/bin/goodvibes-agent',
+          link: '/usr/local/lib/node_modules/@pellux/goodvibes-agent/bin/goodvibes-agent',
           version: 'goodvibes-agent 1.18.1',
         },
         [`${INSTALL_DIR}/goodvibes-agent`]: { version: 'goodvibes-agent 1.21.0' },
@@ -274,7 +279,7 @@ describe('removal offers only recognised copies of our own program', () => {
       pathEntries: [`${HOME}/bin`, INSTALL_DIR],
       files: {
         [`${HOME}/bin/goodvibes-agent`]: {
-          link: '/opt/vendor/node_modules/@goodvibes-jev/agent/bin/goodvibes-agent',
+          link: '/opt/vendor/node_modules/@pellux/goodvibes-agent/bin/goodvibes-agent',
           version: 'goodvibes-agent 1.18.1',
         },
         [`${INSTALL_DIR}/goodvibes-agent`]: { version: 'goodvibes-agent 1.21.0' },
@@ -298,16 +303,16 @@ describe('removal offers only recognised copies of our own program', () => {
     expect(removableShadows(result)).toEqual([]);
   });
 
-  test('one leftover package providing several commands is offered once', () => {
+  test('a command/package mismatch remains unremovable even with a matching banner', () => {
     const result = scanCommandShadows(scanWith({
       pathEntries: [`${HOME}/.bun/bin`, INSTALL_DIR],
       files: {
         [`${HOME}/.bun/bin/goodvibes`]: {
-          link: `${HOME}/.bun/install/global/node_modules/@goodvibes-jev/tui/bin/goodvibes`,
+          link: `${HOME}/.bun/install/global/node_modules/@pellux/goodvibes-tui/bin/goodvibes`,
           version: 'goodvibes 1.10.0',
         },
         [`${HOME}/.bun/bin/goodvibes-daemon`]: {
-          link: `${HOME}/.bun/install/global/node_modules/@goodvibes-jev/tui/bin/goodvibes-daemon`,
+          link: `${HOME}/.bun/install/global/node_modules/@pellux/goodvibes-tui/bin/goodvibes-daemon`,
           version: 'goodvibes-daemon 1.10.0',
         },
         [`${INSTALL_DIR}/goodvibes`]: { version: 'goodvibes 1.25.0' },
@@ -318,7 +323,6 @@ describe('removal offers only recognised copies of our own program', () => {
     expect(result.shadowed).toHaveLength(2);
     expect(removableShadows(result).map((copy) => copy.path)).toEqual([
       `${HOME}/.bun/bin/goodvibes`,
-      `${HOME}/.bun/bin/goodvibes-daemon`,
     ]);
   });
 });

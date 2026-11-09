@@ -1,3 +1,5 @@
+import { quoteShadowArgument } from './path-shadow.js';
+
 /**
  * install-kind.ts, how a running process was installed, decided from its own
  * executable path rather than assumed, and what command replaces an in-place
@@ -40,14 +42,14 @@ export const BINARY_INSTALL_COMMAND = 'curl -fsSL https://goodvibes.sh/install.s
 /**
  * The exact command to tell the user to run instead of an in-place swap.
  *
- * A package-managed install is updated through the package manager, which needs
- * the PACKAGE name, and that is the calling product's own, not something this
- * module can know. Pass it; the source-run case ignores it and points at the
- * installer, because a source checkout has no package to upgrade.
+ * Monorepo product packages are private; both those names and identified old
+ * published products move to the released suite through the installer. External
+ * embedding packages retain their explicit package-manager advice. The name is
+ * quoted as one argument, never interpreted as shell source.
  */
 export function fallbackUpdateCommand(kind: Exclude<InstallKind, 'binary'>, packageName: string): string {
-  if (kind === 'bun-global-package') {
-    return `bun add -g ${packageName}`;
+  if (kind === 'bun-global-package' && !/^@(?:goodvibes-jev\/(?:tui|agent|daemon|webui)|pellux\/goodvibes-(?:tui|agent|daemon))$/.test(packageName)) {
+    return `bun add -g ${quoteShadowArgument(packageName)}`;
   }
   return BINARY_INSTALL_COMMAND;
 }

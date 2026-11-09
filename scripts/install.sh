@@ -2596,7 +2596,7 @@ shadow_owning_package() {
 # errors all yield nothing, which keeps that copy unidentified and therefore
 # never a removal candidate.
 shadow_version_of() {
-  shadow_version_line=$(shadow_run_version "$1")
+  shadow_version_line=$(shadow_run_version "$1") || return 0
   printf '%s\n' "$shadow_version_line" | awk -v cmd="$2" '
     NF == 2 && $1 == cmd {
       v = $2
@@ -2605,17 +2605,131 @@ shadow_version_of() {
     }'
 }
 
-# Runs the candidate with --version, bounded by `timeout` when the host has it
-# so a hung or interactive binary cannot stall the install. This runs the same
+# Runs the candidate with --version through the bounded capture below, so
+# a hung, verbose or interactive binary cannot stall the install. This runs the same
 # file the user's very next bare command would run, with the most harmless
 # argument there is.
 shadow_run_version() {
-  if command -v timeout >/dev/null 2>&1; then
-    timeout 10 "$1" --version 2>/dev/null | head -1
-  else
-    "$1" --version 2>/dev/null | head -1
+  # Capture status before selecting a line. Discovery must not inherit a
+  # candidate's terminal or allow a successful `head` to mask its failure.
+  shadow_probe_output=$(shadow_manager_output "$1" --version) || return 1
+  printf '%s\n' "$shadow_probe_output" | head -1
+}
+
+# Read-only manager facts, never a guess from a `.bun` path segment. The npm
+# prefix and root must agree; the Bun global project and bin are the selected
+# manager's own reported context (bun pm ls/bin -g).
+shadow_manager_output() {
+  # Perl is present on supported stock macOS and many Linux hosts. Its core
+  # pipe/fork/wait facilities bound BOTH output and elapsed time without
+  # background watchdogs or guessing/reusing process IDs. If unavailable,
+  # optional cleanup remains advisory; suite installation still proceeds.
+  command -v perl >/dev/null 2>&1 || return 1
+  perl -e '
+    use strict; use warnings; use POSIX qw(WNOHANG);
+    pipe(my $reader, my $writer) or exit 1;
+    my $pid = fork(); defined($pid) or exit 1;
+    if (!$pid) {
+      close $reader;
+      open STDIN, "<", "/dev/null" or exit 1;
+      open STDERR, ">", "/dev/null" or exit 1;
+      open STDOUT, ">&", $writer or exit 1;
+      close $writer;
+      exec @ARGV; exit 127;
+    }
+    close $writer;
+    my $stop = sub {
+      # WNOHANG reaps an exited child; a still-owned live/zombie child cannot
+      # have its PID reused before our wait. Never signal an unrelated PID.
+      my $done = waitpid($pid, WNOHANG);
+      if ($done == 0) { kill 9, $pid; waitpid($pid, 0); }
+    };
+    $SIG{ALRM} = sub { $stop->(); exit 124; };
+    alarm 5;
+    my $output = "";
+    while (1) {
+      my $count = sysread($reader, my $chunk, 4096);
+      if (!defined $count) { $stop->(); exit 1; }
+      last if !$count;
+      $output .= $chunk;
+      if (length($output) > 65536) { $stop->(); exit 1; }
+    }
+    waitpid($pid, 0);
+    my $status = $?;
+    alarm 0;
+    exit 1 if $status != 0;
+    print $output;
+  ' -- "$@" 2>/dev/null
+}
+
+shadow_global_owner() {
+  shadow_global_package=$1
+  shadow_global_target=$2
+  shadow_global_package_root="${shadow_global_target%/node_modules/*}/node_modules/$shadow_global_package"
+  shadow_npm_root=$(shadow_manager_output npm root --global) || shadow_npm_root=''
+  shadow_npm_prefix=$(shadow_manager_output npm prefix --global) || shadow_npm_prefix=''
+  if [ -d "$shadow_npm_root" ] && [ -d "$shadow_npm_prefix" ]; then
+    shadow_npm_root=$(CDPATH='' cd -P "$shadow_npm_root" && pwd -P) || return 0
+    shadow_npm_prefix=$(CDPATH='' cd -P "$shadow_npm_prefix" && pwd -P) || return 0
+    shadow_npm_expected=$(CDPATH='' cd -P "$shadow_npm_prefix/lib/node_modules" && pwd -P) || shadow_npm_expected=''
+    if [ "$shadow_npm_root" = "$shadow_npm_expected" ]; then
+      if [ "$shadow_global_package_root" = "$shadow_npm_root/$shadow_global_package" ]; then
+        printf 'npm\t%s\t-\n' "$shadow_npm_prefix"; return 0
+      fi
+    fi
+  fi
+  shadow_bun_listing=$(NO_COLOR=1 FORCE_COLOR=0 shadow_manager_output bun pm ls -g) || shadow_bun_listing=''
+  shadow_bun_project=$(printf '%s\n' "$shadow_bun_listing" | head -1 | sed -n 's/ node_modules ([0-9][0-9]* installed)$//p')
+  shadow_bun_bin=$(shadow_manager_output bun pm bin -g) || shadow_bun_bin=''
+  if [ -d "$shadow_bun_project" ] && [ -d "$shadow_bun_bin" ]; then
+    shadow_bun_project=$(CDPATH='' cd -P "$shadow_bun_project" && pwd -P) || return 0
+    shadow_bun_bin=$(CDPATH='' cd -P "$shadow_bun_bin" && pwd -P) || return 0
+    if [ "$shadow_global_package_root" = "$shadow_bun_project/node_modules/$shadow_global_package" ]; then
+      printf 'bun\t%s\t%s\n' "$shadow_bun_project" "$shadow_bun_bin"
+    fi
   fi
 }
+
+# Display only. The executor below always uses structured, quoted argv.
+shadow_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+
+# Existing physical target only. A failed/dangling resolution is never evidence
+# for removal; resolve parent aliases as well on hosts without readlink -f.
+shadow_existing_path() (
+  shadow_existing=$(shadow_real_path "$1") || return 1
+  [ -f "$shadow_existing" ] || return 1
+  shadow_existing_parent=$(CDPATH='' cd -P "$(dirname "$shadow_existing")" && pwd -P) || return 1
+  printf '%s/%s\n' "$shadow_existing_parent" "$(basename "$shadow_existing")"
+)
+
+shadow_target_stamp() {
+  stat -L -c '%d:%i:%u:%g:%f:%s:%y:%z' /dev/fd/3 2>/dev/null || stat -L -f '%d:%i:%u:%g:%p:%z:%m:%c' /dev/fd/3
+}
+
+shadow_entry_stamp() {
+  stat -c '%d:%i:%u:%g:%f:%s:%y:%z' "$1" 2>/dev/null || stat -f '%d:%i:%u:%g:%p:%z:%m:%c' "$1"
+}
+
+# Hold the original selected file and parent through the user's prompt. Only
+# this original entry can be removed; a prompt callback/reconnect/replacement
+# does not mint a new cleanup target. Exit20 means the headless safe default.
+confirm_shadow_removal() (
+  shadow_confirm_plan=$1
+  shadow_confirm_copy=$2
+  shadow_confirm_command=$3
+  shadow_confirm_real=$4
+  exec 3< "$shadow_confirm_copy" || return 1
+  exec 4< "$(dirname "$shadow_confirm_copy")" || return 1
+  shadow_confirm_stamp=$(shadow_entry_stamp "$shadow_confirm_copy") || return 1
+  shadow_confirm_target_stamp=$(shadow_target_stamp) || return 1
+  if shadow_confirm '  Remove it now?'; then
+    [ "$shadow_confirm_copy" -ef /dev/fd/3 ] || return 1
+    [ "$(dirname "$shadow_confirm_copy")" -ef /dev/fd/4 ] || return 1
+    [ "$(shadow_entry_stamp "$shadow_confirm_copy")" = "$shadow_confirm_stamp" ] || return 1
+    run_shadow_removal "$shadow_confirm_plan" "$shadow_confirm_copy" "$shadow_confirm_command" "$shadow_confirm_real"
+  elif [ "$SHADOW_HEADLESS_UNCONFIRMED" = 1 ]; then return 20
+  else return 10; fi
+)
 
 # True when $1 is inside $2 (or is $2 itself). Nothing outside the user's own
 # home is ever a removal candidate, however confidently we recognise it.
@@ -2633,13 +2747,13 @@ shadow_is_within() {
 # The removal plan for a shadowing copy, as "<kind>\t<detail>", or nothing when
 # the copy is not recognisably one of our programs. Two recognised kinds:
 #   package <pkg>   a known exact historical product package, matched to its
-#                   command and version (a bun/npm global or dependency link)
+#                   command/version and actual bun/npm global root only
 #   file <path>     a standalone file that answers --version as this command,
 #                   i.e. an earlier standalone install of the same program
 shadow_removal_plan() {
   shadow_plan_path=$1
   shadow_plan_command=$2
-  shadow_plan_resolved=$(shadow_real_path "$shadow_plan_path")
+  shadow_plan_resolved=$(shadow_existing_path "$shadow_plan_path") || return 0
 
   shadow_is_within "$shadow_plan_path" "$HOME" || return 0
   shadow_is_within "$shadow_plan_resolved" "$HOME" || return 0
@@ -2656,7 +2770,20 @@ shadow_removal_plan() {
   fi
   [ -n "$(shadow_version_of "$shadow_plan_path" "$shadow_plan_command")" ] || return 0
   if [ -n "$shadow_plan_package" ]; then
-    printf 'package\t%s\n' "$shadow_plan_package"
+    shadow_plan_global=$(shadow_global_owner "$shadow_plan_package" "$shadow_plan_resolved")
+    [ -n "$shadow_plan_global" ] || return 0
+    if printf '%s' "$shadow_plan_global" | LC_ALL=C grep -q '[[:cntrl:]]' ; then
+      # Tabs are the three structured fields, all path facts themselves must
+      # be single-line and tab-free (validated independently below).
+      shadow_plan_scope=$(printf '%s' "$shadow_plan_global" | cut -f2)
+      shadow_plan_bin=$(printf '%s' "$shadow_plan_global" | cut -f3)
+      if printf '%s%s' "$shadow_plan_scope" "$shadow_plan_bin" | LC_ALL=C grep -q '[[:cntrl:]]'; then return 0; fi
+    fi
+    shadow_plan_scope=$(printf '%s' "$shadow_plan_global" | cut -f2)
+    shadow_is_within "$shadow_plan_scope" "$HOME" || return 0
+    shadow_plan_bin=$(printf '%s' "$shadow_plan_global" | cut -f3)
+    [ "$shadow_plan_bin" = '-' ] || shadow_is_within "$shadow_plan_bin" "$HOME" || return 0
+    printf 'package\t%s\t%s\n' "$shadow_plan_package" "$shadow_plan_global"
   else
     printf 'file\t%s\n' "$shadow_plan_path"
   fi
@@ -2664,18 +2791,18 @@ shadow_removal_plan() {
 
 # The exact command that removes a recognised copy. A package link is removed
 # by uninstalling the package that provides it — with the manager that owns it,
-# read from where the package actually lives — never by deleting the link,
+# established by its selected global context — never by deleting the link,
 # which the next command of that package manager would put straight back.
 shadow_removal_command() {
-  case "$1" in
-    package)
-      shadow_cmd_resolved=$(shadow_real_path "$3")
-      case "$shadow_cmd_resolved" in
-        */.bun/install/global/*|"$HOME"/.bun/*) printf 'bun remove -g %s\n' "$2" ;;
-        *) printf 'npm rm -g %s\n' "$2" ;;
-      esac
-      ;;
-    file) printf 'rm %s\n' "$2" ;;
+  shadow_display_kind=$(printf '%s' "$1" | cut -f1)
+  shadow_display_detail=$(printf '%s' "$1" | cut -f2)
+  shadow_display_manager=$(printf '%s' "$1" | cut -f3)
+  shadow_display_scope=$(printf '%s' "$1" | cut -f4)
+  shadow_display_bin=$(printf '%s' "$1" | cut -f5)
+  case "$shadow_display_kind:$shadow_display_manager" in
+    package:bun) printf 'BUN_INSTALL_GLOBAL_DIR=%s BUN_INSTALL_BIN=%s bun remove -g --ignore-scripts %s\n' "$(shadow_quote "$shadow_display_scope")" "$(shadow_quote "$shadow_display_bin")" "$(shadow_quote "$shadow_display_detail")" ;;
+    package:npm) printf 'npm --prefix %s rm -g --ignore-scripts %s\n' "$(shadow_quote "$shadow_display_scope")" "$(shadow_quote "$shadow_display_detail")" ;;
+    file:*) printf 'rm -- %s\n' "$(shadow_quote "$shadow_display_detail")" ;;
   esac
 }
 
@@ -2797,7 +2924,7 @@ check_command_shadowing() {
     # a copy that resolves to the EXACT SAME real file as the one this
     # installer maintains is not a shadow — it is the same binary reached
     # through a different spelling — and must never be offered for deletion.
-    shadow_copy_real=$(shadow_real_path "$shadow_copy")
+    shadow_copy_real=$(shadow_existing_path "$shadow_copy") || shadow_copy_real=''
     shadow_target_real=$(shadow_real_path "$shadow_target")
     if [ -n "$shadow_copy_real" ] && [ "$shadow_copy_real" = "$shadow_target_real" ]; then
       IFS='
@@ -2822,27 +2949,20 @@ check_command_shadowing() {
 
     shadow_kind=$(printf '%s' "$shadow_plan" | cut -f1)
     shadow_detail=$(printf '%s' "$shadow_plan" | cut -f2)
-    shadow_fix=$(shadow_removal_command "$shadow_kind" "$shadow_detail" "$shadow_copy")
+    shadow_fix=$(shadow_removal_command "$shadow_plan")
     say ""
     say "  $shadow_copy (version $shadow_copy_version) is a copy of our own program."
     say "  Remove it with: $shadow_fix"
 
     SHADOW_HEADLESS_UNCONFIRMED=0
-    if shadow_confirm "  Remove it now?"; then
-      # shadow_confirm only ever returns true via SHADOW_REMOVE=1 or a real
-      # 'yes' typed at a real terminal, so SHADOW_HEADLESS_UNCONFIRMED is
-      # always 0 here — a failed removal in this branch is a genuine failure.
-      if run_shadow_removal "$shadow_kind" "$shadow_detail" "$shadow_fix"; then
-        say "  removed     $shadow_copy"
-      else
-        say "  could not run: $shadow_fix"
+    if confirm_shadow_removal "$shadow_plan" "$shadow_copy" "$shadow_command" "$shadow_copy_real"; then
+      say "  removed     $shadow_copy"
+    else
+      shadow_removal_status=$?
+      if [ "$shadow_removal_status" != 20 ]; then
+        [ "$shadow_removal_status" = 10 ] || say "  could not run: $shadow_fix"
         shadow_remaining=1
       fi
-    elif [ "$SHADOW_HEADLESS_UNCONFIRMED" = "1" ]; then
-      : # already explained by shadow_confirm; left in place, but not a
-        # failure to blame on this (unattended) run — see the final gate below
-    else
-      shadow_remaining=1
     fi
     IFS='
 '
@@ -2875,23 +2995,31 @@ check_command_shadowing() {
 # Runs one removal. A package link is removed through its package manager; a
 # standalone file is deleted, and only after re-checking that it is still
 # inside the user's home directory.
-run_shadow_removal() {
-  case "$1" in
-    package)
-      shadow_manager=$(printf '%s' "$3" | awk '{ print $1 }')
-      command -v "$shadow_manager" >/dev/null 2>&1 || return 1
-      # shellcheck disable=SC2086
-      $3 >/dev/null 2>&1 || return 1
-      return 0
-      ;;
-    file)
-      shadow_is_within "$2" "$HOME" || return 1
-      rm -f "$2" || return 1
-      return 0
-      ;;
+run_shadow_removal() (
+  # Re-observe exact package/global context after interactive confirmation.
+  # The captured plan is never evaluated as shell source or word-split argv.
+  shadow_execute_plan=$1
+  shadow_execute_path=$2
+  shadow_execute_command=$3
+  [ "$(shadow_existing_path "$shadow_execute_path")" = "$4" ] || return 1
+  shadow_execute_current=$(shadow_removal_plan "$shadow_execute_path" "$shadow_execute_command")
+  [ "$shadow_execute_plan" = "$shadow_execute_current" ] || return 1
+  shadow_execute_kind=$(printf '%s' "$shadow_execute_plan" | cut -f1)
+  shadow_execute_detail=$(printf '%s' "$shadow_execute_plan" | cut -f2)
+  shadow_execute_manager=$(printf '%s' "$shadow_execute_plan" | cut -f3)
+  shadow_execute_scope=$(printf '%s' "$shadow_execute_plan" | cut -f4)
+  shadow_execute_bin=$(printf '%s' "$shadow_execute_plan" | cut -f5)
+  [ "$shadow_execute_path" -ef /dev/fd/3 ] || return 1
+  [ "$(dirname "$shadow_execute_path")" -ef /dev/fd/4 ] || return 1
+  [ "$(shadow_entry_stamp "$shadow_execute_path")" = "$shadow_confirm_stamp" ] || return 1
+  [ "$(shadow_target_stamp)" = "$shadow_confirm_target_stamp" ] || return 1
+  case "$shadow_execute_kind:$shadow_execute_manager" in
+    package:bun) BUN_INSTALL_GLOBAL_DIR="$shadow_execute_scope" BUN_INSTALL_BIN="$shadow_execute_bin" bun remove -g --ignore-scripts "$shadow_execute_detail" >/dev/null 2>&1 ;;
+    package:npm) npm --prefix "$shadow_execute_scope" rm -g --ignore-scripts "$shadow_execute_detail" >/dev/null 2>&1 ;;
+    file:*) shadow_is_within "$shadow_execute_detail" "$HOME" || return 1; rm -f -- "$shadow_execute_detail" ;;
+    *) return 1 ;;
   esac
-  return 1
-}
+)
 
 # The whole-install verdict, run after everything is placed.
 resolve_path_shadows() {
@@ -3265,7 +3393,7 @@ run_uninstall() (
   fi
   say ""
   say "To also erase all GoodVibes user data, remove it yourself:"
-  say "  rm -rf $HOME/.goodvibes"
+  say "  rm -rf -- $(shadow_quote "$HOME/.goodvibes")"
 )
 
 DECISION_POLICY=''

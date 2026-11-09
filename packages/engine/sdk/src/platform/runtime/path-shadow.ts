@@ -25,7 +25,7 @@
  *
  * Removal is deliberately conservative. A copy is only ever offered for
  * removal when it is recognisably one of OUR programs, a link into an
- * installed `@goodvibes-jev/{tui,agent,daemon}` package, or a file that answers
+ * installed exact historical product package, or a file that answers
  * `--version` with `<command> <semver>`, and only when it lives inside the
  * user's own home directory. Everything else is reported and left alone.
  */
@@ -41,8 +41,8 @@
  *   - `install-target`: the copy living in the directory the installer and
  *     the auto-updater maintain. Never a removal candidate.
  *   - `package-link`: an entry that resolves into an installed
- *     `@goodvibes-jev/{tui,agent,daemon}` package (a `bun add -g` / `npm i -g` link, or a
- *     project-local dependency link). Removed by uninstalling that package.
+ *     exact historical product package, with affirmative global-manager
+ *     ownership and a matching version. Local dependencies remain untouched.
  *   - `our-binary`: a standalone file that answers `--version` with
  *     `<command> <semver>`, i.e. a previous standalone install of the same
  *     program. Removed by deleting the file.
@@ -55,7 +55,7 @@ export type ShadowOwnership = 'install-target' | 'package-link' | 'our-binary' |
 export interface ShadowRemoval {
   /** `package` = uninstall the owning package; `file` = delete the PATH entry itself. */
   readonly kind: 'package' | 'file';
-  /** The `@goodvibes-jev/...` package name, when `kind` is `package`. */
+  /** The exact historical package name, when `kind` is `package`. */
   readonly packageName?: string | undefined;
   /** The exact command a user (or the installer) runs to remove this copy. */
   readonly command: string;
@@ -107,6 +107,17 @@ export interface ShadowScanResult {
   readonly hasProblem: boolean;
 }
 
+/** Affirmative host observation of the selected manager's actual global install. */
+export type GlobalPackageOwner =
+  | { readonly manager: 'bun'; readonly root: string; readonly bin: string }
+  | { readonly manager: 'npm'; readonly root: string; readonly prefix: string };
+
+/** Quotes a single POSIX shell argument for display; never execute this text. */
+export function quoteShadowArgument(value: string): string {
+  if (/^[A-Za-z0-9_./@:-]+$/.test(value)) return value;
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
 export interface ShadowScanInput {
   /** Command names the installer/updater maintains, e.g. `['goodvibes', 'goodvibes-daemon', 'goodvibes-agent']`. */
   readonly commands: readonly string[];
@@ -118,7 +129,7 @@ export interface ShadowScanInput {
   readonly homeDir: string;
   /** True when `path` exists and is a runnable file. */
   readonly isExecutableFile: (path: string) => boolean;
-  /** Resolves a symlink chain; returns `path` unchanged when it is not a link or cannot be resolved. */
+  /** Resolves the actual existing path; throws when resolution fails. */
   readonly realPath: (path: string) => string;
   /**
    * Runs `<path> --version` and returns its first line, or undefined when it
@@ -126,6 +137,8 @@ export interface ShadowScanInput {
    * established and such copies stay `unknown` (reported, never removed).
    */
   readonly probeVersion?: ((path: string) => string | undefined) | undefined;
+  /** Called lazily only for a version-matched exact historical product package. */
+  readonly globalPackageOwner?: ((packageName: string, packageRoot: string) => GlobalPackageOwner | undefined) | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -147,7 +160,7 @@ export function splitPathEntries(rawPath: string | undefined, separator = ':'): 
   const seen = new Set<string>();
   const entries: string[] = [];
   for (const raw of rawPath.split(separator)) {
-    const entry = raw.trim();
+    const entry = raw;
     if (entry.length === 0) continue;
     const normalized = stripTrailingSeparators(entry);
     if (normalized.length === 0) continue;
@@ -177,6 +190,8 @@ function segmentsOf(path: string): string[] {
 export function isWithinDirectory(path: string, root: string): boolean {
   const normalizedRoot = stripTrailingSeparators(root);
   if (normalizedRoot.length === 0) return false;
+  if (segmentsOf(path).some((part) => part === '..' || part === '.')
+    || segmentsOf(root).some((part) => part === '..' || part === '.')) return false;
   const normalizedPath = stripTrailingSeparators(path);
   if (normalizedPath === normalizedRoot) return true;
   return normalizedPath.startsWith(`${normalizedRoot}/`);
@@ -186,43 +201,38 @@ export function isWithinDirectory(path: string, root: string): boolean {
 // Ownership classification
 // ---------------------------------------------------------------------------
 
-/** The npm scope every package this platform publishes lives under. */
-const PACKAGE_SCOPE = '@goodvibes-jev';
+/** Existing published product packages accepted solely for old-install cleanup. */
+const HISTORICAL_COMMANDS: Readonly<Record<string, string>> = {
+  '@pellux/goodvibes-tui': 'goodvibes',
+  '@pellux/goodvibes-agent': 'goodvibes-agent',
+  '@pellux/goodvibes-daemon': 'goodvibes-daemon',
+};
 
-/**
- * Extracts the owning `@goodvibes-jev/{tui,agent,daemon}` package name from a resolved
- * path, by finding the LAST `node_modules` segment and reading the scoped
- * package directory that follows it. The last occurrence is the one that
- * owns the file: a nested `node_modules/a/node_modules/b/bin/x` belongs to
- * `b`, not `a`.
- */
-export function owningPackageName(resolvedPath: string): string | undefined {
-  const segments = segmentsOf(resolvedPath);
-  for (let i = segments.length - 1; i >= 0; i -= 1) {
-    if (segments[i] !== 'node_modules') continue;
-    const scope = segments[i + 1];
-    const name = segments[i + 2];
-    if (scope !== PACKAGE_SCOPE || name === undefined) return undefined;
-    if (!['tui', 'agent', 'daemon'].includes(name)) return undefined;
-    return `${scope}/${name}`;
-  }
-  return undefined;
+function packageLocation(path: string): { name: string; root: string } | undefined {
+  const marker = '/node_modules/';
+  const at = path.lastIndexOf(marker);
+  if (at < 0) return undefined;
+  const tail = path.slice(at + marker.length).split('/');
+  const count = tail[0]?.startsWith('@') ? 2 : 1;
+  const name = tail.slice(0, count).join('/');
+  return { name, root: path.slice(0, at + marker.length) + name };
 }
 
-/**
- * Picks the uninstall command for a package link, from where the package
- * actually lives. A bun global install lives under `.bun/install/global`;
- * everything else is treated as npm-managed, which is also the correct
- * advice for a `bun add -g` that used an npm-style prefix.
- */
-function packageRemoval(packageName: string, resolvedPath: string): ShadowRemoval {
-  const isBunGlobal = /[\\/]\.bun[\\/]install[\\/]global[\\/]/.test(resolvedPath)
-    || segmentsOf(resolvedPath).includes('.bun');
-  return {
-    kind: 'package',
-    packageName,
-    command: isBunGlobal ? `bun remove -g ${packageName}` : `npm rm -g ${packageName}`,
-  };
+/** The innermost exact historical package, never a prefix match. */
+export function owningPackageName(resolvedPath: string): string | undefined {
+  const location = packageLocation(resolvedPath);
+  return location && Object.hasOwn(HISTORICAL_COMMANDS, location.name) ? location.name : undefined;
+}
+
+function packageRemoval(input: ShadowScanInput, packageName: string, root: string): ShadowRemoval | undefined {
+  const owner = input.globalPackageOwner?.(packageName, root);
+  if (!owner || !isWithinDirectory(owner.root, input.homeDir) || root !== `${stripTrailingSeparators(owner.root)}/${packageName}`) return undefined;
+  if (owner.manager === 'bun') {
+    if (!owner.root.endsWith('/node_modules') || !isWithinDirectory(owner.bin, input.homeDir)) return undefined;
+    return { kind: 'package', packageName, command: `BUN_INSTALL_GLOBAL_DIR=${quoteShadowArgument(owner.root.slice(0, -'/node_modules'.length))} BUN_INSTALL_BIN=${quoteShadowArgument(owner.bin)} bun remove -g --ignore-scripts ${quoteShadowArgument(packageName)}` };
+  }
+  if (!isWithinDirectory(owner.prefix, input.homeDir)) return undefined;
+  return { kind: 'package', packageName, command: `npm --prefix ${quoteShadowArgument(owner.prefix)} rm -g --ignore-scripts ${quoteShadowArgument(packageName)}` };
 }
 
 /**
@@ -250,29 +260,24 @@ function classify(input: ShadowScanInput, copy: {
   readonly pathIndex: number;
   readonly resolvedPath: string;
 }): { ownership: ShadowOwnership; removal?: ShadowRemoval | undefined; version?: string | undefined } {
-  if (isWithinDirectory(copy.path, input.installDir)) {
+  if (copy.path === joinPath(input.installDir, copy.command)) {
     return { ownership: 'install-target', version: probe(input, copy.path, copy.command) };
   }
-
+  if (!copy.resolvedPath || /[\x00-\x1f\x7f]/.test(copy.path + copy.resolvedPath)) return { ownership: 'unknown' };
+  // A different PATH spelling of the maintained file must never suggest deletion.
+  if (copy.resolvedPath === resolve(input, joinPath(input.installDir, copy.command))) return { ownership: 'install-target', version: probe(input, copy.path, copy.command) };
+  const insideHome = isWithinDirectory(copy.path, input.homeDir) && isWithinDirectory(copy.resolvedPath, input.homeDir);
+  const location = packageLocation(copy.resolvedPath);
+  if (location && HISTORICAL_COMMANDS[location.name] !== copy.command) return { ownership: 'unknown' };
   const version = probe(input, copy.path, copy.command);
-
-  // Nothing outside the user's own home is ever a removal candidate, however
-  // confidently we recognise it: a system-wide copy is somebody else's to
-  // manage, and this code must never reach outside the user's directories.
-  const insideHome = isWithinDirectory(copy.path, input.homeDir)
-    && isWithinDirectory(copy.resolvedPath, input.homeDir);
-
-  const packageName = owningPackageName(copy.resolvedPath);
-  if (packageName && insideHome) {
-    return { ownership: 'package-link', removal: packageRemoval(packageName, copy.resolvedPath), version };
+  if (!insideHome || version === undefined) return { ownership: 'unknown', version };
+  if (location) {
+    try {
+      const removal = packageRemoval(input, location.name, location.root);
+      return removal ? { ownership: 'package-link', removal, version } : { ownership: 'unknown', version };
+    } catch { return { ownership: 'unknown', version }; }
   }
-  if (packageName) {
-    return { ownership: 'unknown', version };
-  }
-  if (version !== undefined && insideHome) {
-    return { ownership: 'our-binary', removal: { kind: 'file', command: `rm ${copy.path}` }, version };
-  }
-  return { ownership: 'unknown', version };
+  return { ownership: 'our-binary', removal: { kind: 'file', command: `rm -- ${quoteShadowArgument(copy.path)}` }, version };
 }
 
 function probe(input: ShadowScanInput, path: string, command: string): string | undefined {
@@ -288,7 +293,7 @@ function resolve(input: ShadowScanInput, path: string): string {
   try {
     return input.realPath(path);
   } catch {
-    return path;
+    return '';
   }
 }
 
@@ -302,6 +307,7 @@ function exists(input: ShadowScanInput, path: string): boolean {
 
 /** Scans PATH for every copy of every maintained command and decides which one wins. */
 export function scanCommandShadows(input: ShadowScanInput): ShadowScanResult {
+  input = { ...input, commands: [...input.commands], pathEntries: [...input.pathEntries] };
   const entries = input.pathEntries.map(stripTrailingSeparators).filter((entry) => entry.length > 0);
   const installDir = stripTrailingSeparators(input.installDir);
   const installDirOnPath = entries.some((entry) => entry === installDir);

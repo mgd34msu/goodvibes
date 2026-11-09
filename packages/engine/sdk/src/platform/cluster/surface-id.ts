@@ -47,6 +47,17 @@ export interface ClusterSurfaceKey {
   readonly discriminator: string;
 }
 
+// Native factories own immutable keys already held by their consumer. Keep
+// only their resulting wire ID, weakly, so election/status reads do not hash
+// the same capability repeatedly or extend the lifetime of its plaintext.
+const surfaceApply = Reflect.apply, surfaceGet = WeakMap.prototype.get, surfaceSet = WeakMap.prototype.set, freezeSurface = Object.freeze;
+const originalSurfaceIds = new WeakMap<ClusterSurfaceKey, { id?: string }>();
+function ownedSurfaceKey(kind: ClusterSurfaceKind, discriminator: string): ClusterSurfaceKey {
+  const key = freezeSurface({ kind, discriminator });
+  if (typeof kind === 'string' && typeof discriminator === 'string') surfaceApply(surfaceSet, originalSurfaceIds, [key, {}]);
+  return key;
+}
+
 /**
  * Domain separation. Prefixed into the hash so a surface digest can never
  * collide with, or be mistaken for, any other digest this codebase computes.
@@ -76,12 +87,16 @@ export function canonicalSurfaceKey(key: ClusterSurfaceKey): string {
  * changing the derivation would split one live consumer election into two.
  * This privacy/compatibility boundary does not justify hashing local revisions. */
 export function surfaceIdFor(key: ClusterSurfaceKey): string {
-  return createHash('sha256')
+  const original = surfaceApply(surfaceGet, originalSurfaceIds, [key]) as { id?: string } | undefined;
+  if (original?.id !== undefined) return original.id;
+  const id = createHash('sha256')
     .update(SURFACE_ID_DOMAIN)
     .update('\u0000')
     .update(canonicalSurfaceKey(key))
     .digest('hex')
     .slice(0, SURFACE_ID_HEX_LENGTH);
+  if (original) original.id = id;
+  return id;
 }
 
 /** True when `value` is a well-formed surface digest and nothing else. */
@@ -115,7 +130,7 @@ export function telegramBotIdFromToken(token: string): string {
 
 /** The surface for one Telegram bot. */
 export function telegramSurface(botIdOrToken: string): ClusterSurfaceKey {
-  return { kind: 'telegram', discriminator: telegramBotIdFromToken(botIdOrToken) };
+  return ownedSurfaceKey('telegram', telegramBotIdFromToken(botIdOrToken));
 }
 
 /**
@@ -127,17 +142,17 @@ export function telegramSurface(botIdOrToken: string): ClusterSurfaceKey {
  */
 export function ntfySurface(baseUrl: string, topic: string): ClusterSurfaceKey {
   const normalizedBase = String(baseUrl ?? '').trim().replace(/\/+$/, '').toLowerCase();
-  return { kind: 'ntfy', discriminator: `${normalizedBase}/${String(topic ?? '').trim()}` };
+  return ownedSurfaceKey('ntfy', `${normalizedBase}/${String(topic ?? '').trim()}`);
 }
 
 /** The surface for one inbox provider account (Slack, Discord, an IMAP box). */
 export function inboxSurface(providerId: string): ClusterSurfaceKey {
-  return { kind: 'inbox', discriminator: String(providerId ?? '').trim() };
+  return ownedSurfaceKey('inbox', String(providerId ?? '').trim());
 }
 
 /** The surface for a single-instance provider runtime (Slack, Discord sockets). */
 export function providerSurface(kind: ClusterSurfaceKind, discriminator: string): ClusterSurfaceKey {
-  return { kind, discriminator: String(discriminator ?? '').trim() };
+  return ownedSurfaceKey(kind, String(discriminator ?? '').trim());
 }
 
 /**

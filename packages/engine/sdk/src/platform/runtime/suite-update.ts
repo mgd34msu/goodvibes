@@ -93,13 +93,15 @@ export function installedSuiteNeedsRepair(options: {
     plan.assertCurrent(); return false;
   } catch { return true; }
 }
-/** Same precedence as the daemon's actual static-bundle serving posture. */
+/** Retain an explicitly installed bundle even while temporarily disabled.
+ * The source-development static fallback is selected only while serving it;
+ * a no-WebUI native install must not acquire the shipped `dist/web` default. */
 export function configuredSuiteWebuiDirectory(config: { get(key: string): unknown }): string | undefined {
-  for (const key of ['controlPlane.webui.bundleDir', 'web.staticAssetsDir']) {
-    const value = config.get(key);
-    if (typeof value === 'string' && value.trim()) return value.trim();
-  }
-  return undefined;
+  const bundle = config.get('controlPlane.webui.bundleDir');
+  if (typeof bundle === 'string' && bundle.trim()) return bundle.trim();
+  if (config.get('controlPlane.webui.serve') !== true) return undefined;
+  const fallback = config.get('web.staticAssetsDir');
+  return typeof fallback === 'string' && fallback.trim() ? fallback.trim() : undefined;
 }
 function synchronous(operation: (() => void) | undefined): void {
   const value: unknown = operation?.();

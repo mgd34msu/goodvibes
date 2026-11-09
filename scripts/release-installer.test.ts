@@ -158,6 +158,22 @@ test('released suite installs all products, companions and native receipt withou
   expect(new Set(urls).size).toBe(urls.length);
   expect(result.stdout).not.toContain('Building');
 });
+
+test('GOODVIBES_WEBUI=0 leaves saved disabled-WebUI defaults and update opt-out intact without fetching a bundle', () => {
+  const directory = join(home, '.goodvibes', 'tui'); mkdirSync(directory, { recursive: true });
+  const settings = join(directory, 'settings.json');
+  const saved = JSON.stringify({ controlPlane: { webui: { serve: false, bundleDir: '' } }, web: { staticAssetsDir: 'dist/web' }, update: { auto: false } });
+  writeFileSync(settings, saved);
+  const result = run(false, undefined, undefined, { GOODVIBES_WEBUI: '0', FIXTURE_REQUIRE_SETTLED: '1' });
+  expect(result.status, result.stderr).toBe(0);
+  expect(readFileSync(settings, 'utf8')).toBe(saved);
+  expect(existsSync(join(home, 'bin/webui'))).toBe(false);
+  expect(existsSync(join(home, 'bin/playwright-core/cli.js'))).toBe(true);
+  const fetched = readFileSync(join(root, 'fetches'), 'utf8');
+  expect(fetched).not.toContain('goodvibes-webui-bundle-');
+  const setup = existsSync(join(root, 'setup-trace')) ? readFileSync(join(root, 'setup-trace'), 'utf8') : '';
+  expect(setup).not.toContain('webui');
+});
 test.each(['missing', 'corrupt', 'duplicate'])('a %s release asset stops before replacing an existing install', problem => {
   mkdirSync(join(home, 'bin')); writeFileSync(join(home, 'bin/goodvibes'), 'previous install');
   const bundle = join(assets, `goodvibes-webui-bundle-${version}.tar.gz`);

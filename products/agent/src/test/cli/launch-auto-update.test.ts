@@ -1,3 +1,4 @@
+import { SuiteUpdateRecoveryError } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 import { describe, expect, test } from 'bun:test';
 import {
   LAUNCH_UPDATED_FROM_ENV,
@@ -199,4 +200,33 @@ describe('restartOntoUpdatedBinary', () => {
     });
     expect(code).toBe(0);
   });
+});
+
+// New suite wiring regressions are source only until the coding pass finishes.
+test('launch passes the original served-bundle getter and rejects changes before applying effects', async () => {
+  let selected = '/fixture/webui/3.1.2', receipts = 0;
+  const configManager = { get: (key: string) => key === 'controlPlane.webui.bundleDir' ? selected : undefined };
+  const { options } = baseOptions({ configManager, recordReceipt: () => { receipts++; }, apply: async value => {
+    expect(value.configManager).toBe(configManager); selected = '/fixture/webui/replacement'; value.assertCurrent?.();
+  } });
+  expect(await runLaunchAutoUpdate(options)).toEqual({ action: 'continue', reason: 'update-failed' }); expect(receipts).toBe(0);
+});
+test('launch records and restarts the actual committed suite version rather than the earlier check tag', async () => {
+  const receipts: string[] = [];
+  const { options } = baseOptions({ apply: async () => ({ version: '1.2.0', programs: ['goodvibes-agent'], files: [], directoryPaths: [], preservedPaths: [] }),
+    recordReceipt: entry => receipts.push(entry.toVersion) });
+  expect(await runLaunchAutoUpdate(options)).toEqual({ action: 'restart', latestTag: 'v1.2.0' }); expect(receipts).toEqual(['v1.2.0']);
+});
+test('same-version repair enters the installer only through the explicit shared repair decision', async () => {
+  let applies = 0;
+  const { options } = baseOptions({ fetchImpl: stubFetch('v1.0.0'), repairRequired: () => true,
+    recordReceipt() {}, apply: async () => { applies++; return { version: '1.0.0', programs: ['goodvibes-agent'], files: [], directoryPaths: [], preservedPaths: [] }; } });
+  expect(await runLaunchAutoUpdate(options)).toEqual({ action: 'restart', latestTag: 'v1.0.0' }); expect(applies).toBe(1);
+});
+
+test('an uncertain suite update halts launch instead of claiming the current installation can start', async () => {
+  const { options, printed } = baseOptions({ apply: async () => { throw new SuiteUpdateRecoveryError(['/fixture/claim'], [], new Error('Synthetic uncertain rename')); },
+    recordReceipt() { throw new Error('Unknown update must not record a success'); } });
+  expect(await runLaunchAutoUpdate(options)).toEqual({ action: 'halt', reason: 'update-recovery-required' });
+  expect(printed.join('\n')).toContain('startup stopped'); expect(printed.join('\n')).not.toContain('starting the current version');
 });

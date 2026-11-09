@@ -1,3 +1,4 @@
+import { SuiteUpdateRecoveryError } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 import { describe, expect, test } from 'bun:test';
 import {
   AgentPeriodicUpdater,
@@ -203,4 +204,36 @@ describe('periodic self-update wiring', () => {
     });
     expect(() => stop()).not.toThrow();
   });
+});
+
+test('periodic ownership reaches the actual apply seam and a newly busy Agent refuses commit', async () => {
+  let idle = true, receipts = 0, restarts = 0;
+  const configManager = { get: (key: string) => key === 'controlPlane.webui.bundleDir' ? '/fixture/webui/3.1.2' : undefined };
+  const updater = new AgentPeriodicUpdater({ currentVersion: CURRENT, execPath: '/fixture/goodvibes-agent', platform: 'linux', arch: 'x64', settings: {}, configManager,
+    isIdle: () => idle, notify() {}, restartNow() { restarts++; }, recordReceipt() { receipts++; },
+    check: async () => ({ latestTag: NEWER, isCurrent: false }), apply: async options => {
+      expect(options.configManager).toBe(configManager); expect(options.signal?.aborted).toBe(false);
+      idle = false; expect(() => options.assertCurrent?.()).toThrow('busy'); throw new Error('Refused while busy');
+    },
+  });
+  await updater.tick(); expect(receipts).toBe(0); expect(restarts).toBe(0); updater.stop();
+});
+test('stopping a periodic owner aborts its original apply signal before any later commit', async () => {
+  let updater!: AgentPeriodicUpdater, originalSignal: AbortSignal | undefined, receipts = 0;
+  updater = new AgentPeriodicUpdater({ currentVersion: CURRENT, execPath: '/fixture/goodvibes-agent', platform: 'linux', arch: 'x64', settings: {}, isIdle: () => true,
+    notify() {}, restartNow() { throw new Error('Stopped owner must not restart'); }, recordReceipt() { receipts++; },
+    check: async () => ({ latestTag: NEWER, isCurrent: false }), apply: async options => {
+      originalSignal = options.signal; updater.stop(); expect(originalSignal?.aborted).toBe(true); options.assertCurrent?.();
+    },
+  });
+  await updater.tick(); expect(originalSignal?.aborted).toBe(true); expect(receipts).toBe(0);
+});
+
+test('uncertain periodic replacement stops the loop and invokes orderly halt without relaunch', async () => {
+  let halts = 0, restarts = 0; const notices: string[] = [];
+  const updater = new AgentPeriodicUpdater({ currentVersion: CURRENT, execPath: '/fixture/goodvibes-agent', platform: 'linux', arch: 'x64', settings: {},
+    isIdle: () => true, notify: line => notices.push(line), restartNow() { restarts++; }, haltNow() { halts++; },
+    check: async () => ({ latestTag: NEWER, isCurrent: false }), apply: async () => { throw new SuiteUpdateRecoveryError(['/fixture/claim'], [], new Error('Synthetic uncertain cohort')); } });
+  await updater.tick(); expect(halts).toBe(1); expect(restarts).toBe(0); expect(notices.join('\n')).toContain('requires recovery');
+  await updater.tick(); expect(halts).toBe(1);
 });

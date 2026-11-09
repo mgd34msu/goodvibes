@@ -28,13 +28,14 @@ import { IS_WORKSPACE_DISTRIBUTION } from './workspace-update-policy.ts';
  * Cadence, network, install step, and restart are all injectable; the decision
  * logic is provable without a network, a real swap, or real time passing.
  */
-import { PeriodicUpdateLoop, type PeriodicCheckOutcome } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { retainSuiteUpdateConfiguration, type SuiteUpdateConfigurationSource } from '@goodvibes-jev/engine/terminal-shell/release-update-preflight';
+import { installedSuiteNeedsRepair, suiteUpdateRequiresRecovery, PeriodicUpdateLoop, type SuiteUpdateResult, type PeriodicCheckOutcome } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
 import { channelDeliveriesInFlight } from '../agent/channel-delivery.ts';
 import { applyUpdate, checkForUpdate, type ApplyUpdateOptions, type CheckForUpdateResult } from '../input/commands/update-runtime.ts';
 import { restartOntoUpdatedBinary } from '../cli/launch-auto-update.ts';
 import { readExplicitUpdateKeys, readUpdateSettings, type UpdateSettings } from '../config/update-settings.ts';
-import { detectInstallKind, normalizeVersion, type UpdateFetchLike } from './update-check.ts';
+import { compareVersions, detectInstallKind, normalizeVersion, type UpdateFetchLike } from './update-check.ts';
 import { recordSelfUpdate } from './self-update-receipt.ts';
 import type { ConfigManager } from '../config/index.ts';
 import { VERSION } from '../version.ts';
@@ -103,6 +104,7 @@ export interface AgentPeriodicUpdaterOptions {
   readonly platform: NodeJS.Platform;
   readonly arch: string;
   readonly settings: UpdateSettings;
+  readonly configManager?: SuiteUpdateConfigurationSource | undefined;
   readonly isIdle: () => boolean;
   /** Surfaces update lines where the person can actually read them. */
   readonly notify: (line: string) => void;
@@ -112,9 +114,12 @@ export interface AgentPeriodicUpdaterOptions {
    * Never returns.
    */
   readonly restartNow: (fromVersion: string) => void;
+  /** Native host orderly shutdown without running an uncertain installation. */
+  readonly haltNow?: (() => void) | undefined;
   readonly fetchImpl?: UpdateFetchLike | undefined;
+  readonly repairRequired?: ((version: string) => boolean) | undefined;
   readonly check?: ((fetchImpl: UpdateFetchLike, currentVersion: string) => Promise<CheckForUpdateResult>) | undefined;
-  readonly apply?: ((options: ApplyUpdateOptions) => Promise<void>) | undefined;
+  readonly apply?: ((options: ApplyUpdateOptions) => Promise<SuiteUpdateResult | void>) | undefined;
   readonly setTimer?: ((fn: () => void, ms: number) => ReturnType<typeof setTimeout>) | undefined;
   readonly clearTimer?: ((timer: ReturnType<typeof setTimeout>) => void) | undefined;
   /** Injectable so tests observe the durable receipt without writing beside a real executable. */
@@ -128,6 +133,7 @@ export interface AgentPeriodicUpdaterOptions {
 
 export class AgentPeriodicUpdater {
   private readonly loop: PeriodicUpdateLoop;
+  private updateOwner = new AbortController();
   /** The tag already announced, so a deferred update is not re-announced every retry. */
   private announcedTag: string | null = null;
 
@@ -139,6 +145,10 @@ export class AgentPeriodicUpdater {
       firstCheckDelayMs: firstCheckSeconds * 1000,
       runCheck: () => this.runCheck(),
       onError: (error) => {
+        if (suiteUpdateRequiresRecovery(error)) {
+          this.stop(); options.notify('Suite update requires recovery; automatic updates stopped. Inspect retained transaction files before starting this installation again.');
+          options.haltNow?.(); return;
+        }
         logger.warn('agent periodic update: check failed; retrying on the next interval', {
           error: error instanceof Error ? error.message : String(error),
         });
@@ -157,10 +167,12 @@ export class AgentPeriodicUpdater {
   }
 
   start(): void {
+    if (this.updateOwner.signal.aborted) this.updateOwner = new AbortController();
     this.loop.start();
   }
 
   stop(): void {
+    this.updateOwner.abort();
     this.loop.stop();
   }
 
@@ -170,17 +182,28 @@ export class AgentPeriodicUpdater {
   }
 
   private async runCheck(): Promise<PeriodicCheckOutcome> {
-    const fetchImpl = this.options.fetchImpl ?? (fetch as UpdateFetchLike);
+    const owner = this.updateOwner, signal = owner.signal;
+    signal.throwIfAborted();
+    const configuration = retainSuiteUpdateConfiguration(this.options.configManager);
+    const baseFetch = this.options.fetchImpl ?? (fetch as UpdateFetchLike);
+    const fetchImpl: UpdateFetchLike = (url, init) => { signal.throwIfAborted(); return baseFetch(url, { ...init, signal: init?.signal ? AbortSignal.any([signal, init.signal]) : signal }); };
     const check = this.options.check ?? checkForUpdate;
     const result = await check(fetchImpl, this.options.currentVersion);
-    if (result.isCurrent) {
+    signal.throwIfAborted(); configuration.assertCurrent();
+    const repair = result.isCurrent && compareVersions(this.options.currentVersion, result.latestTag) === 0
+      && (this.options.repairRequired?.(result.latestTag) ?? (this.options.apply === undefined && installedSuiteNeedsRepair({
+        execPath: this.options.execPath, platform: this.options.platform, arch: this.options.arch, version: result.latestTag,
+        webuiDirectory: configuration.webuiDirectory,
+      })));
+    if (result.isCurrent && !repair) {
       this.announcedTag = null;
       return 'settled';
     }
     if (this.announcedTag !== result.latestTag) {
       this.announcedTag = result.latestTag;
       this.options.notify(
-        `${result.latestTag} is available (running v${normalizeVersion(this.options.currentVersion)}); it installs at the next idle moment`,
+        repair ? `${result.latestTag} needs installed companion repair; it repairs at the next idle moment`
+          : `${result.latestTag} is available (running v${normalizeVersion(this.options.currentVersion)}); it installs at the next idle moment`,
       );
     }
     if (!this.options.isIdle()) {
@@ -191,26 +214,35 @@ export class AgentPeriodicUpdater {
     }
 
     const apply = this.options.apply ?? applyUpdate;
-    await apply({
+    const installed = await apply({
       fetchImpl,
       execPath: this.options.execPath,
       platform: this.options.platform,
       arch: this.options.arch,
       currentVersion: this.options.currentVersion,
+      configManager: this.options.configManager, signal,
+      assertCurrent: () => {
+        signal.throwIfAborted(); configuration.assertCurrent();
+        if (!this.options.isIdle()) throw new Error('Agent became busy before update commit');
+        signal.throwIfAborted(); configuration.assertCurrent();
+      },
       // applyUpdate's own report goes to the log, not over the person's screen;
       // the loop surfaces the two lines that matter through notify.
       print: (line) => logger.info('agent periodic update', { line }),
     });
+    if (!installed && apply === applyUpdate) { this.announcedTag = null; return 'settled'; }
+    const installedTag = installed ? `v${normalizeVersion(installed.version)}` : result.latestTag;
     // Durable before the hand-over. A notify line lives in one running
     // session's scrollback; a swap that happened mid-run has to still be
     // answerable from the install afterwards.
     (this.options.recordReceipt ?? recordSelfUpdate)({
       execPath: this.options.execPath,
       fromVersion: this.options.currentVersion,
-      toVersion: result.latestTag,
+      toVersion: installedTag,
       trigger: 'periodic',
     });
-    this.options.notify(`updated to ${result.latestTag}, restarting onto the new version`);
+    if (signal.aborted) return 'settled';
+    this.options.notify(`updated to ${installedTag}, restarting onto the new version`);
     // Stop before handing over: the loop must not fire again from inside the
     // orderly exit that follows.
     this.stop();
@@ -220,7 +252,7 @@ export class AgentPeriodicUpdater {
 }
 
 export interface StartPeriodicSelfUpdateParams {
-  readonly configManager: Pick<ConfigManager, 'getRaw'> & Partial<Pick<ConfigManager, 'getConfigPath' | 'getProjectConfigPath'>>;
+  readonly configManager: Pick<ConfigManager, 'getRaw'> & Partial<Pick<ConfigManager, 'get' | 'getConfigPath' | 'getProjectConfigPath'>>;
   readonly services: {
     /**
      * The sessions THIS process is running, and how many are mid-turn. Read
@@ -288,6 +320,7 @@ export function startPeriodicSelfUpdate(params: StartPeriodicSelfUpdateParams): 
     platform: process.platform,
     arch: process.arch,
     settings,
+    configManager: params.configManager,
     isIdle: () => agentIsIdleForUpdate({
       countBusySessions: () => params.services.hostedSessions.countBusySessions(),
       listApprovals: () => params.services.approvalsView.snapshot().approvals,
@@ -296,6 +329,7 @@ export function startPeriodicSelfUpdate(params: StartPeriodicSelfUpdateParams): 
     // The restart is the caller's orderly exit with a hand-over step: teardown
     // first, then the swapped binary runs with this process's own argv and
     // environment and this process exits with the new instance's code.
+    haltNow: () => params.exit(),
     restartNow: (fromVersion) => params.exit(() => restartOntoUpdatedBinary({
       execPath,
       argv: params.argv ?? process.argv.slice(2),

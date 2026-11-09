@@ -1,260 +1,96 @@
-import { afterAll, describe, expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+/** Actual Agent apply/rollback entry points over the complete shared suite.
+ * Regression source is unrun while implementation work remains. */
+import { afterAll, expect, test } from 'bun:test';
+import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { gzipSync } from 'node:zlib';
-import {
-  applyUpdate,
-  realUpdateDirectoryIo,
-  rollbackDirectory,
-  swapDirectory,
-} from '../../input/commands/update-runtime.ts';
-import { BROWSER_DRIVER_ARCHIVE_NAME, BROWSER_DRIVER_DIR_NAME } from '../../runtime/release-artifacts.ts';
+import { applyUpdate, rollbackUpdate } from '../../input/commands/update-runtime.ts';
 import type { UpdateFetchLike } from '../../runtime/update-check.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
-
-/**
- * The update path's obligation to the browser driver.
- *
- * A binary swapped in place must never end up beside a stale driver or no
- * driver at all: the first pairs a new build with a driver version it was never
- * tested against, and the second silently removes browser control from an
- * install that had it. The driver is a DIRECTORY, so it cannot ride
- * swapFileAtomically and gets its own extract-then-rename swap, these tests
- * pin that it happens, that it is verified first, and that it rolls back with
- * the binary rather than being left behind.
- */
-
-const scratchDirs: string[] = [];
-function scratch(prefix: string): string {
-  const dir = makeProjectTempDir(`${prefix}`);
-  scratchDirs.push(dir);
-  return dir;
+import { agentFixtureRelease, fixtureDigest, fixtureTarGz, installAgentFixture } from '../helpers/suite-release.ts';
+const roots: string[] = [];
+afterAll(() => { for (const root of roots) rmSync(root, { recursive: true, force: true }); });
+const OLD = '3.1.2', NEXT = '3.1.3';
+function fixture() {
+  const root = makeProjectTempDir('agent-suite-command-'); roots.push(root);
+  const installed = installAgentFixture(root, 'linux', 'x64', OLD, 'original-agent');
+  const release = agentFixtureRelease('linux', 'x64', NEXT, 'new-agent');
+  const manifest = () => [...release.assets].map(([name, bytes]) => `${fixtureDigest(bytes)}  ${name}\n`).join('');
+  const config = { get: (key: string) => key === 'controlPlane.webui.bundleDir' ? installed.webui : undefined };
+  const lines: string[] = [], requests: string[] = [];
+  const fetchImpl: UpdateFetchLike = async url => {
+    requests.push(url);
+    const name = url.split('/').at(-1)!;
+    const response = name === 'latest' ? new Response(null, { status: 302, headers: { location: `https://github.com/mgd34msu/goodvibes/releases/tag/v${NEXT}` } })
+      : name === 'SHA256SUMS.txt' ? new Response(manifest()) : new Response(release.assets.get(name) ?? 'missing', { status: release.assets.has(name) ? 200 : 404 });
+    Object.defineProperty(response, 'url', { value: url }); return response;
+  };
+  const options = { fetchImpl, execPath: installed.appPath, platform: 'linux' as const, arch: 'x64', currentVersion: OLD,
+    configManager: config, print: (line: string) => lines.push(line) };
+  return { root, installed, release, lines, requests, options };
 }
-
-afterAll(() => {
-  for (const dir of scratchDirs) {
-    try {
-      rmSync(dir, { recursive: true, force: true });
-    } catch {
-      /* ignore */
-    }
-  }
+function originals(f: ReturnType<typeof fixture>): void {
+  expect(readFileSync(f.installed.appPath, 'utf8')).toBe('original-agent');
+  expect(readFileSync(f.installed.addonPath, 'utf8')).toBe('old-addon');
+  expect(readFileSync(join(f.installed.driver, 'index.html'), 'utf8')).toBe('old-driver');
+  expect(readFileSync(join(f.installed.webui, 'index.html'), 'utf8')).toBe('old-webui');
+}
+test('Agent apply and rollback delegate the selected program, raw native companions, driver and actual configured WebUI together', async () => {
+  const f = fixture(), result = await applyUpdate(f.options);
+  expect(result?.programs).toEqual(['goodvibes-agent']); expect(result?.version).toBe(NEXT);
+  expect(readFileSync(f.installed.appPath, 'utf8')).toBe('new-agent'); expect(readFileSync(f.installed.addonPath, 'utf8')).toBe('new-addon');
+  expect(readFileSync(join(f.installed.driver, 'index.js'), 'utf8')).toBe('new-driver'); expect(readFileSync(join(f.installed.webui, 'index.html'), 'utf8')).toBe('new-webui');
+  expect(f.lines.join('\n')).toContain(`Updated GoodVibes ${NEXT}: goodvibes-agent.`);
+  rollbackUpdate({ ...f.options, currentVersion: NEXT }); originals(f);
+  expect(f.lines.join('\n')).toContain(`Restored GoodVibes ${OLD}: goodvibes-agent.`);
+});
+for (const missing of ['browser-driver.tar.gz', 'sqlite-vec-linux-x64.so', 'goodvibes-agent-linux-x64.bun', 'goodvibes-agent-linux-x64.reader-ci-artifact.json']) {
+  test(`a release missing ${missing} refuses a partial Agent update`, async () => {
+    const f = fixture(); f.release.assets.delete(missing);
+    await expect(applyUpdate(f.options)).rejects.toThrow(); originals(f);
+  });
+}
+test('a verified archive missing a required driver entry refuses before replacing the binary', async () => {
+  const f = fixture(); f.release.assets.set('browser-driver.tar.gz', fixtureTarGz({ 'playwright-core/package.json': '{}', 'playwright-core/index.js': 'incomplete' }));
+  await expect(applyUpdate(f.options)).rejects.toThrow(); originals(f);
+});
+test('a changed configured bundle path during latest-release lookup is never adopted after the await', async () => {
+  const f = fixture(), originalFetch = f.options.fetchImpl; let selected = f.installed.webui;
+  const configManager = { get: (key: string) => key === 'controlPlane.webui.bundleDir' ? selected : undefined };
+  await expect(applyUpdate({ ...f.options, configManager, fetchImpl: async (url, init) => {
+    const response = await originalFetch(url, init); if (url.endsWith('/latest')) selected = join(f.root, 'webui', 'foreign'); return response;
+  } })).rejects.toThrow('selection changed'); originals(f);
+});
+test('package-managed installs retain install-kind gating and never enter suite downloads', async () => {
+  let requested = 0; const lines: string[] = [];
+  await applyUpdate({ fetchImpl: async () => { requested++; throw new Error('unexpected network'); }, execPath: '/fixture/node_modules/@goodvibes-jev/agent/bin/goodvibes-agent',
+    platform: 'linux', arch: 'x64', currentVersion: OLD, print: line => lines.push(line) });
+  expect(requested).toBe(0); expect(lines.join('\n')).toContain('not a self-updatable binary');
 });
 
-function tarGz(entries: readonly { path: string; data: string }[]): Buffer {
-  const blocks: Buffer[] = [];
-  for (const entry of entries) {
-    const header = Buffer.alloc(512);
-    const body = Buffer.from(entry.data, 'utf-8');
-    header.write(entry.path.slice(0, 100), 0, 'utf-8');
-    header.write('0000644\0', 100, 'utf-8');
-    header.write('0000000\0', 108);
-    header.write('0000000\0', 116);
-    header.write(body.length.toString(8).padStart(11, '0') + '\0', 124, 'utf-8');
-    header.write('00000000000\0', 136);
-    header.write('0', 156, 'utf-8');
-    header.write('ustar\0', 257, 'utf-8');
-    header.write('00', 263, 'utf-8');
-    header.write('        ', 148, 8, 'utf-8');
-    let sum = 0;
-    for (const byte of header) sum += byte;
-    header.write(sum.toString(8).padStart(6, '0') + '\0 ', 148, 'utf-8');
-    blocks.push(header);
-    const padded = Buffer.alloc(Math.ceil(body.length / 512) * 512);
-    body.copy(padded);
-    blocks.push(padded);
-  }
-  blocks.push(Buffer.alloc(1024));
-  return Buffer.from(gzipSync(Buffer.concat(blocks)));
-}
-
-function driverArchive(options: { readonly omitCli?: boolean } = {}): Buffer {
-  return tarGz([
-    { path: `${BROWSER_DRIVER_DIR_NAME}/package.json`, data: JSON.stringify({ name: 'playwright-core', version: '1.62.0' }) },
-    { path: `${BROWSER_DRIVER_DIR_NAME}/index.js`, data: 'module.exports = {};\n' },
-    ...(options.omitCli === true ? [] : [{ path: `${BROWSER_DRIVER_DIR_NAME}/cli.js`, data: '#!/usr/bin/env node\n' }]),
-  ]);
-}
-
-const sha = (buffer: Buffer): string => createHash('sha256').update(buffer).digest('hex');
-
-/** Serves a release: a manifest plus the assets it names. */
-function releaseFetch(assets: Record<string, Buffer>, options: { readonly manifestOmits?: readonly string[] } = {}): UpdateFetchLike {
-  const manifest = Object.entries(assets)
-    .filter(([name]) => !(options.manifestOmits ?? []).includes(name))
-    .map(([name, bytes]) => `${sha(bytes)}  ${name}`)
-    .join('\n');
-  return (async (url: string) => {
-    // The tag is resolved from the redirect on /releases/latest, not a body.
-    if (url.includes('/releases/latest')) {
-      return {
-        ok: true,
-        status: 302,
-        url,
-        headers: { get: (name: string) => (name.toLowerCase() === 'location' ? 'https://github.com/mgd34msu/goodvibes/releases/tag/v9.9.9' : null) },
-      } as never;
-    }
-    const name = url.slice(url.lastIndexOf('/') + 1);
-    if (name === 'SHA256SUMS.txt') {
-      // Read as text by applyVerifiedUpdate and as bytes by the driver leg.
-      return {
-        ok: true,
-        status: 200,
-        text: async () => manifest,
-        arrayBuffer: async () => Buffer.from(manifest, 'utf-8'),
-      } as never;
-    }
-    const asset = assets[name];
-    if (!asset) return { ok: false, status: 404, arrayBuffer: async () => Buffer.alloc(0) } as never;
-    return { ok: true, status: 200, arrayBuffer: async () => asset } as never;
-  }) as unknown as UpdateFetchLike;
-}
-
-describe('swapDirectory: the driver is a directory, not a file', () => {
-  test('replaces the driver and parks the outgoing one', () => {
-    const installDir = scratch('gv-swap');
-    const driverPath = join(installDir, BROWSER_DRIVER_DIR_NAME);
-    mkdirSync(driverPath, { recursive: true });
-    writeFileSync(join(driverPath, 'package.json'), JSON.stringify({ version: '0.0.0-stale' }));
-
-    swapDirectory(driverPath, driverArchive(), realUpdateDirectoryIo);
-
-    expect(JSON.parse(readFileSync(join(driverPath, 'package.json'), 'utf-8')).version).toBe('1.62.0');
-    expect(existsSync(join(driverPath, 'cli.js'))).toBe(true);
-    expect(JSON.parse(readFileSync(join(`${driverPath}.previous`, 'package.json'), 'utf-8')).version).toBe('0.0.0-stale');
-  });
-
-  test('installs a driver where there was none, which is the 1.18.1 upgrade case', () => {
-    const installDir = scratch('gv-swap-fresh');
-    const driverPath = join(installDir, BROWSER_DRIVER_DIR_NAME);
-
-    swapDirectory(driverPath, driverArchive(), realUpdateDirectoryIo);
-
-    expect(existsSync(join(driverPath, 'cli.js'))).toBe(true);
-    expect(existsSync(`${driverPath}.previous`)).toBe(false);
-  });
-
-  test('leaves no stale file from the replaced driver behind', () => {
-    const installDir = scratch('gv-swap-stale');
-    const driverPath = join(installDir, BROWSER_DRIVER_DIR_NAME);
-    mkdirSync(driverPath, { recursive: true });
-    writeFileSync(join(driverPath, 'removed-in-the-new-version.js'), 'old');
-
-    swapDirectory(driverPath, driverArchive(), realUpdateDirectoryIo);
-
-    expect(existsSync(join(driverPath, 'removed-in-the-new-version.js'))).toBe(false);
-  });
-
-  test('rolls back by exchanging with the kept copy, and forward again', () => {
-    const installDir = scratch('gv-roll');
-    const driverPath = join(installDir, BROWSER_DRIVER_DIR_NAME);
-    mkdirSync(driverPath, { recursive: true });
-    writeFileSync(join(driverPath, 'package.json'), JSON.stringify({ version: '0.0.0-stale' }));
-    swapDirectory(driverPath, driverArchive(), realUpdateDirectoryIo);
-
-    expect(rollbackDirectory(driverPath, realUpdateDirectoryIo)).toBe(true);
-    expect(JSON.parse(readFileSync(join(driverPath, 'package.json'), 'utf-8')).version).toBe('0.0.0-stale');
-
-    // An exchange, so a second rollback rolls forward.
-    expect(rollbackDirectory(driverPath, realUpdateDirectoryIo)).toBe(true);
-    expect(JSON.parse(readFileSync(join(driverPath, 'package.json'), 'utf-8')).version).toBe('1.62.0');
-  });
-
-  test('rollback with nothing kept reports so instead of destroying the live driver', () => {
-    const installDir = scratch('gv-roll-none');
-    const driverPath = join(installDir, BROWSER_DRIVER_DIR_NAME);
-    mkdirSync(driverPath, { recursive: true });
-    writeFileSync(join(driverPath, 'package.json'), '{"version":"1.62.0"}');
-
-    expect(rollbackDirectory(driverPath, realUpdateDirectoryIo)).toBe(false);
-    expect(existsSync(join(driverPath, 'package.json'))).toBe(true);
-  });
-});
-
-describe('applyUpdate refreshes the driver in lockstep with the binary', () => {
-  function install(): { readonly dir: string; readonly binaryPath: string } {
-    const dir = scratch('gv-update');
-    const binaryPath = join(dir, 'goodvibes-agent');
-    writeFileSync(binaryPath, 'old binary');
-    return { dir, binaryPath };
-  }
-
-  const binaryAsset = 'goodvibes-agent-linux-x64';
-
-  test('a release that ships the driver leaves it beside the new binary', async () => {
-    const { dir, binaryPath } = install();
-    const lines: string[] = [];
-    await applyUpdate({
-      fetchImpl: releaseFetch({ [binaryAsset]: Buffer.from('new binary'), [BROWSER_DRIVER_ARCHIVE_NAME]: driverArchive() }),
-      execPath: binaryPath,
-      platform: 'linux',
-      arch: 'x64',
-      currentVersion: '1.0.0',
-      print: (line) => lines.push(line),
-    });
-
-    expect(readFileSync(binaryPath, 'utf-8')).toBe('new binary');
-    expect(existsSync(join(dir, BROWSER_DRIVER_DIR_NAME, 'cli.js'))).toBe(true);
-    expect(lines.join('\n')).toContain('browser driver:');
-  });
-
-  test('a release without the driver asset leaves the existing driver untouched and says so', async () => {
-    const { dir, binaryPath } = install();
-    const driverPath = join(dir, BROWSER_DRIVER_DIR_NAME);
-    mkdirSync(driverPath, { recursive: true });
-    writeFileSync(join(driverPath, 'package.json'), JSON.stringify({ version: '1.62.0' }));
-
-    const lines: string[] = [];
-    await applyUpdate({
-      fetchImpl: releaseFetch({ [binaryAsset]: Buffer.from('new binary') }),
-      execPath: binaryPath,
-      platform: 'linux',
-      arch: 'x64',
-      currentVersion: '1.0.0',
-      print: (line) => lines.push(line),
-    });
-
-    expect(JSON.parse(readFileSync(join(driverPath, 'package.json'), 'utf-8')).version).toBe('1.62.0');
-    expect(lines.join('\n')).toContain(`ships no ${BROWSER_DRIVER_ARCHIVE_NAME}`);
-  });
-
-  test('a driver archive that verifies but holds no cli.js aborts BEFORE the binary is swapped', async () => {
-    const { dir, binaryPath } = install();
-
-    await expect(applyUpdate({
-      fetchImpl: releaseFetch({ [binaryAsset]: Buffer.from('new binary'), [BROWSER_DRIVER_ARCHIVE_NAME]: driverArchive({ omitCli: true }) }),
-      execPath: binaryPath,
-      platform: 'linux',
-      arch: 'x64',
-      currentVersion: '1.0.0',
-      print: () => undefined,
-    })).rejects.toThrow(/cli\.js/);
-
-    // The whole point of verifying first: nothing was replaced.
-    expect(readFileSync(binaryPath, 'utf-8')).toBe('old binary');
-    expect(existsSync(join(dir, BROWSER_DRIVER_DIR_NAME))).toBe(false);
-  });
-
-  test('a corrupted driver download aborts before the binary is swapped', async () => {
-    const { dir, binaryPath } = install();
-    const good = driverArchive();
-    // Manifest records the good archive; the server serves different bytes.
-    const fetchImpl = releaseFetch({ [binaryAsset]: Buffer.from('new binary'), [BROWSER_DRIVER_ARCHIVE_NAME]: good });
-    const tampered = ((url: string) => url.endsWith(BROWSER_DRIVER_ARCHIVE_NAME)
-      ? Promise.resolve({ ok: true, status: 200, arrayBuffer: async () => Buffer.from('corrupted') } as never)
-      : (fetchImpl as unknown as (u: string) => Promise<unknown>)(url)) as unknown as UpdateFetchLike;
-
-    await expect(applyUpdate({
-      fetchImpl: tampered,
-      execPath: binaryPath,
-      platform: 'linux',
-      arch: 'x64',
-      currentVersion: '1.0.0',
-      print: () => undefined,
-    })).rejects.toThrow();
-
-    expect(readFileSync(binaryPath, 'utf-8')).toBe('old binary');
-    expect(existsSync(join(dir, BROWSER_DRIVER_DIR_NAME))).toBe(false);
-  });
+test('the registered native /update command passes its original platform config into shared suite apply and rollback', async () => {
+  // Module mocks are isolated in a child so they cannot replace SDK exports for
+  // another suite. The command, preflight, getter capture and report are real.
+  const modulePath = join(import.meta.dir, '..', '..', 'input', 'commands', 'update-runtime.ts');
+  const workspacePath = join(import.meta.dir, '..', '..', 'runtime', 'workspace-update-policy.ts');
+  const script = `
+import {mock} from 'bun:test';
+const sdkPath='@goodvibes-jev/engine/sdk/platform/runtime/self-update', opsPath='@goodvibes-jev/engine/sdk/platform/runtime/operations';
+const sdk=await import(sdkPath),ops=await import(opsPath);const calls=[],lines=[];let uncertain=false,halts=0;
+const result={version:'99.0.0',programs:['goodvibes-agent','goodvibes-daemon'],files:[],directoryPaths:['/fixture/webui/3.1.2'],preservedPaths:[]};
+mock.module(sdkPath,()=>({...sdk,applySuiteUpdate:async options=>{calls.push({kind:'apply',directory:options.webuiDirectory});options.assertCurrent?.();if(uncertain)throw new sdk.SuiteUpdateRecoveryError(['/fixture/claim'],[],new Error('Synthetic uncertainty'));return result;},rollbackSuiteUpdate:options=>{calls.push({kind:'rollback',directory:options.webuiDirectory});return {...result,version:'98.0.0'};}}));
+mock.module(opsPath,()=>({...ops,detectInstallKind:()=> 'binary'}));
+mock.module(${JSON.stringify(workspacePath)},()=>({IS_WORKSPACE_DISTRIBUTION:false,WORKSPACE_UPDATE_GUIDANCE:'source only',WORKSPACE_REBUILD_COMMAND:'source only'}));
+globalThis.fetch=async url=>{const response=new Response(null,{status:302,headers:{location:'https://github.com/mgd34msu/goodvibes/releases/tag/v99.0.0'}});Object.defineProperty(response,'url',{value:String(url)});return response;};
+const product=await import(${JSON.stringify(modulePath)});let command;product.registerUpdateCommand({register(value){command=value;}});
+const configManager={get:key=>key==='controlPlane.webui.bundleDir'?'/fixture/webui/3.1.2':undefined};
+const context={platform:{configManager},print:line=>lines.push(line),exit(){halts++;}};
+await command.handler(['apply'],context);await command.handler(['rollback'],context);uncertain=true;await command.handler(['apply'],context);console.log(JSON.stringify({calls,lines,halts}));
+`;
+  const child = Bun.spawn([process.execPath, '--eval', script], { stdout: 'pipe', stderr: 'pipe' });
+  const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+  expect({ code, err }).toEqual({ code: 0, err: '' });
+  const result = JSON.parse(out.trim().split('\n').at(-1)!) as { calls: unknown[]; lines: string[]; halts: number };
+  expect(result.calls).toEqual([{ kind: 'apply', directory: '/fixture/webui/3.1.2' }, { kind: 'rollback', directory: '/fixture/webui/3.1.2' }, { kind: 'apply', directory: '/fixture/webui/3.1.2' }]);
+  expect(result.halts).toBe(1);
+  expect(result.lines.join('\n')).toContain('Updated GoodVibes 99.0.0'); expect(result.lines.join('\n')).toContain('Restored GoodVibes 98.0.0');
 });

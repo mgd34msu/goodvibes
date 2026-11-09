@@ -1,5 +1,5 @@
 import { detectInstallKind, type InstallKind } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import { normalizeVersion, type UpdateFetchLike } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { compareVersions, normalizeVersion, type UpdateFetchLike } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 import { withTimeout } from './service-io.js';
 export type LaunchUpdateSkipReason = 'just-updated' | 'disabled' | 'not-swappable-install' | 'already-current' | 'check-skipped';
 export interface LaunchUpdateCheck {
@@ -23,6 +23,7 @@ export async function runLaunchUpdatePreflight(
     readonly check: (fetch: UpdateFetchLike, currentVersion: string) => Promise<LaunchUpdateCheck>;
     readonly skipped: string;
     readonly unswappable: (kind: Exclude<InstallKind, 'binary'>) => string | undefined;
+    readonly repairRequired?: ((tag: string) => boolean) | undefined;
   },
 ): Promise<
   | { readonly proceed: false; readonly outcome: { readonly action: 'continue'; readonly reason: LaunchUpdateSkipReason } }
@@ -54,6 +55,6 @@ export async function runLaunchUpdatePreflight(
     options.print(policy.skipped);
     return { proceed: false, outcome: { action: 'continue', reason: 'check-skipped' } };
   }
-  if (check.isCurrent) return { proceed: false, outcome: { action: 'continue', reason: 'already-current' } };
+  if (check.isCurrent && !(compareVersions(options.currentVersion, check.latestTag) === 0 && policy.repairRequired?.(check.latestTag) === true)) return { proceed: false, outcome: { action: 'continue', reason: 'already-current' } };
   return { proceed: true, check };
 }

@@ -45,6 +45,7 @@ import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../runtime
  */
 import { detectInstallKind, normalizeVersion, type UpdateFetchLike } from '../runtime/update-check.ts';
 import { applyUpdate, checkForUpdate, createUpdateSwapProgress, type ApplyUpdateOptions } from '../input/commands/update-runtime.ts';
+import { configuredSuiteWebuiDirectory, installedSuiteNeedsRepair, suiteUpdateRequiresRecovery, type SuiteUpdateResult } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 import { readUpdateSettings, type UpdateSettings } from '../config/tui-extension-settings.ts';
 import { runDaemonHandover, type DaemonHandoverOutcome } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
 import { resolveGoodVibesDaemonExecutable } from './service-posture.ts';
@@ -81,7 +82,8 @@ export type LaunchAutoUpdateOutcome =
         /** The budget ran out after the swap had begun; the swap finished, so a restart picks up the new version. */
         | 'update-in-background';
     }
-  | { readonly action: 'restart'; readonly latestTag: string };
+  | { readonly action: 'restart'; readonly latestTag: string }
+  | { readonly action: 'halt'; readonly error: unknown };
 
 export interface RunLaunchAutoUpdateOptions {
   readonly fetchImpl: UpdateFetchLike;
@@ -94,7 +96,8 @@ export interface RunLaunchAutoUpdateOptions {
   readonly print: (line: string) => void;
   readonly configManager: { get(key: string): unknown };
   /** Injectable so tests observe the install step instead of swapping real files. */
-  readonly apply?: (options: ApplyUpdateOptions) => Promise<void>;
+  readonly apply?: (options: ApplyUpdateOptions) => Promise<SuiteUpdateResult | void>;
+  readonly repairRequired?: ((version: string) => boolean) | undefined;
   readonly timeoutMs?: number;
   /** Overrides the download+verify+swap budget; defaults to settings.applyTimeoutMs ?? LAUNCH_APPLY_TIMEOUT_MS. */
   readonly applyTimeoutMs?: number;
@@ -114,6 +117,8 @@ export async function runLaunchAutoUpdate(options: RunLaunchAutoUpdateOptions): 
     check: checkForUpdate,
     skipped: "couldn't reach the update server; check skipped",
     unswappable: () => undefined,
+    repairRequired: version => options.repairRequired?.(version) ?? (options.apply === undefined && installedSuiteNeedsRepair({ execPath: options.execPath, platform: options.platform, arch: options.arch, version,
+      webuiDirectory: configuredSuiteWebuiDirectory(options.configManager) })),
   });
   if (!preflight.proceed) return preflight.outcome;
   const check = preflight.check;
@@ -156,9 +161,17 @@ export async function runLaunchAutoUpdate(options: RunLaunchAutoUpdateOptions): 
       options.print(`updated in background; restart to use v${normalizeVersion(progress.targetTag ?? check.latestTag)}`);
       return { action: 'continue', reason: 'update-in-background' };
     }
-    options.print(`auto-update: ${check.latestTag} installed; restarting onto the new version`);
-    return { action: 'restart', latestTag: check.latestTag };
+    // The release may move between preflight and apply. Production reports
+    // only the version its completed suite transaction actually installed.
+    if (applyResult === undefined && options.apply === undefined) return { action: 'continue', reason: 'already-current' };
+    const installedTag = applyResult ? `v${applyResult.version}` : check.latestTag;
+    options.print(`auto-update: ${installedTag} installed; restarting onto the new version`);
+    return { action: 'restart', latestTag: installedTag };
   } catch (error) {
+    if (suiteUpdateRequiresRecovery(error)) {
+      options.print(`auto-update requires recovery: ${error instanceof Error ? error.message : String(error)}; startup stopped before loading installed companions`);
+      return { action: 'halt', error };
+    }
     options.print(
       `auto-update failed: ${error instanceof Error ? error.message : String(error)}; starting the current version v${normalizeVersion(options.currentVersion)}`,
     );
@@ -199,6 +212,7 @@ export async function selfUpdateAtLaunch(params: SelfUpdateAtLaunchParams): Prom
     configManager: params.configManager,
     print,
   });
+  if (outcome.action === 'halt') throw outcome.error;
   if (outcome.action === 'restart') {
     process.exit(
       restartOntoUpdatedBinary({

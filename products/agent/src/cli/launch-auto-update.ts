@@ -1,3 +1,5 @@
+import { retainSuiteUpdateConfiguration, type SuiteUpdateConfigurationSource } from '@goodvibes-jev/engine/terminal-shell/release-update-preflight';
+import { installedSuiteNeedsRepair, suiteUpdateRequiresRecovery, type SuiteUpdateResult } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 import { runLaunchUpdatePreflight } from '@goodvibes-jev/engine/terminal-shell/launch-update-preflight';
 import { restartOntoUpdatedBinary as restart, type RestartOntoUpdatedBinaryOptions } from '@goodvibes-jev/engine/terminal-shell/service-io';
 export type { RestartOntoUpdatedBinaryOptions } from '@goodvibes-jev/engine/terminal-shell/service-io';
@@ -60,7 +62,11 @@ export type LaunchAutoUpdateOutcome =
       readonly action: 'continue';
       readonly reason: 'just-updated' | 'disabled' | 'not-swappable-install' | 'already-current' | 'check-skipped' | 'update-failed';
     }
-  | { readonly action: 'restart'; readonly latestTag: string };
+  | { readonly action: 'restart'; readonly latestTag: string }
+  | { readonly action: 'halt'; readonly reason: 'update-recovery-required' };
+export class AgentUpdateRecoveryRequiredError extends Error {
+  constructor() { super('Agent startup stopped: the suite update requires recovery before this installation can run'); this.name = 'AgentUpdateRecoveryRequiredError'; }
+}
 
 export interface RunLaunchAutoUpdateOptions {
   readonly fetchImpl: UpdateFetchLike;
@@ -72,8 +78,11 @@ export interface RunLaunchAutoUpdateOptions {
   readonly env: NodeJS.ProcessEnv;
   readonly print: (line: string) => void;
   /** Injectable so tests observe the install step instead of swapping real files. */
-  readonly apply?: (options: ApplyUpdateOptions) => Promise<void>;
+  readonly configManager?: SuiteUpdateConfigurationSource | undefined;
+  /** Explicit injected installers may retain their existing void completion contract. */
+  readonly apply?: (options: ApplyUpdateOptions) => Promise<SuiteUpdateResult | void>;
   readonly timeoutMs?: number;
+  readonly repairRequired?: ((version: string) => boolean) | undefined;
   /** Injectable so tests observe the durable receipt without writing beside a real executable. */
   readonly recordReceipt?: (entry: {
     readonly execPath: string;
@@ -91,10 +100,19 @@ export interface RunLaunchAutoUpdateOptions {
  * fail-and-continue on the current version. Never throws.
  */
 export async function runLaunchAutoUpdate(options: RunLaunchAutoUpdateOptions): Promise<LaunchAutoUpdateOutcome> {
+  let configuration: ReturnType<typeof retainSuiteUpdateConfiguration>;
+  try { configuration = retainSuiteUpdateConfiguration(options.configManager); }
+  catch (error) {
+    options.print(`auto-update failed: ${error instanceof Error ? error.message : String(error)}, starting the current version v${normalizeVersion(options.currentVersion)}`);
+    return { action: 'continue', reason: 'update-failed' };
+  }
   const preflight = await runLaunchUpdatePreflight(options, {
     updatedFromKey: LAUNCH_UPDATED_FROM_ENV,
     defaultCheckTimeoutMs: LAUNCH_UPDATE_CHECK_TIMEOUT_MS,
     check: checkForUpdate,
+    repairRequired: version => options.repairRequired?.(version) ?? (options.apply === undefined && installedSuiteNeedsRepair({
+      execPath: options.execPath, platform: options.platform, arch: options.arch, version, webuiDirectory: configuration.webuiDirectory,
+    })),
     skipped: 'update check skipped: offline',
     unswappable: (kind) =>
       kind === 'source'
@@ -106,14 +124,20 @@ export async function runLaunchAutoUpdate(options: RunLaunchAutoUpdateOptions): 
 
   try {
     const apply = options.apply ?? applyUpdate;
-    await apply({
+    configuration.assertCurrent();
+    const installed = await apply({
       fetchImpl: options.fetchImpl,
       execPath: options.execPath,
       platform: options.platform,
       arch: options.arch,
       currentVersion: options.currentVersion,
+      configManager: options.configManager, assertCurrent: configuration.assertCurrent,
       print: options.print,
     });
+    // The default suite installer reports the actual committed release. Its
+    // no-op result cannot become a fabricated update receipt or restart.
+    if (!installed && apply === applyUpdate) return { action: 'continue', reason: 'already-current' };
+    const installedTag = installed ? `v${normalizeVersion(installed.version)}` : check.latestTag;
     // Durable before the restart, not after: this process is about to hand over
     // and the line printed below is wiped by the alternate screen a moment
     // later. The receipt is the only trace that survives to tell someone the
@@ -121,12 +145,16 @@ export async function runLaunchAutoUpdate(options: RunLaunchAutoUpdateOptions): 
     (options.recordReceipt ?? recordSelfUpdate)({
       execPath: options.execPath,
       fromVersion: options.currentVersion,
-      toVersion: check.latestTag,
+      toVersion: installedTag,
       trigger: 'launch',
     });
-    options.print(`auto-update: ${check.latestTag} installed, restarting onto the new version`);
-    return { action: 'restart', latestTag: check.latestTag };
+    options.print(`auto-update: ${installedTag} installed, restarting onto the new version`);
+    return { action: 'restart', latestTag: installedTag };
   } catch (error) {
+    if (suiteUpdateRequiresRecovery(error)) {
+      options.print(`auto-update requires recovery: ${error instanceof Error ? error.message : String(error)}; startup stopped`);
+      return { action: 'halt', reason: 'update-recovery-required' };
+    }
     options.print(
       `auto-update failed: ${error instanceof Error ? error.message : String(error)}, starting the current version v${normalizeVersion(options.currentVersion)}`,
     );
@@ -135,7 +163,7 @@ export async function runLaunchAutoUpdate(options: RunLaunchAutoUpdateOptions): 
 }
 
 export interface SelfUpdateAtLaunchParams {
-  readonly configManager: Pick<ConfigManager, 'getRaw'>;
+  readonly configManager: Pick<ConfigManager, 'getRaw'> & Partial<Pick<ConfigManager, 'get'>>;
   readonly stdout: { write(chunk: string): unknown };
 }
 
@@ -158,12 +186,14 @@ export async function selfUpdateAtLaunch(params: SelfUpdateAtLaunchParams): Prom
     arch: process.arch,
     currentVersion: VERSION,
     settings: readUpdateSettings(params.configManager),
+    configManager: params.configManager,
     env: process.env,
     print: (line) => {
       lines.push(line);
       params.stdout.write(`${line}\n`);
     },
   });
+  if (outcome.action === 'halt') throw new AgentUpdateRecoveryRequiredError();
   if (outcome.action === 'restart') {
     process.exit(
       restartOntoUpdatedBinary({

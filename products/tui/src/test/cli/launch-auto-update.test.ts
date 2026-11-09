@@ -7,6 +7,7 @@ import {
 } from '@/cli/launch-auto-update.ts';
 import type { ApplyUpdateOptions } from '@/input/commands/update-runtime.ts';
 import type { UpdateFetchLike } from '@/runtime/update-check.ts';
+import { SuiteUpdateRecoveryError } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 
 // Decision-logic coverage for the launch-time self-update, with every seam
 // stubbed: fetch (never the real network), apply (never a real swap), spawn
@@ -62,6 +63,25 @@ function baseOptions(overrides: Partial<RunLaunchAutoUpdateOptions>): { options:
   };
   return { options, printed };
 }
+
+test('launch reports the actual installed suite rather than an earlier latest-tag check', async () => {
+  const { options } = baseOptions({ apply: async () => ({ version: '1.2.0', programs: ['goodvibes'], files: [], directoryPaths: [], preservedPaths: [] }) });
+  expect(await runLaunchAutoUpdate(options)).toEqual({ action: 'restart', latestTag: 'v1.2.0' });
+});
+
+test('launch halts on an uncertain suite instead of continuing into native companion loading', async () => {
+  const recovery = new SuiteUpdateRecoveryError(['/synthetic/retained-install'], [], new Error('Synthetic incomplete compensation'));
+  const { options, printed } = baseOptions({ apply: async () => { throw recovery; } });
+  expect(await runLaunchAutoUpdate(options)).toEqual({ action: 'halt', error: recovery });
+  expect(printed.some(line => line.includes('startup stopped'))).toBe(true);
+  expect(printed.some(line => line.includes('starting the current version'))).toBe(false);
+});
+
+test('a same-version launch can repair installed peers when explicit fixture evidence requests it', async () => {
+  let applied = false;
+  const { options } = baseOptions({ currentVersion: '1.1.0', repairRequired: () => true, apply: async () => { applied = true; } });
+  expect((await runLaunchAutoUpdate(options)).action).toBe('restart'); expect(applied).toBe(true);
+});
 
 describe('runLaunchAutoUpdate', () => {
   test('restarted process prints the two-version receipt, consumes the env marker, and does not check again', async () => {

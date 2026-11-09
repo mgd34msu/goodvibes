@@ -1,5 +1,5 @@
-import { assertStagedClientReaderCompatible } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
-import { reportUpdateRollback, createSelfUpdateCommand } from '@goodvibes-jev/engine/terminal-shell/release-update-preflight';
+import { applySuiteUpdate, installedSuiteNeedsRepair, rollbackSuiteUpdate, SuiteUpdateRecoveryError, type SuiteUpdateResult } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { createSelfUpdateCommand, retainSuiteUpdateConfiguration, formatSuiteUpdateReport } from '@goodvibes-jev/engine/terminal-shell/release-update-preflight';
 import {
   checkReleaseUpdate,
   prepareReleaseUpdate,
@@ -7,66 +7,26 @@ import {
   type ReleaseUpdateCheck,
 } from '@goodvibes-jev/engine/terminal-shell/release-update-preflight';
 import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../../runtime/workspace-update-policy.ts';
-/**
- * `/update`, a real self-update path for binary installs. The
- * download-verify-swap mechanics are the SDK's canonical update policy
- * module (platform/runtime/self-update, hoisted from this file's
- * semantics), the same mechanism the daemon's hourly loop and
- * the suite installer follow: one update mechanism everywhere. This file owns
- * only the /update UX: install-kind gating, target selection, and the
- * printed report.
- *
- * Subcommands:
- *   /update [check]          , resolve the latest release tag and report
- *                                whether this build is already current.
- *   /update apply             , for a binary install (the curl installer),
- *                                download + verify + safely replace THIS
- *                                app's binary, and refresh the sqlite-vec
- *                                native addon in lockstep so the vector index
- *                                never goes stale beside a new binary. Every
- *                                swap parks the outgoing file at
- *                                `<path>.previous`, so the replaced version is
- *                                always kept. For any other install kind,
- *                                prints the exact command to run instead, it
- *                                never attempts a swap it can't do safely.
- *   /update rollback          , exchange each installed file with its kept
- *                                `.previous` counterpart: one command back to
- *                                the version that ran before the last update
- *                                (and, being an exchange, one more command
- *                                forward again).
- *
- * This command owns the selected terminal and its native companions. All
- * products share the monorepo release version; the daemon retains its own
- * update transaction. The release installer upgrades the selected suite
- * together, while this command checks saved-data compatibility for its own
- * candidate before replacing any terminal files.
- *   /update review             , install/subscription/sandbox posture,
- *                                unrelated to the update mechanics above.
- *   /update bundle export|inspect <path>, portable posture bundle, as before.
- *
- * The former `/update channel <stable|preview>` subcommand wrote a
- * release.channel config value that nothing downstream ever read, it only
- * ever changed what a later `/update review` printed back to you. It has
- * been removed rather than kept decorative; this repo's release process
- * (scripts/release.ts) does not publish separate stable/preview channels,
- * so there is no real channel selection to wire it to.
+/** `/update` uses the platform's shared suite transaction. Every installed
+ * sibling product and its native/browser companions comes from the same
+ * release; an explicitly configured installer-owned WebUI keeps its served
+ * path. Apply/rollback preserve earlier programs and check saved-data readers
+ * before changing live files. Running programs use the replacement on restart.
+ * `/update review` and `bundle` inspect/export this installation's posture.
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import {
-  applyVerifiedUpdate,
   captureUpdateFileIo,
   UpdateTransactionError,
   realUpdateFileIo,
-  rollbackKeptPrevious,
   type UpdateFileIo,
-  type UpdateTarget,
 } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { VERSION } from '../../version.ts';
 import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/sdk/platform/config';
-import { CHECKSUM_MANIFEST_NAME, parseChecksumFile, resolveArtifactNames, resolveSqliteVecAsset } from '../../runtime/release-artifacts.ts';
+import { resolveArtifactNames } from '../../runtime/release-artifacts.ts';
 import { detectInstallKind, fallbackUpdateCommand, type InstallKind, type UpdateFetchLike } from '../../runtime/update-check.ts';
 import { resolveConfiguredServiceName } from '../../runtime/legacy-daemon-migration.ts';
 import { requireShellPaths, requireSubscriptionManager } from './runtime-services.ts';
@@ -75,14 +35,6 @@ const REPO_RELEASES_LATEST_URL = 'https://github.com/mgd34msu/goodvibes/releases
 
 function releaseDownloadBaseUrl(tag: string): string {
   return `https://github.com/mgd34msu/goodvibes/releases/download/${tag}`;
-}
-
-async function downloadText(fetchImpl: UpdateFetchLike, url: string): Promise<string> {
-  const response = await fetchImpl(url);
-  if (!response.ok) {
-    throw new Error(`download failed (${response.status}) for ${url}`);
-  }
-  return await response.text();
 }
 
 /**
@@ -131,7 +83,6 @@ function abortableFetch(fetchImpl: UpdateFetchLike, signal: AbortSignal | undefi
  * one definition everywhere.
  */
 export { PREVIOUS_FILE_SUFFIX } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
-import { PREVIOUS_FILE_SUFFIX } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 
 export interface DaemonServiceRestartInfo {
   readonly managed: boolean;
@@ -202,18 +153,9 @@ export interface ApplyUpdateOptions {
   readonly progress?: UpdateSwapProgress;
 }
 
-/**
- * The real self-update path, delegating the download-verify-swap mechanics
- * to the SDK's canonical update policy module (applyVerifiedUpdate, the
- * same mechanism the daemon's hourly loop uses). For a binary install:
- * resolve the latest tag, compare to the running version, and if newer,
- * download + checksum-verify EVERY artifact before swapping any one (so a
- * checksum failure never leaves a mismatched pair installed), then
- * replace the staged cohort with compensation on failure and outgoing files
- * kept at `<path>.previous`; the cohort is not filesystem-wide atomic. For any other install kind, never attempts a swap, it
- * prints the exact command for that install method instead.
- */
-export async function applyUpdate(options: ApplyUpdateOptions): Promise<void> {
+/** Prepare the selected release and apply the platform's complete installed
+ * suite. Progress distinguishes clean refusal from committed/recovery state. */
+export async function applyUpdate(options: ApplyUpdateOptions): Promise<SuiteUpdateResult | undefined> {
   options = {
     ...options,
     io: captureUpdateFileIo(options.io ?? realUpdateFileIo),
@@ -221,6 +163,7 @@ export async function applyUpdate(options: ApplyUpdateOptions): Promise<void> {
   };
   const signal = options.signal,
     progress = options.progress;
+  const configuration = retainSuiteUpdateConfiguration(options.configManager);
   const fetchImpl = abortableFetch(options.fetchImpl, signal);
   const prepared = await prepareReleaseUpdate(
     { ...options, fetchImpl },
@@ -230,89 +173,33 @@ export async function applyUpdate(options: ApplyUpdateOptions): Promise<void> {
       asset: resolveArtifactNames,
       fallback: fallbackUpdateCommand,
       unsupportedSuffix: ' Update with: ' + fallbackUpdateCommand('source'),
-      assertActive: () => throwIfAborted(signal),
+      assertActive: () => { throwIfAborted(signal); configuration.assertCurrent(); },
       target: (tag) => {
         if (progress) progress.targetTag = tag;
       },
+      repairRequired: version => installedSuiteNeedsRepair({ ...options, version, webuiDirectory: configuration.webuiDirectory }),
     },
   );
   if (!prepared) return;
   const { latestTag, baseUrl } = prepared;
-  const artifacts = prepared.asset;
-  const io = options.io ?? realUpdateFileIo;
-  const appBinaryPath = options.execPath;
-
-  // The sqlite-vec native addon travels with the binaries: refresh it in the
-  // same download-verify-swap pass so /update never leaves a new binary beside a
-  // stale addon. It lands at <execDir>/lib/sqlite-vec-<os>-<arch>/vec0.<suffix>,
-  // exactly where the SDK's loader resolves it. The manifest entry decides
-  // whether the target release ships it, an entry that IS present makes the
-  // download and checksum mandatory (a mismatch is fatal, verified before any
-  // swap), while an absent entry means the target predates the addon and is
-  // skipped rather than blocking an otherwise-valid binary update. On macOS the
-  // file is refreshed for consistency even though the platform blocks extension
-  // loading. This inclusion decision needs one manifest pre-read; the swap
-  // itself re-verifies every included artifact inside applyVerifiedUpdate.
-  throwIfAborted(signal);
-  const checksumText = await downloadText(fetchImpl, `${baseUrl}/${CHECKSUM_MANIFEST_NAME}`);
-  const checksums = parseChecksumFile(checksumText);
-  const addon = resolveSqliteVecAsset(options.platform, options.arch);
-  const addonIncluded = addon !== null && checksums.get(addon.assetName) !== undefined;
-  const addonTargetPath = addon && addonIncluded ? join(dirname(appBinaryPath), 'lib', addon.dirName, addon.fileName) : null;
-
-  const runtimeTargets = options.platform === 'linux' && ['.bun', '.bun.json', '.bun.LICENSE.md'].some(suffix => checksums.has(artifacts.app + suffix))
-    ? ['.bun', '.bun.json', '.bun.LICENSE.md'].map(suffix => ({ label: 'captured Bun' + suffix, path: appBinaryPath + suffix, assetName: artifacts.app + suffix, executable: suffix === '.bun' })) : [];
-
-  const targets: UpdateTarget[] = [
-    { label: 'app binary', path: appBinaryPath, assetName: artifacts.app, executable: true },
-    ...runtimeTargets,
-    ...(checksums.has(artifacts.app + '.reader-ci-artifact.json') ? [{ label: 'compiled terminal readers', path: appBinaryPath + '.readers.json', assetName: artifacts.app + '.reader-ci-artifact.json', executable: false }] : []),
-    ...(addon && addonTargetPath ? [{ label: 'vector addon', path: addonTargetPath, assetName: addon.assetName, executable: false }] : []),
-  ];
-
-  // The canonical helper stages all targets, checks cancellation immediately
-  // before live renames, and compensates failed commits. Its synchronous commit
-  // cannot lose an installed/recovery result to an asynchronous timeout race.
-  throwIfAborted(signal);
   try {
-    await applyVerifiedUpdate({
-      fetchImpl,
-      downloadBaseUrl: baseUrl,
-      targets,
-      io,
-      platform: options.platform,
-      native: io.observe !== undefined && io.readFile !== undefined,
-      beforeCommit: verifiedStage => assertStagedClientReaderCompatible(appBinaryPath, appBinaryPath + '.update-download', io, latestTag, artifacts.app, verifiedStage),
+    const result = await applySuiteUpdate({
+      fetchImpl, downloadBaseUrl: baseUrl, execPath: options.execPath, platform: options.platform, arch: options.arch,
+      version: latestTag, io: options.io ?? realUpdateFileIo,
+      webuiDirectory: configuration.webuiDirectory, assertCurrent: configuration.assertCurrent,
       ...(signal ? { signal } : {}),
     });
-    if (progress) {
-      progress.begun = true;
-      progress.committed = true;
-    }
+    if (progress) { progress.begun = true; progress.committed = true; }
+    const service = detectDaemonServiceManaged(options.platform, options.configManager, options.runCommand);
+    options.print(formatSuiteUpdateReport(result, 'updated', result.programs.includes('goodvibes-daemon') && service.managed ? [`Daemon restart: ${service.restartCommand}`] : []));
+    return result;
   } catch (error) {
     if (progress && error instanceof UpdateTransactionError) {
       progress.begun = error.receipt.committed || error.receipt.recoveryRequired;
       progress.committed = error.receipt.committed;
-    }
+    } else if (progress && error instanceof SuiteUpdateRecoveryError) { progress.begun = true; progress.committed = error.committed; }
     throw error;
   }
-
-  const serviceInfo = detectDaemonServiceManaged(options.platform, options.configManager, options.runCommand);
-
-  options.print(
-    [
-      `Updated to ${latestTag}.`,
-      `  app binary:    ${appBinaryPath}`,
-      ...(addonTargetPath ? [`  vector addon:  ${addonTargetPath}`] : []),
-      '',
-      'Restart goodvibes to run the new version.',
-      // Named, not silently omitted: someone who used to see two binaries swap
-      // here should read why only one did.
-      serviceInfo.managed
-        ? `The daemon updates itself on its own release line; this changed nothing about it (it runs under ${serviceInfo.unitName}.service).`
-        : 'The daemon updates itself on its own release line; this changed nothing about it.',
-    ].join('\n'),
-  );
 }
 
 export interface RollbackUpdateOptions {
@@ -326,43 +213,15 @@ export interface RollbackUpdateOptions {
   readonly io?: UpdateFileIo;
 }
 
-/**
- * One-command rollback to the version that ran before the last update,
- * delegating the exchange mechanics to the SDK's rollbackKeptPrevious (the
- * same module the swap uses): every installed file this command owns (the app
- * binary and the vector addon) that has a kept `.previous` counterpart is
- * EXCHANGED with it, the previous version becomes live, and the version being rolled
- * back is itself kept at `.previous`, so a second `/update rollback` rolls
- * forward again. Files without a kept counterpart are reported and left
- * untouched; nothing is downloaded.
- */
+/** Restore the selected suite and its directory assets together. */
 export function rollbackUpdate(options: RollbackUpdateOptions): void {
   if (!requireBinaryUpdateInstall(options.execPath, options.print, fallbackUpdateCommand, true)) return;
 
-  const io = options.io ?? realUpdateFileIo;
-  const addon = resolveSqliteVecAsset(options.platform, options.arch);
-  // The daemon binary is deliberately absent: this command never replaced it,
-  // so it has nothing here to restore. Rolling back a file another product owns
-  // would undo an update this app did not perform.
-  const targets = [
-    { label: 'app binary', path: options.execPath },
-    { label: 'compiled terminal readers', path: options.execPath + '.readers.json' },
-    ...(options.platform === 'linux' ? ['.bun', '.bun.json', '.bun.LICENSE.md'].map(suffix => ({label:'captured Bun' + suffix,path:options.execPath + suffix})) : []),
-    ...(addon ? [{ label: 'vector addon', path: join(dirname(options.execPath), 'lib', addon.dirName, addon.fileName) }] : []),
-  ];
-
-  const result = rollbackKeptPrevious(targets, io, () => {
-    if (io.exists(options.execPath + '.previous')) assertStagedClientReaderCompatible(options.execPath, options.execPath + '.previous', io, undefined, resolveArtifactNames(options.platform, options.arch)?.app);
-  }, { native: io.observe !== undefined && io.readFile !== undefined });
-  reportUpdateRollback(options, result.restored, [], () => {
-    const serviceInfo = detectDaemonServiceManaged(options.platform, options.configManager, options.runCommand);
-    return [
-      'Restart goodvibes to run the restored version.',
-      serviceInfo.managed
-        ? `The daemon was not rolled back; it updates itself on its own release line (it runs under ${serviceInfo.unitName}.service).`
-        : 'The daemon was not rolled back; it updates itself on its own release line.',
-    ];
-  });
+  const configuration = retainSuiteUpdateConfiguration(options.configManager);
+  const result = rollbackSuiteUpdate({ ...options, currentVersion: VERSION,
+    webuiDirectory: configuration.webuiDirectory, assertCurrent: configuration.assertCurrent });
+  const service = detectDaemonServiceManaged(options.platform, options.configManager, options.runCommand);
+  options.print(formatSuiteUpdateReport(result, 'restored', result.programs.includes('goodvibes-daemon') && service.managed ? [`Daemon restart: ${service.restartCommand}`] : []));
 }
 
 interface UpdateBundle {
@@ -399,7 +258,10 @@ const selfUpdateCommand = createSelfUpdateCommand<CommandContext>({
   workspaceDistribution: IS_WORKSPACE_DISTRIBUTION,
   workspaceGuidance: WORKSPACE_UPDATE_GUIDANCE,
   check: checkForUpdate,
-  apply: (options, ctx) => applyUpdate({ ...options, configManager: ctx.platform.configManager }),
+  repairRequired: (version, ctx) => installedSuiteNeedsRepair({ execPath: process.execPath, platform: process.platform, arch: process.arch, version,
+    webuiDirectory: retainSuiteUpdateConfiguration(ctx.platform.configManager).webuiDirectory }),
+  onRecovery: (_error, ctx) => ctx.exit(),
+  apply: async (options, ctx) => { await applyUpdate({ ...options, configManager: ctx.platform.configManager }); },
   rollback: (options, ctx) => rollbackUpdate({ ...options, configManager: ctx.platform.configManager }),
   extra: async (args, ctx) => {
     const sub = args[0] ?? 'check';

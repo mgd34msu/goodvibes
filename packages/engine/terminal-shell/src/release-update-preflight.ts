@@ -2,6 +2,7 @@ import { PREVIOUS_FILE_SUFFIX } from '@goodvibes-jev/engine/sdk/platform/runtime
 import { detectInstallKind, type InstallKind } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
 import {
   compareVersions,
+  suiteUpdateRequiresRecovery,
   normalizeVersion,
   resolveLatestReleaseTag,
   type UpdateFetchLike,
@@ -54,13 +55,16 @@ export async function prepareReleaseUpdate<Asset extends object | string>(
     readonly unsupportedSuffix: string;
     readonly assertActive?: (() => void) | undefined;
     readonly target?: ((tag: string) => void) | undefined;
+    readonly repairRequired?: ((tag: string) => boolean) | undefined;
   },
 ): Promise<{ readonly latestTag: string; readonly asset: Asset; readonly baseUrl: string } | null> {
   if (!requireBinaryUpdateInstall(options.execPath, options.print, policy.fallback)) return null;
   policy.assertActive?.();
   const latestTag = await resolveLatestReleaseTag(options.fetchImpl, policy.latestUrl, options.signal ? { signal: options.signal } : {});
   policy.assertActive?.();
-  if (compareVersions(options.currentVersion, latestTag) >= 0) {
+  const comparison = compareVersions(options.currentVersion, latestTag);
+  const repair = comparison === 0 && policy.repairRequired?.(latestTag) === true;
+  if (comparison > 0 || comparison === 0 && !repair) {
     options.print(`Already current: running v${normalizeVersion(options.currentVersion)}, latest release is ${latestTag}.`);
     return null;
   }
@@ -72,7 +76,8 @@ export async function prepareReleaseUpdate<Asset extends object | string>(
     return null;
   }
   policy.target?.(latestTag);
-  options.print(`Update available: ${latestTag} (running v${normalizeVersion(options.currentVersion)}). Downloading and verifying...`);
+  options.print(repair ? `Repairing the installed GoodVibes suite at ${latestTag}. Downloading and verifying...`
+    : `Update available: ${latestTag} (running v${normalizeVersion(options.currentVersion)}). Downloading and verifying...`);
   return { latestTag, asset, baseUrl: policy.downloadBase(latestTag) };
 }
 
@@ -118,6 +123,8 @@ export function createSelfUpdateCommand<Context extends { print(message: string)
   readonly check: (fetchImpl: UpdateFetchLike, version: string) => Promise<ReleaseUpdateCheck>;
   readonly apply: (options: SelfUpdateInvocation, context: Context) => Promise<void>;
   readonly rollback: (options: Omit<SelfUpdateInvocation, 'fetchImpl' | 'currentVersion'>, context: Context) => void;
+  readonly onRecovery?: ((error: unknown, context: Context) => void) | undefined;
+  readonly repairRequired?: ((tag: string, context: Context) => boolean) | undefined;
   readonly extra?: ((args: string[], context: Context) => Promise<boolean>) | undefined;
 }): import('./command-registry.js').TerminalSlashCommand<Context> {
   return {
@@ -134,8 +141,9 @@ export function createSelfUpdateCommand<Context extends { print(message: string)
       if (sub === 'check') {
         try {
           const result = await policy.check(fetch as UpdateFetchLike, policy.version);
+          const repair = result.isCurrent && compareVersions(policy.version, result.latestTag) === 0 && policy.repairRequired?.(result.latestTag, context) === true;
           context.print(
-            result.isCurrent
+            repair ? `Installed suite repair required at ${result.latestTag}. Run /update apply to align the installed products and companions.` : result.isCurrent
               ? `Already current: running v${normalizeVersion(policy.version)} (latest release is ${result.latestTag}).`
               : `Update available: ${result.latestTag} (running v${normalizeVersion(policy.version)}). Run /update apply to install it.`,
           );
@@ -159,6 +167,7 @@ export function createSelfUpdateCommand<Context extends { print(message: string)
           );
         } catch (error) {
           context.print(`Update failed: ${error instanceof Error ? error.message : String(error)}`);
+          if (suiteUpdateRequiresRecovery(error)) policy.onRecovery?.(error, context);
         }
         return;
       }
@@ -167,6 +176,7 @@ export function createSelfUpdateCommand<Context extends { print(message: string)
           policy.rollback({ execPath: process.execPath, platform: process.platform, arch: process.arch, print: context.print }, context);
         } catch (error) {
           context.print(`Rollback failed: ${error instanceof Error ? error.message : String(error)}`);
+          if (suiteUpdateRequiresRecovery(error)) policy.onRecovery?.(error, context);
         }
         return;
       }
@@ -174,4 +184,20 @@ export function createSelfUpdateCommand<Context extends { print(message: string)
       context.print(policy.help);
     },
   };
+}
+
+export { retainSuiteUpdateConfiguration, type SuiteUpdateConfigurationSource } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+/** Shared terminal report for the actual products/directories the suite changed. */
+export function formatSuiteUpdateReport(result: {
+  readonly version: string; readonly programs: readonly string[];
+  readonly directoryPaths: readonly string[]; readonly preservedPaths: readonly string[];
+}, action: 'updated' | 'restored', footer: readonly string[] = []): string {
+  const label = action === 'updated' ? 'Updated' : 'Restored';
+  return [
+    `${label} GoodVibes ${result.version}: ${result.programs.join(', ')}.`,
+    ...result.directoryPaths.map(path => `  ${action} directory: ${path}`),
+    ...result.preservedPaths.map(path => `  retained earlier backup: ${path}`),
+    `Restart the running GoodVibes programs to use the ${action === 'updated' ? 'installed' : 'restored'} release.`,
+    ...footer,
+  ].join('\n');
 }

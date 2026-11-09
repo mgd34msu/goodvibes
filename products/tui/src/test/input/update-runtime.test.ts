@@ -1,459 +1,82 @@
-import { describe, expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+/** Actual TUI update commands over a complete synthetic suite release.
+ * Regression source intentionally UNRUN during the coding-first pass. */
+import { afterEach, describe, expect, test } from 'bun:test';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterAll } from 'bun:test';
-import {
-  applyUpdate,
-  checkForUpdate,
-  createUpdateSwapProgress,
-  detectDaemonServiceManaged,
-  rollbackUpdate,
-  PREVIOUS_FILE_SUFFIX,
-  UPDATE_ABORTED_MESSAGE,
-  type ApplyUpdateOptions,
-  type RunCommand,
-} from '../../input/commands/update-runtime.ts';
+import { suiteReleaseFixture } from '../../../../../packages/engine/test/_helpers/suite-release-fixture.ts';
+import { applyUpdate, checkForUpdate, createUpdateSwapProgress, detectDaemonServiceManaged, rollbackUpdate, UPDATE_ABORTED_MESSAGE,
+  type ApplyUpdateOptions, type RunCommand } from '../../input/commands/update-runtime.ts';
 import type { UpdateFetchLike } from '../../runtime/update-check.ts';
-import { realUpdateFileIo, type UpdateFileIo } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
-import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
-// This suite pins fixture versions ('1.0.0' / '1.1.0' / 'v9.9.9') rather than
-// the live build VERSION, per this repo's rule that tests must never compare
-// against the running package version (which shifts on every release bump).
-// All network access goes through a stubbed fetchImpl, nothing here makes a
-// live call.
-
-interface FakeResponseSpec {
-  readonly ok?: boolean;
-  readonly status?: number;
-  readonly url?: string;
-  readonly location?: string | null;
-  readonly text?: string;
-  readonly buffer?: Buffer;
+const cleanups: (() => void)[] = [];
+afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); });
+const LATEST = 'https://github.com/mgd34msu/goodvibes/releases/latest';
+function latest(tag: string, assets?: UpdateFetchLike): UpdateFetchLike {
+  return async (url, init) => url === LATEST ? { ok: false, status: 302, url,
+    headers: { get: name => name.toLowerCase() === 'location' ? `https://github.com/mgd34msu/goodvibes/releases/tag/${tag}` : null },
+    text: async () => '', arrayBuffer: async () => new ArrayBuffer(0) } : assets ? assets(url, init) : new Response('No fixture asset', { status: 404 });
+}
+function fixture() {
+  const f = suiteReleaseFixture(); cleanups.push(f.cleanup);
+  const printed: string[] = [], progress = createUpdateSwapProgress();
+  const options: ApplyUpdateOptions = { execPath: join(f.root, 'goodvibes'), platform: 'darwin', arch: 'x64', currentVersion: '3.1.2',
+    fetchImpl: latest('v3.1.3', f.fetchImpl), print: line => printed.push(line),
+    configManager: { get: key => key === 'controlPlane.webui.bundleDir' ? f.webui : undefined }, progress };
+  return { ...f, options, printed, progress };
 }
 
-function fakeResponse(spec: FakeResponseSpec) {
-  return {
-    ok: spec.ok ?? true,
-    status: spec.status ?? 200,
-    url: spec.url ?? '',
-    headers: { get: (name: string) => (name.toLowerCase() === 'location' ? spec.location ?? null : null) },
-    text: async () => spec.text ?? '',
-    arrayBuffer: async () => {
-      const buf = spec.buffer ?? Buffer.alloc(0);
-      return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
-    },
-  };
-}
-
-const RELEASES_LATEST_URL = 'https://github.com/mgd34msu/goodvibes/releases/latest';
-
-function buildStubFetch(options: {
-  readonly latestTag: string;
-  readonly checksumText?: string;
-  readonly appBuffer?: Buffer;
-  readonly daemonBuffer?: Buffer;
-  readonly addonBuffer?: Buffer;
-  readonly calls?: string[];
-}): UpdateFetchLike {
-  const calls = options.calls ?? [];
-  return (async (url: string, init?: { method?: string }) => {
-    calls.push(`${init?.method ?? 'GET'} ${url}`);
-    if (url === RELEASES_LATEST_URL) {
-      return fakeResponse({
-        status: 302,
-        url,
-        location: `https://github.com/mgd34msu/goodvibes/releases/tag/${options.latestTag}`,
-      });
-    }
-    if (url.endsWith('SHA256SUMS.txt')) {
-      return fakeResponse({ text: options.checksumText ?? '' });
-    }
-    if (url.endsWith('sqlite-vec-linux-x64.so')) {
-      return fakeResponse({ buffer: options.addonBuffer ?? Buffer.from('addon-bytes') });
-    }
-    if (url.endsWith('goodvibes-daemon-linux-x64')) {
-      return fakeResponse({ buffer: options.daemonBuffer ?? Buffer.from('daemon-bytes') });
-    }
-    if (/goodvibes-linux-x64$/.test(url)) {
-      return fakeResponse({ buffer: options.appBuffer ?? Buffer.from('app-bytes') });
-    }
-    throw new Error(`unexpected fetch in test: ${url}`);
-  }) as UpdateFetchLike;
-}
-
-function sha256Hex(buffer: Buffer): string {
-  return createHash('sha256').update(buffer).digest('hex');
-}
-
-/**
- * In-memory UpdateFileIo, the SDK-backed swap path runs for real against a
- * virtual filesystem, so the tests observe genuine verify-before-write and
- * kept-.previous behavior without touching the host.
- */
-function memoryIo(initialFiles: Record<string, string> = {}) {
-  const files = new Map<string, Buffer>(
-    Object.entries(initialFiles).map(([path, content]) => [path, Buffer.from(content)]),
-  );
-  const mutations: string[] = [];
-  const io: UpdateFileIo = {
-    writeExclusive: (path, data) => {
-      if (files.has(path)) throw new Error(`exclusive file exists: ${path}`);
-      files.set(path, data);
-    },
-    remove: (path) => { files.delete(path); },
-    writeFile: (path, data) => {
-      files.set(path, Buffer.from(data));
-      mutations.push(`write ${path}`);
-    },
-    rename: (from, to) => {
-      const buffer = files.get(from);
-      if (buffer === undefined) throw new Error(`rename of missing file in test io: ${from}`);
-      files.delete(from);
-      files.set(to, buffer);
-      mutations.push(`rename ${from} -> ${to}`);
-    },
-    chmod: () => {},
-    exists: (path) => files.has(path),
-    mkdir: () => {},
-  };
-  return {
-    io,
-    mutations,
-    read: (path: string) => files.get(path)?.toString(),
-    has: (path: string) => files.has(path),
-  };
-}
-
-function baseApplyOptions(overrides: Partial<ApplyUpdateOptions>): ApplyUpdateOptions {
-  const printed: string[] = [];
-  return {
-    fetchImpl: buildStubFetch({ latestTag: 'v1.0.0' }),
-    execPath: '/home/user/.local/bin/goodvibes',
-    platform: 'linux',
-    arch: 'x64',
-    currentVersion: '1.0.0',
-    print: (line) => printed.push(line),
-    configManager: { get: () => undefined },
-    io: memoryIo().io,
-    ...overrides,
-  };
-}
-
-describe('applyUpdate: non-binary install kinds never attempt a swap', () => {
-  test('running from source prints workspace rebuild guidance and makes no download calls', async () => {
-    const printed: string[] = [];
-    const calls: string[] = [];
-    await applyUpdate(
-      baseApplyOptions({
-        execPath: '/home/user/.bun/bin/bun',
-        fetchImpl: buildStubFetch({ latestTag: 'v9.9.9', calls }),
-        print: (line) => printed.push(line),
-      }),
-    );
-    expect(calls).toEqual([]); // never even checks the network for a non-binary install
-    expect(printed.join('\n')).toContain('bun run --filter @goodvibes-jev/tui build');
-    expect(printed.join('\n')).toContain('running from source');
-  });
-
-  test('a bun-global package install prints the bun add -g command and makes no download calls', async () => {
-    const printed: string[] = [];
-    const calls: string[] = [];
-    await applyUpdate(
-      baseApplyOptions({
-        execPath: '/home/user/.bun/install/global/node_modules/@goodvibes-jev/tui/vendor/goodvibes-linux-x64',
-        fetchImpl: buildStubFetch({ latestTag: 'v9.9.9', calls }),
-        print: (line) => printed.push(line),
-      }),
-    );
-    expect(calls).toEqual([]);
-    expect(printed.join('\n')).toContain('bun run --filter @goodvibes-jev/tui build');
-  });
+test('source installs remain read-only and print their actual update guidance', async () => {
+  const f = fixture(); let calls = 0;
+  await applyUpdate({ ...f.options, execPath: '/usr/bin/bun', fetchImpl: async () => { calls++; throw new Error('Source installs never download'); } });
+  expect(calls).toBe(0); expect(f.progress.begun).toBe(false);
 });
 
-describe('applyUpdate: binary install, version comparison', () => {
-  test('reports already current honestly and does not download artifacts', async () => {
-    const printed: string[] = [];
-    const calls: string[] = [];
-    await applyUpdate(
-      baseApplyOptions({
-        currentVersion: '1.0.0',
-        fetchImpl: buildStubFetch({ latestTag: 'v1.0.0', calls }),
-        print: (line) => printed.push(line),
-      }),
-    );
-    expect(calls).toEqual([`HEAD ${RELEASES_LATEST_URL}`]);
-    expect(printed.join('\n')).toContain('Already current');
-    expect(printed.join('\n')).toContain('1.0.0');
-  });
-
-  test('reports already current when the running build is even newer than the latest tag', async () => {
-    const printed: string[] = [];
-    await applyUpdate(
-      baseApplyOptions({
-        currentVersion: '2.0.0',
-        fetchImpl: buildStubFetch({ latestTag: 'v1.9.9' }),
-        print: (line) => printed.push(line),
-      }),
-    );
-    expect(printed.join('\n')).toContain('Already current');
-  });
+test('the actual TUI apply and rollback paths include Agent, daemon, native companions and served WebUI', async () => {
+  const f = fixture(), result = await applyUpdate(f.options);
+  expect(result?.version).toBe('3.1.3'); expect(f.progress.committed).toBe(true);
+  expect([...result!.programs].sort()).toEqual(['goodvibes', 'goodvibes-agent', 'goodvibes-daemon']);
+  for (const program of f.programs) expect(readFileSync(join(f.root, program.name), 'utf8')).toBe(program.name + ' version 3.1.3');
+  expect(readFileSync(join(f.webui, 'index.html'), 'utf8')).toBe('New WebUI');
+  expect(f.printed.some(line => line.includes('goodvibes-agent') && line.includes('goodvibes-daemon'))).toBe(true);
+  rollbackUpdate(f.options);
+  for (const [path, bytes] of f.original) expect(readFileSync(path)).toEqual(bytes);
+  expect(readFileSync(join(f.webui, 'original.txt'), 'utf8')).toBe('Retained original directory');
 });
 
-describe('applyUpdate: binary install, checksum verification', () => {
-  const APP_PATH = '/home/user/.local/bin/goodvibes';
-  const DAEMON_PATH = '/home/user/.local/bin/goodvibes-daemon';
-  const ADDON_PATH = '/home/user/.local/bin/lib/sqlite-vec-linux-x64/vec0.so';
-
-  test('a missing manifest entry hard-fails the update and swaps nothing', async () => {
-    const fs = memoryIo({ [APP_PATH]: 'old-app' });
-    const checksumText = ''; // no entries at all
-    const options = baseApplyOptions({
-      currentVersion: '1.0.0',
-      fetchImpl: buildStubFetch({ latestTag: 'v1.1.0', checksumText }),
-      io: fs.io,
-    });
-    await expect(applyUpdate(options)).rejects.toThrow(/no checksum entry for goodvibes-linux-x64/);
-    expect(fs.mutations).toEqual([]);
-    expect(fs.read(APP_PATH)).toBe('old-app');
-  });
-
-  test('matching checksums swap the app binary atomically and place the sqlite-vec addon', async () => {
-    const appBuffer = Buffer.from('new-app-bytes');
-    const addonBuffer = Buffer.from('new-addon-bytes');
-    const checksumText = [
-      `${sha256Hex(appBuffer)}  goodvibes-linux-x64`,
-      `${sha256Hex(addonBuffer)}  sqlite-vec-linux-x64.so`,
-    ].join('\n');
-    const fs = memoryIo({ [APP_PATH]: 'old-app-bytes' });
-    const printed: string[] = [];
-    const options = baseApplyOptions({
-      execPath: APP_PATH,
-      currentVersion: '1.0.0',
-      fetchImpl: buildStubFetch({ latestTag: 'v1.1.0', checksumText, appBuffer, addonBuffer }),
-      io: fs.io,
-      print: (line) => printed.push(line),
-    });
-    await applyUpdate(options);
-    expect(fs.read(APP_PATH)).toBe('new-app-bytes');
-    // Every swap keeps the outgoing file at `<path>.previous`.
-    expect(fs.read(`${APP_PATH}${PREVIOUS_FILE_SUFFIX}`)).toBe('old-app-bytes');
-    // The addon lands at <execDir>/lib/sqlite-vec-<os>-<arch>/vec0.<suffix>, the
-    // exact path the SDK's loader resolves next to the running binary.
-    expect(fs.read(ADDON_PATH)).toBe('new-addon-bytes');
-    expect(printed.join('\n')).toContain('Updated to v1.1.0');
-    expect(printed.join('\n')).toContain(ADDON_PATH);
-  });
-
-  test('a target release that predates the sqlite-vec addon (no manifest entry) still swaps the binary and simply skips the addon', async () => {
-    const appBuffer = Buffer.from('new-app-bytes');
-    // The binary has a valid entry; the addon has none. A pre-addon release must
-    // not block an otherwise-valid binary update, the addon is skipped, never
-    // placed unverified.
-    const checksumText = `${sha256Hex(appBuffer)}  goodvibes-linux-x64`;
-    const fs = memoryIo({ [APP_PATH]: 'old-app' });
-    const options = baseApplyOptions({
-      currentVersion: '1.0.0',
-      fetchImpl: buildStubFetch({ latestTag: 'v1.1.0', checksumText, appBuffer }),
-      io: fs.io,
-    });
-    await applyUpdate(options);
-    expect(fs.read(APP_PATH)).toBe('new-app-bytes');
-    expect(fs.has(ADDON_PATH)).toBe(false);
-  });
-
-  test('a checksum mismatch on the sqlite-vec addon hard-fails and never swaps the binary or writes the addon', async () => {
-    const appBuffer = Buffer.from('new-app-bytes');
-    const addonBuffer = Buffer.from('new-addon-bytes');
-    const checksumText = [
-      `${sha256Hex(appBuffer)}  goodvibes-linux-x64`,
-      `${'0'.repeat(64)}  sqlite-vec-linux-x64.so`,
-    ].join('\n');
-    const fs = memoryIo({ [APP_PATH]: 'old-app' });
-    const options = baseApplyOptions({
-      currentVersion: '1.0.0',
-      fetchImpl: buildStubFetch({ latestTag: 'v1.1.0', checksumText, appBuffer, addonBuffer }),
-      io: fs.io,
-    });
-    await expect(applyUpdate(options)).rejects.toThrow(/checksum mismatch for sqlite-vec-linux-x64\.so/);
-    expect(fs.mutations).toEqual([]);
-    expect(fs.read(APP_PATH)).toBe('old-app');
-    expect(fs.has(ADDON_PATH)).toBe(false);
-  });
-
-  test('a daemon binary sitting beside the app binary is neither downloaded nor replaced', async () => {
-    // The daemon is its own product on its own release line and updates itself.
-    // This app's release publishes no daemon asset at all, so a swap from here
-    // would be looking for a file that does not exist, and would be replacing a
-    // build from a different version line if it ever found one.
-    const appBuffer = Buffer.from('new-app-bytes');
-    const checksumText = `${sha256Hex(appBuffer)}  goodvibes-linux-x64`;
-    const fs = memoryIo({ [APP_PATH]: 'old-app', [DAEMON_PATH]: 'a-running-daemon' });
-    const calls: string[] = [];
-    const printed: string[] = [];
-    const options = baseApplyOptions({
-      execPath: APP_PATH,
-      currentVersion: '1.0.0',
-      fetchImpl: buildStubFetch({ latestTag: 'v1.1.0', checksumText, appBuffer, calls }),
-      io: fs.io,
-      print: (line) => printed.push(line),
-    });
-    await applyUpdate(options);
-    expect(fs.read(APP_PATH)).toBe('new-app-bytes');
-    expect(fs.read(DAEMON_PATH)).toBe('a-running-daemon');
-    expect(fs.has(`${DAEMON_PATH}${PREVIOUS_FILE_SUFFIX}`)).toBe(false);
-    expect(calls.some((url) => url.includes('goodvibes-daemon'))).toBe(false);
-    // And the report says so rather than leaving a reader to wonder.
-    expect(printed.join('\n')).toContain('The daemon updates itself');
-  });
+test('an already-current TUI can repair peers left at the previous suite version', async () => {
+  const f = fixture();
+  const terminal = join(f.root, 'goodvibes');
+  writeFileSync(terminal, f.release.get('goodvibes-macos-x64')!);
+  writeFileSync(terminal + '.readers.json', f.release.get('goodvibes-macos-x64.reader-ci-artifact.json')!);
+  const result = await applyUpdate({ ...f.options, currentVersion: '3.1.3' });
+  expect(result?.version).toBe('3.1.3');
+  expect(readFileSync(join(f.root, 'goodvibes-agent'), 'utf8')).toBe('goodvibes-agent version 3.1.3');
+  expect(f.printed.some(line => line.includes('Repairing the installed GoodVibes suite'))).toBe(true);
 });
 
-describe('applyUpdate: cancellation, honoured only up to the moment before the swap', () => {
-  const APP_PATH = '/home/user/.local/bin/goodvibes';
-
-  test('an already-aborted signal stops the update before the first request and before any file is touched', async () => {
-    const calls: string[] = [];
-    const fs = memoryIo({ [APP_PATH]: 'old-app' });
-    const controller = new AbortController();
-    controller.abort();
-    const progress = createUpdateSwapProgress();
-
-    await expect(
-      applyUpdate(
-        baseApplyOptions({
-          execPath: APP_PATH,
-          currentVersion: '1.0.0',
-          fetchImpl: buildStubFetch({ latestTag: 'v1.1.0', calls }),
-          io: fs.io,
-          signal: controller.signal,
-          progress,
-        }),
-      ),
-    ).rejects.toThrow(UPDATE_ABORTED_MESSAGE);
-
-    expect(calls).toEqual([]); // not one request, let alone a download
-    expect(fs.mutations).toEqual([]);
-    expect(fs.read(APP_PATH)).toBe('old-app');
-    expect(progress).toEqual({ begun: false, committed: false, targetTag: null });
-  });
-
-  test('an abort that lands between steps stops at the next boundary: the manifest is never requested and nothing swaps', async () => {
-    const calls: string[] = [];
-    const fs = memoryIo({ [APP_PATH]: 'old-app' });
-    const controller = new AbortController();
-    const progress = createUpdateSwapProgress();
-    const tagFetch = buildStubFetch({ latestTag: 'v1.1.0', calls });
-    // Cancelled while the version lookup is in flight: the tag still resolves,
-    // and the step after it is the one that must not run.
-    const fetchImpl: UpdateFetchLike = async (url, init) => {
-      const response = await tagFetch(url, init);
-      controller.abort();
-      return response;
-    };
-
-    await expect(
-      applyUpdate(
-        baseApplyOptions({
-          execPath: APP_PATH,
-          currentVersion: '1.0.0',
-          fetchImpl,
-          io: fs.io,
-          signal: controller.signal,
-          progress,
-        }),
-      ),
-    ).rejects.toThrow(/abort/i);
-
-    expect(calls).toEqual([`HEAD ${RELEASES_LATEST_URL}`]);
-    expect(fs.mutations).toEqual([]);
-    expect(fs.read(APP_PATH)).toBe('old-app');
-    // A cancelled lookup never establishes a release target or begins a swap.
-    expect(progress.targetTag).toBeNull();
-    expect(progress.begun).toBe(false);
-    expect(progress.committed).toBe(false);
-  });
-
-  test('caller mutation during discovery cannot redirect the install target', async () => {
-    const state = memoryIo({ [APP_PATH]: 'old-app', '/fixture/redirected': 'unowned' });
-    const bytes = Buffer.from('new-app');
-    const original = buildStubFetch({ latestTag: 'v1.1.0', appBuffer: bytes, checksumText: `${sha256Hex(bytes)}  goodvibes-linux-x64\n` });
-    const options = { ...baseApplyOptions({ execPath: APP_PATH, currentVersion: '1.0.0', io: state.io }), fetchImpl: original };
-    options.fetchImpl = async (url, init) => {
-      options.execPath = '/fixture/redirected';
-      return original(url, init);
-    };
-    await applyUpdate(options);
-    expect(state.read(APP_PATH)).toBe('new-app');
-    expect(state.read('/fixture/redirected')).toBe('unowned');
-  });
-
-  test('late final body after cancellation cannot install a binary', async () => {
-    const state = memoryIo({ [APP_PATH]: 'old-app' });
-    const abort = new AbortController();
-    const bytes = Buffer.from('new-app');
-    const inner = buildStubFetch({ latestTag: 'v1.1.0', appBuffer: bytes, checksumText: `${sha256Hex(bytes)}  goodvibes-linux-x64\n` });
-    let release: (() => void) | undefined;
-    let reached: (() => void) | undefined;
-    const bodyReady = new Promise<void>((resolve) => { reached = resolve; });
-    const bodyGate = new Promise<void>((resolve) => { release = resolve; });
-    const fetchImpl: UpdateFetchLike = async (url, init) => {
-      const original = await inner(url, init);
-      return url.endsWith('/goodvibes-linux-x64') ? { ...original, arrayBuffer: async () => {
-        reached!(); await bodyGate; return original.arrayBuffer();
-      } } : original;
-    };
-    const running = applyUpdate(baseApplyOptions({ execPath: APP_PATH, currentVersion: '1.0.0', fetchImpl, io: state.io, signal: abort.signal }));
-    await bodyReady;
-    abort.abort(new Error('test cancellation'));
-    await expect(running).rejects.toThrow('test cancellation');
-    release!();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(state.read(APP_PATH)).toBe('old-app');
-    expect(state.mutations).toEqual([]);
-  });
-
-  test('the signal rides on every request, so the download itself is cancellable rather than merely abandoned', async () => {
-    const seenSignals: Array<AbortSignal | undefined> = [];
-    const controller = new AbortController();
-    const appBuffer = Buffer.from('new-app-bytes');
-    const checksumText = `${sha256Hex(appBuffer)}  goodvibes-linux-x64\n`;
-    const inner = buildStubFetch({ latestTag: 'v1.1.0', checksumText, appBuffer });
-    const fetchImpl = (async (url: string, init?: { method?: string; signal?: AbortSignal }) => {
-      seenSignals.push(init?.signal);
-      return await inner(url, init);
-    }) as UpdateFetchLike;
-
-    await applyUpdate(
-      baseApplyOptions({
-        execPath: APP_PATH,
-        currentVersion: '1.0.0',
-        fetchImpl,
-        io: memoryIo({ [APP_PATH]: 'old-app' }).io,
-        signal: controller.signal,
-      }),
-    );
-
-    // Tag lookup, manifest pre-read, manifest again inside the verified apply,
-    // and app artifact carry a signal. Core requests retain their own bounded
-    // scope signal linked to the caller, rather than losing deadline cancellation.
-    expect(seenSignals.length).toBeGreaterThanOrEqual(4);
-    expect(seenSignals.every((signal) => signal !== undefined)).toBe(true);
-    expect(seenSignals.some((signal) => signal !== controller.signal)).toBe(true);
-    expect(controller.signal.aborted).toBe(false);
-  });
+test('a missing required macOS companion refuses every live replacement', async () => {
+  const f = fixture(); f.release.delete('sqlite-darwin-x64.dylib.json');
+  await expect(applyUpdate(f.options)).rejects.toThrow('missing');
+  for (const [path, bytes] of f.original) expect(readFileSync(path)).toEqual(bytes);
+  expect(f.progress.begun).toBe(false); expect(f.progress.committed).toBe(false);
 });
 
-describe('checkForUpdate', () => {
-  test('reports isCurrent=true when the running version matches the latest tag', async () => {
-    const result = await checkForUpdate(buildStubFetch({ latestTag: 'v1.0.0' }), '1.0.0');
-    expect(result).toEqual({ latestTag: 'v1.0.0', isCurrent: true });
-  });
+test('the original served WebUI selection is checked after latest-release lookup', async () => {
+  const f = fixture(); let selected = f.webui;
+  const fetchImpl: UpdateFetchLike = async (url, init) => { const response = await f.options.fetchImpl(url, init); if (url === LATEST) selected = join(f.root, 'webui', 'other'); return response; };
+  await expect(applyUpdate({ ...f.options, fetchImpl, configManager: { get: () => selected } })).rejects.toThrow('selection changed');
+  for (const [path, bytes] of f.original) expect(readFileSync(path)).toEqual(bytes);
+});
 
-  test('reports isCurrent=false and the real latest tag when a newer release exists', async () => {
-    const result = await checkForUpdate(buildStubFetch({ latestTag: 'v1.2.0' }), '1.0.0');
-    expect(result).toEqual({ latestTag: 'v1.2.0', isCurrent: false });
-  });
+test('an aborted update performs no publication', async () => {
+  const f = fixture(), owner = new AbortController(); owner.abort();
+  await expect(applyUpdate({ ...f.options, signal: owner.signal })).rejects.toThrow(UPDATE_ABORTED_MESSAGE);
+  for (const [path, bytes] of f.original) expect(readFileSync(path)).toEqual(bytes);
+});
+
+test('version check reports the actual release tag', async () => {
+  expect(await checkForUpdate(latest('v3.1.2'), '3.1.2')).toEqual({ latestTag: 'v3.1.2', isCurrent: true });
+  expect(await checkForUpdate(latest('v3.1.3'), '3.1.2')).toEqual({ latestTag: 'v3.1.3', isCurrent: false });
 });
 
 describe('detectDaemonServiceManaged', () => {
@@ -484,216 +107,5 @@ describe('detectDaemonServiceManaged', () => {
     });
     expect(info.managed).toBe(false);
     expect(called).toBe(false);
-  });
-});
-
-// ─── keep-previous swap + one-command rollback ───────────────────────────────
-
-const scratchDirs: string[] = [];
-function scratchDir(): string {
-  const dir = makeProjectTempDir('gv-update-rollback');
-  scratchDirs.push(dir);
-  return dir;
-}
-afterAll(() => {
-  for (const dir of scratchDirs) {
-    try {
-      rmSync(dir, { recursive: true, force: true });
-    } catch {
-      /* ignore */
-    }
-  }
-});
-
-describe('applyUpdate: the real swap keeps the outgoing binary at .previous', () => {
-  test('after an update the target holds the new bytes and .previous holds the old ones', async () => {
-    const dir = scratchDir();
-    const execPath = join(dir, 'goodvibes');
-    writeFileSync(execPath, 'old-app-bytes');
-
-    const appBuffer = Buffer.from('new-app-bytes');
-    const checksumText = `${sha256Hex(appBuffer)}  goodvibes-linux-x64\n`;
-    const printed: string[] = [];
-    // No swap/writeAddon/fileExists seams: this test exercises the REAL
-    // filesystem swap inside a scratch directory (no addon entry in the
-    // manifest, so only the app binary swaps).
-    await applyUpdate({
-      fetchImpl: buildStubFetch({ latestTag: 'v1.1.0', checksumText, appBuffer }),
-      execPath,
-      platform: 'linux',
-      arch: 'x64',
-      currentVersion: '1.0.0',
-      print: (line) => printed.push(line),
-      configManager: { get: () => undefined },
-      runCommand: () => ({ status: 3, stdout: '' }),
-    });
-
-    expect(readFileSync(execPath, 'utf-8')).toBe('new-app-bytes');
-    expect(readFileSync(`${execPath}${PREVIOUS_FILE_SUFFIX}`, 'utf-8')).toBe('old-app-bytes');
-    expect(printed.join('\n')).toContain('Updated to v1.1.0.');
-  });
-
-  test('an abort during staging restores the prior state before any live rename', async () => {
-    const dir = scratchDir();
-    const execPath = join(dir, 'goodvibes');
-    writeFileSync(execPath, 'old-app-bytes');
-
-    const appBuffer = Buffer.from('new-app-bytes');
-    const checksumText = `${sha256Hex(appBuffer)}  goodvibes-linux-x64\n`;
-    const controller = new AbortController();
-    const progress = createUpdateSwapProgress();
-    // Staging is still cancellable; only the later live commit is synchronous.
-    // Everything else uses the real filesystem inside a temporary fixture.
-    const io: UpdateFileIo = {
-      ...realUpdateFileIo,
-      writeFile: (path, data) => {
-        controller.abort();
-        realUpdateFileIo.writeFile(path, data);
-      },
-    };
-
-    await expect(applyUpdate({
-      fetchImpl: buildStubFetch({ latestTag: 'v1.1.0', checksumText, appBuffer }),
-      execPath,
-      platform: 'linux',
-      arch: 'x64',
-      currentVersion: '1.0.0',
-      print: () => {},
-      configManager: { get: () => undefined },
-      runCommand: () => ({ status: 3, stdout: '' }),
-      io,
-      signal: controller.signal,
-      progress,
-    })).rejects.toThrow();
-
-    expect(readFileSync(execPath, 'utf-8')).toBe('old-app-bytes');
-    expect(existsSync(`${execPath}${PREVIOUS_FILE_SUFFIX}`)).toBe(false);
-    expect(progress.begun).toBe(false);
-    expect(progress.committed).toBe(false);
-  });
-});
-
-describe('rollbackUpdate: one command back to the version that ran before', () => {
-  const inactiveRunner: RunCommand = () => ({ status: 3, stdout: '' });
-
-  test('exchanges each file with its kept .previous counterpart, so a second rollback rolls forward', () => {
-    const dir = scratchDir();
-    const execPath = join(dir, 'goodvibes');
-    writeFileSync(execPath, 'new-app');
-    writeFileSync(`${execPath}${PREVIOUS_FILE_SUFFIX}`, 'old-app');
-
-    const printed: string[] = [];
-    rollbackUpdate({
-      execPath,
-      platform: 'linux',
-      arch: 'x64',
-      print: (line) => printed.push(line),
-      configManager: { get: () => undefined },
-      runCommand: inactiveRunner,
-    });
-
-    expect(readFileSync(execPath, 'utf-8')).toBe('old-app');
-    expect(readFileSync(`${execPath}${PREVIOUS_FILE_SUFFIX}`, 'utf-8')).toBe('new-app');
-    expect(printed.join('\n')).toContain('Rolled back to the previously installed version.');
-
-    // Roll forward again: the exchange is symmetric.
-    rollbackUpdate({
-      execPath,
-      platform: 'linux',
-      arch: 'x64',
-      print: () => {},
-      configManager: { get: () => undefined },
-      runCommand: inactiveRunner,
-    });
-    expect(readFileSync(execPath, 'utf-8')).toBe('new-app');
-  });
-
-  test('a daemon binary kept beside the app binary is left exactly as it was', () => {
-    // This command never replaced the daemon, so it has nothing here to restore.
-    // Rolling it back would undo an update this app did not perform, on a
-    // product with its own release line and its own rollback.
-    const dir = scratchDir();
-    const execPath = join(dir, 'goodvibes');
-    const daemonPath = join(dir, 'goodvibes-daemon');
-    writeFileSync(execPath, 'new-app');
-    writeFileSync(`${execPath}${PREVIOUS_FILE_SUFFIX}`, 'old-app');
-    writeFileSync(daemonPath, 'current-daemon');
-    writeFileSync(`${daemonPath}${PREVIOUS_FILE_SUFFIX}`, 'older-daemon');
-
-    const printed: string[] = [];
-    rollbackUpdate({
-      execPath,
-      platform: 'linux',
-      arch: 'x64',
-      print: (line) => printed.push(line),
-      configManager: { get: () => undefined },
-      runCommand: inactiveRunner,
-    });
-
-    expect(readFileSync(execPath, 'utf-8')).toBe('old-app');
-    expect(readFileSync(daemonPath, 'utf-8')).toBe('current-daemon');
-    expect(readFileSync(`${daemonPath}${PREVIOUS_FILE_SUFFIX}`, 'utf-8')).toBe('older-daemon');
-    expect(printed.join('\n')).toContain('The daemon was not rolled back');
-  });
-
-  test('restores the kept vector addon alongside the app binary', () => {
-    const dir = scratchDir();
-    const execPath = join(dir, 'goodvibes');
-    writeFileSync(execPath, 'new-app');
-    writeFileSync(`${execPath}${PREVIOUS_FILE_SUFFIX}`, 'old-app');
-    const addonDir = join(dir, 'lib', 'sqlite-vec-linux-x64');
-    mkdirSync(addonDir, { recursive: true });
-    const addonPath = join(addonDir, 'vec0.so');
-    writeFileSync(addonPath, 'new-addon');
-    writeFileSync(`${addonPath}${PREVIOUS_FILE_SUFFIX}`, 'old-addon');
-
-    const printed: string[] = [];
-    rollbackUpdate({
-      execPath,
-      platform: 'linux',
-      arch: 'x64',
-      print: (line) => printed.push(line),
-      configManager: { get: () => undefined },
-      runCommand: inactiveRunner,
-    });
-
-    expect(readFileSync(addonPath, 'utf-8')).toBe('old-addon');
-    expect(readFileSync(`${addonPath}${PREVIOUS_FILE_SUFFIX}`, 'utf-8')).toBe('new-addon');
-    expect(printed.join('\n')).toContain('vector addon');
-  });
-
-  test('with nothing kept, says so honestly and touches nothing', () => {
-    const dir = scratchDir();
-    const execPath = join(dir, 'goodvibes');
-    writeFileSync(execPath, 'only-version');
-
-    const printed: string[] = [];
-    rollbackUpdate({
-      execPath,
-      platform: 'linux',
-      arch: 'x64',
-      print: (line) => printed.push(line),
-      configManager: { get: () => undefined },
-      runCommand: inactiveRunner,
-    });
-
-    expect(readFileSync(execPath, 'utf-8')).toBe('only-version');
-    expect(printed.join('\n')).toContain('No previous version is kept beside this install');
-  });
-
-  test('non-binary installs are refused with the package-manager alternative', () => {
-    const printed: string[] = [];
-    const fs = memoryIo({ '/home/u/.bun/install/global/node_modules/@goodvibes-jev/tui/bin/goodvibes': 'pkg' });
-    rollbackUpdate({
-      execPath: '/home/u/.bun/install/global/node_modules/@goodvibes-jev/tui/bin/goodvibes',
-      platform: 'linux',
-      arch: 'x64',
-      print: (line) => printed.push(line),
-      configManager: { get: () => undefined },
-      runCommand: inactiveRunner,
-      io: fs.io,
-    });
-    expect(fs.mutations).toEqual([]);
-    expect(printed.join('\n')).toContain('bun run --filter @goodvibes-jev/tui build');
   });
 });

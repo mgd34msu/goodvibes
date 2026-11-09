@@ -662,7 +662,13 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       const storedIds = deps.store.listStoredIds();
       for (const storedId of storedIds) {
         const stored = deps.store.load(storedId);
-        if (stored?.durableAdmission !== undefined && durableKeyIdentity(stored.durableAdmission.key) === durableKeyIdentity(frozen.key)) {
+        const admission = stored?.durableAdmission;
+        if (admission !== undefined && (durableKeyIdentity(admission.key) === durableKeyIdentity(frozen.key)
+          // A surviving native checkpoint also fences a lost intent/receipt
+          // whose older criteria label cannot be reconstructed. A fresh label
+          // must never turn the same ledger attempt into a second execution.
+          || (stored?.nativeSource !== undefined && frozen.input.nativeSource !== undefined
+            && admission.key.workId === frozen.key.workId && admission.key.attemptId === frozen.key.attemptId))) {
           throw new DurableContractAdmissionError('checkpoint');
         }
       }

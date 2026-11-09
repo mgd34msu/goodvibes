@@ -223,10 +223,11 @@ export function createNativeWorkExecutionHost(deps: {
           || !isDeepStrictEqual(source.continuation, work.source.version === 2 ? work.source.continuation : undefined)))) throw new NativeWorkExecutionError('stale');
       return request;
     }
-    // Every descriptive protocol label is issued once in the persisted intent.
+    // Reuse the existing ledger identity for the criteria key, including after
+    // a missing intent. Issue descriptive source labels once in that intent.
     // The existing durable payload commitment binds the complete actual request;
     // live source/owner/target comparisons do not need additional hashes.
-    const key = { workId: target.workId, criteriaId: 'criteria-v2:' + opaqueUuid(), criteriaRevision: String(target.criteriaRevision), attemptId: target.attemptId };
+    const key = { workId: target.workId, criteriaId: 'criteria-v2:' + work.id, criteriaRevision: String(target.criteriaRevision), attemptId: target.attemptId };
     const source = captureNativeContractSource({ sourceId: work.source?.sourceId ?? opaqueUuid(), sourceRevision: work.source?.sourceRevision ?? opaqueUuid(), inputRevision: opaqueUuid(),
       criteriaId: key.criteriaId, criteriaRevision: key.criteriaRevision, goal: work.goal, criteria: work.criteria,
       ...(work.source?.version === 2 && work.source.continuation ? { continuation: work.source.continuation } : {}) });

@@ -5,7 +5,7 @@ import { canonicalNativeConversationContinuation } from '../sdk/src/platform/wor
 import { createNativeWorkSubmissionHost } from '../sdk/src/platform/workflow/work-ledger/native-submission.js';
 import { registerNativeWorkSubmissionGatewayMethods } from '../sdk/src/platform/control-plane/routes/native-work-submission.js';
 import * as nativeFs from 'node:fs';
-import type { SQLitePublicationIO } from '../sdk/src/platform/state/sqlite-store-persistence.js';
+import * as atomicStore from '../sdk/src/platform/utils/atomic-json-store.js';
 /** Real paired authority, workspace scope and KnowledgeStore bridge into the real durable runner. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -34,6 +34,23 @@ import { dispatchGatewayRestRoutes } from '../daemon-sdk/src/gateway-rest-routes
 import { makeRepo, makeHarness, oneUnitPlan, waitFor, type Harness, type HarnessOptions } from './contract/runner-support.js';
 import { finishes } from './contract/steps-support.js';
 import { plannerOutput } from './contract/plan-support.js';
+
+/** Inject at the actual native publisher, retaining real exclusive writes and
+ * the original after-rename callback; private captured IO is not replaceable. */
+function publicationFault(path: string, phase: 'before-publication' | 'after-rename', ordinal = 1) {
+  const write = atomicStore.writeFileAtomic;
+  let publications = 0, failed = false;
+  const fault = () => { failed = true; throw new Error('Owned native publication failure'); };
+  const hook = spyOn(atomicStore, 'writeFileAtomic').mockImplementation((selected, bytes, options) => {
+    if (selected !== path || failed || ++publications !== ordinal) return write(selected, bytes, options);
+    if (phase === 'before-publication') return fault();
+    return write(selected, bytes, { ...options, onEffect: published => {
+      options?.onEffect?.(published);
+      if (published) fault();
+    } });
+  });
+  return { get failed() { return failed; }, restore: () => hook.mockRestore() };
+}
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
@@ -380,47 +397,63 @@ test('actual process restart explicitly resumes a prepared attempt with fresh re
   expect(f.harness.agentsOf('u1')).toHaveLength(1);
 }, 30000);
 
-test('missing native acknowledgment cannot downgrade an engine launch claim into resumable prepared work', async () => {
+test('removing both native journals cannot authorize a replacement for the surviving durable admission', async () => {
   const f = await fixture({ harness: { scripts: { u1: () => [{ text: 'waiting', stop: { kind: 'hang' } }] } } });
   const original = await f.host.start(f.target, f.authority);
   await waitFor(() => f.harness.agentsOf('u1').length === 1, 'native effect boundary');
   const raw = new SQLiteStore(join(f.root, '.goodvibes', 'knowledge.sqlite'), { coordinated: true });
   await raw.init(() => {}, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION });
-  raw.run('DELETE FROM native_work_executions');
-  raw.run('DELETE FROM native_work_execution_intents');
-  await raw.save();
-  raw.close();
-  const replacement = createNativeWorkExecutionHost(f.hostOptions);
-  replacement.attachRunner(f.harness.runner);
-  const replay = await replacement.start(f.target, f.authority);
-  expect(replay.admission).toEqual(original.admission);
-  expect(f.storage.current(f.key).record?.state).toBe('launch-claimed');
-  await expect(replacement.resume(f.key, f.authority)).rejects.toMatchObject({ code: 'recovery-required' });
-  expect(f.harness.agentsOf('u1')).toHaveLength(1);
-  await replacement.close();
+  raw.run('DELETE FROM native_work_executions'); raw.run('DELETE FROM native_work_execution_intents');
+  await raw.save(); raw.close();
+  const replacement = createNativeWorkExecutionHost(f.hostOptions); replacement.attachRunner(f.harness.runner);
+  try {
+    // This deliberately destroys both saved requests; it is not a lost network
+    // acknowledgement. A newly minted source cannot replay the original input.
+    await expect(replacement.start(f.target, f.authority)).rejects.toMatchObject({ code: 'conflict' });
+    expect(f.harness.runner.inspectDurable!(original.admission.key)?.admission).toEqual(original.admission);
+    expect(f.harness.agentsOf('u1')).toHaveLength(1);
+    expect(f.harness.manager.list().filter(record => record.contractRole === 'owner')).toHaveLength(1);
+  } finally { await replacement.close(); }
 });
+
+for (const criteriaId of ['criteria:earlier-saved-label', 'criteria-v2:earlier-opaque-label']) {
+  test(`a cold runner refuses another native key for an attempt with a surviving ${criteriaId} checkpoint`, async () => {
+    const f = await fixture({ harness: { contract: { maxActiveContracts: 0 } } });
+    const source = { sourceId: 'original-source', sourceRevision: 'original-revision', inputRevision: 'original-input',
+      criteriaId, criteriaRevision: f.key.criteriaRevision, goal: 'Original complete goal', criteria: ['Original criterion'] };
+    // Real queued checkpoint publication, with no model or execution authority
+    // fabricated by this old-format recovery fixture.
+    const original = await f.harness.runner.startDurable({
+      key: { ...f.key, criteriaId }, binding: { sourceId: source.sourceId, inputRevision: source.inputRevision,
+        actionId: 'original-action', actionRevision: 'original-action-revision', authorityId: 'original-owner',
+        authorityRevision: 'original-grant', scopeId: 'original-scope', scopeRevision: 'original-scope-revision' },
+      input: { ask: 'Original ask', sessionId: 'native-fixture', origin: 'turn', projectRoot: f.root, isolation: 'shared', nativeSource: source },
+    });
+    f.harness.dispose(); await f.harness.runner.join(original.admission.contractId);
+    const admissions = join(f.root, '.goodvibes', 'contracts', 'admissions');
+    const before = new Map(nativeFs.readdirSync(admissions).filter(name => name.endsWith('.json'))
+      .map(name => [name, readFileSync(join(admissions, name))]));
+    const replacement = createNativeWorkExecutionHost(f.hostOptions);
+    const cold = makeHarness({ root: f.root, plan: oneUnitPlan(), scripts: {}, contract: { maxActiveContracts: 0 },
+      nativeDecisions: replacement.nativeOwner.decisions, durableAdmission: replacement.nativeOwner.admission });
+    replacement.attachRunner(cold.runner);
+    try {
+      await expect(replacement.start(f.target, f.authority)).rejects.toMatchObject({ code: 'checkpoint' });
+      expect(cold.manager.list()).toHaveLength(0);
+      expect(cold.runner.inspectDurable!(original.admission.key)?.admission).toEqual(original.admission);
+      expect(nativeFs.readdirSync(admissions).filter(name => name.endsWith('.json')).sort()).toEqual([...before.keys()].sort());
+      for (const [name, bytes] of before) expect(readFileSync(join(admissions, name)).equals(bytes)).toBe(true);
+    } finally { await replacement.close(); cold.dispose(); }
+  });
+}
 
 for (const failure of ['before-publication', 'after-rename'] as const) {
   test(`native launch claim persistence failure ${failure} executes zero units`, async () => {
     const f = await fixture();
-    const persistence = (f.store as unknown as { sqlite: { persistence: { io: SQLitePublicationIO } } }).sqlite.persistence;
-    let fileSyncs = 0;
-    let failed = false;
-    persistence.io = {
-      ...nativeFs,
-      fsyncSync(fd) {
-        const directory = nativeFs.fstatSync(fd).isDirectory();
-        if (!directory) fileSyncs++;
-        if (!failed && fileSyncs === 3 && (failure === 'after-rename' ? directory : !directory)) {
-          failed = true;
-          throw new Error('Owned native admission persistence failure');
-        }
-        nativeFs.fsyncSync(fd);
-      },
-    };
-    await expect(f.host.start(f.target, f.authority)).rejects.toThrow();
-    persistence.io = nativeFs;
-    expect(failed).toBe(true);
+    const fault = publicationFault(f.store.storagePath, failure, 3);
+    try { await expect(f.host.start(f.target, f.authority)).rejects.toThrow(); }
+    finally { fault.restore(); }
+    expect(fault.failed).toBe(true);
     expect(f.harness.agentsOf('u1')).toHaveLength(0);
     for (const contract of f.harness.runner.list({ includeTerminal: true })) {
       await f.harness.runner.join(contract.id);
@@ -797,7 +830,7 @@ test('target-aware cancellation wins before the first start without inventing an
   expect(f.storage.current(f.key).record).toBeNull();
   expect(f.storage.current(f.key).intent?.state).toBe('cancelled');
   const original = f.storage.currentByAttempt(f.target.attemptId).intent!;
-  expect(original.version).toBe(2); expect(original.request.key.criteriaId).toMatch(/^criteria-v2:[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/);
+  expect(original.version).toBe(2); expect(original.request.key.criteriaId).toBe(`criteria-v2:${original.target.workId}`);
   expect(await client.cancel(wire.identity)).toEqual(cancelled);
   expect(await client.start(wire.identity)).toEqual(cancelled);
   expect(await client.resume(wire.identity)).toEqual(cancelled);
@@ -811,7 +844,7 @@ test('fresh native execution persists opaque refs and the exact private paired/s
   const execution = f.storage.currentByAttempt(f.target.attemptId).record!, identity = f.authority.current()!, scope = f.scopes.currentScope(f.root);
   expect(execution.version).toBe(2); expect(execution.owner).toEqual({ principalId: identity.principalId, authorityRevision: identity.authorityRevision, scopeId: scope.scopeId, scopeRevision: scope.scopeRevision });
   expect(execution.request.key).toEqual(started.admission.key);
-  expect(execution.request.key.criteriaId).toMatch(/^criteria-v2:[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/);
+  expect(execution.request.key.criteriaId).toBe(`criteria-v2:${execution.target.workId}`);
   for (const value of [identity.principalId, identity.authorityRevision, scope.scopeId, scope.scopeRevision]) expect(JSON.stringify(execution.request.binding)).not.toContain(value);
   expect(execution.request.binding.authorityRevision).toMatch(/^[a-f0-9]{64}$/);
   const wire = transport(f), client = createOperatorNativeWorkExecutionClient(wire.sdk(), 'project');
@@ -825,7 +858,7 @@ test('fresh native execution persists opaque refs and the exact private paired/s
 
 test('unused successor cancellation retains its preallocated source even when its saved tombstone retires the delegated owner', async () => {
   const f = await fixture(), sourceAction = 'e'.repeat(64);
-  const retiring: typeof f.authority = {
+  const retiring: typeof f.authority & { continuationSourceAction: () => string } = {
     ...f.authority,
     continuationSourceAction: () => sourceAction,
     current() { return f.storage.currentByAttempt(f.target.attemptId).intent?.state === 'cancelled' ? null : f.authority.current(); },
@@ -1196,27 +1229,16 @@ for (const failure of ['before-publication', 'after-rename'] as const) {
     });
     const start = f.host.start(f.target, f.authority).catch((error) => error);
     await ready;
-    const persistence = (f.store as unknown as { sqlite: { persistence: { io: SQLitePublicationIO } } }).sqlite.persistence;
-    let failed = false;
-    persistence.io = {
-      ...nativeFs,
-      fsyncSync(fd) {
-        if (!failed && (failure === 'after-rename' ? nativeFs.fstatSync(fd).isDirectory() : !nativeFs.fstatSync(fd).isDirectory())) {
-          failed = true;
-          throw new Error('Owned pending cancellation persistence failure');
-        }
-        nativeFs.fsyncSync(fd);
-      },
-    };
+    const fault = publicationFault(f.store.storagePath, failure);
     let ended = false;
     const cancel = f.host.cancelTarget(f.target, f.authority, 'Cancel despite interrupted persistence').catch((error) => {
       ended = true;
       return error;
     });
-    await waitFor(() => failed, 'owned tombstone publication fault');
-    expect(ended).toBe(false);
-    persistence.io = nativeFs;
-    release();
+    try {
+      await waitFor(() => fault.failed, 'owned tombstone publication fault');
+      expect(ended).toBe(false);
+    } finally { fault.restore(); release(); }
     expect(await cancel).toMatchObject({ code: 'unavailable' });
     await start;
     expect(f.harness.agentsOf('u1')).toHaveLength(0);
@@ -1425,24 +1447,11 @@ for (const failure of ['before-publication', 'after-rename'] as const)
       goal: '  Exact goal  ',
       criteria: ['  Exact criterion  '],
     };
-    const persistence = (f.store as unknown as { sqlite: { persistence: { io: SQLitePublicationIO } } }).sqlite.persistence;
-    let failed = false;
-    persistence.io = {
-      ...nativeFs,
-      fsyncSync(fd) {
-        if (!failed && (failure === 'after-rename' ? nativeFs.fstatSync(fd).isDirectory() : !nativeFs.fstatSync(fd).isDirectory())) {
-          failed = true;
-          throw new Error('Owned submission publication fault');
-        }
-        nativeFs.fsyncSync(fd);
-      },
-    };
+    const fault = publicationFault(f.store.storagePath, failure);
     try {
       await expect(submission.submit(input, f.authority)).rejects.toMatchObject({ code: 'indeterminate' });
-    } finally {
-      persistence.io = nativeFs;
-    }
-    expect(failed).toBe(true);
+    } finally { fault.restore(); }
+    expect(fault.failed).toBe(true);
     const reopened = new KnowledgeStore({ dbPath: join(f.root, '.goodvibes', 'knowledge.sqlite') });
     const ledger = createWorkLedger({
       projectId: 'project',

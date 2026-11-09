@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Reuse the existing work identity for fresh native criteria references. A
+  surviving native checkpoint prevents another execution of the same work
+  attempt even if its intent and execution journals were lost or its earlier
+  criteria reference differs.
+
 - Drain an older Telegram webhook retraction before registering its replacement.
   A delayed disable request cannot remove the newer registration or overwrite
   its status, and retained Telegram updates are not discarded.

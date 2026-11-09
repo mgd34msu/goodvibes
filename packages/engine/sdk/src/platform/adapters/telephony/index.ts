@@ -34,11 +34,11 @@ function signatureCandidateUrls(req: Request, context: SurfaceAdapterContext): r
   return [...new Set(candidates)];
 }
 
-function twilioSignatureBaseString(url: string, rawBody: string, req: Request): string | null {
+function twilioSignatureBaseString(url: string, rawBody: string, req: Request, bodyDigest: () => string): string | null {
   const parsedUrl = new URL(url);
   const bodyHash = parsedUrl.searchParams.get('bodySHA256');
   if (bodyHash) {
-    const expectedHash = createHash('sha256').update(rawBody).digest('hex');
+    const expectedHash = bodyDigest();
     if (!constantTimeEquals(expectedHash, bodyHash.toLowerCase())) return null;
     return url;
   }
@@ -57,8 +57,14 @@ function verifyTwilioSignature(
   signature: string,
 ): boolean {
   if (!authToken || !signature) return false;
+  // Twilio's JSON webhook protocol requires the bodySHA256 query commitment in
+  // the signed URL. Hash this request body once even when its internal and
+  // configured public URLs both need signature verification. Form bodies do
+  // not use this digest. This is protocol verification, not a local identity.
+  let digest: string | undefined;
+  const bodyDigest = () => digest ??= createHash('sha256').update(rawBody).digest('hex');
   for (const url of signatureCandidateUrls(req, context)) {
-    const baseString = twilioSignatureBaseString(url, rawBody, req);
+    const baseString = twilioSignatureBaseString(url, rawBody, req, bodyDigest);
     if (!baseString) continue;
     const expected = createHmac('sha1', authToken).update(baseString).digest('base64');
     if (constantTimeEquals(expected, signature)) return true;
@@ -96,7 +102,8 @@ export async function handleTelephonySurfaceWebhook(req: Request, context: Surfa
   const providedToken = readBearerOrHeaderToken(req, 'x-goodvibes-telephony-token');
   const providedTwilioSignature = readString(req.headers.get('x-twilio-signature')) ?? '';
   const sharedSecretAllowed = configuredSecret ? constantTimeEquals(configuredSecret, providedToken) : false;
-  const twilioSignatureAllowed = verifyTwilioSignature(req, rawBody, context, twilioAuthToken, providedTwilioSignature);
+  const twilioSignatureAllowed = !sharedSecretAllowed
+    && verifyTwilioSignature(req, rawBody, context, twilioAuthToken, providedTwilioSignature);
   if (!sharedSecretAllowed && !twilioSignatureAllowed) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }

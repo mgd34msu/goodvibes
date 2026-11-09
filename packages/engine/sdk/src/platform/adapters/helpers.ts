@@ -7,7 +7,11 @@ export const DEFAULT_WEBHOOK_MAX_BYTES = DEFAULT_MAX_REQUEST_BODY_BYTES;
 
 export function constantTimeEquals(expected: string, provided: string): boolean {
   if (!expected || !provided || expected.length !== provided.length) return false;
-  return timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
+  const expectedBytes = Buffer.from(expected);
+  const providedBytes = Buffer.from(provided);
+  // Equal UTF-16 lengths do not imply equal UTF-8 lengths. Refuse a malformed
+  // presentation instead of letting timingSafeEqual throw out of a webhook.
+  return expectedBytes.length === providedBytes.length && timingSafeEqual(expectedBytes, providedBytes);
 }
 
 export function readBearerOrHeaderToken(req: Request, headerName: string): string {

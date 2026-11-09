@@ -233,6 +233,12 @@ describe('parseJsonRecord', () => {
 // ---------------------------------------------------------------------------
 
 describe('constantTimeEquals', () => {
+  test('different UTF-8 lengths with equal UTF-16 lengths refuse without throwing', () => {
+    expect(constantTimeEquals('abc', 'abé')).toBe(false);
+    expect(constantTimeEquals('abé', 'abc')).toBe(false);
+    expect(constantTimeEquals('é', 'é')).toBe(true);
+    expect(constantTimeEquals('é', 'ñ')).toBe(false);
+  });
   test('returns true for equal strings', () => {
     expect(constantTimeEquals('abc', 'abc')).toBe(true);
   });

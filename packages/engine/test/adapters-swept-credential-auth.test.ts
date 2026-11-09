@@ -22,7 +22,8 @@
  *      configured, no check to run"), so a resolution failure that degrades to
  *      an empty string turns a locked surface into an open one.
  */
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
+import * as crypto from 'node:crypto';
 import { handleSignalSurfaceWebhook } from '../sdk/src/platform/adapters/signal/index.js';
 import { handleIMessageSurfaceWebhook } from '../sdk/src/platform/adapters/imessage/index.js';
 import { handleMatrixSurfaceWebhook } from '../sdk/src/platform/adapters/matrix/index.js';
@@ -142,6 +143,52 @@ function makeContext(options: HarnessOptions) {
     } as never,
   };
 }
+
+test('Twilio JSON signature verifies the actual body once across internal and public URLs', async () => {
+  const body = JSON.stringify({ From: '+15555550123', To: '+15555550124' });
+  const hash = crypto.createHash('sha256').update(body).digest('hex');
+  const suffix = `/telephony?bodySHA256=${hash}`;
+  const signature = crypto.createHmac('sha1', SECRET).update(`https://voice.example.test${suffix}`).digest('base64');
+  const f = makeContext({ shape: 'literal', configKeys: ['surfaces.telephony.authToken'],
+    extraConfig: { 'web.publicBaseUrl': 'https://voice.example.test' } });
+  const hashing = spyOn(crypto, 'createHash');
+  try {
+    const response = await handleTelephonySurfaceWebhook(new Request(`http://localhost${suffix}`, {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-twilio-signature': signature }, body,
+    }), f.context);
+    expect(response.status).toBe(200);
+    expect(f.calls.some(call => call.kind === 'authorizeSurfaceIngress')).toBe(true);
+    expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(1);
+  } finally { hashing.mockRestore(); }
+});
+
+test('Twilio refuses a modified JSON body before ingress even when its signed URL is unchanged', async () => {
+  const original = JSON.stringify({ From: '+15555550123', To: '+15555550124' });
+  const hash = crypto.createHash('sha256').update(original).digest('hex');
+  const url = `http://localhost/telephony?bodySHA256=${hash}`;
+  const signature = crypto.createHmac('sha1', SECRET).update(url).digest('base64');
+  const f = makeContext({ shape: 'literal', configKeys: ['surfaces.telephony.authToken'] });
+  const response = await handleTelephonySurfaceWebhook(new Request(url, {
+    method: 'POST', headers: { 'content-type': 'application/json', 'x-twilio-signature': signature }, body: `${original} `,
+  }), f.context);
+  expect(response.status).toBe(401);
+  expect(f.calls).toEqual([]);
+});
+
+test('authenticated telephony bridge requests need no Twilio body hashing', async () => {
+  const f = makeContext({ shape: 'literal', configKeys: ['surfaces.telephony.webhookSecret', 'surfaces.telephony.authToken'] });
+  const hashing = spyOn(crypto, 'createHash');
+  try {
+    const response = await handleTelephonySurfaceWebhook(new Request('http://localhost/telephony?bodySHA256=unused', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-goodvibes-telephony-token': SECRET,
+        'x-twilio-signature': 'Unused alternate authentication' },
+      body: JSON.stringify({ From: '+15555550123', To: '+15555550124' }),
+    }), f.context);
+    expect(response.status).toBe(200);
+    expect(f.calls.some(call => call.kind === 'authorizeSurfaceIngress')).toBe(true);
+    expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+  } finally { hashing.mockRestore(); }
+});
 
 /**
  * One adapter family's inbound call, parameterised by the secret the caller

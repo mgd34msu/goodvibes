@@ -40,7 +40,7 @@ export function createCapturedCodeContext(input: {
   let operation: AbortController | undefined;
   let disposed = false;
   let unavailable: string | undefined;
-  const checkSignal = (): void => { input.signal?.throwIfAborted(); operation?.signal.throwIfAborted(); if (disposed) throw new Error('captured code context is closed'); };
+  const checkSignal = (): void => { if (disposed) throw new Error('captured code context is closed'); input.signal?.throwIfAborted(); operation?.signal.throwIfAborted(); };
   const checkProvider = (): void => {
     checkSignal();
     if (!pinnedProvider || registry?.getDefaultProviderOrNull() !== pinnedProvider || pinnedProvider.capturedInputAdmission !== 'per-attempt') throw new Error('captured code embedding provider changed');
@@ -271,7 +271,7 @@ export function createCapturedCodeContext(input: {
       const selected = current;
       await bounded(async signal => { await assertGeneration(selected, signal); await assertReadingCurrent?.(); });
     },
-    finishTurn() { assertReadingCurrent = undefined; cachedStats = undefined; current = undefined; operation?.abort(); closeIndex(); },
+    finishTurn() { assertReadingCurrent = undefined; cachedStats = undefined; current = undefined; const finished = operation; operation = undefined; finished?.abort(); closeIndex(); },
     dispose() { assertReadingCurrent = undefined; cachedStats = undefined; disposed = true; operation?.abort(); current = undefined; closeIndex(); },
   };
   return source;

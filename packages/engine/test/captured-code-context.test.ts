@@ -32,7 +32,7 @@ async function fixture(run: (context: {
 }) => Promise<void>, mutable = true): Promise<void> {
   const root = mkdtempSync(join(tmpdir(), 'captured-code-unit-'));
   let dispose: (() => void) | undefined;
-  let disposeRuntime: (() => void) | undefined;
+  let disposeRuntime: (() => Promise<void>) | undefined;
   let restoreJudgment: (() => void) | undefined;
   try {
     git(root, 'init', '-q'); git(root, 'config', 'user.name', 'Fixture'); git(root, 'config', 'user.email', 'fixture@example.invalid');
@@ -52,7 +52,7 @@ async function fixture(run: (context: {
     config.set('permissions.engine', 'policy-engine'); config.set('permissions.mode', 'prompt'); config.set('behavior.autoApprove', false);
     const runtime = createClientRuntimeServices({ surfaceRoot: 'agent', configManager: config, workingDir: root, homeDirectory: root,
       requestApproval: async () => ({ approved: false }), runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(), modelDiscovery: 'skip', providerRegistryFactory: createLaunchTolerantProviderRegistry });
-    disposeRuntime = () => runtime.dispose();
+    disposeRuntime = () => runtime.close();
     const previous = installJudgmentPort(fakePort((name, question) => {
       if (question.type === 'choice') {
         if (name !== 'family' || !('file-mutation' in question.criteria)) throw new Error('Unexpected unit judgment');
@@ -77,7 +77,7 @@ async function fixture(run: (context: {
     const source = createCapturedCodeContext({ authority, root: view, registry, readAccessFilter, signal: stop.signal });
     dispose = () => source.dispose?.();
     await run({ root, view, contract, authority, registry, source, calls, stop, deny, readAccessFilter });
-  } finally { dispose?.(); disposeRuntime?.(); restoreJudgment?.(); rmSync(root, { recursive: true, force: true }); }
+  } finally { dispose?.(); await disposeRuntime?.(); restoreJudgment?.(); rmSync(root, { recursive: true, force: true }); }
 }
 
 test('mutable captured context opens only permitted source bytes and embeds allowed content', async () => fixture(async ({ view, source, calls }) => {
@@ -140,7 +140,7 @@ test('a superseded preparation cannot close or publish over the replacement code
     calls.push(request); await request.beforeAttempt?.();
     if (first) { first = false; entered(); await pending; }
     const vector = new Float32Array(384); vector[0] = 1; return { vector, dimensions: 384 };
-  } }, { makeDefault: true });
+  } }, { makeDefault: true, replace: true });
   const original = source.prepare!();
   void original.catch(() => {});
   try {

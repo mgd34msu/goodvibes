@@ -152,8 +152,8 @@ async function readArgRoles(tool: string, args: Record<string, unknown>, signal:
   const names = [...argumentNames(args)];
   const unread = names.filter((name) => !ARG_ROLES.has(roleKey(tool, name)));
   const port = unread.length > 0 ? judgmentPort(EXECUTION_LEDGER_SITE) : undefined;
-  // mapLimit is fail-fast: its rejected promise does not wait for sibling
-  // workers. Keep their lifetime owned after the caller has observed failure.
+  // mapLimit drains admitted workers before rejecting. Abort at the failing
+  // worker so queued names stop and late siblings cannot publish a role.
   const batch = new AbortController();
   const batchSignal = AbortSignal.any([signal, batch.signal]);
   await mapLimit(unread, ARG_READ_CONCURRENCY, async (argument) => {

@@ -287,7 +287,7 @@ test('an index replaced during capture holds even if the logical staged entries 
     renameSync(join(root, '.git/index-swap'), join(root, '.git/index'));
     swaps++;
   }, 1);
-  try { await expect(captureContractInput(root)).rejects.toThrow('index replaced'); }
+  try { await expect(captureContractInput(root)).rejects.toMatchObject({ change: 'index' }); }
   finally { clearInterval(timer); }
   expect(swaps).toBeGreaterThan(0); expect(readFileSync(join(root, '.git/index'))).toEqual(contents);
 });

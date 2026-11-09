@@ -980,10 +980,14 @@ for (const retirement of ['caller', 'reader'] as const)
     const handled = result.catch(error => error);
     try {
       await pending.started; expect(pending.signals).toHaveLength(1);
-      if (retirement === 'caller') controller.abort(new Error('private secret-batch cancellation'));
+      const cancellation = new Error('private secret-batch cancellation');
+      if (retirement === 'caller') controller.abort(cancellation);
       else installJudgmentPort({ ...installed });
       const outcome: unknown = await handled;
-      expect<unknown>(outcome).toMatchObject({ filled: [], failedRef: 'e1' }); expect(pending.signals[0]?.aborted).toBe(true);
+      expect(outcome).toBeInstanceOf(Error);
+      if (retirement === 'caller') expect(outcome).toBe(cancellation);
+      else expect(outcome).toMatchObject({ name: 'JudgmentAuthorityRetiredError' });
+      expect(pending.signals[0]?.aborted).toBe(true);
       pending.release(); await pending.drain(); expect(effects).toEqual([]); expect(pending.signals).toHaveLength(1);
       expect(JSON.stringify(outcome)).not.toContain('4242424242424242'); expect(JSON.stringify(pages.requests)).not.toContain('4242424242424242');
     } finally { controller.abort(); await pending.drain(); await handled; }

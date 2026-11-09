@@ -165,16 +165,45 @@ describe('native read receipts retain original publishers and clocks', () => {
   });
 
   test('native inspect and detailed-list continuations refuse replaced original local collectors', async () => {
-    for (const method of ['listDetailed', 'readEncryptedFile']) {
+    for (const method of ['listDetailed']) {
       const path = root(), home = join(path, 'home'), project = join(path, 'project'); mkdirSync(home); mkdirSync(project);
       const secrets = new SecretsManager({ globalHome: home, projectRoot: project, surfaceRoot: 'fixture', policy: 'require_secure' });
-      const operation = method === 'listDetailed' ? secrets.inspect() : secrets.listDetailed(); let forgedReads = 0;
+      const operation = secrets.inspect(); let forgedReads = 0;
       Object.defineProperty(secrets, method, { configurable: true, value: () => {
         forgedReads++; Reflect.deleteProperty(secrets, method); return [];
       } });
       try { await expect(operation).rejects.toThrow(SecurityReadSourceRetiredError); expect(forgedReads).toBe(0); }
       finally { Reflect.deleteProperty(secrets, method); }
     }
+  });
+
+  test('a completed synchronous detailed read keeps its original snapshot after a later collector replacement', async () => {
+    const path = root(), home = join(path, 'home'), project = join(path, 'project'); mkdirSync(home); mkdirSync(project);
+    const secrets = new SecretsManager({ globalHome: home, projectRoot: project, surfaceRoot: 'fixture', policy: 'require_secure' });
+    const operation = secrets.listDetailed(); let forgedReads = 0;
+    Object.defineProperty(secrets, 'readEncryptedFile', { configurable: true, value: () => {
+      forgedReads++; return { FORGED_SYNTHETIC_KEY: 'Not an original observation' };
+    } });
+    try {
+      const records = await operation;
+      expect(forgedReads).toBe(0); expect(records.some(record => record.key === 'FORGED_SYNTHETIC_KEY')).toBe(false);
+    } finally { Reflect.deleteProperty(secrets, 'readEncryptedFile'); }
+  });
+
+  test('a collector replaced reentrantly during the actual detailed read is refused before any forged call', async () => {
+    const path = root(), home = join(path, 'home'), project = join(path, 'project'); mkdirSync(home); mkdirSync(project);
+    const secrets = new SecretsManager({ globalHome: home, projectRoot: project, surfaceRoot: 'fixture', policy: 'require_secure' });
+    const order: unknown = Reflect.get(secrets, 'getReadOrder');
+    if (typeof order !== 'function') throw new Error('Missing actual native read order');
+    let forgedReads = 0;
+    Object.defineProperty(secrets, 'getReadOrder', { configurable: true, value: () => {
+      Object.defineProperty(secrets, 'readEncryptedFile', { configurable: true, value: () => {
+        forgedReads++; return { FORGED_SYNTHETIC_KEY: 'Not an original observation' };
+      } });
+      return Reflect.apply(order, secrets, []);
+    } });
+    try { await expect(secrets.listDetailed()).rejects.toThrow(SecurityReadSourceRetiredError); expect(forgedReads).toBe(0); }
+    finally { Reflect.deleteProperty(secrets, 'getReadOrder'); Reflect.deleteProperty(secrets, 'readEncryptedFile'); }
   });
 
   test('native service inspection drains every started local resolver before publishing retirement', async () => {

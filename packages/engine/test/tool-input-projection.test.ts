@@ -198,9 +198,12 @@ test('registration incarnation changes even when re-registering the exact same t
   const { registry, tool } = fixture(); const projector: ToolInputProjector = { async project() { return { status: 'projected', args: safe() }; } };
   registry.register(tool, { inputProjection: projector });
   const first = await registry.projectCall('one', tool.definition.name, raw());
+  const sameRegistration = await registry.projectCall('two', tool.definition.name, raw());
+  expect(sameRegistration.schemaRevision).toBe(first.schemaRevision);
+  await registry.releaseProjected(sameRegistration);
   registry.unregister(tool.definition.name); registry.register(tool, { inputProjection: projector });
   const second = await registry.projectCall('one', tool.definition.name, raw());
-  expect(second.schemaRevision).toBe(first.schemaRevision);
+  expect(second.schemaRevision).not.toBe(first.schemaRevision);
   expect(second.projectionRevision).not.toBe(first.projectionRevision);
   expect(() => registry.assertProjected(first)).toThrow(ToolInputProjectionError);
   await registry.releaseProjected(first); await registry.releaseProjected(second);

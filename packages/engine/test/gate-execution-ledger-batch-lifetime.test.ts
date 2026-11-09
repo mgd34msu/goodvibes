@@ -10,58 +10,75 @@ const call = (callId: string) => ({ callId, turnId: 'review-turn', tool: 'review
 const tick = async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); };
 for (const terminal of ['cancel', 'dispose'] as const) test(`role failure must not orphan parallel readers across ${terminal}`, async () => {
   forgetLedgerArgRoles();
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let release!: () => void, entered!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const lateEntered = new Promise<void>(resolve => { entered = resolve; });
   const fixture = fakePort((name, question) => name === 'kind' ? choiceAnswer(question, 'other', 0.99) : noulAnswer(0.001));
-  const requests: JudgmentRequest<Questions>[] = [];
+  const requests: JudgmentRequest<Questions>[] = [], readers: Promise<unknown>[] = [];
   const previous = installJudgmentPort({ model: fixture.port.model, async ask(request) {
     requests.push(request as JudgmentRequest<Questions>);
     const state = request.state as { argument?: string };
     if (state.argument === 'failFirst') throw new Error('SYNTHETIC_FAILURE');
-    if (state.argument === 'lateRole') await gate;
+    if (state.argument === 'lateRole') {
+      const work = gate.then(() => fixture.port.ask(request)); readers.push(work); entered(); return work;
+    }
     return fixture.port.ask(request);
   } });
   const bus = new RuntimeEventBus(); const first = new AgentExecutionLedger(bus);
-  let second: AgentExecutionLedger | undefined;
+  let second: AgentExecutionLedger | undefined, firstDone: Promise<void> | undefined;
   try {
     emitToolReceived(bus, ctx, { ...call('a'), args: { failFirst: 'harmless', lateRole: 'harmless' } });
-    await first.settled();
-    expect(first.getSnapshot().records[0]?.argsReadingError).toContain('unavailable');
+    let settled = false;
+    firstDone = first.settled().then(() => { settled = true; });
+    await lateEntered; await tick();
+    // Failure aborts the batch immediately, but an admitted noncooperating
+    // reader still belongs to its owner until its real response drains.
+    expect(settled).toBe(false);
     expect(requests.filter(r => (r.state as { argument?: string }).argument === 'lateRole')).toHaveLength(1);
     if (terminal === 'cancel') { emitToolCancelled(bus, ctx, { ...call('a'), reason: 'review cancelled' }); await tick(); }
     else first.dispose();
     const lateSignalAborted = requests.find(r => (r.state as { argument?: string }).argument === 'lateRole')?.signal?.aborted;
-    release(); await tick();
-    // A new call in another live ledger must ask again if the aborted reading did not publish.
+    release(); await Promise.allSettled(readers); await firstDone;
     const bus2 = new RuntimeEventBus(); second = new AgentExecutionLedger(bus2);
     emitToolReceived(bus2, ctx, { ...call('b'), args: { lateRole: 'harmless' } });
     await second.settled();
     expect(lateSignalAborted).toBe(true);
     expect(requests.filter(r => (r.state as { argument?: string }).argument === 'lateRole')).toHaveLength(2);
-  } finally { release(); first.dispose(); second?.dispose(); installJudgmentPort(previous); forgetLedgerArgRoles(); }
+    if (terminal === 'cancel') expect(first.getSnapshot().records[0]?.status).toBe('cancelled');
+  } finally {
+    release(); first.dispose(); second?.dispose(); await Promise.allSettled(readers); await firstDone;
+    installJudgmentPort(previous); forgetLedgerArgRoles();
+  }
 });
 test('a failed batch must not launch queued role requests after disposal', async () => {
   forgetLedgerArgRoles();
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let release!: () => void, entered!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const batchEntered = new Promise<void>(resolve => { entered = resolve; });
   const fixture = fakePort((name, question) => name === 'kind' ? choiceAnswer(question, 'other', 0.99) : noulAnswer(0.001));
-  const requests: JudgmentRequest<Questions>[] = [];
+  const requests: JudgmentRequest<Questions>[] = [], readers: Promise<unknown>[] = [];
   const previous = installJudgmentPort({ model: fixture.port.model, async ask(request) {
     requests.push(request as JudgmentRequest<Questions>);
+    if (requests.length === 8) entered();
     const state = request.state as { argument?: string };
     if (state.argument === 'failFirst') throw new Error('SYNTHETIC_FAILURE');
-    await gate;
-    return fixture.port.ask(request);
+    const work = gate.then(() => fixture.port.ask(request)); readers.push(work); return work;
   } });
   const bus = new RuntimeEventBus(); const ledger = new AgentExecutionLedger(bus);
+  let drained: Promise<void> | undefined;
   try {
     emitToolReceived(bus, ctx, { ...call('queued'), args: { failFirst: 'harmless', ...Object.fromEntries(Array.from({length: 9}, (_, i) => [`ordinary${i}`, 'harmless'])) } });
-    await ledger.settled();
+    drained = ledger.settled();
+    await batchEntered; await tick();
     const before = requests.length;
-    ledger.dispose(); release(); await tick();
+    ledger.dispose(); release(); await Promise.allSettled(readers); await drained;
     expect(before).toBe(8);
     expect(requests).toHaveLength(before);
-  } finally { release(); ledger.dispose(); installJudgmentPort(previous); forgetLedgerArgRoles(); }
+    expect(requests.every(request => request.signal?.aborted)).toBe(true);
+  } finally {
+    release(); ledger.dispose(); await Promise.allSettled(readers); await drained;
+    installJudgmentPort(previous); forgetLedgerArgRoles();
+  }
 });
 
 test('a recordAction callback that disposes the ledger cannot publish its role into the next ledger cache', async () => {

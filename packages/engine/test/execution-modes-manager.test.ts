@@ -142,7 +142,7 @@ test('mode replacement while applying an owner revision invalidates the original
     if (admission.revision) f.setMode('yolo');
     return admission;
   };
-  await expect(f.run({ commands: [{ cmd: 'erase-fixture' }] })).rejects.toThrow('Execution mode');
+  await expect(f.run({ commands: [{ cmd: 'erase-fixture' }] })).rejects.toThrow('Permission configuration changed while deciding');
   expect(f.bodies).toHaveLength(0); expect(f.prompts).toHaveLength(1);
 });
 

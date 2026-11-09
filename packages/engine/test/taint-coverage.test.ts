@@ -132,7 +132,7 @@ describe('outward taint evidence coverage', () => {
     expect(readings.requests).toHaveLength(0);
   });
 
-  test('queued comparisons use detached source text and retain the four-request concurrency bound', async () => {
+  test('one field compares detached source text serially until its first finding', async () => {
     const sources = Array.from({ length: 9 }, (_, i) => ({ surface: 'email', origin: `mail-${i}.example`, text: i === 8 ? marker : `Unrelated source ${i}` }));
     const fake = securityPort({ derives: state => state.text.includes(marker) && state.source.text.includes(marker) });
     let release!: () => void;
@@ -155,7 +155,24 @@ describe('outward taint evidence coverage', () => {
     sources[8]!.text = 'Later caller replacement';
     release();
     expect(await work).toHaveLength(1);
-    expect(maximum).toBe(4);
+    expect(maximum).toBe(1);
     expect(fake.requests).toHaveLength(9);
+  });
+
+  test('distinct fields retain the four-request bound without duplicate same-field work', async () => {
+    const fake = securityPort({ derives: () => true });
+    let release!: () => void, enter!: () => void, active = 0, maximum = 0;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const started = new Promise<void>(resolve => { enter = resolve; });
+    const fields = Object.fromEntries(Array.from({ length: 5 }, (_, index) => [`field${index}`, marker]));
+    const work = findContentTaint(fields, [{ surface: 'email', origin: 'mail.example', text: marker }], { port: {
+      ...fake.port, async ask(input) {
+        active++; maximum = Math.max(maximum, active); enter();
+        try { await pending; return await fake.port.ask(input); } finally { active--; }
+      },
+    } });
+    try { await started; release(); expect(await work).toHaveLength(5); }
+    finally { release(); await work; }
+    expect(maximum).toBe(4); expect(fake.requests).toHaveLength(5);
   });
 });

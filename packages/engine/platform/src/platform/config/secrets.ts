@@ -1116,13 +1116,18 @@ export class SecretsManager {
   async listDetailed(): Promise<SecretRecord[]> {
     const current = captureSecurityReadBindings(this, ['getReadOrder', 'readEncryptedFile', 'readPlaintextFile']);
     current();
+    const readOrder = this.getReadOrder, readEncrypted = this.readEncryptedFile, readPlaintext = this.readPlaintextFile;
+    current();
     const envKeys = new Set(Object.keys(process.env));
     const records: SecretRecord[] = [];
 
-    for (const path of this.getReadOrder()) {
+    const order = readOrder.call(this); current();
+    for (const path of order) {
+      current();
       const values = path.secure
-        ? this.readEncryptedFile(path.path)
-        : this.readPlaintextFile(path.path);
+        ? readEncrypted.call(this, path.path)
+        : readPlaintext.call(this, path.path);
+      current();
       if (!values) continue;
       for (const key of Object.keys(values)) {
         const refSource = getSecretRefSource(values[key]!);
@@ -1148,6 +1153,7 @@ export class SecretsManager {
       });
     }
 
+    current();
     return records.sort((a, b) => a.key.localeCompare(b.key) || a.source.localeCompare(b.source));
   }
 

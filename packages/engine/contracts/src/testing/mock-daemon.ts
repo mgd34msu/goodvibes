@@ -90,6 +90,13 @@ export function sampleFromSchema(schema: JsonSchema | undefined): unknown {
         ? /^\^\[([A-Za-z0-9][A-Za-z0-9-]*)\]\{([1-9][0-9]{0,3})\}\$$/.exec(pattern)
         : null;
       if (fixedClass) return fixedClass[1]![0]!.repeat(Number(fixedClass[2]));
+      // A native revision union retains its first complete fixed-width
+      // alternative (for example the saved64hex checkpoint revision). Select
+      // that literal grammar without executing the schema's regular expression.
+      const firstFixedAlternative = typeof pattern === 'string'
+        ? /^\^\(\?:\[([A-Za-z0-9][A-Za-z0-9-]*)\]\{([1-9][0-9]{0,3})\}\|.+\)\$$/.exec(pattern)
+        : null;
+      if (firstFixedAlternative) return firstFixedAlternative[1]![0]!.repeat(Number(firstFixedAlternative[2]));
       return 'sample';
     }
     case 'number':

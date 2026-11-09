@@ -54,6 +54,9 @@ test('schema samples retain fixed-width digest constraints in each selected-diff
   const digest = { type: 'string', pattern: '^[a-f0-9]{64}$' };
   expect(sampleFromSchema(digest)).toBe('a'.repeat(64));
   expect(firstJsonSchemaFailure(digest, sampleFromSchema(digest))).toBeUndefined();
+  const alternatives = { type: 'string', pattern: '^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$' };
+  expect(sampleFromSchema(alternatives)).toBe('a'.repeat(64));
+  expect(firstJsonSchemaFailure(alternatives, sampleFromSchema(alternatives))).toBeUndefined();
   for (const [pattern, expected] of [['^[0-9]{4}$', '0000'], ['^[A-Z]{2}$', 'AA']] as const) {
     const schema = { type: 'string', pattern };
     expect(sampleFromSchema(schema)).toBe(expected);

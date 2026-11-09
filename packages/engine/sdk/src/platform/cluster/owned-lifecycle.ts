@@ -80,9 +80,13 @@ export class ClusterPeriodicTasks {
     this.cancellations.add(() => { active = false; cancel(); });
   }
 
+  async join(): Promise<void> {
+    while (this.pending.size > 0) await Promise.allSettled([...this.pending]);
+  }
+
   async stop(): Promise<void> {
     for (const cancel of this.cancellations) cancel();
     this.cancellations.clear();
-    await Promise.allSettled(this.pending);
+    await this.join();
   }
 }

@@ -80,7 +80,10 @@ export function clusterGroupRouteExtension(
  */
 function respond<T>(result: GroupOperationResult<T>): Response {
   if (result.ok) return Response.json({ ok: true, data: result.data });
-  return Response.json({ ok: false, error: result.error, fix: result.fix }, { status: 409 });
+  return Response.json({ ok: false, error: result.error, fix: result.fix,
+    ...(result.failure === undefined ? {} : { failure: result.failure }),
+    ...(result.terminal === undefined ? {} : { terminal: result.terminal }),
+  }, { status: 409 });
 }
 
 function readString(body: Record<string, unknown>, key: string): string | undefined {

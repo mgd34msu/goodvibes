@@ -13,9 +13,11 @@
  * The protocol is LAN-only. Nothing in this module contacts Telegram, ntfy, or
  * any other external service, and nothing in it is ever surfaced to a user,
  * elections, heartbeats and promotions are log lines and a `/status` section,
- * never a notification and never a transcript line. Surfaces travel as digests,
- * so a packet capture on the LAN never yields a topic name or a bot id.
+ * never a notification and never a transcript line. Surface wire IDs omit raw
+ * discriminators; they are stable public pseudonyms, not anonymity against
+ * guessing a known/low-entropy topic or account. Signatures do not encrypt them.
  */
+export { ClusterMembershipOperationError, type ClusterMembershipOperation, type MembershipOperationFailure } from './membership-operation.js';
 export { ClusterCoordinator, type ClusterCoordinatorOptions } from './coordinator.js';
 export { ClusterElection, type ClusterElectionOptions } from './election-node.js';
 export { SurfaceElection, type SurfaceElectionHost, type SurfaceElectionOptions } from './election.js';

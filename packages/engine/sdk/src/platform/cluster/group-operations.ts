@@ -32,13 +32,13 @@ import {
 } from './group-state.js';
 import {
   createGroupKeyMaterial,
-  clearGroupKeyMaterial,
   joiningGroupKeyMaterial,
   MAX_KEY_GENERATIONS,
   type ClusterSecretStore,
 } from './group-store.js';
 import { keyRotationGraceMs, type ClusterGroupSettings } from './group-settings.js';
 import type { AdmissionFailure } from './group-admissions.js';
+import { ClusterMembershipOperationError, type ClusterMembershipOperation, type MembershipOperationFailure } from './membership-operation.js';
 
 /** How long a join or a rejoin waits for the group to answer. */
 export const ADMISSION_TIMEOUT_MS = 15_000;
@@ -67,13 +67,13 @@ export type GroupOperationResult<T> =
      * self-resolving) from "replies arrived that I could not verify" (worth
      * telling the operator, but not proof of anything).
      */
-    readonly failure?: AdmissionFailure;
+    readonly failure?: AdmissionFailure | MembershipOperationFailure;
   };
 
 function failed(
   error: string,
   fix: string,
-  options: { readonly terminal?: boolean; readonly failure?: AdmissionFailure } = {},
+  options: { readonly terminal?: boolean; readonly failure?: AdmissionFailure | MembershipOperationFailure } = {},
 ): GroupOperationResult<never> {
   return {
     ok: false,
@@ -82,6 +82,17 @@ function failed(
     ...(options.terminal ? { terminal: options.terminal } : {}),
     ...(options.failure ? { failure: options.failure } : {}),
   };
+}
+
+/** The runtime owns cancellation/drain and serializes actual membership effects. */
+async function membershipOperation<T>(context: GroupOperationsContext, work: (owner: ClusterMembershipOperation) => Promise<GroupOperationResult<T>>): Promise<GroupOperationResult<T>> {
+  try { return await context.runtime.withMembershipOperation(work); }
+  catch (error) {
+    if (!(error instanceof ClusterMembershipOperationError)) throw error;
+    return failed(error.message, error.kind === 'persistence-unknown'
+      ? 'do not blindly retry: inspect cluster status and the membership store, then restart to reconcile the saved result'
+      : 'wait for the current group operation to finish, or restart the runtime before trying again', { failure: error.kind });
+  }
 }
 
 /** One machine, as `cluster nodes` reports it. */
@@ -167,7 +178,7 @@ export function groupStatus(context: GroupOperationsContext): GroupOperationResu
     : membership === 'no-group'
       ? 'this machine is not in a group yet, run `cluster create` here, or `cluster join` to join one that already exists'
       : membership === 'unreadable-key-material'
-        ? 'the stored group key material could not be read, run `cluster join` to rejoin the group'
+        ? 'group membership storage could not be confirmed; check the secrets store and keyfile, then restart and inspect `cluster status` before joining again'
         : null;
   return {
     ok: true,
@@ -213,9 +224,15 @@ export interface CreateGroupResult {
 }
 
 /** Create a group with this machine as its first member. */
-export async function createGroup(
+export function createGroup(context: GroupOperationsContext, input: CreateGroupInput): Promise<GroupOperationResult<CreateGroupResult>> {
+  const captured = { ...input };
+  return membershipOperation(context, owner => createGroupOwned(context, captured, owner));
+}
+
+async function createGroupOwned(
   context: GroupOperationsContext,
   input: CreateGroupInput,
+  owner: ClusterMembershipOperation,
 ): Promise<GroupOperationResult<CreateGroupResult>> {
   if (context.runtime.membership === 'member') {
     return failed(
@@ -234,6 +251,7 @@ export async function createGroup(
   const joinSalt = deriveJoinSalt(groupId);
   const joinKey = passphrase && passphrase.length > 0 ? passphrase : generateJoinKey();
   const joinVerifier = await deriveJoinVerifier(joinKey, joinSalt);
+  context.runtime.assertMembershipOperation(owner);
   const now = context.now();
 
   const material = createGroupKeyMaterial({
@@ -258,7 +276,7 @@ export async function createGroup(
     agreementKey: material.node.agreement.publicKey,
     now,
   });
-  await context.runtime.adoptMembership(material, admitted.state);
+  await context.runtime.adoptMembership(material, admitted.state, owner);
   return {
     ok: true,
     data: {
@@ -289,9 +307,15 @@ export interface JoinGroupResult {
  * it. Both are needed: the id alone is public (it is in every beacon) and the
  * key alone would not say which group it was for.
  */
-export async function joinGroup(
+export function joinGroup(context: GroupOperationsContext, input: JoinGroupInput): Promise<GroupOperationResult<JoinGroupResult>> {
+  const captured = { ...input };
+  return membershipOperation(context, owner => joinGroupOwned(context, captured, owner));
+}
+
+async function joinGroupOwned(
   context: GroupOperationsContext,
   input: JoinGroupInput,
+  owner: ClusterMembershipOperation,
 ): Promise<GroupOperationResult<JoinGroupResult>> {
   if (!context.settings.enabled) {
     return failed(
@@ -334,8 +358,10 @@ export async function joinGroup(
         ? 'no machine in that group accepted the join key, either the join key is wrong, or no machine in that group is reachable on this network'
         : outcome.reason,
       'check the join key with `cluster key` on a machine already in the group, and that both machines are on the same network',
+      { failure: outcome.failure },
     );
   }
+  context.runtime.assertMembershipOperation(owner);
   const grant = outcome.grant;
   const now = context.now();
   const material = joiningGroupKeyMaterial({
@@ -350,10 +376,10 @@ export async function joinGroup(
     now,
     graceMs: keyRotationGraceMs(context.settings),
   });
-  await context.runtime.adoptMembership(material, grant.state);
+  await context.runtime.adoptMembership(material, grant.state, owner);
   // Ask for the group's settings straight away: a machine that has joined but
   // holds none of them cannot serve a surface it might win in a few seconds.
-  await context.runtime.requestConfigSnapshot();
+  if (!owner.signal.aborted) await context.runtime.requestConfigSnapshot();
   return {
     ok: true,
     data: {
@@ -574,17 +600,18 @@ export interface LeaveGroupResult {
  * decision to leave silently rewrite everyone else's membership would be a
  * strictly worse default.
  */
-export async function leaveGroup(
-  context: GroupOperationsContext,
-): Promise<GroupOperationResult<LeaveGroupResult>> {
+export function leaveGroup(context: GroupOperationsContext): Promise<GroupOperationResult<LeaveGroupResult>> {
+  return membershipOperation(context, owner => leaveGroupOwned(context, owner));
+}
+
+async function leaveGroupOwned(context: GroupOperationsContext, owner: ClusterMembershipOperation): Promise<GroupOperationResult<LeaveGroupResult>> {
   const material = context.runtime.keyMaterial;
   const state = context.runtime.groupState;
   if (!material || !state) {
     return failed('this machine is not in a group', 'there is nothing to leave');
   }
   const result = { groupId: material.groupId, groupName: state.displayName };
-  await clearGroupKeyMaterial(context.secrets);
-  await context.runtime.forgetMembership();
+  await context.runtime.leaveMembership(owner);
   return { ok: true, data: result };
 }
 
@@ -627,9 +654,11 @@ export function groupsOnTheNetwork(context: GroupOperationsContext): GroupOperat
  * hand when a return needs a nudge. Succeeds only if the node id is still on
  * the roster, see `decideAdmission`.
  */
-export async function rejoinGroup(
-  context: GroupOperationsContext,
-): Promise<GroupOperationResult<JoinGroupResult>> {
+export function rejoinGroup(context: GroupOperationsContext): Promise<GroupOperationResult<JoinGroupResult>> {
+  return membershipOperation(context, owner => rejoinGroupOwned(context, owner));
+}
+
+async function rejoinGroupOwned(context: GroupOperationsContext, owner: ClusterMembershipOperation): Promise<GroupOperationResult<JoinGroupResult>> {
   const material = context.runtime.keyMaterial;
   if (!material) {
     return failed('this machine is not in a group', 'join one with `cluster join`');
@@ -646,6 +675,11 @@ export async function rejoinGroup(
       { terminal: outcome.failure === 'refused', failure: outcome.failure },
     );
   }
+  context.runtime.assertMembershipOperation(owner);
+  const current = context.runtime.keyMaterial;
+  if (!current || current.groupId !== material.groupId || current.currentGeneration > outcome.grant.currentGeneration) {
+    return failed('the group membership changed while this machine was asking to return', 'inspect cluster status, then ask to rejoin again', { failure: 'not-sent' });
+  }
   const now = context.now();
   await context.runtime.adoptMembership(
     joiningGroupKeyMaterial({
@@ -661,6 +695,7 @@ export async function rejoinGroup(
       graceMs: keyRotationGraceMs(context.settings),
     }),
     outcome.grant.state,
+    owner,
   );
   return {
     ok: true,

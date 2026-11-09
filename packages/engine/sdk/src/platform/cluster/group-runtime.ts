@@ -19,6 +19,8 @@
  * the two commands that fix it. Half-starting, joining the multicast group and
  * broadcasting unsigned, is the outcome this explicitly avoids.
  */
+import { GroupStateOwner } from './group-state-owner.js';
+import { ClusterMembershipOperationError, ClusterMembershipOperations, type ClusterMembershipOperation } from './membership-operation.js';
 import { GroupAdmissionService, type AdmissionOutcome } from './group-admissions.js';
 import { ClusterOwnedLifecycle, ClusterPeriodicTasks } from './owned-lifecycle.js';
 import { digestSurfaceId, sealForMember, openSealedEnvelope } from './group-crypto.js';
@@ -40,15 +42,15 @@ import {
 import {
   adoptGroupKeys,
   GroupKeyring,
-  loadGroupKeyMaterial,
+  observeGroupKeyMaterial,
   loadGroupState,
   readKeyRecord,
   rotateGroupKeyMaterial,
   loadReplicaDocument,
   saveGroupKeyMaterial,
-  GROUP_MATERIAL_SECRET_KEY,
-  saveGroupState,
-  saveReplicaDocument,
+  clearGroupKeyMaterial,
+  GROUP_STATE_FILENAME,
+  GROUP_REPLICA_FILENAME,
   sweepKeyHistory,
   type ClusterSecretStore,
   type GroupKeyMaterial,
@@ -141,9 +143,20 @@ export class ClusterGroupRuntime {
   private lastRotationCheckAt = 0;
   private unreadableMaterial = false;
   private housekeeping = false;
+  private readonly membershipOperations = new ClusterMembershipOperations();
+  private membershipRevision = 0;
+  private materialQueue: Promise<void> = Promise.resolve();
+  private readonly materialWork = new Set<Promise<void>>();
+  private stopping: Promise<void> | null = null;
+  private runtimeStopping = false;
+  private networkStarted = false;
+  private readonly stateOwner: GroupStateOwner;
+  private readonly groupWork = new Set<Promise<void>>();
+  private membershipTransition = false;
   private replication: ConfigReplicationService | null = null;
 
   constructor(private readonly options: ClusterGroupRuntimeOptions) {
+    this.stateOwner = new GroupStateOwner(options.stateDirectory, [GROUP_STATE_FILENAME, GROUP_REPLICA_FILENAME]);
     this.periodic = new ClusterPeriodicTasks(options.clock, options.logger);
     // Built here, not in start(), because the composition root needs
     // `electionTransport()` while it is still WIRING, the coordinator is
@@ -197,15 +210,33 @@ export class ClusterGroupRuntime {
 
   // ── lifecycle ─────────────────────────────────────────────────────────────
 
-  start(): Promise<void> { return this.lifecycle.start(); }
+  start(): Promise<void> {
+    if (this.stopping) return Promise.reject(new ClusterMembershipOperationError('abandoned'));
+    return this.lifecycle.start();
+  }
 
   stop(): Promise<void> {
+    if (this.stopping) return this.stopping;
+    this.runtimeStopping = true;
+    this.networkStarted = false;
+    this.membershipOperations.stop();
+    this.keyringInstance = null;
     this.admissions.stop('the daemon shut down before the group answered');
-    return this.lifecycle.stop();
+    this.stopping = Promise.resolve().then(async () => {
+      await this.lifecycle.stop();
+      // A source/embedder may start membership work before opening transport.
+      // Its owned persistence must drain even when lifecycle had no socket.
+      await this.membershipOperations.join();
+      await this.drainGroupWork();
+      await this.drainMaterialWrites();
+    }).finally(() => { this.stopping = null; });
+    return this.stopping;
   }
 
   private async startOwned(signal: AbortSignal): Promise<void> {
-    await this.reloadMaterial();
+    this.runtimeStopping = false;
+    this.membershipOperations.start();
+    await this.reloadMaterial(signal);
     signal.throwIfAborted();
     if (!this.options.settings.enabled) {
       // Switched off. Read the stored membership so `cluster status`, `key` and
@@ -218,6 +249,7 @@ export class ClusterGroupRuntime {
     }
     await this.router.ensureStarted();
     signal.throwIfAborted();
+    this.networkStarted = true;
     this.admissions.start();
     this.periodic.schedule(this.options.settings.beaconSeconds * 1_000, () => this.sendBeacon());
     this.periodic.schedule(HOUSEKEEPING_INTERVAL_MS, () => this.runHousekeeping());
@@ -232,6 +264,9 @@ export class ClusterGroupRuntime {
   private async stopOwned(): Promise<void> {
     this.admissions.stop('the daemon shut down before the group answered');
     await this.admissions.join();
+    await this.drainGroupWork();
+    await this.membershipOperations.join();
+    await this.drainMaterialWrites();
     await this.periodic.stop();
     await this.router.stop();
   }
@@ -306,33 +341,100 @@ export class ClusterGroupRuntime {
   // ── material ──────────────────────────────────────────────────────────────
 
   /** Re-read key material and roster from their stores. */
-  async reloadMaterial(): Promise<void> {
-    const material = await loadGroupKeyMaterial(this.options.secrets, this.options.logger);
-    this.unreadableMaterial = material === null && (await this.hasStoredMaterial());
-    this.material = material;
-    this.keyringInstance = material
-      ? new GroupKeyring(() => this.requireMaterial(), () => this.options.clock.now())
-      : null;
-    this.state = material
-      ? loadGroupState(this.options.stateDirectory, material.groupId, this.options.clock.now(), this.options.logger)
-      : null;
-    if (material && this.replication) {
-      this.replication.adopt(
-        loadReplicaDocument(
-          this.options.stateDirectory,
-          (value) => readConfigReplicaDocument(value, isReplicatedConfigPath),
-          this.options.logger,
-        ) ?? createConfigReplicaDocument(material.groupId),
-      );
+  async reloadMaterial(signal?: AbortSignal): Promise<void> {
+    if (this.membershipOperations.busy || this.materialWork.size > 0 || this.groupWork.size > 0) throw new ClusterMembershipOperationError('not-sent');
+    this.stateOwner.assertCurrent();
+    const revision = this.membershipRevision;
+    const observation = await observeGroupKeyMaterial(this.options.secrets, this.options.logger);
+    signal?.throwIfAborted();
+    this.stateOwner.assertCurrent();
+    if (this.runtimeStopping || revision !== this.membershipRevision || this.membershipOperations.busy || this.materialWork.size > 0 || this.groupWork.size > 0) throw new ClusterMembershipOperationError('abandoned');
+    const material = observation.material;
+    const state = material ? loadGroupState(this.options.stateDirectory, material.groupId, this.options.clock.now(), this.options.logger) : null;
+    const savedReplica = material ? loadReplicaDocument(this.options.stateDirectory, value => readConfigReplicaDocument(value, isReplicatedConfigPath), this.options.logger) : null;
+    this.stateOwner.assertCurrent();
+    signal?.throwIfAborted();
+    if (this.runtimeStopping || revision !== this.membershipRevision || this.membershipOperations.busy || this.materialWork.size > 0 || this.groupWork.size > 0) throw new ClusterMembershipOperationError('abandoned');
+    this.admissions.abandon('the stored membership was reloaded');
+    this.unreadableMaterial = observation.unreadable;
+    this.material = material; this.state = state; this.membershipRevision += 1;
+    this.keyringInstance = material ? new GroupKeyring(() => this.requireMaterial(), () => this.options.clock.now()) : null;
+    if (observation.unreadable) this.membershipOperations.markUnknown();
+    else {
+      this.membershipOperations.reconciled();
+      if (this.networkStarted) this.admissions.start();
     }
+    // A previous membership's replica is not current-group authority. Keep its
+    // original file intact; only a real current-group write replaces that slot.
+    if (material && this.replication) this.replication.adopt(savedReplica?.groupId === material.groupId
+      ? savedReplica : createConfigReplicaDocument(material.groupId));
   }
 
-  private async hasStoredMaterial(): Promise<boolean> {
-    try {
-      return (await this.options.secrets.get(GROUP_MATERIAL_SECRET_KEY)) !== null;
-    } catch {
-      return false;
-    }
+  /** Operator work reserves one cancellable owner before its first await. */
+  withMembershipOperation<T>(work: (owner: ClusterMembershipOperation) => Promise<T>): Promise<T> {
+    return this.membershipOperations.run(async owner => {
+      try { this.stateOwner.assertCurrent(); } catch { throw new ClusterMembershipOperationError('abandoned'); }
+      return work(owner);
+    });
+  }
+
+  assertMembershipOperation(owner: ClusterMembershipOperation): void { this.membershipOperations.assert(owner); }
+
+  private enqueueMaterialWrite(work: () => Promise<void>): Promise<void> {
+    const task = this.materialQueue.then(work);
+    this.materialQueue = task.catch(() => {});
+    this.materialWork.add(task);
+    void task.then(() => { this.materialWork.delete(task); }, () => { this.materialWork.delete(task); });
+    return task;
+  }
+
+  private async drainMaterialWrites(): Promise<void> {
+    while (this.materialWork.size > 0) await Promise.allSettled([...this.materialWork]);
+  }
+
+  private runGroupWork(work: () => Promise<void> | undefined): Promise<void> {
+    if (this.runtimeStopping || this.membershipTransition || !this.membershipOperations.available) return Promise.reject(new ClusterMembershipOperationError('abandoned'));
+    const revision = this.membershipRevision;
+    const task = Promise.resolve().then(async () => {
+      if (this.runtimeStopping || this.membershipTransition || revision !== this.membershipRevision) throw new ClusterMembershipOperationError('abandoned');
+      await work();
+    });
+    this.groupWork.add(task);
+    void task.then(() => { this.groupWork.delete(task); }, error => {
+      this.groupWork.delete(task);
+      if (!(error instanceof ClusterMembershipOperationError)) this.options.logger.warn('cluster: owned group work failed');
+    });
+    return task;
+  }
+
+  private async drainGroupWork(): Promise<void> {
+    while (this.groupWork.size > 0) await Promise.allSettled([...this.groupWork]);
+  }
+
+  private async beginMembershipTransition(owner: ClusterMembershipOperation): Promise<void> {
+    this.membershipOperations.assert(owner);
+    this.membershipTransition = true;
+    this.admissions.stop('this machine is changing its group membership');
+    // Drain BEFORE entering the material queue: an old handler may itself be
+    // waiting for a queued material write. Holding the queue here would deadlock.
+    await Promise.all([this.admissions.join(), this.drainGroupWork(), this.periodic.join()]);
+    this.membershipOperations.assert(owner);
+  }
+
+  private endMembershipTransition(): void {
+    this.membershipTransition = false;
+    if (this.networkStarted && this.membershipOperations.available) this.admissions.start();
+  }
+
+  private persistenceUnknown(): ClusterMembershipOperationError {
+    // An entered async set/delete may have taken effect before rejecting. Do
+    // not assert rollback, retry it, erase evidence, or keep signing old keys.
+    this.membershipOperations.markUnknown();
+    this.admissions.stop('group membership persistence could not be confirmed');
+    this.material = null; this.state = null; this.keyringInstance = null;
+    this.unreadableMaterial = true;
+    this.membershipRevision += 1;
+    return new ClusterMembershipOperationError('persistence-unknown');
   }
 
   private requireMaterial(): GroupKeyMaterial {
@@ -340,46 +442,77 @@ export class ClusterGroupRuntime {
     return this.material;
   }
 
-  /** Install new material and its roster, persisting both. */
-  async adoptMembership(material: GroupKeyMaterial, state: GroupStateDocument): Promise<void> {
-    this.admissions.abandon('this machine changed its group membership');
-    // Re-seed the replica with the group this machine has just joined. Without
-    // this it keeps the empty group id it was constructed with, and every
-    // incoming settings document is refused for belonging to a different group
-    //, which looks exactly like replication silently not working.
-    if (this.replication && this.replication.replica.groupId !== material.groupId) {
-      this.replication.adopt(createConfigReplicaDocument(material.groupId));
-    }
-    this.material = material;
-    this.unreadableMaterial = false;
-    this.keyringInstance = new GroupKeyring(() => this.requireMaterial(), () => this.options.clock.now());
-    this.state = state;
-    await saveGroupKeyMaterial(this.options.secrets, material);
-    saveGroupState(this.options.stateDirectory, state, this.options.logger);
+  /** Install acknowledged material and its matching durable roster. */
+  adoptMembership(material: GroupKeyMaterial, state: GroupStateDocument, owner?: ClusterMembershipOperation): Promise<void> {
+    return this.membershipOperations.run(async (lease) => {
+      try {
+        await this.beginMembershipTransition(lease);
+        const revision = this.membershipRevision, expected = this.material;
+        if (material.groupId !== state.groupId || (expected?.groupId === material.groupId && material.currentGeneration < expected.currentGeneration)) throw new ClusterMembershipOperationError('abandoned');
+        await this.enqueueMaterialWrite(async () => {
+          this.membershipOperations.assert(lease);
+          if (revision !== this.membershipRevision || expected !== this.material) throw new ClusterMembershipOperationError('abandoned');
+          try { this.stateOwner.ensure(); } catch { throw new ClusterMembershipOperationError('abandoned'); }
+          try {
+            await saveGroupKeyMaterial(this.options.secrets, material);
+            // Cancellation cannot abandon half of an acknowledged publication.
+            // Stop still owns/drains this exact operation and its original store.
+            this.membershipOperations.assert(lease, true);
+            this.stateOwner.write(GROUP_STATE_FILENAME, `${JSON.stringify(state, null, 2)}\n`, true);
+            if (this.replication && this.replication.replica.groupId !== material.groupId) this.replication.adopt(createConfigReplicaDocument(material.groupId));
+            this.material = material; this.state = state; this.unreadableMaterial = false;
+            this.membershipRevision += 1;
+            this.keyringInstance = this.runtimeStopping ? null : new GroupKeyring(() => this.requireMaterial(), () => this.options.clock.now());
+          } catch { throw this.persistenceUnknown(); }
+        });
+      } finally { this.endMembershipTransition(); }
+    }, owner);
   }
 
-  /**
-   * Drop this machine's membership.
-   *
-   * The key material is deleted by the caller (it owns the secrets store); this
-   * clears the in-memory half so the very next datagram is signed with nothing
-   * and accepted by nobody, rather than continuing to sign with a group this
-   * machine has just left.
+  /** Clear only the in-memory half, preserving the existing public semantics.
+   * The explicit leave path below owns deletion through this runtime's store.
    */
-  async forgetMembership(): Promise<void> {
+  forgetMembership(owner?: ClusterMembershipOperation): Promise<void> {
+    return this.membershipOperations.run(async lease => {
+      try {
+        await this.beginMembershipTransition(lease);
+        await this.enqueueMaterialWrite(async () => { this.membershipOperations.assert(lease); this.clearLiveMembership(); });
+      } finally { this.endMembershipTransition(); }
+    }, owner);
+  }
+
+  private clearLiveMembership(): void {
     this.admissions.abandon('this machine left its group');
     this.replication?.adopt(createConfigReplicaDocument(''));
-    this.material = null;
-    this.keyringInstance = null;
-    this.state = null;
-    this.unreadableMaterial = false;
-    await Promise.resolve();
+    this.material = null; this.keyringInstance = null; this.state = null; this.unreadableMaterial = false;
+    this.membershipRevision += 1;
+  }
+
+  /** Delete from the same actual encrypted store that owns this membership. */
+  leaveMembership(owner?: ClusterMembershipOperation): Promise<void> {
+    return this.membershipOperations.run(async lease => {
+      try {
+        await this.beginMembershipTransition(lease);
+        const revision = this.membershipRevision;
+        await this.enqueueMaterialWrite(async () => {
+          this.membershipOperations.assert(lease);
+          if (revision !== this.membershipRevision) throw new ClusterMembershipOperationError('abandoned');
+          this.keyringInstance = null;
+          try {
+            await clearGroupKeyMaterial(this.options.secrets);
+            this.membershipOperations.assert(lease, true);
+            this.clearLiveMembership();
+          } catch { throw this.persistenceUnknown(); }
+        });
+      } finally { this.endMembershipTransition(); }
+    }, owner);
   }
 
   /** Persist a changed roster and gossip it. */
   async commitState(state: GroupStateDocument, gossip = true): Promise<void> {
+    if (!this.membershipOperations.available || this.membershipTransition || state.groupId !== this.material?.groupId) throw new ClusterMembershipOperationError('abandoned');
+    this.stateOwner.write(GROUP_STATE_FILENAME, `${JSON.stringify(state, null, 2)}\n`, false);
     this.state = state;
-    saveGroupState(this.options.stateDirectory, state, this.options.logger);
     if (gossip) await this.sendRoster();
   }
 
@@ -395,23 +528,23 @@ export class ClusterGroupRuntime {
 
   /** Delete a setting across the group. */
   async announceConfigDelete(path: string, secret = false): Promise<void> {
-    await this.replication?.announceLocalDelete(path, secret);
+    await this.runGroupWork(() => this.replication?.announceLocalDelete(path, secret));
   }
 
   /** Ask the group for the settings this machine should be running. */
   async requestConfigSnapshot(): Promise<void> {
-    await this.replication?.requestSnapshot();
+    await this.runGroupWork(() => this.replication?.requestSnapshot());
   }
 
   /** Tell the group about a setting an operator just changed on this machine. */
   async announceConfigChange(path: string): Promise<void> {
     if (!isReplicatedConfigPath(path)) return;
-    await this.replication?.announceLocalChange(path);
+    await this.runGroupWork(() => this.replication?.announceLocalChange(path));
   }
 
   /** Tell the group about a credential an operator just set on this machine. */
   async announceSecretChange(configPath: string): Promise<void> {
-    await this.replication?.announceLocalSecret(configPath);
+    await this.runGroupWork(() => this.replication?.announceLocalSecret(configPath));
   }
 
   /**
@@ -431,13 +564,22 @@ export class ClusterGroupRuntime {
   }
 
   private persistReplica(document: ConfigReplicaDocument): void {
-    saveReplicaDocument(this.options.stateDirectory, document, this.options.logger);
+    if (this.runtimeStopping || !this.membershipOperations.available || document.groupId !== this.material?.groupId) throw new ClusterMembershipOperationError('abandoned');
+    this.stateOwner.write(GROUP_REPLICA_FILENAME, `${JSON.stringify(document, null, 2)}\n`, false);
   }
 
   /** Persist changed key material. */
   async commitMaterial(material: GroupKeyMaterial): Promise<void> {
-    this.material = material;
-    await saveGroupKeyMaterial(this.options.secrets, material);
+    const expected = this.material, revision = this.membershipRevision;
+    await this.enqueueMaterialWrite(async () => {
+      if (!this.membershipOperations.available || this.membershipTransition || expected !== this.material || revision !== this.membershipRevision
+        || material.groupId !== expected?.groupId) throw new ClusterMembershipOperationError('abandoned');
+      try {
+        await saveGroupKeyMaterial(this.options.secrets, material);
+        this.material = material;
+        if (this.runtimeStopping) this.keyringInstance = null;
+      } catch { throw this.persistenceUnknown(); }
+    });
   }
 
   // ── outbound ──────────────────────────────────────────────────────────────
@@ -484,6 +626,7 @@ export class ClusterGroupRuntime {
    * fewer thing on the wire for the same result.
    */
   private async sendBeacon(): Promise<void> {
+    if (this.runtimeStopping || this.membershipTransition) return;
     const state = this.state;
     if (!this.material || !state) return;
     await this.sendGroupMessage(GROUP_MESSAGE_TYPES.beacon, {
@@ -509,18 +652,12 @@ export class ClusterGroupRuntime {
    * Everything periodic is here rather than on its own timer so there is one
    * place to look when something is or is not happening on a schedule.
    */
-  async runHousekeeping(): Promise<void> {
-    // Never two at once. The timer fires every 30 seconds and a pass that
-    // rotates does several awaits, so without this a slow rotation would be
-    // overlapped by the next tick, which reads the material from BEFORE the
-    // rotation and mints a second, competing generation for the same step.
-    if (this.housekeeping) return;
+  runHousekeeping(): Promise<void> {
+    if (this.runtimeStopping || this.membershipTransition || this.housekeeping) return Promise.resolve();
     this.housekeeping = true;
-    try {
-      await this.housekeepingPass();
-    } finally {
-      this.housekeeping = false;
-    }
+    const task = this.runGroupWork(() => this.housekeepingPass());
+    void task.then(() => { this.housekeeping = false; }, () => { this.housekeeping = false; });
+    return task;
   }
 
   private async housekeepingPass(): Promise<void> {
@@ -646,21 +783,27 @@ export class ClusterGroupRuntime {
   // ── inbound: group-key-signed ─────────────────────────────────────────────
 
   private onGroupMessage(envelope: ClusterEnvelope): void {
+    if (this.runtimeStopping || this.membershipTransition || !this.membershipOperations.available) return;
+    void this.runGroupWork(() => this.handleGroupMessage(envelope));
+  }
+
+  private async handleGroupMessage(envelope: ClusterEnvelope): Promise<void> {
+    if (envelope.groupId !== this.material?.groupId) return;
     switch (envelope.type) {
       case GROUP_MESSAGE_TYPES.beacon:
-        void this.onBeacon(envelope);
+        await this.onBeacon(envelope);
         return;
       case GROUP_MESSAGE_TYPES.roster:
-        void this.onRoster(envelope);
+        await this.onRoster(envelope);
         return;
       case GROUP_MESSAGE_TYPES.rekey:
-        void this.onRekey(envelope);
+        await this.onRekey(envelope);
         return;
       case CONFIG_MESSAGE_TYPES.snapshot:
       case CONFIG_MESSAGE_TYPES.delta:
       case CONFIG_MESSAGE_TYPES.propose:
       case CONFIG_MESSAGE_TYPES.request:
-        void this.replication?.handle(envelope);
+        await this.replication?.handle(envelope);
         return;
       default:
         this.options.logger.debug('cluster: ignored an unrecognised group message', { type: envelope.type });

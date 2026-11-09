@@ -18,8 +18,9 @@
  * ever grows is a slow leak, and one that trusts whatever it finds on disk
  * turns a half-written file into a crash loop.
  */
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { writeFileAtomic } from '../utils/atomic-json-store.js';
 import {
   generateGroupKey,
   generateGroupSigningKeyPair,
@@ -321,38 +322,29 @@ export interface ClusterSecretStore {
   delete(key: string): Promise<void>;
 }
 
-/** Read this node's group key material, or null when it is not in a group. */
-export async function loadGroupKeyMaterial(
-  secrets: ClusterSecretStore,
-  logger?: ClusterLogger,
-): Promise<GroupKeyMaterial | null> {
+/** One actual store read distinguishes absence from unreadable/uncertain data. */
+export interface GroupMaterialObservation {
+  readonly material: GroupKeyMaterial | null;
+  readonly unreadable: boolean;
+}
+export async function observeGroupKeyMaterial(secrets: ClusterSecretStore, logger?: ClusterLogger): Promise<GroupMaterialObservation> {
   let raw: string | null;
-  try {
-    raw = await secrets.get(GROUP_MATERIAL_SECRET_KEY);
-  } catch (error) {
-    logger?.error('cluster: the encrypted secrets store could not be read; this node has no usable group membership', {
-      error: error instanceof Error ? error.message : String(error),
-      action: 'check that the secrets keyfile is readable, then run: goodvibes-daemon cluster status',
-    });
-    return null;
+  try { raw = await secrets.get(GROUP_MATERIAL_SECRET_KEY); }
+  catch {
+    logger?.error('cluster: the encrypted group membership could not be read', { action: 'check the secrets store, then restart and inspect cluster status' });
+    return { material: null, unreadable: true };
   }
-  if (!raw) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    logger?.error('cluster: the stored group key material is not readable JSON; this node is not in a group', {
-      action: 'rejoin the group: goodvibes-daemon cluster join',
-    });
-    return null;
-  }
-  const material = readGroupKeyMaterial(parsed);
-  if (!material) {
-    logger?.error('cluster: the stored group key material is incomplete; this node is not in a group', {
-      action: 'rejoin the group: goodvibes-daemon cluster join',
-    });
-  }
-  return material;
+  if (raw === null) return { material: null, unreadable: false };
+  let material: GroupKeyMaterial | null;
+  try { material = readGroupKeyMaterial(JSON.parse(raw) as unknown); }
+  catch { material = null; }
+  if (!material) logger?.error('cluster: the stored group membership is not readable', { action: 'inspect the secrets store, then restart and rejoin the group' });
+  return { material, unreadable: material === null };
+}
+
+/** Read membership; the observation API additionally distinguishes unreadable data. */
+export async function loadGroupKeyMaterial(secrets: ClusterSecretStore, logger?: ClusterLogger): Promise<GroupKeyMaterial | null> {
+  return (await observeGroupKeyMaterial(secrets, logger)).material;
 }
 
 /** Persist key material. Every write goes through here so nothing else formats it. */
@@ -575,8 +567,7 @@ export function saveReplicaDocument(
 ): void {
   const filePath = join(stateDirectory, GROUP_REPLICA_FILENAME);
   try {
-    mkdirSync(dirname(filePath), { recursive: true });
-    writeFileSync(filePath, `${JSON.stringify(document, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+    writeFileAtomic(filePath, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600, cleanupStaleTemps: false });
   } catch (error) {
     logger?.warn('cluster: the replicated settings could not be written; they will be re-sent by the group', {
       filePath,
@@ -593,8 +584,7 @@ export function saveGroupState(
 ): void {
   const filePath = join(stateDirectory, GROUP_STATE_FILENAME);
   try {
-    mkdirSync(dirname(filePath), { recursive: true });
-    writeFileSync(filePath, `${JSON.stringify(state, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+    writeFileAtomic(filePath, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600, cleanupStaleTemps: false });
   } catch (error) {
     logger?.warn('cluster: the roster could not be written; it will be rebuilt from the group on the next gossip', {
       filePath,

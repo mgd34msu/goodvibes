@@ -29,7 +29,7 @@ test.each([false, true])('one prepared two-fact pass survives its own actual def
   await f.store.batch(async () => {
     const first = await f.store.upsertPreparedNode(prepared, 0);
     f.store.assertPreparedNodeWrites(prepared);
-    if (!memory) {
+    if (before !== null) {
       expect(readFileSync(f.path)).toEqual(before);
       expect(() => prepareKnowledgeRecordAdmission(f.store, 'node', first)).toThrow();
     }
@@ -38,9 +38,9 @@ test.each([false, true])('one prepared two-fact pass survives its own actual def
   });
   f.store.assertPreparedNodeWrites(prepared);
   for (const input of f.inputs) prepareKnowledgeRecordAdmission(f.store, 'node', f.store.getNode(input.id)!).assertCurrent();
-  if (!memory) {
+  if (before !== null) {
     const published = readFileSync(f.path);
-    renameSync(f.path, `${f.path}.published`); writeFileSync(f.path, before!);
+    renameSync(f.path, `${f.path}.published`); writeFileSync(f.path, before);
     expect(() => f.store.assertPreparedNodeWrites(prepared)).toThrow();
     expect(readFileSync(`${f.path}.published`)).toEqual(published);
     expect(readFileSync(f.path)).toEqual(before);

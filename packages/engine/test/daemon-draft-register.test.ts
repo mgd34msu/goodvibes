@@ -102,17 +102,17 @@ describe('registerDraftMethods', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  test('confirmed updates and deletes resolve the stored wire identity instead of creating alias rows', async () => {
+  test('caller confirmation cannot edit or delete a native wire reference without its paired owner', async () => {
     const privateId = 'draft-20261011000001-deadbeef';
     const saved = await store.upsert({ id: privateId, message: 'original' });
     const reference = saved.draft.wireReference;
-    const updated = await catalog.invoke(SAVE, confirmedSave({ id: reference, message: 'edited' }));
-    expect(updated).toMatchObject({ created: false, draft: { id: reference, wireReference: reference } });
+    await expect(catalog.invoke(SAVE, confirmedSave({ id: reference, message: 'edited' })))
+      .rejects.toMatchObject({ status: 403, code: 'NATIVE_DRAFT_REFERENCE_FORBIDDEN' });
+    await expect(catalog.invoke(DELETE, invocation({ draftId: reference, confirm: true }, { explicit: true })))
+      .rejects.toMatchObject({ status: 403, code: 'NATIVE_DRAFT_REFERENCE_FORBIDDEN' });
     expect(store.count()).toBe(1); expect(store.get(reference)).toBeNull();
     expect(store.get(privateId)?.wireReference).toBe(reference);
-    expect(await catalog.invoke(DELETE, invocation({ draftId: reference, confirm: true }, { explicit: true })))
-      .toMatchObject({ deleted: true, draftId: reference });
-    expect(store.get(privateId)).toBeNull();
+    expect(store.get(privateId)?.message).toBe(saved.draft.message);
   });
 
   test('attaches handlers to the four canonical platform descriptors', () => {

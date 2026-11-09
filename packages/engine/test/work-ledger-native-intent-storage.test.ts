@@ -107,8 +107,10 @@ test('native scope parsing and request binding require complete own array entrie
   }
   let getters = 0;
   const accessor = Object.defineProperty(new Array<string>(1), '0', { enumerable: true, get() { getters++; return 'read:work-ledger'; } });
+  const missingMiddle = new Array<string>(3);
+  missingMiddle[0] = 'read:work-ledger'; missingMiddle[2] = 'write:fleet';
   for (const scopes of [new Array<string>(1), Object.assign(new Array<string>(1), { extra: 'read:work-ledger' }),
-    Object.assign(['read:work-ledger'], { extra: 'write:fleet' }), ['read:work-ledger', , 'write:fleet'], accessor]) {
+    Object.assign(['read:work-ledger'], { extra: 'write:fleet' }), missingMiddle, accessor]) {
     expect(() => parseNativeWorkExecutionIntent({ ...f.intent, authorityScopes: scopes })).toThrow('invalid');
     expect(() => bindNativeExecutionRequest(f.intent.request, 'project', owner, scopes)).toThrow();
   }

@@ -62,9 +62,9 @@ test('pending batch does not pretend unsaved source relations are absent', async
   });
   // The actual clean-save listener may still own this artifact's strict lease.
   // Once that admitted retry drains, a fresh read must see the persisted ref.
-  let result: Awaited<ReturnType<KnowledgeStore['cleanupUnreferencedArtifact']>> = 'held';
-  await waitFor(async () => { result = await f.store.cleanupUnreferencedArtifact(f.artifacts.captureOriginal(f.artifact.id)); return result !== 'held'; });
-  expect(result).toBe('referenced');
+  const observed: { result: Awaited<ReturnType<KnowledgeStore['cleanupUnreferencedArtifact']>> } = { result: 'held' };
+  await waitFor(async () => { observed.result = await f.store.cleanupUnreferencedArtifact(f.artifacts.captureOriginal(f.artifact.id)); return observed.result !== 'held'; });
+  expect(observed.result).toBe('referenced');
   expect(f.artifacts.get(f.artifact.id)).not.toBeNull();
 });
 test('parsed/copied stores and replaced original sqlite slots cannot report a forged empty family', async () => {

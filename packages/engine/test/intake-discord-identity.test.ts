@@ -106,7 +106,7 @@ test('physical registry replacement during publication is refused even when byte
 test('physical lock replacement with identical payload cannot authorize a registry publication', async () => {
   const f = fixture(), lock = `${f.path}.owner.lock`;
   const owner = { ...f.owner, beforeWrite() { const stage = `${lock}.replacement`; writeFileSync(stage, readFileSync(lock)); renameSync(stage, lock); } };
-  await expect(acquireDiscordInboxIdentity(owner, input())).rejects.toThrow('unavailable');
+  await expect(acquireDiscordInboxIdentity(owner, input())).rejects.toMatchObject({ name: 'Error', message: 'Original native lock owner changed' });
   expect(existsSync(f.path)).toBe(false); expect(existsSync(lock)).toBe(true);
 });
 

@@ -134,7 +134,8 @@ test('real connected native legacy draft save/get/list/delete keeps private IDs 
   expect(channelDraftWireReference('ordinary-native-id')).toBe('ordinary-native-id');
   const saved = await f.call('POST', '/api/channels/drafts', f.input());
   expect(saved.status).toBe(200);
-  expect(saved.data).toMatchObject({ created: false, draft: { id: f.reference, status: 'queued' } });
+  expect(saved.data).toMatchObject({ created: false, draft: { id: f.reference, wireReference: f.reference, status: 'queued' } });
+  expect(f.drafts.count()).toBe(1); expect(f.drafts.get(LEGACY_ID)?.wireReference).toBe(f.reference);
   expect(f.drafts.get(LEGACY_ID)?.status).toBe('queued');
   expect(f.drafts.get(f.reference)).toBeNull();
   const get = await f.call('GET', `/api/channels/drafts/${f.reference}`);

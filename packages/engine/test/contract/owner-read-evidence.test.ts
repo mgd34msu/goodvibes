@@ -106,7 +106,9 @@ test('correction proposal identity ignores bookkeeping but changes when actual o
   const first = JSON.stringify(workReceiptIdentity(work));
   expect(() => workReceiptIdentity({ ...work })).toThrow('original native receipt');
   const later = work;
-  later.privateArchiveChecks[0].durationMs = 89;
+  const archiveCheck = later.privateArchiveChecks[0];
+  if (!archiveCheck) throw new Error('Missing original archive check');
+  archiveCheck.durationMs = 89;
   const owner = later.ownerPriorReads;
   if (!owner || typeof owner !== 'object' || Array.isArray(owner)
     || !Array.isArray(owner['sources']) || !Array.isArray(owner['sourceReads'])) throw new Error('Missing actual owner observations');

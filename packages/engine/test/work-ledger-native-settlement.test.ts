@@ -14,6 +14,7 @@ import { noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
 import { createWorkLedger } from '../sdk/src/platform/workflow/work-ledger/service.js';
 import { createNativeWorkExecutionHost } from '../sdk/src/platform/workflow/work-ledger/native-execution.js';
+import { parseNativeWorkExecutionRecord, nativeExecutionTargetRevision } from '../sdk/src/platform/workflow/work-ledger/native-execution-types.js';
 import { criteriaSetIdForWork, DurableContractAdmissions, durableKeyHash } from '../sdk/src/platform/contract/durable-admission.js';
 import { PairingTokenManager } from '../sdk/src/platform/pairing/pairing-token-store.js';
 import { WorkspaceRegistrationStore } from '../sdk/src/platform/workspace/registration/store.js';
@@ -74,6 +75,8 @@ test('terminal settlement checks every original criterion and atomically publish
   const stop = f.ledger.service.subscribe(f.actor, snapshot => observed.push({ revision: snapshot.revision, verification: snapshot.works[0]?.verification.state ?? 'missing' }));
   cleanups.push(async () => { stop(); });
   const receipt = await f.host.settle(f.key, f.authority);
+  expect(receipt.version).toBe(2);
+  expect(receipt).not.toHaveProperty('receiptDigest'); expect(receipt).not.toHaveProperty('contractDigest'); expect(receipt).not.toHaveProperty('keyHash');
   expect(receipt.attestation.outcome).toBe('verified'); expect(receipt.attestation.criteriaResults.map(item => item.criterionIndex)).toEqual([0, 1]);
   const after = f.storage.current(f.key); expect(after.ledger.revision).toBe(4);
   expect(after.ledger.history.slice(-2).map(event => event.type)).toEqual(['report', 'record_evidence']);
@@ -83,7 +86,9 @@ test('terminal settlement checks every original criterion and atomically publish
   expect(receipt.evidenceSequence).toBe(receipt.reportSequence + 1);
   expect(f.host.status(f.key, f.authority).settlement).toMatchObject({ state: 'published', evidenceId: receipt.evidenceId });
   const checks = receipt.attestation.references.filter(item => item.kind === 'decision'); expect(checks).toHaveLength(2);
-  for (const reference of checks) expect(f.log.get(reference.ref.slice('decision:'.length))?.status).toBe('answered');
+  for (const reference of checks) { const actual = f.log.get(reference.ref.slice('decision:'.length)); expect(actual?.status).toBe('answered'); expect(reference.digest).toBe(actual?.stateHash); }
+  expect(receipt.attestation.references.filter(reference => reference.kind !== 'decision').every(reference => reference.digest === undefined)).toBe(true);
+  expect(receipt.attestation.criteriaResults.every(result => result.references.every(ref => checks.some(check => check.ref === ref)))).toBe(true);
   const controller = new AbortController(); controller.abort();
   expect(await f.host.settle(f.key, f.authority, { signal: controller.signal })).toEqual(receipt);
   expect(f.harness.agentsOf('u1')).toHaveLength(1);
@@ -458,6 +463,20 @@ test('the complete original source is captured before the first borrowed join ho
   expect(expectedGoal).toBe(f.work.goal); expect(expectedCriteria).toEqual(f.work.criteria);
 });
 
+test('saved target counters must match the original independently recorded native act, including standalone verification', async () => {
+  const f = await fixture(), started = await f.host.start(f.target, f.authority); await completed(f.harness, started.admission.contractId);
+  const original = f.storage.current(f.key).record!;
+  for (const field of ['workRevision', 'attemptRevision'] as const) {
+    const target = { ...original.target, [field]: original.target[field] + 1 };
+    expect(() => parseNativeWorkExecutionRecord({ ...structuredClone(original), target })).toThrow();
+    const evidence = original.decision.evidence.map(reference => reference.id === 'native-work-attempt' ? { ...reference, revision: nativeExecutionTargetRevision(target) } : reference);
+    const changed = parseNativeWorkExecutionRecord({ ...structuredClone(original), target, decision: { ...original.decision, evidence }, decisionContext: { ...original.decisionContext, evidence } });
+    await expect(verifyNativeWorkExecution({ execution: changed, runner: f.harness.runner, port: f.hostOptions.port, decisionLog: f.log,
+      settings: checkSettings(CONTRACT_CONFIG_DEFAULTS), readAccessFilter: async () => true, signal: new AbortController().signal, assertCurrent() {} })).rejects.toThrow('unavailable');
+  }
+  expect(f.storage.current(f.key).ledger.revision).toBe(2); expect(f.storage.current(f.key).settlement).toBeNull();
+});
+
 for (const mutation of ['revise', 'handoff', 'cancel', 'scope'] as const) test(`${mutation} during verification prevents late evidence without replaying the runner`, async () => {
   let entered!: () => void; const ready = new Promise<void>(resolve => { entered = resolve; });
   let release!: () => void; const hold = new Promise<void>(resolve => { release = resolve; });
@@ -591,7 +610,7 @@ test('deleted artifacts remain provable when their former parent directory is al
   if (contract.status !== 'passed') throw new Error(JSON.stringify({ status: contract.status, error: contract.error, statusLine: contract.statusLine, decisions: contract.decisions.slice(-5), checks: contract.units.map(unit => unit.checks.at(-1)) }));
   expect(contract.units[0]?.touchedPaths).toContain('obsolete/old.txt');
   const receipt = await f.host.settle(f.key, f.authority);
-  expect(receipt.attestation.outcome).toBe('verified'); expect(receipt.attestation.references.some(item => item.ref.endsWith(':obsolete/old.txt') && item.digest)).toBe(true);
+  expect(receipt.attestation.outcome).toBe('verified'); expect(receipt.attestation.references.some(item => item.kind === 'artifact' && item.ref.endsWith(':obsolete/old.txt'))).toBe(true);
 });
 
 test('a declared passed checkpoint cannot cite recorded failing prior checks', async () => {
@@ -621,4 +640,15 @@ test('borrowed answer mutation after return cannot change the frozen recorded ve
     } }) });
   const started = await f.host.start(f.target, f.authority); await completed(f.harness, started.admission.contractId);
   const receipt = await f.host.settle(f.key, f.authority); expect(receipt.attestation.outcome).toBe('failed'); expect(receipt.attestation.criteriaResults[1]?.status).toBe('unsatisfied');
+});
+
+test('borrowed getter answers cannot execute code while native settlement captures an actual recorded result', async () => {
+  let invoked = 0;
+  const f = await fixture({ decoratePort: port => ({ ...port, async ask(request) {
+    const result = await port.ask(request); if (request.context?.site !== 'contract.check.unit-judge') return result;
+    return { ...result, get answers() { invoked++; return result.answers; } };
+  } }) });
+  const started = await f.host.start(f.target, f.authority); await completed(f.harness, started.admission.contractId);
+  await expect(f.host.settle(f.key, f.authority)).rejects.toThrow();
+  expect(invoked).toBe(0); expect(f.storage.current(f.key).ledger.revision).toBe(2); expect(f.storage.current(f.key).settlement).toBeNull();
 });

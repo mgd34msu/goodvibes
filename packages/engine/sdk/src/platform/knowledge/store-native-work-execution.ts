@@ -1,15 +1,45 @@
 import { isDeepStrictEqual } from 'node:util';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { opaqueUuid, drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { knowledgeSchemaColumns, executionAttemptColumns } from './store-schema-validation-data.js';
 import { createNativeCiContinuationStorage } from './store-native-ci-continuation.js';
-import { nativeSettlementDigest, nativeWorkAttestationSchema, nativeWorkSettlementSchema } from '../workflow/work-ledger/native-settlement-types.js';
+import { nativeSettlementDigest, nativeWorkSettlementSchema, nativeSettlementStorageKey, captureNativeSettlementPublication, nativeSettlementPublicationCommitment, type NativeWorkSettlementReceipt, type NativeWorkSettlementPublication } from '../workflow/work-ledger/native-settlement-types.js';
 import type { SQLiteStore, SqlDatabase } from '../state/sqlite-store.js';
-import { durableKeyIdentity, durableKeyHash, durablePayloadRevision, sameDurableRequest, type DurableContractKey } from '../contract/durable-admission.js';
+import { durableKeyIdentity, durableKeyHash, durablePayloadRevision, sameDurableRequest, type DurableContractKey, type DurableContractRequest, type DurableContractReceipt } from '../contract/durable-admission.js';
 import { readWorkLedgerState, createEmptyWorkLedgerState, reduceWorkLedgerSettlement } from '../workflow/work-ledger/service.js';
 import { NativeWorkExecutionError, parseNativeWorkExecutionRecord, parseNativeWorkExecutionIntent, parseNativeWorkExecutionRecordJson, parseNativeWorkExecutionIntentJson, nativeExecutionStorageKey, type NativeExecutionOriginal, type NativeWorkExecutionIntent, type NativeWorkExecutionRecord, type NativeWorkExecutionMutation, type NativeWorkExecutionStorage, type NativeWorkExecutionTransaction } from '../workflow/work-ledger/native-execution-types.js';
 
 type Lookup = DurableContractKey | { readonly attemptId: string };
 type SqlReader = Pick<SqlDatabase, 'exec'>;
+const settlementApply = Reflect.apply, settlementGet = WeakMap.prototype.get, settlementSet = WeakMap.prototype.set, freezeSettlement = Object.freeze;
+interface SettlementSource { readonly receipt: NativeWorkSettlementReceipt; readonly publication: NativeWorkSettlementPublication; readonly runnerReceipt: DurableContractReceipt }
+// Exact publication data is retained only by the actual immutable native
+// request owner. Independent saved adoption validates its commitment once;
+// copied public JSON cannot acquire this source lifetime.
+const settlementSources = new WeakMap<DurableContractRequest, SettlementSource>();
+const historicalSettlementKeys = new WeakMap<DurableContractRequest, string>();
+function oldSettlementKey(record: NativeWorkExecutionRecord): string {
+  if (record.version === 1) return nativeExecutionStorageKey(record);
+  const held = settlementApply(settlementGet, historicalSettlementKeys, [record.request]) as string | undefined;
+  if (held) return held;
+  const key = durableKeyHash(record.request.key); settlementApply(settlementSet, historicalSettlementKeys, [record.request, key]); return key;
+}
+function historicalReceiptMatches(record: NativeWorkExecutionRecord, digest: string, candidate?: SettlementSource): boolean {
+  const expected = (settlementApply(settlementGet, settlementSources, [record.request]) as SettlementSource | undefined) ?? candidate;
+  if (expected) return expected.receipt.version === 1 && expected.receipt.receiptDigest === digest && isDeepStrictEqual(expected.runnerReceipt, record.receipt);
+  return nativeSettlementDigest(record.receipt) === digest;
+}
+function retainSettlement(record: NativeWorkExecutionRecord, receipt: NativeWorkSettlementReceipt, publication: NativeWorkSettlementPublication, candidate?: SettlementSource): NativeWorkSettlementReceipt {
+  const original = settlementApply(settlementGet, settlementSources, [record.request]) as SettlementSource | undefined;
+  const expected = original ?? candidate;
+  if (expected) {
+    if (!isDeepStrictEqual(expected.receipt, receipt) || !isDeepStrictEqual(expected.publication, publication) || !isDeepStrictEqual(expected.runnerReceipt, record.receipt)) throw new NativeWorkExecutionError('invalid');
+    return expected.receipt;
+  }
+  if (nativeSettlementPublicationCommitment(publication) !== receipt.publicationDigest) throw new NativeWorkExecutionError('invalid');
+  const pending: unknown[] = [receipt, publication];
+  while (pending.length) { const value = pending.pop(); if (!value || typeof value !== 'object') continue; for (const child of Object.values(value)) pending.push(child); freezeSettlement(value); }
+  settlementApply(settlementSet, settlementSources, [record.request, { receipt, publication, runnerReceipt: record.receipt! }]); return receipt;
+}
 export function createNativeWorkExecutionTable(db: Pick<SqlDatabase, 'run'>): void {
   db.run('CREATE TABLE IF NOT EXISTS native_work_executions (project_id TEXT NOT NULL, key_hash TEXT NOT NULL, format_version INTEGER NOT NULL, state_json TEXT NOT NULL, attempt_id TEXT NOT NULL, PRIMARY KEY(project_id, key_hash), UNIQUE(project_id, attempt_id))');
 }
@@ -19,12 +49,18 @@ export function createNativeWorkExecutionIntentTable(db: Pick<SqlDatabase, 'run'
 /** DB settlement migration composes after the intake schema. Existing execution/intent formats are unchanged. */
 export function createNativeWorkSettlementTable(db: Pick<SqlDatabase, 'run'>): void {
   db.run('CREATE TABLE IF NOT EXISTS native_work_execution_settlements (project_id TEXT NOT NULL, key_hash TEXT NOT NULL, format_version INTEGER NOT NULL, state_json TEXT NOT NULL, PRIMARY KEY(project_id, key_hash))');
+  createNativeWorkSettlementTargetIndex(db);
+}
+/** Index the actual historical target lookup; fresh/no-settlement reads must
+ * not scan all completed project settlements merely to avoid a key digest. */
+export function createNativeWorkSettlementTargetIndex(db: Pick<SqlDatabase, 'run'>): void {
+  db.run("CREATE INDEX IF NOT EXISTS native_work_settlement_targets ON native_work_execution_settlements(project_id,format_version,json_extract(state_json, '$.target.attemptId'))");
 }
 export function validateNativeWorkSettlementTable(db: SqlReader): void {
   validateColumns(db, 'native_work_execution_settlements', knowledgeSchemaColumns.settlement);
   for (const row of db.exec('SELECT project_id, key_hash, format_version, state_json FROM native_work_execution_settlements')[0]?.values ?? []) {
     const receipt = nativeWorkSettlementSchema.parse(JSON.parse(String(row[3])));
-    if (row[0] !== receipt.projectId || row[1] !== receipt.keyHash || row[2] !== 1) throw new NativeWorkExecutionError('invalid');
+    if (row[0] !== receipt.projectId || row[1] !== nativeSettlementStorageKey(receipt) || row[2] !== receipt.version) throw new NativeWorkExecutionError('invalid');
     const current = read(db, receipt.projectId, { attemptId: receipt.target.attemptId });
     if (!current.settlement || !isDeepStrictEqual(current.settlement, receipt)) throw new NativeWorkExecutionError('invalid');
   }
@@ -74,7 +110,7 @@ function sameFacts(a: NativeWorkExecutionIntent | NativeWorkExecutionRecord, b: 
   return a.version === b.version && isDeepStrictEqual(a.owner, b.owner) && a.projectId === b.projectId && sameDurableRequest(a.request, b.request)
     && Object.keys(a.target).every(key => a.target[key as keyof typeof a.target] === b.target[key as keyof typeof b.target]) && sameScopes(a.authorityScopes, b.authorityScopes);
 }
-function read(db: SqlReader, projectId: string, key: Lookup, original?: NativeExecutionOriginal): NativeWorkExecutionTransaction {
+function read(db: SqlReader, projectId: string, key: Lookup, original?: NativeExecutionOriginal, candidate?: SettlementSource): NativeWorkExecutionTransaction {
   const ledgerRow = db.exec('SELECT format_version, revision, state_json FROM work_ledgers WHERE project_id = ?', [projectId])[0]?.values[0];
   const ledger = ledgerRow ? readWorkLedgerState(JSON.parse(String(ledgerRow[2])), projectId) : createEmptyWorkLedgerState(projectId);
   if (ledgerRow && (ledgerRow[0] !== ledger.version || ledgerRow[1] !== ledger.revision)) throw new NativeWorkExecutionError('invalid');
@@ -86,28 +122,53 @@ function read(db: SqlReader, projectId: string, key: Lookup, original?: NativeEx
   if (intent && (row?.[0] !== intent.version || intent.projectId !== projectId || intent.target.attemptId !== key.attemptId)) throw new NativeWorkExecutionError('invalid');
   if (intent && record && (!sameFacts(intent, record) || !['associated', 'cancelled'].includes(intent.state) || (intent.state === 'cancelled' && record.state !== 'cancelled'))) throw new NativeWorkExecutionError('invalid');
   // An associated intent with a missing execution is preserved for explicit host recovery.
-  const settlementRow = record ? db.exec('SELECT format_version,state_json FROM native_work_execution_settlements WHERE project_id = ? AND key_hash = ?', [projectId, durableKeyHash(record.request.key)])[0]?.values[0] : undefined;
-  const settlement = settlementRow ? nativeWorkSettlementSchema.parse(JSON.parse(String(settlementRow[1]))) : null;
+  let settlementRow = record ? db.exec('SELECT format_version,state_json,key_hash FROM native_work_execution_settlements WHERE project_id = ? AND key_hash = ?', [projectId, `v2:${durableKeyIdentity(record.request.key)}`])[0]?.values[0] : undefined;
+  // Query actual old target metadata before considering its historical index
+  // recipe. Fresh projects/attempts need no digest to search absent old state.
+  // JSON lookup already belongs to the actual KnowledgeStore SQLite protocol.
+  if (!settlementRow && record) {
+    const old = db.exec("SELECT format_version,state_json,key_hash FROM native_work_execution_settlements WHERE project_id = ? AND format_version = 1 AND json_extract(state_json, '$.target.attemptId') = ?", [projectId, record.target.attemptId])[0]?.values ?? [];
+    if (old.length > 1) throw new NativeWorkExecutionError('invalid');
+    settlementRow = old[0];
+  }
+  let settlement = settlementRow ? nativeWorkSettlementSchema.parse(JSON.parse(String(settlementRow[1]))) : null;
+  if (!settlement && record && settlementApply(settlementGet, settlementSources, [record.request])) throw new NativeWorkExecutionError('invalid');
   if (settlement) {
-    if (!record?.receipt || settlementRow?.[0] !== 1 || settlement.projectId !== projectId || settlement.keyHash !== durableKeyHash(record.request.key)
-      || settlement.receiptDigest !== nativeSettlementDigest(record.receipt) || settlement.payloadRevision !== durablePayloadRevision(record.request)
-      || !isDeepStrictEqual(settlement.target, record.target) || settlement.contractId !== record.receipt.contractId
-      || settlement.evidenceSequence !== settlement.reportSequence + 1) throw new NativeWorkExecutionError('invalid');
-    const report = ledger.history[settlement.reportSequence - 1]; const evidence = ledger.history[settlement.evidenceSequence - 1];
-    if (!report || report.type !== 'report' || report.requestId !== settlement.reportRequestId || report.workId !== record.target.workId
-      || !evidence || evidence.type !== 'record_evidence' || evidence.requestId !== settlement.evidenceRequestId || evidence.evidence?.id !== settlement.evidenceId
+    if (!record?.receipt || settlementRow?.[0] !== settlement.version || settlementRow?.[2] !== nativeSettlementStorageKey(settlement) || settlement.projectId !== projectId
+      || settlement.payloadRevision !== durablePayloadRevision(record.request) || !isDeepStrictEqual(settlement.target, record.target)
+      || settlement.contractId !== record.receipt.contractId || settlement.evidenceSequence !== settlement.reportSequence + 1) throw new NativeWorkExecutionError('invalid');
+    if (settlement.version === 1 ? settlement.keyHash !== oldSettlementKey(record) || !historicalReceiptMatches(record, settlement.receiptDigest, candidate)
+      : !isDeepStrictEqual(settlement.receipt, record.receipt)) throw new NativeWorkExecutionError('invalid');
+    const report = ledger.history[settlement.reportSequence - 1], evidence = ledger.history[settlement.evidenceSequence - 1];
+    const reportedAttempt = report?.type === 'report' ? report.attempts.find(attempt => attempt.id === record.target.attemptId) : undefined;
+    if (!report || report.type !== 'report' || report.requestId !== settlement.reportRequestId || report.workId !== record.target.workId || report.attemptId !== record.target.attemptId
+      || !reportedAttempt || reportedAttempt.workId !== record.target.workId || typeof reportedAttempt.report !== 'string'
+      || reportedAttempt.state !== 'complete' || report.work.id !== record.target.workId || report.work.currentAttemptId !== record.target.attemptId || report.work.reportedState !== 'complete'
+      || !evidence || evidence.type !== 'record_evidence' || evidence.requestId !== settlement.evidenceRequestId || evidence.attemptId !== record.target.attemptId || evidence.evidence?.id !== settlement.evidenceId
       || !isDeepStrictEqual(evidence.evidence.target, settlement.targetAfterReport)
       || !isDeepStrictEqual({ outcome: evidence.evidence.outcome, reason: evidence.evidence.reason, references: evidence.evidence.references, source: evidence.evidence.source, criteriaResults: evidence.evidence.criteriaResults }, settlement.attestation)
       || settlement.targetAfterReport.workRevision !== record.target.workRevision + 1 || settlement.targetAfterReport.attemptRevision !== record.target.attemptRevision + 1
       || settlement.targetAfterReport.criteriaRevision !== record.target.criteriaRevision || settlement.targetAfterReport.workId !== record.target.workId || settlement.targetAfterReport.attemptId !== record.target.attemptId
-      || report.actorId !== evidence.actorId || report.requestId !== `native-report:${settlement.keyHash}` || evidence.requestId !== `native-evidence:${settlement.keyHash}`
-      || settlement.evidenceId !== `native-evidence-${settlement.keyHash}` || settlement.attestation.source !== 'host_check'
-      || settlement.attestation.criteriaResults.length !== record.request.input.nativeSource!.criteria.length || settlement.attestation.criteriaResults.some((item, index) => item.criterionIndex !== index)
-      || !settlement.attestation.references.some(item => item.ref === `execution:${settlement.contractId}` && item.digest === settlement.contractDigest)
-      || !settlement.attestation.references.some(item => item.ref === `receipt:${settlement.contractId}` && item.digest === settlement.receiptDigest)
-      || report.work.goal !== record.request.input.nativeSource!.goal || JSON.stringify(report.work.criteria) !== JSON.stringify(record.request.input.nativeSource!.criteria)
-      || report.work.revision !== settlement.targetAfterReport.workRevision || report.attempts[0]?.revision !== settlement.targetAfterReport.attemptRevision
-      || nativeSettlementDigest({ report: report.attempts[0]?.report, attestation: settlement.attestation, receiptDigest: settlement.receiptDigest, contractDigest: settlement.contractDigest, actorId: report.actorId }) !== settlement.publicationDigest) throw new NativeWorkExecutionError('invalid');
+      || report.actorId !== evidence.actorId || evidence.evidence.actorId !== report.actorId || reportedAttempt.ownerId !== report.actorId
+      || settlement.attestation.source !== 'host_check' || settlement.attestation.criteriaResults.length !== record.request.input.nativeSource!.criteria.length
+      || settlement.attestation.criteriaResults.some((item, index) => item.criterionIndex !== index)
+      || report.work.goal !== record.request.input.nativeSource!.goal || !isDeepStrictEqual(report.work.criteria, record.request.input.nativeSource!.criteria)
+      || report.work.revision !== settlement.targetAfterReport.workRevision || report.work.criteriaRevision !== settlement.targetAfterReport.criteriaRevision || reportedAttempt.revision !== settlement.targetAfterReport.attemptRevision) throw new NativeWorkExecutionError('invalid');
+    if (settlement.version === 1) {
+      const legacy = settlement;
+      if (report.requestId !== `native-report:${legacy.keyHash}` || evidence.requestId !== `native-evidence:${legacy.keyHash}` || legacy.evidenceId !== `native-evidence-${legacy.keyHash}`
+        || !legacy.attestation.references.some(item => item.ref === `execution:${legacy.contractId}` && item.digest === legacy.contractDigest)
+        || !legacy.attestation.references.some(item => item.ref === `receipt:${legacy.contractId}` && item.digest === legacy.receiptDigest)
+        ) throw new NativeWorkExecutionError('invalid');
+      settlement = retainSettlement(record, legacy, { report: reportedAttempt.report, attestation: legacy.attestation, receiptDigest: legacy.receiptDigest, contractDigest: legacy.contractDigest, actorId: report.actorId }, candidate);
+    } else {
+      const current = settlement;
+      if (!/^native-report-v2:[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/.test(report.requestId) || !/^native-evidence-v2:[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/.test(evidence.requestId) || current.evidenceId !== evidence.requestId
+        || !current.attestation.references.some(item => item.ref === `execution:${current.contractId}`)
+        || !current.attestation.references.some(item => item.ref === `receipt:${current.contractId}`)
+        || (record.owner && record.owner.principalId !== report.actorId)) throw new NativeWorkExecutionError('invalid');
+      settlement = retainSettlement(record, current, { version: 2, report: reportedAttempt.report, attestation: current.attestation, receipt: current.receipt, actorId: report.actorId }, candidate);
+    }
   }
   return { ledger, record, intent, settlement };
 }
@@ -140,7 +201,7 @@ function validateIntentTransition(current: NativeWorkExecutionTransaction, next:
     || (previous.state === 'refused' && !['refused', 'cancelled'].includes(next.state))) throw new NativeWorkExecutionError('conflict');
 }
 /** One owner and one existing KnowledgeStore database; no observer launches work. */
-export function createNativeWorkExecutionStorage(sqlite: SQLiteStore, projectId: string, refresh: () => void, beforeV2Write?: () => void, beforeCiV2Write?: () => void): NativeWorkExecutionStorage {
+export function createNativeWorkExecutionStorage(sqlite: SQLiteStore, projectId: string, refresh: () => void, beforeV2Write?: () => void, beforeCiV2Write?: () => void, beforeSettlementV2Write?: () => void): NativeWorkExecutionStorage {
   createEmptyWorkLedgerState(projectId);
   let closed = false; const pending = new Set<Promise<unknown>>(); let closing: Promise<void> | undefined;
   function transaction<T>(key: Lookup, decide: (current: NativeWorkExecutionTransaction) => NativeWorkExecutionMutation<T>, afterDurable?: (value: T, current: () => NativeWorkExecutionTransaction) => void, original?: NativeExecutionOriginal): Promise<T> {
@@ -195,40 +256,58 @@ export function createNativeWorkExecutionStorage(sqlite: SQLiteStore, projectId:
     currentByAttempt(attemptId, original) { if (closed) throw new NativeWorkExecutionError('closed'); if (!attemptId || typeof attemptId !== 'string') throw new NativeWorkExecutionError('invalid'); return sqlite.readPersisted(db => read(db, projectId, { attemptId }, original)); },
     transaction,
     transactionByAttempt(attemptId, decide, afterDurable, original) { return transaction({ attemptId }, decide, afterDurable, original); },
-    settle(key, decide, assertCurrent) {
+    settle(key, decide, assertCurrent, original) {
       if (closed) return Promise.reject(new NativeWorkExecutionError('closed'));
-      const lookup = { ...key }; durableKeyHash(lookup);
+      const lookup = { ...key }; durableKeyIdentity(lookup);
+      let actualSource: NativeWorkExecutionRecord | undefined, candidate: SettlementSource | undefined;
       const operation = sqlite.transactPersisted(db => {
-        const current = read(db, projectId, lookup);
-        const proposed = decide(structuredClone(current));
-        if (proposed && typeof (proposed as unknown as { then?: unknown }).then === 'function') throw new NativeWorkExecutionError('invalid');
+        const current = read(db, projectId, lookup, original); actualSource = current.record ?? undefined;
+        const proposed = decide({ ...current, ledger: structuredClone(current.ledger) });
+        if (proposed && typeof (proposed as unknown as { then?: unknown }).then === 'function') { drainOwned(proposed); throw new NativeWorkExecutionError('invalid'); }
+        const publication = proposed === null ? null : captureNativeSettlementPublication(proposed);
         if (current.settlement) {
-          if (proposed !== null && nativeSettlementDigest(proposed) !== current.settlement.publicationDigest) throw new NativeWorkExecutionError('conflict');
+          if (publication !== null && nativeSettlementPublicationCommitment(publication) !== current.settlement.publicationDigest) throw new NativeWorkExecutionError('conflict');
           return { changed: false, value: current.settlement };
         }
         const record = current.record;
-        if (!proposed || !record?.receipt || record.state !== 'launch-claimed' || (current.intent !== null && current.intent.state !== 'associated')) throw new NativeWorkExecutionError('stale');
-        const publication = { ...structuredClone(proposed), attestation: nativeWorkAttestationSchema.parse(proposed.attestation) };
-        if (publication.receiptDigest !== nativeSettlementDigest(record.receipt) || !/^[0-9a-f]{64}$/.test(publication.contractDigest)) throw new NativeWorkExecutionError('conflict');
+        if (!publication || !record?.receipt || record.state !== 'launch-claimed' || (current.intent !== null && current.intent.state !== 'associated')) throw new NativeWorkExecutionError('stale');
+        if (publication.version === 2 ? !isDeepStrictEqual(publication.receipt, record.receipt)
+          : publication.receiptDigest !== nativeSettlementDigest(record.receipt)) throw new NativeWorkExecutionError('conflict');
         assertCurrent();
-        const keyHash = durableKeyHash(record.request.key);
-        const reportRequestId = `native-report:${keyHash}`; const evidenceRequestId = `native-evidence:${keyHash}`;
+        const oldKey = publication.version === 2 ? undefined : oldSettlementKey(record);
+        const reportRequestId = publication.version === 2 ? `native-report-v2:${opaqueUuid()}` : `native-report:${oldKey}`;
+        const evidenceRequestId = publication.version === 2 ? `native-evidence-v2:${opaqueUuid()}` : `native-evidence:${oldKey}`;
+        const evidenceId = publication.version === 2 ? evidenceRequestId : `native-evidence-${oldKey}`;
         const at = Math.max(Date.now(), current.ledger.history.at(-1)?.at ?? 0);
         const reduced = reduceWorkLedgerSettlement(current.ledger, { target: record.target, report: publication.report, attestation: publication.attestation,
-          actorId: publication.actorId, reportRequestId, evidenceRequestId }, { now: () => at, newId: () => `native-evidence-${keyHash}` });
-        const receipt = nativeWorkSettlementSchema.parse({ version: 1, projectId, keyHash, receiptDigest: publication.receiptDigest,
-          payloadRevision: durablePayloadRevision(record.request), target: record.target, contractId: record.receipt.contractId,
-          contractDigest: publication.contractDigest, publicationDigest: nativeSettlementDigest(publication), reportRequestId, evidenceRequestId,
+          actorId: publication.actorId, reportRequestId, evidenceRequestId }, { now: () => at, newId: () => evidenceId });
+        const receipt = nativeWorkSettlementSchema.parse({ ...(publication.version === 2 ? { version: 2, receipt: publication.receipt } : { version: 1, keyHash: oldKey, receiptDigest: publication.receiptDigest, contractDigest: publication.contractDigest }),
+          projectId, payloadRevision: durablePayloadRevision(record.request), target: record.target, contractId: record.receipt.contractId,
+          publicationDigest: nativeSettlementPublicationCommitment(publication), reportRequestId, evidenceRequestId,
           reportSequence: reduced.report.sequence, evidenceSequence: reduced.evidence.sequence,
           evidenceId: reduced.evidence.evidence!.id, targetAfterReport: reduced.evidence.evidence!.target, attestation: publication.attestation });
-        // Last owner/cancellation/artifact observation follows every reducer/clock/read callback.
+        candidate = { receipt, publication, runnerReceipt: record.receipt };
+        if (receipt.version === 2) {
+          const declared: unknown = beforeSettlementV2Write?.(); if (declared !== undefined) { drainOwned(declared); throw new NativeWorkExecutionError('invalid'); }
+        }
+        // Last owner/cancellation/artifact observation follows every reducer,
+        // clock and format callback. Candidate comparison below is not adoption
+        // of durable source: only the actual afterDurable image may retain it.
         assertCurrent();
         db.run('INSERT INTO work_ledgers(project_id,format_version,revision,state_json) VALUES (?,?,?,?) ON CONFLICT(project_id) DO UPDATE SET format_version=excluded.format_version,revision=excluded.revision,state_json=excluded.state_json', [projectId, reduced.state.version, reduced.state.revision, JSON.stringify(reduced.state)]);
-        db.run('INSERT INTO native_work_execution_settlements(project_id,key_hash,format_version,state_json) VALUES (?,?,?,?)', [projectId, keyHash, 1, JSON.stringify(receipt)]);
-        read(db, projectId, lookup); // Validate the adjacent events and immutable receipt before committing the image.
+        db.run('INSERT INTO native_work_execution_settlements(project_id,key_hash,format_version,state_json) VALUES (?,?,?,?)', [projectId, nativeSettlementStorageKey(receipt), receipt.version, JSON.stringify(receipt)]);
+        read(db, projectId, lookup, record, candidate);
         assertCurrent();
         return { changed: true, value: receipt };
-      }, refresh).then(result => { if (result.kind !== 'completed') throw new NativeWorkExecutionError('unavailable'); return result.value; });
+      }, refresh, (receipt, db) => {
+        const confirmed = read(db, projectId, lookup, actualSource ?? original, candidate);
+        if (!confirmed.record || !confirmed.settlement || !isDeepStrictEqual(confirmed.settlement, receipt)) throw new NativeWorkExecutionError('invalid');
+        if (candidate) {
+          const pending: unknown[] = [candidate.receipt, candidate.publication];
+          while (pending.length) { const value = pending.pop(); if (!value || typeof value !== 'object') continue; for (const child of Object.values(value)) pending.push(child); freezeSettlement(value); }
+          settlementApply(settlementSet, settlementSources, [confirmed.record.request, candidate]);
+        }
+      }).then(result => { if (result.kind !== 'completed') throw new NativeWorkExecutionError('unavailable'); return result.value; });
       pending.add(operation); void operation.then(() => pending.delete(operation), () => pending.delete(operation)); return operation;
     },
     close() { closed = true; return closing ??= Promise.allSettled([...pending]).then(() => {}); },

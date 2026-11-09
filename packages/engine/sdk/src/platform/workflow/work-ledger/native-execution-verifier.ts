@@ -1,9 +1,9 @@
 /** Host-only original-source checks. A terminal runner is never its own attestation. */
-import { createHash } from 'node:crypto';
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, realpathSync } from 'node:fs';
-import { isDeepStrictEqual } from 'node:util';
+import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
-import { hashState, readYesNo, type YesNoBand, type DecisionLog, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { hashState, recordedJudgmentInputHash, readYesNo, type YesNoBand, type DecisionLog, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { captureOwnedJson } from '../../gate/judgment-input.js';
 import { assertDurableCheckpoint, parseDurableAdmission } from '../../contract/durable-admission.js';
 import { assertNativeContractSource, nativeContractSourceForAdmission } from '../../contract/native-source.js';
 import { UNIT_JUDGE_BANDS } from '../../contract/batteries/unit-judge.js';
@@ -21,11 +21,11 @@ import type { ReadAccessFilter } from '../../tools/shared/read-access.js';
 import { emptyWorkItemUsage } from '../../orchestration/types.js';
 import { parseNativeWorkExecutionRecord, type NativeWorkExecutionRecord } from './native-execution-types.js';
 import type { WorkEvidenceReference } from './types.js';
+import { assertNativeRecordedDecision } from './native-recorded-decision.js';
 import { nativeJudgeBatches, nativeQuestionBatches } from './native-judge-proof.js';
-import { nativeSettlementDigest, type NativeWorkAttestation } from './native-settlement-types.js';
+import type { NativeWorkAttestation } from './native-settlement-types.js';
 export type { NativeWorkAttestation } from './native-settlement-types.js';
 
-const digest = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
 function freeze<T>(value: T): T {
   if (value !== null && typeof value === 'object') { for (const child of Object.values(value)) freeze(child); Object.freeze(value); }
   return value;
@@ -99,7 +99,6 @@ function sameArtifact(left: ArtifactSnapshot, right: ArtifactSnapshot): boolean 
 export interface VerifiedNativeWorkExecution {
   readonly attestation: NativeWorkAttestation;
   readonly report: string;
-  readonly contractDigest: string;
   /** Synchronous last guard for the exact frozen proof, including host-read bytes. */
   assertCurrent(): void;
 }
@@ -117,6 +116,7 @@ export async function verifyNativeWorkExecution(options: {
 }): Promise<VerifiedNativeWorkExecution> {
   // Parse a detached record before any borrowed hook. No original mutable requirement survives.
   const record = parseNativeWorkExecutionRecord(options.execution);
+  assertNativeRecordedDecision(record, options.decisionLog);
   const settings = freeze(structuredClone(options.settings));
   if (!record.receipt || record.state !== 'launch-claimed') throw new Error('Native execution has no claimed durable receipt');
   const admission = parseDurableAdmission({ ...record.receipt, input: record.request.input }, record.request);
@@ -134,7 +134,6 @@ export async function verifyNativeWorkExecution(options: {
   const answerCommitment = (): string => answerOutput().digest;
   assertDurableCheckpoint(contract, admission); assertNativeContractSource(contract);
   if (contract.status !== 'passed') throw new Error('Native verifier requires the bound passed contract');
-  const contractDigest = nativeSettlementDigest(contract);
   const units = contract.units.flatMap(unit => unit.attemptUnits?.length ? unit.attemptUnits.filter(attempt => attempt.status === 'passed') : [unit]);
   const object = (value: unknown): Record<string, unknown> | null => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
   const rawNo = (value: unknown, band: YesNoBand): number | null => {
@@ -317,16 +316,14 @@ export async function verifyNativeWorkExecution(options: {
   const root = evidenceRoot(contract);
   const paths = [...new Set(contract.units.flatMap(unit => unit.touchedPaths))];
   if (paths.length > 94) throw new Error('Native evidence exceeds ledger reference capacity');
-  const captured: (ArtifactSnapshot & { readonly path: string; readonly digest: string })[] = [];
+  const captured: (ArtifactSnapshot & { readonly path: string })[] = [];
   let bytes = 0;
   for (const path of paths) {
     current(); const absolute = contained(root, path);
     if (!await options.readAccessFilter(absolute)) throw new Error('Native artifact read is access-restricted');
     current(); const content = readArtifact(root, path); bytes += content.byteLength;
     if (bytes > 20 * 1024 * 1024) throw new Error('Native artifact capture exceeds total budget');
-    const artifactDigest = content.kind === 'file'
-      ? nativeSettlementDigest({ kind: 'file', sha256: digest(content.bytes) }) : digest('native-artifact:absent');
-    captured.push({ path, ...content, digest: artifactDigest });
+    captured.push({ path, ...content });
   }
   const assertCurrent = () => {
     current(); const latest = options.runner.get(admission.contractId);
@@ -343,7 +340,7 @@ export async function verifyNativeWorkExecution(options: {
   const changes: FileChange[] = captured.map(item => ({ path: item.path, diff: `${item.path}\n${item.text}` }));
   const evidence = freeze(trimEvidence({ output: contract.answer ?? '', changes, gates: deliverable!.gates, commands: [] }, unit));
   const originalSource = nativeContractSourceForAdmission(contract);
-  const states = new Map<string, { hash: string; questions: unknown; answers: unknown; decisionId?: string }>();
+  const states = new Map<string, { hash: string; state: EntryType; questions: unknown; answers: unknown; decisionId?: string }>();
   const checkAbort = new AbortController(); const checkSignal = AbortSignal.any([options.signal, checkAbort.signal]);
   const pending = new Set<Promise<unknown>>();
   const checkPort: JudgmentPort = { ...options.port, ask(request) {
@@ -353,16 +350,20 @@ export async function verifyNativeWorkExecution(options: {
       const questions = freeze(structuredClone(request.questions));
       const site = request.context?.site;
       if (!site || (site !== CHECK_SITES.judge && site !== CHECK_SITES.quality)) throw new Error('Unexpected native settlement decision site');
-      const captured = { hash: hashState(state), questions };
       // Forward the registered runUnitCheck request with detached images. This
       // adapter defines no questions or decision; the generic request type stays intact.
       const forwarded: typeof request = { ...request, state, questions, signal: checkSignal, beforeAttempt: active };
       active();
       // The shared port lends an object. Snapshot before borrowed guards or a
       // later microtask can change what the battery reads after provenance capture.
-      const result = freeze(structuredClone(await options.port.ask(forwarded)));
+      const borrowed = await options.port.ask(forwarded);
+      const result = freeze(structuredClone(captureOwnedJson(borrowed, nodeTypes.isProxy))) as typeof borrowed;
+      // Actual recorded results already bind this exact input. A borrowed copy
+      // cannot inherit that provenance: compare its actual forwarded input to
+      // the independent log once, then still compare questions/answers below.
+      const recorded = recordedJudgmentInputHash(borrowed, forwarded) ?? hashState(state);
       active();
-      states.set(site, { ...captured, answers: result.answers, ...(result.decisionId ? { decisionId: result.decisionId } : {}) }); return result;
+      states.set(site, { hash: recorded, state, questions, answers: result.answers, ...(result.decisionId ? { decisionId: result.decisionId } : {}) }); return result;
     });
     pending.add(operation); void operation.then(() => pending.delete(operation), () => pending.delete(operation)); return operation;
   } };
@@ -376,23 +377,25 @@ export async function verifyNativeWorkExecution(options: {
   for (const path of paths) { if (!await options.readAccessFilter(contained(root, path))) throw new Error('Native artifact read was revoked'); assertCurrent(); }
   const decisionReferences = result.check.decisionIds.map((id, index): WorkEvidenceReference => {
     const entry = options.decisionLog.get(id); const site = index === 0 ? CHECK_SITES.judge : CHECK_SITES.quality;
-    const expected = hashState({ ...(index === 0 ? judgeState(unit, evidence) : qualityState(unit, evidence)), originalSource } as unknown as EntryType);
-    if (!entry || entry.status !== 'answered' || entry.context.site !== site || entry.stateHash !== expected || states.get(site)?.hash !== expected || states.get(site)?.decisionId !== id || !isDeepStrictEqual(states.get(site)?.questions, entry.questions) || !isDeepStrictEqual(states.get(site)?.answers, entry.answers)) throw new Error('Native decision provenance is missing or mismatched');
-    const { notes: _notes, ...immutable } = entry;
-    return { kind: 'decision', ref: `decision:${id}`, digest: nativeSettlementDigest(immutable) };
+    const expected = { ...(index === 0 ? judgeState(unit, evidence) : qualityState(unit, evidence)), originalSource } as unknown as EntryType;
+    const observed = states.get(site);
+    if (!entry || !observed || entry.status !== 'answered' || entry.context.site !== site || entry.stateHash !== observed.hash || !isDeepStrictEqual(observed.state, expected) || observed.decisionId !== id || !isDeepStrictEqual(observed.questions, entry.questions) || !isDeepStrictEqual(observed.answers, entry.answers)) throw new Error('Native decision provenance is missing or mismatched');
+    // The actual independent log already committed this full original input.
+    // Reuse that real content identity, not a new checksum of the log row.
+    return { kind: 'decision', ref: `decision:${id}`, digest: entry.stateHash };
   });
   if (decisionReferences.length !== 2 || new Set(result.check.decisionIds).size !== 2) throw new Error('Native settlement requires both recorded decision batteries');
   const references: WorkEvidenceReference[] = [...decisionReferences,
-    { kind: 'test', ref: `check:${contract.id}:${result.check.id}`, digest: nativeSettlementDigest(result.check) },
-    { kind: 'test', ref: `execution:${contract.id}`, digest: contractDigest },
-    { kind: 'test', ref: `receipt:${contract.id}`, digest: nativeSettlementDigest(record.receipt) },
-    ...captured.map(item => ({ kind: 'artifact' as const, ref: `artifact:${contract.id}:${item.path}`, digest: item.digest }))];
+    { kind: 'test', ref: `check:${contract.id}:${result.check.id}` },
+    { kind: 'test', ref: `execution:${contract.id}` },
+    { kind: 'test', ref: `receipt:${contract.id}` },
+    ...captured.map(item => ({ kind: 'artifact' as const, ref: `artifact:${contract.id}:${item.path}` }))];
   const criteriaResults = source.criteria.map((_text, criterionIndex) => ({ criterionIndex,
     status: result.verdicts.get(`native.c${criterionIndex}`) === 'met' ? 'satisfied' as const : result.verdicts.get(`native.c${criterionIndex}`) === 'unmet' ? 'unsatisfied' as const : 'unknown' as const,
-    references: references.map(item => item.ref) }));
+    references: decisionReferences.map(item => item.ref) }));
   const passed = result.check.result === 'pass' && criteriaResults.every(item => item.status === 'satisfied');
   result.recordAction(`native settlement ${admission.contractId}: ${passed ? 'verified' : 'failed'} against ${admission.payloadRevision}`);
   assertCurrent();
   return { attestation: freeze({ outcome: passed ? 'verified' : 'failed', reason: passed ? 'Every original native criterion and quality check passed against host-collected evidence.' : 'Original native criteria or quality did not pass verification.', source: 'host_check', criteriaResults, references }),
-    report: (contract.answer?.trim() || 'Native execution finished; see revision-bound verification evidence.').slice(0, 20_000), contractDigest, assertCurrent };
+    report: (contract.answer?.trim() || 'Native execution finished; see revision-bound verification evidence.').slice(0, 20_000), assertCurrent };
 }

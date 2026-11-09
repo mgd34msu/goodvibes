@@ -48,7 +48,7 @@ export class NativeWorkExecutionError extends Error {
  * principal/authority id and token/incarnation equality are checked by the host. */
 export interface NativeExecutionOwnerFacts { readonly principalId: string; readonly authorityRevision: string; readonly scopeId: string; readonly scopeRevision: string }
 export type NativeExecutionOriginal = NativeWorkExecutionRecord | NativeWorkExecutionIntent;
-interface NativeRecordOrigin { storedKey?: string; observedOwner?: NativeExecutionOwnerFacts }
+interface NativeRecordOrigin { storedKey?: string; observedOwner?: NativeExecutionOwnerFacts; historicalTargetRevision?: string }
 interface NativeRequestOwner { readonly projectId: string; readonly projectRoot: string; readonly owner: NativeExecutionOwnerFacts; readonly authorityScopes: readonly string[]; readonly commitment: string }
 const nativeApply = Reflect.apply, nativeGet = WeakMap.prototype.get, nativeSet = WeakMap.prototype.set, freeze = Object.freeze;
 const nativeWeakHas = WeakSet.prototype.has, nativeWeakAdd = WeakSet.prototype.add, nativeJsonParse = JSON.parse, clone = structuredClone, isProxy = nodeTypes.isProxy;
@@ -57,6 +57,11 @@ const requestOwners = new WeakMap<DurableContractRequest, NativeRequestOwner>();
 const decodedJson = new WeakSet<object>();
 const origin = (value: NativeExecutionOriginal) => nativeApply(nativeGet, originals, [value]) as NativeRecordOrigin | undefined;
 function immutable(value: NativeExecutionOriginal) { return { version: value.version, projectId: value.projectId, target: value.target, authorityScopes: value.authorityScopes, request: value.request, ...(value.owner ? { owner: value.owner } : {}) }; }
+/** Public revision counters already travel in the actual recorded decision.
+ * They need neither another digest nor an extra private/public protocol token. */
+export function nativeExecutionTargetRevision(target: NativeWorkExecutionTarget): string {
+  return `w${target.workRevision.toString(36)}:c${target.criteriaRevision.toString(36)}:a${target.attemptRevision.toString(36)}`;
+}
 function source(value: unknown, previous?: NativeExecutionOriginal): Record<string, unknown> {
   // Native JSON decoding already creates fresh data-only ordinary objects.
   // Other callers first cross a descriptor-safe detached snapshot; cloning
@@ -142,6 +147,17 @@ export function parseNativeWorkExecutionRecord(value: unknown, previous?: Native
     if (!fields(row, ['version', 'projectId', 'target', 'authorityScopes', 'request', 'decision', 'decisionContext', 'receipt', 'state', ...(version === 2 ? ['owner'] : [])])) throw new Error();
     const data = common(row, previous), decisionContext = captureJevDecisionContext(row['decisionContext'] as JevDecisionContext), decision = validateJevDecision(row['decision'], decisionContext);
     if (decision.outcome !== 'act' || !isDeepStrictEqual(decision.binding, data.request.binding)) throw new Error();
+    const targets = decision.evidence.filter(reference => reference.id === 'native-work-attempt');
+    if (targets.length !== 1) throw new Error();
+    let historicalTargetRevision: string | undefined;
+    if (targets[0]!.revision !== nativeExecutionTargetRevision(data.target)) {
+      if (data.version !== 1 || !/^[0-9a-f]{64}$/.test(targets[0]!.revision)) throw new Error();
+      historicalTargetRevision = previous && origin(previous)?.historicalTargetRevision;
+      // Actual v1 saved decision evidence used this exact target recipe.
+      // Verify once on independent adoption; never emit it for fresh decisions.
+      historicalTargetRevision ??= createHash('sha256').update(JSON.stringify(data.target)).digest('hex');
+      if (targets[0]!.revision !== historicalTargetRevision) throw new Error();
+    }
     let receipt: DurableContractReceipt | null = null;
     if (row['receipt'] !== null) {
       if (previous && origin(previous) && 'receipt' in previous && previous.receipt && isDeepStrictEqual(row['receipt'], previous.receipt)) receipt = previous.receipt;
@@ -153,7 +169,9 @@ export function parseNativeWorkExecutionRecord(value: unknown, previous?: Native
       }
     }
     if (!['prepared', 'launch-claimed', 'cancelled'].includes(String(row['state'])) || (row['state'] === 'launch-claimed' && !receipt)) throw new Error();
-    return retain({ ...data, receipt, decision, decisionContext, state: row['state'] as NativeWorkExecutionRecord['state'] }, previous);
+    const result = retain({ ...data, receipt, decision, decisionContext, state: row['state'] as NativeWorkExecutionRecord['state'] }, previous);
+    if (historicalTargetRevision) origin(result)!.historicalTargetRevision = historicalTargetRevision;
+    return result;
   } catch { throw new NativeWorkExecutionError('invalid'); }
 }
 export function parseNativeWorkExecutionIntent(value: unknown, previous?: NativeExecutionOriginal): NativeWorkExecutionIntent {
@@ -220,6 +238,6 @@ export interface NativeWorkExecutionStorage {
   transactionByAttempt<T>(attemptId: string, decide: (current: NativeWorkExecutionTransaction) => NativeWorkExecutionMutation<T>, afterDurable?: (value: T, current: () => NativeWorkExecutionTransaction) => void, original?: NativeExecutionOriginal): Promise<T>;
   /** Atomic report, evidence and native settlement publication in the existing ledger transaction. */
   settle?(key: DurableContractRequest['key'], decide: (current: NativeWorkExecutionTransaction) => NativeWorkSettlementPublication | null,
-    assertCurrent: () => void): Promise<NativeWorkSettlementReceipt>;
+    assertCurrent: () => void, original?: NativeExecutionOriginal): Promise<NativeWorkSettlementReceipt>;
   close(): Promise<void>;
 }

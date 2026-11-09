@@ -3,16 +3,17 @@ import type { NativeContinuationGrant } from '../../pairing/pairing-token-store.
 import type { CiWatchSubscription } from '../../ci-watch/types.js';
 import type { ExternalOperationSource } from '../../permissions/external-request.js';
 import { createNativeCiContinuationHost, type NativeCiGrantOwner, type NativeCiContinuationPolicy } from './native-ci-continuation.js';
+import { assertNativeRecordedDecision } from './native-recorded-decision.js';
 import { nativeSelectedDiffEvidence } from './native-diff-evidence.js';
 import { verifyNativeWorkExecution } from './native-execution-verifier.js';
-import { nativeSettlementDigest, type NativeWorkSettlementReceipt } from './native-settlement-types.js';
+import type { NativeWorkSettlementReceipt } from './native-settlement-types.js';
 import type { CheckSettings } from '../../contract/check.js';
 import type { ReadAccessFilter } from '../../tools/shared/read-access.js';
 /** Native work -> durable runner bridge. No product payload can provide its authority owners. */
 import { randomBytes } from 'node:crypto';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { realpathSync } from 'node:fs';
-import { canonicalJson, type DecisionLog, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
+import type { DecisionLog, EntryType, JudgmentPort } from '@goodvibes-jev/judgment';
 import { decideAutonomous } from '../../gate/autonomous-decision.js';
 import { durableKeyIdentity, durablePayloadRevision, sameDurableRequest, type DurableContractAdmission, type DurableContractKey, type DurableContractRequest, type DurableStartedContract } from '../../contract/durable-admission.js';
 import { captureNativeContractSource } from '../../contract/native-source.js';
@@ -20,7 +21,7 @@ import type { ContractRunner } from '../../contract/runner.js';
 import type { ContractIntegrationInspection } from '../../contract/integration-inspection-wire.js';
 import { isTerminalContractStatus, type ContractView, type StartContractInput } from '../../contract/types.js';
 import type { NativeContractCompositionOwner } from '../../runtime/contract-composition.js';
-import { NativeWorkExecutionError, parseNativeWorkExecutionRecord, parseNativeWorkExecutionIntent, nativeExecutionOwnerMatches, bindNativeExecutionRequest, type NativeExecutionOwnerFacts, type NativeWorkExecutionIntent, type NativeWorkExecutionRecord, type NativeWorkExecutionStorage, type NativeWorkExecutionTarget, type NativeWorkExecutionTransaction } from './native-execution-types.js';
+import { NativeWorkExecutionError, parseNativeWorkExecutionRecord, parseNativeWorkExecutionIntent, nativeExecutionOwnerMatches, nativeExecutionTargetRevision, bindNativeExecutionRequest, type NativeExecutionOwnerFacts, type NativeWorkExecutionIntent, type NativeWorkExecutionRecord, type NativeWorkExecutionStorage, type NativeWorkExecutionTarget, type NativeWorkExecutionTransaction } from './native-execution-types.js';
 
 export interface NativePairedExecutionSnapshot {
   readonly kind: 'pairing-token'; readonly tokenId: string; readonly principalId: string;
@@ -164,15 +165,8 @@ export function createNativeWorkExecutionHost(deps: {
     if (record.projectId !== deps.projectId || record.request.input.projectRoot !== projectRoot || !nativeExecutionOwnerMatches(record, ownerFacts(current, currentScope)) || !equalScopes(current.scopes, record.authorityScopes)) throw new NativeWorkExecutionError('stale');
     return { current, currentScope };
   }
-  function assertRecorded(record: NativeWorkExecutionRecord) {
-    for (const id of record.decision.judgmentDecisionIds) {
-      const entry = deps.decisionLog.get(id);
-      if (!entry || entry.status !== 'answered' || entry.context.site !== 'work-ledger.native-start'
-        || !entry.notes.some(note => note.kind === 'action' && note.action === `autonomous:claim:${record.decision.decisionId}`)
-        || !entry.notes.some(note => note.kind === 'readings' && note.readings !== null && typeof note.readings === 'object' && !Array.isArray(note.readings)
-          && canonicalJson(note.readings['autonomousDecision']) === canonicalJson(record.decision as unknown as EntryType))) throw new NativeWorkExecutionError('unavailable');
-    }
-  }
+  function assertRecorded(record: NativeWorkExecutionRecord) { assertNativeRecordedDecision(record, deps.decisionLog); }
+
   function assertRecord(current: NativeWorkExecutionTransaction, record: NativeWorkExecutionRecord, owner: ActiveOwner) {
     assertOpen(); assertRecorded(record);
     if (owner.payloadRevision !== undefined && durablePayloadRevision(record.request) !== owner.payloadRevision) throw new NativeWorkExecutionError('stale');
@@ -290,7 +284,7 @@ export function createNativeWorkExecutionHost(deps: {
       instructions: 'Decide whether to start exactly this native work attempt from its complete original goal and ordered criteria. Authentication and scope are fixed host constraints. Do not ask for human approval or invent missing requirements.',
       actionDescription: 'Start the exact bound native work attempt through the durable contract runner.', binding,
       state: { originalSource: { goal: source.goal, criteria: source.criteria, ...(source.continuation ? { conversationContext: source.continuation.messages, ...(source.continuation.selectedDiff ? { selectedDiffContext: nativeSelectedDiffEvidence(source.continuation.selectedDiff) } : {}) } : {}) }, revisions: { work: target.workRevision, criteria: target.criteriaRevision, attempt: target.attemptRevision }, operation: { kind: 'start-native-work', projectRoot }, ...(request.input.taskEvidence ? { untrustedTaskEvidence: request.input.taskEvidence } : {}), deterministicConstraints: { existingActiveClaim: true } } as unknown as EntryType,
-      evidence: [{ id: 'native-work-source', revision: source.inputRevision }, { id: 'native-work-attempt', revision: `w${target.workRevision.toString(36)}:c${target.criteriaRevision.toString(36)}:a${target.attemptRevision.toString(36)}` }, ...(intent ? [{ id: 'native-intent-evaluation', revision: String(intent.generation) }] : [])],
+      evidence: [{ id: 'native-work-source', revision: source.inputRevision }, { id: 'native-work-attempt', revision: nativeExecutionTargetRevision(target) }, ...(intent ? [{ id: 'native-intent-evaluation', revision: String(intent.generation) }] : [])],
       continuations: [], conditions: [], allowAct: true, assertCurrent, signal });
     assertCurrent();
     if (read.decision.outcome !== 'act') {
@@ -348,7 +342,7 @@ export function createNativeWorkExecutionHost(deps: {
     const reconcile = () => authority.withCurrent(ownerFacts.current, async assertAuthority => deps.scopes.withCurrentScope(ownerFacts.currentScope, async assertScope => {
       if (!deps.storage.settle) throw new NativeWorkExecutionError('unavailable');
       return deps.storage.settle(key, latest => { assertAuthority(); assertScope(); inspectAuthority(record, authority);
-        if (!latest.settlement || latest.settlement.receiptDigest !== nativeSettlementDigest(record.receipt)) throw new NativeWorkExecutionError('conflict'); return null; }, () => {});
+        if (!latest.settlement || !latest.record || !sameDurableRequest(latest.record.request, record.request) || !isDeepStrictEqual(latest.record.receipt, record.receipt)) throw new NativeWorkExecutionError('conflict'); return null; }, () => {}, record);
     }));
     // Durable replay reconfirms directory durability, without reading Jev, artifacts or runner effects.
     if (current.settlement) return track(reconcile);
@@ -384,8 +378,8 @@ export function createNativeWorkExecutionHost(deps: {
           assertAuthority(); assertScope(); inspectAuthority(record, authority);
           if (latest.settlement) return null;
           assertRecord(latest, record, owner); proof.assertCurrent();
-          return { report: proof.report, attestation: proof.attestation, receiptDigest: nativeSettlementDigest(record.receipt), contractDigest: proof.contractDigest, actorId: owner.expected.principalId };
-        }, () => { assertAuthority(); assertScope(); proof.assertCurrent(); signal.throwIfAborted(); });
+          return { version: 2, report: proof.report, attestation: proof.attestation, receipt: record.receipt!, actorId: owner.expected.principalId };
+        }, () => { assertAuthority(); assertScope(); proof.assertCurrent(); signal.throwIfAborted(); }, record);
       }));
     });
     const owned = { authority: identity, controller, promise }; settlements.set(id, owned); settlementFailures.delete(id);

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { bindNativeExecutionRequest, parseNativeWorkExecutionRecord, parseNativeWorkExecutionRecordJson, parseNativeWorkExecutionIntent,
-  nativeExecutionOwnerMatches, nativeExecutionStorageKey, type NativeExecutionOwnerFacts, type NativeWorkExecutionTarget } from '../sdk/src/platform/workflow/work-ledger/native-execution-types.js';
+  nativeExecutionOwnerMatches, nativeExecutionStorageKey, nativeExecutionTargetRevision, type NativeExecutionOwnerFacts, type NativeWorkExecutionTarget } from '../sdk/src/platform/workflow/work-ledger/native-execution-types.js';
 import { captureNativeContractSource } from '../sdk/src/platform/contract/native-source.js';
 import { durablePayloadRevision, freezeDurableRequest } from '../sdk/src/platform/contract/durable-admission.js';
 import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
@@ -22,7 +22,7 @@ function draft(target: NativeWorkExecutionTarget = { workId: 'work-original', wo
     goal: 'Preserve exact original work.', criteria: ['Preserve exact original work.'] });
   const binding = { sourceId: source.sourceId, inputRevision: source.inputRevision, actionId: 'a'.repeat(64), actionRevision: opaqueUuid(), authorityId: opaqueUuid(), authorityRevision: 'pending', scopeId: opaqueUuid(), scopeRevision: opaqueUuid() };
   const request = bindNativeExecutionRequest({ key, binding, input: { ask: source.goal, nativeSource: source, projectRoot, sessionId: 'native-session', origin: 'external', isolation: 'shared' } }, 'project', owner, authorityScopes);
-  const context = { decisionId: 'recorded-native-decision', binding: request.binding, judgmentDecisionIds: ['recorded-native-reading'], evidence: [], continuations: [], resumeConditions: [] };
+  const context = { decisionId: 'recorded-native-decision', binding: request.binding, judgmentDecisionIds: ['recorded-native-reading'], evidence: [{ id: 'native-work-attempt', revision: nativeExecutionTargetRevision(target) }], continuations: [], resumeConditions: [] };
   const decision = { schemaVersion: 1 as const, decisionId: context.decisionId, binding: context.binding, judgmentDecisionIds: context.judgmentDecisionIds, evidence: context.evidence, outcome: 'act' as const, summary: 'Synthetic bound native act.' };
   return { version: 2 as const, projectId: 'project', target, owner, authorityScopes, request, decision, decisionContext: context, receipt: null, state: 'prepared' as const };
 }
@@ -72,6 +72,9 @@ test('copied records, accessors, proxies and public flags cannot inherit native 
   const altered = { ...structuredClone(original), request: { ...original.request, binding }, decision: { ...original.decision, binding }, decisionContext: { ...original.decisionContext, binding } };
   expect(() => parseNativeWorkExecutionRecord(altered, original)).toThrow();
   expect(() => parseNativeWorkExecutionRecordJson(JSON.stringify({ ...original, version: 3 }))).toThrow();
+  for (const field of ['workRevision', 'attemptRevision'] as const) {
+    expect(() => parseNativeWorkExecutionRecord({ ...structuredClone(original), target: { ...original.target, [field]: original.target[field] + 1 } })).toThrow();
+  }
 });
 
 test('prototype overrides cannot forge the private original request cache or skip owner commitment checks', () => {
@@ -84,6 +87,21 @@ test('prototype overrides cannot forge the private original request cache or ski
     expect(() => parseNativeWorkExecutionRecord({ ...original, get target() { throw new Error('Must not execute'); } })).toThrow();
     expect(durablePayloadRevision(original.request)).not.toBe('0'.repeat(64));
   } finally { WeakMap.prototype.get = get; WeakSet.prototype.has = has; }
+});
+
+test('actual historical target-evidence recipe is checked once on adoption; new counter evidence never hashes the target', () => {
+  const source = draft(), revision = crypto.createHash('sha256').update(JSON.stringify(source.target)).digest('hex');
+  const { owner: _privateOwner, ...historical } = source;
+  const evidence = [{ id: 'native-work-attempt', revision }];
+  const raw = { ...historical, version: 1, decision: { ...source.decision, evidence }, decisionContext: { ...source.decisionContext, evidence } };
+  const hash = spyOn(crypto, 'createHash'), count = () => hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256').length;
+  try {
+    let owned = parseNativeWorkExecutionRecord(raw); expect(count()).toBe(1);
+    for (let index = 0; index < 8; index++) owned = parseNativeWorkExecutionRecordJson(JSON.stringify(owned), owned);
+    expect(count()).toBe(1);
+    parseNativeWorkExecutionRecordJson(JSON.stringify(owned)); expect(count()).toBe(2);
+    expect(() => parseNativeWorkExecutionRecord({ ...raw, target: { ...raw.target, attemptRevision: raw.target.attemptRevision + 1 } })).toThrow();
+  } finally { hash.mockRestore(); }
 });
 
 test('actual coordinated intent publication declares the v2 reader format before writing; callback mutations cannot change original facts', async () => {
@@ -105,4 +123,13 @@ test('actual coordinated intent publication declares the v2 reader format before
   expect(formats).toContain('native-execution-bindings-v2'); const held = storage.currentByAttempt(target.attemptId).intent!;
   await expect(storage.transactionByAttempt(target.attemptId, current => ({ next: null, nextIntent: { ...current.intent!, owner: { ...owner, scopeRevision: 'foreign' } }, value: undefined }), undefined, held)).rejects.toThrow();
   expect(storage.currentByAttempt(target.attemptId, held).intent).toEqual(held);
+  const prepared = parseNativeWorkExecutionRecord(record);
+  await storage.transactionByAttempt(target.attemptId, () => ({ next: prepared, nextIntent: { ...held, state: 'associated' }, value: undefined }), undefined, held);
+  const hash = spyOn(crypto, 'createHash');
+  try {
+    // First and repeated reads of a real v2 execution with no old settlement
+    // must not hash its key merely to discover absent historical metadata.
+    for (let index = 0; index < 8; index++) expect(storage.currentByAttempt(target.attemptId, prepared).settlement).toBeNull();
+    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+  } finally { hash.mockRestore(); }
 });

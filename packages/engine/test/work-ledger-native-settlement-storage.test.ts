@@ -1,5 +1,6 @@
 /** Owned synthetic SQLite and paired-host fixtures; no user settings, credentials, or external services. */
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
+import * as crypto from 'node:crypto';
 import * as nativeFs from 'node:fs';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -9,13 +10,13 @@ import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
 import { KNOWLEDGE_SCHEMA_VERSION } from '../sdk/src/platform/knowledge/store-schema.js';
 import { loadSqlJsEngine, SQLiteStore, type SqlDatabase } from '../sdk/src/platform/state/sqlite-store.js';
 import type { SQLitePublicationIO } from '../sdk/src/platform/state/sqlite-store-persistence.js';
-import { criteriaSetIdForWork, durablePayloadRevision, freezeDurableRequest } from '../sdk/src/platform/contract/durable-admission.js';
+import { criteriaSetIdForWork, durableKeyIdentity, durablePayloadRevision, freezeDurableRequest } from '../sdk/src/platform/contract/durable-admission.js';
 import { checkSettings } from '../sdk/src/platform/contract/check.js';
 import { CONTRACT_CONFIG_DEFAULTS } from '../sdk/src/platform/contract/config.js';
-import { createWorkLedger, readWorkLedgerState } from '../sdk/src/platform/workflow/work-ledger/service.js';
-import { parseNativeWorkExecutionIntent, parseNativeWorkExecutionRecord, type NativeWorkExecutionStorage } from '../sdk/src/platform/workflow/work-ledger/native-execution-types.js';
+import { createWorkLedger, readWorkLedgerState, reduceWorkLedgerSettlement } from '../sdk/src/platform/workflow/work-ledger/service.js';
+import { parseNativeWorkExecutionIntent, parseNativeWorkExecutionRecord, nativeExecutionTargetRevision, type NativeWorkExecutionStorage } from '../sdk/src/platform/workflow/work-ledger/native-execution-types.js';
 import { createNativeWorkExecutionHost } from '../sdk/src/platform/workflow/work-ledger/native-execution.js';
-import { nativeSettlementDigest, nativeWorkSettlementSchema, type NativeWorkSettlementPublication, type NativeWorkSettlementReceipt } from '../sdk/src/platform/workflow/work-ledger/native-settlement-types.js';
+import { nativeSettlementDigest, nativeWorkSettlementSchema, nativeSettlementPublicationCommitment, captureNativeSettlementPublication, type HistoricalNativeWorkSettlementPublication, type NativeWorkSettlementPublication, type NativeWorkSettlementReceipt, type CurrentNativeWorkSettlementPublication } from '../sdk/src/platform/workflow/work-ledger/native-settlement-types.js';
 import { PairingTokenManager } from '../sdk/src/platform/pairing/pairing-token-store.js';
 import { WorkspaceRegistrationStore } from '../sdk/src/platform/workspace/registration/store.js';
 import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../sdk/src/platform/daemon/control-plane.js';
@@ -55,7 +56,7 @@ async function fixture(options: { root?: string; actorId?: string; associate?: b
   const binding = { sourceId: 'fixture-source', inputRevision: 'fixture-input', actionId: 'fixture-action', actionRevision: 'fixture-action-revision', authorityId: 'fixture-authority', authorityRevision: 'fixture-authority-revision', scopeId: 'fixture-scope', scopeRevision: 'fixture-scope-revision' };
   const request = freezeDurableRequest({ key, binding, input: { ask: work.title, sessionId: 'fixture-session', projectRoot: root, origin: 'external', isolation: 'shared', nativeSource: { sourceId: binding.sourceId, sourceRevision: 'fixture-source-revision', inputRevision: binding.inputRevision, criteriaId: key.criteriaId, criteriaRevision: key.criteriaRevision, goal: work.goal, criteria: work.criteria } } });
   const intent = parseNativeWorkExecutionIntent({ version: 1, projectId: 'project', target, authorityScopes: ['write:fleet', 'read:work-ledger'], request, generation: 1, state: 'admitting' });
-  const decisionContext = { decisionId: 'fixture-decision', binding, judgmentDecisionIds: ['fixture-reading'], evidence: [{ id: 'fixture-evidence', revision: 'fixture-evidence-revision' }], continuations: [], resumeConditions: [] };
+  const decisionContext = { decisionId: 'fixture-decision', binding, judgmentDecisionIds: ['fixture-reading'], evidence: [{ id: 'fixture-evidence', revision: 'fixture-evidence-revision' }, { id: 'native-work-attempt', revision: nativeExecutionTargetRevision(target) }], continuations: [], resumeConditions: [] };
   // This is parser-valid synthetic storage data, not a semantic proof or live permission grant.
   const record = parseNativeWorkExecutionRecord({ version: 1, projectId: 'project', target, authorityScopes: intent.authorityScopes, request, decisionContext, decision: { schemaVersion: 1, decisionId: decisionContext.decisionId, binding, judgmentDecisionIds: decisionContext.judgmentDecisionIds, evidence: decisionContext.evidence, summary: 'Owned storage fixture only.', outcome: 'act' }, receipt: { schemaVersion: 2, key, binding, contractId: 'ctr-01234567', ownerAgentId: 'fixture-agent', payloadRevision: durablePayloadRevision(request), execution: { isolation: 'shared' } }, state: 'launch-claimed' });
   if (options.associate !== false) {
@@ -64,17 +65,18 @@ async function fixture(options: { root?: string; actorId?: string; associate?: b
   }
   const receiptDigest = nativeSettlementDigest(record.receipt); const contractDigest = nativeSettlementDigest({ fixture: 'terminal-contract' });
   const references = [{ kind: 'test' as const, ref: 'fixture:acceptance', digest: nativeSettlementDigest('acceptance') },
-    { kind: 'test' as const, ref: `receipt:${record.receipt!.contractId}`, digest: receiptDigest },
-    { kind: 'test' as const, ref: `execution:${record.receipt!.contractId}`, digest: contractDigest }];
-  const publication: NativeWorkSettlementPublication = {
+    { kind: 'test' as const, ref: `receipt:${record.receipt.contractId}`, digest: receiptDigest },
+    { kind: 'test' as const, ref: `execution:${record.receipt.contractId}`, digest: contractDigest }];
+  const publication: HistoricalNativeWorkSettlementPublication = {
     report: 'Owned synthetic terminal report', receiptDigest, contractDigest, actorId,
     attestation: { outcome: 'verified', reason: 'Owned storage attestation fixture.', source: 'host_check', references, criteriaResults: work.criteria.map((_text, criterionIndex) => ({ criterionIndex, status: 'satisfied', references: references.map(reference => reference.ref) })) },
   };
   return { ...opened, root, file, ledger, actor, actorId, work, target, key, intent, record, publication, create, claim, created, claimed };
 }
-function settle(storage: NativeWorkExecutionStorage, f: Pick<Awaited<ReturnType<typeof fixture>>, 'key' | 'publication'>, assertCurrent: () => void = () => {}) {
+async function settle(storage: NativeWorkExecutionStorage, f: Pick<Awaited<ReturnType<typeof fixture>>, 'key' | 'publication'>, assertCurrent: () => void = () => {}) {
   if (!storage.settle) throw new Error('Fixture requires settlement storage');
-  return storage.settle(f.key, () => f.publication, assertCurrent);
+  const receipt = await storage.settle(f.key, () => f.publication, assertCurrent);
+  if (receipt.version !== 1) throw new Error('Historical publication fixture changed version'); return receipt;
 }
 async function inspectImage<T>(file: string, inspect: (db: SqlDatabase) => T): Promise<T> {
   const SQL = await loadSqlJsEngine(); const db = new SQL.Database(readFileSync(file));
@@ -104,6 +106,105 @@ async function assertImage(file: string, expectedRevision: number, expectedSettl
     }
   });
 }
+
+/** Synthetic storage-only evidence; actual daemon fixtures below exercise the
+ * genuine recorded decision state commitments used by the native verifier. */
+function currentPublication(f: Awaited<ReturnType<typeof fixture>>): CurrentNativeWorkSettlementPublication {
+  return { version: 2, report: f.publication.report, receipt: f.record.receipt!, actorId: f.actorId,
+    attestation: { ...f.publication.attestation,
+      references: f.publication.attestation.references.map(reference => reference.ref === 'fixture:acceptance' ? reference : { kind: reference.kind, ref: reference.ref }),
+      criteriaResults: f.publication.attestation.criteriaResults.map(result => ({ ...result, references: ['fixture:acceptance'] })) } };
+}
+
+test('settlement2 stores the exact bounded runner receipt and adjacent publication once, without decorative content hashes', async () => {
+  const f = await fixture(), publication = currentPublication(f), original = f.storage.current(f.key).record!;
+  const hash = spyOn(crypto, 'createHash'); let receipt: NativeWorkSettlementReceipt | undefined;
+  try {
+    receipt = await f.storage.settle!(f.key, () => publication, () => {}, original);
+    expect(receipt.version).toBe(2); expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(1);
+    for (let index = 0; index < 8; index++) expect(f.storage.current(f.key, original).settlement).toEqual(receipt);
+    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(1);
+  } finally { hash.mockRestore(); }
+  if (!receipt || receipt.version !== 2) throw new Error('Fixture current settlement');
+  expect(receipt.receipt).toEqual(f.record.receipt);
+  expect(receipt.publicationDigest).toBe(nativeSettlementPublicationCommitment(captureNativeSettlementPublication(publication)));
+  expect(receipt).not.toHaveProperty('receiptDigest'); expect(receipt).not.toHaveProperty('contractDigest'); expect(receipt).not.toHaveProperty('keyHash');
+  expect(receipt.reportRequestId).toMatch(/^native-report-v2:[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/);
+  expect(receipt.evidenceId).toBe(receipt.evidenceRequestId);
+  await inspectImage(f.file, db => expect(db.exec('SELECT key_hash,format_version FROM native_work_execution_settlements')[0]?.values).toEqual([[`v2:${durableKeyIdentity(f.key)}`, 2]]));
+  await inspectImage(f.file, db => {
+    const plan = db.exec("EXPLAIN QUERY PLAN SELECT format_version,state_json,key_hash FROM native_work_execution_settlements WHERE project_id = ? AND format_version = 1 AND json_extract(state_json, '$.target.attemptId') = ?", ['project', f.key.attemptId]);
+    expect(JSON.stringify(plan)).toContain('USING INDEX native_work_settlement_targets');
+  });
+  const bytes = readFileSync(f.file), reopened = await open(f.file);
+  expect(reopened.storage.current(f.key).settlement).toEqual(receipt);
+  expect(await reopened.storage.settle!(f.key, () => null, () => { throw new Error('No new proof on saved reconciliation'); })).toEqual(receipt);
+  expect(await reopened.storage.settle!(f.key, () => publication, () => {})).toEqual(receipt);
+  expect(readFileSync(f.file)).toEqual(bytes); await assertImage(f.file, 4, 1);
+});
+
+test('an old native execution can publish settlement2 but real old settlement1 still wins exact replay unchanged', async () => {
+  const f = await fixture(), saved = await settle(f.storage, f), bytes = readFileSync(f.file), reopened = await open(f.file);
+  expect(saved.version).toBe(1); expect(reopened.storage.current(f.key).settlement).toEqual(saved);
+  await expect(reopened.storage.settle!(f.key, () => currentPublication(f), () => {})).rejects.toMatchObject({ code: 'conflict' });
+  expect(readFileSync(f.file)).toEqual(bytes); expect(await settle(reopened.storage, f)).toEqual(saved);
+});
+
+test('the actual settlement2 SQL writer declares its native reader floor before either adjacent event or receipt', async () => {
+  const f = await fixture(), before = readFileSync(f.file), formats: string[] = []; let denied = true;
+  const reopened = new KnowledgeStore({ dbPath: f.file, nativeDataWriter: { declare(format) { formats.push(format); if (format === 'native-settlements-v2' && denied) throw new Error('Synthetic old settlement reader'); } } }); cleanups.push(() => reopened.close());
+  const storage = await reopened.openNativeWorkExecutionStorage('project');
+  await expect(storage.settle!(f.key, () => currentPublication(f), () => {})).rejects.toThrow('old settlement reader');
+  expect(readFileSync(f.file)).toEqual(before); expect(storage.current(f.key).settlement).toBeNull(); denied = false;
+  expect((await storage.settle!(f.key, () => currentPublication(f), () => {})).version).toBe(2);
+  expect(formats).toContain('native-settlements-v2'); await assertImage(f.file, 4, 1);
+});
+
+test('a borrowed publication cannot execute report getters or echo malformed private fields while being captured', async () => {
+  const f = await fixture(), publication = currentPublication(f), before = readFileSync(f.file); let invoked = 0;
+  const getter = { ...publication, get report() { invoked++; return publication.report; } };
+  await expect(f.storage.settle!(f.key, () => getter, () => {})).rejects.toMatchObject({ code: 'invalid' });
+  expect(invoked).toBe(0); expect(readFileSync(f.file)).toEqual(before);
+  try { captureNativeSettlementPublication({ ...publication, PRIVATE_REPORT_KEY: 'Synthetic private value' } as typeof publication); throw new Error('Fixture should refuse'); }
+  catch (error) { expect(error).toMatchObject({ code: 'invalid' }); expect(String(error)).not.toContain('PRIVATE_REPORT_KEY'); expect(String(error)).not.toContain('Synthetic private value'); }
+});
+
+for (const phase of ['before-rename', 'after-rename'] as const) test(`settlement2 ${phase} failure never promotes a private candidate into confirmed saved ownership`, async () => {
+  const f = await fixture(), original = f.storage.current(f.key).record!, publication = currentPublication(f), owner = persistence(f.store); let injected = false;
+  owner.io = { ...nativeFs,
+    renameSync(from, to) { if (phase === 'before-rename' && !injected) { injected = true; throw new Error('Synthetic candidate publication failure'); } nativeFs.renameSync(from, to); },
+    fsyncSync(fd) { if (phase === 'after-rename' && !injected && nativeFs.fstatSync(fd).isDirectory()) { injected = true; throw new Error('Synthetic candidate durability failure'); } nativeFs.fsyncSync(fd); } };
+  try { await expect(f.storage.settle!(f.key, () => publication, () => {}, original)).rejects.toThrow(); } finally { owner.io = nativeFs; }
+  const reopened = await open(f.file), saved = reopened.storage.current(f.key).settlement;
+  const confirmed = await reopened.storage.settle!(f.key, () => publication, () => {});
+  if (saved) expect(confirmed).toEqual(saved); expect(confirmed.version).toBe(2); await assertImage(f.file, 4, 1);
+});
+
+test('the saved publication commitment independently rejects a changed but otherwise valid adjacent ledger report without duplicating report text', async () => {
+  const f = await fixture(), before = f.storage.current(f.key), publication = currentPublication(f);
+  const receipt = await f.storage.settle!(f.key, () => publication, () => {}, before.record!);
+  if (receipt.version !== 2) throw new Error('Current receipt fixture');
+  expect(JSON.stringify(receipt)).not.toContain(publication.report);
+  const current = f.storage.current(f.key), reportedAt = current.ledger.history[receipt.reportSequence - 1]!.at;
+  const changed = reduceWorkLedgerSettlement(before.ledger, { target: f.target, report: 'A changed report with a valid ledger command history',
+    attestation: publication.attestation, actorId: publication.actorId, reportRequestId: receipt.reportRequestId, evidenceRequestId: receipt.evidenceRequestId },
+    { now: () => reportedAt, newId: () => receipt.evidenceId });
+  // Actual reducer replay remains valid; the independent original publication
+  // binding, not an invalid ledger shape, must catch this different report.
+  expect(readWorkLedgerState(changed.state, 'project')).toEqual(changed.state);
+  await mutateImage(f.file, db => db.run('UPDATE work_ledgers SET state_json = ? WHERE project_id = ?', [JSON.stringify(changed.state), 'project']));
+  const bytes = readFileSync(f.file);
+  expect(() => f.storage.current(f.key, before.record!)).toThrow(); await expect(open(f.file)).rejects.toThrow();
+  expect(readFileSync(f.file)).toEqual(bytes);
+});
+
+test('future settlement rows remain untouched and cannot be rewritten by a supported older publication', async () => {
+  const f = await fixture(), receipt = await f.storage.settle!(f.key, () => currentPublication(f), () => {});
+  await mutateImage(f.file, db => db.run('UPDATE native_work_execution_settlements SET format_version = 3, state_json = ?', [JSON.stringify({ ...receipt, version: 3 })]));
+  const bytes = readFileSync(f.file);
+  expect(() => f.storage.current(f.key)).toThrow(); await expect(f.storage.settle!(f.key, () => currentPublication(f), () => {})).rejects.toThrow();
+  await expect(open(f.file)).rejects.toThrow(); expect(readFileSync(f.file)).toEqual(bytes);
+});
 
 test('SQLite settlement publishes one adjacent report/evidence pair and matching receipt without altering execution formats', async () => {
   const f = await fixture();
@@ -250,7 +351,7 @@ for (const corruption of ['execution', 'intent', 'history'] as const) test(`sche
   });
 });
 
-const corruptBindings: readonly { name: string; change: (receipt: NativeWorkSettlementReceipt) => NativeWorkSettlementReceipt }[] = [
+const corruptBindings: readonly { name: string; change: (receipt: Extract<NativeWorkSettlementReceipt, { version: 1 }>) => NativeWorkSettlementReceipt }[] = [
   { name: 'receipt digest', change: receipt => ({ ...receipt, receiptDigest: nativeSettlementDigest('foreign-receipt') }) },
   { name: 'payload revision', change: receipt => ({ ...receipt, payloadRevision: nativeSettlementDigest('foreign-payload') }) },
   { name: 'original target', change: receipt => ({ ...receipt, target: { ...receipt.target, workRevision: receipt.target.workRevision + 1 } }) },

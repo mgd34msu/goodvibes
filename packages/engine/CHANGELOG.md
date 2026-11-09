@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- Preserve native settlement replay with the exact original runner receipt and
+  independently checked adjacent ledger events. Reuse recorded decision input
+  commitments for verified criteria instead of hashing navigation references,
+  complete checkpoints and artifact bytes again. Keep older receipts readable
+  and require the new installed-reader capability before publication.
+
 - Reuse the complete-answer commitment for scoped factual reviews instead of
   hashing every passage. Saved reviews still bind exact ranges to independently
   recorded questions; older passage receipts remain readable. New checkpoint

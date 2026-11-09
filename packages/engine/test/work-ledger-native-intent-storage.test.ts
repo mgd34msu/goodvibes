@@ -10,7 +10,7 @@ import { SQLiteStore, loadSqlJsEngine, type SqlDatabase } from '../sdk/src/platf
 import type { SQLitePublicationIO } from '../sdk/src/platform/state/sqlite-store-persistence.js';
 import { createWorkLedger } from '../sdk/src/platform/workflow/work-ledger/service.js';
 import { workLedgerStateSchema, type LedgerWork, type WorkLedgerEvent } from '../sdk/src/platform/workflow/work-ledger/types.js';
-import { parseNativeWorkExecutionIntent, parseNativeWorkExecutionRecord, type NativeWorkExecutionIntent } from '../sdk/src/platform/workflow/work-ledger/native-execution-types.js';
+import { parseNativeWorkExecutionIntent, parseNativeWorkExecutionRecord, nativeExecutionTargetRevision, type NativeWorkExecutionIntent } from '../sdk/src/platform/workflow/work-ledger/native-execution-types.js';
 import { criteriaSetIdForWork, durableKeyHash, freezeDurableRequest } from '../sdk/src/platform/contract/durable-admission.js';
 
 const roots: string[] = [];
@@ -37,7 +37,7 @@ async function fixture() {
   const binding = { sourceId: 'fixture-source', inputRevision: 'fixture-input', actionId: 'fixture-action', actionRevision: 'fixture-action-revision', authorityId: 'fixture-authority', authorityRevision: 'fixture-authority-revision', scopeId: 'fixture-scope', scopeRevision: 'fixture-scope-revision' };
   const request = freezeDurableRequest({ key, binding, input: { ask: work.title, sessionId: 'fixture-session', projectRoot: join(file, '..'), origin: 'external', isolation: 'auto', nativeSource: { sourceId: binding.sourceId, sourceRevision: 'fixture-source-revision', inputRevision: binding.inputRevision, criteriaId: key.criteriaId, criteriaRevision: key.criteriaRevision, goal: work.goal, criteria: work.criteria } } });
   const intent: NativeWorkExecutionIntent = parseNativeWorkExecutionIntent({ version: 1, projectId: 'project', target, authorityScopes: ['write:fleet', 'read:work-ledger'], request, generation: 1, state: 'admitting' });
-  const decisionContext = { decisionId: 'fixture-decision', binding, judgmentDecisionIds: ['fixture-reading'], evidence: [{ id: 'fixture-evidence', revision: 'fixture-evidence-revision' }], continuations: [], resumeConditions: [] };
+  const decisionContext = { decisionId: 'fixture-decision', binding, judgmentDecisionIds: ['fixture-reading'], evidence: [{ id: 'fixture-evidence', revision: 'fixture-evidence-revision' }, { id: 'native-work-attempt', revision: nativeExecutionTargetRevision(target) }], continuations: [], resumeConditions: [] };
   const record = parseNativeWorkExecutionRecord({ version: 1, projectId: 'project', target, authorityScopes: intent.authorityScopes, request, decisionContext, decision: { schemaVersion: 1, decisionId: decisionContext.decisionId, binding, judgmentDecisionIds: decisionContext.judgmentDecisionIds, evidence: decisionContext.evidence, summary: 'Owned parser fixture only.', outcome: 'act' }, receipt: null, state: 'prepared' });
   return { ...opened, file, intent, record, key, ledger, actor, work };
 }

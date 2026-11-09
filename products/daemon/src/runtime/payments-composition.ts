@@ -169,7 +169,8 @@ export function createPaymentsServices(options: PaymentsCompositionOptions): Pay
     requests: new ProtectedPaymentRequests(controlPlaneStorePath(options.shellPaths, GOODVIBES_DAEMON_SURFACE_ROOT, 'payments-requests'),
       declareNativeData ? version => declareNativeData(version === 2 ? 'payment-window-checkpoints-v2' : 'payment-window-checkpoints-v1') : undefined,
       () => declareNativeData?.('payment-reply-history-v1'),
-      () => declareNativeData?.('payment-reply-coverage-v1')),
+      () => declareNativeData?.('payment-reply-coverage-v1'),
+      () => declareNativeData?.('payment-receive-spans-v1')),
     journal: new DurableCheckoutJournal(
       controlPlaneStorePath(options.shellPaths, GOODVIBES_DAEMON_SURFACE_ROOT, 'payments-checkout-journal.json'),
     ),

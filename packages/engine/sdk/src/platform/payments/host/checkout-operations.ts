@@ -80,12 +80,13 @@ export class CheckoutOperations {
   private readonly reserved = new Set<string>();
   private readonly requests: Pick<PaymentRequestStore, 'retain' | 'read' | 'remove' | 'checkpointWindow' | 'appendReply' | 'recordReceiveCoverage'> | undefined;
   private readonly history: Pick<PaymentReplyInbox, 'retainReplyHistory'> | undefined;
+  private readonly captureReceiveSpans: PaymentReplyInbox['captureReceiveSpans'] | undefined;
   private closing: Promise<void> | undefined;
   constructor(private readonly store: DurablePaymentOperations, private readonly journal: CheckoutJournal,
     private readonly purchases: DaemonPurchaseLedger,
     private readonly execute: (input: BeginCheckoutInput, id: string, owner: DetachedCheckoutOwner) => Promise<PaymentBeginResult>,
     private readonly now: () => number = Date.now,
-    requests?: PaymentRequestStore, replies?: Pick<PaymentReplyInbox, 'retainReplyHistory'>) {
+    requests?: PaymentRequestStore, replies?: Pick<PaymentReplyInbox, 'retainReplyHistory'> & Partial<Pick<PaymentReplyInbox, 'bindDurableOperationReader' | 'captureReceiveSpans'>>) {
     // Retain the original host methods, rather than consulting a mutable
     // embed wrapper again after admission or during asynchronous cleanup.
     this.requests = requests ? Object.freeze({ retain: requests.retain.bind(requests), read: requests.read.bind(requests), remove: requests.remove.bind(requests),
@@ -93,6 +94,9 @@ export class CheckoutOperations {
       ...(requests.supportsReplyHistory && requests.appendReply ? { appendReply: requests.appendReply.bind(requests) } : {}),
       ...(requests.supportsReplyReceiveCoverage && requests.recordReceiveCoverage ? { recordReceiveCoverage: requests.recordReceiveCoverage.bind(requests) } : {}) }) : undefined;
     this.history = this.requests?.appendReply && replies ? Object.freeze({ retainReplyHistory: replies.retainReplyHistory.bind(replies) }) : undefined;
+    this.captureReceiveSpans = requests?.supportsReplyReceiveSpans ? replies?.captureReceiveSpans?.bind(replies) : undefined;
+    const readStatus = store.get.bind(store);
+    replies?.bindDurableOperationReader?.(readStatus, () => { if (this.closed) throw new CheckoutOwnershipError(); });
   }
 
   private retainHistory(writer: PaymentOperationWriter, checkpoint: CheckoutWindowCheckpoint): RetainedPaymentReplyHistory | undefined {
@@ -371,7 +375,8 @@ export class CheckoutOperations {
     }
     // Recapture the exact selected native controls for this quote, rather than
     // keep the admission snapshot after a reprice or intervening native read.
-    await save(writer.purchaseId, writer.read().operationId, checkpoint, browser, current);
+    const receiveSpans = await this.captureReceiveSpans?.(writer.purchaseId, checkpoint, current); current();
+    await save(writer.purchaseId, writer.read().operationId, checkpoint, browser, current, receiveSpans);
     current();
     operation.history ??= this.retainHistory(writer, checkpoint);
   }

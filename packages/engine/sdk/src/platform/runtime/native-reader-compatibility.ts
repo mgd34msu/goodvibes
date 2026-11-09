@@ -14,7 +14,7 @@ import type { UpdateFileIo } from './self-update.js';
 export const NATIVE_READER_REQUIREMENT_FILE = '.goodvibes-reader-requirements.json';
 /** Installation metadata support, separate from application-data write floors. */
 export const NATIVE_PREVIOUS_READER_RECEIPT_FORMAT = 'daemon-previous-reader-receipt-v1';
-export type NativeDataFormat = 'payment-retained-holds-v2' | 'telegram-account-cursors-v2' | 'payment-window-checkpoints-v1' | 'payment-window-checkpoints-v2' | 'payment-reply-history-v1' | 'payment-reply-coverage-v1' | 'payment-operation-reconciliation-v2' | 'delegated-review-owner-v2' | 'discord-inbox-identities-v1' | 'account-inbox-identities-v1' | 'inbox-triage-identities-v1';
+export type NativeDataFormat = 'payment-retained-holds-v2' | 'telegram-account-cursors-v2' | 'payment-window-checkpoints-v1' | 'payment-window-checkpoints-v2' | 'payment-reply-history-v1' | 'payment-reply-coverage-v1' | 'payment-operation-reconciliation-v2' | 'delegated-review-owner-v2' | 'discord-inbox-identities-v1' | 'telegram-payment-spans-v3' | 'payment-receive-spans-v1' | 'account-inbox-identities-v1' | 'inbox-triage-identities-v1';
 const requirements: Readonly<Record<NativeDataFormat, string>> = {
   'payment-retained-holds-v2': '3.1.2', 'telegram-account-cursors-v2': '3.1.2',
   'payment-window-checkpoints-v1': '3.1.2',
@@ -24,6 +24,8 @@ const requirements: Readonly<Record<NativeDataFormat, string>> = {
   'payment-operation-reconciliation-v2': '3.1.2',
   'delegated-review-owner-v2': '3.1.2',
   'discord-inbox-identities-v1': '3.1.2',
+  'telegram-payment-spans-v3': '3.1.2',
+  'payment-receive-spans-v1': '3.1.2',
   'account-inbox-identities-v1': '3.1.2',
   'inbox-triage-identities-v1': '3.1.2',
 };

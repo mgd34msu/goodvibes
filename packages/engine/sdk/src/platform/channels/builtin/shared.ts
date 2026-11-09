@@ -70,6 +70,7 @@ export interface BuiltinChannelRuntimeDeps {
    */
   readonly telegramOffsetPath?: string | undefined;
   readonly beforeTelegramCursorWrite?: (() => void) | undefined;
+  readonly beforeTelegramReceiveSpanWrite?: (() => void) | undefined;
   /** Lazy verified identity capabilities for original Telegram ingress sessions. */
   readonly telegramSourceAccounts?: TelegramSourceAccountOwner | undefined;
   /**

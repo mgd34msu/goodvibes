@@ -192,8 +192,9 @@ export class TelegramBotApi {
    * switch from webhook to polling HANDS the queued updates to the poller
    * instead of discarding messages the user already sent.
    */
-  async deleteWebhook(dropPendingUpdates = false): Promise<void> {
-    await this.call('deleteWebhook', { drop_pending_updates: dropPendingUpdates });
+  async deleteWebhook(dropPendingUpdates = false, signal?: AbortSignal): Promise<void> {
+    const result = await this.call('deleteWebhook', { drop_pending_updates: dropPendingUpdates }, signal);
+    if (result !== true) throw new Error('Telegram did not confirm webhook removal');
   }
 
   /**
@@ -235,11 +236,14 @@ export class TelegramBotApi {
     };
   }
 
-  async getWebhookInfo(): Promise<TelegramWebhookInfo> {
-    const result = readRecord(await this.call('getWebhookInfo', {}));
+  async getWebhookInfo(signal?: AbortSignal): Promise<TelegramWebhookInfo> {
+    const result = readRecord(await this.call('getWebhookInfo', {}, signal));
+    if (!result || typeof result.url !== 'string' || typeof result.pending_update_count !== 'number'
+      || !Number.isSafeInteger(result.pending_update_count) || result.pending_update_count < 0)
+      throw new Error('Telegram webhook status was not confirmed');
     return {
-      url: typeof result?.url === 'string' ? result.url : '',
-      pendingUpdateCount: readNumber(result?.pending_update_count) ?? 0,
+      url: result.url,
+      pendingUpdateCount: result.pending_update_count,
       lastErrorMessage: typeof result?.last_error_message === 'string' ? result.last_error_message : undefined,
     };
   }

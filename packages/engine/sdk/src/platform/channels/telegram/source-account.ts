@@ -1,8 +1,10 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import type { TelegramReceiveProgressOwner, TelegramReceiveScope } from './receive-progress.js';
+import type { TelegramPaymentReceiveSelector } from './payment-receive-span.js';
 
 export interface TelegramReceiveCoverageReservation {
+  readonly selector?: TelegramPaymentReceiveSelector;
   waitFor(handle: TelegramSourceAccountHandle, sinceMs: number, throughMs: number, signal: AbortSignal, scope: TelegramReceiveScope): Promise<() => void>;
 }
 
@@ -33,7 +35,8 @@ export interface TelegramSourceAccountReader {
   current(): TelegramSourceAccountSnapshot | null;
   /** Synchronous pre-notice reservation of this exact receiving session.
    * A later attachment, including the same bot, cannot fill a prior gap. */
-  retainReceiveCoverage?(): TelegramReceiveCoverageReservation | null;
+  retainReceiveCoverage?(purchaseId?: string, sinceMs?: number): TelegramReceiveCoverageReservation | null;
+  restoreReceiveCoverage?(selector: TelegramPaymentReceiveSelector): TelegramReceiveCoverageReservation | null;
 }
 
 export interface TelegramSourceAccountLease {
@@ -63,6 +66,8 @@ export interface TelegramSourceAccountOwner {
   attachWebhook?(session: TelegramSourceAccountSession & { readonly secret: string }): TelegramWebhookAccountLease;
   /** A configured shared secret or serialized account ID cannot mint this lease. */
   authorizeWebhook?(secret: string): TelegramWebhookAccountLease | null;
+  /** Native poll completion prunes only actual terminal payment operations. */
+  prunePaymentReceiveSpans?(): void;
   invalidate(): void;
 }
 
@@ -85,7 +90,7 @@ function validIdentity(value: Pick<TelegramSourceAccountSnapshot, 'id' | 'userna
  * A lazy provenance seam for the actual ingress API session. Installing it does
  * no provider I/O. It owns identity capabilities only, never retained messages.
  */
-export function createTelegramSourceAccountOwner(): TelegramSourceAccountOwner {
+export function createTelegramSourceAccountOwner(isPaymentSpanTerminal?: (purchaseId: string) => boolean): TelegramSourceAccountOwner {
   let active: Session | null = null;
   let webhook: { readonly secret: string; readonly session: Session; readonly lease: TelegramWebhookAccountLease } | null = null;
   let lastAccount: Pick<TelegramSourceAccountSnapshot, 'id' | 'revision'> | null = null;
@@ -169,6 +174,34 @@ export function createTelegramSourceAccountOwner(): TelegramSourceAccountOwner {
     return session;
   };
 
+  const reserveCoverage = (purchaseId?: string, sinceMs?: number, selector?: TelegramPaymentReceiveSelector): TelegramReceiveCoverageReservation | null => {
+    const session = active;
+    if (!session || !live(session) || !session.options.receiveProgress) return null;
+    // Only the native composition supplies terminal bookkeeping lookup. A
+    // reader holding account identity cannot supply its own deletion verdict.
+    if (isPaymentSpanTerminal) session.options.receiveProgress.prune?.(isPaymentSpanTerminal);
+    const span = selector ? session.options.receiveProgress.restore?.(selector) : session.options.receiveProgress.retain(purchaseId, sinceMs);
+    if (!span || typeof span.waitFor !== 'function') { drainOwned(span); return null; }
+    const wait = span.waitFor.bind(span), retainedSelector = span.selector;
+    if (!live(session)) return null;
+    return Object.freeze({ ...(retainedSelector ? { selector: retainedSelector } : {}),
+      waitFor: async (handle: TelegramSourceAccountHandle, sinceMs: number, throughMs: number, signal: AbortSignal, scope: TelegramReceiveScope) => {
+        const originalScope = Object.freeze({ conversationId: scope.conversationId, threadId: scope.threadId });
+        const record = handles.get(handle);
+        if (!record || record.session !== session || retainedSelector && retainedSelector.accountId !== record.snapshot.id
+          || !await check(session) || !live(session)) throw new Error('Telegram receive source is unavailable');
+        const covered = await wait(sinceMs, throughMs, AbortSignal.any([signal, session.controller.signal]), originalScope);
+        if (typeof covered !== 'function') { drainOwned(covered); throw new Error('Telegram receive assertion is unavailable'); }
+        if (!await check(session) || !live(session)) throw new Error('Telegram receive source is unavailable');
+        const assertCovered = () => {
+          if (signal.aborted || !live(session)) throw new Error('Telegram receive source is unavailable');
+          const result: unknown = covered();
+          if (result !== undefined) { drainOwned(result); throw new Error('Telegram receive assertions must be synchronous'); }
+        };
+        assertCovered(); return assertCovered;
+      } });
+  };
+
   return Object.freeze({
     reader: Object.freeze({
       subscribeIdentityChange(listener: (account: TelegramSourceAccountSnapshot) => void): () => void { identityListeners.add(listener); return () => { identityListeners.delete(listener); }; },
@@ -198,28 +231,8 @@ export function createTelegramSourceAccountOwner(): TelegramSourceAccountOwner {
         return record.snapshot;
       },
       current: () => active && live(active) ? active.snapshot : null,
-      retainReceiveCoverage(): TelegramReceiveCoverageReservation | null {
-        const session = active;
-        if (!session || !live(session) || !session.options.receiveProgress) return null;
-        const span = session.options.receiveProgress.retain();
-        if (!span || typeof span.waitFor !== 'function') { drainOwned(span); return null; }
-        const wait = span.waitFor.bind(span);
-        if (!live(session)) return null;
-        return Object.freeze({ waitFor: async (handle: TelegramSourceAccountHandle, sinceMs: number, throughMs: number, signal: AbortSignal, scope: TelegramReceiveScope) => {
-          const originalScope = Object.freeze({ conversationId: scope.conversationId, threadId: scope.threadId });
-          const record = handles.get(handle);
-          if (!record || record.session !== session || !await check(session) || !live(session)) throw new Error('Telegram receive source is unavailable');
-          const covered = await wait(sinceMs, throughMs, AbortSignal.any([signal, session.controller.signal]), originalScope);
-          if (typeof covered !== 'function') { drainOwned(covered); throw new Error('Telegram receive assertion is unavailable'); }
-          if (!await check(session) || !live(session)) throw new Error('Telegram receive source is unavailable');
-          const assertCovered = () => {
-            if (signal.aborted || !live(session)) throw new Error('Telegram receive source is unavailable');
-            const result: unknown = covered();
-            if (result !== undefined) { drainOwned(result); throw new Error('Telegram receive assertions must be synchronous'); }
-          };
-          assertCovered(); return assertCovered;
-        } });
-      },
+      retainReceiveCoverage: (purchaseId?: string, sinceMs?: number) => reserveCoverage(purchaseId, sinceMs),
+      restoreReceiveCoverage: (selector: TelegramPaymentReceiveSelector) => reserveCoverage(undefined, undefined, selector),
     }),
     attach(options: TelegramSourceAccountSession): TelegramSourceAccountLease {
       const session = attachSession(options);
@@ -243,6 +256,10 @@ export function createTelegramSourceAccountOwner(): TelegramSourceAccountOwner {
       // Registration credentials are ASCII and bounded; no digest or raw-token cache.
       if (!/^[A-Za-z0-9_-]{1,256}$/.test(secret) || secret.length !== registered.secret.length) return null;
       return timingSafeEqual(Buffer.from(secret), Buffer.from(registered.secret)) ? registered.lease : null;
+    },
+    prunePaymentReceiveSpans() {
+      const session = active;
+      if (session && live(session) && isPaymentSpanTerminal) session.options.receiveProgress?.prune?.(isPaymentSpanTerminal);
     },
     invalidate,
   });

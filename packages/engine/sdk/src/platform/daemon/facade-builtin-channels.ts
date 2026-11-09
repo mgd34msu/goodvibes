@@ -80,6 +80,7 @@ export function createBuiltinChannelRuntime(
   });
   const builtinChannels = new BuiltinChannelRuntime({
     ...(declareData ? { beforeTelegramCursorWrite: () => declareData('telegram-account-cursors-v2') } : {}),
+    ...(declareData ? { beforeTelegramReceiveSpanWrite: () => declareData('telegram-payment-spans-v3') } : {}),
     telegramSourceAccounts: input.telegramSourceAccounts,
     ...(input.ingressAlarm ? { ingressAlarm: input.ingressAlarm } : {}),
     configManager: runtime.configManager,

@@ -2,11 +2,13 @@ import type { ChannelDeliveryReceipt } from '../channels/delivery/types.js';
 import type { TelegramSourceAccountReader } from '../channels/telegram/source-account.js';
 import { OwnedWork } from '../utils/owned-work.js';
 import { capturePaymentNoticeReceipt } from './notice-receipt.js';
+import type { TelegramPaymentReceiveSelector } from '../channels/telegram/payment-receive-span.js';
 
 export interface PaymentReplySourceGuard {
   readonly ready: Promise<void>;
   assertReceiptCurrent(receipt: ChannelDeliveryReceipt | undefined): void;
   waitForCoverage(receipt: ChannelDeliveryReceipt | undefined, throughMs: number): Promise<() => void>;
+  coverageSelector(receipt: ChannelDeliveryReceipt | undefined): TelegramPaymentReceiveSelector | undefined;
 }
 interface Binding {
   readonly reader: TelegramSourceAccountReader;
@@ -32,14 +34,16 @@ export class PaymentReplySourceOwner {
       current: reader.current.bind(reader), subscribeIdentityChange: reader.subscribeIdentityChange.bind(reader),
       ...(reader.acquireWhenAvailable ? { acquireWhenAvailable: reader.acquireWhenAvailable.bind(reader) } : {}),
       ...(reader.retainReceiveCoverage ? { retainReceiveCoverage: reader.retainReceiveCoverage.bind(reader) } : {}),
+      ...(reader.restoreReceiveCoverage ? { restoreReceiveCoverage: reader.restoreReceiveCoverage.bind(reader) } : {}),
     }) });
   }
 
-  reserveTelegram(signal: AbortSignal, sinceMs = Date.now()): PaymentReplySourceGuard {
+  reserveTelegram(signal: AbortSignal, sinceMs = Date.now(), purchaseId?: string, selector?: TelegramPaymentReceiveSelector): PaymentReplySourceGuard {
     const binding = this.binding;
     const lifetime = binding ? AbortSignal.any([signal, binding.lifetime, binding.abort.signal]) : signal;
     let coverage: ReturnType<NonNullable<TelegramSourceAccountReader['retainReceiveCoverage']>> = null;
-    try { coverage = binding?.reader.retainReceiveCoverage?.() ?? null; } catch { /* Operator answers remain available; silence requires actual coverage. */ }
+    try { coverage = selector ? binding?.reader.restoreReceiveCoverage?.(selector) ?? null
+      : binding?.reader.retainReceiveCoverage?.(purchaseId, sinceMs) ?? null; } catch { /* Operator answers remain available; silence requires actual coverage. */ }
     const retainedCoverage = coverage;
     let observed: { readonly id: string; readonly revision: string; readonly assertCurrent: () => void;
       readonly waitForCoverage: (throughMs: number, receipt: ChannelDeliveryReceipt) => Promise<() => void> } | undefined;
@@ -68,7 +72,7 @@ export class PaymentReplySourceOwner {
       assertCurrent(); observed = Object.freeze({ id, revision, assertCurrent,
         waitForCoverage: async (throughMs: number, receipt: ChannelDeliveryReceipt) => {
           assertCurrent(); if (!retainedCoverage) throw new Error('Payment receive coverage is unavailable');
-          const covered = await retainedCoverage.waitFor(handle, sinceMs, throughMs, lifetime, { conversationId: receipt.conversationId, threadId: receipt.threadId });
+          const covered = await retainedCoverage.waitFor(handle, selector?.sinceMs ?? sinceMs, throughMs, lifetime, { conversationId: receipt.conversationId, threadId: receipt.threadId });
           assertCurrent(); covered(); return () => { assertCurrent(); covered(); };
         } });
     });
@@ -78,7 +82,9 @@ export class PaymentReplySourceOwner {
       if (!observed || receipt?.surfaceKind !== 'telegram' || receipt.accountId !== observed.id) throw new Error('Payment reply source is unavailable');
       observed.assertCurrent();
     };
-    return Object.freeze({ ready, assertReceiptCurrent, waitForCoverage: (receipt: ChannelDeliveryReceipt | undefined, throughMs: number) => this.work.run(async () => {
+    return Object.freeze({ ready, assertReceiptCurrent,
+      coverageSelector: (receipt: ChannelDeliveryReceipt | undefined) => { assertReceiptCurrent(receipt); return retainedCoverage?.selector; },
+      waitForCoverage: (receipt: ChannelDeliveryReceipt | undefined, throughMs: number) => this.work.run(async () => {
       const original = capturePaymentNoticeReceipt(receipt, 'telegram');
       assertReceiptCurrent(original ?? undefined);
       if (!observed || !original) throw new Error('Payment receive coverage is unavailable');

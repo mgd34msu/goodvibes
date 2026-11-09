@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ProtectedPaymentRequests } from '../sdk/src/platform/payments/host/protected-requests.js';
@@ -46,6 +46,38 @@ test('encrypted coverage survives reopening and duplicate proof preserves the or
   const next = (await f.read()).replyHistory;
   expect(next?.windows[0]?.receiveCoverage).toEqual([f.coverage]); expect(next?.windows.at(-1)?.receiveCoverage).toBeUndefined();
   const current = next?.windows.at(-1); if (!current) throw new Error('Missing new window'); expect(paymentReplyWindowReceiveCovered(current)).toBe(false);
+});
+
+test('retaining imported coverage declares its actual format before the encrypted request is created', async () => {
+  const f = await fixture(); await f.record();
+  const value = await f.read(), calls: string[] = [], directory = join(f.root, 'imported');
+  const store = new ProtectedPaymentRequests(directory, undefined, () => { calls.push('history'); }, () => { calls.push('coverage'); });
+  await store.retain(value, () => {});
+  expect(calls).toEqual(['history', 'coverage']);
+  expect((await store.read(value.purchaseId, value.operationId, () => {})).replyHistory).toEqual(value.replyHistory);
+  const unsupported = new ProtectedPaymentRequests(join(f.root, 'unsupported-import'), undefined, () => {});
+  await expect(unsupported.retain(value, () => {})).rejects.toThrow();
+});
+
+test('retaining imported receive selectors requires their distinct reader floor before publication', async () => {
+  const f = await fixture(); await f.record();
+  const saved = await f.read(), previous = saved.replyHistory?.windows.at(-1); if (!previous) throw new Error('Missing original history');
+  const value = { ...saved, replyHistory: { version: 1 as const, windows: [{ ...previous, receiveSpans: [{
+    receipt: f.coverage.receipt,
+    selector: { id: 'original-native-span', accountId: '123', purchaseId: saved.purchaseId, sinceMs: 1, registeredAtMs: 1, offsetAtStart: 500 },
+    deadlineMs: f.binding.deadlineMs, acceptPositive: true,
+  }] }] } };
+  const calls: string[] = [], directory = join(f.root, 'imported-spans');
+  const leaf = `${Buffer.from(value.purchaseId).toString('base64url')}.json`;
+  const store = new ProtectedPaymentRequests(directory, undefined,
+    () => { calls.push('history'); }, () => { calls.push('coverage'); }, () => {
+      expect(existsSync(join(directory, leaf))).toBe(false); calls.push('spans');
+    });
+  await store.retain(value, () => {}); expect(calls).toEqual(['history', 'coverage', 'spans']);
+  expect((await store.read(value.purchaseId, value.operationId, () => {})).replyHistory).toEqual(value.replyHistory);
+  const unsupported = new ProtectedPaymentRequests(join(f.root, 'unsupported-spans'), undefined, () => {}, () => {});
+  await expect(unsupported.retain(value, () => {})).rejects.toThrow();
+  expect(existsSync(join(f.root, 'unsupported-spans', leaf))).toBe(false);
 });
 
 test.each(['notice', 'account', 'thread', 'deadline', 'future-span', 'unchecked', 'answer'] as const)(

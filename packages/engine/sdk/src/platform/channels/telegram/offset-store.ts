@@ -7,8 +7,9 @@ import { atomicWriteFileSync } from '../../config/atomic-write.js';
 import { readFileObservation, type FileObservation } from '../../utils/file-observation.js';
 import { tryAcquireCrossProcessLock } from '../../workspace/checkpoint/cross-process-lock.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { readTelegramPaymentReceiveSpan, MAX_TELEGRAM_PAYMENT_RECEIVE_SPANS, type TelegramPaymentReceiveSpan } from './payment-receive-span.js';
 
-const MAX_FILE_BYTES = 16_384;
+const MAX_FILE_BYTES = 512 * 1024;
 const MAX_ACCOUNTS = 64;
 const missing = (error: unknown): boolean => error !== null && typeof error === 'object' && 'code' in error && error.code === 'ENOENT';
 const offsetValue = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
@@ -38,9 +39,11 @@ export interface TelegramPollingCursor {
   capture(): { readonly observation: TelegramCursorObservation; assertCurrent(): void };
   assertCurrent(): void;
   save(offset: number, assertCurrent: () => void): number;
+  receiveSpans(): readonly TelegramPaymentReceiveSpan[];
+  replaceReceiveSpans(spans: readonly TelegramPaymentReceiveSpan[], assertCurrent: () => void): void;
   release(): void;
 }
-interface AccountCursor { readonly accountId: string; readonly offset: number; readonly updatedAt: string; }
+interface AccountCursor { readonly accountId: string; readonly offset: number; readonly updatedAt: string; readonly receiveSpans?: readonly TelegramPaymentReceiveSpan[] }
 declare const legacyMigrationHandle: unique symbol;
 export interface TelegramLegacyCursorHandle { readonly [legacyMigrationHandle]: true; }
 interface LegacyCursor { readonly offset: number; readonly updatedAt: string; }
@@ -55,7 +58,9 @@ export class TelegramOffsetStore {
   private readonly migrations = new WeakMap<TelegramLegacyCursorHandle, { readonly observed: FileObservation; readonly cursor: LegacyCursor }>();
   private observedFile = false;
   private failed: TelegramOffsetFailure | undefined;
-  constructor(private readonly filePath: string, private readonly accountId: string, private readonly beforeWrite?: () => void) {
+  private receiveSpanFormat = false;
+  constructor(private readonly filePath: string, private readonly accountId: string, private readonly beforeWrite?: () => void,
+    private readonly beforeReceiveSpanWrite?: () => void) {
     if (!accountValue(accountId)) throw new TelegramOffsetStoreError('invalid-request');
   }
 
@@ -80,15 +85,28 @@ export class TelegramOffsetStore {
       const raw = this.readRaw(); if (!raw) return { observed: null, accounts: [] };
       const { row, observed } = raw;
       if (object(row) && row['version'] === 1) { legacyCursor(row); throw new TelegramOffsetStoreError('unbound'); }
-      if (!object(row) || Object.keys(row).length !== 2 || row['version'] !== 2 || !Array.isArray(row['accounts'])
+      if (!object(row) || Object.keys(row).length !== 2 || (row['version'] !== 2 && row['version'] !== 3) || !Array.isArray(row['accounts'])
         || row['accounts'].length > MAX_ACCOUNTS) throw new Error();
-      const seen = new Set<string>();
+      const seen = new Set<string>(), spans = new Set<string>();
+      const accounts: AccountCursor[] = [];
       for (const entry of row['accounts']) {
-        if (!object(entry) || Object.keys(entry).length !== 3 || !accountValue(entry['accountId']) || seen.has(entry['accountId'])
+        if (!object(entry) || Object.keys(entry).length !== (Object.hasOwn(entry, 'receiveSpans') ? 4 : 3) || !accountValue(entry['accountId']) || seen.has(entry['accountId'])
           || !offsetValue(entry['offset']) || typeof entry['updatedAt'] !== 'string' || !Number.isFinite(Date.parse(entry['updatedAt']))) throw new Error();
         seen.add(entry['accountId']);
+        let receiveSpans: readonly TelegramPaymentReceiveSpan[] | undefined;
+        if (Object.hasOwn(entry, 'receiveSpans')) {
+          if (row['version'] !== 3 || !Array.isArray(entry['receiveSpans'])) throw new Error();
+          receiveSpans = Object.freeze(entry['receiveSpans'].map(readTelegramPaymentReceiveSpan));
+          for (const span of receiveSpans) {
+            if (span.accountId !== entry['accountId'] || span.offsetAtStart !== null && span.offsetAtStart > entry['offset'] || spans.has(span.id)) throw new Error(); spans.add(span.id);
+          }
+          if (spans.size > MAX_TELEGRAM_PAYMENT_RECEIVE_SPANS) throw new Error();
+        }
+        accounts.push(Object.freeze({ accountId: entry['accountId'], offset: entry['offset'], updatedAt: entry['updatedAt'],
+          ...(receiveSpans === undefined ? {} : { receiveSpans }) }));
       }
-      return { observed, accounts: row['accounts'] as unknown as readonly AccountCursor[] };
+      if (row['version'] === 3) this.receiveSpanFormat = true;
+      return { observed, accounts: Object.freeze(accounts) };
     } catch (error) {
       this.failed = error instanceof TelegramOffsetStoreError ? error.kind : 'unavailable';
       throw new TelegramOffsetStoreError(this.failed);
@@ -99,7 +117,7 @@ export class TelegramOffsetStore {
    * become this handle, and preparing never writes or clears the old record. */
   prepareLegacyMigration(): (LegacyCursor & { readonly handle: TelegramLegacyCursorHandle }) | null {
     const raw = this.readRaw(); if (!raw) return null;
-    if (object(raw.row) && raw.row['version'] === 2) { this.read(); return null; }
+    if (object(raw.row) && (raw.row['version'] === 2 || raw.row['version'] === 3)) { this.read(); return null; }
     const cursor = legacyCursor(raw.row), handle = Object.freeze({}) as TelegramLegacyCursorHandle;
     this.migrations.set(handle, { observed: raw.observed, cursor });
     return Object.freeze({ ...cursor, handle });
@@ -119,9 +137,16 @@ export class TelegramOffsetStore {
     });
   }
 
+  private declareReceiveSpanFormat(): void {
+    if (!this.receiveSpanFormat) return;
+    const declared: unknown = this.beforeReceiveSpanWrite?.();
+    if (declared !== undefined) { drainOwned(declared); throw new TelegramOffsetStoreError('unavailable'); }
+  }
+
   load(): TelegramOffsetStart {
     try {
       const snapshot = this.read(), cursor = snapshot.accounts.find(entry => entry.accountId === this.accountId);
+      this.declareReceiveSpanFormat(); this.assertFileCurrent(snapshot.observed);
       return cursor ? { mode: 'resume', offset: cursor.offset } : { mode: 'fresh' };
     } catch (error) {
       const failure = error instanceof TelegramOffsetStoreError ? error : new TelegramOffsetStoreError('unavailable');
@@ -140,7 +165,8 @@ export class TelegramOffsetStore {
     if (!release) throw new TelegramOffsetStoreError('busy');
     try {
       const lease = readFileObservation(lockPath);
-      let expected = this.read(), retired = false;
+      let expected = this.read(), retired = false, offsetGeneration = {};
+      this.declareReceiveSpanFormat(); this.assertFileCurrent(expected.observed);
       const assertLease = () => {
         if (retired || this.failed) throw new TelegramOffsetStoreError('unavailable');
         try {
@@ -158,12 +184,31 @@ export class TelegramOffsetStore {
       return Object.freeze({
         assertCurrent,
         capture: () => {
-          assertCurrent(); const selected = expected, cursor = selected.accounts.find(entry => entry.accountId === this.accountId);
+          assertCurrent(); const selected = expected, generation = offsetGeneration, cursor = selected.accounts.find(entry => entry.accountId === this.accountId);
           const observation = Object.freeze({ accountId: this.accountId, offset: cursor?.offset ?? null, physical: selected.observed?.physical ?? null });
           return Object.freeze({ observation, assertCurrent: () => {
-            assertLease();
-            try { this.assertFileCurrent(selected.observed); } catch { throw new TelegramOffsetStoreError('unavailable'); }
+            // Own metadata-only span publication may happen while getUpdates
+            // waits. It must not substitute another offset generation or file.
+            assertCurrent();
+            if (generation !== offsetGeneration) throw new TelegramOffsetStoreError('unavailable');
           } });
+        },
+        receiveSpans: () => { assertCurrent(); return expected.accounts.find(entry => entry.accountId === this.accountId)?.receiveSpans ?? []; },
+        replaceReceiveSpans: (input: readonly TelegramPaymentReceiveSpan[], current: () => void) => {
+          const spans = Object.freeze(input.map(readTelegramPaymentReceiveSpan));
+          if (spans.some(span => span.accountId !== this.accountId) || new Set(spans.map(span => span.id)).size !== spans.length) throw new TelegramOffsetStoreError('invalid-request');
+          const selected = expected, owned = () => { assertLease(); current(); assertLease(); };
+          this.mutate(owned, mutationLease => {
+            owned(); this.assertFileCurrent(selected.observed);
+            const previous = selected.accounts.find(entry => entry.accountId === this.accountId);
+            if (!previous && selected.accounts.length >= MAX_ACCOUNTS) throw new Error();
+            const next: AccountCursor = { accountId: this.accountId, offset: previous?.offset ?? 0,
+              updatedAt: new Date().toISOString(), receiveSpans: spans };
+            const accounts = previous ? selected.accounts.map(entry => entry.accountId === this.accountId ? next : entry) : [...selected.accounts, next];
+            if (accounts.reduce((count, entry) => count + (entry.receiveSpans?.length ?? 0), 0) > MAX_TELEGRAM_PAYMENT_RECEIVE_SPANS) throw new Error();
+            this.publish(selected.observed, accounts, owned, mutationLease, () => { expected = this.read(); });
+            owned(); this.assertFileCurrent(expected.observed); return 0;
+          });
         },
         save: (offset: number, current: () => void) => {
           if (!offsetValue(offset)) throw new TelegramOffsetStoreError('invalid-request');
@@ -175,10 +220,10 @@ export class TelegramOffsetStore {
             if (previous && offset < previous.offset) throw new TelegramOffsetStoreError('invalid-request');
             if (previous?.offset === offset) { mutationLease(); assertCurrent(); return offset; }
             if (!previous && selected.accounts.length >= MAX_ACCOUNTS) throw new TelegramOffsetStoreError('unavailable');
-            const next = { accountId: this.accountId, offset, updatedAt: new Date().toISOString() };
+            const next = { ...previous, accountId: this.accountId, offset, updatedAt: new Date().toISOString() };
             const accounts = previous ? selected.accounts.map(entry => entry.accountId === this.accountId ? next : entry) : [...selected.accounts, next];
-            this.publish(selected.observed, accounts, owned, mutationLease);
-            expected = this.read(); owned(); this.assertFileCurrent(expected.observed);
+            this.publish(selected.observed, accounts, owned, mutationLease, () => { expected = this.read(); offsetGeneration = {}; });
+            owned(); this.assertFileCurrent(expected.observed);
             return offset;
           });
         },
@@ -200,7 +245,10 @@ export class TelegramOffsetStore {
       const nextOffset = Math.max(previous?.offset ?? 0, offset);
       if (previous?.offset === nextOffset) { assertCurrent(); currentLease(); this.assertFileCurrent(snapshot.observed); return nextOffset; }
       if (!previous && snapshot.accounts.length >= MAX_ACCOUNTS) throw new Error();
-      const next = { accountId: this.accountId, offset: nextOffset, updatedAt: new Date().toISOString() };
+      // This compatibility writer does not own actual archive dispatch. An
+      // administrative advance cannot certify old payment receive custody.
+      const next = { ...previous, accountId: this.accountId, offset: nextOffset, updatedAt: new Date().toISOString(),
+        ...(previous?.receiveSpans ? { receiveSpans: previous.receiveSpans.map(span => ({ ...span, invalid: true })) } : {}) };
       const accounts = previous ? snapshot.accounts.map(entry => entry.accountId === this.accountId ? next : entry) : [...snapshot.accounts, next];
       this.publish(snapshot.observed, accounts, assertCurrent, currentLease);
       return nextOffset;
@@ -216,16 +264,23 @@ export class TelegramOffsetStore {
       throw new Error();
     }
   }
-  private publish(observed: FileObservation | null, accounts: readonly AccountCursor[], assertCurrent: () => void, currentLease: () => void): void {
-    const contents = `${JSON.stringify({ version: 2, accounts })}\n`;
+  private publish(observed: FileObservation | null, accounts: readonly AccountCursor[], assertCurrent: () => void, currentLease: () => void,
+    publishedOwnImage?: () => void): void {
+    const version = this.receiveSpanFormat || accounts.some(account => account.receiveSpans !== undefined) ? 3 : 2;
+    const contents = `${JSON.stringify({ version, accounts })}\n`;
     if (Buffer.byteLength(contents, 'utf8') > MAX_FILE_BYTES) throw new Error();
     const current = () => { assertCurrent(); currentLease(); this.assertFileCurrent(observed); };
     try {
       current();
       const published: unknown = this.beforeWrite?.();
       if (published !== undefined) { drainOwned(published); throw new Error(); }
+      if (version === 3) {
+        const declared: unknown = this.beforeReceiveSpanWrite?.();
+        if (declared !== undefined) { drainOwned(declared); throw new Error(); }
+      }
       current();
-      atomicWriteFileSync(this.filePath, contents, { mode: 0o600, assertCurrent: current });
+      atomicWriteFileSync(this.filePath, contents, { mode: 0o600, assertCurrent: current,
+        onEffect: published => { if (published) publishedOwnImage?.(); } });
       if (!readFileObservation(this.filePath).bytes.equals(Buffer.from(contents, 'utf8'))) throw new Error();
       this.observedFile = true; assertCurrent(); currentLease();
     } catch { this.failed = 'write-uncertain'; throw new TelegramOffsetStoreError('write-uncertain'); }

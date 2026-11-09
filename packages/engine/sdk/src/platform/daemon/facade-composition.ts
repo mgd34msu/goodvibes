@@ -579,7 +579,8 @@ export function createDaemonFacadeCollaborators(
   runtime.channelPlugins.setIngressAlarm(ingressAlarm);
   const workProposals = createFacadeWorkProposalStore(runtime.configManager);
 
-  const telegramSourceAccounts = createTelegramSourceAccountOwner();
+  const terminalPaymentSpan = options.paymentReplies?.mayRetireReceiveSpan.bind(options.paymentReplies);
+  const telegramSourceAccounts = createTelegramSourceAccountOwner(purchaseId => terminalPaymentSpan?.(purchaseId) === true);
   const surfaceActionHelper = new DaemonSurfaceActionHelper({
     telegramSourceAccounts: telegramSourceAccounts.reader,
     delegatedTelegram: composeDelegatedTelegramIntake(runtime, telegramSourceAccounts.reader, options.swapManager),

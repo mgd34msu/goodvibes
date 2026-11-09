@@ -122,6 +122,7 @@ export class BuiltinChannelRuntime {
       buildSurfaceAdapterContext: this.deps.buildSurfaceAdapterContext,
       offsetFilePath,
       beforeCursorWrite: this.deps.beforeTelegramCursorWrite?.bind(this.deps),
+      beforeReceiveSpanWrite: this.deps.beforeTelegramReceiveSpanWrite?.bind(this.deps),
       telegramSourceAccounts: this.deps.telegramSourceAccounts,
       ...(this.deps.ingressAlarm ? { ingressAlarm: this.deps.ingressAlarm } : {}),
       onConcurrentConsumerConflict: (detail) => {

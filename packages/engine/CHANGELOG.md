@@ -41,51 +41,57 @@
   native actions their own incarnation instead of hashing the same evidence
   again. Remove an unused historical downloader; retain release manifest pins.
 
-- Retain the actual Telegram polling cursor and its local receiving lease
-  through provider calls, dispatch and shutdown. A competing local receiver
-  waits and retries; another writer's cursor cannot become this session's
-  confirmed progress. Repeated stop/start calls also drain retired receiving
-  work before handing over the queue. The encrypted archive/cursor link for
-  an outage overlapping an unfinished payment window remains incomplete.
+- Resume eligible pre-submit payment windows under their original operation
+  lease, issued pairing grant, unchanged payment settings and independently
+  restored native browser/page/controls. Preserve the original held funds and
+  exact selected quote. Changed terms or window type void earlier answers;
+  parsed IDs and saved facts alone authorize no effects. Wait for host readiness
+  without blocking payment-handler registration.
 
-- Persist a completed native payment receive span and its silence result before
-  resolving the window. Restore that original expiry without another notice
-  after independently restoring its authority and page. Keep new notices and
-  recipients separate, declare the required reader format before publication,
-  and drain the original write on cancellation. Coverage for an outage that
-  overlaps an unfinished window remains incomplete.
+- Retain the actual Telegram polling cursor and local receiving lease through
+  provider calls, archive dispatch and shutdown. A competing local receiver
+  waits; another writer's cursor never becomes this session's progress. Repeated
+  stop/start also drains retiring setup and receive work before queue handover.
+  Before sending a native payment notice, persist its original account-bound
+  receive selector and link it to each acknowledged receipt in the encrypted
+  request. Declare cursor, selector and completed-coverage reader formats before
+  publication, including when retaining imported request history.
 
-- Require the original native Telegram poller to process through a payment
-  deadline before treating it as silence. Reject skipped or unconfirmed receive
-  spans, keep queued on-time replies answerable, preserve decision-model outage
-  errors, and reject ambiguous provider timestamps. Expired operator views
-  cannot answer while the receive drain is pending. Classic retains potential
-  replies without swallowing ordinary chat or treating unread replies as silence.
-  Durable restart/backlog and webhook coverage remain unfinished.
+- Archive authorized original Telegram replies before confirming their update
+  IDs. Preserve first receipt time on redelivery, distinct edit timestamps and
+  separate window histories. Stop receiving when archival fails. Restart uses
+  the same real poller to drain up to 64 completed requests or 30 seconds; only
+  an empty request started through the required cutoff, after dispatch and
+  persistence, establishes observed queue quiet. Saved reply lists, account IDs
+  and backfill flags do not establish absence.
 
-- Retain authorized Telegram owner replies in the original encrypted checkout
-  request before confirming provider delivery. Keep prior-window replies separate,
-  preserve first receipt time on redelivery and stop receiving if archival fails.
-  Recovery can honor a saved objection under the original native authority;
-  positive answers and silence still require unfinished receive-coverage work.
+- Keep covered original payment deadlines and acknowledged notices, including
+  still-open windows. Honor original objections under the restored authority;
+  original positive replies require complete receive coverage for all required
+  recipients. Covered expired silence retains its original approval/veto rule
+  and cannot become approval through a later interpretation. Re-notify only
+  uncovered actual bot/chat/topic recipients with new acknowledged deliveries;
+  their new window cannot inherit an old recipient's positive answer. Preserve
+  each retained recipient's original cutoff instead of extending it globally.
 
-- Wire native startup into checkout-window resumption under the existing
-  operation lease, original issued pairing grant and restored native page.
-  Wait for host registration without blocking payment handler readiness.
-  Reopen uncovered Telegram windows at the acknowledged account/chat/topic,
-  and clean up matching pre-submit holds if restoration fails or is stopped.
-  Durable reply history and receive/downtime coverage remain unfinished.
-  Read scope membership without computing an unused catalog digest.
+- Refuse unconfirmed reception after observed competing consumers, webhook
+  transitions, cursor replacement/advance, scoped processing gaps, backwards
+  clocks or a receive gap reaching Telegram's at-most-24-hour retention.
+  Continuously received longer windows retain their archive and coverage;
+  notice age alone does not discard them. Native custody assumes exclusive
+  use of that bot token: Telegram cannot retrospectively audit a different
+  consumer that drained updates during downtime and then stopped. Webhook
+  identity supplies no durable polling coverage. Expired operator views and
+  unavailable decision models cannot turn an unresolved reply into silence.
+  Classic retains potential replies without suppressing ordinary chat.
 
-- Let native payment reception wait for its first Telegram ingress attachment
-  during startup, then verify that exact session. Cancellation, facade retirement
-  and rebinding remove the pending wait; a replacement session cannot take it
-  over. This does not establish missed-reply or downtime coverage.
-
-- Add the engine checkout-window resume path using the original journal and
-  held funds. Preserve exact selected terms in v2 checkpoints, reject replaced
-  holds and void earlier answers when the selected terms or window type change.
-  Reply-history integration and final release qualification remain unfinished.
+- Retain the exact Telegram account before sending and through reply/expiry
+  checks. Missing, pending, retired or replaced sources cannot acquire silence
+  authority from a receipt. Startup can wait for the first real ingress session;
+  cancellation removes that wait and a later replacement cannot take it over.
+  Paired operator answers remain available before expiry. Drain account reads,
+  archive writes and native receive work during shutdown. Source regression
+  cases are authored; runtime and release qualification remain pending.
 
 - Follow the repository rename to `mgd34msu/goodvibes` in install/uninstall
   downloads, native acquisition, updates, release tooling, workflow action
@@ -97,18 +103,13 @@
   after repricing. Refresh selected native browser controls, preserve original
   intent/authority/evidence, and declare the checkpoint reader format before
   publication. Missing or failed storage stops the waiting checkout before
-  submission. Full reply-history recovery remains unfinished.
+  submission; the original archive and receive selectors remain bound to that
+  checkpoint's actual receipt and per-recipient cutoff.
 
 - Compare native-daemon smoke payloads directly against private baseline copies
   instead of hashing each local file before and after execution. Keep comparison
   memory bounded and report relative paths/byte counts in the version 2 local
   proof. Independently pinned published-download checksum verification remains.
-
-- Retain the original Telegram ingress account before sending native payment
-  notices and recheck its private session handle at window expiry. A missing,
-  pending, retired or replaced source cannot become veto silence through a
-  receipt account ID. Keep paired operator answers usable and drain admitted
-  account reads during shutdown. Durable missed-reply coverage remains unfinished.
 
 - Add explicit previous-cursor migration through WebUI Settings → Surfaces and
   the shared TUI/Agent `/channels telegram-cursor` picker. Verify the selected
@@ -120,26 +121,17 @@
   discarding history with a negative offset. Retain separate cursors per bot,
   serialize refreshed writes, and stop before confirming an unpersisted offset.
   Native writes declare the account-cursor reader format before publication.
-  Durable reply history and payment window restart continuation remain unfinished.
+  Explicit administrative offset advances invalidate prior payment receive
+  spans rather than claiming native archive dispatch.
 
-- Add the private browser restoration path for the retained exact debugger,
-  native target/context and document-loader graph, including the Node-host
-  fallback. Reconstruct only selected control identities with a fresh snapshot
-  binding on every checkout-driver action; later same-ref snapshots cannot be
-  adopted. Retire failed attachments without closing the owner's browser.
-  Automatic startup payment-window continuation remains unfinished.
-
-- Retain the selected checkout control identities, frame selectors and native
-  identity metadata with encrypted browser recovery facts, excluding entered
-  values. Native snapshots are immutable; JSON copies cannot mint their source
-  provenance. Concurrent snapshot reads keep distinct allocated IDs. Actual
-  startup integration and resumed payment windows remain unfinished.
-
-- Retain the original discovered browser WebSocket, native tab/context and
-  document-loader observations inside encrypted checkout facts. Use the actual
-  browser or Node-host page mapping and drain protocol reads through admission
-  cancellation and shutdown. These observations do not authorize restart
-  continuation; automatic startup integration remains unfinished.
+- Restore the retained exact browser debugger, native target/context and
+  document-loader graph, including the Node-host fallback. Reconstruct selected
+  control identities with a fresh snapshot binding on each checkout-driver
+  action; same-ref replacement snapshots cannot be adopted. Encrypted recovery
+  facts retain frame selectors and identity metadata, excluding entered values.
+  JSON cannot mint native snapshot provenance. Concurrent snapshots have distinct
+  IDs, and failed attachments retire without closing the owner's browser.
+  Admission and shutdown drain the original browser/Node-host protocol reads.
 
 - Attribute optional calibration reports to the Git revision and local file
   versions instead of hashing every source file and the complete digest list.
@@ -154,13 +146,14 @@
   Native webhook registration now supplies its own private, retired-on-stop
   credential and verified original bot session through the actual HTTP route.
   Failed or late registration cannot mint proof; ordinary shared-secret ingress
-  cannot borrow a polling capability. Actual restart backfill remains unfinished.
+  cannot borrow a polling capability or establish retrospective receive coverage.
 
 - Retain a real, original-owner-issued payment continuation with protected
   checkout facts. Bind it losslessly to the existing operation ID, retire it
   before known-safe cleanup, and drain delayed retirement through shutdown.
   A stop retires future authority without deleting unknown-submit evidence.
-  Browser restart continuation and missed-reply recovery remain unfinished.
+  Resumed pre-submit windows still require the original native grant and
+  independently restored page and receive custody described above.
 
 - Issue native continuation custody IDs instead of hashing directory and token
   state for every check. Compare the recorded owner ancestry and credential
@@ -171,7 +164,8 @@
   encrypted store before acknowledging admission. Own and drain preparation
   through cancellation, retain the original storage callbacks, and clean up
   settled requests while keeping uncertain/unverified submission evidence.
-  Saved facts confer no execution authority; restart continuation remains open.
+  Saved facts confer no execution authority; native restoration independently
+  reacquires the original page, paired grant and receiving capabilities.
 
 - Reuse one immutable gateway scope snapshot while registrations are unchanged.
   Live continuation guards no longer rebuild and hash the complete catalog on
@@ -190,8 +184,8 @@
 - Retain the exact purchase-window notice and Telegram's actual acknowledged
   chat/message/thread identities in checkout evidence. Notification delivery can
   return this receipt without sending twice; existing string-result callers keep
-  their response IDs. This prepares correlation evidence; automatic checkout
-  continuation and missed-reply backfill remain unfinished.
+  their response IDs. Receipts select the exact original notice during native
+  continuation; they do not independently grant receiving or spending authority.
 
 - Enforce the owner's request-specific maximum against the complete payable
   total, including tax, fees and delivery. Exceeding it requires explicit

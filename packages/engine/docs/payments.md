@@ -784,7 +784,7 @@ alias is not substituted for the acknowledged recipient after sending. Earlier
 journals and adapters without receipts leave this metadata absent. A receipt
 does not establish that history can be backfilled and cannot authorize a resumed
 checkout. Native restoration and encrypted reply archival are wired as described
-in §8.6.1; complete receive coverage across downtime remains unfinished.
+in §8.6.1, including original native polling spans and bounded backlog recovery.
 
 Telegram receipts also retain the public sending-bot ID when the provider
 acknowledges it. A channel answer must match that account, recipient and topic.
@@ -849,13 +849,15 @@ write. Another writer's advance, deletion or replacement cannot be adopted as
 this receiver's progress. Even an unchanged-byte rewrite retires that original
 observation. Stop and repeated stop/start calls drain the original provider and
 dispatch work before releasing the receiving lease. These local file observations
-do not use content hashes and do not establish the still-required archive link
-for a window whose outage overlaps reception.
+do not use content hashes. The payment span is separately linked to its original
+encrypted reply archive before its notice is sent; neither cursor facts nor
+account identity substitute for that link.
 
 Native webhook identity alone does not supply this polling barrier; explicit owner answers can
 still settle a webhook window before expiry, but unattended expiry requires
-confirmed receive coverage. Durable downtime and webhook coverage remain work
-in progress; see §8.6.1.
+confirmed receive coverage. Native polling can restore its saved original
+receive span under the custody contract in §8.6.1. Webhook downtime coverage is
+not available; webhook identity cannot certify unattended expiry.
 
 Telegram's retained update queue is bounded and is not a complete chat-history
 service; restart recovery must establish which replies were actually received
@@ -1052,8 +1054,8 @@ never a serialized receipt as permission to invent a fresh window. It preserves
 the original notice only when the exact selected terms and required window type
 still match. Changed terms or an older checkpoint without the exact selection
 void that window before a fresh decision and notification. Native startup is
-wired to this entry under the original issued grant. Complete receive-history
-coverage across downtime remains unfinished (§8.6.1).
+wired to this entry under the original issued grant and the native polling
+receive-custody requirements in §8.6.1.
 
 Each wait now carries its exact `purchaseId`, rendered notice, deadline and
 owning cancellation signal. The notifier does not keep a shared last notice;
@@ -1251,10 +1253,39 @@ the remaining current quote and payment checks. A new model interpretation of
 old text cannot promote a recorded silence result into an approval. Missing,
 partial, foreign-notice or future-clock markers do not establish coverage.
 
-**Account receive/downtime coverage and complete provider-backlog recovery are
-unfinished.** The complete backfill and expiry behavior described below remains
-a requirement; live source identity, a delivered-notice receipt and a saved
-reply list do not establish it.
+Native polling now reserves a private, durable receive span before sending the
+notice. Its exact account, original purchase, registration time and saved offset
+are linked to each acknowledged receipt in the encrypted request. On restart,
+only the actual account-bound poller holding the original cursor lease can
+restore that span. The same poller drains its provider backlog through the
+original archive; it never starts a second `getUpdates` consumer. Matching owner
+replies are archived before the next request confirms their update IDs.
+An empty response proves queue quiet only through that request's start time,
+after dispatch and persistence. Recovery bounds the drain to 64 completed
+requests or 30 seconds. Exhaustion is uncovered reception, never silence.
+
+An eligible original positive answer can settle the original window only with
+complete receive coverage for every original recipient. With no answer and
+coverage through expiry, the original deadline and opposite approval/veto
+silence rules stand. Still-open covered recipients retain their original notice
+and cutoff. Only uncovered actual recipients get another acknowledged notice
+and a new deadline; already covered recipients are not re-notified. An old
+recipient's earlier positive answer cannot authorize a newly reopened window.
+
+Coverage is conditional on native exclusive receiving custody of that exact
+bot token. The Bot API provides a bounded update queue, not a retrospective
+audit of other consumers. If an unrelated holder consumed updates during the
+outage and stopped before restart, Telegram cannot expose that lost history.
+The daemon does not claim to prove otherwise. Observed competing consumers,
+webhook transitions, cursor replacement/advance, scoped processing gaps,
+clock regression and the provider's at-most-24-hour retention invalidate the
+original span. Missing span/archive linkage is uncovered too. Webhook receiving
+does not provide a durable polling span. No list of replies, bot identity or
+`backfillable` flag independently establishes absence.
+
+The implementation and source regressions are present. End-to-end runtime and
+release qualification remain separate work; this description is not a claim
+that those deferred checks have passed.
 
 **The rule that follows is `recoverInterruptedWindow()`'s design, verified
 against its own unit tests and applied by boot recovery to every interrupted

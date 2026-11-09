@@ -22,8 +22,8 @@ import { captureBrowserControlSnapshot, type BrowserControlSnapshot } from '../.
 import { captureBrowserCheckoutRecovery, type BrowserCheckoutRecovery } from '../../browser/browser-checkout-recovery-data.js';
 import { captureCheckoutWindowCheckpoint, type CheckoutWindowCheckpoint } from '../checkout-window-checkpoint.js';
 import { atomicWriteFileSync } from '../../config/atomic-write.js';
-import { capturePaymentReplyHistory, capturePaymentReplyHistoryEntry, capturePaymentReplyReceiveCoverage, paymentReplyHistoryBinding, historyEntryIdentity,
-  type PaymentReplyHistory, type PaymentReplyHistoryBinding, type PaymentReplyHistoryEntry, type PaymentReplyReceiveCoverage } from '../reply-history.js';
+import { capturePaymentReplyHistory, capturePaymentReplyHistoryEntry, capturePaymentReplyReceiveCoverage, capturePaymentReplyReceiveSpans, paymentReplyHistoryBinding, historyEntryIdentity,
+  type PaymentReplyHistory, type PaymentReplyHistoryBinding, type PaymentReplyHistoryEntry, type PaymentReplyReceiveCoverage, type PaymentReplyReceiveSpan } from '../reply-history.js';
 
 export interface PaymentRequestHostFacts {
   readonly authority: NativePairedSnapshot;
@@ -49,11 +49,12 @@ export interface ProtectedPaymentRequest {
 export interface PaymentRequestStore {
   readonly supportsReplyHistory?: boolean;
   readonly supportsReplyReceiveCoverage?: boolean;
+  readonly supportsReplyReceiveSpans?: boolean;
   retain(request: ProtectedPaymentRequest, assertCurrent: () => void): Promise<void>;
   read(purchaseId: string, operationId: string, assertCurrent: () => void): Promise<ProtectedPaymentRequest>;
   remove(purchaseId: string, operationId: string, assertCurrent: () => void): Promise<void>;
   checkpointWindow?(purchaseId: string, operationId: string, window: CheckoutWindowCheckpoint,
-    browser: BrowserCheckoutRecovery | null, assertCurrent: () => void): Promise<void>;
+    browser: BrowserCheckoutRecovery | null, assertCurrent: () => void, receiveSpans?: readonly PaymentReplyReceiveSpan[]): Promise<void>;
   appendReply?(purchaseId: string, operationId: string, binding: PaymentReplyHistoryBinding,
     entry: PaymentReplyHistoryEntry, assertCurrent: () => void): Promise<void>;
   recordReceiveCoverage?(purchaseId: string, operationId: string, binding: PaymentReplyHistoryBinding,
@@ -154,9 +155,11 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
   private failed = false;
   private readonly records = new Map<string, { operationId: string; physical: string }>();
   constructor(private readonly directory: string, private readonly beforeCheckpoint?: (version: 1 | 2) => void,
-    private readonly beforeReplyHistory?: () => void, private readonly beforeReplyReceiveCoverage?: () => void) {}
+    private readonly beforeReplyHistory?: () => void, private readonly beforeReplyReceiveCoverage?: () => void,
+    private readonly beforeReplyReceiveSpans?: () => void) {}
   get supportsReplyHistory(): boolean { return this.beforeReplyHistory !== undefined; }
   get supportsReplyReceiveCoverage(): boolean { return this.beforeReplyHistory !== undefined && this.beforeReplyReceiveCoverage !== undefined; }
+  get supportsReplyReceiveSpans(): boolean { return this.beforeReplyHistory !== undefined && this.beforeReplyReceiveSpans !== undefined; }
   private path(id: string): string { return join(this.directory, `${Buffer.from(checkoutRequestId(id)).toString('base64url')}.json`); }
   private safeDirectory(): void {
     const entry = lstatSync(this.directory);
@@ -224,7 +227,7 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
       current(check); const request = own(value), plaintext = JSON.stringify(request);
       if (request.replyHistory) {
         if (!this.beforeReplyHistory) throw new ProtectedPaymentRequestError();
-        const declared: unknown = this.beforeReplyHistory();
+        const declared: unknown = this.declareHistory(request.replyHistory);
         if (declared !== undefined) { drainOwned(declared); throw new ProtectedPaymentRequestError(); }
         current(check);
       }
@@ -263,7 +266,15 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
   private declareHistory(history: PaymentReplyHistory): unknown {
     const declared: unknown = this.beforeReplyHistory?.();
     if (declared !== undefined) return declared;
-    return history.windows.some(window => window.receiveCoverage !== undefined) ? this.beforeReplyReceiveCoverage?.() : undefined;
+    if (history.windows.some(window => window.receiveCoverage !== undefined)) {
+      if (!this.beforeReplyReceiveCoverage) throw new ProtectedPaymentRequestError();
+      const coverage: unknown = this.beforeReplyReceiveCoverage(); if (coverage !== undefined) return coverage;
+    }
+    if (history.windows.some(window => window.receiveSpans !== undefined)) {
+      if (!this.beforeReplyReceiveSpans) throw new ProtectedPaymentRequestError();
+      return this.beforeReplyReceiveSpans();
+    }
+    return undefined;
   }
 
   /** Called by the original live receiver only after its entire delivered
@@ -279,6 +290,8 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
       if (!original.window || !original.replyHistory || !isDeepStrictEqual(paymentReplyHistoryBinding(original.window), binding)) throw new ProtectedPaymentRequestError();
       const coverage = capturePaymentReplyReceiveCoverage(value, binding), history = original.replyHistory, window = history.windows.at(-1);
       if (!window || !isDeepStrictEqual(window.binding, binding)) throw new ProtectedPaymentRequestError();
+      const cutoff = window.receiveSpans?.find(span => isDeepStrictEqual(span.receipt, coverage.receipt))?.deadlineMs ?? binding.deadlineMs;
+      if (coverage.throughMs !== cutoff) throw new ProtectedPaymentRequestError();
       const previous = window.receiveCoverage?.find(entry => isDeepStrictEqual(entry.receipt, coverage.receipt));
       if (previous) { current(check); return; }
       const next = own({ ...original, replyHistory: { ...history, windows: [...history.windows.slice(0, -1),
@@ -315,7 +328,7 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
    * identity, intent, paired grant, configuration and source evidence survive;
    * only the window's actual quote and native control observations advance. */
   async checkpointWindow(id: string, operationId: string, window: CheckoutWindowCheckpoint,
-    browser: BrowserCheckoutRecovery | null, check: () => void): Promise<void> {
+    browser: BrowserCheckoutRecovery | null, check: () => void, receiveSpans?: readonly PaymentReplyReceiveSpan[]): Promise<void> {
     try {
       current(check);
       const original = this.readOwned(id, operationId, check), path = this.path(id), file = readFileObservation(path);
@@ -332,8 +345,14 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
       const { browser: _oldBrowser, browserControls: _oldControls, ...authority } = original.host;
       if (original.replyHistory && !this.beforeReplyHistory) throw new ProtectedPaymentRequestError();
       const binding = this.beforeReplyHistory ? paymentReplyHistoryBinding(selected) : undefined;
+      const spans = binding && receiveSpans?.length ? capturePaymentReplyReceiveSpans(receiveSpans, binding, id) : undefined;
+      const carriedCoverage = binding ? original.replyHistory?.windows.at(-1)?.receiveCoverage?.filter(coverage =>
+        binding.receipts.some(receipt => isDeepStrictEqual(receipt, coverage.receipt))
+        && coverage.throughMs === (spans?.find(span => isDeepStrictEqual(span.receipt, coverage.receipt))?.deadlineMs ?? binding.deadlineMs)) : undefined;
       const replyHistory = binding ? isDeepStrictEqual(original.replyHistory?.windows.at(-1)?.binding, binding) ? original.replyHistory
-        : { version: 1, windows: [...(original.replyHistory?.windows ?? []), { startedAtMs: selected.record.updatedAtMs, binding, entries: [] }] } : undefined;
+        : { version: 1, windows: [...(original.replyHistory?.windows ?? []), {
+          startedAtMs: spans ? Math.min(selected.record.updatedAtMs, ...spans.map(span => span.selector.sinceMs)) : selected.record.updatedAtMs,
+          binding, entries: [], ...(spans ? { receiveSpans: spans } : {}), ...(carriedCoverage?.length ? { receiveCoverage: carriedCoverage } : {}) }] } : undefined;
       const { replyHistory: _oldHistory, ...retained } = original;
       const next = own({ ...retained, window: selected, ...(replyHistory ? { replyHistory } : {}),
         host: { ...authority, ...(recovery ? { browser: recovery.connection, browserControls: recovery.controls } : {}) } });

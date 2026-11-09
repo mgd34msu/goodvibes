@@ -303,7 +303,7 @@ privacy mode in BotFather with `/setprivacy`. With privacy mode on, the default,
 Telegram does not even deliver ordinary group messages to the bot.
 
 **Messages sent while the daemon was down.**
-Telegram retains undelivered updates for about 24 hours, and polling picks up
+Telegram retains undelivered updates for at most 24 hours, and polling picks up
 that backlog on the next start. The read cursor is persisted at
 `.goodvibes/goodvibes/channels/telegram-offset.json`, so a restart resumes
 from each bot's own saved offset. Switching bots does not reuse or overwrite the
@@ -332,9 +332,20 @@ or unsupported records remain blocked for inspection.
 Native installs publish the new reader requirement before
 writing account-bound cursors, so an incompatible binary cannot be restored.
 
-A cursor is not a durable message archive or proof that replies are available
-for an entire outage. Payment-window backfill and restart continuation remain
-unfinished.
+A cursor alone is not a message archive or proof that replies survived an
+outage. Native payment recovery links its original pre-notice polling span to
+its encrypted reply archive and drains through the same account's held cursor.
+Archive publication precedes provider confirmation. Recovery keeps covered
+original deadlines and re-notifies only uncovered actual recipients.
+
+This relies on exclusive native custody of that bot's receiving token. Telegram
+cannot retrospectively disclose an unrelated consumer that drained updates
+while the daemon was down. Observed conflicts, webhook transitions, scoped
+gaps, replaced cursor files, clock regression or retention loss invalidate the
+span. Webhook identity and a `backfillable` flag do not provide absence evidence.
+See [payment restart behavior](payments.md#861-a-window-interrupted-by-downtime-is-keyed-on-delivery-not-on-uptime).
+The corresponding runtime regression checks have been authored and remain
+pending execution during release qualification.
 
 **Switching from webhook to polling (or back).**
 Just change `surfaces.telegram.mode` and restart. The daemon reconciles the

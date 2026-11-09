@@ -8,12 +8,13 @@
  * original bytes under a unique `.unrecognized` name; newer formats stay put.
  */
 import { existsSync, readdirSync, renameSync, statSync, unlinkSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
-import { writeFileAtomic, reapOwnedAtomicTempFile, captureExistingDirectory } from '../utils/atomic-json-store.js';
+import { writeFileAtomic, reapOwnedAtomicTempFile, captureExistingDirectory, prepareAtomicPublicationDirectory } from '../utils/atomic-json-store.js';
 import { fileObservationIdentity, readFileObservation } from '../utils/file-observation.js';
+import { tryAcquireCrossProcessLock, assertCrossProcessLockCurrent } from '../workspace/checkpoint/cross-process-lock.js';
 import {
   CURRENT_WORKSTREAM_SCHEMA_VERSION,
   type OrchestrationEvent,
@@ -74,7 +75,10 @@ export function serializeWorkstream(workstream: Workstream): SerializedWorkstrea
 }
 
 export function deserializeWorkstream(serialized: SerializedWorkstream): Workstream {
-  return { ...serialized, items: serialized.items.map(deserializeWorkItem) };
+  const result = { ...serialized, items: serialized.items.map(deserializeWorkItem) };
+  const frame = nativeApply(nativeWeakGet, snapshotReadFrames, [serialized]) as SnapshotWriteFrame | undefined;
+  if (frame) { assertSnapshotFrame(frame); nativeApply(nativeWeakSet, snapshotWriteFrames, [result, frame]); }
+  return result;
 }
 
 /** JSON.stringify a schema-versioned envelope. Returns null on serialization failure rather than throwing. */
@@ -192,7 +196,16 @@ export function loadWorkstreamSnapshot(projectRoot: SnapshotRoot, workstreamId: 
     }
     return null;
   }
-  return snapshot;
+  try {
+    if (snapshot.workstream.id !== workstreamId) throw new Error('Saved workstream identity does not match its selected path');
+    const frame: SnapshotWriteFrame = { selection: path, path: join(parent.canonical, basename(path)), parent, physical: source.physical };
+    assertSnapshotFrame(frame);
+    nativeApply(nativeWeakSet, snapshotReadFrames, [snapshot.workstream, frame]);
+    return snapshot;
+  } catch (error) {
+    logger.warn('orchestration persistence: original snapshot read changed', { path, error: summarizeError(error) });
+    return null;
+  }
 }
 
 /**
@@ -217,41 +230,100 @@ export function listSnapshotWorkstreamIds(projectRoot: SnapshotRoot, options?: S
   }
 }
 
-// Only the actual owner object reuses its successfully read/published version
-// observation. Copies/imports have no frame; changed native files are reread.
-const snapshotWriteFrames = new WeakMap<Workstream, { readonly path: string; readonly physical: string }>();
+// Only the true creating/importing model or a real native read owns this
+// selected path/version. JSON copies and later writer calls cannot adopt it.
+interface SnapshotWriteFrame {
+  readonly selection: string;
+  readonly path: string;
+  readonly parent: ReturnType<typeof captureExistingDirectory>;
+  readonly physical: string | null;
+}
+const nativeApply = Reflect.apply, nativeWeakGet = WeakMap.prototype.get, nativeWeakSet = WeakMap.prototype.set;
+const snapshotWriteFrames = new WeakMap<Workstream, SnapshotWriteFrame>();
+const snapshotReadFrames = new WeakMap<SerializedWorkstream, SnapshotWriteFrame>();
 const currentSnapshotPhysical = (path: string): string | null => {
   try { return fileObservationIdentity(path); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
 };
+function assertSnapshotFrame(frame: SnapshotWriteFrame): void {
+  frame.parent.assertCurrent();
+  if (currentSnapshotPhysical(frame.path) !== frame.physical) throw new Error('Original workstream snapshot changed');
+  frame.parent.assertCurrent();
+}
+function captureSnapshotFrame(projectRoot: SnapshotRoot, workstream: Workstream, creating: boolean): SnapshotWriteFrame {
+  const selection = snapshotPath(projectRoot, workstream.id);
+  const parent = prepareAtomicPublicationDirectory(dirname(selection));
+  const path = join(parent.canonical, basename(selection));
+  let physical = currentSnapshotPhysical(path);
+  if (physical !== null) {
+    if (creating) throw new Error('Workstream snapshot identity already exists');
+    const source = readFileObservation(path), raw = parseSnapshotJson(source.bytes.toString('utf8'));
+    if (isFutureSnapshot(raw)) throw new Error('A newer workstream snapshot requires a newer reader');
+    const original = snapshotValue(raw);
+    if (!original || original.workstream.id !== workstream.id) throw new Error('An unreadable workstream snapshot must be preserved');
+    physical = source.physical;
+  }
+  const frame = { selection, path, parent, physical };
+  assertSnapshotFrame(frame); return frame;
+}
+/** Creation captures absence before any phase or asynchronous checkpoint work.
+ * First publication still uses an atomic no-replace operation, not this check. */
+export function retainNewWorkstreamSnapshot(projectRoot: SnapshotRoot, workstream: Workstream): void {
+  if (nativeApply(nativeWeakGet, snapshotWriteFrames, [workstream]) !== undefined) throw new Error('Workstream snapshot owner already exists');
+  nativeApply(nativeWeakSet, snapshotWriteFrames, [workstream, captureSnapshotFrame(projectRoot, workstream, true)]);
+}
+/** An explicit import chooses the actual current nonfuture native destination;
+ * native load/deserialize already carries its original read frame instead. */
+export function retainImportedWorkstreamSnapshot(projectRoot: SnapshotRoot, workstream: Workstream): void {
+  const original = nativeApply(nativeWeakGet, snapshotWriteFrames, [workstream]) as SnapshotWriteFrame | undefined;
+  if (original) {
+    if (original.selection !== snapshotPath(projectRoot, workstream.id)) throw new Error('Original snapshot selection changed');
+    assertSnapshotFrame(original); return;
+  }
+  nativeApply(nativeWeakSet, snapshotWriteFrames, [workstream, captureSnapshotFrame(projectRoot, workstream, false)]);
+}
 
 export function writeWorkstreamSnapshot(projectRoot: SnapshotRoot, workstream: Workstream, completedResults: readonly PhaseResult[]): void {
   let path: string;
   try { path = snapshotPath(projectRoot, workstream.id); }
   catch { logger.warn('orchestration persistence: invalid snapshot location refused'); return; }
-  const json = serializeWorkstreamSnapshot(workstream, completedResults);
-  if (json === null) return;
+  let release: (() => void) | null = null;
   try {
-    let physical = currentSnapshotPhysical(path);
-    const cached = snapshotWriteFrames.get(workstream);
-    if (physical !== null && (cached?.path !== path || cached.physical !== physical)) {
-      const source = readFileObservation(path), raw = parseSnapshotJson(source.bytes.toString('utf8'));
-      if (isFutureSnapshot(raw)) throw new Error('A newer workstream snapshot requires a newer reader');
-      if (snapshotValue(raw) === null) throw new Error('An unreadable workstream snapshot must be preserved');
-      physical = source.physical;
+    // A direct first writer can create an absent checkpoint. Existing leaves
+    // require an actual prior load or explicit import, never a cold write.
+    if (nativeApply(nativeWeakGet, snapshotWriteFrames, [workstream]) === undefined) retainNewWorkstreamSnapshot(projectRoot, workstream);
+    const frame = nativeApply(nativeWeakGet, snapshotWriteFrames, [workstream]) as SnapshotWriteFrame | undefined;
+    if (!frame || frame.selection !== path) throw new Error('Original snapshot selection changed');
+    assertSnapshotFrame(frame);
+    if (frame.physical !== null) {
+      // Cooperating snapshot updates serialize the check + replace interval.
+      // This is advisory ownership, not general filesystem compare-and-swap.
+      release = tryAcquireCrossProcessLock(`${frame.path}.lock`, { assertCurrent: () => frame.parent.assertCurrent() });
+      if (!release) throw new Error('Workstream snapshot writer is busy');
     }
-    const assertCurrent = () => { if (currentSnapshotPhysical(path) !== physical) throw new Error('Original workstream snapshot changed'); };
+    const assertCurrent = () => { assertSnapshotFrame(frame); if (release) assertCrossProcessLockCurrent(release); };
+    assertCurrent();
+    const json = serializeWorkstreamSnapshot(workstream, completedResults);
+    if (json === null) return;
     assertCurrent();
     let publication: string | undefined;
-    writeFileAtomic(path, json, { assertCurrent, cleanupStaleTemps: false, onEffect(published) {
-      if (published) publication = fileObservationIdentity(path);
+    writeFileAtomic(path, json, { replaceExisting: frame.physical !== null, assertCurrent, cleanupStaleTemps: false, onEffect(published) {
+      if (published) {
+        frame.parent.assertCurrent();
+        if (release) assertCrossProcessLockCurrent(release);
+        publication = fileObservationIdentity(frame.path);
+      }
     } });
-    // A callback observation becomes a reusable version frame only after the
-    // original writer confirms its staged image through the complete return.
-    if (publication === undefined || fileObservationIdentity(path) !== publication) throw new Error('Original snapshot publication changed');
-    snapshotWriteFrames.set(workstream, { path, physical: publication });
+    // Advance the model only after complete, original publication returns.
+    frame.parent.assertCurrent();
+    if (release) assertCrossProcessLockCurrent(release);
+    if (publication === undefined || fileObservationIdentity(frame.path) !== publication) throw new Error('Original snapshot publication changed');
+    nativeApply(nativeWeakSet, snapshotWriteFrames, [workstream, { ...frame, physical: publication }]);
   } catch (error) {
     logger.error('orchestration persistence: snapshot write failed; original preserved', { path, error: summarizeError(error) });
+  } finally {
+    try { release?.(); }
+    catch (error) { logger.error('orchestration persistence: original snapshot writer lock did not retire', { error: summarizeError(error) }); }
   }
 }
 

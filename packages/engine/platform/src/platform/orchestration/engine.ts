@@ -25,6 +25,8 @@ import {
   listSnapshotWorkstreamIds,
   loadWorkstreamSnapshot,
   serializeWorkstreamSnapshot,
+  retainNewWorkstreamSnapshot,
+  retainImportedWorkstreamSnapshot,
   type SnapshotRoot,
 } from './persistence.js';
 import { computeClaims, firstPhase, nextPhaseAfter, sortedPhases } from './scheduler.js';
@@ -47,6 +49,7 @@ import {
   type WorkItemUsage,
   type Workstream,
   type WorkstreamIsolation,
+  type WorkstreamSnapshot,
   type WorkstreamProvenance,
   type ReleasePolicy,
   type AttemptJudge,
@@ -369,7 +372,8 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
       const first = firstPhase(workstream)?.id ?? null;
       // Expand any `attempts:N` item into N sibling attempts (worktree isolation
       // only); every other item passes through unchanged (see attempts.ts).
-      workstream.items = attempts.expandItems(workstream.id, workstream.isolation, input.items, (spec) => buildItem(spec, first));
+      workstream.items = attempts.expandItems(workstream.id, workstream.isolation, input.items, (spec) => buildItem(spec, first),
+        deps.persist === false ? undefined : () => retainNewWorkstreamSnapshot(snapshotRoot, workstream));
       workstreams.set(workstream.id, workstream);
       completedResults.set(workstream.id, []);
       return workstream;
@@ -845,7 +849,10 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
 
   function importWorkstream(snapshotJson: string, force = false): boolean {
     const snapshot = deserializeWorkstreamSnapshot(snapshotJson);
-    if (!snapshot) return false;
+    return snapshot !== null && importSnapshot(snapshot, force);
+  }
+
+  function importSnapshot(snapshot: WorkstreamSnapshot, force = false): boolean {
     let workstream: Workstream;
     try {
       assertDistinctIds([snapshot.workstream], 'workstream');
@@ -865,26 +872,36 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
       });
       return false;
     }
-    reconcileImportedItems(workstream);
-    workstreams.set(workstream.id, workstream);
-    completedResults.set(workstream.id, [...snapshot.completedResults]);
-    // Orphan worktree reconciliation (worktree mode), synchronous, BEFORE any
-    // tick can claim (see WorktreeIsolationManager.reconcileOrphans): adopt or
-    // report crash-artifact trees, never delete on sight.
-    if (workstream.isolation === 'worktree') {
-      worktreeIsolation.reconcileOrphans(workstream);
-    }
-    // Rebuild the in-memory best-of-N group registry from the imported items so
-    // held-merge groups are pickable again after a resume (attempts.ts).
-    attempts.reconcileGroups(workstream);
-    return true;
+    creatingWorkstreams.add(workstream.id);
+    try {
+      // Bind the real destination before events can schedule any writer. A
+      // native read carries its original frame; explicit import observes once.
+      try { if (deps.persist !== false) retainImportedWorkstreamSnapshot(snapshotRoot, workstream); }
+      catch (error) {
+        logger.warn('orchestration engine: original snapshot import could not be retained', { error: summarizeError(error) });
+        return false;
+      }
+      reconcileImportedItems(workstream);
+      workstreams.set(workstream.id, workstream);
+      completedResults.set(workstream.id, [...snapshot.completedResults]);
+      // Orphan worktree reconciliation (worktree mode), synchronous, BEFORE any
+      // tick can claim (see WorktreeIsolationManager.reconcileOrphans): adopt or
+      // report crash-artifact trees, never delete on sight.
+      if (workstream.isolation === 'worktree') {
+        worktreeIsolation.reconcileOrphans(workstream);
+      }
+      // Rebuild the in-memory best-of-N group registry from the imported items so
+      // held-merge groups are pickable again after a resume (attempts.ts).
+      attempts.reconcileGroups(workstream);
+      return true;
+    } finally { creatingWorkstreams.delete(workstream.id); }
   }
 
   function resumeWorkstream(workstreamId: string): boolean {
     if (!workstreams.has(workstreamId)) {
       const snapshot = loadWorkstreamSnapshot(snapshotRoot, workstreamId);
       if (!snapshot) return false;
-      if (!importWorkstream(JSON.stringify(snapshot))) return false;
+      if (!importSnapshot(snapshot)) return false;
     }
     tick(workstreamId);
     return true;

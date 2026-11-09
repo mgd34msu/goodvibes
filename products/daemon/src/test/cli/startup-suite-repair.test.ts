@@ -5,6 +5,7 @@ import { suiteReleaseFixture } from '@goodvibes-jev/engine/toolchain/testing/sui
 import { captureUpdateFileIo, realUpdateFileIo, createInstalledReaderCohort, nativeReaderCapabilities } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { retainNativeUpdateSources } from '@goodvibes-jev/engine/platform/platform/runtime/compiled-native-startup';
 import { createDaemonCliConfiguration } from '../../cli/configuration.js';
+import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../../config/surface.js';
 import { parseDaemonCli } from '../../cli/parser.js';
 import { repairDaemonSuiteBeforeStartup } from '../../cli/startup-suite-repair.js';
 import { EventEmitter } from 'node:events';
@@ -18,13 +19,19 @@ afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup();
 function configurationFixture(auto = true, suite?: Pick<ReturnType<typeof suiteReleaseFixture>, 'root' | 'webui'>) {
   const root = suite?.root ?? makeOwnedTempDir('startup-suite-configuration');
   if (!suite) cleanups.push(() => rmSync(root, { recursive: true, force: true }));
-  const home = join(root, 'home'), settings = join(home, '.goodvibes', 'daemon', 'settings.json');
+  const home = join(root, 'home');
+  // Update policy is client-owned; the daemon still reads its surface-local
+  // policy from the historical tui root. WebUI serving is daemon-owned.
+  const settings = join(home, '.goodvibes', GOODVIBES_DAEMON_SURFACE_ROOT, 'settings.json');
+  const daemonSettings = join(home, '.goodvibes', 'daemon', 'settings.json');
   mkdirSync(dirname(settings), { recursive: true });
-  writeFileSync(settings, JSON.stringify({ update: { auto, releasesUrl: 'https://example.test/releases/latest' },
+  mkdirSync(dirname(daemonSettings), { recursive: true });
+  writeFileSync(settings, JSON.stringify({ update: { auto, releasesUrl: 'https://example.test/releases/latest' } }));
+  writeFileSync(daemonSettings, JSON.stringify({
     controlPlane: { webui: { serve: true, bundleDir: suite?.webui ?? join(root, 'webui', '3.1.3') } } }));
   const env = { HOME: home }, flags = parseDaemonCli(['serve']).flags;
   const configuration = createDaemonCliConfiguration(flags, env, root, { readOnly: true, diagnosticMode: 'structural' });
-  return { root, configuration, env, settings };
+  return { root, configuration, env, settings, daemonSettings };
 }
 function fixture() {
   const f = suiteReleaseFixture(); cleanups.push(() => f.cleanup());
@@ -80,10 +87,16 @@ test('a current daemon with historical sibling profiles repairs the real suite b
 
 test('saved automatic-update opt-out admits no repair, download or replacement process', async () => {
   const f = configurationFixture(false); let admissions = 0, downloads = 0, restarts = 0;
+  const settings = readFileSync(f.settings), daemonSettings = readFileSync(f.daemonSettings);
+  expect(f.configuration.config.getConfigPath()).toBe(f.settings);
+  expect(f.configuration.config.get('update.auto')).toBe(false);
   expect(await repairDaemonSuiteBeforeStartup({ configuration: f.configuration, argv: ['serve'], env: f.env, signal: new AbortController().signal,
     print() {}, platform: 'darwin', arch: 'x64' }, { admit() { admissions++; throw new Error('Must not admit'); },
     async fetchImpl() { downloads++; throw new Error('Must not fetch'); }, async restart() { restarts++; return 0; } })).toBe(false);
   expect([admissions, downloads, restarts]).toEqual([0, 0, 0]);
+  expect(readFileSync(f.settings)).toEqual(settings);
+  expect(readFileSync(f.daemonSettings)).toEqual(daemonSettings);
+  expect(existsSync(join(f.configuration.daemonHomeDirectory, 'operator-tokens.json'))).toBe(false);
 });
 
 test('missing release evidence fails before data writes or relaunch', async () => {

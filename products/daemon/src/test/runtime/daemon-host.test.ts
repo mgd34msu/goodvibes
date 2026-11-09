@@ -7,7 +7,8 @@ import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { DaemonServer, HttpListener, PlatformServiceManager } from '@goodvibes-jev/engine/platform/platform/daemon';
 import { persistProviders, loadPersistedProviders, type DiscoveredServer } from '@goodvibes-jev/engine/platform/platform/discovery';
 import { HostedSessionManager, HostedSessionStore, HostedWorkspaceFloors, HOSTED_SESSION_WIRE_EVENT, type HostedSessionRecord, type HostedSessionUpdatePayload, type HostedWorkspaceFloor } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
-import { registerInboxSurface } from '@goodvibes-jev/engine/platform/platform/intake';
+import { inboxTriage, registerInboxSurface, runInboxTriage, SqliteTriageStore, type TriageReceipt } from '@goodvibes-jev/engine/platform/platform/intake';
+import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { Notifier } from '@goodvibes-jev/engine/platform/platform/integrations';
 import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
@@ -17,7 +18,7 @@ import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { createFeatureFlagManager, deriveFeatureStates, RuntimeEventBus } from '../../runtime/index.js';
 import { createDaemonHost, type DaemonHost, type DaemonHostFactories, type DaemonHostOptions } from '../../runtime/daemon-host.js';
 import { createDaemonBootOperations } from '../../runtime/boot-composition.js';
-import { NATIVE_READER_REQUIREMENT_FILE, assertNativeReaderCompatible, realUpdateFileIo } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import { NATIVE_READER_REQUIREMENT_FILE, assertNativeReaderCompatible, nativeReaderCapabilities, realUpdateFileIo } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 
@@ -1230,6 +1231,52 @@ test('actual native root publishes the imported payment-hold requirement through
   expect(() => assertNativeReaderCompatible(native.execPath, '3.1.1', realUpdateFileIo)).toThrow('requires GoodVibes 3.1.2');
   await fx.host.close();
   expect(() => assertNativeReaderCompatible(native.execPath, '3.1.1', realUpdateFileIo)).toThrow('requires GoodVibes 3.1.2');
+});
+
+for (const outcome of ['missing', 'rejected'] as const) test(`actual native handler publishes the failed-triage reader floor before storing a ${outcome} port result`, async () => {
+  const native = writeNativeReaderInstallationFixture(makeOwnedTempDir('host-failed-triage-reader-floor'), '3.1.2', process.arch === 'arm64' ? 'arm64' : 'x64');
+  const artifact = resolveInstalledDaemonUpdateArtifact({ isOverridden: false }, native.options);
+  if (!artifact) throw new Error('Native fixture admission missing');
+  let attempts = 0;
+  let receipts: readonly TriageReceipt[] = [];
+  const port: JudgmentPort | undefined = outcome === 'missing' ? undefined : {
+    model: 'jev-1.13.0', async ask() { attempts++; throw new Error('Synthetic triage transport unavailable'); },
+  };
+  const fx = fixture(undefined, {
+    async createRuntime(options) {
+      const runtime = await createRuntimeServices({ ...options, inboxFactory: async (context, _routing, controls) => {
+        // Borrow the real root's format hook; neither this factory nor the
+        // scorer knows the native installation or can manufacture its floor.
+        expect(controls.beforeInboxTriageReceiptWrite).toBeFunction();
+        receipts = await runInboxTriage([{ id: 'failed-preview', surface: 'email', snippet: 'Synthetic preview with no settled judgment.' }], {
+          workingDirectory: context.workingDirectory, ...(port ? { port } : {}), beforeReceiptWrite: controls.beforeInboxTriageReceiptWrite,
+        });
+        return registerInboxSurface(context, { ...controls, adapters: new Map() });
+      } });
+      keep(spyOn(runtime.serviceRegistry, 'resolveSecret').mockResolvedValue(''));
+      return runtime;
+    },
+    createServer() { return inertNativeHostServer(); },
+  }, { updateArtifact: artifact, hasOverriddenHome: false });
+  const floor = join(native.execPath, '..', NATIVE_READER_REQUIREMENT_FILE);
+  expect(existsSync(floor)).toBe(false);
+  await fx.host.start();
+  expect(attempts).toBe(outcome === 'missing' ? 0 : 1);
+  expect(receipts).toEqual([{ id: 'failed-preview', battery: inboxTriage.name, batteryVersion: inboxTriage.version, receiptVersion: 3, status: 'unavailable' }]);
+  const reopened = new SqliteTriageStore(fx.workingDir);
+  try {
+    const saved = (await reopened.readBatch(['failed-preview'])).get('failed-preview');
+    expect(saved).toEqual({ latest: receipts[0], settled: null });
+    expect(readFileSync(reopened.dbPath).includes(Buffer.from('"inputHash"'))).toBe(false);
+  } finally { await reopened.close(); }
+  expect(JSON.parse(readFileSync(floor, 'utf8')).formats).toContain('inbox-triage-failed-bindings-v3');
+  expect(() => assertNativeReaderCompatible(native.execPath, '3.1.1', realUpdateFileIo)).toThrow('requires GoodVibes 3.1.2');
+  const current = nativeReaderCapabilities('3.1.2');
+  expect(() => assertNativeReaderCompatible(native.execPath, '3.1.2', realUpdateFileIo, {
+    ...current, formats: current.formats.filter(format => format !== 'inbox-triage-failed-bindings-v3'),
+  })).toThrow();
+  expect(() => assertNativeReaderCompatible(native.execPath, '3.1.2', realUpdateFileIo, current)).not.toThrow();
+  await fx.host.close();
 });
 
 for (const retirement of ['payload', 'binding'] as const) test(`native ${retirement} retirement during runtime acquisition prevents listener construction and drains the acquired graph`, async () => {

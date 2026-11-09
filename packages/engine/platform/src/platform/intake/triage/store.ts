@@ -1,6 +1,6 @@
 import { createSqlJsDatabase } from '../../state/sqljs-database.js';
 import { randomUUID } from 'node:crypto';
-import { types } from 'node:util';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import {
   closeSync, constants, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync,
   readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync,
@@ -25,6 +25,17 @@ function isMissing(error: unknown): boolean {
 
 function abortIfRequested(signal?: AbortSignal): void {
   signal?.throwIfAborted();
+}
+
+/** A borrowed restriction cannot extend publication with unowned async work. */
+function assertSynchronous(check: (() => unknown) | undefined, message: string): void {
+  let result: unknown;
+  try { result = check?.(); }
+  catch (error) { drainOwned(error); throw error; }
+  if (result !== undefined) {
+    drainOwned(result);
+    throw new Error(message);
+  }
 }
 
 /** Resolve existing ancestors without creating the working directory. */
@@ -168,9 +179,7 @@ function publishImage(path: string, image: Uint8Array, signal?: AbortSignal, ass
     // Cancellation after preparation cannot publish a partial/new receipt.
     abortIfRequested(signal);
     checkPath(path);
-    const proof: unknown = assertPublicationCurrent?.();
-    if (types.isPromise(proof)) void proof.catch(() => {});
-    if (proof !== undefined) throw new Error('Triage publication fence must be synchronous.');
+    assertSynchronous(assertPublicationCurrent, 'Triage publication fence must be synchronous.');
     abortIfRequested(signal);
     renameSync(temporary, path);
     ownsTemporary = false;
@@ -181,7 +190,7 @@ function publishImage(path: string, image: Uint8Array, signal?: AbortSignal, ass
 
 /**
  * Atomic latest-attempt and last-settled storage for the bounded triage pass.
- * Receipts retain only an exact-input commitment, not duplicated protected previews;
+ * Settled receipts retain only an exact-input commitment, not duplicated protected previews;
  * the commitment is dictionary-recoverable and grants no execution authority.
  * Construction, reads, and close are read-only. Every commit reloads the latest
  * disk image under the shared canonical-path process queue; separate instances
@@ -195,7 +204,7 @@ export class SqliteTriageStore implements TriageStore {
   private closing: Promise<void> | null = null;
   private readonly pending = new Set<Promise<unknown>>();
 
-  constructor(workingDirectory: string, fileName: string = STORE_FILE, private readonly beforeReceiptWrite?: (() => void) | undefined) {
+  constructor(workingDirectory: string, fileName: string = STORE_FILE, private readonly beforeReceiptWrite?: ((receiptVersion?: 3) => void) | undefined) {
     if (!/^[a-zA-Z0-9_-]+\.sqlite$/.test(fileName)) throw new TypeError('Triage store requires a safe SQLite filename.');
     this.path = join(canonicalDirectory(workingDirectory), '.goodvibes', 'tui', 'operator', fileName);
   }
@@ -266,13 +275,10 @@ export class SqliteTriageStore implements TriageStore {
         db.run('COMMIT');
         abortIfRequested(signal);
         publishImage(this.path, db.export(), signal, () => {
-          const before: unknown = assertPublicationCurrent?.();
-          if (types.isPromise(before)) void before.catch(() => {});
-          if (before !== undefined) throw new Error('Triage publication fence must be synchronous');
-          const declared: unknown = this.beforeReceiptWrite?.();
-          if (types.isPromise(declared)) void declared.catch(() => {});
-          if (declared !== undefined) throw new Error('Triage receipt format declaration must be synchronous');
-          return assertPublicationCurrent?.();
+          assertSynchronous(assertPublicationCurrent, 'Triage publication fence must be synchronous.');
+          assertSynchronous(() => this.beforeReceiptWrite?.(checked.some(receipt => receipt.receiptVersion === 3) ? 3 : undefined),
+            'Triage receipt format declaration must be synchronous.');
+          assertSynchronous(assertPublicationCurrent, 'Triage publication fence must be synchronous.');
         });
       } finally {
         db.close();

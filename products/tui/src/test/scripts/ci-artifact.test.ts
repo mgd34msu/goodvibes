@@ -1,5 +1,4 @@
 import { expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -97,8 +96,8 @@ test('the native build foundation artifacts match their committed source before 
   const files = readdirSync(generated).sort();
   expect(files).toEqual(['knowledge-graphql.graphql', 'knowledge-store.sql', 'operator-contract.json', 'peer-contract.json']);
   for (const file of files) {
-    const hash = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
-    expect({ file, sha256: hash(join(committed, file)) }).toEqual({ file, sha256: hash(join(generated, file)) });
+    expect({ file, bytes: readFileSync(join(committed, file)) })
+      .toEqual({ file, bytes: readFileSync(join(generated, file)) });
   }
 }));
 
@@ -110,8 +109,16 @@ test('CI preserves the existing validation build and mandatorily archives its ex
   const steps = workflow.jobs.validate.steps;
   const validate = steps.findIndex(step => step.name === 'Validate workspace');
   expect(steps[validate]!.run).toBe('bun run validate');
-  const record = steps[validate + 1]!;
-  const upload = steps[validate + 2]!;
+  const consistency = steps.findIndex(step => step.name === 'Test release asset consistency');
+  const recordIndex = steps.findIndex(step => step.name === 'Record TUI native artifact provenance');
+  const uploadIndex = steps.findIndex(step => step.name === 'Upload TUI native artifact');
+  expect(validate).toBeGreaterThanOrEqual(0);
+  expect(consistency).toBeGreaterThan(validate);
+  expect(recordIndex).toBeGreaterThan(consistency);
+  expect(uploadIndex).toBeGreaterThan(recordIndex);
+  expect(steps[consistency]!.run).toBe("python3 -m unittest discover -s .github/scripts -p 'test_release_asset_*.py'");
+  const record = steps[recordIndex]!;
+  const upload = steps[uploadIndex]!;
   expect(record.name).toBe('Record TUI native artifact provenance');
   expect(record.if).toBe("hashFiles('products/tui/package.json') != ''");
   // The exact uploaded binary must pass the unchanged boot and namespace-read

@@ -34,7 +34,15 @@ export interface TriageEvidence extends TriageBinding {
   readonly tags: readonly string[];
   readonly signals: Readonly<{ spam: number; urgency: number }>;
 }
-export type TriageReceipt = TriageEvidence | (TriageBinding & {
+/** Failed attempts withdraw a previous label, but have no input-matching
+ * consumer. Fresh v3 failures carry no decorative message commitment. Actual
+ * saved v1/v2 failures retain their original binding for read compatibility. */
+export type TriageFailureReceipt = Omit<TriageBinding, 'inputHash' | 'receiptVersion'> & {
+  readonly inputHash?: never;
+  readonly receiptVersion: 3;
+  readonly status: 'held' | 'unavailable';
+};
+export type TriageReceipt = TriageEvidence | TriageFailureReceipt | (TriageBinding & {
   readonly status: 'held' | 'unavailable';
 });
 export interface TriageStoredRecord {
@@ -60,5 +68,5 @@ export interface RunInboxTriageOptions {
   readonly workingDirectory?: string;
   readonly dryRun?: boolean;
   readonly signal?: AbortSignal;
-  readonly beforeReceiptWrite?: (() => void) | undefined;
+  readonly beforeReceiptWrite?: ((receiptVersion?: 3) => void) | undefined;
 }

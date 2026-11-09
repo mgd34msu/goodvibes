@@ -36,7 +36,7 @@ export interface OwnedTriagedInboxOptions extends Omit<RegisterInboxSurfaceOptio
   readonly triageStoreFileName?: string;
   /** Native installation declaration before publishing default opaque selectors. */
   readonly beforeIdentityWrite?: (() => void) | undefined;
-  readonly beforeReceiptWrite?: (() => void) | undefined;
+  readonly beforeReceiptWrite?: ((receiptVersion?: 3) => void) | undefined;
   readonly providerId: string;
   readonly accountScopeId: string;
   readonly acquireReadLease: NonNullable<RegisterInboxSurfaceOptions['acquireReadLease']>;

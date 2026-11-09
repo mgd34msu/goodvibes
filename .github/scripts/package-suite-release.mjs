@@ -42,12 +42,21 @@ try {
   };
   const put = (path, name = basename(path)) => {
     const bytes = readFileSync(path);
-    const hash = createHash('sha256').update(bytes).digest('hex');
-    if (files[name]) assert.equal(files[name].sha256, hash, 'Product addon bytes differ');
-    else {
-      publishBytes(name, bytes, lstatSync(path).mode & 0o777);
-      files[name] = { sha256: hash, size: bytes.length };
+    if (files[name]) {
+      // Several products supply the same published addon. Compare this input
+      // with the actual original output; its first pin is already the release
+      // checksum. A copied filename or replaced output cannot inherit it.
+      const original = ownedOutputs.find(output => output.path === join(destination, name));
+      assert(original, 'Original published addon owner is missing');
+      original.assertCurrent();
+      const selected = readFileSync(original.path);
+      original.assertCurrent();
+      assert(bytes.equals(selected), 'Product addon bytes differ');
+      return;
     }
+    const hash = createHash('sha256').update(bytes).digest('hex');
+    publishBytes(name, bytes, lstatSync(path).mode & 0o777);
+    files[name] = { sha256: hash, size: bytes.length };
   };
   const [platform, arch] = target.split('-');
   assert.equal(process.platform, platform); assert.equal(process.arch, arch);

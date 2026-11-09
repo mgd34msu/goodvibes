@@ -57,7 +57,7 @@ export function createEmailDaemonInboxFactory(options: EmailDaemonInboxOptions,
 function createEmailAccountFactory<T extends InboxSurfaceRegistration>(options: EmailDaemonInboxOptions,
   factories: Pick<EmailDaemonInboxFactories, 'createOwner' | 'eligibilityClock'>,
   register: (context: Parameters<DaemonInboxFactory>[0], options: Parameters<typeof registerInboxSurface>[1], owner: EmailInboxOwner,
-    beforeIdentityWrite: (() => void) | undefined, beforeReceiptWrite: (() => void) | undefined) => T | Promise<T>,
+    beforeIdentityWrite: (() => void) | undefined, beforeReceiptWrite: ((receiptVersion?: 3) => void) | undefined) => T | Promise<T>,
 ): (...args: Parameters<DaemonInboxFactory>) => Promise<T> {
   const triageTagging = options.triageTagging ? Object.freeze({ onReady: options.triageTagging.onReady }) : undefined;
   if (triageTagging && typeof triageTagging.onReady !== 'function') throw new Error('Triage tagging requires an explicit owner callback');

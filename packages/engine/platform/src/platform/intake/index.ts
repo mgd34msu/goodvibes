@@ -63,7 +63,7 @@ export { scoreInboxTriage } from './triage/scorer.js';
 export { SqliteTriageStore } from './triage/store.js';
 export { runInboxTriage, readTriageMetadataBatch, enrichItemsWithTriage } from './triage/pipeline.js';
 export type {
-  TriageInput, TriageLabel, TriageBinding, TriageEvidence, TriageReceipt,
+  TriageInput, TriageLabel, TriageBinding, TriageEvidence, TriageFailureReceipt, TriageReceipt,
   TriageStoredRecord, TriageStore, RunInboxTriageOptions, TriageReceiptScope,
 } from './triage/types.js';
 

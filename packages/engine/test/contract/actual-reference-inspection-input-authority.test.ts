@@ -4,7 +4,6 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs';
 import * as asyncFs from 'node:fs/promises';
 import * as childProcess from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { basename, join } from 'node:path';
 import { choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '../../errors/src/index.js';
@@ -101,15 +100,14 @@ for (const workflow of ['references', 'inspection', 'analysis', 'edit', 'write-r
       const target = workflow === 'write-read' ? 'generated.ts'
         : `${scenario === 'denied' ? 'private' : 'allowed'}.${workflow === 'inspection' ? 'tsx' : 'ts'}`;
       // This fixture-only witness runs before the subject tool is admitted. It
-      // stores a digest, never bytes in the scripted provider's request/result.
+      // keeps exact bytes privately, never in the scripted provider's request/result.
       // Backend reads are observed separately while activeTool is true.
       const fixtureRead = fs.readFileSync;
-      const fixtureIdentity = (path: string): string | undefined => fs.existsSync(path)
-        ? createHash('sha256').update(fixtureRead(path)).digest('hex') : undefined;
-      const originalTargetIdentity = fixtureIdentity(join(root, target));
-      let subjectTargetIdentity: string | undefined;
+      const fixtureBytes = (path: string): Buffer | undefined => fs.existsSync(path) ? fixtureRead(path) : undefined;
+      const originalTargetBytes = fixtureBytes(join(root, target));
+      let subjectTargetBytes: Buffer | undefined;
       let subjectAdmissionObserved = false;
-      let settledTargetIdentity: string | undefined;
+      let settledTargetBytes: Buffer | undefined;
       let subjectSettlementObserved = false;
       const steps: ToolCall[] = workflow === 'references' ? [{ id: 'subject', name: 'find', arguments: {
         queries: [{ id: 'refs', mode: 'references', file: target, symbol: 'referenceTarget', line: 0, column: 16 }],
@@ -138,7 +136,7 @@ for (const workflow of ['references', 'inspection', 'analysis', 'edit', 'write-r
           memberRoot = services.agentManager.list().find(record => record.contractRole === 'unit')!.workingDirectory!;
           const step = steps[memberCalls++];
           if (step?.id === 'subject') {
-            subjectTargetIdentity = fixtureIdentity(join(memberRoot, target));
+            subjectTargetBytes = fixtureBytes(join(memberRoot, target));
             subjectAdmissionObserved = true;
           }
           activeTool = step !== undefined;
@@ -174,7 +172,7 @@ for (const workflow of ['references', 'inspection', 'analysis', 'edit', 'write-r
           for (const result of turn.results) results.set(result.callId, result);
           activeTool = false;
           if (turn.results.some(result => result.callId === 'subject')) {
-            settledTargetIdentity = fixtureIdentity(join(memberRoot, target));
+            settledTargetBytes = fixtureBytes(join(memberRoot, target));
             subjectSettlementObserved = true;
           }
           contractRunner.hooks().onTurnEnd(record, turn);
@@ -258,9 +256,9 @@ for (const workflow of ['references', 'inspection', 'analysis', 'edit', 'write-r
       if (outcome.status !== 'awaiting-owner') await contractRunner.join(id);
       expect(plannerCalls).toBe(1); expect(memberRoot).not.toBe(root); expect(ownerRegistryCalls).toBe(1);
       expect(subjectAdmissionObserved).toBe(true);
-      expect(subjectTargetIdentity).toBe(originalTargetIdentity);
-      if (workflow === 'write-read') expect(subjectTargetIdentity).toBeUndefined();
-      else expect(subjectTargetIdentity).toMatch(/^[a-f0-9]{64}$/);
+      expect(subjectTargetBytes).toEqual(originalTargetBytes);
+      if (workflow === 'write-read') expect(subjectTargetBytes).toBeUndefined();
+      else expect(Buffer.isBuffer(subjectTargetBytes)).toBe(true);
       expect(processes).toEqual([]);
       expect(opened.some(path => path.endsWith('/private.ts') || path.endsWith('/private.tsx'))).toBe(false);
       for (const request of requests) { expect(request.text).not.toContain(PRIVATE); expect(request.text).not.toContain(OWNER_REGISTRY); }
@@ -277,8 +275,8 @@ for (const workflow of ['references', 'inspection', 'analysis', 'edit', 'write-r
           expect(subject?.success, JSON.stringify(subject)).toBe(scenario === 'allowed');
         if (scenario === 'denied') {
           expect(subjectSettlementObserved).toBe(true);
-          expect(settledTargetIdentity).toBe(subjectTargetIdentity);
-          expect(fixtureIdentity(join(root, target))).toBe(originalTargetIdentity);
+          expect(settledTargetBytes).toEqual(subjectTargetBytes);
+          expect(fixtureBytes(join(root, target))).toEqual(originalTargetBytes);
           if (workflow === 'analysis') {
             // The existing preview envelope carries a structured read refusal.
             // Its transport success flag is not successful analysis evidence.

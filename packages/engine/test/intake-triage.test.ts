@@ -118,7 +118,7 @@ describe('typed inbox triage', () => {
     const port: JudgmentPort = { model: TRIAGE_MODEL, async ask(request) { input.subject = 'changed'; return fake.port.ask(request); } };
     const receipts = await scoreInboxTriage([input], port);
     expect(fake.requests[0]!.state).toEqual({items: captureTriageInputs([item()]).map(item => ({...item}))});
-    expect(receipts[0]?.inputHash).not.toBe((await scoreInboxTriage([input]))[0]?.inputHash);
+    expect(receipts[0]?.inputHash).not.toBe((await scoreInboxTriage([input], answer().port))[0]?.inputHash);
   });
   test('dry-run is wholly store-free and does not close an injected store', async () => {
     let touched = 0;

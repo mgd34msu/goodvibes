@@ -1,14 +1,18 @@
 import { fanOut, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { inboxTriage } from './battery.js';
 import { captureTriageData, captureTriageInputs, captureTriageReceiptScope, settleTriage, triageBinding, type CapturedTriageInput } from './evidence.js';
 import { captureTriageJudgment, triageConfiguredModel } from './model-result.js';
-import type { TriageInput, TriageReceipt, TriageReceiptScope } from './types.js';
+import type { TriageFailureReceipt, TriageInput, TriageReceipt, TriageReceiptScope } from './types.js';
 
 export async function scoreCapturedTriage(items: readonly CapturedTriageInput[], port?: JudgmentPort, signal?: AbortSignal, receiptScope?: TriageReceiptScope): Promise<readonly TriageReceipt[]> {
-  // Issue one saved exact-input receipt commitment, not an execution/currentness token.
   const scope = captureTriageReceiptScope(receiptScope);
-  const bindings = items.map(item => triageBinding(item, scope));
-  const unavailable = () => Object.freeze(bindings.map(binding => Object.freeze({ ...binding, status: 'unavailable' as const })));
+  // Only settled evidence has a later exact-input matching consumer. A failed
+  // attempt needs enough metadata to withdraw an old label, never a hash of the
+  // discarded private preview. Missing ports and cancellation perform no hashing.
+  const metadata = items.map(item => Object.freeze({ id: item.id, battery: inboxTriage.name,
+    batteryVersion: inboxTriage.version, receiptVersion: 3 as const }));
+  const unavailable = (): readonly TriageFailureReceipt[] => Object.freeze(metadata.map(binding => Object.freeze({ ...binding, status: 'unavailable' as const })));
   if (!items.length) return Object.freeze([]);
   if (!port || signal?.aborted) return unavailable();
   // Each part is the same registered decision, addressed to one batch item.
@@ -47,11 +51,17 @@ export async function scoreCapturedTriage(items: readonly CapturedTriageInput[],
     if (signal?.aborted) return unavailable();
     if (targetModel === undefined) throw new Error('Missing triage target attribution');
     const answeredTarget = targetModel;
-    return Object.freeze(bindings.map((binding, i) => {
+    return Object.freeze(items.map((item, i) => {
       const readings = run.readings[`item${i}`]!;
-      return settleTriage({ ...binding, model: run.result.requestedModel, actualModel: run.result.model, targetModel: answeredTarget }, readings.spam, readings.urgency);
+      const attribution = { model: run.result.requestedModel, actualModel: run.result.model, targetModel: answeredTarget };
+      if (readings.spam.outcome !== 'act' || readings.urgency.outcome !== 'act') {
+        return Object.freeze({ ...metadata[i]!, ...attribution, status: 'held' as const });
+      }
+      // One commitment at actual settled publication. Read-only enrichment
+      // independently compares it without retaining the prior message preview.
+      return settleTriage({ ...triageBinding(item, scope), ...attribution }, readings.spam, readings.urgency);
     }));
-  } catch { return unavailable(); }
+  } catch (error) { drainOwned(error); return unavailable(); }
 }
 /** One injected, typed judgment request per nonempty admissible batch; never creates a provider. */
 export async function scoreInboxTriage(items: readonly TriageInput[], port?: JudgmentPort, signal?: AbortSignal): Promise<readonly TriageReceipt[]> {

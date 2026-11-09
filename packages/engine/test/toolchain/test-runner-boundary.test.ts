@@ -1,7 +1,6 @@
 import { parseNpmPack } from '../../toolchain/src/lib/package-install-check.ts';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -55,13 +54,6 @@ beforeAll(() => {
   if (proof) {
     mkdirSync(proof, { recursive: true });
     cpSync(join(root, record.filename), join(proof, 'toolchain-boundary.tgz'));
-    const entries = ['package.json', ...files.filter((path) => path.startsWith('toolchain/dist/test-runner/'))];
-    const exported = manifest.exports as Record<string, unknown> | undefined;
-    writeFileSync(join(proof, 'packed-entry-hashes.json'), JSON.stringify({
-      scope: 'Focused normalized engine toolchain boundary; not full engine release validation',
-      entry: exported?.['./toolchain/test-runner'],
-      files: Object.fromEntries(entries.map((path) => [path, createHash('sha256').update(readFileSync(join(installed, path))).digest('hex')])),
-    }, null, 2));
   }
 }, 30_000);
 

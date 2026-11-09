@@ -1,12 +1,26 @@
+import assert from 'node:assert/strict';
 import { expect, spyOn, test } from 'bun:test';
 import { mkdirSync, readFileSync, readdirSync, renameSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import * as fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import ts from 'typescript';
 import { createReleaseStage } from '@goodvibes-jev/engine/toolchain/release-publication';
 import { makeProjectTempDir } from '../_helpers/project-temp.ts';
 const scratch = () => makeProjectTempDir('pack-bundle-release-publication-');
+function coordinatorArrow(name: string): string {
+  const script = resolve(import.meta.dir, '../../../../.github/scripts/package-suite-release.mjs');
+  const source = ts.createSourceFile(script, readFileSync(script, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const declarations: ts.ArrowFunction[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === name
+      && node.initializer && ts.isArrowFunction(node.initializer)) declarations.push(node.initializer);
+    ts.forEachChild(node, visit);
+  };
+  visit(source); expect(declarations).toHaveLength(1);
+  return declarations[0]!.getText(source);
+}
+
 
 test('companion/archive publishers use independent original stages and refuse existing names', () => {
   const out = scratch();
@@ -80,15 +94,6 @@ test('the actual suite coordinator reader-emission closure publishes metadata wi
   // Execute the actual small publisher closure, rather than a reimplementation
   // or a full native product build. Any accidental capture from another local
   // (for example put()'s path) fails here before metadata can be certified.
-  const script = resolve(import.meta.dir, '../../../../.github/scripts/package-suite-release.mjs');
-  const source = ts.createSourceFile(script, readFileSync(script, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
-  const declarations: ts.ArrowFunction[] = [];
-  const visit = (node: ts.Node): void => {
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === 'emitReader'
-      && node.initializer && ts.isArrowFunction(node.initializer)) declarations.push(node.initializer);
-    ts.forEachChild(node, visit);
-  };
-  visit(source); expect(declarations).toHaveLength(1);
   const out = scratch(), stage = createReleaseStage(out, '.suite-staging-');
   const files: Record<string, { sha256: string; size: number }> = {};
   const published: ReturnType<typeof stage.publishBytes>[] = [];
@@ -96,7 +101,7 @@ test('the actual suite coordinator reader-emission closure publishes metadata wi
     published.push(stage.publishBytes(name, bytes, mode));
   };
   const emit = new Function('publishBytes', 'files', 'createHash', 'Buffer',
-    `'use strict'; return (${declarations[0]!.getText(source)});`)(publishBytes, files, createHash, Buffer) as
+    `'use strict'; return (${coordinatorArrow('emitReader')});`)(publishBytes, files, createHash, Buffer) as
       (name: string, artifact: unknown) => void;
   const name = 'goodvibes-linux-x64.reader-ci-artifact.json';
   const artifact = { schema: 1, packageName: '@goodvibes-jev/tui', version: '3.1.2', files: [] };
@@ -110,4 +115,60 @@ test('the actual suite coordinator reader-emission closure publishes metadata wi
     expect(files[name]).toEqual({ sha256: '8088aa6782157003b115d9e8e24b4bdec99efb1e6f49a29a2a108d76ad4c2624', size: 94 });
     expect(published).toHaveLength(1); published[0]!.assertCurrent();
   } finally { process.umask(previous); stage.cleanup(); }
+});
+
+
+function coordinatorPut(onRead: (path: string) => void = () => {}) {
+  const destination = scratch(), inputs = scratch(), stage = createReleaseStage(destination, '.suite-staging-');
+  const files: Record<string, { sha256: string; size: number }> = {};
+  const ownedOutputs: ReturnType<typeof stage.publishBytes>[] = [];
+  let hashes = 0;
+  const measuredHash = new Proxy(createHash, { apply(target, receiver, args) {
+    hashes++; return Reflect.apply(target, receiver, args);
+  } });
+  const read = (path: string) => { const bytes = readFileSync(path); onRead(path); return bytes; };
+  const publishBytes = (name: string, bytes: Uint8Array, mode: number) => {
+    const original = stage.publishBytes(name, bytes, mode); ownedOutputs.push(original); return original;
+  };
+  const put = new Function('basename', 'readFileSync', 'createHash', 'files', 'publishBytes', 'lstatSync',
+    'assert', 'ownedOutputs', 'destination', 'join', `'use strict'; return (${coordinatorArrow('put')});`)(
+    basename, read, measuredHash, files, publishBytes, fs.lstatSync,
+    assert, ownedOutputs, destination, join) as (path: string, name?: string) => void;
+  const input = (name: string, text: string) => { const path = join(inputs, name); writeFileSync(path, text); return path; };
+  return { destination, stage, files, ownedOutputs, put, input, hashes: () => hashes };
+}
+
+test('the actual suite publisher reuses one real published pin for equal product addons and refuses different bytes without rehashing', () => {
+  const f = coordinatorPut(), name = 'sqlite-vec-linux-x64.so';
+  try {
+    f.put(f.input('first', 'alpha'), name);
+    const pin = f.files[name];
+    expect(pin).toEqual({ sha256: '8ed3f6ad685b959ead7022518e1af76cd816f8e8ec7ccdda1ed4018e8f2223f8', size: 5 });
+    f.put(f.input('equal', 'alpha'), name);
+    expect(f.hashes()).toBe(1); expect(f.files[name]).toBe(pin); expect(f.ownedOutputs).toHaveLength(1);
+    expect(() => f.put(f.input('different', 'other'), name)).toThrow('Product addon bytes differ');
+    expect(f.hashes()).toBe(1); expect(f.files[name]).toBe(pin);
+    expect(readFileSync(join(f.destination, name), 'utf8')).toBe('alpha');
+    f.ownedOutputs[0]!.assertCurrent();
+  } finally { f.stage.cleanup(); }
+});
+
+for (const when of ['before', 'during-read'] as const) test(`same-byte foreign output replacement ${when} cannot inherit the suite publisher pin`, () => {
+  const name = 'sqlite-vec-linux-x64.so';
+  let replaceDuringRead = false, selected: string | undefined;
+  const f = coordinatorPut(path => {
+    if (replaceDuringRead && path === selected) {
+      replaceDuringRead = false; renameSync(path, path + '.original'); writeFileSync(path, 'alpha');
+    }
+  });
+  try {
+    f.put(f.input('first', 'alpha'), name); selected = join(f.destination, name);
+    const pin = f.files[name];
+    if (when === 'before') { renameSync(selected, selected + '.original'); writeFileSync(selected, 'alpha'); }
+    else replaceDuringRead = true;
+    expect(() => f.put(f.input('equal', 'alpha'), name)).toThrow();
+    expect(f.hashes()).toBe(1); expect(f.files[name]).toBe(pin); expect(f.ownedOutputs).toHaveLength(1);
+    expect(readFileSync(selected, 'utf8')).toBe('alpha');
+    expect(readFileSync(selected + '.original', 'utf8')).toBe('alpha');
+  } finally { f.stage.cleanup(); }
 });

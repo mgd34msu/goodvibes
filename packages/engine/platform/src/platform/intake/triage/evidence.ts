@@ -3,7 +3,7 @@ import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
 import { readYesNo, isPinnedJudgmentModel, matchesJudgmentModel, type YesNoReading } from '@goodvibes-jev/judgment';
 import { JudgmentInputError, snapshotJudgmentInput } from '../../gate/judgment-input.js';
 import { inboxTriage, TRIAGE_MODEL } from './battery.js';
-import type { TriageBinding, TriageEvidence, TriageInput, TriageLabel, TriageReceipt, TriageReceiptScope } from './types.js';
+import type { TriageBinding, TriageFailureReceipt, TriageEvidence, TriageInput, TriageLabel, TriageReceipt, TriageReceiptScope } from './types.js';
 
 /** Descriptor-only capture checks every property, including hidden data, without invoking user code. */
 export function captureTriageData(value: unknown): unknown {
@@ -101,11 +101,13 @@ export function checkTriageReceipt(value: unknown): TriageReceipt {
   if (!safe || typeof safe !== 'object' || Array.isArray(safe)) return invalid();
   const row = safe as Record<string, unknown>;
   if (typeof row['id'] !== 'string' || !row['id'].trim() || row['id'].length > 500
-    || typeof row['inputHash'] !== 'string' || !/^[a-f0-9]{64}$/.test(row['inputHash'])
     || row['battery'] !== inboxTriage.name || row['batteryVersion'] !== inboxTriage.version) return invalid();
+  const failedV3 = row['receiptVersion'] === 3;
+  if (failedV3 ? Object.hasOwn(row, 'inputHash') || (row['status'] !== 'held' && row['status'] !== 'unavailable')
+    : typeof row['inputHash'] !== 'string' || !/^[a-f0-9]{64}$/.test(row['inputHash'])) return invalid();
   const model = row['model'], actualModel = row['actualModel'], targetModel = row['targetModel'];
   const identifier = (entry: unknown): entry is string => typeof entry === 'string' && /^[A-Za-z0-9@][A-Za-z0-9._:/@+-]{0,255}$/.test(entry);
-  const modern = row['receiptVersion'] === 2;
+  const modern = row['receiptVersion'] === 2 || failedV3;
   if (row['receiptVersion'] !== undefined && !modern) return invalid();
   if (modern) {
     // Stored attribution describes the validated port response. It neither
@@ -120,7 +122,15 @@ export function checkTriageReceipt(value: unknown): TriageReceipt {
     if (model === TRIAGE_MODEL && row['status'] !== 'unavailable' && actualModel === undefined) return invalid();
     if (targetModel !== undefined) return invalid();
   }
-  const binding: TriageBinding = { id: row['id'], inputHash: row['inputHash'], battery: inboxTriage.name, batteryVersion: inboxTriage.version,
+  if (failedV3) {
+    const expected: TriageFailureReceipt = Object.freeze({ id: row['id'], battery: inboxTriage.name, batteryVersion: inboxTriage.version,
+      receiptVersion: 3, status: row['status'] as 'held' | 'unavailable',
+      ...(model === undefined ? {} : { model: model as string }), ...(actualModel === undefined ? {} : { actualModel: actualModel as string }),
+      ...(targetModel === undefined ? {} : { targetModel: targetModel as string }) });
+    if (!isDeepStrictEqual(safe, expected)) return invalid();
+    return expected;
+  }
+  const binding: TriageBinding = { id: row['id'], inputHash: row['inputHash'] as string, battery: inboxTriage.name, batteryVersion: inboxTriage.version,
     ...(modern ? { receiptVersion: 2 as const } : {}), ...(model === undefined ? {} : { model: model as string }),
     ...(actualModel === undefined ? {} : { actualModel: actualModel as string }), ...(targetModel === undefined ? {} : { targetModel: targetModel as string }) };
   if (row['status'] === 'held' || row['status'] === 'unavailable') {

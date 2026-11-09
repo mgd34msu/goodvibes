@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Preserve full generated UUIDs for knowledge sources, extractions, nodes, edges,
+  issues and job records. Distinct UUIDs sharing the former eight-character
+  prefix can no longer overwrite unrelated rows through their generated IDs.
+  Existing saved identities and explicit updates retain their original IDs.
+
 - Store terminal historical-import recovery in one shared SQLite journal with
   exact workspace/project slots instead of digest-derived filenames. Status
   reads create no state. Preserve existing journals and unknown requests, refuse

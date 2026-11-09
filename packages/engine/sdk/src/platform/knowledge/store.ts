@@ -1,6 +1,6 @@
 import { createKnowledgeRowRevisions, knowledgeRawRowForAdmission } from './store-row-revisions.js';
 import { withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { drainOwned, opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { KnowledgeRecordAdmissionHeldError, knowledgeEdgeSnapshotFromRows, knowledgeRecordGenerationFromRows, knowledgeRecordSnapshotFromRows, type KnowledgeRecordSnapshot } from './store-record-snapshot.js';
 import { sameKnowledgeRecord, captureKnowledgeStoreInput, copyKnowledgeRepresentation, prepareKnowledgeOwnedClocks } from './store-record-representation.js';
 import { captureOwnedJson, JudgmentInputError, snapshotJudgmentInput } from '../gate/judgment-input.js';
@@ -14,7 +14,7 @@ import type { NativeConversationStorage } from '../workflow/work-ledger/native-i
 import { migrateNativeWorkSettlementTable, validateNativeWorkSettlementTable, createNativeWorkSettlementTargetIndex, createNativeWorkExecutionStorage, createNativeWorkExecutionTable, validateNativeWorkExecutionTable, createNativeWorkExecutionIntentTable, validateNativeWorkExecutionIntentTable } from './store-native-work-execution.js';
 import type { NativeWorkExecutionStorage } from '../workflow/work-ledger/native-execution-types.js';
 import { createKnowledgeWorkLedgerStorage, createWorkLedgerTable, validateWorkLedgerTable, migrateWorkLedgerTableToVersion2, type KnowledgeWorkLedgerStorage } from './store-work-ledger.js';
-import { randomUUID } from 'node:crypto';
+
 import { KnowledgeSourcePublicationHeldError, knowledgeSourceSnapshotFromRows, planningSourceSnapshotFromRows, readPlanningSourceSnapshot, readKnowledgeSourceSnapshot, type KnowledgeSourceSnapshot, type KnowledgeSourceWriteResult } from './store-source-generation.js';
 import type { PlanningSourceIdentity } from './store-planning-source-selector.js';
 import { applyKnowledgeImport, type KnowledgeImportInput, type KnowledgeImportReceipt, type PrepareKnowledgeImportGraph } from './store-import.js';
@@ -814,7 +814,7 @@ export class KnowledgeStore {
     // Existing confidence normalization is independent of operator authority.
     const confidence = clampConfidence(input.confidence ?? existing?.confidence ?? 0);
     const candidate: KnowledgeNodeRecord = {
-      id: existing?.id ?? input.id ?? `node-${randomUUID().slice(0, 8)}`,
+      id: existing?.id ?? input.id ?? `node-${opaqueUuid()}`,
       kind: input.kind,
       slug: input.slug,
       title: input.title.trim(),
@@ -1126,7 +1126,7 @@ export class KnowledgeStore {
     const now = nowMs();
     const _error = stableText(input.error);
     const record: KnowledgeJobRunRecord = {
-      id: existing?.id ?? input.id ?? `kjr-${randomUUID().slice(0, 8)}`,
+      id: existing?.id ?? input.id ?? `kjr-${opaqueUuid()}`,
       jobId: input.jobId,
       status: input.status,
       mode: input.mode,
@@ -1194,7 +1194,7 @@ export class KnowledgeStore {
 
   async upsertRefinementTask(input: KnowledgeRefinementTaskUpsertInput): Promise<KnowledgeRefinementTaskRecord> {
     await this.init();
-    return upsertKnowledgeRefinementTask(this.sqlite, this.refinementTasks, input, () => `kref-${randomUUID().slice(0, 8)}`);
+    return upsertKnowledgeRefinementTask(this.sqlite, this.refinementTasks, input, () => `kref-${opaqueUuid()}`);
   }
 
   async upsertUsageRecord(input: KnowledgeUsageUpsertInput, assertCurrent?: () => void): Promise<KnowledgeUsageRecord> {
@@ -1203,7 +1203,7 @@ export class KnowledgeStore {
     const _task = stableText(input.task);
     const _sessionId = stableText(input.sessionId);
     const record: KnowledgeUsageRecord = {
-      id: input.id ?? `kuse-${randomUUID().slice(0, 8)}`,
+      id: input.id ?? `kuse-${opaqueUuid()}`,
       targetKind: input.targetKind,
       targetId: input.targetId,
       usageKind: input.usageKind,
@@ -1246,7 +1246,7 @@ export class KnowledgeStore {
     const _suggestedScope = stableText(input.suggestedScope);
     const _decidedBy = stableText(input.decidedBy);
     const record: KnowledgeConsolidationCandidateRecord = {
-      id: existing?.id ?? input.id ?? `kcand-${randomUUID().slice(0, 8)}`,
+      id: existing?.id ?? input.id ?? `kcand-${opaqueUuid()}`,
       candidateType: input.candidateType,
       status: input.status ?? existing?.status ?? 'open',
       subjectKind: input.subjectKind,
@@ -1301,7 +1301,7 @@ export class KnowledgeStore {
     const existing = input.id ? this.consolidationReports.get(input.id) : null;
     const now = nowMs();
     const record: KnowledgeConsolidationReportRecord = {
-      id: existing?.id ?? input.id ?? `krep-${randomUUID().slice(0, 8)}`,
+      id: existing?.id ?? input.id ?? `krep-${opaqueUuid()}`,
       kind: input.kind,
       title: input.title.trim(),
       summary: input.summary.trim(),
@@ -1339,7 +1339,7 @@ export class KnowledgeStore {
 
   async upsertSchedule(input: KnowledgeScheduleUpsertInput): Promise<KnowledgeScheduleRecord> {
     await this.init();
-    return upsertKnowledgeSchedule(this.sqlite, this.schedules, input, () => `ksched-${randomUUID().slice(0, 8)}`);
+    return upsertKnowledgeSchedule(this.sqlite, this.schedules, input, () => `ksched-${opaqueUuid()}`);
   }
 
   async deleteSchedule(id: string): Promise<boolean> {

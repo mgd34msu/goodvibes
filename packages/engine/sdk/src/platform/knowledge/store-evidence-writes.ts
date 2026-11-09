@@ -1,5 +1,5 @@
 import { knowledgeRawRepresentation, knowledgeSourceMetadataView, prepareKnowledgeOwnedClocks, retainKnowledgePreparedRecord, retainKnowledgeRepresentation } from './store-record-representation.js';
-import { randomUUID } from 'node:crypto';
+import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import type { SQLiteStore } from '../state/sqlite-store.js';
 import type { KnowledgeSourceRecord, KnowledgeSourceUpsertInput, KnowledgeExtractionRecord, KnowledgeExtractionUpsertInput } from './types.js';
 import { nowMs, stableText, uniq } from './store-schema.js';
@@ -33,7 +33,7 @@ export function prepareKnowledgeSourceRecord(input: KnowledgeSourceUpsertInput, 
       ...(input.metadata ?? {}),
     });
     const record: KnowledgeSourceRecord = {
-      id: existing?.id ?? input.id ?? `source-${randomUUID().slice(0, 8)}`,
+      id: existing?.id ?? input.id ?? `source-${opaqueUuid()}`,
       connectorId: input.connectorId,
       sourceType: input.sourceType,
       ...opt('title', _title),
@@ -117,7 +117,7 @@ export function prepareKnowledgeExtractionRecord(input: KnowledgeExtractionUpser
       ? mergedExtractionMetadata
       : ensureKnowledgeSpaceMetadata(mergedExtractionMetadata, getKnowledgeSpaceId(extractionSource));
     const record: KnowledgeExtractionRecord = {
-      id: existing?.id ?? input.id ?? `extract-${randomUUID().slice(0, 8)}`,
+      id: existing?.id ?? input.id ?? `extract-${opaqueUuid()}`,
       sourceId: input.sourceId,
       ...(_artifactId !== null ? { artifactId: _artifactId } : existing?.artifactId ? { artifactId: existing.artifactId } : {}),
       extractorId: input.extractorId,

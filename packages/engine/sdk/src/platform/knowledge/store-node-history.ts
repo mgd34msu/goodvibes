@@ -1,5 +1,5 @@
 import { knowledgeClockIso, knowledgeRawRepresentation, retainKnowledgeRepresentation } from './store-record-representation.js';
-import { randomUUID } from 'node:crypto';
+import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { KnowledgeNodeActivationHeldError } from './activation/types.js';
 import { preparedNodeWrite, markPreparedNodeWritten } from './store-node-activation.js';
 import { retainKnowledgeNodeObservation } from './store-node-observation.js';
@@ -276,7 +276,7 @@ function planMergedEdges(original: readonly KnowledgeEdgeRecord[], loserId: stri
     const existing = [...edges.values()].find((edge) => edge.fromKind === input.fromKind && edge.fromId === input.fromId
       && edge.toKind === input.toKind && edge.toId === input.toId && edge.relation === input.relation);
     const record: KnowledgeEdgeRecord = {
-      ...input, id: existing?.id ?? `edge-${randomUUID().slice(0, 8)}`,
+      ...input, id: existing?.id ?? `edge-${opaqueUuid()}`,
       weight: Number.isFinite(input.weight) ? Number(input.weight) : existing?.weight ?? 1,
       metadata: { ...existing?.metadata, ...input.metadata },
       createdAt: existing?.createdAt ?? mergedAt, updatedAt: mergedAt,

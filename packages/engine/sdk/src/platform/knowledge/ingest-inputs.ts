@@ -3,7 +3,7 @@ import { knowledgeRawRepresentation } from './store-record-representation.js';
 import { knowledgeClockIso } from './store-record-representation.js';
 import { createKnowledgeIngestUriCanonicalizer } from './uri-canonicalization/ingest-owner.js';
 import { KnowledgeUriCanonicalizationHeldError } from './uri-canonicalization/reader.js';
-import { randomUUID } from 'node:crypto';
+import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { snapshotNodeInput } from './activation/projection.js';
 import { KnowledgeNodeActivationHeldError } from './activation/types.js';
 import { KnowledgeNodeMutationHeldError } from './store-node-authority.js';
@@ -477,7 +477,7 @@ export function pickKnowledgeRefreshCandidates(
 /** Reserve identity without publishing pending or overwriting an existing source. */
 function reserveSourceId(context: KnowledgeIngestContext, canonicalUri: string | undefined): string {
   return (canonicalUri ? context.store.getSourceByCanonicalUri(canonicalUri)?.id : undefined)
-    ?? `source-${randomUUID().slice(0, 8)}`;
+    ?? `source-${opaqueUuid()}`;
 }
 
 type ExtractionPreparation =

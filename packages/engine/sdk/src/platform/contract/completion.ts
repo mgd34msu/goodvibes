@@ -38,8 +38,10 @@ import { admitPublicationInput, type PublicationInputAdmission } from './publica
 import { contractSourceScope } from './work-receipts.js';
 
 import { spawnSync } from 'node:child_process';
+import { isDeepStrictEqual } from 'node:util';
+import { captureOwnedJson } from '../gate/judgment-input.js';
 import { judgmentPort, captureJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { hashState, JudgmentContextLimitError, JudgmentError, mapLimit, toJson, type JsonValue, type YesNoReading } from '@goodvibes-jev/judgment';
+import { recordedJudgmentInputHash, hashState, JudgmentContextLimitError, JudgmentError, mapLimit, toJson, type JsonValue, type YesNoReading } from '@goodvibes-jev/judgment';
 import { AgentWorktree, IsolatedWorktree } from '../agents/worktree.js';
 import { excludeUntouchedLaunchResidue } from '../orchestration/dirty-guard.js';
 import { GitService } from '../git/service.js';
@@ -417,11 +419,18 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
         try {
           const rawReviewPort = judgmentPort(site);
           let reviewStateHash: string | undefined;
-          const boundReviewPort: typeof rawReviewPort = { ...rawReviewPort, ask(request) {
-            const currentHash = hashState(request.state);
-            if (reviewStateHash !== undefined && reviewStateHash !== currentHash) throw new Error('Final-answer evidence changed between content batches');
-            reviewStateHash = currentHash;
-            return rawReviewPort.ask(request);
+          let reviewInput: { readonly state: typeof state } | undefined;
+          const boundReviewPort: typeof rawReviewPort = { ...rawReviewPort, async ask(request) {
+            const captured = captureOwnedJson(request.state) as typeof state;
+            if (reviewInput !== undefined && !isDeepStrictEqual(reviewInput.state, captured)) throw new Error('Final-answer evidence changed between content batches');
+            reviewInput ??= { state: captured };
+            const forwarded: typeof request = { ...request, state: reviewInput.state };
+            const result = await rawReviewPort.ask(forwarded);
+            const recorded = recordedJudgmentInputHash(result, forwarded);
+            if (recorded === undefined) throw new JudgmentError('unrecorded', 'Final-answer review requires its actual recorded input.');
+            if (reviewStateHash !== undefined && reviewStateHash !== recorded) throw new Error('Final-answer recorded input changed between content batches');
+            reviewStateHash = recorded;
+            return result;
           } };
           const reviewPort = meteredPort(nativeContractPort(contract, context.native, boundReviewPort, run.abort.signal), reviewUsage);
           const readContent = async () => {
@@ -449,11 +458,13 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
               claimSignal.throwIfAborted();
               let stateHash: string | undefined;
               const raw = judgmentPort(site);
-              const bound: typeof raw = { ...raw, ask(request) {
-                stateHash = hashState(request.state);
+              const bound: typeof raw = { ...raw, async ask(request) {
                 const forwarded: typeof request = { ...request, questions: { ...request.questions,
                   unsupported: scopedClaimQuestion(reviewBattery.items.unsupported.question, scope, outputDigest) } };
-                return raw.ask(forwarded);
+                const result = await raw.ask(forwarded);
+                stateHash = recordedJudgmentInputHash(result, forwarded);
+                if (stateHash === undefined) throw new JudgmentError('unrecorded', 'Scoped answer review requires its actual recorded input.');
+                return result;
               } };
               const review = await reviewBattery.run(meteredPort(nativeContractPort(contract, context.native, bound, claimSignal), reviewUsage),
                 { ...state, claimScope: { ...scope, text: evidence.output.slice(scope.start, scope.end) } },
@@ -580,10 +591,12 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
       let stateHash: string | undefined;
       try {
         const raw = judgmentPort(site);
-        const bound: typeof raw = { ...raw, ask(request) {
-          stateHash = hashState(request.state);
+        const bound: typeof raw = { ...raw, async ask(request) {
           const forwarded: typeof request = { ...request, questions: { ...request.questions, omitted: goalObligationQuestion(battery.items.omitted.question, literalSourceDigest) } };
-          return raw.ask(forwarded);
+          const result = await raw.ask(forwarded);
+          stateHash = recordedJudgmentInputHash(result, forwarded);
+          if (stateHash === undefined) throw new JudgmentError('unrecorded', 'Goal-obligation review requires its actual recorded input.');
+          return result;
         } };
         const result = await battery.run(meteredPort(nativeContractPort(contract, context.native, bound, run.abort.signal), usage), state, { site, signal: run.abort.signal });
         assertOwnedContractSource(contract);
@@ -633,9 +646,11 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
         const site = 'contract.check.original-obligation-coverage';
         const port = judgmentPort(site);
         let stateHash: string | undefined;
-        const boundPort: typeof port = { ...port, ask(request) {
-          stateHash = hashState(request.state);
-          return port.ask(request);
+        const boundPort: typeof port = { ...port, async ask(request) {
+          const result = await port.ask(request);
+          stateHash = recordedJudgmentInputHash(result, request);
+          if (stateHash === undefined) throw new JudgmentError('unrecorded', 'Original-obligation review requires its actual recorded input.');
+          return result;
         } };
         const result = await originalCoverage.run(
           meteredPort(nativeContractPort(contract, context.native, boundPort, run.abort.signal), usage),

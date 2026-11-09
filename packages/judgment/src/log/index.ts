@@ -1,4 +1,4 @@
-export { withDecisionLog } from './recording-port.ts';
+export { withDecisionLog, recordedJudgmentInputHash } from './recording-port.ts';
 export { SqliteDecisionLog } from './sqlite.ts';
 export {
   actionOf,

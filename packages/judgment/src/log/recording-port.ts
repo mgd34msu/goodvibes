@@ -1,4 +1,4 @@
-import { retainNativeModelObservation } from '../port/model-observation.ts';
+import { retainNativeModelObservation, recordImmutableJudgmentResult } from '../port/model-observation.ts';
 import { drainOwned } from '../drain-owned.ts';
 import { opaqueUuid } from '../port/opaque-uuid.ts';
 import { captureJudgmentInput } from '../port/input-snapshot.ts';
@@ -10,6 +10,55 @@ import {
   type JudgmentResult, type Questions,
 } from '../port/types.ts';
 import { hashState, isoTime, type DecisionLog, type NewDecisionEntry } from './types.ts';
+
+interface RecordedInput {
+  readonly state: JudgmentRequest<Questions>['state'];
+  readonly questions: Questions;
+  readonly context: NonNullable<JudgmentRequest<Questions>['context']>;
+  readonly stateHash: string;
+  readonly decisionId: string;
+}
+// Reuse the actual recorder's immutable input and existing commitment, never
+// another copy or a text-keyed global cache. Original result GC releases it.
+const recordedInputResults = new WeakMap<object, RecordedInput>();
+
+/** Descriptor-only JSON comparison. Never execute a getter/toJSON/thenable in
+ * a borrowed requested image merely to recover its recorded commitment. */
+function sameRecordedData(left: unknown, right: unknown): boolean {
+  const pending: [unknown, unknown][] = [[left, right]];
+  while (pending.length) {
+    const pair = pending.pop(); if (!pair) break;
+    const [a, b] = pair;
+    if (a === b) continue;
+    if (!a || !b || typeof a !== 'object' || typeof b !== 'object' || nodeTypes.isProxy(b) || Array.isArray(a) !== Array.isArray(b)) return false;
+    const prototype: unknown = Object.getPrototypeOf(b);
+    if (Array.isArray(b) ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) return false;
+    const keys = Reflect.ownKeys(a), other = Reflect.ownKeys(b);
+    if (keys.length !== other.length || other.some(key => typeof key !== 'string')) return false;
+    for (const key of keys) {
+      const original = Object.getOwnPropertyDescriptor(a, key), supplied = Object.getOwnPropertyDescriptor(b, key);
+      if (!original || !supplied || !('value' in original) || !('value' in supplied) || original.enumerable !== supplied.enumerable) return false;
+      pending.push([original.value, supplied.value]);
+    }
+  }
+  return true;
+}
+/** Existing private-state commitment for THIS original recorded result/input.
+ * Copies and forgeable decision IDs cannot acquire this observation. The hash
+ * was computed once by withDecisionLog; this read performs no serialization or
+ * hashing and conveys no authority beyond the actual saved call identity. */
+export function recordedJudgmentInputHash(value: unknown, request: unknown): string | undefined {
+  if (!value || typeof value !== 'object' || !request || typeof request !== 'object' || nodeTypes.isProxy(request)) return undefined;
+  const recorded = recordedInputResults.get(value); if (!recorded || typeof recorded.decisionId !== 'string' || !recorded.decisionId) return undefined;
+  try {
+    const id = Object.getOwnPropertyDescriptor(value, 'decisionId'), state = Object.getOwnPropertyDescriptor(request, 'state'), questions = Object.getOwnPropertyDescriptor(request, 'questions'), context = Object.getOwnPropertyDescriptor(request, 'context');
+    if (!id || !('value' in id) || id.value !== recorded.decisionId || !state || !questions || !('value' in state) || !('value' in questions)
+      || (context !== undefined && !('value' in context))
+      || !sameRecordedData(recorded.state, state.value) || !sameRecordedData(recorded.questions, questions.value)
+      || !sameRecordedData(recorded.context, context?.value ?? {})) return undefined;
+    return recorded.stateHash;
+  } catch { return undefined; }
+}
 
 const FAILURE_MESSAGES: Readonly<Record<JudgmentErrorKind, string>> = {
   'invalid-request': 'the judgment request was invalid',
@@ -276,7 +325,9 @@ export function withDecisionLog(inner: JudgmentPort, log: DecisionLog, now: () =
       }));
       assertLogCurrent(logAssertion);
       const decisionId = recorded(() => log.record(entry));
-      return retainNativeModelObservation(originalResult, { ...resultToReturn, decisionId });
+      const returned = recordImmutableJudgmentResult(retainNativeModelObservation(originalResult, { ...resultToReturn, decisionId }));
+      recordedInputResults.set(returned, { state: input.state, questions: input.questions, context: call.context, stateHash: call.stateHash, decisionId });
+      return returned;
     },
   };
 }

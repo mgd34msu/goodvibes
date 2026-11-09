@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Hold knowledge extraction when caller or retained restrictions return a
+  promise or another value. Observe rejected work without treating it as
+  permission, and recheck restrictions after the readability model returns.
+
 - Read and hash the static-check policy once per actual preparation or checker
   pass. Recheck the original files before reuse and after callbacks or waits;
   missing saved evidence skips policy hashing. Saved report comparisons retain

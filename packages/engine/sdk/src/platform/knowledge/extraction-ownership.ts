@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { isClassicOperation } from '../runtime/decision-policy.js';
 import { captureJudgmentPort, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
@@ -16,11 +17,19 @@ export function createKnowledgeExtractionOwner(ownership: Pick<KnowledgeIngestOw
   const retained: (() => void)[] = [];
   const captures = new Map<string, JudgmentPortCapture>();
   let classic = isClassicOperation();
+  const runRestriction = (check: () => void) => {
+    let result: unknown;
+    try { result = check(); }
+    catch (error) { drainOwned(error); throw new KnowledgeExtractionJudgmentHoldError(); }
+    if (result !== undefined) { drainOwned(result); throw new KnowledgeExtractionJudgmentHoldError(); }
+  };
   const assertCaller = () => {
     try {
       if (ownership.signal !== signal || ownership.assertCurrent !== callerCurrent) throw new Error('retired');
-      signal?.throwIfAborted(); callerCurrent?.();
-      for (const check of retained) check();
+      signal?.throwIfAborted();
+      if (callerCurrent) runRestriction(callerCurrent);
+      for (const check of retained) runRestriction(check);
+      signal?.throwIfAborted();
     } catch { throw new KnowledgeExtractionJudgmentHoldError(); }
   };
   const assertCurrent = () => {
@@ -31,7 +40,7 @@ export function createKnowledgeExtractionOwner(ownership: Pick<KnowledgeIngestOw
     }
     catch { throw new KnowledgeExtractionJudgmentHoldError(); }
   };
-  return Object.freeze({ signal, assertCurrent, retain(check: () => void) { assertCurrent(); check(); retained.push(check); }, port(site: string) {
+  return Object.freeze({ signal, assertCurrent, retain(check: () => void) { assertCurrent(); runRestriction(check); assertCurrent(); retained.push(check); }, port(site: string) {
     assertCurrent(); let captured = captures.get(site);
     if (!captured) {
       captured = captureJudgmentPort(site, { signal, assertCurrent: assertCaller, prepareResultCapture: prepareRepairJudgmentResult });

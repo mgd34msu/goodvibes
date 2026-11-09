@@ -84,11 +84,13 @@ test('an uncertain overall factual objection is resolved by exact complete answe
   expect(receipt.readings.unsupported.probability).toBe(0.03);
   expect(completeAnswerClaimCoverage(current.answer!, receipt.claimReviews)).toBe(true);
   expect(receipt.claimReviews.length).toBe(scoped);
+  let expectedOutputDigest: string | undefined;
   for (const claim of receipt.claimReviews) {
+    expectedOutputDigest ??= hashState(current.answer!);
     const entry = log.get(claim.decisionId)!;
     expect(entry.stateHash).toBe(claim.stateHash);
     expect(entry.questions).toMatchObject({ unsupported: { instructions: { claimScope: {
-      version: 2, start: claim.start, end: claim.end, outputDigest: hashState(current.answer!) } } } });
+      version: 2, start: claim.start, end: claim.end, outputDigest: expectedOutputDigest } } } });
     expect(current.checks.at(-1)!.decisionIds).toContain(claim.decisionId);
   }
   const scopes = answerClaimScopes(output);
@@ -514,10 +516,11 @@ test('a final-content receipt resolves its own pending requirement through a gen
           expect(evidence.finalAnswerReview.passed).toBe(true);
           const output = context.state['output'];
           if (typeof output !== 'string') throw new Error('Expected the exact final answer');
-          expect(evidence.finalAnswerReview.outputDigest).toBe(hashState(output));
+          const expectedOutputDigest = hashState(output);
+          expect(evidence.finalAnswerReview.outputDigest).toBe(expectedOutputDigest);
           expect(log.get(evidence.finalAnswerReview.decisionIds[0]!)?.context.site).toBe('contract.check.final-answer-review');
           expect(evidence).toMatchObject({ orchestration: { currentValidation: { stage: 'original-requirements-after-content-review',
-            completedContentReview: { passed: true, outputDigest: hashState(output) }, pendingStages: ['this original-requirements decision', 'owner-publication'] } },
+            completedContentReview: { passed: true, outputDigest: expectedOutputDigest }, pendingStages: ['this original-requirements decision', 'owner-publication'] } },
             nativeJudgmentExecutions: { source: 'native-host', operation: 'read-runtime-native-judgment-log' } });
           const phases = (evidence as unknown as { nativeJudgmentExecutions: { phases: { phase: string; answered: number; missingOrUnanswered: string[] }[] } }).nativeJudgmentExecutions.phases;
           expect(phases.find(phase => phase.phase === 'finalAnswer')).toMatchObject({ answered: 1, missingOrUnanswered: [] });

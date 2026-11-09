@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { builtinTriggerSupervisorMethodDescriptors } from './method-catalog-trigger-supervisor.js';
 import { builtinDelegatedInboundMethodDescriptors } from './method-catalog-delegated-inbound.js';
 import { builtinGatewayNativeHostedTurnMethodDescriptors } from './method-catalog-native-hosted-turn.js';
@@ -275,9 +276,11 @@ export class GatewayMethodCatalog {
           return [id, value.source, value.pluginId ?? null, [...value.transport].sort(), [...value.scopes].sort(),
             [...(value.domains ?? [])].sort(), [...(value.wireEvents ?? [])].sort()];
         });
-        // Existing continuation records use this exact representation. Its
-        // format migration remains open; live guards must not repeatedly sort,
-        // serialize and hash the same unchanged catalog on every await.
+        // Saved native CI grants compare this registered method/event policy
+        // after restart. Keep one compact commitment per catalog generation;
+        // membership-only readers use grantedScopes() without computing it.
+        // The current attached owner and durable revocation precondition, not
+        // this checksum, establish authority.
         const snapshot = Object.freeze({ revision: createHash('sha256').update(JSON.stringify({ methods, events })).digest('hex'),
           scopes: grantedScopes() });
         if (this.scopePolicyOwner !== owner || this.scopePolicyChanging || this.scopePolicyState !== state) {
@@ -309,7 +312,10 @@ export class GatewayMethodCatalog {
     this.scopePolicyChanging = true;
     try {
       const result: unknown = owner.beforeMutation();
-      if (result && typeof result === 'object' && typeof (result as { then?: unknown }).then === 'function') throw new Error('Gateway scope policy mutation must be synchronous');
+      if (result !== undefined) {
+        drainOwned(result);
+        throw new Error('Gateway scope policy mutation must be synchronous');
+      }
       if (this.scopePolicyOwner !== owner) throw new Error('Gateway scope policy owner changed');
     } finally { this.scopePolicyChanging = false; }
   }

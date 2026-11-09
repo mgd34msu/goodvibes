@@ -188,3 +188,20 @@ test('ordinary catalog behavior needs no durable configuration and granted-scope
   expect(grantedGatewayScopes(catalog, true)).toEqual(['read:control-plane', 'read:events', 'read:telemetry', 'read:telemetry-sensitive', 'write:control-plane', 'write:synthetic']);
   expect(catalog.unregister('synthetic.write')).toBe(true);
 });
+
+// Regression source: execution is deferred until the coding phase is complete.
+test('rejected asynchronous scope preconditions are drained without changing the registered catalog', async () => {
+  const catalog = new GatewayMethodCatalog({ includeBuiltins: false });
+  catalog.register(method(), handler);
+  const owner = catalog.attachScopePolicyOwner(async () => { throw new Error('synthetic failed scope precondition'); });
+  const original = owner.current(), unhandled: unknown[] = [];
+  const observe = (error: unknown) => { unhandled.push(error); };
+  process.on('unhandledRejection', observe);
+  try {
+    expect(() => catalog.unregister('synthetic.write')).toThrow('synchronous');
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(unhandled).toEqual([]);
+    expect(catalog.get('synthetic.write')).not.toBeNull();
+    expect(owner.current()).toBe(original);
+  } finally { process.off('unhandledRejection', observe); owner.close(); }
+});

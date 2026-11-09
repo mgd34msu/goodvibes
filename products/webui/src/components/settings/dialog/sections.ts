@@ -121,9 +121,9 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
     label: 'Current model and providers',
     page: 'models',
     description: 'The model new chats use, and the providers that serve it.',
-    namespaces: ['provider', 'pricing', 'cache'],
-    keywords: ['model', 'provider', 'llm', 'ai', 'route', 'context', 'price', 'openai', 'anthropic'],
-    items: ['Current model', 'Providers', 'Models', 'Sign-in routes', 'Browse models'],
+    namespaces: ['provider', 'judgment', 'pricing', 'cache'],
+    keywords: ['model', 'provider', 'llm', 'ai', 'route', 'context', 'price', 'openai', 'anthropic', 'judgment', 'decision', 'failover', 'budget', 'volume'],
+    items: ['Current model', 'Providers', 'Models', 'Sign-in routes', 'Browse models', 'Decision models', 'Decision call-volume alerts'],
   },
   {
     id: 'credentials',

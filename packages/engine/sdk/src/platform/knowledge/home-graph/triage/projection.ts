@@ -53,9 +53,10 @@ function copyString(target: Record<string, JsonValue>, record: Record<string, un
   target[key] = record[key];
 }
 export function triageCacheFingerprint(input: TriageReadInput, issue: KnowledgeIssueRecord, node: KnowledgeNodeRecord | undefined, policy: { model: string; minConfidence: number; category?: string | undefined }): string {
-  // Saved issue triage compares this exact input, ephemeral owner guidance and
-  // policy between runs without retaining another private prompt body. This is
-  // the existing 96-bit cache key recipe, not authentication or operator review.
+  // Same-store/source cache reuse must survive ordinary issue-row replacement
+  // while detecting relevant input, ephemeral guidance and policy changes.
+  // Keep a compact comparison instead of retaining the prior private prompt.
+  // Restart is cold; this is neither authority nor an independent cold-reader check.
   return createHash('sha256').update(JSON.stringify({
     issue: input.issue, subject: input.subject, guidance: input.ruleGuidance, policy,
     issueId: issue.id, nodeId: issue.nodeId, sourceId: issue.sourceId,

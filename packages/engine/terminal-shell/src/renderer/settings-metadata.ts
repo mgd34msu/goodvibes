@@ -42,6 +42,7 @@ export const SHARED_CATEGORY_LABELS = {
 } as const;
 
 export const SHARED_SETTING_LABELS = {
+  'judgment.volumeMonitor': 'Decision Call-volume Alerts',
   'ui.systemMessages': 'System Message Target',
   'ui.operationalMessages': 'Operational Message Target',
   'behavior.autoCompactThreshold': 'Auto-Compact %',

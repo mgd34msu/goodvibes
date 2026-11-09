@@ -97,7 +97,7 @@ export const updateConfigSettings: ConfigSettingDefinition[] = [
     key: 'update.releasesUrl',
     type: 'string',
     default: DAEMON_RELEASES_LATEST_URL,
-    description: 'GitHub releases/latest URL for the daemon complete native cohort and source manifest. Exact historical default feeds migrate to goodvibes-jev; explicit custom feeds remain unchanged. A daemon update does not replace sibling product executables',
+    description: 'GitHub releases/latest URL for a complete GoodVibes monorepo suite. Exact historical default feeds migrate to goodvibes; explicit custom feeds remain unchanged. Native suite updates replace installed sibling programs and configured release WebUI/browser support together',
   },
   {
     key: 'update.rollbackAfterFailedStarts',

@@ -143,12 +143,11 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
               if (target.endpoint.authentication !== 'none' && !target.endpoint.apiKey.trim()) {
                 throw new JudgmentError('unavailable', 'this judgment target has no resolved credential');
               }
-              const response = await interruptible(withRequestId(
+              const { result } = await interruptible(withRequestId(
                 () => askBackend({ ...target, timeoutMs, retry: {}, fetch: (input, init) => { dispatched = true; return fetch ? fetch(input, init) : globalThis.fetch(input, init); } }, body, attemptController.signal, headers),
                 (id) => { requestId = safeId(id); },
               ), attemptController.signal);
               checkCancellation();
-              const result = response;
               if (!result || typeof result.model !== 'string' || keys.some((key) => result.model.includes(key)) || !result.answers || !result.usage
                 || ![result.usage.input_tokens, result.usage.output_tokens].every((n) => Number.isFinite(n) && n >= 0)) {
                 throw new JudgmentError('invalid-response', 'System One returned an invalid result envelope');

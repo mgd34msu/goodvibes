@@ -20,7 +20,11 @@ export interface JudgmentFallbackSettings {
   readonly backend?: JudgmentBackendSettings;
 }
 
+import type { JudgmentVolumeMonitorControl } from '../observe/judgment-volume-monitor.js';
+
 export interface JudgmentSettings {
+  /** Optional owner-configured local call-volume alerts. */
+  volumeMonitor?: Partial<JudgmentVolumeMonitorControl>;
   /** Missing on older installations; defaults to Default - On. */
   policy?: DecisionModelPolicy;
   /** System One endpoint base URL; empty uses TYPESAFE_BASE_URL, then the hosted endpoint. */
@@ -40,6 +44,7 @@ export interface JudgmentSettings {
 }
 
 export type JudgmentConfigKey =
+  | 'judgment.volumeMonitor'
   | 'judgment.policy'
   | 'judgment.endpoint'
   | 'judgment.keySource'
@@ -51,6 +56,7 @@ export type JudgmentConfigKey =
 
 /** The value of every `judgment.*` key, folded into ConfigValue with one arm. */
 export interface JudgmentConfigValueMap {
+  'judgment.volumeMonitor': Partial<JudgmentVolumeMonitorControl>;
   'judgment.policy': DecisionModelPolicy;
   'judgment.endpoint': string;
   'judgment.keySource': JudgmentKeySource;

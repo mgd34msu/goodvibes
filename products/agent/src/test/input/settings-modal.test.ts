@@ -110,6 +110,31 @@ describe('SettingsModal', () => {
     mkdirSync(join(tmpDir, '.goodvibes', 'tui'), { recursive: true });
   });
 
+  test('Judgment call-volume alerts are discoverable, editable and persisted through the actual settings modal', () => {
+    modal.open(cm, ffm, subscriptionManager, serviceRegistry, mcpRegistry);
+    modal.categoryIndex = SETTINGS_CATEGORIES.indexOf('judgment');
+    modal.selectedIndex = modal.currentItems.findIndex(entry => entry.setting.key === 'judgment.volumeMonitor');
+    expect(modal.selectedIndex).toBeGreaterThanOrEqual(0);
+    modal.focusPane = 'settings';
+    modal.activateSelected();
+    expect(modal.editingMode).toBe(true);
+    expect(JSON.parse(modal.editBuffer)).toMatchObject({ enabled: false, budgets: [] });
+    const control = { enabled: true, budgets: [{ name: 'All decisions', maxLogicalDecisions: 100, maxWireAttempts: 200 }],
+      intervalMs: 2000, windowMs: 60_000, limit: 25 };
+    modal.editBuffer = JSON.stringify(control);
+    expect(modal.commitEdit()).toBe(true);
+    expect(cm.get('judgment.volumeMonitor')).toEqual(control);
+    const reopened = createConfigManager(tmpDir);
+    try { expect(reopened.get('judgment.volumeMonitor')).toEqual(control); }
+    finally { reopened.stopWatchingConfigFiles(); }
+    modal.open(cm, ffm, subscriptionManager, serviceRegistry, mcpRegistry);
+    modal.categoryIndex = SETTINGS_CATEGORIES.indexOf('judgment');
+    modal.selectedIndex = modal.currentItems.findIndex(entry => entry.setting.key === 'judgment.volumeMonitor');
+    modal.activateSelected(); modal.editBuffer = JSON.stringify({ enabled: true, budgets: [] });
+    expect(modal.commitEdit()).toBe(false);
+    expect(cm.get('judgment.volumeMonitor')).toEqual(control);
+  });
+
   test.each([
     ['judgment', 'judgment.model', 'Choose decision model'],
     ['judgment', 'judgment.backend', 'Choose decision provider'],

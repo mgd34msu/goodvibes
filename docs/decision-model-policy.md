@@ -68,3 +68,24 @@ Select **Decision Router / auto** in the ordinary model picker to enable this
 routing for the conversation. Selecting other providers adds no categorization
 calls. Classification uses bounded context; the chosen answer model receives
 the conversation and tool history.
+
+## Call-volume alerts
+
+In **Settings → Judgment → Decision Call-volume Alerts**, edit
+`judgment.volumeMonitor` to enable local alerts and set budgets. For example:
+
+```json
+{"enabled":true,"budgets":[{"name":"All decisions","maxLogicalDecisions":1000,"maxWireAttempts":2000}]}
+```
+
+The default window is one hour, checked once a minute. Optional `battery` or
+`site` fields restrict a budget to that category; `windowMs`, `intervalMs` and
+`limit` control the window, cadence and maximum log entries inspected. Alerts
+appear in runtime logs and do not call a model or stop work. Native monitoring
+reads attribution and dispatch counters without loading questions, answers or
+notes into JavaScript. Settings apply to
+the running monitor when changed. Disabled product monitoring still honors an
+explicit `GOODVIBES_JUDGMENT_MONITOR` budget-file override.
+
+Enabled monitoring requires 1–100 budgets. `intervalMs` accepts 1 second to 1 day,
+`windowMs` accepts 1 second to 30 days, and `limit` accepts 1–100000 entries.

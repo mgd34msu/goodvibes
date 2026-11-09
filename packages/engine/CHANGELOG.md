@@ -4,6 +4,14 @@
 
 ### Fixed
 
+- Validate the decision response inside its request-ID wrapper. Valid backend
+  answers are no longer rejected as malformed envelopes; request correlation
+  and answer validation remain intact.
+
+- Expose local decision call-volume alert budgets in Judgment settings across
+  the terminal products and WebUI. Persist and apply changed settings to the
+  running monitor, and stop its timer and subscription before the log closes.
+
 - Remove hash-derived Home Graph quality issue IDs. Reuse saved subject/code
   identities and select new opaque IDs once. Reuse existing comparison digests
   for unchanged native inputs, preserve reviews when related evidence is

@@ -9,9 +9,11 @@ import type { JudgmentSettings } from './schema-types-judgment.js';
 import type { ConfigSetting } from './schema-types.js';
 import { validJudgmentFallbackSettings, validJudgmentCredentialName } from './judgment-fallback-settings.js';
 import { captureJudgmentBackendSettings, validEndpointURL } from '@goodvibes-jev/judgment/decisions';
+import { captureJudgmentVolumeMonitorControl } from '../observe/judgment-volume-monitor.js';
 
 export const judgmentConfigDefaults: { judgment: JudgmentSettings } = {
   judgment: {
+    volumeMonitor: captureJudgmentVolumeMonitorControl({}),
     policy: 'Default - On',
     endpoint: '',
     keySource: 'env',
@@ -29,6 +31,12 @@ function isEndpoint(value: unknown): boolean {
 
 export const judgmentConfigSettings: (ConfigSettingDefinition | ConfigSetting)[] = [
   {
+    key: 'judgment.volumeMonitor', type: 'object', default: captureJudgmentVolumeMonitorControl({}),
+    description: 'Local decision call-volume alerts. Set enabled:true and budgets:[{name:"All decisions",maxLogicalDecisions:1000,maxWireAttempts:2000}]. Optional battery/site restrict each budget; windowMs defaults to one hour, intervalMs to one minute, limit to 10000 log entries. Alerts report usage without calling models or stopping work. Disabled settings retain the optional GOODVIBES_JUDGMENT_MONITOR file override.',
+    validate: value => { try { captureJudgmentVolumeMonitorControl(value); return value !== undefined; } catch { return false; } },
+    validationHint: 'object with enabled and up to 100 budgets; enabled monitoring needs at least one budget',
+  },
+  {
     key: 'judgment.policy', type: 'enum', default: 'Default - On',
     enumValues: ['Default - On', 'Preferred', 'Classic - Off'],
     description: 'Default - On requires available decision models. Preferred tries the configured chain and falls back to Classic only on availability exhaustion. Classic - Off makes no decision-model calls, uses owner-approved tool execution and ordinary completion, and exposes decision-only feature limitations.',
@@ -37,7 +45,7 @@ export const judgmentConfigSettings: (ConfigSettingDefinition | ConfigSetting)[]
     key: 'judgment.endpoint',
     type: 'string',
     default: '',
-    description: 'System One endpoint the engine asks for judgments; empty uses TYPESAFE_BASE_URL, then the hosted endpoint. A loopback address selects a local model',
+    description: 'System One endpoint the engine asks for judgments; empty uses TYPESAFE_BASE_URL, then the hosted endpoint. A loopback address selects a local model. Choose credential references explicitly when changing destinations; embedded credentials, query strings and fragments are refused',
     validate: isEndpoint,
     validationHint: 'empty, or an http(s) URL without embedded credentials, query or fragment',
   },

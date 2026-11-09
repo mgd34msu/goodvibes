@@ -30,7 +30,8 @@ export const JUDGMENT_KEY_NAME = 'TYPESAFE_API_KEY';
 /** What the judgment settings are read from. */
 export interface JudgmentSettingsSource {
   readonly config: {
-    get(key: 'judgment.policy' | 'judgment.endpoint' | 'judgment.keySource' | 'judgment.keyName' | 'judgment.model' | 'judgment.backend' | 'judgment.timeoutMs' | 'judgment.fallbacks'): unknown;
+    get(key: 'judgment.policy' | 'judgment.endpoint' | 'judgment.keySource' | 'judgment.keyName' | 'judgment.model' | 'judgment.backend' | 'judgment.timeoutMs' | 'judgment.fallbacks' | 'judgment.volumeMonitor'): unknown;
+    subscribe?(key: 'judgment.volumeMonitor', listener: () => void): () => void;
     getConfigurationIncarnation?(): number;
     onDidChangeIncarnation?(listener: () => void): () => void;
   };
@@ -285,6 +286,6 @@ export function composeJudgment(input: JudgmentServicesInput): JudgmentServices 
     // shape: AsyncDisposalRegistry observes it and waits before older owners.
     return Promise.allSettled([...active]).then(() => { decisionLog[Symbol.dispose](); });
   });
-  composeJudgmentVolumeMonitor(decisionLog, input.env, input.disposal);
+  composeJudgmentVolumeMonitor(decisionLog, input.env, input.disposal, input.config);
   return { port, decisionLog };
 }

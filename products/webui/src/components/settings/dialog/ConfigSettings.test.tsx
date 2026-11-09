@@ -15,6 +15,7 @@ const configSetCalls: [string, unknown][] = [];
 type SetOutcome = "ok" | "reject";
 let setOutcome: SetOutcome = "ok";
 let fallbackValue: unknown = [];
+let volumeValue: unknown = { enabled: false, budgets: [], intervalMs: 60_000, windowMs: 3_600_000, limit: 10_000 };
 let semanticCalls = 0;
 let primaryEndpoint = "https://api.typesafe.ai";
 let primaryKeySource = "env";
@@ -70,7 +71,7 @@ mock.module("../../../lib/goodvibes", () => ({
           if (outcome === "network-error") {
             return Promise.reject(new Error("Failed to fetch"));
           }
-          return Promise.resolve({ ...CONFIG_FIXTURE, judgment: { fallbacks: fallbackValue, endpoint: primaryEndpoint, keySource: primaryKeySource, keyName: "TYPESAFE_API_KEY" } });
+          return Promise.resolve({ ...CONFIG_FIXTURE, judgment: { fallbacks: fallbackValue, volumeMonitor: volumeValue, endpoint: primaryEndpoint, keySource: primaryKeySource, keyName: "TYPESAFE_API_KEY" } });
         },
         set: (key: string, value: unknown) => {
           configSetCalls.push([key, value]);
@@ -80,6 +81,7 @@ mock.module("../../../lib/goodvibes", () => ({
             );
           }
           if (key === "judgment.fallbacks") fallbackValue = value;
+          if (key === "judgment.volumeMonitor") volumeValue = value;
           if (key === "judgment.endpoint") primaryEndpoint = String(value);
           if (key === "judgment.keySource") primaryKeySource = String(value);
           // daemonOwned surfaces.* keys report a daemon-tier persistedTo; everything
@@ -234,6 +236,7 @@ afterEach(() => {
   setOutcome = "ok";
   configSetCalls.length = 0;
   fallbackValue = [];
+  volumeValue = { enabled: false, budgets: [], intervalMs: 60_000, windowMs: 3_600_000, limit: 10_000 };
   semanticCalls = 0;
   primaryEndpoint = "https://api.typesafe.ai"; primaryKeySource = "env";
 });
@@ -790,6 +793,35 @@ describe("the Payments category offers card entry", () => {
     }
     unmount();
   });
+});
+
+
+test('decision call-volume alerts save and read back on the actual Models and providers settings page', async () => {
+  const ui = render();
+  try {
+    await waitFor(() => [...ui.el.querySelectorAll('.settings-category')].some(button => button.textContent === 'Judgment'));
+    clickCategory(ui.el, 'Judgment');
+    expect(sectionForNamespace('judgment')).toBe('models');
+    await waitFor(() => Boolean(ui.el.querySelector('[data-config-key="judgment.volumeMonitor"] textarea')));
+    const field = ui.el.querySelector('[data-config-key="judgment.volumeMonitor"]');
+    const textarea = field?.querySelector('textarea');
+    if (!textarea) throw new Error('Missing decision call-volume editor');
+    expect(JSON.parse(textarea.value)).toMatchObject({ enabled: false, budgets: [] });
+    const control = { enabled: true, budgets: [{ name: 'All decisions', maxLogicalDecisions: 100, maxWireAttempts: 200 }],
+      intervalMs: 2000, windowMs: 60_000, limit: 25 };
+    flushSync(() => {
+      Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set?.call(textarea, JSON.stringify(control));
+      textarea.dispatchEvent(new window.Event('input', { bubbles: true }));
+    });
+    flushSync(() => [...(field?.querySelectorAll('button') ?? [])].find(button => button.textContent === 'Save')
+      ?.dispatchEvent(new window.MouseEvent('click', { bubbles: true })));
+    await waitFor(() => Boolean(field?.querySelector('.settings-field-persisted')));
+    expect(configSetCalls).toEqual([['judgment.volumeMonitor', control]]);
+    expect(volumeValue).toEqual(control); expect(semanticCalls).toBe(0);
+    clickCategory(ui.el, 'Display'); clickCategory(ui.el, 'Judgment');
+    const readback = ui.el.querySelector('[data-config-key="judgment.volumeMonitor"] textarea') as HTMLTextAreaElement | null;
+    expect(readback).not.toBeNull(); expect(JSON.parse(readback?.value ?? '{}')).toEqual(control);
+  } finally { ui.unmount(); }
 });
 
 

@@ -77,6 +77,7 @@ describe('settings dialog sections', () => {
     expect(sectionForNamespace('permissions')).toBe('permissions');
     expect(sectionForNamespace('learning')).toBe('memory');
     expect(sectionForNamespace('provider')).toBe('models');
+    expect(sectionForNamespace('judgment')).toBe('models');
     expect(sectionForNamespace('payments')).toBe('usage');
     expect(sectionForNamespace('relay')).toBe('network');
     expect(sectionForNamespace('orchestration')).toBe('all');

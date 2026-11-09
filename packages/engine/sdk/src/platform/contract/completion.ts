@@ -65,6 +65,7 @@ import type { StepContext } from './steps.js';
 import type { CheckTrigger, Contract, Criterion, CriterionReading, CriterionVerdict, NudgeKind, TreeBaseline, UnitCheck } from './types.js';
 import { addJudgmentUsage } from './usage.js';
 import { preserveDeclaredReadReceipts, readPrivateReceiptArchives, verifyPrivateReceiptPreservation } from './private-read-receipts.js';
+import { completionEvidenceCommitment } from './completion-evidence-binding.js';
 import { finalAnswerEvidence, finalContentEvidence } from './final-answer-evidence.js';
 import { answerClaimScopes, completeAnswerClaimCoverage, scopedClaimQuestion, type AnswerClaimReview, type AnswerClaimScope } from './final-answer-claims.js';
 import { judgmentExecutionEvidence } from './judgment-execution-evidence.js';
@@ -342,11 +343,11 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
       content: { name: reviewBattery.name, version: reviewBattery.version }, stakes: config().acceptanceStakes };
     // Bind the facts and policies being assessed, independently of fresh
     // reading identities. An unchanged rejection cannot become approval by polling.
-    const digest = hashState({ goal: input.goal, output: evidence.output, evidence: fulfillmentEvidence,
+    const digest = completionEvidenceCommitment({ goal: input.goal, output: evidence.output, evidence: fulfillmentEvidence,
       criteria: input.criteria.map(({ id, text, serves, disposition }) => ({ id, text, serves: [...serves], disposition })),
       policy: { fulfillment: { name: fulfillmentJudge.name, version: fulfillmentJudge.version },
         ...(input.scope === 'deliverable' ? { content: { name: reviewBattery.name, version: reviewBattery.version },
-          originalCoverage: { name: originalCoverage.name, version: originalCoverage.version } } : {}) } });
+          originalCoverage: { name: originalCoverage.name, version: originalCoverage.version } } : {}) } }, rawEvidence);
     const prior = input.checks.at(-1);
     if (contract.nativeSource !== undefined && prior !== undefined && prior.result !== 'pass' && prior.evidenceDigest === digest) {
       return { check: prior, verdicts: new Map(input.criteria.filter(criterion => criterion.disposition === 'judged').map(criterion => [criterion.id, criterion.status === 'unread' ? 'unshown' : criterion.status])), passed: false, output: evidence.output };
@@ -393,7 +394,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
         meaning: 'Actual just-completed native original-requirements assessment of this exact output and primary evidence. These readings establish only the requirements and work they assessed. They are not permission to publish, approval of this separate final-content review, proof of unshown execution, or acceptance of a later rewritten answer. Every requirement reading, every gate and the final-content review must all pass before owner publication.' };
       const state = { goal: input.goal, criteria: judged(input.criteria).map(criterion => criterion.text), output: evidence.output,
         evidence: { ...finalContentEvidence(fulfillmentEvidence), fulfillmentAssessment }, ...(contract.nativeSource === undefined ? {} : { nativeSource: nativeContractSourceData(contract.nativeSource) }) };
-      const evidenceDigest = hashState({ state, policy: { name: reviewBattery.name, version: reviewBattery.version, stakes: config().acceptanceStakes } });
+      const evidenceDigest = completionEvidenceCommitment({ state, policy: { name: reviewBattery.name, version: reviewBattery.version, stakes: config().acceptanceStakes } }, rawEvidence);
       const outputDigest = hashState(evidence.output);
       const targetId = `${contract.id}.final-answer-review`;
       // A later verifier request failure does not invalidate an unchanged

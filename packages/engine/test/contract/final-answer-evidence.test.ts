@@ -1,5 +1,6 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
+import { completionEvidenceCommitment } from '../../sdk/src/platform/contract/completion-evidence-binding.js';
 import { contractWorkReceipts, workReceiptIdentity } from '../../sdk/src/platform/contract/work-receipts.js';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -294,6 +295,20 @@ test('large historical reports stay retained with actual storage references with
   expect(projected.evidence['fullSourceEvidence']).not.toHaveProperty('digest');
   expect(projected.evidence['fullSourceEvidence']).not.toHaveProperty('bytes');
   expect(projected.evidence['orchestration']).not.toHaveProperty('acceptedAnswerDigest');
+});
+
+test('saved refusal and review bindings change when a privately omitted old body changes even though the model projection stays identical', () => {
+  const f = fixture();
+  const first = finalAnswerEvidence(f.contract, f.evidence, {})!;
+  const before = completionEvidenceCommitment({ output: 'The current answer.', evidence: first.evidence }, f.evidence);
+  const firstBody = f.evidence.orchestration.units[0].acceptedAnswer;
+  f.evidence.orchestration.units[0].acceptedAnswer = firstBody + ' Actual changed retained non-research body.';
+  const second = finalAnswerEvidence(f.contract, f.evidence, {})!;
+  // This unrelated old answer is deliberately not repeated in the model view.
+  expect(second.evidence).toEqual(first.evidence);
+  expect(completionEvidenceCommitment({ output: 'The current answer.', evidence: second.evidence }, f.evidence)).not.toBe(before);
+  expect(second.evidence['fullSourceEvidence']).not.toHaveProperty('digest');
+  expect(JSON.stringify(second.evidence)).not.toContain('Actual changed retained non-research body.');
 });
 
 test('final artifact review receives complete actual current text when the diff omits unchanged sections', () => {

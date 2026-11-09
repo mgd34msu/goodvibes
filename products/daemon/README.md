@@ -54,6 +54,14 @@ hashed mirror filenames and matching triage receipts remain readable after
 upgrade. A missing or damaged identity registry with opaque mirrors requires
 restoring the matching registry; the daemon holds instead of opening a new empty
 inbox. Native updates and rollbacks require a reader that supports this format.
+
+While the daemon runs, local maintenance also expires previews in inactive
+Discord, Slack and email mirrors. It uses each mirror's recorded retention
+policy and keeps active readers and pollers excluded until their owners finish
+closing. Historical native provider mirrors retain the native 30-day, 5,000-row
+policy; unknown custom policies require inspection and are not replaced by a
+default. Maintenance does not contact a provider or decision model. Native SQLite
+images are kept in an owner-only directory with owner-only file permissions.
 The host supplies the live `ProtectedSourceOwnerOptions` capability for both the
 local proposal service and `jev-latest`, including established ephemeral retention.
 The standalone launcher has no managed local screening runner; settings or endpoint

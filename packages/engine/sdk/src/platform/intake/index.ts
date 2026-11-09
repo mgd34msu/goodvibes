@@ -84,3 +84,7 @@ export type { DiscordInboxAccount, DiscordInboxChannelScope, DiscordInboxOwnerOp
 
 export { acquireDiscordInboxIdentity, acquireDiscordInboxRegistryRevision } from './providers/discord-identity.js';
 export type { DiscordInboxIdentity, DiscordInboxIdentityInput, DiscordInboxIdentityOwner } from './providers/discord-identity.js';
+
+export { createInactiveInboxRetentionOwner } from './inactive-retention.js';
+export type { InactiveInboxRetentionOwner, InactiveInboxRetentionOptions, InactiveInboxSweep } from './inactive-retention.js';
+export type { InboxRetentionPolicy } from './cursor-store.js';

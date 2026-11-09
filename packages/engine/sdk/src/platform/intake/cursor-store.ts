@@ -37,6 +37,8 @@
 
 import { HandlerSqliteStore, type HandlerSqliteTransaction } from '../state/daemon-handler-sqlite-store.js';
 import type { ImapUidCheckpoint, ImapUidCheckpointAdvance, InboundChannelItem } from './provider-adapter.js';
+import { existsSync } from 'node:fs';
+import { retainActiveInboxStore } from './active-stores.js';
 import { captureImapAdvance, captureImapCheckpoint, captureImapItems, sameImapCheckpoint } from './imap-checkpoint.js';
 
 /**
@@ -90,7 +92,18 @@ export interface InboxCursorStoreOptions {
   readonly clearIntervalImpl?: typeof clearInterval;
 }
 
+/** Versioned local policy, independent of account/source authority. */
+export interface InboxRetentionPolicy { readonly itemTtlMs: number; readonly itemCap: number }
+export function isInboxRetentionPolicy(value: unknown): value is InboxRetentionPolicy {
+  if (!value || typeof value !== 'object') return false;
+  const row = value as Record<string, unknown>;
+  return typeof row['itemTtlMs'] === 'number' && Number.isSafeInteger(row['itemTtlMs']) && row['itemTtlMs'] >= 0
+    && typeof row['itemCap'] === 'number' && Number.isSafeInteger(row['itemCap']) && row['itemCap'] >= 0;
+}
 const SCHEMA: string[] = [
+  `CREATE TABLE IF NOT EXISTS inbox_retention_policy (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1), version INTEGER NOT NULL, itemTtlMs INTEGER NOT NULL, itemCap INTEGER NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS imap_checkpoints (
      provider TEXT PRIMARY KEY, checkpoint TEXT NOT NULL
    )`,
@@ -175,25 +188,29 @@ export class InboxCursorStore {
    * daemon's life hits exactly this window.
    */
   private closed = false;
+  private readonly releaseStorage: () => void;
 
   constructor(
     workingDirectory: string,
     fileName: string = DEFAULT_STORE_FILE_NAME,
     options: InboxCursorStoreOptions = {},
   ) {
+    const policy = { itemTtlMs: options.itemTtlMs ?? INBOX_ITEM_TTL_MS, itemCap: options.itemCap ?? INBOX_ITEM_CAP };
+    if (!isInboxRetentionPolicy(policy)) throw new Error('Inbox retention requires nonnegative safe-integer TTL and item cap');
     this.store = new HandlerSqliteStore({
       workingDirectory,
       fileName: fileName || DEFAULT_STORE_FILE_NAME,
       schema: SCHEMA,
     });
-    this.itemTtlMs = options.itemTtlMs ?? INBOX_ITEM_TTL_MS;
-    this.itemCap = options.itemCap ?? INBOX_ITEM_CAP;
+    this.itemTtlMs = policy.itemTtlMs;
+    this.itemCap = policy.itemCap;
     this.sweepIntervalMs = options.sweepIntervalMs ?? INBOX_SWEEP_INTERVAL_MS;
     this.onSweep = options.onSweep;
     this.onSweepError = options.onSweepError;
     this.now = options.now ?? Date.now;
     this.setIntervalImpl = options.setIntervalImpl ?? setInterval;
     this.clearIntervalImpl = options.clearIntervalImpl ?? clearInterval;
+    this.releaseStorage = retainActiveInboxStore(this.store.dbPath);
   }
 
   get dbPath(): string {
@@ -212,6 +229,14 @@ export class InboxCursorStore {
     const pending = (async () => {
       await this.store.init();
       if (this.closed) return;
+      const saved = this.store.get<{ version: number; itemTtlMs: number; itemCap: number }>('SELECT version, itemTtlMs, itemCap FROM inbox_retention_policy WHERE singleton = 1');
+      if (saved && (saved.version !== 1 || !isInboxRetentionPolicy(saved))) throw new Error('Inbox retention policy is unsupported');
+      if (!saved || saved.itemTtlMs !== this.itemTtlMs || saved.itemCap !== this.itemCap) {
+        this.store.run('INSERT OR REPLACE INTO inbox_retention_policy (singleton, version, itemTtlMs, itemCap) VALUES (1, 1, ?, ?)', [this.itemTtlMs, this.itemCap]);
+        // Keep genuinely empty/unconfigured sources memory-only. Existing
+        // mirrors must retain their actual policy after their owner closes.
+        if (existsSync(this.store.dbPath)) this.revision += 1;
+      }
       await this.runSweep();
       if (this.closed) return;
       this.initialized = true;
@@ -569,7 +594,7 @@ export class InboxCursorStore {
         await Promise.allSettled([this.initializing, ...this.sweeping, ...this.flushing]);
         await this.flushSnapshot();
         if (timerError !== undefined) throw timerError;
-      } finally { this.store.close(); }
+      } finally { this.store.close(); this.releaseStorage(); }
     });
     return this.closing;
   }

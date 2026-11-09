@@ -1,7 +1,7 @@
 /** Root-owned, least-capability mail and explicit tagging constructors. */
 import { EmailService } from '@goodvibes-jev/engine/sdk/platform/email';
 import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { OwnedInboxTagging } from '@goodvibes-jev/engine/sdk/platform/intake';
+import { createInactiveInboxRetentionOwner, INBOX_ITEM_TTL_MS, INBOX_ITEM_CAP, type InactiveInboxRetentionOwner, type OwnedInboxTagging } from '@goodvibes-jev/engine/sdk/platform/intake';
 import { composeMailDeps } from './mail-composition.js';
 import { createDaemonTriageTaggingFactory, type DaemonTriagePermissionHost, type DaemonTriageTaggingRequest } from './tagged-inbox-composition.js';
 import type { SecretsManager } from '../config/secrets.js';
@@ -38,6 +38,8 @@ export async function registerOwnedMailInbox(factory: DaemonInboxFactory, contex
   const lifetime = new AbortController();
   const listeners = new Set<() => void>();
   let retired = false, initialized = false, epoch = 0;
+  let registration: OwnedHandlerSurface | undefined;
+  let retention: InactiveInboxRetentionOwner | undefined;
   const initialEpoch = epoch;
   const invalidate = () => {
     epoch++;
@@ -103,7 +105,7 @@ export async function registerOwnedMailInbox(factory: DaemonInboxFactory, contex
       secrets: { get: mailInput.secretsManager.get.bind(mailInput.secretsManager), resolveLocalCredentialSnapshot: snapshot.bind(mailInput.secretsManager) },
       onInvalidate(listener) { assertCurrent(); listeners.add(listener); return () => { listeners.delete(listener); }; }, assertCurrent,
     }) : undefined;
-    const registration = await factory(context, routing, { ...controls,
+    registration = await factory(context, routing, { ...controls,
       ...(hasHostedScreeningOwners(mailInput) ? { acquireHostedScreening: async (source, operation) => {
         assertCurrent();
         const acquisition = await acquireHostedInboxScreening({ config: mailInput.configManager, secrets: mailInput.secretsManager,
@@ -150,25 +152,45 @@ export async function registerOwnedMailInbox(factory: DaemonInboxFactory, contex
         } catch (error) { close(); throw error; }
       },
     });
+    const ownedRegistration = registration;
+    // The native root establishes the historical policy for its reserved
+    // provider-mirror namespace. Custom persisted policies remain authoritative.
+    retention = createInactiveInboxRetentionOwner({ workingDirectory: context.workingDirectory,
+      assertCurrent() { if (retired || lifetime.signal.aborted) throw new Error('Inbox storage maintenance is retired'); },
+      historicalNativePolicy: { itemTtlMs: INBOX_ITEM_TTL_MS, itemCap: INBOX_ITEM_CAP },
+      onSweep(result) {
+        if (result.expired || result.capped) context.logger.info('Inactive inbox previews expired', { expired: result.expired, capped: result.capped });
+        if (result.unavailable || result.unknownPolicy) context.logger.warn('Some inactive inbox stores require inspection', { unavailable: result.unavailable, unknownPolicy: result.unknownPolicy });
+      },
+    });
+    const retainedStorage = retention;
     let closing: Promise<void> | undefined;
     const close = (): Promise<void> => {
       if (closing) return closing;
       const deferred = Promise.withResolvers<void>(); closing = deferred.promise;
       lifetime.abort();
-      void drainTagging().then(async () => {
-        try { await registration.close(); } finally { try { await drainScreening(); } finally { closeMail(); } }
+      // Stop background storage admission immediately, while all actual cleanup
+      // and source reads remain owned until the enclosing close drains them.
+      const storageClosing = retainedStorage.close();
+      void Promise.allSettled([storageClosing, drainTagging()]).then(async results => {
+        const errors = results.flatMap(result => result.status === 'rejected' ? [result.reason] : []);
+        try { await ownedRegistration.close(); } catch (error) { errors.push(error); }
+        try { await drainScreening(); } catch (error) { errors.push(error); }
+        try { closeMail(); } catch (error) { errors.push(error); }
+        if (errors.length) throw new AggregateError(errors, 'Inbox source and retention cleanup did not drain cleanly');
       }).then(deferred.resolve, deferred.reject);
       return closing;
     };
-    const ready = Promise.resolve(registration.ready).then(() => {
+    const ready = Promise.all([ownedRegistration.ready, retainedStorage.ready]).then(() => {
       if (taggingOwners.length || screeningAcquisitions.size) assertCurrent();
       initialized = true;
     }).catch(async error => { await close(); throw error; });
     void ready.catch(() => {});
-    return { ...(registration.ready === undefined ? {} : { ready }), close };
+    return { ready, close };
   } catch (error) {
     lifetime.abort();
-    try { await drainTagging(); } finally { try { await drainScreening(); } finally { closeMail(); } }
+    await Promise.allSettled([retention?.close(), registration?.close(), drainTagging()]);
+    try { await drainScreening(); } finally { closeMail(); }
     throw error;
   }
 }

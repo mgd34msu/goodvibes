@@ -1,12 +1,13 @@
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { createSqlJsDatabase, SqlJsDatabaseAllocationError } from './sqljs-database.js';
-import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
-import { readFileSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
-import { existsSync } from 'node:fs';
+import { open } from 'node:fs/promises';
+import { fstatSync, lstatSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, type BigIntStats } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { basename, dirname, join } from 'node:path';
 import type { MutationPublication } from '../utils/file-mutation.js';
 import { logger } from '../utils/logger.js';
+import { fileObservationIdentity } from '../utils/file-observation.js';
+import { capturePrivateSqliteDirectory, readPrivateSqliteImage } from './private-sqlite-path.js';
 import { loadSqlJsEngine, type SqlDatabase } from './sqlite-store.js';
 
 /** Synchronous transaction view; callers must not retain it past the callback. */
@@ -16,6 +17,7 @@ export interface HandlerSqliteTransaction {
   get<T = Record<string, unknown>>(sql: string, params?: (string | number)[]): T | null;
 }
 
+interface PreparedSqliteImage { assertCurrent(): void; cleanup(): void }
 export interface HandlerSqliteStoreOptions {
   workingDirectory: string;
   /** e.g. 'channel-routes.sqlite', 'drafts.sqlite', 'inbox-cursors.sqlite' */
@@ -69,9 +71,12 @@ export class HandlerSqliteStore {
   private databaseFactory: ((data: Uint8Array) => SqlDatabase) | null = null;
   private mutationRevision = 0;
   private stagedTransactions = 0;
+  private closed = false;
+  private assertStorageCurrent: () => void = () => { throw new Error('HandlerSqliteStore is not initialized'); };
 
   constructor(options: HandlerSqliteStoreOptions) {
-    this.options = options;
+    if (!options.fileName || options.fileName === '.' || options.fileName === '..' || /[\\/\0]/.test(options.fileName)) throw new Error('HandlerSqliteStore requires a local filename');
+    this.options = Object.freeze({ ...options, schema: [...options.schema] }); Object.freeze(this.options.schema);
     this.resolvedPath = join(
       options.workingDirectory,
       '.goodvibes',
@@ -99,9 +104,11 @@ export class HandlerSqliteStore {
    * fresh in memory and the bad file is left exactly where it was rather than
    * being overwritten on the next save.
    */
-  private quarantineUnreadable(): string | null {
+  private quarantineUnreadable(expected: string | undefined): string | null {
+    if (!expected) return null;
     const target = `${this.resolvedPath}.corrupt-${Date.now()}-${randomUUID()}`;
     try {
+      this.assertActiveStorage(); if (fileObservationIdentity(this.resolvedPath) !== expected) return null;
       renameSync(this.resolvedPath, target);
       return target;
     } catch {
@@ -161,6 +168,7 @@ export class HandlerSqliteStore {
   }
 
   async init(): Promise<void> {
+    if (this.closed) throw new Error('HandlerSqliteStore is closed');
     if (this.db) return;
     if (this.initPromise) return this.initPromise;
     this.initPromise = this.initialize();
@@ -172,8 +180,10 @@ export class HandlerSqliteStore {
   }
 
   private async initialize(): Promise<void> {
-    await mkdir(dirname(this.resolvedPath), { recursive: true });
-    const SQL = await loadSqlJsEngine();
+    if (this.closed) throw new Error('HandlerSqliteStore is closed');
+    const storage = capturePrivateSqliteDirectory(this.options.workingDirectory, { create: true, assertCurrent() {} });
+    this.assertStorageCurrent = storage.assertCurrent;
+    const SQL = await loadSqlJsEngine(); this.assertActiveStorage();
     this.databaseFactory = (data) => createSqlJsDatabase(SQL.Database, data);
     this.persistenceBlocked = false;
 
@@ -187,19 +197,18 @@ export class HandlerSqliteStore {
     let existing: Buffer | undefined;
     let quarantined: string | null = null;
     let quarantineReason = '';
-    if (existsSync(this.resolvedPath)) {
-      let raw: Buffer | null = null;
-      try {
-        raw = readFileSync(this.resolvedPath);
-      } catch {
-        raw = null;
-      }
-      if (!raw || raw.length === 0) {
-        quarantineReason = raw ? 'zero-byte file (interrupted write)' : 'unreadable file';
-        quarantined = this.quarantineUnreadable();
+    // Reject aliases/hardlinks and tighten the actual selected descriptor
+    // before reading a private database. Unsafe ownership is never quarantined
+    // or replaced by an apparently fresh store.
+    const original = readPrivateSqliteImage(this.resolvedPath, () => this.assertActiveStorage());
+    if (original !== undefined) {
+      const raw = original.bytes;
+      if (raw.length === 0) {
+        quarantineReason = 'zero-byte file (interrupted write)';
+        quarantined = this.quarantineUnreadable(original?.physical);
       } else if (raw.length < SQLITE_HEADER.length || !raw.subarray(0, SQLITE_HEADER.length).equals(SQLITE_HEADER)) {
         quarantineReason = 'missing the SQLite file header (not a database)';
-        quarantined = this.quarantineUnreadable();
+        quarantined = this.quarantineUnreadable(original?.physical);
       } else {
         existing = raw;
       }
@@ -224,7 +233,7 @@ export class HandlerSqliteStore {
         quarantineReason = `database would not open: ${error instanceof Error ? error.message : String(error)}`;
         candidate?.close();
         candidate = null;
-        quarantined = this.quarantineUnreadable();
+        quarantined = this.quarantineUnreadable(original?.physical);
       }
     }
 
@@ -278,6 +287,46 @@ export class HandlerSqliteStore {
     return rows.length > 0 ? rows[0]! : null;
   }
 
+  private assertActiveStorage(): void {
+    if (this.closed) throw new Error('HandlerSqliteStore is closed'); this.assertStorageCurrent();
+  }
+
+  /** Retain the actual staged descriptor through every asynchronous write.
+   * Creation collisions grant neither publication nor cleanup of another file. */
+  private async stageImage(path: string, bytes: Uint8Array): Promise<PreparedSqliteImage> {
+    this.assertActiveStorage();
+    const handle = await open(path, 'wx', 0o600);
+    let original: BigIntStats | undefined;
+    let handleClosed = false;
+    const owns = (stat: BigIntStats | undefined): boolean => !!original && !!stat && stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1n
+      && stat.dev === original.dev && stat.ino === original.ino && stat.uid === original.uid && stat.gid === original.gid && stat.birthtimeNs === original.birthtimeNs;
+    const cleanup = () => {
+      // Physical cleanup remains allowed after close, but never follows a
+      // replaced directory or removes a foreign file occupying the old name.
+      this.assertStorageCurrent(); const selected = lstatSync(path, { bigint: true, throwIfNoEntry: false });
+      if (owns(selected)) unlinkSync(path);
+    };
+    try {
+      original = fstatSync(handle.fd, { bigint: true });
+      this.assertActiveStorage();
+      if (!owns(lstatSync(path, { bigint: true, throwIfNoEntry: false }))) throw new Error('SQLite staging source changed');
+      await handle.chmod(0o600); this.assertActiveStorage();
+      await handle.writeFile(bytes); this.assertActiveStorage();
+      const prepared = fstatSync(handle.fd, { bigint: true });
+      if (!owns(prepared) || (prepared.mode & 0o777n) !== 0o600n) throw new Error('SQLite staging permissions are unavailable');
+      const assertCurrent = () => {
+        this.assertActiveStorage(); const selected = lstatSync(path, { bigint: true, throwIfNoEntry: false });
+        if (!owns(selected) || !selected || selected.mode !== prepared.mode || selected.size !== prepared.size
+          || selected.mtimeNs !== prepared.mtimeNs || selected.ctimeNs !== prepared.ctimeNs) throw new Error('SQLite staging source changed');
+      };
+      assertCurrent(); await handle.close(); handleClosed = true; assertCurrent();
+      return { assertCurrent, cleanup };
+    } catch (error) {
+      try { if (!handleClosed) await handle.close(); } finally { cleanup(); }
+      throw error;
+    }
+  }
+
   /**
    * Serialize and atomically persist to dbPath (tmp + rename).
    *
@@ -304,13 +353,11 @@ export class HandlerSqliteStore {
     const tmpPath = `${this.resolvedPath}.${process.pid}.${Date.now()}.${HandlerSqliteStore.saveSequence}.tmp`;
     const previous = HandlerSqliteStore.saveTails.get(this.resolvedPath) ?? Promise.resolve();
     const saving = previous.then(async () => {
+      let prepared: PreparedSqliteImage | undefined;
       try {
-        await mkdir(dirname(this.resolvedPath), { recursive: true });
-        await writeFile(tmpPath, data ?? this.requireDb().export());
-        await rename(tmpPath, this.resolvedPath);
-      } finally {
-        await rm(tmpPath, { force: true }).catch(() => {});
-      }
+        prepared = await this.stageImage(tmpPath, data ?? this.requireDb().export());
+        prepared.assertCurrent(); renameSync(tmpPath, this.resolvedPath);
+      } finally { prepared?.cleanup(); }
     });
     const tail = saving.catch(() => {});
     HandlerSqliteStore.saveTails.set(this.resolvedPath, tail);
@@ -344,6 +391,7 @@ export class HandlerSqliteStore {
         HandlerSqliteStore.saveSequence += 1;
         const tmpPath = `${this.resolvedPath}.${process.pid}.${Date.now()}.${HandlerSqliteStore.saveSequence}.tmp`;
         let published = false;
+        let prepared: PreparedSqliteImage | undefined;
         try {
           const transaction: HandlerSqliteTransaction = {
             run: (sql, params) => candidate.run(sql, params),
@@ -360,15 +408,15 @@ export class HandlerSqliteStore {
             }
             candidate.run('COMMIT');
           } catch (error) { candidate.run('ROLLBACK'); throw error; }
-          await mkdir(dirname(this.resolvedPath), { recursive: true });
-          await writeFile(tmpPath, candidate.export());
+          prepared = await this.stageImage(tmpPath, candidate.export());
+          const staged = prepared; staged.assertCurrent();
           // The trusted fence cannot yield. A synchronous rename closes the
           // otherwise unavoidable gap between checking and replacing the file.
           let finished = false, attempted = false, active = true;
           const publish = (publicationCurrent: () => void) => {
             if (!active || attempted) throw new Error('HandlerSqliteStore publication is not current');
             attempted = true;
-            synchronousFence(publicationCurrent); synchronousFence(assertCurrent);
+            synchronousFence(publicationCurrent); synchronousFence(assertCurrent); this.assertActiveStorage(); staged.assertCurrent();
             if (this.db !== live) throw new Error('HandlerSqliteStore transaction lost its database');
             if (this.mutationRevision !== revision) { finished = true; return; }
             renameSync(tmpPath, this.resolvedPath);
@@ -387,7 +435,7 @@ export class HandlerSqliteStore {
           return result;
         } finally {
           if (!published) candidate.close();
-          await rm(tmpPath, { force: true }).catch(() => {});
+          prepared?.cleanup();
         }
       }
     });
@@ -401,6 +449,7 @@ export class HandlerSqliteStore {
   }
 
   close(): void {
+    this.closed = true;
     if (this.db) {
       this.db.close();
       this.db = null;

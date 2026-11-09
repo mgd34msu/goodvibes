@@ -263,7 +263,10 @@ export function confirmFileDurable(filePath: string): void {
  * Write `contents` to `filePath` atomically, creating parent directories as
  * needed. See the module docstring for the mechanics and why they matter.
  */
-export function writeFileAtomic(filePath: string, contents: string, options: AtomicWriteOptions = {}): void {
+export function writeFileAtomic(filePath: string, contents: string | Uint8Array, options: AtomicWriteOptions = {}): void {
+  // Strings are immutable; detach binary input before any borrowed guard runs.
+  // Preserve exact bytes, including NUL and invalid UTF-8, without text coercion.
+  const input = typeof contents === 'string' ? contents : Buffer.from(contents);
   const guard = options.assertCurrent;
   const current = () => {
     const result: unknown = guard?.();
@@ -285,8 +288,8 @@ export function writeFileAtomic(filePath: string, contents: string, options: Ato
     const fd = openSync(tmpPath, 'w', mode);
     try {
       current();
-      const written = writeSync(fd, contents, null, 'utf-8');
-      if (written !== Buffer.byteLength(contents, 'utf-8')) {
+      const written = typeof input === 'string' ? writeSync(fd, input, null, 'utf-8') : writeSync(fd, input, 0, input.byteLength, null);
+      if (written !== (typeof input === 'string' ? Buffer.byteLength(input, 'utf-8') : input.byteLength)) {
         throw new Error('Incomplete atomic file write');
       }
       current();

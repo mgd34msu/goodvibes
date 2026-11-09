@@ -1,6 +1,11 @@
 import { createHash } from 'node:crypto';
+import type { StaticRule, SourceAnchor, StaticSourceInput, StaticSourceReadings, StaticCallEvidence, StaticSourceReceipt, StaticSourceProgress, StaticInputStanding } from './static-source-reading-types.ts';
+export type { StaticRule, SourceAnchor, StaticSourceInput, StaticSourceReadings, StaticCallEvidence, StaticSourceReceipt, StaticSourceProgress, StaticInputStanding } from './static-source-reading-types.ts';
+import { currentStaticSourcePolicyPass, withStaticSourcePolicyPass as runStaticSourcePolicyPass } from './static-source-policy-lifetime.ts';
+import { fileObservationIdentity, readFileObservation } from '../sdk/src/platform/utils/file-observation.ts';
+import { captureExistingDirectory } from '../sdk/src/platform/utils/atomic-json-store.ts';
 import { closeSync, createReadStream, existsSync, fstatSync, fsyncSync, openSync, readFileSync, readSync, renameSync, writeFileSync, writeSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { pipeline } from 'node:stream/promises';
 import { createGunzip, gunzipSync, gzipSync } from 'node:zlib';
@@ -9,52 +14,71 @@ import { DEFERRED_WORK_INSTRUCTIONS, deferredWork, INTERNAL_IDENTIFIER_INSTRUCTI
 import { deferredBatteryPolicyStatements, internalSourceAnchors, markdownSourceContext, structuredSourceContext } from './static-source-anchors.ts';
 import { STATIC_WEAK_ANCHOR_FIT_INSTRUCTIONS, STATIC_WEAK_ANCHOR_INSTRUCTIONS, staticWeakAnchor } from './batteries/static-weak-anchor.ts';
 
-export type StaticRule = 'internal-identifier' | 'deferred-work';
-export interface SourceAnchor {
-  readonly id: string;
-  readonly line: number;
-  readonly col: number;
-  readonly text: string;
-}
-export interface StaticSourceInput {
-  readonly kind: StaticRule;
-  readonly path: string;
-  readonly sourceHash: string;
-  readonly firstLine: number;
-  readonly lastLine: number;
-  readonly source: string;
-  readonly anchors: readonly SourceAnchor[];
-}
-export interface StaticSourceReadings {
-  readonly format: 1;
-  readonly readingPlanVersion?: 1 | 2 | 3;
-  readonly decisionSourceHash: string;
-  readonly readings: Readonly<Record<string, unknown>>;
-  /** Original source manifests prove which policy a retained wire capture used. */
-  readonly captureSources?: Readonly<Record<string, unknown>>;
-  readonly captureBatterySources?: Readonly<Record<string, unknown>>;
-}
-
 export const STATIC_READINGS_PATH = resolve(import.meta.dir, '../etc/static-source-readings.json.gz');
 export const STATIC_SITE = 'engine.gates.static-source';
 export const STATIC_SOURCE_READING_PLAN_VERSION = 3;
 export const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex');
 
-/** Bind extraction, questions, model and reading bands to the actual source. */
+const policyFiles = [
+  'batteries/static-source.ts', 'batteries/static-weak-anchor.ts', 'static-source-readings.ts', 'internal-identifier-rule.ts',
+  'no-todo-marker-rules.ts', 'check-internal-identifiers.ts', 'no-todo-markers.ts', 'read-static-source.ts', 'static-source-anchors.ts',
+  '../../judgment/src/batteries/battery.ts', '../../judgment/src/batteries/asking.ts',
+  '../../judgment/src/patterns/select.ts', '../../judgment/src/readings/readings.ts',
+  '../../judgment/src/readings/bands.ts', '../../judgment/src/port/answers.ts',
+  '../../judgment/src/port/config.ts',
+] as const;
+interface PolicyObservation {
+  readonly manifest: ReadonlyArray<readonly [string, string]>;
+  readonly hash: string;
+  readonly batterySources: ReadonlyMap<string, string>;
+  assertCurrent(): void;
+}
+const policyObservations = new WeakMap<object, PolicyObservation>();
+/** Last callback/await cannot publish a result after changing its policy owner. */
+export function withStaticSourcePolicyPass<T>(operation: () => T): T {
+  if (currentStaticSourcePolicyPass()) return operation();
+  return runStaticSourcePolicyPass(() => {
+    const finish = () => { const owner = currentStaticSourcePolicyPass(); if (owner) policyObservations.get(owner)?.assertCurrent(); };
+    const result = operation();
+    if (result instanceof Promise) return result.then(value => { finish(); return value; }) as T;
+    finish(); return result;
+  });
+}
+/** Original physical files are checked on every reuse; only the battery body
+ * needed by existing historical-policy readers survives the initial hash pass. */
+function currentPolicyObservation(): PolicyObservation {
+  const owner = currentStaticSourcePolicyPass(), previous = owner && policyObservations.get(owner);
+  if (owner && previous) {
+    try { previous.assertCurrent(); return previous; }
+    catch { policyObservations.delete(owner); }
+  }
+  const parents = new Map<string, ReturnType<typeof captureExistingDirectory>>();
+  const leaves: Array<{ path: string; physical: string }> = [], batterySources = new Map<string, string>();
+  const manifest = Object.freeze(policyFiles.map(file => {
+    const selected = resolve(import.meta.dir, file), directory = dirname(selected);
+    let parent = parents.get(directory);
+    if (!parent) { parent = captureExistingDirectory(directory); parents.set(directory, parent); }
+    parent.assertCurrent();
+    const path = join(parent.canonical, basename(selected)), observed = readFileObservation(path);
+    const text = observed.bytes.toString('utf8');
+    leaves.push({ path, physical: observed.physical });
+    if (file === 'batteries/static-source.ts') batterySources.set(file, text);
+    return Object.freeze([file, sha256(text)] as const);
+  }));
+  const current = { manifest, hash: sha256(JSON.stringify(manifest)), batterySources, assertCurrent() {
+    for (const parent of parents.values()) parent.assertCurrent();
+    for (const leaf of leaves) if (fileObservationIdentity(leaf.path) !== leaf.physical) throw new Error('Static policy source changed');
+    for (const parent of parents.values()) parent.assertCurrent();
+  } };
+  current.assertCurrent();
+  if (owner) policyObservations.set(owner, current);
+  return current;
+}
+/** Preserve the portable saved manifest recipe; local currentness never hashes. */
 export function staticDecisionSourceManifest(): ReadonlyArray<readonly [string, string]> {
-  const files = [
-    'batteries/static-source.ts', 'batteries/static-weak-anchor.ts', 'static-source-readings.ts', 'internal-identifier-rule.ts',
-    'no-todo-marker-rules.ts', 'check-internal-identifiers.ts', 'no-todo-markers.ts', 'read-static-source.ts', 'static-source-anchors.ts',
-    '../../judgment/src/batteries/battery.ts', '../../judgment/src/batteries/asking.ts',
-    '../../judgment/src/patterns/select.ts', '../../judgment/src/readings/readings.ts',
-    '../../judgment/src/readings/bands.ts', '../../judgment/src/port/answers.ts',
-    '../../judgment/src/port/config.ts',
-  ];
-  return files.map(path => [path, sha256(readFileSync(resolve(import.meta.dir, path), 'utf8'))] as const);
+  return currentPolicyObservation().manifest;
 }
-export function staticDecisionSourceHash(): string {
-  return sha256(JSON.stringify(staticDecisionSourceManifest()));
-}
+export function staticDecisionSourceHash(): string { return currentPolicyObservation().hash; }
 
 /** Structural windows retain every offered line or AST anchor and context on both sides. */
 export function captureStaticInputs(kind: StaticRule, path: string, text: string, offered?: readonly SourceAnchor[]): StaticSourceInput[] {
@@ -478,36 +502,6 @@ function legacySelectionQuestions(input: StaticSourceInput, weakSelection = fals
   return { pick: choice(weakSelection ? STATIC_WEAK_ANCHOR_INSTRUCTIONS : STATIC_ANCHOR_INSTRUCTIONS, options), ...Object.fromEntries(input.anchors.map((anchor, index) => [`fits_${index}`, noul({ question: weakSelection ? STATIC_WEAK_ANCHOR_FIT_INSTRUCTIONS : STATIC_ANCHOR_FIT_INSTRUCTIONS, candidate: `\`candidates[${index}]\` (id ${JSON.stringify(anchor.id)})` })])) };
 }
 
-export interface StaticCallEvidence {
-  readonly id: string;
-  readonly at: string;
-  readonly battery: string;
-  readonly version: number;
-  readonly site: string;
-  readonly stateHash: string;
-  readonly questionsHash: string;
-  readonly requestedModel: string;
-  readonly observedModel: string;
-  readonly requestId: string | null;
-  readonly answers: unknown;
-  /** Legacy evidence inherits its containing receipt's original capture hash. */
-  readonly captureDecisionSourceHash?: string;
-}
-export interface StaticSourceReceipt {
-  readonly readingPlanVersion?: 1 | 2 | 3;
-  readonly inputHash: string;
-  readonly sourceHash: string;
-  readonly decisionSourceHash: string;
-  readonly presence: StaticCallEvidence;
-  readonly selection: StaticCallEvidence | null;
-  readonly parts: readonly StaticSourceReceipt[];
-  /** Revalidation does not change the original capture hash or wire evidence. */
-  readonly validatedDecisionSourceHash?: string;
-  /** Current composition applied to unchanged original plan-2 question answers. */
-  readonly validatedReadingPlanVersion?: 3;
-  readonly previousCaptures?: readonly unknown[];
-}
-
 function evidence(log: DecisionLog, id: string | undefined, captureDecisionSourceHash: string): StaticCallEvidence {
   const entry = id === undefined ? undefined : log.get(id);
   if (entry?.status !== 'answered' || !entry.context.battery || entry.context.batteryVersion === undefined || !entry.context.site) throw new Error('A genuine answered decision-log entry is required');
@@ -516,73 +510,64 @@ function evidence(log: DecisionLog, id: string | undefined, captureDecisionSourc
     observedModel: entry.model, requestId: entry.requestId ?? null, answers: entry.answers, captureDecisionSourceHash };
 }
 
-export interface StaticSourceProgress {
-  readonly previous: StaticSourceReadings;
-  readonly original?: StaticSourceReadings;
-  readonly decisionSourceHash?: string;
-  readonly onReceipt: (input: StaticSourceInput, receipt: StaticSourceReceipt) => void;
-}
-
 /** Revise an unsettled union through exact subsets, retaining the complete original context. */
 export async function readStaticInput(port: JudgmentPort, log: DecisionLog, input: StaticSourceInput, signal?: AbortSignal, progress?: StaticSourceProgress): Promise<StaticSourceReceipt> {
-  const sourceHash = progress?.decisionSourceHash ?? staticDecisionSourceHash();
-  const read = async (current: StaticSourceInput, inherited?: unknown): Promise<StaticSourceReceipt> => {
-    signal?.throwIfAborted();
-    if (staticDecisionSourceHash() !== sourceHash) throw new Error('Static decision source changed during reading');
-    const prior = progress ? revalidateStaticInput(current, progress.previous)
-      ?? revalidateReceipt(current, inherited, progress.previous) : null;
-    const original = ownValue(progress?.original?.readings, staticInputKey(current)) ?? ownValue(progress?.previous.readings, staticInputKey(current)) ?? inherited;
-    const options = { site: `${STATIC_SITE}.${current.kind}`, ...(signal ? { signal } : {}) };
-    let presence = prior && object(prior) ? receiptEvidence(current, prior, false, sourceHash, progress?.previous.captureSources ?? {}, progress?.previous.captureBatterySources ?? {}) : null;
-    const reusedPresence = presence !== null;
-    let previousCaptures: readonly unknown[] | undefined = object(prior) && Array.isArray(prior.previousCaptures) ? prior.previousCaptures : undefined;
-    if (object(original) && original.readingPlanVersion === 2) previousCaptures = [original];
-    if (!presence) {
-      const run = await batteryFor(current.kind).run(port, staticInputState(current), options);
-      run.recordAction(`prepared static source observation:${run.readings.violation.verdict}`);
-      presence = evidence(log, run.result.decisionId, sourceHash);
-      if (original !== undefined) previousCaptures = [original];
-    }
-    const answer = object(presence.answers) ? presence.answers.violation : undefined;
-    if (!object(answer) || answer.type !== 'noul' || !probability(answer.noul)) throw new Error('Invalid captured static presence');
-    const reading = readYesNo({ type: 'noul', noul: answer.noul }, STAKES_BANDS.high.yesNo);
-    let selection = prior && object(prior) ? receiptEvidence(current, prior, true, sourceHash, progress?.previous.captureSources ?? {}, progress?.previous.captureBatterySources ?? {}) : null;
-    const parts: StaticSourceReceipt[] = [];
-    const receipt = (): StaticSourceReceipt => ({
-      ...(object(prior) ? prior : {}), inputHash: staticInputKey(current), sourceHash: current.sourceHash,
-      decisionSourceHash: object(prior) && typeof prior.decisionSourceHash === 'string' ? prior.decisionSourceHash : sourceHash,
-      readingPlanVersion: STATIC_SOURCE_READING_PLAN_VERSION, presence, selection, parts: [...parts],
-      ...(previousCaptures ? { previousCaptures } : {}),
-    });
-    if (!reusedPresence) progress?.onReceipt(current, receipt());
-    if ((reading.verdict === 'yes' && reading.outcome === 'act') || (reading.outcome !== 'act' && current.anchors.length === 1)) {
-      if (!selection) {
-        if (object(prior) && prior.selection !== null && prior.selection !== undefined) previousCaptures = [original ?? prior];
-        const selector = reading.outcome === 'act' ? staticOffendingAnchor : staticWeakAnchor;
-        const selected = await selector.select(port, staticSelectionContext(current), staticSelectionCandidates(current), options);
-        selected.recordAction('prepared exact offending source anchor; offline gate preserves held outcomes');
-        selection = evidence(log, selected.decisionId, sourceHash);
-        progress?.onReceipt(current, receipt());
+  return withStaticSourcePolicyPass(async () => {
+    const sourceHash = progress?.decisionSourceHash ?? staticDecisionSourceHash();
+    const read = async (current: StaticSourceInput, inherited?: unknown): Promise<StaticSourceReceipt> => {
+      signal?.throwIfAborted();
+      if (staticDecisionSourceHash() !== sourceHash) throw new Error('Static decision source changed during reading');
+      const prior = progress ? revalidateStaticInput(current, progress.previous)
+        ?? revalidateReceipt(current, inherited, progress.previous) : null;
+      const original = ownValue(progress?.original?.readings, staticInputKey(current)) ?? ownValue(progress?.previous.readings, staticInputKey(current)) ?? inherited;
+      const options = { site: `${STATIC_SITE}.${current.kind}`, ...(signal ? { signal } : {}) };
+      let presence = prior && object(prior) ? receiptEvidence(current, prior, false, sourceHash, progress?.previous.captureSources ?? {}, progress?.previous.captureBatterySources ?? {}) : null;
+      const reusedPresence = presence !== null;
+      let previousCaptures: readonly unknown[] | undefined = object(prior) && Array.isArray(prior.previousCaptures) ? prior.previousCaptures : undefined;
+      if (object(original) && original.readingPlanVersion === 2) previousCaptures = [original];
+      if (!presence) {
+        const run = await batteryFor(current.kind).run(port, staticInputState(current), options);
+        run.recordAction(`prepared static source observation:${run.readings.violation.verdict}`);
+        presence = evidence(log, run.result.decisionId, sourceHash);
+        if (original !== undefined) previousCaptures = [original];
       }
-    } else if (reading.outcome !== 'act' && current.anchors.length > 1) {
-      const middle = Math.ceil(current.anchors.length / 2);
-      for (const [index, anchors] of [current.anchors.slice(0, middle), current.anchors.slice(middle)].entries()) {
-        const inheritedPart = object(original) && Array.isArray(original.parts) ? original.parts[index] : undefined;
-        parts.push(await read({ ...current, anchors }, inheritedPart));
+      const answer = object(presence.answers) ? presence.answers.violation : undefined;
+      if (!object(answer) || answer.type !== 'noul' || !probability(answer.noul)) throw new Error('Invalid captured static presence');
+      const reading = readYesNo({ type: 'noul', noul: answer.noul }, STAKES_BANDS.high.yesNo);
+      let selection = prior && object(prior) ? receiptEvidence(current, prior, true, sourceHash, progress?.previous.captureSources ?? {}, progress?.previous.captureBatterySources ?? {}) : null;
+      const parts: StaticSourceReceipt[] = [];
+      const receipt = (): StaticSourceReceipt => ({
+        ...(object(prior) ? prior : {}), inputHash: staticInputKey(current), sourceHash: current.sourceHash,
+        decisionSourceHash: object(prior) && typeof prior.decisionSourceHash === 'string' ? prior.decisionSourceHash : sourceHash,
+        readingPlanVersion: STATIC_SOURCE_READING_PLAN_VERSION, presence, selection, parts: [...parts],
+        ...(previousCaptures ? { previousCaptures } : {}),
+      });
+      if (!reusedPresence) progress?.onReceipt(current, receipt());
+      if ((reading.verdict === 'yes' && reading.outcome === 'act') || (reading.outcome !== 'act' && current.anchors.length === 1)) {
+        if (!selection) {
+          if (object(prior) && prior.selection !== null && prior.selection !== undefined) previousCaptures = [original ?? prior];
+          const selector = reading.outcome === 'act' ? staticOffendingAnchor : staticWeakAnchor;
+          const selected = await selector.select(port, staticSelectionContext(current), staticSelectionCandidates(current), options);
+          selected.recordAction('prepared exact offending source anchor; offline gate preserves held outcomes');
+          selection = evidence(log, selected.decisionId, sourceHash);
+          progress?.onReceipt(current, receipt());
+        }
+      } else if (reading.outcome !== 'act' && current.anchors.length > 1) {
+        const middle = Math.ceil(current.anchors.length / 2);
+        for (const [index, anchors] of [current.anchors.slice(0, middle), current.anchors.slice(middle)].entries()) {
+          const inheritedPart = object(original) && Array.isArray(original.parts) ? original.parts[index] : undefined;
+          parts.push(await read({ ...current, anchors }, inheritedPart));
+        }
       }
-    }
-    const result = receipt();
-    progress?.onReceipt(current, result);
-    signal?.throwIfAborted();
-    if (staticDecisionSourceHash() !== sourceHash) throw new Error('Static decision source changed during reading');
-    return result;
-  };
-  return read(input);
+      const result = receipt();
+      progress?.onReceipt(current, result);
+      signal?.throwIfAborted();
+      if (staticDecisionSourceHash() !== sourceHash) throw new Error('Static decision source changed during reading');
+      return result;
+    };
+    return read(input);
+  });
 }
-
-export type StaticInputStanding = { readonly kind: 'clear' }
-  | { readonly kind: 'violation'; readonly anchor: SourceAnchor }
-  | { readonly kind: 'held'; readonly reason: string };
 
 /** Capture completeness and gate admission share the full canonical answer boundary. */
 function selectionAnswer(value: unknown, input: StaticSourceInput) {
@@ -638,11 +623,14 @@ function currentEvidence(value: unknown, input: StaticSourceInput, selection: bo
 
 /** Recompute outcomes from unrounded raw answers; stale or malformed evidence cannot pass. */
 export function staticInputStanding(input: StaticSourceInput, readings: StaticSourceReadings | null): StaticInputStanding {
-  const held = (reason: string): StaticInputStanding => ({ kind: 'held', reason });
-  const sourceHash = staticDecisionSourceHash();
-  if (!readings || readings.decisionSourceHash !== sourceHash) return held('missing or stale decision source');
-  const receipt = ownValue(readings.readings, staticInputKey(input));
-  return receiptStanding(input, receipt, sourceHash, readings.captureSources ?? {}, readings.captureBatterySources ?? {});
+  return withStaticSourcePolicyPass<StaticInputStanding>(() => {
+    const held = (reason: string): StaticInputStanding => ({ kind: 'held', reason });
+    if (!readings) return held('missing or stale decision source');
+    const sourceHash = staticDecisionSourceHash();
+    if (readings.decisionSourceHash !== sourceHash) return held('missing or stale decision source');
+    const receipt = ownValue(readings.readings, staticInputKey(input));
+    return receiptStanding(input, receipt, sourceHash, readings.captureSources ?? {}, readings.captureBatterySources ?? {});
+  });
 }
 
 /** A changed extractor may reuse the same exact request only under the same canonical reading policy. */
@@ -651,7 +639,7 @@ function capturePolicyMatches(captureHash: unknown, kind: StaticRule, manifests:
   const manifest = ownValue(manifests, captureHash);
   if (!Array.isArray(manifest) || manifest.some(entry => !Array.isArray(entry) || entry.length !== 2
     || typeof entry[0] !== 'string' || typeof entry[1] !== 'string') || sha256(JSON.stringify(manifest)) !== captureHash) return false;
-  const current = staticDecisionSourceManifest();
+  const currentPolicy = currentPolicyObservation(), current = currentPolicy.manifest;
   const captured = new Map<string, string>();
   for (const entry of manifest) {
     if (captured.has(entry[0])) return false;
@@ -660,8 +648,8 @@ function capturePolicyMatches(captureHash: unknown, kind: StaticRule, manifests:
   // Questions, model and battery version are independently matched to the exact wire request.
   // Canonical decoding, distribution admission and threshold configuration must be unchanged.
   if (!current.every(([path, hash]) => !path.startsWith('../../judgment/') || captured.get(path) === hash)) return false;
-  const currentBatterySource = readFileSync(resolve(import.meta.dir, 'batteries/static-source.ts'), 'utf8');
-  if (captured.get('batteries/static-source.ts') === sha256(currentBatterySource)) return true;
+  const currentBatterySource = currentPolicy.batterySources.get('batteries/static-source.ts')!;
+  if (captured.get('batteries/static-source.ts') === currentPolicy.manifest.find(([path]) => path === 'batteries/static-source.ts')?.[1]) return true;
   if (kind !== 'deferred-work') return false;
   const capturedBatterySource = ownValue(batterySources, captureHash);
   if (typeof capturedBatterySource !== 'string' || sha256(capturedBatterySource) !== captured.get('batteries/static-source.ts')) return false;
@@ -672,7 +660,9 @@ function capturePolicyMatches(captureHash: unknown, kind: StaticRule, manifests:
 
 /** Produce explicit revalidation provenance, retaining original captures and any held observations. */
 export function revalidateStaticInput(input: StaticSourceInput, readings: StaticSourceReadings | null): unknown | null {
-  return revalidateReceipt(input, ownValue(readings?.readings, staticInputKey(input)), readings);
+  return withStaticSourcePolicyPass(() => {
+    return revalidateReceipt(input, ownValue(readings?.readings, staticInputKey(input)), readings);
+  });
 }
 
 function revalidateReceipt(input: StaticSourceInput, receipt: unknown, readings: StaticSourceReadings | null): unknown | null {
@@ -722,7 +712,7 @@ function receiptEvidence(input: StaticSourceInput, receipt: Record<string, unkno
     if (!captureHash) return null;
     if (captureHash !== sourceHash) {
       const manifest = ownValue(manifests, captureHash);
-      const batteryHash = sha256(readFileSync(resolve(import.meta.dir, 'batteries/static-weak-anchor.ts'), 'utf8'));
+      const batteryHash = currentPolicyObservation().manifest.find(([path]) => path === 'batteries/static-weak-anchor.ts')?.[1];
       if (!Array.isArray(manifest) || !manifest.some(entry => Array.isArray(entry)
         && entry[0] === 'batteries/static-weak-anchor.ts' && entry[1] === batteryHash)) return null;
     }
@@ -732,24 +722,26 @@ function receiptEvidence(input: StaticSourceInput, receipt: Record<string, unkno
 
 /** Complete capture means every planned call exists, including genuinely held answers. */
 export function staticInputCaptureComplete(input: StaticSourceInput, readings: StaticSourceReadings): boolean {
-  const receipt = revalidateStaticInput(input, readings);
-  const sourceHash = staticDecisionSourceHash();
-  const complete = (current: StaticSourceInput, value: unknown): boolean => {
-    if (!object(value) || value.inputHash !== staticInputKey(current) || value.sourceHash !== current.sourceHash) return false;
-    const presence = receiptEvidence(current, value, false, sourceHash, readings.captureSources ?? {}, readings.captureBatterySources ?? {});
-    const answer = object(presence?.answers) ? presence.answers.violation : undefined;
-    if (!object(answer) || answer.type !== 'noul' || !probability(answer.noul)) return false;
-    const reading = readYesNo({ type: 'noul', noul: answer.noul }, STAKES_BANDS.high.yesNo);
-    if (reading.outcome === 'act') return reading.verdict === 'no'
-      || receiptEvidence(current, value, true, sourceHash, readings.captureSources ?? {}, readings.captureBatterySources ?? {}) !== null;
-    if (current.anchors.length < 2) return receiptEvidence(current, value, true, sourceHash, readings.captureSources ?? {}, readings.captureBatterySources ?? {}) !== null;
-    if (!Array.isArray(value.parts) || value.parts.length !== 2) return false;
-    const parts = value.parts;
-    const middle = Math.ceil(current.anchors.length / 2);
-    return [current.anchors.slice(0, middle), current.anchors.slice(middle)]
-      .every((anchors, index) => complete({ ...current, anchors }, parts[index]));
-  };
-  return complete(input, receipt);
+  return withStaticSourcePolicyPass(() => {
+    const receipt = revalidateStaticInput(input, readings);
+    const sourceHash = staticDecisionSourceHash();
+    const complete = (current: StaticSourceInput, value: unknown): boolean => {
+      if (!object(value) || value.inputHash !== staticInputKey(current) || value.sourceHash !== current.sourceHash) return false;
+      const presence = receiptEvidence(current, value, false, sourceHash, readings.captureSources ?? {}, readings.captureBatterySources ?? {});
+      const answer = object(presence?.answers) ? presence.answers.violation : undefined;
+      if (!object(answer) || answer.type !== 'noul' || !probability(answer.noul)) return false;
+      const reading = readYesNo({ type: 'noul', noul: answer.noul }, STAKES_BANDS.high.yesNo);
+      if (reading.outcome === 'act') return reading.verdict === 'no'
+        || receiptEvidence(current, value, true, sourceHash, readings.captureSources ?? {}, readings.captureBatterySources ?? {}) !== null;
+      if (current.anchors.length < 2) return receiptEvidence(current, value, true, sourceHash, readings.captureSources ?? {}, readings.captureBatterySources ?? {}) !== null;
+      if (!Array.isArray(value.parts) || value.parts.length !== 2) return false;
+      const parts = value.parts;
+      const middle = Math.ceil(current.anchors.length / 2);
+      return [current.anchors.slice(0, middle), current.anchors.slice(middle)]
+        .every((anchors, index) => complete({ ...current, anchors }, parts[index]));
+    };
+    return complete(input, receipt);
+  });
 }
 
 function receiptStanding(input: StaticSourceInput, receipt: unknown, sourceHash: string, manifests: Readonly<Record<string, unknown>>, batterySources: Readonly<Record<string, unknown>>): StaticInputStanding {

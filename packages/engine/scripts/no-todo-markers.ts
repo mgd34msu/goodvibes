@@ -21,7 +21,7 @@ import type { Dirent } from 'node:fs';
 import { resolve, relative, extname, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sourceMarkerFindings } from './no-todo-marker-rules.ts';
-import { loadStaticSourceReadings } from './static-source-readings.ts';
+import { loadStaticSourceReadings, withStaticSourcePolicyPass } from './static-source-readings.ts';
 import { scanTargetsFromEnvironment } from './check-internal-identifiers.ts';
 import type { InternalIdentifierCandidate } from './internal-identifier-rule.ts';
 
@@ -102,7 +102,7 @@ export function collectDeferredSourceCandidates(root = TODO_ROOT, targets?: read
   });
 }
 
-if (import.meta.main) {
+if (import.meta.main) withStaticSourcePolicyPass(() => {
   const readings = loadStaticSourceReadings(process.env.STATIC_SOURCE_READINGS_PATH);
   const findings: Finding[] = [];
   const candidates = collectDeferredSourceCandidates(TODO_ROOT, scanTargetsFromEnvironment(process.env.TODO_DIRS_JSON));
@@ -122,4 +122,4 @@ if (import.meta.main) {
   }
   if (violations.length > 0) process.exit(1);
   console.log(`todo-check: OK, no confirmed unfinished-work findings; ${advisories.length} inconclusive advisories.`);
-}
+});

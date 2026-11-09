@@ -1,5 +1,5 @@
 import ts from 'typescript';
-import { captureStaticInputs, staticInputStanding, type SourceAnchor, type StaticSourceReadings } from './static-source-readings.ts';
+import { captureStaticInputs, staticInputStanding, withStaticSourcePolicyPass, type SourceAnchor, type StaticSourceReadings } from './static-source-readings.ts';
 
 export interface SourceMarkerFinding {
   readonly line: number;
@@ -144,11 +144,13 @@ export function sourceMarkerAnchors(path: string, text: string): SourceAnchor[] 
 }
 
 export function sourceMarkerFindings(path: string, text: string, readings: StaticSourceReadings | null = null): SourceMarkerFinding[] {
-  const inputs = captureStaticInputs('deferred-work', path, text, sourceMarkerAnchors(path, text));
-  return inputs.flatMap(input => {
-    const standing = staticInputStanding(input, readings);
-    if (standing.kind === 'clear') return [];
-    if (standing.kind === 'held') return [{ line: input.firstLine, col: 1, marker: 'evidence-held', text: `${standing.reason}; run static-source:read` }];
-    return [{ line: standing.anchor.line, col: standing.anchor.col, marker: 'deferred-work', text: standing.anchor.text }];
+  return withStaticSourcePolicyPass<SourceMarkerFinding[]>(() => {
+    const inputs = captureStaticInputs('deferred-work', path, text, sourceMarkerAnchors(path, text));
+    return inputs.flatMap(input => {
+      const standing = staticInputStanding(input, readings);
+      if (standing.kind === 'clear') return [];
+      if (standing.kind === 'held') return [{ line: input.firstLine, col: 1, marker: 'evidence-held', text: `${standing.reason}; run static-source:read` }];
+      return [{ line: standing.anchor.line, col: standing.anchor.col, marker: 'deferred-work', text: standing.anchor.text }];
+    });
   });
 }

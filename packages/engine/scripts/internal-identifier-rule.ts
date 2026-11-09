@@ -1,4 +1,4 @@
-import { captureStaticInputs, staticInputStanding, type StaticSourceReadings } from './static-source-readings.ts';
+import { captureStaticInputs, staticInputStanding, withStaticSourcePolicyPass, type StaticSourceReadings } from './static-source-readings.ts';
 
 export interface InternalIdentifierCandidate {
   readonly relPath: string;
@@ -42,18 +42,20 @@ export function checkNoInternalIdentifiers(
   candidates: readonly InternalIdentifierCandidate[], readings: StaticSourceReadings | null = null,
   onHeld?: (finding: string) => void,
 ): string[] {
-  const violations: string[] = [];
-  for (const { relPath, text } of candidates) {
-    if (isInternalIdentifierExempt(relPath)) continue;
-    for (const input of captureStaticInputs('internal-identifier', relPath, text)) {
-      const standing = staticInputStanding(input, readings);
-      if (standing.kind === 'clear') continue;
-      if (standing.kind === 'held') {
-        onHeld?.(`${relPath}:${input.firstLine}: internal-identifier evidence held (${standing.reason}); review source or run static-source:read [internal-identifier]`);
-      } else {
-        violations.push(`${relPath}:${standing.anchor.line}: internal planning identifier; ${OWNER_DOCTRINE} [internal-identifier]`);
+  return withStaticSourcePolicyPass(() => {
+    const violations: string[] = [];
+    for (const { relPath, text } of candidates) {
+      if (isInternalIdentifierExempt(relPath)) continue;
+      for (const input of captureStaticInputs('internal-identifier', relPath, text)) {
+        const standing = staticInputStanding(input, readings);
+        if (standing.kind === 'clear') continue;
+        if (standing.kind === 'held') {
+          onHeld?.(`${relPath}:${input.firstLine}: internal-identifier evidence held (${standing.reason}); review source or run static-source:read [internal-identifier]`);
+        } else {
+          violations.push(`${relPath}:${standing.anchor.line}: internal planning identifier; ${OWNER_DOCTRINE} [internal-identifier]`);
+        }
       }
     }
-  }
-  return violations;
+    return violations;
+  });
 }

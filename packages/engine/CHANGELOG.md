@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Read and hash the static-check policy once per actual preparation or checker
+  pass. Recheck the original files before reuse and after callbacks or waits;
+  missing saved evidence skips policy hashing. Saved report comparisons retain
+  their existing format.
+
 - Exercise Home Graph publication interruptions at the actual artifact lease
   boundary, and finish async fixture disposal before deleting its directories.
 

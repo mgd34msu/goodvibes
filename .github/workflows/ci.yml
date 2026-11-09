@@ -38,7 +38,7 @@ jobs:
       - name: Validate workspace
         run: bun run validate
       - name: Test release asset consistency
-        run: python3 -m unittest discover -s .github/scripts -p 'test_release_asset_pins.py'
+        run: python3 -m unittest discover -s .github/scripts -p 'test_release_asset_*.py'
       - name: Record TUI native artifact provenance
         if: hashFiles('products/tui/package.json') != ''
         env:

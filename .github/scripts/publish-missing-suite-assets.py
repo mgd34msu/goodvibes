@@ -1,4 +1,5 @@
 """Complete an existing release, retaining every previously published payload."""
+from contextlib import ExitStack
 import hashlib
 import json
 import os
@@ -8,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 from release_asset_pins import needs_metadata, validate_reader_assets, resume_existing_assets
+from release_asset_sources import RetainedReleaseAsset
 
 directory, tag = Path(sys.argv[1]), sys.argv[2]
 repo = os.environ.get('GITHUB_REPOSITORY', 'mgd34msu/goodvibes')
@@ -24,7 +26,7 @@ release = json.loads(subprocess.check_output(['gh', 'api', f'repos/{repo}/releas
 assert not release['draft'] and release['tag_name'] == tag
 assets = {a['name']: a for a in release['assets']}
 assert len(assets) == len(release['assets'])
-with tempfile.TemporaryDirectory(prefix='goodvibes-release-completion-') as temporary:
+with tempfile.TemporaryDirectory(prefix='goodvibes-release-completion-') as temporary, ExitStack() as ownership:
     temporary = Path(temporary)
     checks = {}
     if checksum_name in assets:
@@ -34,11 +36,16 @@ with tempfile.TemporaryDirectory(prefix='goodvibes-release-completion-') as temp
             assert match and match[2] not in checks and match[2] != checksum_name
             checks[match[2]] = match[1]
     assert set(checks) <= set(assets), 'A previously checksummed immutable asset is missing'
-    incoming = {}
+    incoming, retained = {}, {}
     for path in sorted(directory.iterdir()):
         assert path.is_file() and not path.is_symlink() and path.name != checksum_name and re.fullmatch(r'[A-Za-z0-9_.-]+', path.name)
-        with path.open('rb') as stream:
-            incoming[path.name] = {'sha256': hashlib.file_digest(stream, 'sha256').hexdigest(), 'size': path.stat().st_size}
+        # Existing checksummed payloads are immutable and win outright. Their
+        # unused rebuilt candidates need neither a local pin nor an open FD.
+        if path.name in checks:
+            continue
+        original = ownership.enter_context(RetainedReleaseAsset(path))
+        retained[path.name] = original
+        incoming[path.name] = original.pin
     # Resume only actual candidate bytes left unlisted by a partial prior
     # upload. Arbitrary unchecksummed remote assets cannot join this source.
     resumed = resume_existing_assets(assets, checks, incoming, checksum_name)
@@ -55,26 +62,26 @@ with tempfile.TemporaryDirectory(prefix='goodvibes-release-completion-') as temp
         if name in assets:
             subprocess.run(['gh', 'release', 'download', tag, '--repo', repo, '--pattern', name, '--dir', str(metadata_dir)], check=True)
             path = metadata_dir / name
+            assert path.stat().st_size <= 128 * 1024, f'Oversized release metadata: {name}'
+            raw = path.read_bytes()
+            # These bytes arrived from GitHub and require their actual published
+            # integrity pin. Local candidates were already pinned exactly once.
+            assert hashlib.sha256(raw).hexdigest() == selected_pins[name]['sha256'], f'Published metadata pin mismatch: {name}'
         else:
-            path = directory / name
-        assert path.stat().st_size <= 128 * 1024, f'Oversized release metadata: {name}'
-        raw = path.read_bytes()
-        assert hashlib.sha256(raw).hexdigest() == selected_pins[name]['sha256'], f'Metadata changed before publication: {name}'
+            raw = retained[name].read_metadata()
         selected_metadata[name] = raw
     # Refuse rebuilt metadata for different already-published binaries before
     # the first upload; filling a release must preserve a coherent source tuple.
     validate_reader_assets(selected_pins, selected_metadata, tag, source)
     added = []
-    for path in sorted(directory.iterdir()):
-        assert path.is_file() and not path.is_symlink()
-        if path.name in assets:
+    for name, original in sorted(retained.items()):
+        if name in assets:
             continue
-        with path.open('rb') as stream:
-            digest = hashlib.file_digest(stream, 'sha256').hexdigest()
-        assert digest == incoming[path.name]['sha256'] and path.stat().st_size == incoming[path.name]['size'], f'Candidate changed before upload: {path.name}'
-        subprocess.run(['gh', 'release', 'upload', tag, '--repo', repo, str(path)], check=True)
-        checks[path.name] = digest
-        added.append(path.name)
+        original.assert_current()
+        subprocess.run(['gh', 'release', 'upload', tag, '--repo', repo, str(original.path)], check=True)
+        original.assert_current()
+        checks[name] = original.digest
+        added.append(name)
     # Publication jobs share a tag-scoped concurrency group. Re-read actual
     # immutable asset digests before the final checksum replacement as well.
     final_release = json.loads(subprocess.check_output(['gh', 'api', f'repos/{repo}/releases/tags/{tag}'], text=True))

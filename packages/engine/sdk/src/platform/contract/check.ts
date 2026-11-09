@@ -315,7 +315,7 @@ export async function runUnitCheck(input: UnitCheckInput): Promise<UnitCheckOutc
     problems: kinds,
     qualityProblems,
     decisionIds,
-    evidenceDigest: hashState(judgeState(unit, evidence)),
+    ...(chosen.result === 'pass' ? {} : { evidenceDigest: hashState(judgeState(unit, evidence)) }),
   };
 
   let result = chosen.result;

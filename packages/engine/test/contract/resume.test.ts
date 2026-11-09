@@ -1420,7 +1420,7 @@ describe('a later group and the whole plan', () => {
           id: done.units[0]!.checks.at(-1)!.id,
           result: 'pass',
           decisionIds: done.units[0]!.checks.at(-1)!.decisionIds,
-          evidenceDigest: done.units[0]!.checks.at(-1)!.evidenceDigest,
+          ...(done.units[0]!.checks.at(-1)!.evidenceDigest === undefined ? {} : { evidenceDigest: done.units[0]!.checks.at(-1)!.evidenceDigest }),
         },
         acceptedAnswerSource: { storage: 'native-contract-store', contractId: done.id, unitId: 'u1', field: 'answer' },
       },

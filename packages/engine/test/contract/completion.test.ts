@@ -5,11 +5,12 @@
  * commit failure as a warning, the note outside git, and the answer on the
  * owner record with the status line on the operator audience only.
  */
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { hashState, JudgmentError, SqliteDecisionLog } from '@goodvibes-jev/judgment';
+import * as completionBinding from '../../sdk/src/platform/contract/completion-evidence-binding.js';
 import { CONTRACT_PASSED_WITHOUT_OUTPUT, describeCommitOutcome, describeContractOutcome, renderContractAnswer } from '../../sdk/src/platform/contract/index.js';
 import { makeHarness, oneUnitPlan, startContract, twoUnitPlan, waitFor, type AgentScript, type Harness } from './runner-support.js';
 import { contractOf, finishes, git, judgeOf, terminal } from './steps-support.js';
@@ -853,4 +854,20 @@ describe('answer and status (6.5)', () => {
       commit: { status: 'skipped', note: 'commit skipped: not a git repository' },
     })).toBe('Contract ctr-00000000 passed (1 of 1 criterion met, 0 corrections, 1 excluded: requires an agent arrangement); commit skipped: not a git repository');
   });
+});
+
+
+test('actual first-pass group and deliverable success omits unused refusal commitments', async () => {
+  const hash = spyOn(completionBinding, 'completionEvidenceCommitment');
+  const h = use(makeHarness({ plan: oneUnitPlan(1), scripts: { u1: finishes('The retained parser result.') } }));
+  try {
+    const id = await run(h), result = contractOf(h, id);
+    expect(result.status).toBe('passed');
+    for (const check of [...result.checks, ...result.groups.flatMap(group => group.checks)]) {
+      expect(check.result).toBe('pass'); expect(check).not.toHaveProperty('evidenceDigest');
+    }
+    // The final content-review commitment has a real saved receipt and remains.
+    expect(hash.mock.calls.some(([evaluation]) => evaluation !== null && typeof evaluation === 'object' && 'state' in evaluation)).toBe(true);
+    expect(hash.mock.calls.filter(([evaluation]) => evaluation !== null && typeof evaluation === 'object' && 'criteria' in evaluation)).toHaveLength(0);
+  } finally { hash.mockRestore(); }
 });

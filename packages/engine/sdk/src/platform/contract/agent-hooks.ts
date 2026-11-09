@@ -274,7 +274,7 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
       const prior = unit.checks.at(-1);
       if (run.contract.nativeSource !== undefined && prior !== undefined && prior.result !== 'pass'
         && (prior.problems?.includes('unshown') || prior.goal.verdict === 'unshown' || unit.criteria.some(criterion => criterion.status === 'unshown'))
-        && prior.evidenceDigest === hashState(judgeState(unit, evidence))) {
+        && typeof prior.evidenceDigest === 'string' && prior.evidenceDigest === hashState(judgeState(unit, evidence))) {
         // Dispatch the unchanged recorded uncertainty to native correction. Do not ask until probability crosses a threshold.
         outcome = nativeRecordedCheck(unit, { ...prior, result: 'native-decision' }); reusedNativeEvidence = true;
       } else {

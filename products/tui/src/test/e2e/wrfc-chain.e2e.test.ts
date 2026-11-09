@@ -112,7 +112,10 @@ test('compiled native reviewed repair fails review, fixes, genuinely re-reviews,
     const rereview = reviewed.checks.at(-1)!;
     expect(rereview).toMatchObject({ trigger: 'fix-passed', result: 'pass', sourceRead: 'fixed', answered: true });
     expect(before.checks.map(check => check.id)).not.toContain(rereview.id);
-    expect(before.checks.map(check => check.evidenceDigest)).not.toContain(rereview.evidenceDigest);
+    expect(rereview).not.toHaveProperty('evidenceDigest');
+    expect(rereview.decisionIds.length).toBeGreaterThan(0);
+    const previousDecisions = new Set(before.checks.flatMap(check => check.decisionIds));
+    expect(rereview.decisionIds.every(id => !previousDecisions.has(id))).toBe(true);
     expect(reviewed.decisions).toEqual(expect.arrayContaining([
       { stage: 'stall', outcome: 'act', sourceBound: true, answered: true },
       { stage: 'fix-plan', outcome: 'act', sourceBound: true, answered: true },

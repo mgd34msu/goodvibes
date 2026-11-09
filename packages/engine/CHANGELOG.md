@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Stop hashing passing contract checks when nothing compares that digest.
+  Nonpass checks retain their saved refusal comparison; earlier stored digests
+  remain readable. Update inspection, work receipts and WebUI together, and
+  declare reader compatibility before saving the changed check shape.
+
 - Preserve the Home Assistant installation when syncing through a recognized
   space alias with a different prefix case or display spelling. Reuse the same
   saved objects instead of rewriting their installation metadata.

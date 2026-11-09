@@ -88,7 +88,8 @@ export async function createNativeReviewedRepairFixture() {
       const contract = parsed.snapshot.contract;
       const unit = contract.units.find(candidate => candidate.id === 'u1');
       if (!unit) throw new Error('Missing reviewed native unit');
-      const checks = unit.checks.map(check => ({ id: check.id, trigger: check.trigger, result: check.result, evidenceDigest: check.evidenceDigest,
+      const checks = unit.checks.map(check => ({ id: check.id, trigger: check.trigger, result: check.result,
+        ...(check.evidenceDigest === undefined ? {} : { evidenceDigest: check.evidenceDigest }), decisionIds: [...check.decisionIds],
         // Match the captured real evidence to the persisted answered decision,
         // rather than treating a scripted final message as a successful review.
         sourceRead: reads.find(read => check.decisionIds.some(id => {

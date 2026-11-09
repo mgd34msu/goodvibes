@@ -134,6 +134,10 @@ test('ordinary worktree inspection preserves captured input and the runner-parse
     expect(record.units[0]?.lastReport).toEqual(report);
     expect(record.units[0]?.lastOutput).toBe(output);
     expect(record.units[0]?.checks.length).toBeGreaterThan(0);
+    const passedChecks = [...record.checks, ...record.groups.flatMap(group => group.checks), ...record.units.flatMap(unit => unit.checks)]
+      .filter(check => check.result === 'pass');
+    expect(passedChecks.length).toBeGreaterThan(0);
+    for (const check of passedChecks) expect(check).not.toHaveProperty('evidenceDigest');
     expect(record.nativeSource).toBeUndefined();
     rejectsInspection({ ...record, unexpectedField: true });
     rejectsInspection({ ...record, inputSnapshot: { ...record.inputSnapshot, version: 99 } });

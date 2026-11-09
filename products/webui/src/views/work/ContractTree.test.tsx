@@ -110,6 +110,16 @@ describe('ContractTree read-only evidence', () => {
     expect(el.textContent).not.toContain('All checks passed');
   });
 
+  test('fresh passed checks omit unused digest details while actual historical fields remain visible', () => {
+    const { evidenceDigest: historical, ...fresh } = check({ result: 'pass' });
+    const current = render(contract({ checks: [fresh] }));
+    expect(current.textContent).toContain('decision-check');
+    expect(current.textContent).not.toContain('Evidence digest');
+    expect(current.textContent).not.toContain('No evidence digest');
+    const old = render(contract({ checks: [{ ...fresh, evidenceDigest: historical }] }));
+    expect(old.textContent).toContain('Evidence digest'); expect(old.textContent).toContain(historical);
+  });
+
   test('shows unverified receipt status and separates command exits from assertion evidence', () => {
     const el = render(contract({ checks: [check({ gates: [
       { gate: 'required tests', passed: false, outcome: 'unverified', required: true, reason: 'source-changed-after-check', output: 'a prior run passed', durationMs: 8,

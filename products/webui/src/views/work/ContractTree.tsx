@@ -86,7 +86,7 @@ function CheckEvidence({ check }: { check: Check }) {
       { label: 'Decision ids', value: <Ids values={check.decisionIds} /> },
       { label: 'Problems', value: <Ids values={check.problems ?? []} /> }, { label: 'Quality problems', value: <Ids values={check.qualityProblems ?? []} /> },
     ]} />
-    <DetailSection title="Evidence digest">{check.evidenceDigest ? <Text>{check.evidenceDigest}</Text> : <Empty>No evidence digest recorded.</Empty>}</DetailSection>
+    {check.evidenceDigest && <DetailSection title="Evidence digest"><Text>{check.evidenceDigest}</Text></DetailSection>}
     <DetailSection title="Goal reading"><Facts items={[
       { label: 'Verdict', value: check.goal.verdict }, { label: 'Probability unmet', value: String(check.goal.probabilityUnmet) }, { label: 'Outcome', value: check.goal.outcome },
     ]} /></DetailSection>

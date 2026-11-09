@@ -1,5 +1,11 @@
 import { expect, spyOn, test } from 'bun:test';
 import { join } from 'node:path';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { contractPath } from '../sdk/src/platform/contract/store.js';
+import { makeContract, makeUnit } from './contract/fixtures.js';
+import type { UnitCheck } from '../sdk/src/platform/contract/types.js';
+import { createNativeDataWriteOwner, assertNativeReaderCompatible, nativeReaderCapabilities, type NativeDataFormat } from '../sdk/src/platform/runtime/native-reader-compatibility.js';
+import { realUpdateFileIo } from '../sdk/src/platform/runtime/self-update.js';
 import { createAgentExecutionGraph, createAgentGraph } from '../sdk/src/platform/runtime/agent-graph-composition.ts';
 import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
 import { SubscriptionManager } from '../sdk/src/platform/config/subscriptions.ts';
@@ -59,4 +65,47 @@ test('default graph retains exactly one canonical runner and one startup resume'
     await composition.resumeContracts(graph.contractRunner, f.workingDirectory);
     expect(resumed).toHaveBeenCalledTimes(1);
   } finally { graph?.dispose(); graph?.agentOrchestrator.dispose(); resumed?.mockRestore(); install.mockRestore(); compose.mockRestore(); }
+});
+
+
+test('actual canonical composition publishes optional-check reader floor before every serialized check location', () => {
+  const f = fixture(), graph = createAgentExecutionGraph(f), execPath = join(f.workingDirectory, 'goodvibes');
+  writeFileSync(execPath, 'Original native reader fixture', { mode: 0o755 });
+  const owner = createNativeDataWriteOwner({ execPath, version: '3.1.2', assertCurrent() {} });
+  const declared: NativeDataFormat[] = []; let target = '', refuse = false;
+  const nativeDataWriter = { declare(format: NativeDataFormat) {
+    declared.push(format);
+    if (format === 'contract-optional-check-digests-v1') {
+      expect(existsSync(target)).toBe(false);
+      if (refuse) throw new Error('Original optional-check reader unavailable');
+    }
+    owner.declare(format);
+  } };
+  const composed = composition.composeContractRunner({ ...f, projectRoot: f.workingDirectory, nativeDataWriter,
+    agentManager: graph.agentManager, agentMessageBus: graph.agentMessageBus,
+    fleetCapacity: composition.nativeAgentFleetCapacity(f.configManager, graph.agentManager) });
+  const pass: UnitCheck = { id: 'current-pass', at: 10, trigger: 'completion', result: 'pass', quality: {},
+    goal: { probabilityUnmet: .01, verdict: 'met', outcome: 'act' }, decisionIds: ['actual-passed-decision'] };
+  try {
+    const old = makeContract({ projectRoot: f.workingDirectory, checks: [{ ...pass, evidenceDigest: 'actual-old-saved-check' }] });
+    target = contractPath(f.workingDirectory, old.id); composed.store.hold(old);
+    expect(composed.store.write(old.id)).toBe(true);
+    expect(declared).not.toContain('contract-optional-check-digests-v1');
+    expect(readFileSync(target, 'utf8')).toContain('actual-old-saved-check');
+    for (const location of ['contract', 'group', 'unit', 'attempt'] as const) {
+      const current = makeContract({ projectRoot: f.workingDirectory });
+      if (location === 'contract') current.checks = [pass];
+      if (location === 'group') current.groups[0]!.checks = [pass];
+      if (location === 'unit') current.units[0]!.checks = [pass];
+      if (location === 'attempt') current.units[0]!.attemptUnits = [makeUnit({ id: 'attempt', attemptOf: current.units[0]!.id, attemptIndex: 0, checks: [pass] })];
+      target = contractPath(f.workingDirectory, current.id); composed.store.hold(current);
+      refuse = true; expect(composed.store.write(current.id)).toBe(false); expect(existsSync(target)).toBe(false);
+      refuse = false; declared.length = 0;
+      expect(composed.store.write(current.id)).toBe(true); expect(declared).toContain('contract-optional-check-digests-v1');
+    }
+    const capabilities = nativeReaderCapabilities('3.1.2');
+    expect(() => assertNativeReaderCompatible(execPath, '3.1.2', realUpdateFileIo, capabilities)).not.toThrow();
+    expect(() => assertNativeReaderCompatible(execPath, '3.1.2', realUpdateFileIo, { ...capabilities,
+      formats: capabilities.formats.filter(format => format !== 'contract-optional-check-digests-v1') })).toThrow('does not confirm');
+  } finally { composed.dispose(); graph.agentOrchestrator.dispose(); rmSync(f.workingDirectory, { recursive: true, force: true }); }
 });

@@ -349,13 +349,15 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
       content: { name: reviewBattery.name, version: reviewBattery.version }, stakes: config().acceptanceStakes };
     // Bind the facts and policies being assessed, independently of fresh
     // reading identities. An unchanged rejection cannot become approval by polling.
-    const digest = completionEvidenceCommitment({ goal: input.goal, output: evidence.output, evidence: fulfillmentEvidence,
+    const refusalEvaluation = { goal: input.goal, output: evidence.output, evidence: fulfillmentEvidence,
       criteria: input.criteria.map(({ id, text, serves, disposition }) => ({ id, text, serves: [...serves], disposition })),
       policy: { fulfillment: { name: fulfillmentJudge.name, version: fulfillmentJudge.version },
         ...(input.scope === 'deliverable' ? { content: { name: reviewBattery.name, version: reviewBattery.version },
-          originalCoverage: { name: originalCoverage.name, version: originalCoverage.version } } : {}) } }, rawEvidence);
+          originalCoverage: { name: originalCoverage.name, version: originalCoverage.version } } : {}) } };
+    let retainedRefusalDigest: string | undefined;
+    const refusalDigest = (): string => retainedRefusalDigest ??= completionEvidenceCommitment(refusalEvaluation, rawEvidence);
     const prior = input.checks.at(-1);
-    if (contract.nativeSource !== undefined && prior !== undefined && prior.result !== 'pass' && prior.evidenceDigest === digest) {
+    if (contract.nativeSource !== undefined && prior !== undefined && prior.result !== 'pass' && typeof prior.evidenceDigest === 'string' && prior.evidenceDigest === refusalDigest()) {
       return { check: prior, verdicts: new Map(input.criteria.filter(criterion => criterion.disposition === 'judged').map(criterion => [criterion.id, criterion.status === 'unread' ? 'unshown' : criterion.status])), passed: false, output: evidence.output };
     }
     const readFulfillment = async (review?: FinalAnswerReviewReceipt, previous?: Awaited<ReturnType<typeof fulfillmentJudge.judge>>) => {
@@ -718,7 +720,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
       problems,
       qualityProblems: [],
       decisionIds: [...new Set([...(answerReview?.fulfillmentDecisionIds ?? []), ...(answerReview?.decisionIds ?? []), ...judgment.decisionIds, ...(goalProof?.decisionIds ?? []), ...(originalObligations?.decisionIds ?? [])])],
-      evidenceDigest: digest,
+      ...(passed ? {} : { evidenceDigest: refusalDigest() }),
     };
     input.checks.push(check);
     if (passed && source !== undefined) acceptedSources.set(run, { checkId, tree, source });

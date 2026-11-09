@@ -280,8 +280,9 @@ export interface UnitCheck {
   /** The quality items read as problems. */
   readonly qualityProblems?: readonly QualityItem[] | undefined;
   readonly decisionIds: readonly string[];
-  /** hashState of the evidence (the judgment foundation's decision log). */
-  readonly evidenceDigest: string;
+  /** Exact saved evidence commitment for nonpass refusal replay. Historical
+   * pass checks may retain it; fresh pass checks use actual check/decision IDs. */
+  readonly evidenceDigest?: string;
 }
 
 export interface Nudge {

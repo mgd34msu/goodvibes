@@ -165,7 +165,7 @@ const CHECK_SCHEMA = objectSchema({
     objectSchema({ path: STRING_SCHEMA, sha256: STRING_SCHEMA }, ['path', 'sha256']),
     objectSchema({ path: STRING_SCHEMA, observationId: STRING_SCHEMA }, ['path', 'observationId']),
   ] }),
-}, ['id', 'at', 'trigger', 'goal', 'quality', 'result', 'decisionIds', 'evidenceDigest']);
+}, ['id', 'at', 'trigger', 'goal', 'quality', 'result', 'decisionIds']);
 
 const NUDGE_SCHEMA = objectSchema({
   id: STRING_SCHEMA,

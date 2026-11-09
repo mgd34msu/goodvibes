@@ -230,6 +230,17 @@ export function composeContractRunner(options: ContractRunnerCompositionOptions)
     },
     beforeWrite: contract => {
       const formats: import('./native-reader-compatibility.js').NativeDataFormat[] = ['contract-review-observations-v1', 'contract-tree-baselines-v2', 'contract-answer-claim-scopes-v2'];
+      if (contract) {
+        const units = [...contract.units];
+        let optionalDigest = [...contract.checks, ...contract.groups.flatMap(group => group.checks)]
+          .some(check => check.result === 'pass' && check.evidenceDigest === undefined);
+        while (units.length && !optionalDigest) {
+          const unit = units.pop()!;
+          optionalDigest = unit.checks.some(check => check.result === 'pass' && check.evidenceDigest === undefined);
+          units.push(...(unit.attemptUnits ?? []));
+        }
+        if (optionalDigest) formats.push('contract-optional-check-digests-v1');
+      }
       if (isOpaqueContractId(contract?.id)) formats.push('contract-opaque-identities-v1');
       if (contract?.nativeSource?.continuation?.version === 2) formats.push('native-conversation-captures-v2');
       for (const format of formats) {

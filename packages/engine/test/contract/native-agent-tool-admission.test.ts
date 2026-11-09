@@ -225,7 +225,8 @@ for (const scenario of ['act', 'unrecorded', 'planner-act', 'review-drafts'] as 
         await waitFor(() => runner.get(id!)!.units[0]!.status === 'passed', 'repaired review accepted', 10_000);
         const checks = runner.get(id!)!.units[0]!.checks;
         expect(checks.map(check => check.result)).toEqual(['nudge', 'pass']);
-        expect(checks[0]!.evidenceDigest).not.toBe(checks[1]!.evidenceDigest);
+        expect(checks[0]!.evidenceDigest).toMatch(/^[a-f0-9]{64}$/);
+        expect(checks[1]!).not.toHaveProperty('evidenceDigest');
         expect(modelCalls).toBe(3);
       }
     } finally {

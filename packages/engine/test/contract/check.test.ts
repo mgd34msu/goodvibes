@@ -8,8 +8,8 @@ import { nativeContractPort } from '../../sdk/src/platform/contract/native-decis
  * the band edges (4.5), the stall rule applied to a nudge, severities, and a
  * missing port failing loudly.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { readYesNo, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import { canonicalJson, hashState, readYesNo, STAKES_BANDS } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { DELIVERABLE_JUDGES, deliverableVerdict } from '../../sdk/src/platform/contract/batteries/deliverable-judge.js';
@@ -19,6 +19,7 @@ import { MID_RUN_QUALITY_ITEMS, UNIT_QUALITY_BAND, midRunNudgeItems, qualityVerd
 import { registry } from '../../sdk/src/platform/contract/judgment-registry.js';
 import { QUALITY_ITEMS, type QualityItem } from '../../sdk/src/platform/contract/types.js';
 import {
+  nativeRecordedCheck,
   applySeverities,
   applyUnitCheck,
   criterionVerdict,
@@ -30,7 +31,8 @@ import {
   type DecidedCheck,
   type UnitCheckInput,
 } from '../../sdk/src/platform/contract/check.js';
-import type { UnitEvidence } from '../../sdk/src/platform/contract/evidence.js';
+import { judgeState, type UnitEvidence } from '../../sdk/src/platform/contract/evidence.js';
+import { deserializeContract, serializeContract } from '../../sdk/src/platform/contract/store.js';
 import type { ContractUnit, RequestShape, UnitCheck } from '../../sdk/src/platform/contract/types.js';
 import { checkPort, MET, UNMET, type CheckAnswers } from './check-port.js';
 import { makeContract, makeCriterion, makeUnit } from './fixtures.js';
@@ -545,4 +547,33 @@ test('Classic semantic contract helpers reject before touching a caller-supplied
     expect(() => nativeContractPort(contract, undefined, port)).toThrow(DecisionModelsDisabledError);
     expect(JSON.stringify(unit)).toBe(before); expect(borrowed).toBe(0);
   });
+});
+
+
+test('fresh actual passing unit checks do not compute an unused refusal digest', async () => {
+  const unit = twoCriterionUnit(), current = evidence({ gates: undefined });
+  const input = canonicalJson(judgeState(unit, current)), hashing = spyOn(Bun.CryptoHasher, 'hash');
+  try {
+    const outcome = await check({ criteria: [MET, MET] }, { unit, evidence: current });
+    expect(outcome.check.result).toBe('pass'); expect(outcome.check).not.toHaveProperty('evidenceDigest');
+    expect(hashing.mock.calls.filter(([algorithm, value]) => algorithm === 'sha256' && value === input)).toHaveLength(0);
+  } finally { hashing.mockRestore(); }
+});
+
+test('genuine nonpass checks keep their exact refusal commitment through checkpoint restart and recorded replay', async () => {
+  const unit = twoCriterionUnit(), current = evidence({ gates: undefined });
+  const outcome = await check({ criteria: [MET, UNMET] }, { unit, evidence: current });
+  expect(outcome.check.result).not.toBe('pass'); expect(outcome.check.evidenceDigest).toMatch(/^[a-f0-9]{64}$/);
+  applyUnitCheck(unit, outcome);
+  const historicalPass = { ...outcome.check, id: 'historical-pass', result: 'pass' as const };
+  const persisted = serializeContract(makeContract({ units: [unit], checks: [historicalPass] }), 10);
+  if (persisted === null) throw new Error('Actual contract checkpoint serialization failed');
+  const restored = deserializeContract(persisted);
+  if (!restored) throw new Error('Actual contract checkpoint restoration failed');
+  const restoredUnit = restored.units[0]!, prior = restoredUnit.checks.at(-1)!;
+  expect(prior.evidenceDigest).toBe(outcome.check.evidenceDigest);
+  expect(prior.evidenceDigest).toBe(hashState(judgeState(restoredUnit, current)));
+  expect(restored.checks[0]!.evidenceDigest).toBe(historicalPass.evidenceDigest);
+  const replayed = nativeRecordedCheck(restoredUnit, { ...prior, result: 'native-decision' });
+  expect(replayed.check.result).toBe('native-decision'); expect(replayed.verdicts).toEqual(outcome.verdicts);
 });

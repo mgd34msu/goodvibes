@@ -87,6 +87,7 @@ import { createUnitFailureHandling } from './unit-failures.js';
 import { contractAgentIds, ownerRecordUsage, rollUpContractUsage, type PriceUsageFn } from './usage.js';
 import { createUnitWatchdog, type WatchedAgent } from './watchdog.js';
 import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 import { nativeContractActionSource, nativeContractPort } from './native-decisions.js';
 import type { DurableContractExecution } from './durable-admission.js';
 
@@ -672,6 +673,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       catch (error) { lease(); throw error; }
       durableLeases.set(id, lease);
       let owner: AgentRecord | undefined;
+      let created: StartedContract | undefined;
       try {
         requireDecisionFeature('autonomous contract planning and acceptance');
         const execution = await resolveContractGitPlacement(frozen.input.isolation ?? env.config().isolation,
@@ -683,7 +685,17 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
         creation.assertCurrent();
         const admission = parseDurableAdmission({ ...frozen, schemaVersion: 2, execution, contractId: id,
           ownerAgentId: owner.id, payloadRevision: durablePayloadRevision(frozen) });
-        create(frozen.input, id, owner, { durableAdmission: admission, execution, creation }, true, true);
+        created = create(frozen.input, id, owner, { durableAdmission: admission, execution, creation }, true, true);
+        if (isTerminalContractStatus(created.contract.status)) {
+          // A reentrant creation listener may cancel before launch admission.
+          // The live run has already retired, but its final checkpoint still
+          // belongs to executor drainage; never acknowledge the old prepared
+          // disk image while that original settlement is pending.
+          await created.settled;
+          const result = durableResult(admission);
+          if (result.state !== 'terminal') throw new DurableContractAdmissionError('checkpoint');
+          return result;
+        }
         const run = runs.get(id);
         if (run !== undefined && !run.terminal && !disposed) {
           if (admitted.size < env.config().maxActiveContracts) {
@@ -699,7 +711,10 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       } catch (error) {
         const run = runs.get(id);
         if (run !== undefined && creation.owns(run.contract)) cancelRun(run, 'native admission could not start');
-        else if (!settling.has(id)) {
+        // Once creation succeeded, terminal settlement alone releases the
+        // execution lease. A failed final checkpoint must keep it fenced even
+        // after its real drainage barrier has resolved and retired the run.
+        else if (created === undefined && !settling.has(id)) {
           try { if (owner) deps.agentManager.cancel(owner.id); const pending = settlements.get(id); pending?.resolve(); if (runs.get(id) === undefined && settlements.get(id) === pending) settlements.delete(id); }
           finally { durableLeases.delete(id); lease(); }
         }

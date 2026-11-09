@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Wait for the durable cancellation checkpoint before acknowledging a contract
+  cancelled during creation. Preserve the execution lease after a failed save
+  while allowing drained executor work to finish joining.
+
 - Publish release archives, companion files and metadata through unique staging
   directories without replacing existing outputs. Failed or concurrent builds
   preserve files that belong to another invocation.

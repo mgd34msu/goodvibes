@@ -167,6 +167,25 @@ describe('native durable contract admission', () => {
     expect(next.manager.list()).toHaveLength(0);
   });
 
+  test('a failed final checkpoint still joins drained work while retaining the durable execution lease', async () => {
+    const h = setup(undefined, makeRepo(), 0);
+    const started = await h.runner.startDurable(request(h.root));
+    const admissions = new DurableContractAdmissions(h.root);
+    const original = admissions.checkpoint(key);
+    const write = h.store.write.bind(h.store);
+    h.store.write = () => false;
+    try {
+      expect(h.runner.cancel(started.admission.contractId, 'Owner cancelled queued work')).toBe(true);
+      let joined = false;
+      const drainage = h.runner.join(started.admission.contractId).then(() => { joined = true; });
+      await waitFor(() => joined, 'executor drainage despite final checkpoint failure');
+      await drainage;
+      expect(admissions.checkpoint(key)).toBe(original);
+      await expect(new DurableContractAdmissions(h.root).lease(key)).rejects.toThrow('cross-process-lock');
+      expect(h.agentsOf('u1')).toHaveLength(0);
+    } finally { h.store.write = write; }
+  });
+
   test('durable work refuses an orchestration adapter without actual settlement', async () => {
     const root = makeRepo(); roots.push(root);
     let disposed = false;
@@ -288,9 +307,36 @@ describe('native durable contract admission', () => {
     let checks = 0;
     const h = setup({ withCurrent: (_admission, launch) => { checks++; launch(() => undefined); } });
     h.runner.on((event) => { if (event.type === 'CONTRACT_CREATED') h.runner.cancel(event.contractId, 'cancelled'); });
-    expect((await h.runner.startDurable(request(h.root))).state).toBe('terminal');
-    expect(checks).toBe(0);
-    expect(h.agentsOf('u1')).toHaveLength(0);
+    const first = await h.runner.startDurable(request(h.root));
+    expect(first.state).toBe('terminal'); expect(first.contract.status).toBe('cancelled');
+    const saved = new DurableContractAdmissions(h.root).checkpoint(key);
+    expect(saved).not.toBeNull(); expect(JSON.parse(saved!).contract.status).toBe('cancelled');
+    const replay = await h.runner.startDurable(request(h.root));
+    expect(replay.state).toBe('terminal'); expect(replay.admission).toEqual(first.admission);
+    expect(checks).toBe(0); expect(h.agentsOf('u1')).toHaveLength(0);
+    expect(h.manager.list().filter(record => record.contractRole === 'owner')).toHaveLength(1);
+    const release = await new DurableContractAdmissions(h.root).lease(key); release();
+  });
+
+  test('reentrant cancellation cannot acknowledge a stale prepared checkpoint or release its lease after final publication fails', async () => {
+    let checks = 0;
+    const h = setup({ withCurrent: (_admission, launch) => { checks++; launch(() => undefined); } });
+    const write = h.store.write.bind(h.store);
+    let original: string | null = null, contractId: string | undefined;
+    h.runner.on(event => {
+      if (event.type !== 'CONTRACT_CREATED') return;
+      contractId = event.contractId;
+      original = new DurableContractAdmissions(h.root).checkpoint(key);
+      h.store.write = () => false;
+      h.runner.cancel(event.contractId, 'Owner cancelled during creation');
+    });
+    try {
+      await expect(h.runner.startDurable(request(h.root))).rejects.toMatchObject({ code: 'checkpoint' });
+      expect(contractId).toBeDefined(); await h.runner.join(contractId!);
+      expect(new DurableContractAdmissions(h.root).checkpoint(key)).toBe(original);
+      await expect(new DurableContractAdmissions(h.root).lease(key)).rejects.toThrow('cross-process-lock');
+      expect(checks).toBe(0); expect(h.agentsOf('u1')).toHaveLength(0);
+    } finally { h.store.write = write; }
   });
 
   test('slot-delayed launch revalidates authority after queued hooks', async () => {

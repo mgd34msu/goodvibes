@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
-import { hashState, type JsonValue } from '@goodvibes-jev/judgment';
+import type { JsonValue } from '@goodvibes-jev/judgment';
 import type { ContractView } from './types.js';
 import type { FileChange } from './evidence.js';
 import { commandObservation } from './command-observation.js';
@@ -157,19 +157,18 @@ export function finalAnswerEvidence(contract: Pick<ContractView, 'id' | 'ask' | 
   const units = Array.isArray(host['units']) ? host['units'].filter(object).map(unit => {
     const source = contract.units.find(source => source.id === unit['id']);
     const retainedResult = source && researchIds.has(source.id)
-      && unit['acceptedAnswerDigest'] === hashState(source.answer ?? '');
+      && unit['acceptedAnswer'] === (source.answer ?? '');
     return {
     id: unit['id'] ?? null, goal: unit['goal'] ?? null, status: unit['status'] ?? null, dependsOn: unit['dependsOn'] ?? [],
     criteria: unit['criteria'] ?? null, latestCheck: unit['latestCheck'] ?? null,
-    acceptedAnswerDigest: unit['acceptedAnswerDigest'] ?? null,
     ...(retainedResult ? { acceptedAnswer: source.answer ?? '' } : {}),
     acceptedAnswerSource: { storage: 'native-contract-store', contractId: host['contractId'] ?? null, unitId: unit['id'] ?? null, field: 'answer' },
     readObservations: observationTable(unit['readObservations'], unit['latestCheck']),
   }; }) : [];
   const view: JsonObject = {
     originalRequest: contract.ask,
-    fullSourceEvidence: { digest: hashState(evidence), bytes: Buffer.byteLength(JSON.stringify(evidence)),
-      meaning: 'Digest of the complete native evidence prepared for this decision before projection. Its source records remain in the owned contract, accepted unit answers and read observations, command/check records, task evidence and checked tree. The view below carries current primary artifacts/diffs, every scoped native criterion/check/read range, complete accepted research results with non-artifact source observations, referenced execution bodies, all failures and unknown child outcomes, and complete gates. Unreferenced successful command bodies remain available at their exact native storage references and are not execution proof for an unshown claim. Earlier verdicts establish only their checked scope. This digest grants no approval and does not replace judging every original root requirement.' },
+    fullSourceEvidence: { storage: 'native-contract-store', contractId: contract.id,
+      meaning: 'References to the complete native evidence prepared for this decision before projection. Its source records remain in the owned contract, accepted unit answers and read observations, command/check records, task evidence and checked tree. The view below carries current primary artifacts/diffs, every scoped native criterion/check/read range, complete accepted research results with non-artifact source observations, referenced execution bodies, all failures and unknown child outcomes, and complete gates. Unreferenced successful command bodies remain available at their exact native storage references and are not execution proof for an unshown claim. Earlier verdicts establish only their checked scope. These source references grant no approval and does not replace judging every original root requirement.' },
     currentArtifacts: artifacts,
     currentTextualChanges: currentChanges,
     hostOperations: Array.isArray(evidence['hostOperations']) ? evidence['hostOperations'].map(metadata) : [],

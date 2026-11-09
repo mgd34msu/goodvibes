@@ -1,8 +1,9 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
+import * as crypto from 'node:crypto';
+import { contractWorkReceipts, workReceiptIdentity } from '../../sdk/src/platform/contract/work-receipts.js';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { hashState } from '@goodvibes-jev/judgment';
 import { currentFileObservations } from '../../sdk/src/platform/contract/evidence.js';
 import { finalAnswerEvidence, finalContentEvidence } from '../../sdk/src/platform/contract/final-answer-evidence.js';
 import { commandObservation } from '../../sdk/src/platform/contract/command-observation.js';
@@ -41,7 +42,7 @@ function fixture() {
   const current = currentFileObservations(root, ['review.md'])[0];
   if (!current || typeof current !== 'object' || Array.isArray(current)) throw new Error('Missing native current-file fixture');
   const evidence = { orchestration: { currentFiles: [current], continuationEvidence: 'Initial work was unfinished.',
-    units: [{ id: 'u1', status: 'passed', acceptedAnswer: contract.units[0]!.answer!, acceptedAnswerDigest: 'answer-digest',
+    units: [{ id: 'u1', status: 'passed', acceptedAnswer: contract.units[0]!.answer!,
       latestCheck: contract.units[0]!.checks[0]!, criteria: [{ text: 'The review is complete', verdict: 'met' }], readObservations: [] }] },
     diff: '-Initial limited draft\n+Ready.', hostOperations: [current],
     commands: [{ command: 'verify-archive', success: true, head: 'Integrity passed.' }], gates: [] };
@@ -65,7 +66,7 @@ test('content review receives only byte-matched current primary artifact text an
   expect(JSON.stringify(view)).not.toContain('Initial work was unfinished.');
   expect(JSON.stringify(f.contract)).toBe(before);
   expect(f.evidence.diff).toContain('Initial limited draft');
-  expect(view.evidence['fullSourceEvidence']).toMatchObject({ digest: hashState(f.evidence), bytes: Buffer.byteLength(JSON.stringify(f.evidence)) });
+  expect(view.evidence['fullSourceEvidence']).toMatchObject({ storage: 'native-contract-store', contractId: f.contract.id });
 });
 
 test('root projection retains actual scope calculations and repair-plan admissions rather than replacing them with acceptance labels', () => {
@@ -87,7 +88,7 @@ test('substantive accepted research stays visible with its actual check while ol
     checks: f.contract.units[0]!.checks.map(check => ({ ...check, id: 'source-review.k1', decisionIds: ['native-source-check'] })),
     readEvidence: [{ path: 'src/reconnect.ts', returnedRanges: ['1-20'], returnedLines: 20, contentKind: 'cited-source' }] });
   f.contract.units.push(source);
-  f.evidence.orchestration.units.push({ id: source.id, status: 'passed', acceptedAnswerDigest: hashState(source.answer!),
+  f.evidence.orchestration.units.push({ id: source.id, status: 'passed', acceptedAnswer: source.answer!,
     latestCheck: source.checks.at(-1), criteria: source.criteria, readObservations: source.readEvidence });
   const before = JSON.stringify(f.contract);
   const view = finalAnswerEvidence(f.contract, f.evidence, {})!;
@@ -98,6 +99,49 @@ test('substantive accepted research stays visible with its actual check while ol
   source.status = 'running';
   expect((finalAnswerEvidence(f.contract, f.evidence, {})!.evidence['orchestration'] as { units: { id: string }[] }).units.find(unit => unit.id === source.id))
     .not.toHaveProperty('acceptedAnswer');
+});
+
+test('source references and retained research text require exact source equality without hashing bodies', () => {
+  const f = fixture();
+  const source = makeUnit({ id: 'research-source', role: 'research', status: 'passed', answer: 'Actual accepted research text.',
+    checks: f.contract.units[0]!.checks.map(check => ({ ...check, id: 'research-source.k1', decisionIds: ['research-native-check'] })),
+    readEvidence: [{ path: 'src/source.ts', returnedRanges: ['1-2'], returnedLines: 2, contentKind: 'cited-source' }] });
+  f.contract.units.push(source);
+  const supplied = { id: source.id, status: source.status, acceptedAnswer: source.answer, latestCheck: source.checks.at(-1), criteria: source.criteria, readObservations: source.readEvidence };
+  f.evidence.orchestration.units.push(supplied);
+  const hashes = spyOn(crypto, 'createHash');
+  try {
+    const view = finalAnswerEvidence(f.contract, f.evidence, {})!;
+    expect(JSON.stringify(view.evidence)).toContain(source.answer!);
+    const receipts = contractWorkReceipts(f.contract, { readObservations: true });
+    expect(receipts.units.find(unit => unit.id === source.id)?.acceptedAnswer).toBe(source.answer);
+    expect(view.evidence['fullSourceEvidence']).toMatchObject({ storage: 'native-contract-store', contractId: f.contract.id });
+    expect(hashes.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+    supplied.acceptedAnswer = 'Copied source label with different text.';
+    const mismatched = finalAnswerEvidence(f.contract, f.evidence, {})!;
+    const units = (mismatched.evidence['orchestration'] as { units: { id: string; acceptedAnswer?: string }[] }).units;
+    expect(units.find(unit => unit.id === source.id)).not.toHaveProperty('acceptedAnswer');
+  } finally { hashes.mockRestore(); }
+});
+
+test('an omitted passed answer remains privately bound to saved repair identity without per-answer hashes', () => {
+  const f = fixture(), old = f.contract.units[0]!.answer ?? '';
+  const hashes = spyOn(crypto, 'createHash');
+  try {
+    const first = contractWorkReceipts(f.contract, { readObservations: true });
+    expect(first.units[0]).not.toHaveProperty('acceptedAnswer');
+    expect(JSON.stringify(first)).not.toContain('exactAcceptedAnswers');
+    const identity = workReceiptIdentity(first);
+    expect(identity.exactAcceptedAnswers).toEqual([{ unitId: f.contract.units[0]!.id, answer: old }]);
+    f.contract.units[0]!.answer = old + ' Actual changed accepted answer.';
+    const next = contractWorkReceipts(f.contract, { readObservations: true });
+    expect(next.units[0]).not.toHaveProperty('acceptedAnswer');
+    expect(workReceiptIdentity(next)).not.toEqual(identity);
+    // The earlier receipt still owns the earlier immutable string.
+    expect(workReceiptIdentity(first)).toEqual(identity);
+    expect(() => workReceiptIdentity(structuredClone(first))).toThrow('original native receipt');
+    expect(hashes.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+  } finally { hashes.mockRestore(); }
 });
 
 test('current execution citations and every failure keep full primary bodies while unrelated successful history retains exact native pointers', () => {
@@ -139,7 +183,7 @@ test('current execution citations and every failure keep full primary bodies whi
   }
   f.evidence.commands = [...observed, unbound];
   expect(JSON.stringify(f.contract)).toBe(before);
-  expect(view.evidence['fullSourceEvidence']).toMatchObject({ digest: hashState(f.evidence) });
+  expect(view.evidence['fullSourceEvidence']).toMatchObject({ storage: 'native-contract-store', contractId: f.contract.id });
   f.contract.units[0]!.readEvidence = [{ ...f.contract.units[0]!.readEvidence![0]!, returnedContent: '1 | call-inactive.' }];
   writeFileSync(join(f.root, 'review.md'), 'call-inactive.\n');
   f.evidence.orchestration.currentFiles = currentFileObservations(f.root, ['review.md']);
@@ -150,7 +194,7 @@ test('current execution citations and every failure keep full primary bodies whi
 test('native read tables preserve every original field, range and unit attribution while avoiding repeated column names', () => {
   const f = fixture();
   const reads = Array.from({ length: 200 }, (_, index) => ({ path: `src/file-${index}.ts`, returnedRanges: ['1-4', '8-12'], returnedLines: 9,
-    ...(index === 0 ? { contentKind: 'declared-reference', returnedContentDigest: 'actual-retained-digest',
+    ...(index === 0 ? { contentKind: 'declared-reference', bodySource: { storage: 'native-contract-store', field: 'readEvidence', index },
       returnedContentBytes: 85, validatedByCheckId: 'u1.k1', decisionIds: ['native-unit-check'], extra: null } : {}) }));
   f.evidence.orchestration.units[0].readObservations = reads;
   const before = JSON.stringify(f.evidence);
@@ -168,7 +212,7 @@ test('native read tables preserve every original field, range and unit attributi
   expect(restored).toEqual(reads);
   expect(JSON.stringify(unit.readObservations).length).toBeLessThan(JSON.stringify(reads).length);
   expect(JSON.stringify(f.evidence)).toBe(before);
-  expect(view.evidence['fullSourceEvidence']).toMatchObject({ digest: hashState(f.evidence) });
+  expect(view.evidence['fullSourceEvidence']).toMatchObject({ storage: 'native-contract-store', contractId: f.contract.id });
 });
 
 test('read validation references preserve mismatched and unaccepted check identities inline', () => {
@@ -236,21 +280,20 @@ test('an auxiliary file keeps its complete actual native diff without dropping c
   expect(finalAnswerEvidence(f.contract, f.evidence, {}, [{ ...change, diff: 'Invented replacement text' }])).toBeUndefined();
 });
 
-test('large historical reports stay retained and bound without overflowing the current verification view', () => {
+test('large historical reports stay retained with actual storage references without overflowing the current verification view', () => {
   const f = fixture();
   const history = 'Earlier accepted report. '.repeat(60_000);
   f.contract.units[0]!.answer = history;
   f.evidence.orchestration.units[0].acceptedAnswer = history;
-  f.evidence.orchestration.units[0].acceptedAnswerDigest = hashState(history);
   const projected = finalAnswerEvidence(f.contract, f.evidence, { checks: [{ criterion: 'original-c1' }] })!;
   expect(Buffer.byteLength(JSON.stringify(projected.evidence))).toBeLessThan(20_000);
-  expect(projected.evidence['fullSourceEvidence']).toMatchObject({ digest: hashState(f.evidence), bytes: Buffer.byteLength(JSON.stringify(f.evidence)) });
+  expect(projected.evidence['fullSourceEvidence']).toMatchObject({ storage: 'native-contract-store', contractId: f.contract.id });
   expect(f.contract.units[0]!.answer).toBe(history);
-  expect(projected.evidence['orchestration']).toMatchObject({ units: [{ acceptedAnswerDigest: hashState(history),
+  expect(projected.evidence['orchestration']).toMatchObject({ units: [{ acceptedAnswerSource: { storage: 'native-contract-store', contractId: f.contract.id, unitId: 'u1', field: 'answer' },
     latestCheck: { result: 'pass', decisionIds: ['native-unit-check'] } }] });
-  const oldBinding = (projected.evidence['fullSourceEvidence'] as { digest: string }).digest;
-  f.evidence.orchestration.units[0].acceptedAnswer += 'Changed earlier evidence.';
-  expect((finalAnswerEvidence(f.contract, f.evidence, {})!.evidence['fullSourceEvidence'] as { digest: string }).digest).not.toBe(oldBinding);
+  expect(projected.evidence['fullSourceEvidence']).not.toHaveProperty('digest');
+  expect(projected.evidence['fullSourceEvidence']).not.toHaveProperty('bytes');
+  expect(projected.evidence['orchestration']).not.toHaveProperty('acceptedAnswerDigest');
 });
 
 test('final artifact review receives complete actual current text when the diff omits unchanged sections', () => {
@@ -268,7 +311,7 @@ test('final artifact review receives complete actual current text when the diff 
     expect(JSON.stringify(view.evidence).split('Unchanged findings and source assessments.')).toHaveLength(2);
     expect(view.artifacts[0]).not.toHaveProperty('sourceCheckId');
     expect(view.evidence['orchestration']).toMatchObject({ currentFiles: [{ observationId: expect.any(String) }] });
-    expect(view.evidence['fullSourceEvidence']).toMatchObject({ digest: hashState(evidence) });
+    expect(view.evidence['fullSourceEvidence']).toMatchObject({ storage: 'native-contract-store', contractId: contract.id });
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

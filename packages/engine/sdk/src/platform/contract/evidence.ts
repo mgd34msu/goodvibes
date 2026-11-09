@@ -19,7 +19,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, relative } from 'node:path';
-import { estimateTokens, hashState, type JsonValue } from '@goodvibes-jev/judgment';
+import { estimateTokens, type JsonValue } from '@goodvibes-jev/judgment';
 import { GitService } from '../git/service.js';
 import { hashWorkingTreeFile, snapshotDirtyTree } from '../orchestration/dirty-guard.js';
 import { readNativePrivateReceiptArchives, verifyPrivateReceiptPreservation } from './private-read-receipts.js';
@@ -488,7 +488,7 @@ export async function collectUnitEvidence(
       ...(firstUnitStartedAt === undefined ? {} : { firstUnitStartedAt }),
       ...(contract.proposedUnits === undefined ? {} : { proposedUnits: contract.proposedUnits.map(unit => ({ task: unit.task, ...(unit.template === undefined ? {} : { template: unit.template }) })) }),
       ...(contract.units === undefined ? {} : { plannedUnits: contract.units.map(planned => ({ id: planned.id, title: planned.title, goal: planned.goal, role: planned.role,
-        briefSource: { storage: 'native-contract-store', contractId: contract.id, unitId: planned.id, field: 'brief', digest: hashState(planned.brief), bytes: Buffer.byteLength(planned.brief) },
+        briefSource: { storage: 'native-contract-store', contractId: contract.id, unitId: planned.id, field: 'brief', bytes: Buffer.byteLength(planned.brief) },
         ...(planned.id === unit.id ? {} : { status: planned.status,
           latestCheck: planned.checks.length ? { id: planned.checks.at(-1)!.id, trigger: planned.checks.at(-1)!.trigger,
             result: planned.checks.at(-1)!.result, decisionIds: [...planned.checks.at(-1)!.decisionIds],
@@ -503,17 +503,17 @@ export async function collectUnitEvidence(
                 ...('exitCode' in observed && typeof observed.exitCode === 'number'
                   && 'executionSucceeded' in observed && typeof observed.executionSucceeded === 'boolean'
                   ? { exitCode: observed.exitCode, executionSucceeded: observed.executionSucceeded, toolCallSucceeded: command.success } : {}),
-                commandDigest: hashState(script), commandBytes: Buffer.byteLength(script),
-                captureDigest: hashState(head), captureBytes: Buffer.byteLength(head),
+                commandBytes: Buffer.byteLength(script),
+                captureBytes: Buffer.byteLength(head),
                 bodySource: { storage: 'native-contract-store', contractId: contract.id, unitId: planned.id, field: 'commandEvidence', index },
-                meaning: 'Actual receipt identity and available child exit status retained; this command is outside the assigned dependency closure and its execution id is not referenced by this candidate. Command/result bodies remain unchanged at bodySource under their digests and are not supplied in this check view. Metadata or a prior pass does not prove an unshown command body, purpose or asserted verification result. Declared dependency or explicitly execution-id-referenced receipts are supplied in full.' };
+                meaning: 'Actual receipt identity and available child exit status retained; this command is outside the assigned dependency closure and its execution id is not referenced by this candidate. Command/result bodies remain unchanged at bodySource in their original native record and are not supplied in this check view. Metadata or a prior pass does not prove an unshown command body, purpose or asserted verification result. Declared dependency or explicitly execution-id-referenced receipts are supplied in full.' };
             }),
             ...(currentUnit?.role === 'integration' || (repairing && (planned.role === 'integration' || dependencyIds.has(planned.id) || researchIds.has(planned.id)))
               ? { acceptedAnswer: planned.answer ?? '' } : {}) } : {}) }),
         criteria: planned.criteria.map(criterion => ({ id: criterion.id, text: criterion.text, serves: [...criterion.serves],
           ...(criterion.contribution ? { contribution: { ...criterion.contribution } } : {}),
           ...(planned.id !== unit.id && planned.status === 'passed' ? { verdict: criterion.status } : {}) })) })) }),
-      meaning: 'Host records for this current contract. The complete assigned unit brief and exact referenced requirements are supplied in requirements. Other units are represented by their goals, exact criteria, actual scoped checks, observations, command receipts and accepted results. Integration checks receive prior commands in full. Other checks receive full command/result bodies for their dependency closure or explicitly referenced execution ids; unrelated prior commands retain their identities, statuses and digest-bound native storage locations, not proof of unshown results. Old worker instructions remain unchanged under briefSource and its digest; they are not this unit\'s requirements. A passed peer criterion verdict establishes only its checked scope. Plan and prior-unit acceptance do not approve the unit now being checked.' } } : {}) }, unit);
+      meaning: 'Host records for this current contract. The complete assigned unit brief and exact referenced requirements are supplied in requirements. Other units are represented by their goals, exact criteria, actual scoped checks, observations, command receipts and accepted results. Integration checks receive prior commands in full. Other checks receive full command/result bodies for their dependency closure or explicitly referenced execution ids; unrelated prior commands retain their identities, statuses and native storage locations, not proof of unshown results. Old worker instructions remain unchanged at briefSource; they are not this unit\'s requirements. A passed peer criterion verdict establishes only its checked scope. Plan and prior-unit acceptance do not approve the unit now being checked.' } } : {}) }, unit);
 }
 
 // ── What Jev reads ────────────────────────────────────────────────────────────
@@ -569,7 +569,7 @@ export function judgeState(unit: Pick<ContractUnit, 'goal'>, evidence: UnitEvide
   const report = parseCompletionReport(evidence.output);
   if (typeof report?.finalAnswer === 'string') return { goal: unit.goal, output: report.finalAnswer,
     evidence: { ...(judgeEvidence(evidence) as CheckState), completionReport: report as unknown as JsonValue,
-      deliverySource: { field: 'finalAnswer', rawReportDigest: hashState(evidence.output),
+      deliverySource: { field: 'finalAnswer',
         meaning: 'output is the exact proposed user-facing finalAnswer from the current completion report. The complete parsed report remains supplied for criteria about its fields, supporting work and attribution. Report text is a proposal, never proof of execution or approval.' } } };
   return { goal: unit.goal, output: evidence.output, evidence: judgeEvidence(evidence) };
 }
@@ -593,7 +593,7 @@ export function qualityState(unit: Pick<ContractUnit, 'goal' | 'brief'>, evidenc
     output: evidence.output,
     ...(typeof report?.finalAnswer === 'string' ? { completionReport: report as unknown as JsonValue,
       proposedFinalAnswer: report.finalAnswer,
-      deliverySource: { field: 'finalAnswer', rawReportDigest: hashState(evidence.output), outputDigest: hashState(report.finalAnswer),
+      deliverySource: { field: 'finalAnswer',
         phase: 'candidate-before-native-acceptance-and-publication',
         meaning: 'The exact parsed finalAnswer is proposed release text, not an already published response or proof of performed work. The complete raw and parsed completion report remain supplied. The host releases this text only after separate native checks and successful owner publication; the current unit need not perform those future host steps. Every claimed substantive result, read, test or other execution still needs its actual relevant evidence. Internal pending-check metadata is not a claim that task work was omitted; explicit premature claims of native approval remain unsupported. No approval is granted by this state.' } } : {}),
   };

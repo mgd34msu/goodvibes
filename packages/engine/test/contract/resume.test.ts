@@ -13,7 +13,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join } from 'node:path';
 import { uptime } from 'node:os';
 import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { hashState, JudgmentError } from '@goodvibes-jev/judgment';
+import { JudgmentError } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput } from '../../sdk/src/platform/gate/judgment-input.js';
 import { findCardNumberShapes } from '../../sdk/src/platform/security/card-shapes.js';
 import type { Contract, ContractView } from '../../sdk/src/platform/contract/index.js';
@@ -1419,7 +1419,6 @@ describe('a later group and the whole plan', () => {
           decisionIds: done.units[0]!.checks.at(-1)!.decisionIds,
           evidenceDigest: done.units[0]!.checks.at(-1)!.evidenceDigest,
         },
-        acceptedAnswerDigest: hashState(done.units[0]!.answer ?? ''),
         acceptedAnswerSource: { storage: 'native-contract-store', contractId: done.id, unitId: 'u1', field: 'answer' },
       },
     ]);

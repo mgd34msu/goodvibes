@@ -2,13 +2,18 @@ import type { ContractView } from './types.js';
 import type { SourceReadEvidence } from './evidence.js';
 import { findCardNumberShapes } from '../security/card-shapes.js';
 import { readPrivateReceiptArchives, verifyPrivateReceiptPreservation } from './private-read-receipts.js';
-import { hashState, type JsonValue } from '@goodvibes-jev/judgment';
+import type { JsonValue } from '@goodvibes-jev/judgment';
 import { ownerEvidenceIdentity } from './owner-evidence.js';
 import { commandObservation } from './command-observation.js';
 import { currentFileObservations } from './current-file-observations.js';
 import { compareJsonReadReferences, compareReadReferences } from './read-reference-comparison.js';
 import { acceptedResearchIds } from './accepted-research.js';
 import { compactReviewInventory, reviewInventoryObservation } from './review-inventory.js';
+
+// Model receipts omit unrelated old answer bodies. Their exact original
+// immutable strings still participate in the LOCAL saved repair binding.
+// Hold them only with the actual returned receipt; no text-keyed global cache.
+const receiptAnswers = new WeakMap<object, readonly { readonly unitId: string; readonly answer: string }[]>();
 
 /** The same actual source accounting used by native acceptance and recovery. */
 export function contractSourceScope(contract: Pick<ContractView, 'units'> & Partial<Pick<ContractView, 'criteria'>>, cwd: string,
@@ -69,7 +74,7 @@ export function contractWorkReceipts(
     return checked ? [{ unitId: unit.id, gate: checked.gate, passed: checked.passed, output: checked.output,
       ...(checked.skipped === undefined ? {} : { skipped: checked.skipped }) }] : [];
   });
-  return {
+  const work = {
     contractId: contract.id,
     ...(contract.reviewInventory && contract.projectRoot ? { reviewInventory: compactReviewInventory(reviewInventoryObservation({ ...contract, projectRoot: contract.projectRoot })!) } : {}),
     ...(options.readObservations && cwd ? { sourceScope: contractSourceScope(contract, cwd, options.ownerEvidence) } : {}),
@@ -90,17 +95,23 @@ export function contractWorkReceipts(
         evidenceDigest: unit.checks.at(-1)!.evidenceDigest, decisionIds: [...unit.checks.at(-1)!.decisionIds] } : null,
       ...(options.readObservations ? { readObservations: (unit.readEvidence ?? []).map(read => ({ path: read.path,
         returnedRanges: [...read.returnedRanges], returnedLines: read.returnedLines })), commands: (unit.commandEvidence ?? []).map(commandReceipt) } : {}),
-      ...(unit.status === 'passed' ? { acceptedAnswerDigest: hashState(unit.answer ?? ''),
-        acceptedAnswerSource: { storage: 'native-contract-store', contractId: contract.id, unitId: unit.id, field: 'answer' } } : {}),
+      ...(unit.status === 'passed' ? { acceptedAnswerSource: { storage: 'native-contract-store', contractId: contract.id, unitId: unit.id, field: 'answer' } } : {}),
       ...(unit.status === 'passed' && (options.answerIds?.has(unit.id) || researchIds.has(unit.id)) ? { acceptedAnswer: unit.answer ?? '' } : {}),
     })),
   };
+  receiptAnswers.set(work, Object.freeze(contract.units.filter(unit => unit.id !== options.excludeUnitId && unit.status === 'passed')
+    .map(unit => Object.freeze({ unitId: unit.id, answer: unit.answer ?? '' }))));
+  return work;
 }
 
 /** Timing and session-file bookkeeping do not change the actual work a
  * retained correction proposal addresses. Changed observations still do. */
 export function workReceiptIdentity(work: ReturnType<typeof contractWorkReceipts>) {
-  return { ...work,
+  const answers = receiptAnswers.get(work);
+  if (!answers) throw new Error('Saved work identity requires its original native receipt');
+  // This image is consumed only by the local persisted-binding comparison in
+  // correction planning. Never include it in a model-facing work receipt.
+  return { ...work, exactAcceptedAnswers: answers,
     privateArchiveChecks: work.privateArchiveChecks.map(check => Object.fromEntries(Object.entries(check).filter(([key]) => key !== 'durationMs'))),
     ...(work.ownerPriorReads === undefined ? {} : { ownerPriorReads: ownerEvidenceIdentity(work.ownerPriorReads) }),
   };

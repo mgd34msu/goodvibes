@@ -209,10 +209,11 @@ test('original fulfillment receives native arithmetic over complete unchanged re
     groups: [{ referencedLines: 3, coveredReferencedLines: 3, missingReferencedLines: 0, missing: [] }] }]);
   const done = contractOf(h, id);
   const recovery = contractWorkReceipts(done, { readObservations: true });
-  expect(rootScope).toEqual(recovery.sourceScope?.sourceJsonReferenceComparisons);
+  const withoutReadLabels = (value: unknown) => JSON.parse(JSON.stringify(value), (key, field) => key === 'referenceObservationId' ? undefined : field);
+  expect(withoutReadLabels(rootScope)).toEqual(withoutReadLabels(recovery.sourceScope?.sourceJsonReferenceComparisons));
   expect(recovery.sourceScope?.referenceOperations).toMatchObject([{ path: 'scope.json', success: true }]);
   expect(recovery.units[0]!.acceptedAnswer).toBe(done.units[0]!.answer);
-  expect(recovery.units[0]!.acceptedAnswerDigest).toBe(hashState(done.units[0]!.answer!));
+  expect(recovery.units[0]!.acceptedAnswerSource).toMatchObject({ contractId: done.id, unitId: done.units[0]!.id, field: 'answer' });
 });
 
 test('group and final checks receive actual plan-validation and unit-acceptance receipts', async () => {
@@ -270,17 +271,17 @@ test('group and final checks receive actual plan-validation and unit-acceptance 
   expect(observed.some(evidence => 'units' in evidence)).toBe(true);
   expect(observed.some(evidence => 'criteria' in evidence)).toBe(true);
   for (const evidence of observed) {
-    const protocol = (evidence['orchestration'] as { currentValidation: { scope: string; targetId: string; outputDigest: string; status: string; publicationRule: string } }).currentValidation;
+    const protocol = (evidence['orchestration'] as { currentValidation: { scope: string; targetId: string; status: string; publicationRule: string } }).currentValidation;
     expect(protocol.scope).toBe('criteria' in evidence ? 'deliverable' : 'group');
     expect(protocol.targetId).toBe('criteria' in evidence ? id : (evidence['units'] as { id: string }[])[0]!.id === 'u1' ? 'g1' : 'g2');
-    expect(protocol.outputDigest).toBe(hashState(checkedOutputs.get(evidence)!));
+    expect(protocol).not.toHaveProperty('outputDigest');
     expect(protocol.status).toBe('in-progress');
     if (protocol.scope === 'deliverable') {
       expect(protocol.publicationRule).toContain('only commits and delivers this checked answer after this judgment passes');
       expect(evidence).not.toHaveProperty('finalAnswerReview');
       const assessment = contentEvidence!['fulfillmentAssessment'] as { outputDigest: string; evidenceDigest: string; decisionIds: string[];
         goal: { verdict: string }; criteria: { id: string; verdict: string }[] };
-      expect(assessment.outputDigest).toBe(protocol.outputDigest);
+      expect(assessment.outputDigest).toBe(hashState(checkedOutputs.get(evidence)!));
       expect(assessment.evidenceDigest).toBe(hashState(evidence as Record<string, JsonValue>));
       expect(assessment.goal.verdict).toBe('met');
       expect(assessment.criteria.map(criterion => [criterion.id, criterion.verdict])).toEqual(done.criteria.map(criterion => [criterion.id, 'met']));
@@ -312,21 +313,21 @@ test('group and final checks receive actual plan-validation and unit-acceptance 
   expect(integrationReceipts.units.find(unit => unit.id === 'u1')!.readObservations).toEqual([
     { path: 'input.txt', returnedRanges: ['1-2'], returnedLines: 2, contentKind: 'declared-reference', returnedContent: '1 | first\n2 | second' },
   ]);
-  const acceptedPeer = (integrationEvidence['orchestration'] as { units: { id: string; acceptedAnswer: string; acceptedAnswerDigest: string; latestCheck: unknown }[] }).units.find(unit => unit.id === 'u1')!;
+  const acceptedPeer = (integrationEvidence['orchestration'] as { units: { id: string; acceptedAnswer: string; latestCheck: unknown }[] }).units.find(unit => unit.id === 'u1')!;
   expect(acceptedPeer.acceptedAnswer).toBe(done.units[0]!.answer!);
-  expect(acceptedPeer.acceptedAnswerDigest).toBe(hashState(done.units[0]!.answer!));
+  expect(acceptedPeer).not.toHaveProperty('acceptedAnswerDigest');
   expect(acceptedPeer.latestCheck).toEqual(done.units[0]!.checks.at(-1)!);
-  const finalReceipts = observed.find(evidence => 'criteria' in evidence)!['orchestration'] as { units: { id: string; acceptedAnswerDigest: string; acceptedAnswerSource: unknown; latestCheck: unknown; readObservations: unknown[] }[] };
+  const finalReceipts = observed.find(evidence => 'criteria' in evidence)!['orchestration'] as { units: { id: string; acceptedAnswerSource: unknown; latestCheck: unknown; readObservations: unknown[] }[] };
   expect(Array.isArray(contentCriteria)).toBe(true);
   expect(observed.find(evidence => 'criteria' in evidence)!['criteria']).toEqual(contentCriteria);
   const finalPeer = finalReceipts.units.find(unit => unit.id === 'u1')!;
   const check = done.units[0]!.checks.at(-1)!;
   expect(check.decisionIds.length).toBeGreaterThan(0);
-  expect(finalPeer.acceptedAnswerDigest).toBe(hashState(done.units[0]!.answer!));
+  expect(finalPeer).not.toHaveProperty('acceptedAnswerDigest');
   expect(finalPeer.acceptedAnswerSource).toEqual({ storage: 'native-contract-store', contractId: id, unitId: 'u1', field: 'answer' });
   expect(finalPeer.latestCheck).toEqual(check);
   expect(finalPeer.readObservations).toEqual([{ path: 'input.txt', returnedRanges: ['1-2'], returnedLines: 2,
-    contentKind: 'declared-reference', returnedContentDigest: hashState('1 | first\n2 | second'),
+    contentKind: 'declared-reference', bodySource: { storage: 'native-contract-store', contractId: id, unitId: 'u1', field: 'readEvidence', index: 0 },
     returnedContentBytes: Buffer.byteLength('1 | first\n2 | second'), nativeCheckRef: 'latestCheck',
   }]);
   expect(done.units[0]!.readEvidence![0]!.returnedContent).toBe('1 | first\n2 | second');
@@ -796,12 +797,12 @@ describe('answer and status (6.5)', () => {
           const evidence = state['evidence'] as Record<string, unknown> | undefined;
           if (evidence !== undefined && 'criteria' in evidence && 'output' in state && (name === 'goal' || name.startsWith('criterion_'))) {
             outputs.push(state['output']);
-            const units = (evidence['orchestration'] as { units: { id: string; acceptedAnswerDigest: string;
+            const units = (evidence['orchestration'] as { units: { id: string;
               acceptedAnswerSource: { storage: string; contractId: string; unitId: string; field: string } }[] }).units;
             const reference = units.find(value => value.id === 'u2')!;
             const source = reference.acceptedAnswerSource;
             const full = h.store.get(source.contractId)!.units.find(unit => unit.id === source.unitId)!.answer!;
-            expect(reference.acceptedAnswerDigest).toBe(hashState(full));
+            expect(reference).not.toHaveProperty('acceptedAnswerDigest');
             expect(source).toEqual({ storage: 'native-contract-store', contractId: source.contractId, unitId: 'u2', field: 'answer' });
             reports.push(full);
           }

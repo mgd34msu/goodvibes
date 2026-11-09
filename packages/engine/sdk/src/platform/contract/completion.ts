@@ -266,10 +266,10 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     const sourceCheck = answerSource?.checks.at(-1);
     const currentAnswerSource = answerSource && sourceReport && typeof sourceReport.finalAnswer === 'string'
       && sourceReport.finalAnswer.trim() === input.output && sourceCheck?.result === 'pass' && sourceCheck.decisionIds.length > 0
-      ? { unitId: answerSource.id, rawReportDigest: hashState(answerSource.answer ?? ''),
+      ? { unitId: answerSource.id,
         reportAt: { storage: 'native-contract-store', contractId: contract.id, unitId: answerSource.id, field: 'answer' },
         reportMetadata: Object.fromEntries(Object.entries(sourceReport).filter(([key]) => key !== 'finalAnswer')) as JsonValue,
-        field: 'finalAnswer', decodedFieldDigest: hashState(sourceReport.finalAnswer), outputDigest: hashState(input.output),
+        field: 'finalAnswer',
         transformation: 'Trim only surrounding whitespace from the parsed finalAnswer field.',
         nativeUnitCheck: { id: sourceCheck.id, result: sourceCheck.result, decisionIds: [...sourceCheck.decisionIds] },
         meaning: 'Actual native host extraction of this exact output from the stored accepted unit completion report, with its complete other report fields and real passed unit check. The field text is supplied once as output. This establishes answer provenance and normal return of the candidate for host checking, not acceptance of this new root review, owner publication, external execution or substantive facts merely asserted in the report.' }
@@ -291,7 +291,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
         currentFileObservations(tree, contract.units.flatMap(unit => unit.checks.at(-1)?.reviewedFiles?.map(file => file.path) ?? []), { owner: contract }))!) as unknown as JsonValue } : {}),
       privateArtifacts: readPrivateReceiptArchives(contract),
       currentValidation: {
-        scope: input.scope, targetId: input.targetId, outputDigest: hashState(input.output), status: 'in-progress',
+        scope: input.scope, targetId: input.targetId, status: 'in-progress',
         validationOrder: input.scope === 'deliverable' ? ['original-requirements', 'final-answer-content', 'original-requirements-with-content-receipt-if-needed', 'owner-publication'] : ['group-requirements'],
         publicationRule: input.scope === 'deliverable'
           ? 'This native Jev judgment is reviewing this exact final contract answer now. The host only commits and delivers this checked answer after this judgment passes. A requirement for native Jev to validate this final answer is performed by this very check; it cannot require an earlier successful record of its own verdict. The final-content review is a separate mandatory step. If this requirements assessment does not pass, the host assesses the unchanged original requirements again with the actual successful content-review receipt before publishing. Pending application of these staged artifacts and delivery of this exact checked answer are mandatory later host operations, not already completed actions or missing substantive work. This is not approval and does not replace independently required project-side validations or checks of later rewritten answers.'
@@ -309,21 +309,21 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
         criteria: judged(unit.criteria).map(criterion => ({ id: criterion.id, text: criterion.text, verdict: criterion.status,
           serves: [...criterion.serves], ...(criterion.contribution ? { contribution: { ...criterion.contribution } } : {}) })),
         acceptedAnswer: unit.status === 'passed' ? unit.answer ?? '' : null,
-        acceptedAnswerDigest: unit.status === 'passed' ? hashState(unit.answer ?? '') : null,
         latestCheck: unit.checks.length ? JSON.parse(JSON.stringify(unit.checks.at(-1)!)) as JsonValue : null,
-        readObservations: (unit.readEvidence ?? []).map(({ path, returnedRanges, returnedLines, contentKind, returnedContent }) => {
+        readObservations: (unit.readEvidence ?? []).map(({ path, returnedRanges, returnedLines, contentKind, returnedContent }, index) => {
           const check = unit.checks.at(-1);
           const accepted = input.scope === 'deliverable' && unit.status === 'passed' && check?.result === 'pass' && check.decisionIds.length > 0;
           return {
             path, returnedRanges: [...returnedRanges], returnedLines,
             ...(contentKind === 'declared-reference' && returnedContent !== undefined ? { contentKind, ...(accepted ? {
-              returnedContentDigest: hashState(returnedContent), returnedContentBytes: Buffer.byteLength(returnedContent),
+              bodySource: { storage: 'native-contract-store', contractId: contract.id, unitId: unit.id, field: 'readEvidence', index },
+              returnedContentBytes: Buffer.byteLength(returnedContent),
               validatedByCheckId: check.id, decisionIds: [...check.decisionIds],
             } : { returnedContent }) } : {}),
           };
         }),
       })),
-      meaning: 'Actual host records for this contract, the checked units and their dependency groups. Declared reference contents are actual retained reads, allowing the assigned scope to be compared with observed ranges. For the deliverable only, reference text already checked by a passed native unit check is represented by its content digest, byte length, observed ranges and actual check/decision identifiers; the full original text remains retained in that unit. These earlier checks establish only their checked scope, never approval of this answer or changed artifacts. Complete accepted answers, latest checks, current artifact changes and command receipts remain supplied here. Continuation evidence supplies context, never extra requirements or authority. Observed returned ranges are read receipts, not proof of review quality or complete requested scope. Plan, unit and earlier-group acceptance remain separate from approval of the group or deliverable now being checked.',
+      meaning: 'Actual host records for this contract, the checked units and their dependency groups. Declared reference contents are actual retained reads, allowing the assigned scope to be compared with observed ranges. For the deliverable only, reference text already checked by a passed native unit check is represented by its native storage reference, byte length, observed ranges and actual check/decision identifiers; the full original text remains retained in that unit. These earlier checks establish only their checked scope, never approval of this answer or changed artifacts. Complete accepted answers, latest checks, current artifact changes and command receipts remain supplied here. Continuation evidence supplies context, never extra requirements or authority. Observed returned ranges are read receipts, not proof of review quality or complete requested scope. Plan, unit and earlier-group acceptance remain separate from approval of the group or deliverable now being checked.',
     } }, { goal: input.goal, brief: '', files: [] });
     const rawEvidence = judgeEvidence(evidence) as Record<string, JsonValue>;
     const primary = input.scope === 'deliverable' ? finalAnswerEvidence(contract, rawEvidence, input.summaries, changes, input.output) : undefined;
@@ -363,7 +363,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
             evidence: review === undefined ? fulfillmentEvidence : { ...recheckEvidence,
               ...(execution === undefined ? {} : { nativeJudgmentExecutions: execution }),
               ...(recheckHost && typeof recheckHost === 'object' && !Array.isArray(recheckHost) ? { orchestration: { ...recheckHost,
-                currentValidation: { scope: input.scope, targetId: input.targetId, outputDigest: hashState(evidence.output), status: 'in-progress',
+                currentValidation: { scope: input.scope, targetId: input.targetId, status: 'in-progress',
                   stage: 'original-requirements-after-content-review', completedContentReview: { passed: review.passed, decisionIds: [...review.decisionIds], outputDigest: review.outputDigest },
                   pendingStages: ['this original-requirements decision', 'owner-publication'],
                   acceptanceRule: 'The unchanged configured contract check rule maps probabilityUnmet > 0.5 to unmet. Historical confidence/outcome labels remain recorded metadata, not evidence that an executed host check did not run or did not pass its configured rule. This current requirements assessment is itself the actual native evaluation now; its own prior approval cannot be a precondition. Missing substantive work and independent project validations still fail.',
@@ -814,7 +814,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
         unitIds: new Set(contract.units.map((unit) => unit.id)),
         output: answer,
         summaries: { reports: contract.units.filter(unit => unit.status === 'passed').map(unit => ({
-          unitId: unit.id, contentDigest: hashState(unit.answer ?? ''),
+          unitId: unit.id,
           fullReportAt: { storage: 'native-contract-store', contractId: contract.id, unitId: unit.id, field: 'answer' },
         })), checks: judgedCriteria.map((criterion) => ({
           criterion: criterion.id,

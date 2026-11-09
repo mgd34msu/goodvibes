@@ -7,7 +7,7 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { hashState, JudgmentError, SqliteDecisionLog } from '@goodvibes-jev/judgment';
+import { JudgmentError, SqliteDecisionLog } from '@goodvibes-jev/judgment';
 import { hasContractPlanConsumer } from '../../sdk/src/platform/tools/agent/contract-binding.js';
 import { buildFixGroup, validateFixPlan, type ContractRouteSelector, type Criterion, type FixBrief } from '../../sdk/src/platform/contract/index.js';
 import { plannerOutput, type AnswerContext, type DraftPlan } from './plan-support.js';
@@ -294,11 +294,10 @@ function failsUntilRepairedWork(kind: 'group' | 'deliverable') {
   return (context: AnswerContext): unknown => {
     if (judgeOf(context) !== kind) return undefined;
     const { finalAnswerReview: _review, previousFulfillmentAssessment: _previous, ...work } = context.state['evidence'] as Record<string, unknown>;
-    // Content approval changes the verifier phase and attaches actual execution
-    // provenance. The original prepared-evidence digest still binds the same
-    // work; a new phase label is not an implementation repair.
-    const full = work['fullSourceEvidence'] as { digest?: string } | undefined;
-    const basis = JSON.stringify({ output: context.state['output'], work: full?.digest ?? work });
+    // A verifier phase or its new decision receipts do not repair task work.
+    // Compare the actual substantive work, excluding only that phase metadata.
+    const basis = JSON.stringify({ output: context.state['output'], work }, (key, value) =>
+      key === 'nativeJudgmentExecutions' || key === 'currentValidation' ? undefined : value);
     rejectedBasis ??= basis;
     return noulAnswer(basis === rejectedBasis ? UNMET : MET);
   };
@@ -368,10 +367,10 @@ describe('groups and the deliverable (6.4)', () => {
     expect(fixed.checks.at(-1)!.decisionIds.length).toBeGreaterThan(0);
     expect(sources).toHaveLength(2);
     for (const source of sources) {
-      expect(source).toMatchObject({ unitId: fixed.id, rawReportDigest: hashState(fixed.answer!),
+      expect(source).toMatchObject({ unitId: fixed.id,
         reportAt: { storage: 'native-contract-store', contractId: done.id, unitId: fixed.id, field: 'answer' },
         reportMetadata: { summary: 'Corrected the final response.', result: 'Supporting context retained.' },
-        field: 'finalAnswer', decodedFieldDigest: hashState(decoded), outputDigest: hashState(corrected),
+        field: 'finalAnswer',
         nativeUnitCheck: { id: fixed.checks.at(-1)!.id, result: 'pass', decisionIds: fixed.checks.at(-1)!.decisionIds } });
       expect((source as { reportMetadata: unknown }).reportMetadata).not.toHaveProperty('finalAnswer');
       expect(source).not.toHaveProperty('rootPassed');

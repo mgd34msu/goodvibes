@@ -1,9 +1,10 @@
 /** Native metadata must prove its owner binding before using canonical protocol encoding. */
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { SqliteDecisionLog, withDecisionLog, type EntryType } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { criteriaSetIdForWork, durablePayloadRevision, type DurableContractRequest } from '../../sdk/src/platform/contract/durable-admission.js';
+import * as admissionModule from '../../sdk/src/platform/contract/durable-admission.js';
 import { decideNativeContract } from '../../sdk/src/platform/contract/native-decisions.js';
 import { captureNativeContractSource, nativeSourceCriteria } from '../../sdk/src/platform/contract/native-source.js';
 import type { Contract, NativeContractSource } from '../../sdk/src/platform/contract/types.js';
@@ -113,4 +114,31 @@ test('inconsistent durable criteria binding cannot normalize a matching source I
     await expect(decide(value)).rejects.toMatchObject({ problem: 'card-material' });
     expect(fake.requests).toHaveLength(0); expect(log.query()).toHaveLength(0);
   });
+});
+
+
+// UNRUN: exercises the actual native decision and its repeated currentness
+// guards; no helper-only count or synthetic replacement decision.
+test('ordinary criteria references never invoke the earlier work-ID hash recipe', async () => {
+  const value = contract({ criteriaId: 'owner-saved-requirements' });
+  const hash = spyOn(admissionModule, 'criteriaSetIdForWork');
+  try {
+    await recorded(async () => {
+      const result = await decide(value); result.assertCurrent(); result.assertCurrent();
+      expect(result.decision.evidence).toContainEqual({ id: 'owner-saved-requirements', revision: '1' });
+      expect(hash).not.toHaveBeenCalled();
+    });
+  } finally { hash.mockRestore(); }
+});
+
+test('an actual earlier criteria spelling is verified once per original admission while live guards still run', async () => {
+  const value = contract(), hash = spyOn(admissionModule, 'criteriaSetIdForWork');
+  try {
+    await recorded(async () => {
+      const first = await decide(value), second = await decide(value);
+      first.assertCurrent(); second.assertCurrent();
+      expect(first.decision.evidence).toContainEqual({ id: criteriaId.slice('criteria:'.length), revision: '1' });
+      expect(hash).toHaveBeenCalledTimes(1);
+    });
+  } finally { hash.mockRestore(); }
 });

@@ -218,6 +218,7 @@ function nativeSemanticPort(contract: Contract, owner: NativeContractServices, s
  * arbitrary source/reference strings still cross the unmodified privacy guard.
  * The original namespaced ID remains in the source and durable admission.
  */
+const historicalCriteriaReferences = new WeakMap<object, { readonly workId: string; readonly criteriaId: string }>();
 function nativeCriteriaEvidence(contract: Contract): JevVersionRef {
   const source = contract.nativeSource!;
   const admission = contract.durableAdmission;
@@ -229,10 +230,16 @@ function nativeCriteriaEvidence(contract: Contract): JevVersionRef {
       && admission.key.criteriaId === source.criteriaId && source.criteriaRevision === admission.key.criteriaRevision) {
       return { id: source.criteriaId, revision: source.criteriaRevision };
     }
-    const canonicalId = criteriaSetIdForWork(admission.key.workId);
-    if (source.criteriaId === canonicalId && admission.key.criteriaId === canonicalId
+    // Only an exact earlier saved spelling needs its old work-ID recipe.
+    // Ordinary caller-supplied references never invoke that compatibility hash.
+    if (/^criteria:[0-9a-f]{64}$/.test(source.criteriaId) && admission.key.criteriaId === source.criteriaId
       && source.criteriaRevision === admission.key.criteriaRevision) {
-      return { id: canonicalId.slice('criteria:'.length), revision: source.criteriaRevision };
+      let saved = historicalCriteriaReferences.get(admission);
+      if (!saved || saved.workId !== admission.key.workId) {
+        saved = { workId: admission.key.workId, criteriaId: criteriaSetIdForWork(admission.key.workId) };
+        historicalCriteriaReferences.set(admission, saved);
+      }
+      if (source.criteriaId === saved.criteriaId) return { id: saved.criteriaId.slice('criteria:'.length), revision: source.criteriaRevision };
     }
   }
   return { id: source.criteriaId, revision: source.criteriaRevision };

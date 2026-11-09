@@ -2,7 +2,7 @@ import { requireSemanticKnowledge } from '../../decision-policy.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { toJson, type JsonValue, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { snapshotJudgmentInput } from '../../../gate/judgment-input.js';
-import { freezeSupport, supportHash } from '../verification/projection.js';
+import { freezeSupport } from '../verification/projection.js';
 import { answerGapAdmission, answerGapEquivalence } from './battery.js';
 import { ANSWER_GAP_LIMITS as LIMITS, KnowledgeAnswerGapHeldError as Held, type AnswerGapInput } from './types.js';
 export * from './types.js';
@@ -52,7 +52,7 @@ export function prepareAnswerGapReadings(input: AnswerGapInput, options: {
 }) {
   requireSemanticKnowledge();
   const { signal, deadlineAt, assertCurrent: callerCurrent } = options;
-  const snapshot = snapshotAnswerGapInput(input), inputHash = supportHash(snapshot);
+  const snapshot = snapshotAnswerGapInput(input);
   const json = (value: object) => {
     const result = toJson(value);
     if (!result || typeof result !== 'object' || Array.isArray(result)) throw new Held('malformed');
@@ -78,7 +78,7 @@ export function prepareAnswerGapReadings(input: AnswerGapInput, options: {
       if (current !== configured.port || current?.model !== configured.model) throw new Held('stale');
     }
   };
-  let promise: Promise<{ readonly admitted: boolean; readonly reference?: string | undefined; readonly inputHash: string; readonly decisionIds: readonly string[] }> | undefined;
+  let promise: Promise<{ readonly version: 2; readonly admitted: boolean; readonly reference?: string | undefined; readonly decisionIds: readonly string[] }> | undefined;
   const read = (): NonNullable<typeof promise> => promise ??= (async () => {
     assertCurrent();
     const controller = new AbortController();
@@ -112,11 +112,11 @@ export function prepareAnswerGapReadings(input: AnswerGapInput, options: {
         result.recordAction(`prepared answer-gap ${reading.verdict}; observation only, no repair or operator authority`);
         return reading.verdict === 'yes';
       };
-      if (snapshot.needsSubject && !await ask(answerGapAdmission, admission)) return freezeSupport({ admitted: false, inputHash, decisionIds });
+      if (snapshot.needsSubject && !await ask(answerGapAdmission, admission)) return freezeSupport({ version: 2 as const, admitted: false, decisionIds });
       for (const job of jobs) if (await ask(answerGapEquivalence, job.state)) selected.push(job.reference);
       check();
       if (selected.length > 1) throw new Held('uncertain');
-      return freezeSupport({ admitted: true, reference: selected[0], inputHash, decisionIds });
+      return freezeSupport({ version: 2 as const, admitted: true, reference: selected[0], decisionIds });
     };
     try { return await Promise.race([run(), stopped.promise]); }
     catch (error) { controller.abort(); throw error instanceof Held ? error : new Held('unavailable'); }

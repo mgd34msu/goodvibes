@@ -39,7 +39,9 @@ export interface AnswerGapWritePlan {
   readonly existing?: KnowledgeNodeRecord | undefined; readonly issue?: KnowledgeIssueRecord | undefined;
   readonly issues: readonly KnowledgeIssueRecord[]; readonly tasks: readonly KnowledgeRefinementTaskRecord[];
   readonly sources: readonly KnowledgeSourceRecord[]; readonly linkedObjects: readonly KnowledgeNodeRecord[];
-  readonly reading: { readonly inputHash: string; readonly decisionIds: readonly string[] };
+  /** Current native read-set and actual decision references bind this write.
+   * Earlier saved inputHash annotations remain data, never a write permit. */
+  readonly reading: { readonly version: 2; readonly decisionIds: readonly string[] };
 }
 /** Internal only: the immutable plan and its read-set are closures, never JSON
  * authority. The ordinary observed research-task seam does not endorse facts.

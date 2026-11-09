@@ -84,6 +84,22 @@ async function unchanged(store: KnowledgeStore, before: ReturnType<typeof snapsh
 }
 
 describe('prepared answer-gap universe and write guards', () => {
+  // UNRUN: plain fake port isolates this reader's local bookkeeping from the
+  // independently required recorded-port state commitment.
+  test('answer gap readings need no descriptive input checksum', async () => {
+    const fake = readings(0.01), hashing = spyOn(crypto, 'createHash');
+    try {
+      const meaning = { query, subjects: [], sources: [] };
+      const plan = prepareAnswerGapReadings({ question: meaning, needsSubject: true,
+        candidates: [{ reference: 'gap-1', title: query, ...meaning }] },
+      { deadlineAt: Date.now() + 1000, assertCurrent() {} });
+      const reading = await plan.read();
+      expect(reading.version).toBe(2); expect(reading.admitted).toBe(true);
+      expect(Object.hasOwn(reading, 'inputHash')).toBe(false);
+      expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+      expect(fake.requests).toHaveLength(2); expect(await plan.read()).toBe(reading);
+    } finally { hashing.mockRestore(); }
+  });
   test('new gap identifiers cannot accidentally resemble payment card material', async () => {
     const item = await fixture(); readings(0.01);
     expect(() => assertJudgmentInput({ value: '8111-111111111112' })).toThrow(JudgmentInputError);
@@ -101,6 +117,8 @@ describe('prepared answer-gap universe and write guards', () => {
     const prepared = await prepare(item).read();
     const result = await prepared.persist(reason);
     expect(result?.id).toBe(item.existing.id);
+    expect(result?.metadata.answerGapReading).toMatchObject({ version: 2, admitted: true });
+    expect(Object.hasOwn(result!.metadata.answerGapReading as object, 'inputHash')).toBe(false);
     expect(item.store.listNodes().filter((node) => node.kind === 'knowledge_gap').map((node) => node.id)).toEqual([item.existing.id]);
     expect(item.store.listIssues().map((issue) => issue.id)).toEqual([item.issue.id]);
     expect(item.store.getIssue(item.issue.id)?.metadata.subjectFingerprint).toBe(item.issue.metadata.subjectFingerprint);

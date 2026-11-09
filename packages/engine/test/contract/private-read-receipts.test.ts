@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { preserveDeclaredReadReceipts, readPrivateReceiptArchives, readNativePrivateReceiptArchives, verifyPrivateReceiptPreservation } from '../../sdk/src/platform/contract/private-read-receipts.js';
-import type { ContractView } from '../../sdk/src/platform/contract/types.js';
+import { newContractId, type ContractView } from '../../sdk/src/platform/contract/types.js';
 import { makeRepo } from './runner-support.js';
 import { git } from './steps-support.js';
 import { judgeEvidence, qualityState } from '../../sdk/src/platform/contract/evidence.js';
@@ -10,13 +10,13 @@ import { judgeEvidence, qualityState } from '../../sdk/src/platform/contract/evi
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
-function fixture() {
+function fixture(contractId = 'ctr-abcd1234') {
   const root = makeRepo(); roots.push(root);
   writeFileSync(join(root, '.gitignore'), '.goodvibes/\n');
-  const relativePath = '.goodvibes/reviews/ctr-abcd1234/source-receipts.json';
+  const relativePath = `.goodvibes/reviews/${contractId}/source-receipts.json`;
   const observations = [{ path: 'review-artifacts/repository-review/findings.json', returnedRanges: ['1-2'], returnedLines: 2,
     contentKind: 'declared-reference' as const, returnedContent: '1 | {"followUpReturnedReadLedger":{"ranges":["11-23"],\n2 | "provenance":"private original receipt provenance"}}' }];
-  const contract = { id: 'ctr-abcd1234', projectRoot: root, units: [
+  const contract = { id: contractId, projectRoot: root, units: [
     { id: 'u1', status: 'passed', files: [], checks: [{ id: 'u1.k3', result: 'pass' }], readEvidence: observations },
     { id: 'u2', status: 'running', files: [relativePath], checks: [], readEvidence: [] },
   ] } as unknown as ContractView;
@@ -132,4 +132,12 @@ test('an old private reference cannot establish preservation of a different curr
   const task = { ...f.contract.units[1]!, files: [f.relativePath, reference], baseline: { head: git(f.root, 'rev-parse', 'HEAD').trim(), dirty: {} } };
   expect(verifyPrivateReceiptPreservation(f.contract, task, f.root)).toMatchObject({ passed: false,
     output: `The original public reference ${reference} has no exact preserved private snapshot` });
+});
+
+// UNRUN: this is the actual private archive writer/read path, not only the ID regex.
+test('full opaque contract IDs preserve native private receipt archives', () => {
+  const f = fixture(newContractId()); preserveDeclaredReadReceipts(f.contract);
+  expect(existsSync(f.path)).toBe(true); expect(lstatSync(f.path).mode & 0o777).toBe(0o600);
+  expect(readPrivateReceiptArchives(f.contract)[0]?.path).toBe(f.relativePath);
+  expect(readNativePrivateReceiptArchives(f.contract, [f.relativePath, 'review-artifacts/repository-review/findings.json'])[0]?.retainedPrivateReferences).toHaveLength(1);
 });

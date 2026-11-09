@@ -69,7 +69,7 @@ import { createContractFleetControls, type ContractFleetControls } from './fleet
 import type { OwnerEvidenceReader } from './owner-evidence.js';
 import { ContractRun, failureFromError, type RunEnv } from './run-context.js';
 import { createContractSteps, type ContractSteps, type ContractStepsWithReplies } from './steps.js';
-import { deserializeContract, deserializeOwnedContractCheckpoint, serializeContract, type ContractStore } from './store.js';
+import { deserializeContract, deserializeOwnedContractCheckpoint, serializeContract, type ContractCreationReservation, type ContractStore } from './store.js';
 import { retainOriginalReviewDescriptors } from './review-file-observations.js';
 import { releaseTreeBaselineBytes, retainOriginalTreeBaselines } from './tree-baseline.js';
 import {
@@ -667,21 +667,23 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       }
       const lease = await durableAdmissions.lease(frozen.key);
       const id = newContractId();
-      if (runs.has(id) || settlements.has(id) || durableLeases.has(id) || deps.store.get(id) !== null || storedIds.includes(id)) {
-        lease();
-        throw new DurableContractAdmissionError('conflict');
-      }
+      let creation: ContractCreationReservation;
+      try { creation = reserveCreation(id); }
+      catch (error) { lease(); throw error; }
       durableLeases.set(id, lease);
+      let owner: AgentRecord | undefined;
       try {
         requireDecisionFeature('autonomous contract planning and acceptance');
         const execution = await resolveContractGitPlacement(frozen.input.isolation ?? env.config().isolation,
           frozen.input.projectRoot, id, placementAbort.signal);
         if (disposed) throw new Error('Contract runner is disposed');
         requireDecisionFeature('autonomous contract planning and acceptance');
-        const owner = spawnOwner(frozen.input, id);
+        creation.assertCurrent();
+        owner = spawnOwner(frozen.input, id);
+        creation.assertCurrent();
         const admission = parseDurableAdmission({ ...frozen, schemaVersion: 2, execution, contractId: id,
           ownerAgentId: owner.id, payloadRevision: durablePayloadRevision(frozen) });
-        create(frozen.input, id, owner, { durableAdmission: admission, execution }, true, true);
+        create(frozen.input, id, owner, { durableAdmission: admission, execution, creation }, true, true);
         const run = runs.get(id);
         if (run !== undefined && !run.terminal && !disposed) {
           if (admitted.size < env.config().maxActiveContracts) {
@@ -696,10 +698,13 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
         return durableResult(admission);
       } catch (error) {
         const run = runs.get(id);
-        if (run !== undefined) cancelRun(run, 'native admission could not start');
-        else if (!settling.has(id)) { durableLeases.delete(id); lease(); }
+        if (run !== undefined && creation.owns(run.contract)) cancelRun(run, 'native admission could not start');
+        else if (!settling.has(id)) {
+          try { if (owner) deps.agentManager.cancel(owner.id); const pending = settlements.get(id); pending?.resolve(); if (runs.get(id) === undefined && settlements.get(id) === pending) settlements.delete(id); }
+          finally { durableLeases.delete(id); lease(); }
+        }
         throw error;
-      }
+      } finally { creation.release(); }
     } finally { release(); }
   }
 
@@ -754,7 +759,12 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     } finally { release(); }
   }
 
-  async function prepareStart(input: StartContractInput, id: string, options: ContractStartOptions,
+  function reserveCreation(id: string): ContractCreationReservation {
+    if (runs.has(id) || settlements.has(id) || durableLeases.has(id) || deps.store.get(id) !== null) throw new DurableContractAdmissionError('conflict');
+    return deps.store.reserveCreation(id);
+  }
+
+  async function prepareStart(input: StartContractInput, id: string, options: ContractStartOptions, creation: ContractCreationReservation,
     extraCurrent: () => void = () => {}, ownerSignal?: AbortSignal) {
     const originalSignal = options.signal, assertion = options.assertCurrent;
     const signal = AbortSignal.any([placementAbort.signal, ...(originalSignal ? [originalSignal] : []), ...(ownerSignal ? [ownerSignal] : [])]);
@@ -765,7 +775,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       let result: unknown;
       try { result = assertion?.(); } catch (error) { drainOwned(error); throw error; }
       if (result !== undefined) { drainOwned(result); throw new Error('Contract start requires a synchronous current owner'); }
-      extraCurrent();
+      extraCurrent(); creation.assertCurrent();
       signal.throwIfAborted();
     };
     current();
@@ -774,26 +784,29 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     return { execution, signal, current };
   }
 
-  function failedStart(id: string, owner: AgentRecord | undefined): void {
+  function failedStart(id: string, owner: AgentRecord | undefined, creation: ContractCreationReservation): void {
     const run = runs.get(id);
-    if (run !== undefined) { cancelRun(run, 'contract preparation or publication failed'); return; }
+    if (run !== undefined && creation.owns(run.contract)) { cancelRun(run, 'contract preparation or publication failed'); return; }
     try { if (owner !== undefined) deps.agentManager.cancel(owner.id); }
-    finally { settlements.get(id)?.resolve(); }
+    finally {
+      if (run === undefined) { const pending = settlements.get(id); pending?.resolve(); if (runs.get(id) === undefined && settlements.get(id) === pending) settlements.delete(id); }
+    }
   }
 
   function start(input: StartContractInput, options: ContractStartOptions = {}): Promise<StartedContract> {
     requireDecisionFeature('autonomous contract planning and acceptance');
     if (disposed) throw new Error('Contract runner is disposed');
     const captured = captureStartInput(input);
-    const id = newContractId();
+    const id = newContractId(), creation = reserveCreation(id);
     return (async () => {
-      const prepared = await prepareStart(captured, id, options);
       let owner: AgentRecord | undefined;
       try {
+        const prepared = await prepareStart(captured, id, options, creation);
         prepared.current();
         owner = spawnOwner(captured, id); prepared.current();
-        return create(captured, id, owner, prepared);
-      } catch (error) { failedStart(id, owner); throw error; }
+        return create(captured, id, owner, { ...prepared, creation });
+      } catch (error) { failedStart(id, owner, creation); throw error; }
+      finally { creation.release(); }
     })();
   }
 
@@ -802,15 +815,16 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     if (disposed) throw new Error('Contract runner is disposed');
     const { draft, ...rest } = { ...input, ...captureStartInput(input) };
     const draftPlan = numberDraft(draft);
-    const id = newContractId();
+    const id = newContractId(), creation = reserveCreation(id);
     return (async () => {
-      const prepared = await prepareStart(rest, id, options);
       let owner: AgentRecord | undefined;
       try {
+        const prepared = await prepareStart(rest, id, options, creation);
         prepared.current();
         owner = spawnOwner(rest, id); prepared.current();
-        return create(rest, id, owner, { ...prepared, draftPlan });
-      } catch (error) { failedStart(id, owner); throw error; }
+        return create(rest, id, owner, { ...prepared, draftPlan, creation });
+      } catch (error) { failedStart(id, owner, creation); throw error; }
+      finally { creation.release(); }
     })();
   }
 
@@ -842,15 +856,17 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
         || (bound && (record.contractRole !== 'owner' || record.reviewMode !== 'contract'))
         || (sourceOf && sourceIsCurrent && !sourceIsCurrent(sourceOf()))) throw new Error('The original contract owner changed during preparation');
     };
+    const creation = reserveCreation(id);
     return (async () => {
-      const prepared = await prepareStart(input, id, options, recordCurrent, ownerSignal);
       try {
+        const prepared = await prepareStart(input, id, options, creation, recordCurrent, ownerSignal);
         prepared.current();
         record.contractId = id; record.contractRole = 'owner'; record.reviewMode = 'contract'; bound = true;
         startContractOwner(record, { contractId: id, contractRole: 'owner', progress: `Contract ${id}: queued`, settled: reserveSettlement(id).promise }, deps.runtimeBus);
         prepared.current();
-        return create(input, id, record, prepared, requireSettlement);
-      } catch (error) { failedStart(id, record); throw error; }
+        return create(input, id, record, { ...prepared, creation }, requireSettlement);
+      } catch (error) { if (bound) failedStart(id, record, creation); throw error; }
+      finally { creation.release(); }
     })();
   }
 
@@ -893,6 +909,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     owner: AgentRecord,
     extra: Pick<Contract, 'draftPlan' | 'durableAdmission'> & {
       readonly execution: DurableContractExecution;
+      readonly creation: ContractCreationReservation;
       readonly signal?: AbortSignal;
       readonly current?: () => void;
     },
@@ -943,22 +960,18 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       bindContractActionSignal(contract, originalSignal ? AbortSignal.any([originalSignal, extra.signal]) : extra.signal);
     }
     extra.current?.();
-    // Establish the immutable identity/checkpoint before publishing this run.
-    // A failed admission cannot replace an existing live map or leave an
-    // uncommitted run visible to reentrant store/creation observers.
-    if (contract.durableAdmission !== undefined) {
-      const checkpoint = serializeContract(contract, now());
-      if (checkpoint === null) throw new DurableContractAdmissionError('checkpoint');
-      deps.store.prepareCheckpointWrite(contract);
-      durableAdmissions.write(contract.durableAdmission, checkpoint);
-    }
+    // Complete exclusive first publication precedes run registration. A
+    // competing/history ID survives every placement/spawn/persistence hook.
+    extra.creation.assertCurrent();
+    deps.store.publishCreation(extra.creation, contract);
     const run = newRun(contract);
     run.requireSettlement = requireSettlement;
     deps.store.put(contract);
     extra.current?.();
-    if (contract.durableAdmission !== undefined) {
-      if (!deps.store.write(id)) throw new DurableContractAdmissionError('checkpoint');
-    }
+    extra.creation.assertCurrent();
+    // No executor or creation event is admitted until actual claim cleanup
+    // succeeds. Future creators now see the durable initial checkpoint.
+    extra.creation.release();
     run.decide('created', id, `origin ${input.origin}; ${isolation} isolation${extra.draftPlan === undefined ? '' : `; ${extra.draftPlan.units.length} drafted units`}`);
     run.emit({ type: 'CONTRACT_CREATED', contractId: id, sessionId: input.sessionId, origin: input.origin, ask: input.ask, ownerAgentId: owner.id });
     if (owner.status === 'cancelled') cancelRun(run, 'the owner was cancelled during spawn');

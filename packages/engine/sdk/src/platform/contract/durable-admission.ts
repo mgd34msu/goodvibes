@@ -9,7 +9,7 @@ import { createAtomicTempPath, writeFileAtomic } from '../utils/atomic-json-stor
 import { readFileObservation } from '../utils/file-observation.js';
 import { readOwnedContractCheckpoint, ownedContractCheckpointText, type OwnedContractCheckpointRead } from './owned-checkpoint-read.js';
 import { acquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
-import { CONTRACT_ORIGINS, isContractId, type ContractView, type StartContractInput } from './types.js';
+import { CONTRACT_ORIGINS, isContractId, isOpaqueContractId, type ContractView, type StartContractInput } from './types.js';
 import { captureNativeContractSource } from './native-source.js';
 import { delegationForbidden } from './batteries/request-shape.js';
 const nativeAdmissionApply = Reflect.apply, nativeRequestGet = WeakMap.prototype.get, nativeRequestSet = WeakMap.prototype.set, freezeNativeAdmission = Object.freeze;
@@ -394,6 +394,9 @@ export class DurableContractAdmissions {
       if (envelope === null || envelope.admission.contractId !== contractId) throw new DurableContractAdmissionError('invalid');
       return envelope.admission;
     }
+    // Full128 IDs were introduced only after reverse-first durable publication.
+    // A missing reverse leaf is not a reason to scan every earlier8hex receipt.
+    if (isOpaqueContractId(contractId)) return null;
     const admission = this.findUnindexedContract(contractId);
     if (admission !== null) this.reserveIndex(admission);
     return admission;
@@ -449,7 +452,7 @@ export class DurableContractAdmissions {
     if (this.read(admission.key) !== null) throw new DurableContractAdmissionError('conflict');
     // A fresh index cannot steal an older receipt's unindexed ID. This check
     // is intentionally conservative until that historical identity is known.
-    if (this.indexedKey(admission.contractId) === null && this.findUnindexedContract(admission.contractId) !== null)
+    if (!isOpaqueContractId(admission.contractId) && this.indexedKey(admission.contractId) === null && this.findUnindexedContract(admission.contractId) !== null)
       throw new DurableContractAdmissionError('conflict');
     this.reserveIndex(admission, true);
     this.persist(admission, checkpoint);

@@ -148,10 +148,10 @@ describe('the rules the runner relies on', () => {
 });
 
 describe('contract ids', () => {
-  test('newContractId is ctr- and eight hex digits, and ids differ', () => {
+  test('newContractId is a full opaque128bit UUID label, and ids differ', () => {
     const ids = new Set(Array.from({ length: 50 }, () => newContractId()));
     expect(ids.size).toBe(50);
-    for (const id of ids) expect(isContractId(id)).toBe(true);
+    for (const id of ids) { expect(isContractId(id)).toBe(true); expect(id).toMatch(/^ctr-[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/); }
   });
 
   test('isContractId refuses anything that could name another path', () => {

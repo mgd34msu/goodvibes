@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Reserve full contract IDs before placement or owner startup, and publish the
+  initial checkpoint exclusively before registering execution. Preserve existing
+  history, refuse concurrent creation and keep earlier contract IDs readable.
+
 - Match Agent end-to-end completion fixtures to the actual text-only target
   adapter and remove diagnostic-only payload hashes. Saved static-source checks
   stop after a matching wire format and reject wrong metadata before hashing

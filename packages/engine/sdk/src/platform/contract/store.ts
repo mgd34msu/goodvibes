@@ -1,3 +1,5 @@
+import { retainOwnedJson } from '../gate/judgment-input.js';
+import { claimContractCreation, contractCreationPathAbsent, publishInitialContractCheckpoint, retainContractCreationRead, type ContractCreationClaim } from './creation-claim.js';
 /**
  * ContractStore: the contract tree in memory and on disk
  * (docs/design/contract-runner.md section 7.1).
@@ -20,7 +22,7 @@ import type { ContractEvent } from '../../events/contract.js';
 import { CONTRACT_STATUSES } from '../../events/contract.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
-import { reapOwnedAtomicTempFile, writeFileAtomic } from '../utils/atomic-json-store.js';
+import { captureExistingDirectory, reapOwnedAtomicTempFile, writeFileAtomic } from '../utils/atomic-json-store.js';
 import { fileObservationIdentity, readFileObservation } from '../utils/file-observation.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { contractWithStoredReviewObservations, hydrateStoredReviewObservations } from './review-file-observations.js';
@@ -30,7 +32,7 @@ import { storedTreeBaselineOrigins, hydrateTreeBaselines, releaseTreeBaselineByt
 import { isContractInputSnapshot } from './input-snapshot.js';
 import { validateNativeDecisionState } from './native-decisions.js';
 import { assertNativeContractSource, bindNativeContractSource } from './native-source.js';
-import { CURRENT_CONTRACT_SCHEMA_VERSION, isContractId, isTerminalContractStatus, type Contract } from './types.js';
+import { CURRENT_CONTRACT_SCHEMA_VERSION, isContractId, isOpaqueContractId, isTerminalContractStatus, type Contract } from './types.js';
 import { recoverPendingFixIdentities, recoverRepeatedStructuralCriteria } from './fix-identity.js';
 
 const DEBOUNCE_MS = 250;
@@ -76,7 +78,7 @@ export function contractCheckpointsDir(projectRoot: string): string {
   return join(contractsDir(projectRoot), 'checkpoints-v6');
 }
 
-/** A contract's current checkpoint file path. Throws for an id that is not `ctr-<8 hex>`, so no id can name a path outside the directory. */
+/** A contract's current checkpoint file path. Accepts only an actual current or historical contract ID, so no id can name a path outside the directory. */
 export function contractPath(projectRoot: string, contractId: string): string {
   if (!isContractId(contractId)) throw new Error(`Not a contract id: ${JSON.stringify(contractId)}`);
   return join(contractCheckpointsDir(projectRoot), `${contractId}${JSON_SUFFIX}`);
@@ -207,12 +209,31 @@ export interface ContractStoreOptions {
   readonly projectRoot: string;
   /** Actual installed native owner; declare its reader floor before writes. */
   readonly beforeWrite?: ((contract?: Contract) => void) | undefined;
+  /** Original native constructor declares new ID readers before creation effects. */
+  readonly beforeCreate?: ((contractId: string) => void) | undefined;
   /** Clock seam for tests. */
   readonly now?: (() => number) | undefined;
   /** Debounce for event-triggered writes; defaults to 250 ms. */
   readonly debounceMs?: number | undefined;
   /** Housekeeping interval while attached; 0 turns the timer off. Defaults to an hour. */
   readonly sweepIntervalMs?: number | undefined;
+}
+
+export interface ContractCreationReservation {
+  readonly id: string;
+  assertCurrent(): void;
+  owns(contract: Contract): boolean;
+  release(): void;
+}
+interface CreationState {
+  readonly claim: ContractCreationClaim;
+  readonly reservation: ContractCreationReservation;
+  contract?: Contract;
+  candidate?: Contract;
+  releaseFailed?: boolean;
+  releaseError?: unknown;
+  publication?: { assertCurrent(): void };
+  durable?: { readonly read: OwnedContractCheckpointRead; readonly indexPath: string; readonly physical: string; readonly parent: ReturnType<typeof captureExistingDirectory> };
 }
 
 interface DatedFile {
@@ -256,6 +277,8 @@ export class ContractStore {
   private readonly debounceMs: number;
   private readonly sweepIntervalMs: number;
   private readonly beforeWrite: ((contract?: Contract) => void) | undefined;
+  private readonly beforeCreate: ((contractId: string) => void) | undefined;
+  private readonly creations = new Map<string, CreationState>();
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(options: ContractStoreOptions) {
@@ -264,6 +287,7 @@ export class ContractStore {
     this.debounceMs = options.debounceMs ?? DEBOUNCE_MS;
     this.sweepIntervalMs = options.sweepIntervalMs ?? SWEEP_INTERVAL_MS;
     this.beforeWrite = options.beforeWrite?.bind(options);
+    this.beforeCreate = options.beforeCreate?.bind(options);
   }
 
   /** The live contract, which the runner mutates in place. */
@@ -277,8 +301,73 @@ export class ContractStore {
 
   /** Also used by the runner's first atomic durable-admission checkpoint. */
   prepareCheckpointWrite(contract?: Contract): void {
+    const creation = contract ? this.creations.get(contract.id) : undefined;
+    if (creation) {
+      if (creation.candidate !== contract) throw new Error('Contract creation belongs to another original');
+      creation.claim.assertCurrent();
+    }
     const result: unknown = this.beforeWrite?.(contract);
     if (result !== undefined) { drainOwned(result); throw new Error('Contract checkpoint publication requires a synchronous native owner'); }
+    creation?.claim.assertCurrent();
+  }
+
+  /** Claim an unused identity before placement awaits or owner spawn hooks. */
+  reserveCreation(id: string): ContractCreationReservation {
+    if (!isContractId(id) || this.creations.has(id) || this.contracts.has(id)) throw new Error('Contract identity is already held');
+    const returned: unknown = this.beforeCreate?.(id);
+    if (returned !== undefined) { drainOwned(returned); throw new Error('Contract creation requires a synchronous native owner'); }
+    const claim = claimContractCreation(this.projectRoot, id);
+    try {
+      // Only actual earlier8hex producers could leave unindexed receipts.
+      // Every valid full128 writer reserves its fixed reverse leaf first; no
+      // unrelated historical directory scan belongs in normal new creation.
+      if (!isOpaqueContractId(id) && new DurableContractAdmissions(this.projectRoot).findByContractId(id) !== null) throw new Error('Contract identity is already admitted');
+      const reservation: ContractCreationReservation = Object.freeze({ id,
+        assertCurrent: () => {
+          const state = this.creations.get(id);
+          if (!state || state.reservation !== reservation) throw new Error('Contract creation reservation has retired');
+          state.claim.assertCurrent();
+          if (state.contract) {
+            if (this.contracts.get(id) !== state.contract) throw new Error('Original contract creation owner changed');
+            state.publication?.assertCurrent();
+          } else if (this.contracts.has(id) || [contractPath(this.projectRoot, id), historicalContractPath(this.projectRoot, id)].some(path => !contractCreationPathAbsent(path) || !contractCreationPathAbsent(path + QUARANTINE_SUFFIX))) throw new Error('Contract identity became occupied');
+          const indexPath = join(contractsDir(this.projectRoot), 'admissions', '.by-contract', `${id}.json`);
+          if (state.durable) { ownedContractCheckpointText(state.durable.read); state.durable.parent.assertCurrent(); if (fileObservationIdentity(state.durable.indexPath) !== state.durable.physical) throw new Error('Original durable contract index changed'); }
+          else if (!contractCreationPathAbsent(indexPath)) throw new Error('Contract identity became admitted');
+        },
+        owns: (contract: Contract) => state.contract === contract,
+        release: () => {
+          if (this.creations.get(id) !== state) return;
+          if (state.releaseFailed) throw state.releaseError;
+          try { state.claim.release(); }
+          catch (error) { state.releaseFailed = true; state.releaseError = error; throw error; }
+          this.creations.delete(id);
+        },
+      });
+      const state: CreationState = { claim, reservation };
+      this.creations.set(id, state); reservation.assertCurrent(); return reservation;
+    } catch (error) { this.creations.delete(id); claim.release(); throw error; }
+  }
+
+  /** First complete checkpoint is exclusive and durable before run registration.
+   * Replays/updates keep their separate existing immutable admission boundary. */
+  publishCreation(reservation: ContractCreationReservation, contract: Contract): void {
+    const state = this.creations.get(contract.id);
+    if (!state || state.reservation !== reservation || reservation.id !== contract.id || state.contract) throw new Error('Original contract creation reservation is unavailable');
+    reservation.assertCurrent(); state.candidate = contract;
+    const original = retainOwnedJson(contract);
+    const text = serializeContract(contract, this.now()); if (text === null) throw new Error('Initial contract checkpoint could not be serialized');
+    original.assertCurrent(); this.prepareCheckpointWrite(contract); original.assertCurrent(); reservation.assertCurrent();
+    if (contract.durableAdmission) {
+      const admissions = new DurableContractAdmissions(this.projectRoot); admissions.write(contract.durableAdmission, text);
+      const indexPath = join(contractsDir(this.projectRoot), 'admissions', '.by-contract', `${contract.id}.json`);
+      state.durable = { read: admissions.checkpointRead(contract.durableAdmission.key), indexPath,
+        physical: fileObservationIdentity(indexPath), parent: captureExistingDirectory(join(contractsDir(this.projectRoot), 'admissions', '.by-contract')) };
+    }
+    const publication = publishInitialContractCheckpoint(contractCheckpointsDir(this.projectRoot), contract.id, text, reservation.assertCurrent);
+    publication.assertCurrent(); state.claim.assertCurrent(); original.assertCurrent();
+    state.publication = publication; state.contract = contract; this.contracts.set(contract.id, contract);
+    reservation.assertCurrent();
   }
 
   /** Holds a contract in memory and schedules its write. */
@@ -347,6 +436,17 @@ export class ContractStore {
    * Does not hold the contract.
    */
   load(contractId: string): Contract | null {
+    let release = retainContractCreationRead(this.projectRoot, contractId);
+    try {
+      const contract = this.loadAvailable(contractId);
+      // An initially absent claim may have appeared during the actual read.
+      // Never return that creator's provisional checkpoint as recovered work.
+      if (!release) release = retainContractCreationRead(this.projectRoot, contractId);
+      return contract;
+    } finally { release?.(); }
+  }
+
+  private loadAvailable(contractId: string): Contract | null {
     const currentPath = contractPath(this.projectRoot, contractId);
     const path = existsSync(currentPath) ? currentPath : historicalContractPath(this.projectRoot, contractId);
     if (!existsSync(path)) return null;
@@ -490,8 +590,10 @@ export class ContractStore {
     for (const { dir, entry } of entries) {
       const path = join(dir, entry);
       if (entry.includes(TEMP_MARKER)) {
-        const target = /^(ctr-[0-9a-f]{8}\.json)\.tmp-/.exec(entry)?.[1];
-        if (target === undefined) continue;
+        const marker = entry.indexOf(TEMP_MARKER);
+        const id = marker < 0 ? '' : entry.slice(0, marker);
+        if (!isContractId(id)) continue;
+        const target = `${id}${JSON_SUFFIX}`;
         try {
           const removed = reapOwnedAtomicTempFile(join(dir, target), entry, { now, minimumAgeMs: STALE_TEMP_MAX_AGE_MS });
           if (removed !== undefined) { bytesReclaimed += removed; staleTempRemoved += 1; }

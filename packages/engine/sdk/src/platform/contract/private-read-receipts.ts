@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { writeFileAtomic } from '../utils/atomic-json-store.js';
-import type { ContractView } from './types.js';
+import { isContractId, type ContractView } from './types.js';
 import type { QualityGateResult } from './gates.js';
 import type { JsonValue } from '@goodvibes-jev/judgment';
 import { ownerEvidenceIdentity } from './owner-evidence.js';
@@ -15,7 +15,7 @@ interface ReceiptArchive {
 }
 
 function archivePath(contract: ArchiveOwner): string | undefined {
-  if (!contract.projectRoot || !/^ctr-[a-f0-9]{8}$/.test(contract.id)) return undefined;
+  if (!contract.projectRoot || !isContractId(contract.id)) return undefined;
   let parent = contract.projectRoot;
   for (const part of ['.goodvibes', 'reviews', contract.id]) {
     parent = join(parent, part);

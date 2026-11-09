@@ -1,3 +1,4 @@
+import { CONTRACT_ID_PATTERN } from '../../contract/types.js';
 /** Saved settlement data is evidence of one publication, never execution authority. */
 import { createHash } from 'node:crypto';
 import { types as nodeTypes } from 'node:util';
@@ -16,8 +17,8 @@ const digest = string().regex(/^[0-9a-f]{64}$/), id = string().min(1).max(200), 
 const revision = number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const key = strictObject({ workId: ref, criteriaId: ref, criteriaRevision: ref, attemptId: ref });
 const binding = strictObject({ sourceId: ref, inputRevision: ref, actionId: ref, actionRevision: ref, authorityId: ref, authorityRevision: ref, scopeId: ref, scopeRevision: ref });
-const receiptFields = { key, binding, contractId: string().regex(/^ctr-[0-9a-f]{8}$/), ownerAgentId: string().min(1), payloadRevision: digest };
-const execution = union([strictObject({ isolation: literal('shared') }), strictObject({ isolation: literal('worktree'), branch: string().regex(/^contract\/[0-9a-f]{8}$/), worktreePath: string().min(1), baseBranch: string().min(1) })]);
+const receiptFields = { key, binding, contractId: string().regex(CONTRACT_ID_PATTERN), ownerAgentId: string().min(1), payloadRevision: digest };
+const execution = union([strictObject({ isolation: literal('shared') }), strictObject({ isolation: literal('worktree'), branch: string().regex(new RegExp(CONTRACT_ID_PATTERN.source.replace('^ctr-', '^contract/'))), worktreePath: string().min(1), baseBranch: string().min(1) })]);
 const runnerReceipt = union([strictObject({ ...receiptFields, schemaVersion: literal(1) }), strictObject({ ...receiptFields, schemaVersion: literal(2), execution })]);
 const common = { projectId: id, payloadRevision: digest, target: evidenceTargetSchema, contractId: id, publicationDigest: digest,
   reportRequestId: id, evidenceRequestId: id, reportSequence: revision, evidenceSequence: revision,

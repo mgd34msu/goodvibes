@@ -126,7 +126,7 @@ export {
   readContractSnapshot,
   serializeContract,
 } from './store.js';
-export type { ContractReapSummary, ContractSnapshot, ContractSnapshotRejection, ContractStoreOptions } from './store.js';
+export type { ContractCreationReservation, ContractReapSummary, ContractSnapshot, ContractSnapshotRejection, ContractStoreOptions } from './store.js';
 export type { ReviewedFileReference } from './review-file-observations.js';
 export type { OwnedContractCheckpointRead } from './owned-checkpoint-read.js';
 export { CHANGING_TOOLS, createUnitCheckLoop } from './agent-hooks.js';

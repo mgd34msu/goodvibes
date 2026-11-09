@@ -18,7 +18,7 @@ import type { DurableContractAdmission } from './durable-admission.js';
 import type { ContractInputSnapshot } from './input-snapshot.js';
 
 import type { NativeContractDecisionState, NativeContractProgress, NativeContractTransportProgress } from './native-decisions.js';
-import { randomBytes } from 'node:crypto';
+import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import type { Outcome, ReplyReadingName } from '@goodvibes-jev/judgment';
 import type {
   CheckResult,
@@ -101,17 +101,18 @@ export type AgentManagerLike = Pick<AgentManager, 'spawn' | 'getStatus' | 'list'
 // bookkeeping. Older readers must refuse it rather than erase those records.
 export const CURRENT_CONTRACT_SCHEMA_VERSION = 6;
 
-/** `ctr-<8 hex>`. Also the store's file name, so it is checked before any path is built from it. */
-export const CONTRACT_ID_PATTERN = /^ctr-[0-9a-f]{8}$/;
-
+/** Full opaque128bit UUID labels are emitted; actual saved8hex IDs remain readable. */
+const opaqueContractPattern = /^ctr-[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/;
+const contractIdPattern = /^ctr-(?:[0-9a-f]{8}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$/;
+export const CONTRACT_ID_PATTERN = new RegExp(contractIdPattern.source);
 export function isContractId(value: unknown): value is string {
-  return typeof value === 'string' && CONTRACT_ID_PATTERN.test(value);
+  return typeof value === 'string' && contractIdPattern.test(value);
 }
-
-/** A fresh contract id. */
-export function newContractId(): string {
-  return `ctr-${randomBytes(4).toString('hex')}`;
+export function isOpaqueContractId(value: unknown): value is string {
+  return typeof value === 'string' && opaqueContractPattern.test(value);
 }
+/** A fresh full128bit contract id, with no card-shaped decimal runs. */
+export function newContractId(): string { return `ctr-${opaqueUuid()}`; }
 
 // ── Routing ────────────────────────────────────────────────────────────────────
 

@@ -88,6 +88,22 @@ function settle() {
 }
 
 describe('browser capture and compilation outcomes', () => {
+  test('fresh browser metadata has no invented content pin and retains its source across reopen and replay', async () => {
+    const f = await fixture(); settle();
+    const first = await f.ingest();
+    expect(first.captured).toBe(1);
+    const source = first.capturedSources[0]!;
+    expect(source.contentHash).toBeUndefined();
+    expect(source.metadata.browserObservationCount).toBe(1);
+    const reopened = await f.reopen();
+    expect(reopened.getSource(source.id)?.contentHash).toBeUndefined();
+    expect(reopened.getSourceByCanonicalUri(uri)?.id).toBe(source.id);
+    const repeated = await f.ingest();
+    expect(repeated.capturedSources[0]?.id).toBe(source.id);
+    expect(repeated.capturedSources[0]?.contentHash).toBeUndefined();
+    expect(f.store.listSources()).toHaveLength(1);
+  });
+
   test('alias hold reports retained capture, preserves rich evidence and retries the same source', async () => {
     const f = await fixture();
     const retained = await retainRichSource(f);

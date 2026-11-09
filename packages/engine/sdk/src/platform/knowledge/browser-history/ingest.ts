@@ -1,7 +1,6 @@
 import { prepareObservedKnowledgeNodeInput } from '../store-node-observation.js';
 import { createKnowledgeIngestUriCanonicalizer } from '../uri-canonicalization/ingest-owner.js';
 import { KnowledgeUriCanonicalizationHeldError, type KnowledgeUriCanonicalizer } from '../uri-canonicalization/reader.js';
-import { createHash } from 'node:crypto';
 import {
   emitKnowledgeIngestCompleted,
   emitKnowledgeIngestFailed,
@@ -54,19 +53,6 @@ interface BrowserKnowledgeAggregate {
 
 function timestampForEntry(entry: BrowserKnowledgeEntry): number | undefined {
   return entry.sourceKind === 'history' ? entry.visitedAtMs : entry.addedAtMs;
-}
-
-function hashAggregate(aggregate: BrowserKnowledgeAggregate): string {
-  return createHash('sha256')
-    .update(JSON.stringify(aggregate.entries.map((entry) => ({
-      sourceKind: entry.sourceKind,
-      url: entry.url,
-      browser: entry.browser,
-      profilePath: entry.profilePath,
-      rawId: entry.rawId,
-      recordedAt: timestampForEntry(entry),
-    }))))
-    .digest('hex');
 }
 
 function sourceTypeForAggregate(aggregate: BrowserKnowledgeAggregate): KnowledgeSourceType {
@@ -228,7 +214,9 @@ async function captureAggregate(
     folderPath: existing?.folderPath ?? folderForAggregate(aggregate),
     status: 'indexed',
     artifactId: existing?.artifactId,
-    contentHash: existing?.contentHash ?? hashAggregate(aggregate),
+    // Browser observations are source metadata, not the fetched page bytes.
+    // Keep a real existing content pin, but don't invent one from visit IDs.
+    contentHash: existing?.contentHash,
     lastCrawledAt: existing?.lastCrawledAt ?? Date.now(),
     sessionId: options.sessionId ?? existing?.sessionId,
     metadata: {

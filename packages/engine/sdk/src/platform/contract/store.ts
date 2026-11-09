@@ -22,6 +22,7 @@ import { CONTRACT_STATUSES } from '../../events/contract.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import { writeFileAtomic } from '../utils/atomic-json-store.js';
+import { fileObservationIdentity, readFileObservation } from '../utils/file-observation.js';
 import { isContractInputSnapshot } from './input-snapshot.js';
 import { validateNativeDecisionState } from './native-decisions.js';
 import { assertNativeContractSource, bindNativeContractSource } from './native-source.js';
@@ -212,6 +213,8 @@ export class ContractStore {
   readonly projectRoot: string;
   private readonly contracts = new Map<string, Contract>();
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** One parsed version per actual physical path image, never checkpoint text. */
+  private readonly supportedStoredVersions = new Map<string, string>();
   private readonly now: () => number;
   private readonly debounceMs: number;
   private readonly sweepIntervalMs: number;
@@ -385,14 +388,18 @@ export class ContractStore {
 
   private assertStoredVersion(contractId: string): void {
     const path = contractPath(this.projectRoot, contractId);
-    let text: string;
-    try { text = readFileSync(path, 'utf8'); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
+    let observed: string;
+    try { observed = fileObservationIdentity(path); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') { this.supportedStoredVersions.delete(path); return; } throw error; }
+    if (this.supportedStoredVersions.get(path) === observed) return;
+    const file = readFileObservation(path);
+    if (file.physical !== observed) throw new Error('Contract checkpoint changed during its version check');
     let value: unknown;
-    try { value = JSON.parse(text); } catch { return; }
+    try { value = JSON.parse(file.bytes.toString('utf8')); } catch { this.supportedStoredVersions.set(path, observed); return; }
     if (isRecord(value) && typeof value['schemaVersion'] === 'number' && value['schemaVersion'] > CURRENT_CONTRACT_SCHEMA_VERSION) {
       throw new ContractStoreVersionError(contractId);
     }
+    this.supportedStoredVersions.set(path, observed);
   }
 
   /**

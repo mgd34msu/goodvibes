@@ -3,8 +3,8 @@
  * cannot trust, reaping bounds, and importContract refusing to replace a live
  * contract without force.
  */
-import { afterEach, describe, expect, test } from 'bun:test';
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ContractEvent } from '../../sdk/src/events/contract.js';
@@ -145,6 +145,20 @@ describe('atomic write', () => {
 });
 
 describe('quarantine', () => {
+  test('unchanged version checks reuse their exact physical image and a foreign future replacement invalidates it', () => {
+    const root = tempRoot(), contract = makeContract(), store = storeAt(root);
+    const path = writeRaw(root, contract.id, envelope(contract)); store.hold(contract);
+    const parse = spyOn(JSON, 'parse');
+    try {
+      store.hold(contract); store.hold(contract);
+      expect(parse).not.toHaveBeenCalled();
+      const future = envelope(contract, CURRENT_CONTRACT_SCHEMA_VERSION + 1), stage = `${path}.replacement`;
+      writeFileSync(stage, future); renameSync(stage, path);
+      expect(() => store.hold(contract)).toThrow(ContractStoreVersionError);
+      expect(readFileSync(path, 'utf8')).toBe(future);
+    } finally { parse.mockRestore(); }
+  });
+
   test('future checkpoints remain at their original path and refuse load, put, hold, write and forced import', () => {
     const root = tempRoot(), contract = makeContract(), store = storeAt(root);
     store.hold(contract);

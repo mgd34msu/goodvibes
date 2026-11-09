@@ -1,7 +1,8 @@
+export { isCompiledBunModuleUrl } from '../utils/bun-module.js';
 export { parseClientReaderArtifact, clientReaderAsset, assertClientReaderPayload } from './client-reader-artifact.js';
 export type { ClientReaderArtifact, ClientReaderPackage, ClientReaderTarget } from './client-reader-artifact.js';
 export { assertStagedClientReaderCompatible } from './client-reader-update.js';
-export { admitInstalledClientDataWriter, installedReaderCommand, isCompiledBunModuleUrl } from './installed-client-data-writer.js';
+export { admitInstalledClientDataWriter, installedReaderCommand } from './installed-client-data-writer.js';
 export type { InstalledClientDataOptions } from './installed-client-data-writer.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /**

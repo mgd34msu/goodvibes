@@ -1,3 +1,4 @@
+import { isCompiledBunModuleUrl } from '../utils/bun-module.js';
 /** A compiled terminal admits its own selected installation synchronously,
  * before CLI setup/awaits. This capability only restricts later readers; it
  * grants neither data access nor execution. Source and package-managed modules
@@ -14,14 +15,6 @@ export interface InstalledClientDataOptions {
   /** Exact baked version, never a nearby package.json or requested version. */
   readonly compiledVersion: string;
   readonly platform: string;
-}
-/** The compiler's actual virtual filesystem root, not a substring in an
- * ordinary checkout/package directory. The shipped targets use file URLs. */
-export function isCompiledBunModuleUrl(moduleUrl: string): boolean {
-  try {
-    const parsed = new URL(moduleUrl);
-    return parsed.protocol === 'file:' && parsed.hostname === '' && decodeURIComponent(parsed.pathname).startsWith('/$bunfs/');
-  } catch { return false; }
 }
 export function admitInstalledClientDataWriter(options: InstalledClientDataOptions): NativeDataWriteOwner | undefined {
   if (!isCompiledBunModuleUrl(options.moduleUrl)) return undefined;

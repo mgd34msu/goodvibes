@@ -1,9 +1,10 @@
+import { isCompiledBunModuleUrl } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { createHash } from 'node:crypto';
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, relative, sep } from 'node:path';
-import { VERSION } from '../version.js';
+import { COMPILED_VERSION } from '../version.js';
 
 export interface DaemonSqliteRuntime {
   readonly target: 'darwin-x64' | 'darwin-arm64';
@@ -95,7 +96,7 @@ export interface DaemonSqliteOptions {
 /** Run before importing any service module that can construct a database. */
 export function initializeDaemonNativeSqlite(options: DaemonSqliteOptions = {}): void {
   const { platform = process.platform, arch = process.arch, execPath = process.execPath,
-    bundled = import.meta.url.includes('$bunfs'), version = VERSION,
+    bundled = isCompiledBunModuleUrl(import.meta.url), version = COMPILED_VERSION,
     capturedOwner = typeof __DAEMON_NATIVE_SQLITE_OWNER__ === 'undefined' ? null : __DAEMON_NATIVE_SQLITE_OWNER__, signal, assertCurrent,
     setCustomSQLite = (path: string) => (createRequire(import.meta.url)('bun:sqlite') as typeof import('bun:sqlite')).Database.setCustomSQLite(path),
   } = options;

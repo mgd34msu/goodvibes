@@ -1,3 +1,4 @@
+import { isCompiledBunModuleUrl } from '../utils/bun-module.js';
 /** SDK-owned platform module. This implementation is maintained in goodvibes-sdk. */
 
 import { createRequire } from 'node:module';
@@ -44,7 +45,7 @@ function requireSqliteVecLoad(): (db: Database) => void {
  */
 /** Whether this is a Bun compiled binary: Bun's virtual bundle filesystem is marked `$bunfs` in module URLs. */
 function isBundledRun(): boolean {
-  return import.meta.url.includes('$bunfs');
+  return isCompiledBunModuleUrl(import.meta.url);
 }
 
 export function resolveSqliteVecPath(): string {

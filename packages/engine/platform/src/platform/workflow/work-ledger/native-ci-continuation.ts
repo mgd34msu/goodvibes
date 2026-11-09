@@ -154,12 +154,18 @@ export function createNativeCiContinuationHost(deps: {
     const owners = available(); let current = reader.read();
     if (!current.record.watch || brief.repo !== current.record.watch.repo || brief.ref !== current.record.watch.ref || brief.prNumber !== current.record.watch.prNumber
       || !brief.jobs?.length || brief.jobs.some(job => !job.headSha || !job.runId || !job.jobId)) throw new Error('Native CI evidence does not match its issued watch');
-    const failureRevision = nativeCiFailureCommitment(brief);
     await deps.joinOriginal(current.original); signal.throwIfAborted(); current = reader.read();
     const claimed = await owners.grants.withNativeContinuation(record.grant, current.paired, async assertPairing =>
-      deps.scopes.withCurrentScope(current.scope, async assertScope => owners.storage.claim(record.id, failureRevision, snapshot => {
-        signal.throwIfAborted(); assertPairing(); assertScope(); reader.inspect(snapshot);
-      }, reader.snapshot())));
+      deps.scopes.withCurrentScope(current.scope, async assertScope => {
+        signal.throwIfAborted(); assertPairing(); assertScope(); reader.read();
+        // Only an admitted, still-current claim needs the saved replay binding.
+        // brief remains the original immutable capture from before every await;
+        // rejected original drainage/ownership never computes its log digest.
+        const failureRevision = nativeCiFailureCommitment(brief);
+        return owners.storage.claim(record.id, failureRevision, snapshot => {
+          signal.throwIfAborted(); assertPairing(); assertScope(); reader.inspect(snapshot);
+        }, reader.snapshot());
+      }));
     reader.observe(claimed); const successor = claimed.successor!;
     const consumption = nativeCiConsumption(claimed);
     // A crash between ledger claim and private consumption can replay only this

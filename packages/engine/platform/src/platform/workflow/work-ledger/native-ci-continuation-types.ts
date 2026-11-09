@@ -145,10 +145,11 @@ export function parseNativeCiContinuation(value: unknown, previous?: NativeCiCon
   const watch = parsed.watch === null ? null : sameSource && previous?.watch && isDeepStrictEqual(previous.watch, parsed.watch) ? previous.watch
     : watchInput && apply(get, issuedWatches, [watchInput]) && isDeepStrictEqual(watchInput, parsed.watch) ? watchInput : captureNativeCiWatch(parsed.watch);
   const row = { ...parsed, issue, watch } as NativeCiContinuationRecord;
-  if (!isDeepStrictEqual(value, row) || row.id !== row.grant.id || row.grant.binding !== nativeCiIssueCommitment(issue)
+  if (!isDeepStrictEqual(value, row) || row.id !== row.grant.id
     || (row.watch !== null && row.watch.continuationId !== row.id) || (row.state === 'issued' && (row.failureRevision !== null || row.successor !== null))
     || (row.state === 'claimed' && (row.failureRevision === null || row.successor === null))
     || (row.version === 2 && row.successor && row.successor.attemptId !== row.issue.successorAttemptId)) throw new Error('Invalid native CI continuation');
+  if (row.grant.binding !== nativeCiIssueCommitment(issue)) throw new Error('Invalid native CI continuation');
   const proof: Origin = {};
   if (sameSource && previous) { const original = origin(previous); if (original?.legacySource) proof.legacySource = original.legacySource;
     if (original?.legacySuccessor) proof.legacySuccessor = original.legacySuccessor;

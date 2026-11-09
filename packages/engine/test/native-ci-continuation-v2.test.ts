@@ -61,6 +61,32 @@ test('only independently checked issue/watch/claim commitments hash once per imm
   } finally { hash.mockRestore(); }
 });
 
+test('impossible saved associations and states hash nothing; a viable cold grant verifies its actual commitment once', () => {
+  const base = structuredClone(watched());
+  if (base.version !== 2 || !base.watch) throw new Error('Expected native watched fixture');
+  const successor = { workId: base.issue.originalKey.workId, workRevision: 4, criteriaRevision: 1,
+    attemptId: base.issue.successorAttemptId, attemptRevision: 1 };
+  const impossible = [
+    { ...base, id: 'different-private-grant' },
+    { ...base, watch: { ...base.watch, continuationId: 'different-issued-continuation' } },
+    { ...base, failureRevision: 'd'.repeat(64) },
+    { ...base, successor },
+    { ...base, state: 'claimed', successor },
+    { ...base, state: 'claimed', failureRevision: 'd'.repeat(64) },
+    { ...base, state: 'claimed', failureRevision: 'd'.repeat(64), successor: { ...successor, attemptId: 'attempt-ci-' + opaqueUuid() } },
+  ];
+  const hash = spyOn(crypto, 'createHash'), count = () => hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256').length;
+  try {
+    for (const row of impossible) expect(() => parseNativeCiContinuation(row)).toThrow();
+    expect(count()).toBe(0);
+    const saved = parseNativeCiContinuation(base); expect(count()).toBe(1);
+    expect(parseNativeCiContinuationJson(JSON.stringify(saved), saved)).toEqual(saved); expect(count()).toBe(1);
+    const changed = (base.grant.binding[0] === '0' ? '1' : '0') + base.grant.binding.slice(1);
+    expect(() => parseNativeCiContinuation({ ...base, grant: { ...base.grant, binding: changed } })).toThrow();
+    expect(count()).toBe(2); // A viable but incorrect binding still needs verification.
+  } finally { hash.mockRestore(); }
+});
+
 test('old CI issue, successor and grant-consumption recipes remain readable without rehashing every live guard', () => {
   const owner = issued().issue, issue = captureNativeCiIssue(1, { projectId: owner.projectId, originalKey: owner.originalKey, originalPayloadRevision: owner.originalPayloadRevision,
     principalId: owner.principalId, authorityRevision: owner.authorityRevision, authorityScopes: owner.authorityScopes, scopeId: owner.scopeId, scopeRevision: owner.scopeRevision,

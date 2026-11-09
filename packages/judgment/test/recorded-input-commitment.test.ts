@@ -15,7 +15,7 @@ test('only the original saved result and matching input recover its existing pri
   const original = await withDecisionLog(borrowed, log).ask(request);
   const row = log.get(original.decisionId!);
   expect(row?.status).toBe('answered');
-  const hashes = spyOn(crypto, 'createHash');
+  const hashes = spyOn(crypto, 'createHash'), stateHashes = spyOn(Bun.CryptoHasher, 'hash');
   try {
     expect(recordedJudgmentInputHash(original, request)).toBe(row!.stateHash);
     expect(recordedJudgmentInputHash(original, structuredClone(request))).toBe(row!.stateHash);
@@ -29,9 +29,10 @@ test('only the original saved result and matching input recover its existing pri
     expect(recordedJudgmentInputHash(original, request)).toBeUndefined();
     expect(recordedJudgmentInputHash(original, { state: { nested: { text: 'PRIVATE_CALLER_CONTENT' } }, questions, context: request.context })).toBe(row!.stateHash);
     expect(hashes.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+    expect(stateHashes.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
     expect(JSON.stringify(original)).not.toContain('PRIVATE_CALLER_CONTENT');
     expect(row).not.toHaveProperty('state');
-  } finally { hashes.mockRestore(); }
+  } finally { stateHashes.mockRestore(); hashes.mockRestore(); }
 });
 
 test('commitment lookup never executes borrowed accessors or proxy traps to manufacture a matching state', async () => {

@@ -110,7 +110,7 @@ test('source references and retained research text require exact source equality
   f.contract.units.push(source);
   const supplied = { id: source.id, status: source.status, acceptedAnswer: source.answer, latestCheck: source.checks.at(-1), criteria: source.criteria, readObservations: source.readEvidence };
   f.evidence.orchestration.units.push(supplied);
-  const hashes = spyOn(crypto, 'createHash');
+  const hashes = spyOn(crypto, 'createHash'), stateHashes = spyOn(Bun.CryptoHasher, 'hash');
   try {
     const view = finalAnswerEvidence(f.contract, f.evidence, {})!;
     expect(JSON.stringify(view.evidence)).toContain(source.answer!);
@@ -118,16 +118,17 @@ test('source references and retained research text require exact source equality
     expect(receipts.units.find(unit => unit.id === source.id)?.acceptedAnswer).toBe(source.answer);
     expect(view.evidence['fullSourceEvidence']).toMatchObject({ storage: 'native-contract-store', contractId: f.contract.id });
     expect(hashes.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+    expect(stateHashes.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
     supplied.acceptedAnswer = 'Copied source label with different text.';
     const mismatched = finalAnswerEvidence(f.contract, f.evidence, {})!;
     const units = (mismatched.evidence['orchestration'] as { units: { id: string; acceptedAnswer?: string }[] }).units;
     expect(units.find(unit => unit.id === source.id)).not.toHaveProperty('acceptedAnswer');
-  } finally { hashes.mockRestore(); }
+  } finally { stateHashes.mockRestore(); hashes.mockRestore(); }
 });
 
 test('an omitted passed answer remains privately bound to saved repair identity without per-answer hashes', () => {
   const f = fixture(), old = f.contract.units[0]!.answer ?? '';
-  const hashes = spyOn(crypto, 'createHash');
+  const hashes = spyOn(crypto, 'createHash'), stateHashes = spyOn(Bun.CryptoHasher, 'hash');
   try {
     const first = contractWorkReceipts(f.contract, { readObservations: true });
     expect(first.units[0]).not.toHaveProperty('acceptedAnswer');
@@ -142,7 +143,8 @@ test('an omitted passed answer remains privately bound to saved repair identity 
     expect(workReceiptIdentity(first)).toEqual(identity);
     expect(() => workReceiptIdentity(structuredClone(first))).toThrow('original native receipt');
     expect(hashes.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
-  } finally { hashes.mockRestore(); }
+    expect(stateHashes.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+  } finally { stateHashes.mockRestore(); hashes.mockRestore(); }
 });
 
 test('current execution citations and every failure keep full primary bodies while unrelated successful history retains exact native pointers', () => {

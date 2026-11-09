@@ -69,7 +69,7 @@ import { addJudgmentUsage } from './usage.js';
 import { preserveDeclaredReadReceipts, readPrivateReceiptArchives, verifyPrivateReceiptPreservation } from './private-read-receipts.js';
 import { completionEvidenceCommitment } from './completion-evidence-binding.js';
 import { finalAnswerEvidence, finalContentEvidence } from './final-answer-evidence.js';
-import { answerClaimScopes, completeAnswerClaimCoverage, scopedClaimQuestion, type AnswerClaimReview, type AnswerClaimScope } from './final-answer-claims.js';
+import { answerClaimScopes, completeAnswerClaimCoverage, recordAnswerClaimReview, scopedClaimQuestion, type AnswerClaimReview, type AnswerClaimScope } from './final-answer-claims.js';
 import { judgmentExecutionEvidence } from './judgment-execution-evidence.js';
 import { GOAL_OBLIGATIONS } from './batteries/goal-obligations.js';
 import { ORIGINAL_OBLIGATION_COVERAGE, originalObligationSource } from './batteries/original-obligation-coverage.js';
@@ -485,7 +485,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
                 }
               }
               const { probability, verdict, outcome } = reading;
-              return [{ ...scope, stateHash, decisionId: review.result.decisionId, reading: { probability, verdict, outcome } }];
+              return [recordAnswerClaimReview(scope, { stateHash, decisionId: review.result.decisionId, reading: { probability, verdict, outcome } })];
             };
             const pending = new Set<Promise<AnswerClaimReview[]>>();
             try {

@@ -6,10 +6,10 @@ import { nativeExecutionProvider } from './helpers/native-execution-provider.js'
 import * as nativeFs from 'node:fs';
 import type { SQLitePublicationIO } from '../sdk/src/platform/state/sqlite-store-persistence.js';
 /** Real paired authority, workspace scope and KnowledgeStore bridge into the real durable runner. */
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { SqliteDecisionLog, withDecisionLog, createSystemOnePort, DEFAULT_MODEL, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { canonicalJson, SqliteDecisionLog, withDecisionLog, createSystemOnePort, DEFAULT_MODEL, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
 import { createWorkLedger } from '../sdk/src/platform/workflow/work-ledger/service.js';
@@ -223,6 +223,23 @@ test('original-coverage v2 verifies without an unused digest, actual v1 stays re
     if (format === 'current-v2' || format === 'historical-v1') await expect(operation).resolves.toMatchObject({ attestation: { outcome: 'verified' } });
     else await expect(operation).rejects.toThrow('genuine original-obligation coverage');
   }
+});
+
+test('native claim verification hashes the complete immutable answer once, rather than once per bounded passage', async () => {
+  const output = 'The complete supported result retains all necessary qualifications.\n'.repeat(180);
+  const f = await fixture({ harness: { scripts: { u1: finishes(output) }, port: context => context.name === 'unsupported'
+    ? noulAnswer(context.state['claimScope'] === undefined ? 0.61 : 0.01) : undefined } });
+  const started = await f.host.start(f.target, f.authority), contract = await completed(f.harness, started.admission.contractId);
+  const review = JSON.parse(contract.decisions.findLast(value => value.targetId === `${contract.id}.final-answer-review`)!.reason) as { claimReviews: unknown[] };
+  expect(review.claimReviews.length).toBeGreaterThan(1);
+  const completeAnswer = canonicalJson(contract.answer ?? ''), hashes = spyOn(Bun.CryptoHasher, 'hash');
+  try {
+    const verified = await verifyNativeWorkExecution({ execution: f.storage.current(f.key).record!, runner: f.harness.runner,
+      port: f.hostOptions.port, decisionLog: f.log, settings: checkSettings(CONTRACT_CONFIG_DEFAULTS), readAccessFilter: async () => true,
+      signal: new AbortController().signal, assertCurrent() {} });
+    expect(verified.attestation.outcome).toBe('verified');
+    expect(hashes.mock.calls.filter(([algorithm, value]) => algorithm === 'sha256' && value === completeAnswer)).toHaveLength(1);
+  } finally { hashes.mockRestore(); }
 });
 
 test('native settlement proves every original question across actual deliverable batches and refuses incomplete or mixed proof', async () => {

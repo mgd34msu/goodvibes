@@ -126,6 +126,11 @@ export async function verifyNativeWorkExecution(options: {
   const raw = options.runner.get(admission.contractId);
   if (!raw) throw new Error('Native runner checkpoint is unavailable');
   const contract = freeze(structuredClone(raw));
+  // One exact immutable answer is compared with several saved receipt/question
+  // bindings. Reuse its commitment within this verification; never re-hash the
+  // entire answer per claim or carry it into another verification lifetime.
+  let retainedAnswerCommitment: string | undefined;
+  const answerCommitment = (): string => retainedAnswerCommitment ??= hashState(contract.answer ?? '');
   assertDurableCheckpoint(contract, admission); assertNativeContractSource(contract);
   if (contract.status !== 'passed') throw new Error('Native verifier requires the bound passed contract');
   const contractDigest = nativeSettlementDigest(contract);
@@ -168,7 +173,7 @@ export async function verifyNativeWorkExecution(options: {
     const initial = readYesNo({ type: 'noul', noul: sourceProbability }, UNIT_JUDGE_BANDS.high);
     const recordedInitial = object(proof['sourceGoal']), recorded = object(proof['reading']), policy = object(proof['policy']);
     if (!source || !entry || entry.context.battery !== battery.name || entry.context.batteryVersion !== battery.version
-      || entry.stateHash !== proof['stateHash'] || proof['literalSourceDigest'] !== literalSourceDigest || proof['outputDigest'] !== hashState(contract.answer ?? '')
+      || entry.stateHash !== proof['stateHash'] || proof['literalSourceDigest'] !== literalSourceDigest || proof['outputDigest'] !== answerCommitment()
       || !isDeepStrictEqual(proof['sourceJudgmentDecisionIds'], sourceIds)
       || !isDeepStrictEqual(decision.decisionIds, ids)
       || !isDeepStrictEqual(source.question, goalObligationQuestion(battery.items.omitted.question, literalSourceDigest))
@@ -243,7 +248,7 @@ export async function verifyNativeWorkExecution(options: {
       if (!actual || !entry || entry.context.battery !== battery.name || entry.context.batteryVersion !== battery.version
         || entry.stateHash !== claim['stateHash'] || entry.stateHash === content?.['stateHash']
         || !isDeepStrictEqual(actual.question, scopedClaimQuestion(battery.items.unsupported.question,
-          rawClaim as AnswerClaimReview, hashState(contract.answer ?? '')))) return false;
+          rawClaim as AnswerClaimReview, answerCommitment()))) return false;
       const raw = rawNo(actual.answer, battery.items.unsupported.band);
       if (raw === null || reading?.['probability'] !== raw || reading['verdict'] !== 'no' || reading['outcome'] !== 'act') return false;
       worst = Math.max(worst, raw);
@@ -278,7 +283,7 @@ export async function verifyNativeWorkExecution(options: {
     || originalEntry.status !== 'answered' || originalEntry.context.battery !== originalBattery.name
     || originalEntry.context.batteryVersion !== originalBattery.version || originalEntry.stateHash !== original['stateHash']
     || originalPolicy?.['name'] !== originalBattery.name || originalPolicy['version'] !== originalBattery.version
-    || original['sourceDigest'] !== hashState(originalObligationSource(contract)) || original['outputDigest'] !== hashState(contract.answer ?? '')
+    || original['sourceDigest'] !== hashState(originalObligationSource(contract)) || original['outputDigest'] !== answerCommitment()
     || !originalQuestion || originalProbability === null
     || originalReading?.['probability'] !== originalProbability || originalReading['verdict'] !== 'no' || originalReading['outcome'] !== 'act'
     || !isDeepStrictEqual(originalQuestion.question, originalBattery.items.original_obligations_unmet.question)
@@ -286,17 +291,19 @@ export async function verifyNativeWorkExecution(options: {
     || !deliverable.decisionIds.includes(originalId)) {
     throw new Error('Native execution lacks genuine original-obligation coverage');
   }
+  let claimsValid: boolean | undefined;
+  const genuineClaimsOnce = (): boolean => claimsValid ??= genuineClaims();
   const expectedIds = Array.isArray(fulfillmentIds) ? [...new Set([...fulfillmentIds, ...(Array.isArray(contentIds) ? contentIds : []), ...deliverableJudgeIds, ...qualifiedGoalIds, originalId])] : [];
-  if (content?.['schemaVersion'] !== 2 || content['passed'] !== true || content['outputDigest'] !== hashState(contract.answer ?? '')
+  if (content?.['schemaVersion'] !== 2 || content['passed'] !== true || content['outputDigest'] !== answerCommitment()
     || !contentQuestions || !contentReadings || !contentEntries.length
-    || (claims !== undefined && !genuineClaims())
+    || (claims !== undefined && !genuineClaimsOnce())
     || !Array.isArray(contentIds) || new Set(contentIds).size !== contentIds.length
     || !contentEntries.every(entry => entry?.status === 'answered' && entry.context.battery === battery.name
       && entry.context.batteryVersion === battery.version && entry.stateHash === content['stateHash'])
     || !['unfinished', 'unsupported'].every(key => {
       const reading = object(contentReadings[key]); const item = battery.items[key as 'unfinished' | 'unsupported'];
       const source = contentQuestions.get(key)!;
-      if (key === 'unsupported' && claims !== undefined) return genuineClaims();
+      if (key === 'unsupported' && claims !== undefined) return genuineClaimsOnce();
       const raw = rawNo(source.answer, item.band);
       return raw !== null && reading?.['probability'] === raw && reading['verdict'] === 'no' && reading['outcome'] === 'act'
         && isDeepStrictEqual(source.question, item.question);

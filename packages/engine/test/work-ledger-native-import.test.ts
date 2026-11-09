@@ -137,7 +137,7 @@ test('dedicated import scopes commit once from actual recorded lineage; complete
   for (const key of ['actionId', 'actionRevision', 'authorityId', 'authorityRevision', 'scopeId', 'scopeRevision'])
     expect(state.binding[key]).toMatch(/^import-action-[1-9][0-9]*(?::[a-z-]+)?$/);
   const manifest = (f.fake.requests[0]!.state as unknown as { input: { manifest: { sources: object[] } } }).input.manifest;
-  expect(Object.keys(manifest.sources[0]!).sort()).toEqual(['digest', 'generation', 'source']);
+  expect(Object.keys(manifest.sources[0]!).sort()).toEqual(['generation', 'source']);
 });
 
 test('a command retained by a host callback cannot change while its admission reading awaits', async () => {

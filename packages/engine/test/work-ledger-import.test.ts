@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
@@ -7,11 +8,12 @@ import { createWorkLedger } from '../sdk/src/platform/workflow/work-ledger/servi
 import { prepareLegacyWorkLedgerMigration } from '../sdk/src/platform/workflow/work-ledger/legacy-import.js';
 import { acquireCrossProcessLock } from '../sdk/src/platform/workspace/checkpoint/cross-process-lock.js';
 import type { SQLitePublicationIO } from '../sdk/src/platform/state/sqlite-store-persistence.js';
+import type { NativeDataWriteOwner } from '../sdk/src/platform/runtime/native-reader-compatibility.js';
 const roots: string[] = []; const stores: KnowledgeStore[] = [];
 afterEach(async () => { await Promise.all(stores.splice(0).map(store => store.close())); for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
-async function fixture(file?: string, hostId = 'host') {
+async function fixture(file?: string, hostId = 'host', nativeDataWriter?: NativeDataWriteOwner) {
   if (!file) { const root = fs.mkdtempSync(join(tmpdir(), 'ledger-import-')); roots.push(root); file = join(root, 'knowledge.sqlite'); }
-  const store = new KnowledgeStore({ dbPath: file }); stores.push(store);
+  const store = new KnowledgeStore({ dbPath: file, ...(nativeDataWriter ? { nativeDataWriter } : {}) }); stores.push(store);
   const storage = await store.openWorkLedgerStorage('project');
   const ledger = createWorkLedger({ projectId: 'project', importHostId: hostId, storage, clock: { now: () => 100, newId: kind => `${kind}:synthetic` } });
   const actor = ledger.authority.issueActor({ actorId: 'owner', projectId: 'project', role: 'coordinator' });
@@ -64,6 +66,43 @@ test('old source generation previews remain parseable but cannot be rebound to a
   expect(await host.service.execute(request, host.actor)).toMatchObject({ kind: 'rejected', code: 'stale_source' });
   expect(fs.readFileSync(host.file)).toEqual(bytes);
   expect((await host.service.readSnapshot(host.actor)).works).toEqual([]);
+});
+test('actual historical manifest1 commits and replays after restart without adopting fresh source-digest removal', async () => {
+  const host = await fixture(), request = await seed(host, ['historical']);
+  const { digest: _digest, ...original } = request.manifest;
+  const body = { ...original, version: 1 as const, sources: original.sources.map(entry => ({ source: entry.source, generation: entry.generation,
+    digest: createHash('sha256').update(JSON.stringify(entry.source)).digest('hex'),
+  })) };
+  const historical = { ...request, manifest: { ...body, digest: createHash('sha256').update(JSON.stringify(body)).digest('hex') } };
+  const first = await host.service.execute(historical, host.actor);
+  expect(first).toMatchObject({ kind: 'accepted', replayed: false, event: { manifest: { version: 1 } } });
+  await host.service.close(); await host.store.close();
+  const reopened = await fixture(host.file, 'different-host'), before = fs.readFileSync(host.file);
+  expect(await reopened.service.execute(historical, reopened.actor)).toEqual({ ...first, replayed: true });
+  expect(fs.readFileSync(host.file)).toEqual(before);
+  const history = await reopened.service.history(0, reopened.actor);
+  expect(history[0]).toMatchObject({ manifest: historical.manifest });
+});
+
+for (const malformed of [false, true]) test(`new manifest2 publication requires its actual native-reader floor (nonvoid=${malformed})`, async () => {
+  let allowed = false, declared = 0;
+  const host = await fixture(undefined, 'host', { declare(format) {
+    if (format !== 'native-historical-import-manifests-v2') return;
+    declared++;
+    if (!allowed) {
+      if (malformed) return Promise.reject(new Error('Synthetic asynchronous format owner'));
+      throw new Error('Synthetic old installed reader');
+    }
+  } });
+  const request = await seed(host, ['floor-bound']), before = fs.readFileSync(host.file);
+  expect(await host.service.execute(request, host.actor)).toMatchObject({ kind: 'indeterminate' });
+  expect(declared).toBe(1); expect(fs.readFileSync(host.file)).toEqual(before);
+  expect((await host.service.readSnapshot(host.actor)).revision).toBe(0);
+  allowed = true;
+  expect(await host.service.execute(request, host.actor)).toMatchObject({ kind: 'accepted', replayed: false, event: { manifest: { version: 2 } } });
+  expect(declared).toBe(2);
+  expect(await host.service.execute(request, host.actor)).toMatchObject({ kind: 'accepted', replayed: true });
+  expect(declared).toBe(2);
 });
 test('stale source, target, host, identity collision and forged actor cannot partially commit', async () => {
   const host = await fixture(); const request = await seed(host, ['work:synthetic']);

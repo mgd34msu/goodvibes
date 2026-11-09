@@ -1,5 +1,5 @@
 import { nativeConversationContinuationSchema } from './native-continuation-context.js';
-import { array, discriminatedUnion, enum as enumSchema, literal, number, strictObject, string, union, unknown as unknownSchema, type z } from 'zod/v4';
+import { array, discriminatedUnion, enum as enumSchema, literal, NEVER, number, strictObject, string, union, unknown as unknownSchema, type z } from 'zod/v4';
 import { nativeConversationSpanSchema, nativeConversationProposalRevision, validateNativeConversationProposal } from './native-intake-types.js';
 import { NATIVE_WORK_SUBMISSION_MAX_REQUEST_BYTES } from './native-submission-wire.js';
 import { LEGACY_IMPORT_MAX_BYTES, validateLegacyWorkLedgerManifest, type LegacyMigrationManifest } from './legacy-import.js';
@@ -112,9 +112,10 @@ export const ledgerEvidenceSchema = strictObject({
 });
 export type LedgerEvidence = z.infer<typeof ledgerEvidenceSchema>;
 
-export const legacyWorkLedgerManifestSchema = unknownSchema().superRefine((input, context) => {
-  try { validateLegacyWorkLedgerManifest(input); } catch {
+export const legacyWorkLedgerManifestSchema = unknownSchema().transform((input, context) => {
+  try { return validateLegacyWorkLedgerManifest(input); } catch {
     context.addIssue({ code: 'custom', message: 'Invalid or oversized legacy import manifest' });
+    return NEVER;
   }
 }) as unknown as z.ZodType<LegacyMigrationManifest>;
 

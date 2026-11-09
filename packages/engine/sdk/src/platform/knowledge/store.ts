@@ -204,6 +204,7 @@ export class KnowledgeStore {
   private readonly nativeConversationStorage = new Map<string, NativeConversationStorage>();
   private readonly declareNativeConversationFormat: (() => void) | undefined;
   private readonly declareNativeExplicitSourceFormat: (() => void) | undefined;
+  private readonly declareHistoricalImportFormat: (() => void) | undefined;
   private readonly declareNativeExecutionFormat: (() => void) | undefined;
   private readonly declareNativeCiFormat: (() => void) | undefined;
   private readonly declareNativeSettlementFormat: (() => void) | undefined;
@@ -236,6 +237,7 @@ export class KnowledgeStore {
     const beforeInitialRead = config.beforeInitialRead?.bind(config);
     this.declareNativeConversationFormat = declareNativeData ? () => declareNativeData('native-conversation-captures-v2') : undefined;
     this.declareNativeExplicitSourceFormat = declareNativeData ? () => declareNativeData('native-explicit-sources-v3') : undefined;
+    this.declareHistoricalImportFormat = declareNativeData ? () => declareNativeData('native-historical-import-manifests-v2') : undefined;
     this.declareNativeExecutionFormat = declareNativeData ? () => declareNativeData('native-execution-bindings-v2') : undefined;
     this.declareNativeCiFormat = declareNativeData ? () => declareNativeData('native-ci-continuations-v2') : undefined;
     this.declareNativeSettlementFormat = declareNativeData ? () => declareNativeData('native-settlements-v2') : undefined;
@@ -305,7 +307,7 @@ export class KnowledgeStore {
     if (this.closed) throw new Error('KnowledgeStore is closed');
     let storage = this.ledgerStorage.get(projectId);
     if (!storage) {
-      storage = createKnowledgeWorkLedgerStorage(this.sqlite, projectId, () => this.refreshSnapshot(), undefined, this.declareNativeExplicitSourceFormat);
+      storage = createKnowledgeWorkLedgerStorage(this.sqlite, projectId, () => this.refreshSnapshot(), undefined, this.declareNativeExplicitSourceFormat, this.declareHistoricalImportFormat);
       this.ledgerStorage.set(projectId, storage);
     }
     return storage;

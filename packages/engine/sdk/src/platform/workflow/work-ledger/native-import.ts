@@ -5,7 +5,7 @@ import { canonicalJson, JudgmentError, type DecisionLog, type EntryType, type Ju
 import type { JevDecision } from '@goodvibes-jev/judgment/decisions';
 import { decideAutonomous } from '../../gate/autonomous-decision.js';
 import { captureLegacyImportAction } from './import-action-binding.js';
-import { validateLegacyWorkLedgerManifest, type LegacyMigrationManifest } from './legacy-import.js';
+import { assertLegacyWorkLedgerSourcesCurrent, validateLegacyWorkLedgerManifest, type LegacyMigrationManifest } from './legacy-import.js';
 import { workLedgerCommandSchema, WorkLedgerAccessError, type WorkLedgerAuthority, type WorkLedgerResult, type WorkLedgerRejection, type WorkLedgerService } from './types.js';
 import type { NativeExecutionScopeOwner, NativePairedExecutionAuthority, NativePairedExecutionSnapshot } from './native-execution.js';
 
@@ -43,7 +43,7 @@ export function legacyImportSemanticManifest(manifest: LegacyMigrationManifest) 
   };
   return { ...manifest, hostId: /^[a-f0-9-]{36}$/i.test(manifest.hostId) ? manifest.hostId.replaceAll('-', '.') : manifest.hostId,
     digest: digest(manifest.digest), sources: manifest.sources.map(capture => ({
-      ...capture, digest: digest(capture.digest), generation: generation(capture.generation), source: { ...capture.source,
+      ...capture, ...(capture.digest === undefined ? {} : { digest: digest(capture.digest) }), generation: generation(capture.generation), source: { ...capture.source,
         createdAt: timestamp(capture.source['createdAt']),
         updatedAt: timestamp(capture.source['updatedAt']),
       },
@@ -108,13 +108,7 @@ export function createNativeLegacyImportHost(deps: NativeLegacyImportDependencie
           if (realpathSync(deps.projectRoot) !== projectRoot || scope.root !== projectRoot) throw new NativeImportPrecommitError('conflict', 'Native import workspace changed.');
           const currentScope = deps.scopes.currentScope(projectRoot);
           if (currentScope.scopeId !== scope.scopeId || currentScope.scopeRevision !== scope.scopeRevision || currentScope.root !== scope.root) throw new NativeImportPrecommitError('conflict', 'Native import workspace registration changed.');
-          const sources = command.manifest.sources.map((capture): { source: unknown; generation: string | null; digest: string } => {
-            const current = deps.readSource(String(capture.source.id));
-            // Rebuild the canonical manifest envelope, not the store snapshot envelope.
-            // The complete-row generation still binds every persisted source byte.
-            return { source: current.source, generation: current.generation, digest: capture.digest };
-          });
-          try { validateLegacyWorkLedgerManifest({ ...command.manifest, sources }); }
+          try { assertLegacyWorkLedgerSourcesCurrent(command.manifest, id => deps.readSource(id)); }
           catch { throw new NativeImportPrecommitError('stale_source', 'Complete persisted import sources changed.'); }
         };
         assertCurrent();

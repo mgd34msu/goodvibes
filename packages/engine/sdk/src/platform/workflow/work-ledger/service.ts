@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
-import { LEGACY_IMPORT_MAX_BYTES, projectLegacyImportWorks, validateLegacyWorkLedgerManifest } from './legacy-import.js';
+import { assertLegacyWorkLedgerSourcesCurrent, LEGACY_IMPORT_MAX_BYTES, matchLegacyWorkLedgerManifest, projectLegacyImportWorks, validateLegacyWorkLedgerManifest } from './legacy-import.js';
 import { array, discriminatedUnion, enum as enumSchema, literal, strictObject, string, union } from 'zod/v4';
 import {
   workLedgerCommandSchema, workLedgerStateSchema, ledgerWorkSchema, ledgerEventSchema, WorkLedgerAccessError,
@@ -40,6 +40,29 @@ const legacyWorkLedgerStateSchema = workLedgerStateSchema.extend({
   receipts: array(workLedgerStateSchema.shape.receipts.element.extend({ event: legacyEventSchema })),
 });
 
+/** Historical manifest1 was an unknown-schema field: its validated JSON key
+ * insertion order was retained in saved command signatures. Only that field
+ * may differ from today's detached canonical projection; outer command bytes,
+ * role and complete manifest data must still agree independently. */
+function storedImportSignature(signature: { role: string; command: WorkLedgerCommand }, rawManifest: unknown): string {
+  return signature.command.type === 'import_legacy' && signature.command.manifest.version === 1
+    ? JSON.stringify({ ...signature, command: { ...signature.command, manifest: rawManifest } }) : JSON.stringify(signature);
+}
+function sameReceiptSignature(stored: string, expected: string, command: WorkLedgerCommand): boolean {
+  if (stored === expected) return true;
+  if (command.type !== 'import_legacy' || command.manifest.version !== 1) return false;
+  try {
+    const raw: unknown = JSON.parse(stored);
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+    const candidate = (raw as Record<string, unknown>)['command'];
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate) || (candidate as Record<string, unknown>)['type'] !== 'import_legacy') return false;
+    const rawManifest = (candidate as Record<string, unknown>)['manifest'];
+    (candidate as Record<string, unknown>)['manifest'] = matchLegacyWorkLedgerManifest(rawManifest, command.manifest);
+    const checked = strictObject({ role: identitySchema.shape.role, command: workLedgerCommandSchema }).parse(raw);
+    return storedImportSignature(checked, rawManifest) === stored && JSON.stringify(checked) === expected;
+  } catch { return false; }
+}
+
 
 const nativeAbortState = Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'aborted')?.get;
 
@@ -76,10 +99,22 @@ function validateWorkLedgerHistory(state: WorkLedgerState | ReturnType<typeof le
     const receipt = state.receipts[index];
     if (!receipt || receipt.actorId !== event.actorId || receipt.requestId !== event.requestId
       || event.sequence !== index + 1 || !isDeepStrictEqual(receipt.event, event)) throw new Error('Invalid work ledger receipt');
+    const originalSignature: unknown = JSON.parse(receipt.signature);
+    let rawManifest: unknown;
+    if (event.type === 'import_legacy' && originalSignature !== null && typeof originalSignature === 'object' && !Array.isArray(originalSignature)) {
+      const command = (originalSignature as Record<string, unknown>)['command'];
+      if (command !== null && typeof command === 'object' && !Array.isArray(command) && (command as Record<string, unknown>)['type'] === 'import_legacy') {
+        // This independently stored command must match the complete event image,
+        // not just its public digest. Only then may it reuse that validated
+        // immutable manifest instead of recomputing the same commitment.
+        rawManifest = (command as Record<string, unknown>)['manifest'];
+        (command as Record<string, unknown>)['manifest'] = matchLegacyWorkLedgerManifest(rawManifest, event.manifest);
+      }
+    }
     const signature = strictObject({ role: identitySchema.shape.role,
-      command: legacy ? legacyWorkLedgerCommandSchema : workLedgerCommandSchema }).parse(JSON.parse(receipt.signature));
+      command: legacy ? legacyWorkLedgerCommandSchema : workLedgerCommandSchema }).parse(originalSignature);
     const command = signature.command;
-    if (JSON.stringify(signature) !== receipt.signature || command.requestId !== event.requestId
+    if (storedImportSignature(signature, rawManifest) !== receipt.signature || command.requestId !== event.requestId
       || command.expectedRevision !== index || command.type !== event.type) throw new Error('Invalid work ledger receipt command');
     const generated: { kind: 'work' | 'attempt' | 'evidence'; id: string }[] = [];
     if (event.type !== 'import_legacy') {
@@ -178,7 +213,7 @@ function reduceWorkLedger(state: WorkLedgerState, command: WorkLedgerCommand, ac
   const projectId = state.projectId;
   const signature = JSON.stringify({ role: actor.role, command });
   const receipt = state.receipts.find(r => r.actorId === actor.actorId && r.requestId === command.requestId);
-  if (receipt) return receipt.signature === signature
+  if (receipt) return sameReceiptSignature(receipt.signature, signature, command)
     ? { kind: 'accepted', replayed: true, event: receipt.event }
     : rejected('request_conflict', 'requestId was already used for a different command or role.', state.revision);
   if (command.type === 'submit_native' && state.receipts.some(item => item.actorId === actor.actorId
@@ -195,12 +230,8 @@ function reduceWorkLedger(state: WorkLedgerState, command: WorkLedgerCommand, ac
     if (!importHostId || manifest.hostId !== importHostId || manifest.projectId !== projectId
       || manifest.expectedLedgerRevision !== command.expectedRevision) return rejected('conflict', 'Selected host, project or reviewed ledger revision changed.', state.revision);
     if (!context) return rejected('host_error', 'Authoritative transactional source snapshots are unavailable.', state.revision);
-    const captures = manifest.sources.map(entry => {
-      const current = context.readSource(String(entry.source.id));
-      return { source: current.source, generation: current.generation };
-    });
     try {
-      validateLegacyWorkLedgerManifest({ ...manifest, sources: captures.map((entry, index) => ({ ...entry, digest: manifest.sources[index]!.digest })) });
+      assertLegacyWorkLedgerSourcesCurrent(manifest, id => context.readSource(id));
     } catch { return rejected('stale_source', 'Complete persisted source images changed since preparation.', state.revision); }
     const imported = projectLegacyImportWorks(manifest, at);
     const oldEntities = new Set(state.history.flatMap(event => event.type === 'import_legacy'
@@ -458,7 +489,7 @@ export function createWorkLedger(options: {
         const trusted = requireIdentity(actor);
         const receipt = state.receipts.find(item => item.actorId === trusted.actorId && item.requestId === command.requestId);
         if (!receipt) return null;
-        return receipt.signature === JSON.stringify({ role: trusted.role, command })
+        return sameReceiptSignature(receipt.signature, JSON.stringify({ role: trusted.role, command }), command)
           ? { kind: 'accepted', replayed: true, event: receipt.event }
           : rejected('request_conflict', 'requestId was already used for a different command or role.', state.revision);
       });

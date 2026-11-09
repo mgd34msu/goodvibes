@@ -50,7 +50,7 @@ export function readKnowledgeWorkLedger(db: Pick<SqlDatabase, 'exec'>, projectId
 export function createKnowledgeWorkLedgerStorage(sqlite: SQLiteStore, projectId: string, refresh: () => void, hooks?: {
   beforeDecision(db: SqlDatabase): void;
   beforeCommit(db: SqlDatabase, current: WorkLedgerState, next: WorkLedgerState): void;
-}, beforeExplicitSourceWrite?: () => void): KnowledgeWorkLedgerStorage {
+}, beforeExplicitSourceWrite?: () => void, beforeHistoricalImportWrite?: () => void): KnowledgeWorkLedgerStorage {
   createEmptyWorkLedgerState(projectId); // Validate even before the first row exists.
   let closed = false;
   let closePromise: Promise<void> | undefined;
@@ -82,7 +82,10 @@ export function createKnowledgeWorkLedgerStorage(sqlite: SQLiteStore, projectId:
       return track(sqlite.transactPersisted(db => {
         hooks?.beforeDecision(db);
         const current = readKnowledgeWorkLedger(db, projectId);
-        const decision = decide(structuredClone(current), { readSource: id => readKnowledgeSourceSnapshot(db, { id }) });
+        // Parsing copies mutable ledger records while retaining only genuinely
+        // validated immutable manifest originals. A blanket structuredClone
+        // destroys that private provenance and rehashes every historical import.
+        const decision = decide(workLedgerStateSchema.parse(current), { readSource: id => readKnowledgeSourceSnapshot(db, { id }) });
         if (decision && typeof (decision as unknown as { then?: unknown }).then === 'function') {
           if (decision instanceof Promise) void decision.catch(() => {});
           throw new TypeError('Work ledger decision must be synchronous');
@@ -98,6 +101,10 @@ export function createKnowledgeWorkLedgerStorage(sqlite: SQLiteStore, projectId:
           if (next.history.slice(current.history.length).some(event => event.type === 'submit_native' && event.work.source?.version === 3)) {
             const declared: unknown = beforeExplicitSourceWrite?.();
             if (declared !== undefined) { drainOwned(declared); throw new Error('Explicit source publication requires a synchronous native owner'); }
+          }
+          if (next.history.slice(current.history.length).some(event => event.type === 'import_legacy' && event.manifest.version === 2)) {
+            const declared: unknown = beforeHistoricalImportWrite?.();
+            if (declared !== undefined) { drainOwned(declared); throw new Error('Historical import publication requires a synchronous native owner'); }
           }
           db.run('INSERT INTO work_ledgers(project_id, format_version, revision, state_json) VALUES (?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET format_version=excluded.format_version, revision=excluded.revision, state_json=excluded.state_json', [projectId, next.version, next.revision, JSON.stringify(next)]);
         }

@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- Compare exact historical-import source images and duplicate fields instead of
+  repeatedly hashing them. Fresh manifests retain one complete saved-review
+  commitment; older per-source receipts remain readable. Live checks preserve
+  validated immutable originals, and new ledger writes establish the matching
+  installed-reader capability before publication.
+
 - Reuse the actual recorded input commitment during conversational intake,
   keeping original source data immutable across custom provider callbacks.
   Preserve real model attribution and reject copied or fabricated ownership.

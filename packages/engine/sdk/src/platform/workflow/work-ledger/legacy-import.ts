@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import type { LedgerWork, WorkReportedState } from './types.js';
 
 /** Preparation only. This module has no store, host client, actor or command executor. */
@@ -30,13 +31,14 @@ export interface LegacyMigrationLink {
   readonly to: string;
 }
 export interface LegacyMigrationManifest {
-  readonly version: 1;
+  readonly version: 1 | 2;
   readonly hostId: string;
   readonly projectId: string;
   readonly expectedLedgerRevision: number;
   /** Stable preparation identity; NOT a receipt, permission or import request. */
   readonly digest: string;
-  readonly sources: readonly { readonly source: RecordValue; readonly generation: string; readonly digest: string }[];
+  /** Only historical format1 carries its redundant individual-source digest. */
+  readonly sources: readonly { readonly source: RecordValue; readonly generation: string; readonly digest?: string }[];
   readonly entities: readonly LegacyMigrationEntity[];
   readonly links: readonly LegacyMigrationLink[];
   readonly executionAuthority: 'none';
@@ -91,10 +93,13 @@ function capture(value: unknown): Json {
         if (input.length > MAX_LINKS || Object.keys(input).length !== input.length) fail('limit', 'Sparse, extended or oversized source array.');
         result = Array.from({ length: input.length }, (_, index) => visit(descriptors[String(index)]?.value, depth + 1));
       } else {
-        result = Object.create(null) as RecordValue;
+        // Native JSON.parse rows use ordinary plain records. Preserve that
+        // canonical representation across validation while defining literal
+        // __proto__/constructor keys as data, never invoking inherited setters.
+        result = {};
         for (const key of Object.keys(descriptors).sort()) {
           bytes += Buffer.byteLength(JSON.stringify(key));
-          result[key] = visit(descriptors[key]?.value, depth + 1);
+          Object.defineProperty(result, key, { value: visit(descriptors[key]?.value, depth + 1), enumerable: true, writable: true, configurable: true });
         }
       }
       active.delete(input);
@@ -108,9 +113,17 @@ function capture(value: unknown): Json {
   }
   return visit(value, 0);
 }
-function hash(value: unknown): string { return createHash('sha256').update(JSON.stringify(value)).digest('hex'); }
+// One complete preparation commitment survives client review, saved journal and
+// ledger receipt replay. It binds the exact reviewed sources/projection across
+// those boundaries; it is neither authentication nor a secrecy mechanism.
+function manifestCommitment(value: unknown): string { return createHash('sha256').update(JSON.stringify(value)).digest('hex'); }
+// Format1 persisted one additional digest for each source. Its exact old recipe
+// remains readable; fresh format2 compares captured source data directly.
+function historicalSourceCommitment(value: unknown): string { return createHash('sha256').update(JSON.stringify(value)).digest('hex'); }
+const applyOwned = Reflect.apply, hasOwned = WeakSet.prototype.has, addOwned = WeakSet.prototype.add, freezeOwned = Object.freeze;
+const ownedManifests = new WeakSet<object>();
 function freeze<T>(value: T): T {
-  if (value && typeof value === 'object') { for (const child of Object.values(value)) freeze(child); Object.freeze(value); }
+  if (value && typeof value === 'object') { for (const child of Object.values(value)) freeze(child); freezeOwned(value); }
   return value;
 }
 function reported(status: Json | undefined, planning: boolean): WorkReportedState {
@@ -130,6 +143,9 @@ function reported(status: Json | undefined, planning: boolean): WorkReportedStat
 }
 
 export function prepareLegacyWorkLedgerMigration(input: LegacyMigrationInput, signal?: AbortSignal): LegacyMigrationPreparation {
+  return prepare(input, signal, 2);
+}
+function prepare(input: LegacyMigrationInput, signal: AbortSignal | undefined, version: 1 | 2): LegacyMigrationPreparation {
   try {
     if (signal?.aborted) fail('cancelled', 'Preparation cancelled; no source or ledger was changed.');
     if (input.pendingLocalChanges !== false) fail('pending-local-changes', 'Save or discard local edits explicitly before capturing persisted sources.');
@@ -138,14 +154,17 @@ export function prepareLegacyWorkLedgerMigration(input: LegacyMigrationInput, si
     if (!Array.isArray(input.sources) || input.sources.length === 0 || input.sources.length > MAX_SOURCES) fail('limit', 'Capture between 1 and 500 complete sources.');
     const captured = array(capture(input.sources), 'sources');
     const occupied = new Set(input.occupiedWorkIds.map(value => id(value, 'occupiedWorkId')));
-    const sources = new Map<string, { source: RecordValue; generation: string; digest: string }>();
+    const sources = new Map<string, { source: RecordValue; generation: string; digest?: string }>();
     for (const item of captured) {
       const entry = object(item, 'source capture'); const source = object(entry.source, 'source');
       const sourceId = id(source.id, 'source.id');
       if (typeof entry.generation !== 'string' || !entry.generation || entry.generation.length > 256) fail('invalid-source', 'Missing complete-source generation.');
-      const digest = hash(source); const previous = sources.get(sourceId);
-      if (previous && (previous.digest !== digest || previous.generation !== entry.generation)) fail('identity-conflict', `Conflicting images of source ${sourceId}.`);
-      sources.set(sourceId, { source, generation: entry.generation, digest });
+      const previous = sources.get(sourceId);
+      if (previous) {
+        if (!isDeepStrictEqual(previous.source, source) || previous.generation !== entry.generation) fail('identity-conflict', `Conflicting images of source ${sourceId}.`);
+        continue;
+      }
+      sources.set(sourceId, { source, generation: entry.generation, ...(version === 1 ? { digest: historicalSourceCommitment(source) } : {}) });
     }
     const entities = new Map<string, LegacyMigrationEntity>(); const links: LegacyMigrationLink[] = [];
     const isPlanningSource = (sourceId: string): boolean =>
@@ -163,9 +182,9 @@ export function prepareLegacyWorkLedgerMigration(input: LegacyMigrationInput, si
               && reported(fragment.original.status, isPlanningSource(fragment.sourceId)) !== state) fail('identity-conflict', `Conflicting legacy work status for ${entityId}.`);
           } else {
             const fields = kind === 'decision' ? ['title', 'decision', 'text', 'status'] : kind === 'question' ? ['prompt', 'answer', 'status'] : [];
-            if (kind === 'artifact' && hash(fragment.original) !== hash(original)) fail('identity-conflict', `Conflicting legacy artifact ${entityId}.`);
+            if (kind === 'artifact' && !isDeepStrictEqual(fragment.original, original)) fail('identity-conflict', `Conflicting legacy artifact ${entityId}.`);
             for (const field of fields) {
-              if (fragment.original[field] !== undefined && original[field] !== undefined && hash(fragment.original[field]) !== hash(original[field])) {
+              if (fragment.original[field] !== undefined && original[field] !== undefined && !isDeepStrictEqual(fragment.original[field], original[field])) {
                 fail('identity-conflict', `Conflicting legacy ${kind} ${field} for ${entityId}; no winner was selected.`);
               }
             }
@@ -232,14 +251,15 @@ export function prepareLegacyWorkLedgerMigration(input: LegacyMigrationInput, si
       }
     }
     if (signal?.aborted) fail('cancelled', 'Preparation cancelled; no source or ledger was changed.');
-    const body = { version: 1 as const, hostId, projectId, expectedLedgerRevision: input.expectedLedgerRevision,
+    const body = { version, hostId, projectId, expectedLedgerRevision: input.expectedLedgerRevision,
       sources: [...sources.values()].sort((a, b) => String(a.source.id) < String(b.source.id) ? -1 : String(a.source.id) > String(b.source.id) ? 1 : 0),
       entities: [...entities.values()], links, executionAuthority: 'none' as const, persistence: 'not-imported' as const };
-    const manifest = freeze({ ...body, digest: hash(body) });
+    const manifest = freeze({ ...body, digest: manifestCommitment(body) });
     if (Buffer.byteLength(JSON.stringify(manifest)) > LEGACY_IMPORT_MAX_BYTES - 1024) fail('limit', 'Complete manifest exceeds 256 KiB; nothing was truncated.');
     capture(manifest); // Check complete-envelope nesting, including retained fragments.
     // A prepared manifest must already be representable by the native work schema.
     projectLegacyImportWorks(manifest, 0);
+    applyOwned(addOwned, ownedManifests, [manifest]);
     return { kind: 'prepared', manifest };
   } catch (error) {
     return { kind: 'blocked', code: error instanceof PreparationError ? error.code : 'invalid-source', reason: error instanceof PreparationError ? error.message : 'Malformed source capture; nothing was changed.' };
@@ -248,25 +268,53 @@ export function prepareLegacyWorkLedgerMigration(input: LegacyMigrationInput, si
 
 /** Recompute from fresh captures. This proves repeatable preparation, never durable import. */
 export function replayLegacyWorkLedgerPreparation(previous: LegacyMigrationManifest, fresh: LegacyMigrationInput, signal?: AbortSignal): LegacyMigrationPreparation {
-  const next = prepareLegacyWorkLedgerMigration(fresh, signal);
+  if (signal?.aborted) return { kind: 'blocked', code: 'cancelled', reason: 'Preparation cancelled; no source or ledger was changed.' };
+  let original: LegacyMigrationManifest;
+  try { original = validateLegacyWorkLedgerManifest(previous); }
+  catch { return { kind: 'blocked', code: 'invalid-source', reason: 'Original preparation is invalid; capture and review complete sources again.' }; }
+  const next = prepare(fresh, signal, original.version);
   if (next.kind === 'blocked') return next;
-  if (previous.digest !== next.manifest.digest) return { kind: 'blocked', code: 'stale-preparation', reason: 'Selected host, ledger revision or complete source images changed. Capture and review a new preparation.' };
+  if (original.digest !== next.manifest.digest) return { kind: 'blocked', code: 'stale-preparation', reason: 'Selected host, ledger revision or complete source images changed. Capture and review a new preparation.' };
   return next;
 }
 
 /** Server and product use identical deterministic preparation, never client assertions. */
 export function validateLegacyWorkLedgerManifest(input: unknown): LegacyMigrationManifest {
+  if (input !== null && typeof input === 'object' && applyOwned(hasOwned, ownedManifests, [input])) return input as LegacyMigrationManifest;
   const value = object(capture(input), 'manifest');
-  const prepared = prepareLegacyWorkLedgerMigration({
+  if (value.version !== 1 && value.version !== 2) throw new Error('Unsupported historical import manifest version');
+  const prepared = prepare({
     hostId: value.hostId as string, projectId: value.projectId as string,
     expectedLedgerRevision: value.expectedLedgerRevision as number,
     pendingLocalChanges: false, sources: value.sources as unknown as LegacyMigrationInput['sources'], occupiedWorkIds: [],
-  });
+  }, undefined, value.version);
   if (prepared.kind !== 'prepared' || JSON.stringify(capture(prepared.manifest)) !== JSON.stringify(value)) {
     throw new Error('Manifest does not match canonical complete-source preparation');
   }
   if (Buffer.byteLength(JSON.stringify(prepared.manifest)) > LEGACY_IMPORT_MAX_BYTES) throw new Error('Manifest exceeds import limit');
   return prepared.manifest;
+}
+
+/** Reuse a validated original only after comparing the entire foreign image. */
+export function matchLegacyWorkLedgerManifest(input: unknown, original: LegacyMigrationManifest): LegacyMigrationManifest {
+  const validated = validateLegacyWorkLedgerManifest(original);
+  if (JSON.stringify(capture(input)) !== JSON.stringify(capture(validated))) throw new Error('Historical import manifest differs from its original event');
+  return validated;
+}
+
+/**
+ * Exact current complete source images, not generations alone or rehashed
+ * re-preparation. Validation provenance belongs only to detached frozen originals;
+ * a copied/public manifest still takes the complete validation path above.
+ */
+export function assertLegacyWorkLedgerSourcesCurrent(manifest: LegacyMigrationManifest, readSource: (id: string) => { readonly source: unknown; readonly generation: string | null }): void {
+  const original = validateLegacyWorkLedgerManifest(manifest);
+  const current = capture(original.sources.map(entry => {
+    const source = readSource(String(entry.source.id));
+    return { source: source.source, generation: source.generation };
+  }));
+  const expected = original.sources.map(entry => ({ generation: entry.generation, source: entry.source }));
+  if (JSON.stringify(current) !== JSON.stringify(expected)) throw new Error('Complete persisted historical import sources changed');
 }
 
 

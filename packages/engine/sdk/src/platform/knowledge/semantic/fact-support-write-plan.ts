@@ -5,7 +5,6 @@ import type { KnowledgeStore } from '../store.js';
 import type { KnowledgeExtractionRecord, KnowledgeNodeRecord } from '../types.js';
 import { getKnowledgeSpaceId } from '../spaces.js';
 import type { SemanticWriteGuard } from './primary-source-plan.js';
-import { semanticHash } from './utils.js';
 import { prepareGeneratedFactSupport } from './verification/generated-fact-support.js';
 import {
   KnowledgeGeneratedFactSupportHeldError,
@@ -45,6 +44,20 @@ export function createGeneratedFactWritePlanner(
 ) {
   const requests: GeneratedFactSupportInput[] = [];
   const slots = new Map<string, number[]>();
+  // These keys only deduplicate this pass; nothing persists or verifies them.
+  // Intern complete component encodings once per distinct value, rather than
+  // hashing (or retaining) another full source/extraction for every claim.
+  // Preserve JSON field order, source order and unset-field semantics exactly.
+  const parts = new Map<string | undefined, number>();
+  const requestsByParts = new Map<string, string>();
+  function part(value: unknown): number {
+    const encoded = JSON.stringify(value);
+    const previous = parts.get(encoded);
+    if (previous !== undefined) return previous;
+    const id = parts.size;
+    parts.set(encoded, id);
+    return id;
+  }
   const nativeOwners: Array<{ readonly claimId: string; readonly assertCurrent: () => void }> = [];
   let settled: readonly GeneratedFactSupportPlan[] | undefined;
   let started = false;
@@ -73,8 +86,12 @@ export function createGeneratedFactWritePlanner(
       return { source, extraction };
     });
     if (sources.length === 0) throw new KnowledgeGeneratedFactSupportHeldError('missing-evidence');
-    const key = semanticHash(JSON.stringify({ spaceId, claim, sources, subjects }));
-    if (!slots.has(key)) slots.set(key, sources.map(({ source, extraction }) => {
+    const tuple = JSON.stringify([part(spaceId), part(claim),
+      sources.map(({ source, extraction }) => [part(source), part(extraction)]), subjects.map(part)]);
+    const previous = requestsByParts.get(tuple);
+    if (previous !== undefined) return previous;
+    const key = `support:${slots.size}`;
+    const indices = sources.map(({ source, extraction }) => {
       const index = requests.length;
       const input = withStoredKnowledgeSourceReferences({ spaceId, claim, source, extraction, subjects }, store, source, store.getExtractionBySourceId(source.id));
       requests.push(generatedReferences ? withEngineGeneratedSupportReferences(input, generatedReferences) : input);
@@ -94,7 +111,9 @@ export function createGeneratedFactWritePlanner(
         }
       } });
       return index;
-    }));
+    });
+    slots.set(key, indices);
+    requestsByParts.set(tuple, key);
     return key;
   }
   return {
@@ -102,24 +121,28 @@ export function createGeneratedFactWritePlanner(
     async readAll(): Promise<void> {
       if (started) throw new KnowledgeGeneratedFactSupportHeldError('malformed');
       started = true;
-      guard.assertCurrent();
-      const measured = await prepareGeneratedFactSupport(requests, options);
-      guard.assertCurrent();
-      if (measured.length !== requests.length) throw new KnowledgeGeneratedFactSupportHeldError('malformed');
-      const proofs = measured.map((plan, index) => {
-        const owner = nativeOwners[index];
-        if (!owner) throw new KnowledgeGeneratedFactSupportHeldError('malformed');
-        owner.assertCurrent();
-        if (plan.claimId !== owner.claimId || plan.receipts.some(receipt => receipt.claimId !== owner.claimId)) {
-          throw new KnowledgeGeneratedFactSupportHeldError('stale');
-        }
-        return { plan, proof: Object.freeze({ store, claimId: owner.claimId, receipts: plan.receipts, assertCurrent: owner.assertCurrent }) };
-      });
-      // No successful prefix escapes a failed whole-pass source check.
-      guard.assertCurrent();
-      for (const { proof } of proofs) proof.assertCurrent();
-      for (const { plan, proof } of proofs) nativeApply(nativeWeakMapSet, nativeGeneratedPlans, [plan, proof]);
-      settled = measured;
+      try {
+        guard.assertCurrent();
+        const measured = await prepareGeneratedFactSupport(requests, options);
+        guard.assertCurrent();
+        if (measured.length !== requests.length) throw new KnowledgeGeneratedFactSupportHeldError('malformed');
+        const proofs = measured.map((plan, index) => {
+          const owner = nativeOwners[index];
+          if (!owner) throw new KnowledgeGeneratedFactSupportHeldError('malformed');
+          owner.assertCurrent();
+          if (plan.claimId !== owner.claimId || plan.receipts.some(receipt => receipt.claimId !== owner.claimId)) {
+            throw new KnowledgeGeneratedFactSupportHeldError('stale');
+          }
+          return { plan, proof: Object.freeze({ store, claimId: owner.claimId, receipts: plan.receipts, assertCurrent: owner.assertCurrent }) };
+        });
+        // No successful prefix escapes a failed whole-pass source check.
+        guard.assertCurrent();
+        for (const { proof } of proofs) proof.assertCurrent();
+        for (const { plan, proof } of proofs) nativeApply(nativeWeakMapSet, nativeGeneratedPlans, [plan, proof]);
+        settled = measured;
+      } finally {
+        parts.clear(); requestsByParts.clear(); requests.length = 0; nativeOwners.length = 0;
+      }
     },
     plans(key: string): readonly GeneratedFactSupportPlan[] {
       if (!settled || !slots.has(key)) throw new KnowledgeGeneratedFactSupportHeldError('malformed');

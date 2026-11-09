@@ -392,3 +392,40 @@ test('an exact native receipt clock remains lossless while an unrecognized numer
   expect(changed.metadata.unrecognizedReceiptClock).toEqual({ extractionUpdatedAt: nativeClock });
   expect(item.fake.requests).toHaveLength(refusalCalls);
 });
+
+test('whole-pass support deduplicates exact copied claims without exposing source content in its local key', async () => {
+  const item = await fixture();
+  const original = item.plan.supportPlans[0];
+  if (!original) throw new Error('Native support plan missing');
+  const planner = createGeneratedFactWritePlanner(item.store, createSemanticWriteGuard(item.store));
+  const first = planner.add(item.spaceId, original.claim, [item.source.id], [item.subject], new Map(), new Set(), { claimId: item.fact.id });
+  const copied = planner.add(item.spaceId, structuredClone(original.claim), [item.source.id], [structuredClone(item.subject)], new Map(), new Set(), { claimId: item.fact.id });
+  expect(copied).toBe(first);
+  expect(first).not.toContain(item.spaceId);
+  expect(first).not.toContain(item.source.id);
+  expect(first).not.toContain(original.claim.title);
+  await planner.readAll();
+  const plans = planner.plans(first);
+  expect(plans.length).toBeGreaterThan(0);
+  expect(planner.plans(copied)[0]).toBe(plans[0]);
+  // Releasing the pass's input/dedup tables must retain the original native
+  // publication proof, rather than issue proof to arbitrary copied plans.
+  for (const plan of plans) captureNativeGeneratedFactPlanReferences(item.store, plan).assertCurrent();
+  expect(() => captureNativeGeneratedFactPlanReferences(item.store, structuredClone(plans[0]!))).toThrow();
+});
+
+test('support deduplication retains nested claim distinctions and cannot hide source replacement before the read', async () => {
+  const item = await fixture();
+  const original = item.plan.supportPlans[0];
+  if (!original) throw new Error('Native support plan missing');
+  const planner = createGeneratedFactWritePlanner(item.store, createSemanticWriteGuard(item.store));
+  const first = planner.add(item.spaceId, { ...original.claim, value: { ports: ['HDMI', 'USB'], details: { count: 4 } } }, [item.source.id], [item.subject]);
+  const changed = planner.add(item.spaceId, { ...original.claim, value: { ports: ['HDMI', 'USB'], details: { count: 3 } } }, [item.source.id], [item.subject]);
+  expect(changed).not.toBe(first);
+  const calls = item.fake.requests.length;
+  await item.store.upsertSource({ ...item.source, title: 'Replaced after collecting support inputs' });
+  await expect(planner.readAll()).rejects.toThrow();
+  expect(item.fake.requests).toHaveLength(calls);
+  expect(() => planner.plans(first)).toThrow();
+  expect(() => planner.plans(changed)).toThrow();
+});

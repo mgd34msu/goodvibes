@@ -287,6 +287,10 @@ export class SlackIntegration {
     signature: string,
     signingSecret: string,
   ): boolean {
+    // The wire comparator accepts only this exact ASCII encoding. Reject an
+    // impossible signature before payload authentication or UTF-8 comparison.
+    if (typeof signature !== 'string' || signature.length !== 67 || !signature.startsWith('v0=')
+      || !/^[a-f0-9]{64}$/.test(signature.slice(3))) return false;
     // Guard against replay attacks (5-minute window)
     const now = Math.floor(Date.now() / 1000);
     const ts = parseInt(timestamp, 10);

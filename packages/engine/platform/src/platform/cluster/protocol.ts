@@ -98,7 +98,8 @@ export function decodeMessage(raw: string, secret: string): ClusterDecodeResult 
   if (typeof sig !== 'string' || sig.length === 0) {
     return { message: null, rejected: 'datagram is unsigned but cluster.secret is set' };
   }
-  if (!signaturesMatch(sig, signMessage(message, secret))) {
+  if (sig.length !== 64 || !/^[a-f0-9]{64}$/.test(sig)
+    || !signaturesMatch(sig, signMessage(message, secret))) {
     return { message: null, rejected: 'datagram signature did not verify' };
   }
   return { message, rejected: null };

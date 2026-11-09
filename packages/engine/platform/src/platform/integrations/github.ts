@@ -30,10 +30,10 @@ export class GitHubIntegration {
    * GitHub sends: X-Hub-Signature-256: sha256=<hex>
    */
   static verifySignature(payload: string, signature: string, secret: string): boolean {
-    if (!signature.startsWith('sha256=')) return false;
+    if (typeof signature !== 'string' || !signature.startsWith('sha256=')) return false;
     const sig = signature.slice('sha256='.length);
+    if (sig.length !== 64 || !/^[a-f0-9]{64}$/i.test(sig)) return false;
     const expected = createHmac('sha256', secret).update(payload, 'utf8').digest('hex');
-    if (sig.length !== expected.length) return false;
     return timingSafeEqual(Buffer.from(sig, 'hex'), Buffer.from(expected, 'hex'));
   }
 

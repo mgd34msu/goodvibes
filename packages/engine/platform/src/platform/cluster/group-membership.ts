@@ -361,6 +361,11 @@ export interface OutOfBandCheck {
 export function checkJoinClassMessage(raw: string, joinVerifier: string): OutOfBandCheck | null {
   const read = readUnverifiedEnvelope(raw);
   if (!read || !JOIN_CLASS.has(read.envelope.type)) return null;
+  // Only JOIN uses a hex HMAC. Shared unverified parsing also carries the
+  // different identity-signature format, which must remain unchanged.
+  if (read.sig.length !== 64 || !/^[a-f0-9]{64}$/.test(read.sig)) {
+    return { envelope: read.envelope, joinKeyProved: false, identityProved: false };
+  }
   const expected = authenticateWithSharedKey(canonicalizeEnvelope(read.envelope), joinVerifier);
   return { envelope: read.envelope, joinKeyProved: secretsMatch(read.sig, expected), identityProved: false };
 }

@@ -337,7 +337,8 @@ export function decodeEnvelope(raw: string, keyring: ClusterKeyring): EnvelopeDe
   if (!groupKey) return { envelope: null, rejected: 'generation-not-held', claimedGroupId };
 
   const sig = candidate['sig'];
-  if (typeof sig !== 'string' || !secretsMatch(sig, signEnvelope(envelope, groupKey))) {
+  if (typeof sig !== 'string' || sig.length !== 64 || !/^[a-f0-9]{64}$/.test(sig)
+    || !secretsMatch(sig, signEnvelope(envelope, groupKey))) {
     return { envelope: null, rejected: 'signature-did-not-verify', claimedGroupId };
   }
   return { envelope, rejected: null, claimedGroupId };

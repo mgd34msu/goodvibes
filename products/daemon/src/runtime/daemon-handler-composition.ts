@@ -25,6 +25,8 @@ import type { HostedInboxScreeningAcquisition, HostedInboxScreeningOperation, Ho
  * production default and this seam is not evidence of built-in provider parity.
  */
 export interface DaemonInboxControls extends Required<Pick<RegisterInboxSurfaceOptions, 'gatePolling'>> {
+  /** Publish the admitted native reader floor before opaque Discord identity data. */
+  readonly beforeDiscordIdentityWrite?: (() => void) | undefined;
   /** Root-owned capability; only explicit source options request it. */
   readonly createTriageTagging?: (request: DaemonTriageTaggingRequest) => OwnedInboxTagging;
   /** Explicit awaitable election withdrawal for account-verified clustered owners. */
@@ -91,6 +93,7 @@ export async function createDaemonHandlerComposition(
     registerInbox: (ctx, routing) => registerOwnedMailInbox(options.inboxFactory, ctx, routing, {
       // Each provider is elected separately; standby nodes still serve storage.
       gatePolling: (providerId, control) => options.clusterCoordinator.register(inboxPollerGate(providerId, control)),
+      beforeDiscordIdentityWrite: () => options.nativeDataWriter?.declare('discord-inbox-identities-v1'),
       gatePollingOwned: (providerId, control) => options.clusterCoordinator.registerOwned(inboxPollerGate(providerId, control)),
     }, { configManager: options.configManager, secretsManager: options.secretsManager }, options.triagePermissionHost),
     registerDrafts: registerDraftMethods,

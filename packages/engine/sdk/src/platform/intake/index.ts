@@ -81,3 +81,6 @@ export type { OwnedInboxTagging, OwnedInboxTaggingOptions, OwnedInboxTagOperatio
 // Explicit account-bound Discord channels; no implicit catalog or external polling.
 export { createDiscordInboxOwner } from './providers/discord-owner.js';
 export type { DiscordInboxAccount, DiscordInboxChannelScope, DiscordInboxOwnerOptions, DiscordInboxOwnerFactories, DiscordInboxOwner, VerifiedDiscordInboxOwner } from './providers/discord-owner.js';
+
+export { acquireDiscordInboxIdentity, acquireDiscordInboxRegistryRevision } from './providers/discord-identity.js';
+export type { DiscordInboxIdentity, DiscordInboxIdentityInput, DiscordInboxIdentityOwner } from './providers/discord-identity.js';

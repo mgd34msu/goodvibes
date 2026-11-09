@@ -1,11 +1,10 @@
 /** Explicit Discord account/DM scope over the canonical source and registration owners. */
 import { realpath } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { acquireCrossProcessLock } from '@goodvibes-jev/engine/sdk/platform/state/durable-file-io';
 import { createInboxRouteResolver } from '@goodvibes-jev/engine/sdk/platform/channels';
 import type { ClusterClock } from '@goodvibes-jev/engine/sdk/platform/cluster';
-import { createDiscordInboxOwner, createOwnedTriagedInboxSource,
+import { acquireDiscordInboxIdentity, acquireDiscordInboxRegistryRevision, createDiscordInboxOwner, createOwnedTriagedInboxSource,
   type DiscordInboxOwnerOptions, type VerifiedDiscordInboxOwner, type OwnedInboxSource, type InboxTriageAuthority,
 } from '@goodvibes-jev/engine/sdk/platform/intake';
 import { createMultiOwnerDaemonInboxFactory, type DaemonInboxSourceFactory } from './multiowner-inbox-composition.js';
@@ -75,19 +74,21 @@ export function createConfiguredDiscordDaemonInboxSourceFactory(
     try {
       for (const key of keys) unsubscribe.push(subscribe(key, () => lifetime.abort()));
       current();
+      const workingDirectory = await realpath(context.workingDirectory); current();
+      const revision = await acquireDiscordInboxRegistryRevision({ workingDirectory, assertCurrent: current, beforeWrite: controls.beforeDiscordIdentityWrite }, { userId }, channelIds); current();
       source = await createDiscordDaemonInboxSourceFactory({
         account: { userId },
         channels: { channelIds, signal: lifetime.signal, assertCurrent: current,
-          revision: createHash('sha256').update(JSON.stringify([userId, [...channelIds].sort()])).digest('hex') },
+          revision },
         screening,
-      }, factories)(context, routing, controls);
+      }, factories, true)(context, routing, controls);
       current();
       return { ...source, close, unregister() { void close().catch(() => {}); } };
     } catch (error) { await close(); throw error; }
   };
 }
 export function createDiscordDaemonInboxSourceFactory(options: DiscordDaemonInboxOptions,
-  factories: DiscordDaemonInboxSourceFactories = {}): DaemonInboxSourceFactory {
+  factories: DiscordDaemonInboxSourceFactories = {}, configuredRegistry = false): DaemonInboxSourceFactory {
   const createOwner = factories.createOwner ?? createDiscordInboxOwner;
   const authority = options.triageAuthority;
   const triageTagging = options.triageTagging ? Object.freeze({ onReady: options.triageTagging.onReady,
@@ -128,8 +129,10 @@ export function createDiscordDaemonInboxSourceFactory(options: DiscordDaemonInbo
       const workingDirectory = await realpath(context.workingDirectory); startupCurrent();
       const resolveProfileId = routing.resolveProfileId.bind(routing);
       const resolveRouteId = createInboxRouteResolver({ getProfileForChannel: resolveProfileId, resolveProfile: resolveProfileId });
+      const identity = await acquireDiscordInboxIdentity({ workingDirectory, assertCurrent: startupCurrent, beforeWrite: controls.beforeDiscordIdentityWrite }, options, { configuredRegistry });
+      startupCurrent();
       owner = await createOwner({ ...context, resolveRouteId }, {
-        account: options.account, channels: options.channels, screening: options.screening, assertCurrent: current,
+        identity, account: options.account, channels: options.channels, screening: options.screening, assertCurrent: current,
         ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
       });
       startupCurrent();
@@ -140,7 +143,7 @@ export function createDiscordDaemonInboxSourceFactory(options: DiscordDaemonInbo
       startupCurrent();
       surface = await createOwnedTriagedInboxSource({ ...context, workingDirectory }, {
         providerId: 'discord', accountScopeId: owner.scopeId, ...(authority ? { authority } : {}),
-        adapters: new Map([['discord', owner.adapter]]), storeFileName,
+        adapters: new Map([['discord', owner.adapter]]), storeFileName, triageStoreFileName: owner.triageStoreFileName,
         ...(clustered ? { awaitInitialPoll: false } : {}), acquireReadLease: () => owner!.acquireReadLease(),
         gatePolling(_provider, control) {
           if (!clustered) return controls.gatePolling(`discord:${owner!.scopeId}`, control);

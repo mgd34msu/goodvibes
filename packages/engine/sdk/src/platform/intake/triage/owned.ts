@@ -33,6 +33,8 @@ export interface InboxTriageAuthority {
 export interface OwnedTriagedInboxOptions extends Omit<RegisterInboxSurfaceOptions, 'storeFileName' | 'enrichTriage' | 'acquireReadLease'> {
   /** Preserve a native account mirror already protected by its host owner lock. */
   readonly storeFileName?: string;
+  /** Preserve a native provider's already-owned opaque or historical triage selector. */
+  readonly triageStoreFileName?: string;
   readonly providerId: string;
   readonly accountScopeId: string;
   readonly acquireReadLease: NonNullable<RegisterInboxSurfaceOptions['acquireReadLease']>;
@@ -79,9 +81,9 @@ async function createTriagedSource(
   ctx = Object.freeze({ ...ctx });
   options = Object.freeze({ ...options, adapters: new Map(options.adapters) });
   const { providerId, accountScopeId } = options;
-  if (options.storeFileName !== undefined && (typeof options.storeFileName !== 'string'
-    || options.storeFileName.length > 200 || options.storeFileName.includes('/') || options.storeFileName.includes('\\')
-    || options.storeFileName.startsWith('.') || !options.storeFileName.endsWith('.sqlite'))) {
+  for (const selectedFile of [options.storeFileName, options.triageStoreFileName]) if (selectedFile !== undefined && (typeof selectedFile !== 'string'
+    || selectedFile.length > 200 || selectedFile.includes('/') || selectedFile.includes('\\')
+    || selectedFile.startsWith('.') || !selectedFile.endsWith('.sqlite'))) {
     throw new TypeError('Triaged inbox mirror requires a local SQLite filename');
   }
   if (!providerId || providerId.includes(':') || !accountScopeId || accountScopeId.length > 500
@@ -100,8 +102,11 @@ async function createTriagedSource(
   let closed = false, closing: Promise<void> | undefined, store: SqliteTriageStore | undefined;
   const active = new Set<Promise<unknown>>();
   let scoreTail: Promise<unknown> = Promise.resolve();
-  const scope = createHash('sha256').update(JSON.stringify(['owned-inbox-triage-v1', providerId, accountScopeId])).digest('hex');
-  const fileName = `inbox-triage-${scope}.sqlite`;
+  // Native providers supply already-owned selectors. The default remains for
+  // callers outside this Discord migration; it is not evaluated for native Discord.
+  const scope = options.storeFileName && options.triageStoreFileName ? undefined
+    : createHash('sha256').update(JSON.stringify(['owned-inbox-triage-v1', providerId, accountScopeId])).digest('hex');
+  const fileName = options.triageStoreFileName ?? `inbox-triage-${scope}.sqlite`;
   const releaseLock = await acquireCrossProcessLock(join(ctx.workingDirectory, '.goodvibes', 'tui', 'operator', `${fileName}.owner.lock`),
     { strictOwnership: true, totalTimeoutMs: 100 });
   const assertAuthority = (): void => {

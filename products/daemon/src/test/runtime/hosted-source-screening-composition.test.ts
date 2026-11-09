@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConfigManager, createDaemonCredentialStore } from '@goodvibes-jev/engine/sdk/platform/config';
-import { createDiscordInboxOwner } from '@goodvibes-jev/engine/sdk/platform/intake';
+import { acquireDiscordInboxIdentity, createDiscordInboxOwner } from '@goodvibes-jev/engine/sdk/platform/intake';
 import { acquireCrossProcessLock } from '@goodvibes-jev/engine/sdk/platform/state/durable-file-io';
 import { SecretsManager } from '../../config/secrets.js';
 import { acquireHostedInboxScreening } from '../../runtime/hosted-source-screening-composition.js';
@@ -132,12 +132,14 @@ async function nativeDiscordOwner(f: Awaited<ReturnType<typeof fixture>>,
   acquisition: Awaited<ReturnType<typeof acquireHostedInboxScreening>>, selection: {
     userId?: string; channelIds?: readonly string[]; revision?: string;
   } = {}) {
-  const owner = await createDiscordInboxOwner({ credentials: createDaemonCredentialStore(f.secrets), logger: { info() {}, warn() {}, error() {} } }, {
+  const input = {
     account: { userId: selection.userId ?? '100000000000000001' },
     channels: { channelIds: selection.channelIds ?? ['100000000000000002'],
       revision: selection.revision ?? 'same-native-registry-revision', signal: new AbortController().signal, assertCurrent() {} },
     screening: acquisition.options, assertCurrent() {},
-  });
+  };
+  const identity = await acquireDiscordInboxIdentity({ workingDirectory: f.root, assertCurrent() {} }, input);
+  const owner = await createDiscordInboxOwner({ credentials: createDaemonCredentialStore(f.secrets), logger: { info() {}, warn() {}, error() {} } }, { ...input, identity });
   cleanup.push(() => owner.close());
   return owner;
 }

@@ -1,10 +1,13 @@
+import { makeProjectTempDir } from './_helpers/project-temp.ts';
+import { acquireDiscordInboxIdentity } from '../sdk/src/platform/intake/providers/discord-identity.ts';
 import { afterEach, expect, test } from 'bun:test';
 import { Client } from 'undici/index.js';
 import { createDiscordInboxOwner } from '../sdk/src/platform/intake/providers/discord-owner.ts';
 import type { ProtectedSourceOwnerOptions } from '../sdk/src/platform/security/source-screening/types.ts';
 
+let identityDirectory: string | undefined;
 const cleanups: Array<() => void | Promise<void>> = [];
-afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });
+afterEach(async () => { identityDirectory = undefined; for (const close of cleanups.splice(0).reverse()) await close(); });
 
 const botId = '100000000000000001';
 const channelId = '100000000000000002';
@@ -58,6 +61,10 @@ async function fixture(input: {
       typesafeApiKey: input.typesafeApiKey ?? 'synthetic-hosted-typesafe-key-1',
     },
   };
+  const ownerInput = { account: { userId },
+    channels: { channelIds, revision: input.registryRevision ?? 'synthetic-native-registry-1', signal: new AbortController().signal, assertCurrent() {} },
+    screening, assertCurrent() {} };
+  const identity = await acquireDiscordInboxIdentity({ workingDirectory: identityDirectory ??= makeProjectTempDir('discord-hosted-identities'), assertCurrent() {} }, ownerInput);
   const owner = await createDiscordInboxOwner({
     logger: { info() {}, warn() {}, error() {} },
     credentials: {
@@ -70,12 +77,7 @@ async function fixture(input: {
         return token;
       },
     },
-  }, {
-    account: { userId },
-    channels: { channelIds, revision: input.registryRevision ?? 'synthetic-native-registry-1',
-      signal: new AbortController().signal, assertCurrent() {} },
-    screening, assertCurrent() {},
-  }, { createHttpClient(origin, options) {
+  }, { ...ownerInput, identity }, { createHttpClient(origin, options) {
     expect(origin).toBe('https://discord.com');
     expect(options.connect).toEqual({ rejectUnauthorized: true });
     return new Client(`http://127.0.0.1:${remote.port}`, options);
@@ -93,7 +95,7 @@ test('hosted scope survives distinct admissions, credential snapshots and channe
     grantRevision: 'synthetic-hosted-revision-2', abacusApiKey: 'synthetic-hosted-abacus-key-2',
     typesafeApiKey: 'synthetic-hosted-typesafe-key-2' });
   expect(first.owner.scopeId).toBe(second.owner.scopeId);
-  expect(first.owner.scopeId).toMatch(/^[a-f0-9]{64}$/);
+  expect(first.owner.scopeId).toMatch(/^[0-9a-f-]{36}$/);
   expect(first.screening.authority.ownerId).not.toBe(second.screening.authority.ownerId);
   expect(first.screening.authority.revision).not.toBe(second.screening.authority.revision);
   expect(first.calls).toEqual([]); expect(second.calls).toEqual([]);

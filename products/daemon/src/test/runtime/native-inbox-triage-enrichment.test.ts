@@ -93,7 +93,7 @@ async function fixture(provider: Provider, options: { noAuthority?: boolean; sco
     retention: 'ephemeral-no-log', signal: semantic.signal, assertCurrent },
     proposal: { endpoint: 'http://127.0.0.1:1', model: 'synthetic-proposer' },
     judgment: { endpoint: 'http://127.0.0.1:1', model: 'jev-1.13.0' } };
-  const native = { scopeId, adapter, acquireReadLease, assertReadCurrent: async () => { assertCurrent(); },
+  const native = { scopeId, triageStoreFileName: 'inbox-triage-synthetic-discord.sqlite', adapter, acquireReadLease, assertReadCurrent: async () => { assertCurrent(); },
     invalidateCredential() { current = false; },
     verifyEligibility: async () => {
       metadataCalls++;

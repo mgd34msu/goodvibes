@@ -47,6 +47,13 @@ and `surfaces.discord.inboxChannelIds`. The latter is an explicit comma-separate
 registry of 1–200 bot-readable one-to-one DM IDs. The token must prove the expected
 bot identity and every channel before history reads; account or registry replacement
 revokes the source even if the setting is restored. Group DMs are unsupported.
+Discord's account and screening scope use stable opaque IDs stored in the private
+workspace file `.goodvibes/tui/operator/discord-inbox-identities.json`. Keep that
+file with the inbox SQLite files when backing up or moving a workspace. Existing
+hashed mirror filenames and matching triage receipts remain readable after
+upgrade. A missing or damaged identity registry with opaque mirrors requires
+restoring the matching registry; the daemon holds instead of opening a new empty
+inbox. Native updates and rollbacks require a reader that supports this format.
 The host supplies the live `ProtectedSourceOwnerOptions` capability for both the
 local proposal service and `jev-latest`, including established ephemeral retention.
 The standalone launcher has no managed local screening runner; settings or endpoint

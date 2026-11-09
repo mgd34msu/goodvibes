@@ -1,3 +1,5 @@
+import { makeProjectTempDir } from './_helpers/project-temp.ts';
+import { acquireDiscordInboxIdentity } from '../sdk/src/platform/intake/providers/discord-identity.ts';
 import { VERSION } from '../sdk/src/platform/version.js';
 import { screeningAnswers } from './_helpers/screening-answers.js';
 import { afterEach, expect, test } from 'bun:test';
@@ -6,8 +8,9 @@ import { createDiscordInboxOwner, type DiscordInboxOwnerOptions } from '../sdk/s
 import { createDiscordInboxHttpOwner } from '../sdk/src/platform/intake/providers/discord-http.ts';
 import { digestSender } from '../sdk/src/platform/intake/text-normalization.ts';
 
+let identityDirectory: string | undefined;
 const cleanups: Array<() => unknown | Promise<unknown>> = [];
-afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });
+afterEach(async () => { identityDirectory = undefined; for (const close of cleanups.splice(0).reverse()) await close(); });
 const pause = () => new Promise<void>((done) => setTimeout(done, 5));
 const snowflake = (ms: number) => (BigInt(ms - 1_420_070_400_000) << 22n).toString();
 const account = { userId: '100000000000000001' };
@@ -74,7 +77,7 @@ async function fixture(options: { credentialGate?: Promise<void>; screeningGate?
   );
   const channelSignal = new AbortController(),
     privacySignal = new AbortController();
-  const ownerOptions: DiscordInboxOwnerOptions = {
+  const ownerOptions: Omit<DiscordInboxOwnerOptions, 'identity'> = {
     account,
     channels: {
       channelIds: options.ids ?? [channel],
@@ -97,6 +100,7 @@ async function fixture(options: { credentialGate?: Promise<void>; screeningGate?
       judgment: { endpoint: `http://127.0.0.1:${local.port}`, model: 'jev-1.13.0' },
     },
   };
+  const identity = await acquireDiscordInboxIdentity({ workingDirectory: identityDirectory ??= makeProjectTempDir('discord-owner-identities'), assertCurrent() {} }, ownerOptions);
   const owner = await createDiscordInboxOwner(
     {
       logger: { info() {}, warn() {}, error() {} },
@@ -118,7 +122,7 @@ async function fixture(options: { credentialGate?: Promise<void>; screeningGate?
       },
       resolveRouteId: async () => 'synthetic-profile',
     },
-    ownerOptions,
+    { ...ownerOptions, identity },
     {
       createHttpClient(origin, settings) {
         expect(origin).toBe('https://discord.com');
@@ -256,7 +260,7 @@ test('account scope includes intended catalog and privacy policy revision, indep
     second = await fixture({ ids: ['100000000000000099'] }),
     third = await fixture({ privacyRevision: '2' });
   expect(new Set([f.owner.scopeId, second.owner.scopeId, third.owner.scopeId]).size).toBe(3);
-  expect(f.owner.scopeId).toMatch(/^[a-f0-9]{64}$/);
+  expect(f.owner.scopeId).toMatch(/^[0-9a-f-]{36}$/);
 });
 test('production transport rejects undeclared channels, unsupported DM listing, redirects, credentials and extra query before opening a client', async () => {
   let constructed = 0;

@@ -1,5 +1,4 @@
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
-import { createHash } from 'node:crypto';
 import { types } from 'node:util';
 import { createProtectedSourceOwner } from '../../security/source-screening/owner.js';
 import type { ProtectedSourceOwnerOptions } from '../../security/source-screening/types.js';
@@ -10,6 +9,8 @@ import { POLL_CADENCE_MS } from '../provider-adapter.js';
 import type { OwnedInboxReadLease } from '../registration.js';
 import { createDiscordInboxAdapter, type DiscordInboxHttp } from './discord.js';
 import { createDiscordInboxHttpOwner } from './discord-http.js';
+
+import { resolveDiscordInboxIdentity, type DiscordInboxIdentity } from './discord-identity.js';
 
 const KEY = 'surfaces.discord.botToken';
 const AUTH_URL = 'https://discord.com/api/v10/users/@me';
@@ -28,6 +29,8 @@ export interface DiscordInboxChannelScope {
   readonly assertCurrent: () => void;
 }
 export interface DiscordInboxOwnerOptions {
+  /** Private account/source-bound identity from the native local registry. */
+  readonly identity: DiscordInboxIdentity;
   readonly channels: DiscordInboxChannelScope;
   /** Expected bot identity, established by the trusted composition root. */
   readonly account: DiscordInboxAccount;
@@ -49,6 +52,7 @@ export interface DiscordInboxOwner {
   readonly account: DiscordInboxAccount;
   /** Opaque stable account discriminator, independent of credential rotation. */
   readonly scopeId: string;
+  readonly triageStoreFileName: string;
   readonly adapter: InboundProviderAdapter;
   /** A changed credential must prove the same identity before stored rows leave. */
   assertReadCurrent(): Promise<void>;
@@ -101,7 +105,6 @@ function captureChannels(value: DiscordInboxChannelScope): DiscordInboxChannelSc
     signal: fields.signal!.value, assertCurrent: fields.assertCurrent!.value });
 }
 
-function digest(value: string): string { return createHash('sha256').update(value).digest('hex'); }
 function unavailable(configured?: boolean): ProviderPollResult {
   return { items: [], state: 'unavailable', error: 'Discord inbox account or source is unavailable', ...(configured === undefined ? {} : { configured }) };
 }
@@ -115,21 +118,18 @@ export async function createDiscordInboxOwner(
   options: DiscordInboxOwnerOptions,
   factories: DiscordInboxOwnerFactories = {},
 ): Promise<VerifiedDiscordInboxOwner> {
+  const screeningOptions = Object.freeze({ ...options.screening });
   const account = captureAccount(options.account);
   const channels = captureChannels(options.channels);
   const resolveCredential = context.credentials.resolveConfigSecret.bind(context.credentials);
   const observeCredential = context.credentials.resolveConfigCredentialSnapshot?.bind(context.credentials);
   if (!observeCredential) throw new Error('Discord inbox requires exact local credential ownership');
   const resolveRouteId = context.resolveRouteId;
-  const scopeId = digest(JSON.stringify('kind' in options.screening
-    ? ['discord-inbox-hosted', 1, account.userId, channels.channelIds, channels.revision,
-      'abacus-route-llm+typesafe-jev-latest', 'provider-managed-zero-retention-unverified']
-    : ['discord-inbox', 1, account.userId, channels.channelIds, channels.revision,
-      options.screening.authority.ownerId, options.screening.authority.revision]));
+  const { scopeId, triageFileName: triageStoreFileName } = resolveDiscordInboxIdentity(options.identity, { account, channels, screening: screeningOptions });
   const lifetime = new AbortController();
-  const signal = AbortSignal.any([lifetime.signal, channels.signal, options.screening.authority.signal, ...(options.signal ? [options.signal] : [])]);
+  const signal = AbortSignal.any([lifetime.signal, channels.signal, screeningOptions.authority.signal, ...(options.signal ? [options.signal] : [])]);
   const assertScope = options.assertCurrent;
-  const sourceAuthority = options.screening.authority;
+  const sourceAuthority = screeningOptions.authority;
   const assertSource = sourceAuthority.assertCurrent;
   const active = new Set<Promise<unknown>>();
   let closed = false;
@@ -155,26 +155,25 @@ export async function createDiscordInboxOwner(
     try {
       if (closed || signal.aborted) throw new Error();
       const result: unknown = assertScope();
-      if (result !== null && (typeof result === 'object' || typeof result === 'function') && 'then' in result) {
+      if (result !== undefined) {
         drainOwned(result);
         throw new Error();
       }
       const channelResult: unknown = channels.assertCurrent();
       if (channelResult !== undefined) {
-        if (types.isPromise(channelResult)) void channelResult.catch(() => {});
+        drainOwned(channelResult);
         throw new Error();
       }
       const sourceResult: unknown = assertSource.call(sourceAuthority);
       if (sourceResult !== undefined) {
-        if (types.isPromise(sourceResult)) void sourceResult.catch(() => {});
+        drainOwned(sourceResult);
         throw new Error();
       }
       if (closed || signal.aborted) throw new Error();
     } catch { invalidateIdentity(); throw new Error('Discord inbox account scope is unavailable'); }
   };
   current();
-  const screeningOptions = options.screening;
-  const assertScreeningCurrent = () => { current(); return assertSource.call(sourceAuthority); };
+  const assertScreeningCurrent = () => { current(); };
   const screening = createProtectedSourceOwner('kind' in screeningOptions
     ? { ...screeningOptions, authority: { ...screeningOptions.authority, signal, assertCurrent: assertScreeningCurrent } }
     : { ...screeningOptions, authority: { ...screeningOptions.authority, signal, assertCurrent: assertScreeningCurrent } });
@@ -331,7 +330,7 @@ export async function createDiscordInboxOwner(
     } catch { throw new Error('Discord inbox account scope is unavailable'); }
   });
   return {
-    account, scopeId, adapter,
+    account, scopeId, triageStoreFileName, adapter,
     invalidateCredential: invalidateIdentity,
     async assertReadCurrent() { await verifyIdentity(true); },
     async acquireReadLease() {

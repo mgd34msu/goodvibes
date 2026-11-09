@@ -11,7 +11,6 @@ import { semanticFactId } from '../sdk/src/platform/knowledge/semantic/utils.js'
 import { prepareSourceLinkedRepairProfileFacts } from '../sdk/src/platform/knowledge/semantic/self-improvement-promotion.js';
 import { prepareGeneratedFactSupport, KnowledgeGeneratedFactSupportHeldError, type GeneratedFactSupportInput } from '../sdk/src/platform/knowledge/semantic/verification/generated-fact-support.js';
 import { withEngineGeneratedSupportReferences } from '../sdk/src/platform/knowledge/semantic/verification/structural-references.js';
-import { supportHash } from '../sdk/src/platform/knowledge/semantic/verification/projection.js';
 
 const spaceId = 'support-test';
 const actualClaimId = semanticFactId({ spaceId, kind: 'specification', title: 'HDMI ports', value: 'four hdmi ports', subjectIds: ['synthetic-repro-subject-767'] });
@@ -52,9 +51,9 @@ describe('engine-generated structural reference projection', () => {
     expect(wire).not.toContain(actualClaimId); expect(wire).not.toContain(generatedSubjectId);
     expect(wire).toContain('claim-1'); expect(wire).toContain('subject-1'); expect(wire).toContain('four hdmi ports');
     expect(plan!.claimId).toBe(actualClaimId); expect(plan!.claim.id).toBe(actualClaimId);
-    expect(plan!.claimHash).toBe(supportHash(candidate.claim));
+    expect(plan!.claim).toEqual(candidate.claim); expect(Object.hasOwn(plan!, 'claimHash')).toBe(false);
     expect(plan!.receipts.find((receipt) => receipt.field === 'subjectAttachment')?.subjectId).toBe(generatedSubjectId);
-    expect(plan!.receipts.find((receipt) => receipt.field === 'targetHints[0]')?.fieldHash).toBe(supportHash(candidate.claim.targetHints![0]));
+    expect(plan!.receipts.find((receipt) => receipt.field === 'targetHints[0]')).toMatchObject({ version: 2, claimId: candidate.claim.id, field: 'targetHints[0]' });
     for (const request of fake.requests) {
       const state = request.state as { claim: { targetHints: { id: string }[] }; subjects: { id: string }[]; field?: { name: string; value: { id?: string } } };
       expect(state.claim.targetHints[0]!.id).toBe(state.subjects[0]!.id);

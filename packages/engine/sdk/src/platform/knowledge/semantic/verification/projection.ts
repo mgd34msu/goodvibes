@@ -1,3 +1,5 @@
+import { types as nodeTypes } from 'node:util';
+import { captureOwnedJson } from '../../../gate/judgment-input.js';
 import { projectKnowledgeSourceReferences } from '../../source-structural-references.js';
 import { storedKnowledgeSourceReferences } from './structural-references.js';
 import type { SupportReferenceLabels } from './structural-references.js';
@@ -28,7 +30,7 @@ function assertPlainSnapshot(value: unknown): void {
     if (typeof entry === 'string') { chars += entry.length; if (chars > 1_000_000) throw new JudgmentInputError('unsupported-input'); return; }
     if (entry === undefined || entry === null || typeof entry === 'boolean') return;
     if (typeof entry === 'number' && Number.isFinite(entry)) return;
-    if (typeof entry !== 'object' || ancestors.has(entry)) throw new JudgmentInputError('unsupported-input');
+    if (typeof entry !== 'object' || nodeTypes.isProxy(entry) || ancestors.has(entry)) throw new JudgmentInputError('unsupported-input');
     const proto: unknown = Object.getPrototypeOf(entry);
     if (Array.isArray(entry) ? proto !== Array.prototype : proto !== Object.prototype && proto !== null) throw new JudgmentInputError('unsupported-input');
     if (Object.getOwnPropertySymbols(entry).length) throw new JudgmentInputError('unsupported-input');
@@ -69,6 +71,18 @@ function subjectProjection(subject: KnowledgeNodeRecord) {
 }
 const CLAIM_KEYS = new Set(['id', 'kind', 'title', 'summary', 'value', 'evidence', 'labels', 'aliases', 'subject', 'targetHints']);
 const HINT_KEYS = new Set(['id', 'kind', 'title']);
+
+interface OriginalSupportValues { readonly source: unknown; readonly extraction: unknown; readonly claim: unknown; readonly subjects: readonly unknown[] }
+const supportOriginals = new WeakMap<object, OriginalSupportValues>();
+/** Comparison data for this exact detached projection's lifetime only. It is
+ * never joins model/public serialization, persisted metadata or native
+ * publication authority. */
+export function releaseOriginalSupportValues(projection: object): void { supportOriginals.delete(projection); }
+export function originalSupportValues(projection: object): OriginalSupportValues {
+  const original = supportOriginals.get(projection);
+  if (!original) throw new Held('malformed');
+  return original;
+}
 
 /** Produces only explicit evidence and identity fields; arbitrary metadata never leaves this boundary. */
 export function projectSupportInput(input: GeneratedFactSupportInput, labels?: SupportReferenceLabels) {
@@ -136,25 +150,27 @@ export function projectSupportInput(input: GeneratedFactSupportInput, labels?: S
   } : claim;
   const subjects = input.subjects.map((subject) => {
     const state = subjectProjection(subject);
-    return { originalId: subject.id, originalFieldHash: supportHash(state), state: { ...state, id: references?.subjects.get(subject.id) ?? state.id }, hash: supportHash(subject) };
+    return { originalId: subject.id, state: { ...state, id: references?.subjects.get(subject.id) ?? state.id } };
   });
   const state = { spaceId, claim: projectedClaim, source: sourceState, extraction: extractionState, subjects: subjects.map((subject) => subject.state) };
   // Called for EVERY selected input before the reader sends ANY request, without clipping.
   assertJudgmentInput(state);
-  const fields: { name: string; value: JsonValue; originalHash: string }[] = [];
+  const fields: { name: string; value: JsonValue }[] = [];
   for (const name of ['kind', 'title', 'summary', 'value', 'evidence', 'subject'] as const) {
     const value = projectedClaim[name];
-    if (value !== undefined) fields.push({ name, value: JSON.parse(JSON.stringify(value)) as JsonValue, originalHash: supportHash(claim[name]) });
+    if (value !== undefined) fields.push({ name, value: JSON.parse(JSON.stringify(value)) as JsonValue });
   }
   for (const name of ['labels', 'aliases', 'targetHints'] as const) {
-    projectedClaim[name]?.forEach((value, index) => fields.push({ name: `${name}[${index}]`, value: JSON.parse(JSON.stringify(value)) as JsonValue, originalHash: supportHash(claim[name]![index]) }));
+    projectedClaim[name]?.forEach((value, index) => fields.push({ name: `${name}[${index}]`, value: JSON.parse(JSON.stringify(value)) as JsonValue }));
   }
   // Detach the request/plan from caller-owned objects before the first await.
   const snapshot = JSON.parse(JSON.stringify({ state, fields, subjects, claim })) as {
-    state: JsonValue; fields: typeof fields; subjects: { originalId: string; originalFieldHash: string; state: ReturnType<typeof subjectProjection>; hash: string }[]; claim: typeof claim;
+    state: JsonValue; fields: typeof fields; subjects: { originalId: string; state: ReturnType<typeof subjectProjection> }[]; claim: typeof claim;
   };
-  return freezeSupport({ ...snapshot, spaceId, claimId: claim.id, claimHash: supportHash(claim), sourceId: source.id,
-    sourceHash: supportHash(source), extractionId: extraction.id, extractionHash: supportHash(extraction),
-    extractionUpdatedAt: extraction.updatedAt, evidenceHash: supportHash(extractionState) });
+  const projection = freezeSupport({ ...snapshot, spaceId, claimId: claim.id, sourceId: source.id,
+    extractionId: extraction.id, extractionUpdatedAt: extraction.updatedAt });
+  supportOriginals.set(projection, Object.freeze({ source: captureOwnedJson(source), extraction: captureOwnedJson(extraction),
+    claim: captureOwnedJson(claim), subjects: Object.freeze(input.subjects.map(subject => captureOwnedJson(subject))) }));
+  return projection;
 }
 export type ProjectedSupportInput = ReturnType<typeof projectSupportInput>;

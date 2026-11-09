@@ -30,6 +30,8 @@ export interface GeneratedFactSupportOptions {
   readonly timeoutMs?: number | undefined;
 }
 export interface GeneratedFactSupportReceipt {
+  /** Fresh receipts are v2. Omitted only on earlier saved descriptive metadata. */
+  readonly version?: 2;
   /** Opaque local label, not evidence or a provider/decision-log ID. Saved earlier labels remain readable. */
   readonly receiptId: string;
   readonly decisionId?: string | undefined;
@@ -37,20 +39,26 @@ export interface GeneratedFactSupportReceipt {
   readonly batteryVersion: number;
   readonly spaceId: string;
   readonly claimId: string;
-  readonly claimHash: string;
+  /** Earlier saved receipt compatibility only; fresh receipts do not compute this field. */
+  readonly claimHash?: string;
   readonly field: string;
-  readonly fieldHash: string;
-  readonly stateHash: string;
+  /** Earlier saved receipt compatibility only; fresh receipts do not compute this field. */
+  readonly fieldHash?: string;
+  /** Earlier saved receipt compatibility only; fresh receipts do not compute this field. */
+  readonly stateHash?: string;
   readonly sourceId: string;
-  readonly sourceHash: string;
+  /** Earlier saved receipt compatibility only; fresh receipts do not compute this field. */
+  readonly sourceHash?: string;
   readonly extractionId: string;
-  readonly extractionHash: string;
+  /** Earlier saved receipt compatibility only; fresh receipts do not compute this field. */
+  readonly extractionHash?: string;
   /** Native writers emit canonical ISO; numeric receipts remain readable for historical data. */
   readonly extractionUpdatedAt: string | number;
   readonly subjectId?: string | undefined;
   readonly subjectHash?: string | undefined;
-  /** Whole, exact extraction projection; no invented or model-generated citation. */
-  readonly evidenceReference: { readonly extractionId: string; readonly evidenceHash: string };
+  /** Names the actual extraction. Original native source owners and complete
+   * receipt equality provide binding; a descriptive checksum grants nothing. */
+  readonly evidenceReference: { readonly extractionId: string; readonly evidenceHash?: string };
   readonly verdict: 'yes';
   readonly outcome: 'act';
   readonly probability: number;
@@ -58,11 +66,8 @@ export interface GeneratedFactSupportReceipt {
 export interface GeneratedFactSupportPlan {
   readonly claim: GeneratedFactSupportClaim;
   readonly claimId: string;
-  readonly claimHash: string;
   readonly sourceId: string;
-  readonly sourceHash: string;
   readonly extractionId: string;
-  readonly extractionHash: string;
   readonly receipts: readonly GeneratedFactSupportReceipt[];
 }
 export type GeneratedFactSupportHoldReason = 'unsettled' | 'no-support' | 'unavailable' | 'malformed' | 'stale' | 'aborted' | 'budget' | 'missing-evidence' | 'foreign-space';

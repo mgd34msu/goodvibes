@@ -155,15 +155,16 @@ export type GeneratedFactWritePlanner = ReturnType<typeof createGeneratedFactWri
 /** Keep receipts per claim/source; a last writer must not erase earlier provenance. */
 export function generatedFactSupportMetadata(
   plans: readonly GeneratedFactSupportPlan[], existing: unknown,
-): { readonly version: 1; readonly claimHashes: readonly string[]; readonly receipts: readonly unknown[] } {
+): { readonly version: 2; readonly receipts: readonly unknown[] } {
   const previous = existing && typeof existing === 'object' && !Array.isArray(existing)
-    ? existing as { readonly receipts?: unknown } : {};
+    ? existing as { readonly version?: unknown; readonly receipts?: unknown } : {};
+  if (typeof previous.version === 'number' && previous.version > 2) throw new KnowledgeGeneratedFactSupportHeldError('malformed');
   const receipts = new Map<string, unknown>();
   if (Array.isArray(previous.receipts)) for (const value of previous.receipts) {
     if (value && typeof value === 'object' && typeof value.receiptId === 'string') receipts.set(supportReceiptKey(value), value);
   }
   for (const receipt of generatedFactSupportReceipts(plans)) receipts.set(supportReceiptKey(receipt), receipt);
-  return { version: 1, claimHashes: [...new Set(plans.map((plan) => plan.claimHash))], receipts: [...receipts.values()] };
+  return { version: 2, receipts: [...receipts.values()] };
 }
 export function generatedFactSupportReceipts(plans: readonly GeneratedFactSupportPlan[]): readonly GeneratedFactSupportReceipt[] {
   return plans.flatMap((plan) => plan.receipts);

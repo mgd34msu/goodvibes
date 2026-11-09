@@ -1,3 +1,5 @@
+import { types as nodeTypes } from 'node:util';
+import { knowledgeRecordVersion, sameKnowledgeRecord } from '../../store-record-representation.js';
 import { requireSemanticKnowledge } from '../../decision-policy.js';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { knowledgeClockIso } from '../../store-record-representation.js';
@@ -5,7 +7,7 @@ import { createSupportReferenceLabels } from './structural-references.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JsonValue, JudgmentPort } from '@goodvibes-jev/judgment';
 import { generatedFactFieldSupport, generatedFactSubjectAttachment } from './batteries.js';
-import { freezeSupport, projectSupportInput, supportHash, type ProjectedSupportInput } from './projection.js';
+import { freezeSupport, projectSupportInput, originalSupportValues, releaseOriginalSupportValues, type ProjectedSupportInput } from './projection.js';
 import { GENERATED_FACT_SUPPORT_LIMITS as LIMITS, KnowledgeGeneratedFactSupportHeldError as Held,
   type GeneratedFactSupportInput, type GeneratedFactSupportOptions, type GeneratedFactSupportPlan, type GeneratedFactSupportReceipt } from './types.js';
 export * from './types.js';
@@ -13,9 +15,7 @@ export * from './types.js';
 type RequestPlan = {
   readonly projection: ProjectedSupportInput;
   readonly field: string;
-  readonly fieldHash: string;
   readonly subjectId?: string;
-  readonly subjectHash?: string;
   readonly state: Record<string, JsonValue>;
   readonly attachment: boolean;
 };
@@ -26,25 +26,24 @@ function bounded(value: number | undefined, maximum: number): number {
   return result;
 }
 function versionsAgree(inputs: readonly ProjectedSupportInput[]): void {
-  const versions = new Map<string, string>();
-  const compare = (key: string, hash: string) => {
-    const previous = versions.get(key);
-    if (previous !== undefined && previous !== hash) throw new Held('stale');
-    versions.set(key, hash);
+  const versions = new Map<string, unknown>();
+  const compare = (key: string, value: unknown) => {
+    if (versions.has(key) && !sameKnowledgeRecord(versions.get(key), value)) throw new Held('stale');
+    versions.set(key, value);
   };
   for (const input of inputs) {
-    compare(`source:${input.sourceId}`, input.sourceHash);
-    compare(`extraction:${input.extractionId}`, input.extractionHash);
-    compare(`source-extraction:${input.sourceId}`, input.extractionHash);
-    for (const subject of input.subjects) compare(`subject:${subject.originalId}`, subject.hash);
+    const original = originalSupportValues(input);
+    compare(`source:${input.sourceId}`, original.source);
+    compare(`extraction:${input.extractionId}`, original.extraction);
+    compare(`source-extraction:${input.sourceId}`, original.extraction);
+    input.subjects.forEach((subject, index) => compare(`subject:${subject.originalId}`, original.subjects[index]));
   }
 }
 function requestPlans(input: ProjectedSupportInput): RequestPlan[] {
   const state = input.state as { readonly [key: string]: JsonValue };
   return [
-    ...input.fields.map((field) => ({ projection: input, field: field.name, fieldHash: field.originalHash, state: { ...state, field: { name: field.name, value: field.value } }, attachment: false })),
-    ...input.subjects.map((subject) => ({ projection: input, field: 'subjectAttachment', fieldHash: subject.originalFieldHash,
-      subjectId: subject.originalId, subjectHash: subject.hash, state: { ...state, subject: subject.state }, attachment: true })),
+    ...input.fields.map((field) => ({ projection: input, field: field.name, state: { ...state, field: { name: field.name, value: field.value } }, attachment: false })),
+    ...input.subjects.map((subject) => ({ projection: input, field: 'subjectAttachment', subjectId: subject.originalId, state: { ...state, subject: subject.state }, attachment: true })),
   ];
 }
 /** Validate custom ports too: a malformed noul may otherwise accidentally reach an act band. */
@@ -66,12 +65,11 @@ function receipt(request: RequestPlan, probability: number, decisionId?: string)
   const battery = request.attachment ? generatedFactSubjectAttachment : generatedFactFieldSupport;
   const body = {
     ...(decisionId === undefined ? {} : { decisionId }), battery: battery.name, batteryVersion: battery.version,
-    spaceId: input.spaceId, claimId: input.claimId, claimHash: input.claimHash,
-    field: request.field, fieldHash: request.fieldHash, stateHash: supportHash(request.state),
-    sourceId: input.sourceId, sourceHash: input.sourceHash, extractionId: input.extractionId,
-    extractionHash: input.extractionHash, extractionUpdatedAt: knowledgeClockIso(input.extractionUpdatedAt),
-    ...(request.subjectId === undefined ? {} : { subjectId: request.subjectId, subjectHash: request.subjectHash }),
-    evidenceReference: { extractionId: input.extractionId, evidenceHash: input.evidenceHash },
+    version: 2 as const, spaceId: input.spaceId, claimId: input.claimId,
+    field: request.field, sourceId: input.sourceId, extractionId: input.extractionId,
+    extractionUpdatedAt: knowledgeClockIso(input.extractionUpdatedAt),
+    ...(request.subjectId === undefined ? {} : { subjectId: request.subjectId }),
+    evidenceReference: { extractionId: input.extractionId },
     verdict: 'yes' as const, outcome: 'act' as const, probability,
   };
   // The saved whole receipt and its source/field tuple carry the evidence.
@@ -87,6 +85,7 @@ function receipt(request: RequestPlan, probability: number, decisionId?: string)
 export async function prepareGeneratedFactSupport(inputs: readonly GeneratedFactSupportInput[], options: GeneratedFactSupportOptions = {}): Promise<readonly GeneratedFactSupportPlan[]> {
   requireSemanticKnowledge();
   if (options.signal?.aborted) throw new Held('aborted');
+  if (nodeTypes.isProxy(inputs)) throw new Held('malformed');
   if (!Array.isArray(inputs) || inputs.length > LIMITS.inputs) throw new Held('budget');
   if (Object.getPrototypeOf(inputs) !== Array.prototype || Object.values(Object.getOwnPropertyDescriptors(inputs)).some((item) => item.get || item.set)) throw new Held('malformed');
   for (let index = 0; index < inputs.length; index++) if (!Object.hasOwn(inputs, index)) throw new Held('malformed');
@@ -103,10 +102,20 @@ export async function prepareGeneratedFactSupport(inputs: readonly GeneratedFact
     return projection;
   });
   versionsAgree(projections);
-  const jobs: RequestPlan[] = [], requestsByKey = new Map<string, number>();
+  const jobs: RequestPlan[] = [], requestsByKey = new Map<string, number>(), parts = new Map<string, number>();
+  // Exact component encodings are local to this bounded pass. Only their small
+  // ordinals join request keys; nothing enters receipts, IDs or model payloads.
+  const part = (value: unknown): number => {
+    const encoded = knowledgeRecordVersion(value), known = parts.get(encoded);
+    if (known !== undefined) return known;
+    const next = parts.size; parts.set(encoded, next); return next;
+  };
   let bytes = 0;
   const planRequests = projections.map((input) => freezeSupport(requestPlans(input)).map((request) => {
-    const key = JSON.stringify({ state: request.state, claimHash: input.claimHash, sourceHash: input.sourceHash, extractionHash: input.extractionHash, subjectHash: request.subjectHash });
+    const original = originalSupportValues(input);
+    const subjectIndex = request.subjectId === undefined ? -1 : input.subjects.findIndex(subject => subject.originalId === request.subjectId);
+    const key = JSON.stringify([part(request.state), part(original.claim), part(original.source), part(original.extraction),
+      subjectIndex === -1 ? null : part(original.subjects[subjectIndex])]);
     const previous = requestsByKey.get(key);
     if (previous !== undefined) return previous;
     if (jobs.length >= maxRequests) throw new Held('budget');
@@ -119,6 +128,8 @@ export async function prepareGeneratedFactSupport(inputs: readonly GeneratedFact
     requestsByKey.set(key, index); jobs.push(request);
     return index;
   }));
+  parts.clear(); requestsByKey.clear();
+  for (const projection of projections) releaseOriginalSupportValues(projection);
   if (options.signal?.aborted) throw new Held('aborted');
   if (jobs.length === 0) return Object.freeze([]);
 
@@ -169,8 +180,7 @@ export async function prepareGeneratedFactSupport(inputs: readonly GeneratedFact
     }));
     assertCurrent();
     return freezeSupport(projections.map((input, index) => ({ claim: input.claim, claimId: input.claimId,
-      claimHash: input.claimHash, sourceId: input.sourceId, sourceHash: input.sourceHash,
-      extractionId: input.extractionId, extractionHash: input.extractionHash,
+      sourceId: input.sourceId, extractionId: input.extractionId,
       receipts: planRequests[index]!.map((request) => settled[request]!),
     })));
   } catch (error) { throw error instanceof Held ? error : new Held('unavailable'); }

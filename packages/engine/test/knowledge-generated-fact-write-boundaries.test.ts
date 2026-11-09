@@ -73,6 +73,24 @@ function llm(value: KnowledgeSemanticExtraction, prompts: string[] = []): Knowle
 }
 
 describe('generated fact support persistence boundaries', () => {
+  // UNRUN actual SQL reopen: earlier metadata remains data, not a native proof.
+  test('fresh v2 fact metadata reads back without decorative hashes and retains surviving earlier receipts', async () => {
+    const f = await fixture(); readings(); const first = await prepareSourceLinkedRepairProfileFacts([f.input]), [fact] = await first.write();
+    const current = fact!.metadata.generatedFactSupport as { version: number; receipts: readonly Record<string, unknown>[] };
+    expect(current.version).toBe(2);
+    const oldReceipt = { ...current.receipts[0]!, receiptId: 'actual-earlier-receipt-label', sourceId: 'earlier-other-source', version: undefined,
+      claimHash: 'a'.repeat(64), sourceHash: 'b'.repeat(64), extractionHash: 'c'.repeat(64), fieldHash: 'd'.repeat(64), stateHash: 'e'.repeat(64) };
+    const store = await loadLegacyFacts(f.store, [{ ...fact!, metadata: { ...fact!.metadata, generatedFactSupport: { version: 1, claimHashes: ['a'.repeat(64)], receipts: [oldReceipt] } } }]);
+    const source = store.getSource(f.source.id)!, extraction = store.getExtractionBySourceId(f.source.id)!, subjects = [store.getNode(f.subject.id)!];
+    const next = await prepareSourceLinkedRepairProfileFacts([{ ...f.input, store, source, extraction, subjects }]); const [updated] = await next.write();
+    const support = updated!.metadata.generatedFactSupport as { version: number; receipts: readonly Record<string, unknown>[] };
+    expect(support.version).toBe(2); expect(Object.hasOwn(support, 'claimHashes')).toBe(false);
+    expect(support.receipts.some(receipt => receipt.receiptId === oldReceipt.receiptId && receipt.claimHash === oldReceipt.claimHash)).toBe(true);
+    for (const receipt of support.receipts.filter(receipt => receipt.version === 2)) for (const field of ['claimHash', 'sourceHash', 'extractionHash', 'fieldHash', 'stateHash', 'subjectHash']) expect(Object.hasOwn(receipt, field)).toBe(false);
+    const reopened = new KnowledgeStore({ dbPath: store.storagePath }); await reopened.init();
+    expect(reopened.getNode(updated!.id)!.metadata.generatedFactSupport).toEqual(JSON.parse(JSON.stringify(support)));
+  });
+
   test('single-source preparation verifies fields and attachment, then writes without new requests', async () => {
     const { store, input, source, extraction } = await fixture(); const fake = readings(); const before = snapshot(store);
     const prepared = await prepareSourceLinkedRepairProfileFacts([input]);

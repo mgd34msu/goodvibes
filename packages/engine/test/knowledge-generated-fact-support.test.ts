@@ -1,4 +1,6 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import crypto from 'node:crypto';
+import { generatedFactSupportMetadata } from '../sdk/src/platform/knowledge/semantic/fact-support-write-plan.js';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
@@ -64,7 +66,9 @@ describe('generated fact field support and subject attachment', () => {
     for (const receipt of plan.receipts) {
       expect(receipt.outcome).toBe('act'); expect(receipt.verdict).toBe('yes'); expect(receipt.probability).toBe(0.97);
       expect(receipt.sourceId).toBe('source'); expect(receipt.extractionId).toBe('extract-source');
-      expect(receipt.sourceHash).toHaveLength(64); expect(receipt.extractionHash).toHaveLength(64); expect(receipt.claimHash).toHaveLength(64); expect(receipt.stateHash).toHaveLength(64);
+      expect(receipt.version).toBe(2);
+      for (const field of ['sourceHash', 'extractionHash', 'claimHash', 'fieldHash', 'stateHash', 'subjectHash']) expect(Object.hasOwn(receipt, field)).toBe(false);
+      expect(receipt.evidenceReference).toEqual({ extractionId: 'extract-source' });
       expect(receipt.receiptId).toMatch(/^fact-support-/); expect(receipt.decisionId).toBeUndefined();
       expect(Object.isFrozen(receipt.evidenceReference)).toBe(true); expect(Object.isFrozen(receipt)).toBe(true);
     }
@@ -168,6 +172,9 @@ describe('generated fact field support and subject attachment', () => {
     const item = input();
     for (const changed of [
       { ...item, source: { ...item.source, updatedAt: 2 } },
+      { ...item, source: { ...item.source, metadata: { ...item.source.metadata, privateInternalField: 'different-private-source-value' } } },
+      { ...item, extraction: { ...item.extraction!, metadata: { ...item.extraction!.metadata, privateInternalField: 'different-private-extraction-value' } } },
+      { ...item, subjects: [{ ...item.subjects[0]!, metadata: { ...item.subjects[0]!.metadata, privateInternalField: 'different-private-subject-value' } }] },
       { ...item, extraction: { ...item.extraction!, updatedAt: 2 } },
       { ...item, subjects: [{ ...item.subjects[0]!, title: 'AC-7 Pro' }] },
     ]) {
@@ -245,4 +252,46 @@ describe('generated fact field support and subject attachment', () => {
     expect(fake.requests).toHaveLength(0);
   });
 
+});
+
+// UNRUN: no decorative per-field/source/checksum work in this real whole-pass reader.
+test('fresh exact duplicate pass has no SHA computations, while private source distinctions still hold', async () => {
+  const fake = readings(), hashing = spyOn(crypto, 'createHash');
+  try {
+    const [first, duplicate] = await prepareGeneratedFactSupport([input(), input()]);
+    expect(first).toEqual(duplicate); expect(fake.requests).toHaveLength(10);
+    expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+    const serialized = JSON.stringify(first);
+    for (const omitted of ['PRIVATE_METADATA', 'claimHash', 'sourceHash', 'extractionHash', 'fieldHash', 'stateHash', 'evidenceHash']) expect(serialized).not.toContain(omitted);
+  } finally { hashing.mockRestore(); }
+});
+
+test('new metadata keeps actual earlier source receipts without rewriting their labels or descriptive hashes', async () => {
+  readings(); const plans = await prepareGeneratedFactSupport([input()]);
+  const old = { receiptId: 'actual-previous-label', sourceId: 'previous-source', field: 'title', battery: 'actual-earlier-battery', batteryVersion: 1,
+    claimHash: 'saved-claim-content-commitment', sourceHash: 'saved-source-content-commitment', evidenceReference: { extractionId: 'previous-extraction', evidenceHash: 'saved-evidence-commitment' } };
+  const existing = { version: 1, claimHashes: ['saved-claim-content-commitment'], receipts: [old] };
+  const metadata = generatedFactSupportMetadata(plans, existing);
+  expect(metadata.version).toBe(2); expect(Object.hasOwn(metadata, 'claimHashes')).toBe(false);
+  expect(metadata.receipts).toContainEqual(old); expect(existing.receipts[0]).toBe(old);
+  expect(JSON.parse(JSON.stringify(metadata)).receipts).toContainEqual(old);
+  expect(() => generatedFactSupportMetadata(plans, { version: 99, receipts: [old] })).toThrow(KnowledgeGeneratedFactSupportHeldError);
+});
+
+test('proxy input or nested record is refused without executing caller traps or sending any request', async () => {
+  for (const field of ['root', 'source', 'extraction', 'claim', 'subjects'] as const) {
+    const item = input(), fake = readings(); let traps = 0;
+    const proxy = <T extends object>(value: T): T => new Proxy(value, { getPrototypeOf(target) { traps++; return Reflect.getPrototypeOf(target); }, get(target, property, receiver) { traps++; return Reflect.get(target, property, receiver); }, ownKeys(target) { traps++; return Reflect.ownKeys(target); } });
+    const wrapped = field === 'root' ? proxy(item) : field === 'source' ? { ...item, source: proxy(item.source) }
+      : field === 'extraction' ? { ...item, extraction: proxy(item.extraction!) }
+        : field === 'claim' ? { ...item, claim: proxy(item.claim) } : { ...item, subjects: proxy(item.subjects) };
+    await expect(prepareGeneratedFactSupport([wrapped])).rejects.toBeInstanceOf(JudgmentInputError);
+    expect(traps).toBe(0); expect(fake.requests).toHaveLength(0);
+  }
+});
+
+test('proxy outer request collection is refused before length/prototype/descriptor traps', async () => {
+  const fake = readings(); let traps = 0;
+  const inputs = new Proxy([input()], { get(target, key, receiver) { traps++; return Reflect.get(target, key, receiver); }, getPrototypeOf(target) { traps++; return Reflect.getPrototypeOf(target); }, ownKeys(target) { traps++; return Reflect.ownKeys(target); } });
+  await held(prepareGeneratedFactSupport(inputs), 'malformed'); expect(traps).toBe(0); expect(fake.requests).toHaveLength(0);
 });

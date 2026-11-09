@@ -18,7 +18,6 @@ import { withStoredKnowledgeSourceReferences } from '../sdk/src/platform/knowled
 import { captureKnowledgeSourceReferences, knowledgeSourceJudgmentUris, projectKnowledgeSourceReferences, restoreKnowledgeSourceAnswerAliases, withKnowledgeSourceAnswerAliases } from '../sdk/src/platform/knowledge/source-structural-references.js';
 import { judgmentInputProblem, JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.js';
 import { KnowledgeGeneratedFactSupportHeldError } from '../sdk/src/platform/knowledge/semantic/verification/types.js';
-import { supportHash } from '../sdk/src/platform/knowledge/semantic/verification/projection.js';
 
 import { createKnowledgePageSourceReader } from '../sdk/src/platform/knowledge/source-quality.js';
 import { rankHomeGraphPageCandidates } from '../sdk/src/platform/knowledge/home-graph/page-priority.js';
@@ -172,9 +171,8 @@ describe('fresh generated source and extraction references', () => {
     const prepared = await prepareSourceLinkedRepairProfileFacts([{ store, source, extraction, spaceId, subjects: [], authority: 'secondary',
       title: 'AC-7 ports', summary: 'AC-7 has four HDMI ports.', evidence: 'AC-7 has four HDMI ports.', extractor: 'synthetic',
       classification: { kind: 'specification', title: 'AC-7 ports', summary: 'AC-7 has four HDMI ports.', value: 'four HDMI ports', labels: [], aliases: [] } }]);
-    const receipts = (prepared.plans[0]!.writeData.factMetadata.generatedFactSupport as { receipts: { sourceId: string; sourceHash: string; extractionId: string; extractionHash: string }[] }).receipts;
-    expect(receipts.every((receipt) => receipt.sourceId === source.id && receipt.sourceHash === supportHash(source)
-      && receipt.extractionId === extraction.id && receipt.extractionHash === supportHash(extraction))).toBe(true);
+    const receipts = (prepared.plans[0]!.writeData.factMetadata.generatedFactSupport as { receipts: { version: number; sourceId: string; extractionId: string }[] }).receipts;
+    expect(receipts.every((receipt) => receipt.version === 2 && receipt.sourceId === source.id && receipt.extractionId === extraction.id)).toBe(true);
     expect(JSON.stringify(fake.requests)).not.toContain(source.id); expect(JSON.stringify(fake.requests)).not.toContain(extraction.id);
     expect(JSON.stringify(fake.requests)).toContain('four HDMI ports');
     expect((await prepared.write())[0]!.sourceId).toBe(source.id);
@@ -189,7 +187,7 @@ describe('fresh generated source and extraction references', () => {
     expect(node.status).toBe('active'); expect(JSON.stringify(fake.requests)).not.toContain(source.canonicalUri!);
     expect(sourceRankingContent(source).uri).toBe('');
     expect(sourceRankingContent(structuredClone(source)).uri).toBe(source.canonicalUri!);
-    expect(plan!.sourceHash).toBe(supportHash(source)); expect(store.getSource(source.id)!.canonicalUri).toBe(source.canonicalUri);
+    expect(plan!.sourceId).toBe(source.id); expect(Object.hasOwn(plan!, 'sourceHash')).toBe(false); expect(store.getSource(source.id)!.canonicalUri).toBe(source.canonicalUri);
   });
   test('owned answer aliases recover only the unchanged current generated source', async () => {
     readings(); const { store, source, dbPath } = await fixture('00001af0');

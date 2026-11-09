@@ -18,7 +18,7 @@ import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { openVersionedSchema, sqlJsVersionHandle } from './store-versioning.js';
 import { restoreStoreSnapshot, snapshotStoreFile } from './store-snapshots.js';
-import { readSQLitePersistedImage, SQLitePublicationError, SQLiteStorePersistence, type SQLiteImageObservation } from './sqlite-store-persistence.js';
+import { readSQLitePersistedImage, SQLitePublicationError, SQLiteStorePersistence, type SQLiteImageObservation, type SQLiteBaselineObservation } from './sqlite-store-persistence.js';
 import { sqliteLocalObservation } from './sqlite-local-observation.js';
 import { nativeKnowledgeSchemaReadPlanMatches, validateNativeKnowledgeReadSchema, type NativeKnowledgeSchemaReadPlan } from './knowledge-schema-read-plan.js';
 import { knowledgeRecordTableSql } from '../knowledge/store-schema-validation-data.js';
@@ -838,10 +838,10 @@ function ownDatabase(raw: NativeSqlDatabase): SqlDatabase {
 }
 
 /** This path is only for fixed internal SQL, never caller SQL or callbacks. */
-function readDatabaseRow(db: SqlDatabase, sql: string, params: string[]) {
+function readDatabaseRow(db: SqlDatabase, sql: string, params: (string | number)[], config?: { useBigInt: boolean }) {
   const state = privateMapGet(ownedDatabases, db);
   if (state?.inFlight) throw new SQLiteObservationRetiredError();
-  return (state?.raw ?? db).exec(sql, params);
+  return (state?.raw ?? db).exec(sql, params, config);
 }
 
 type ActualKnowledgeRecordValues = readonly (readonly [string, string | number | null])[] | null;
@@ -1151,6 +1151,7 @@ const frameImageStamps = new WeakMap<NativeFrameImageStamp, {
   readonly imageEpoch: number;
   readonly observationEpoch: number;
   readonly evidence: SQLiteImageObservation;
+  readonly baseline: SQLiteBaselineObservation | undefined;
 }>();
 interface NativeReadFrameObservation {
   readonly identity: string | undefined;
@@ -1228,6 +1229,14 @@ const expectedRecordReadsets = new WeakMap<object, {
 const artifactReferenceObservation = SQLiteStorePersistence.prototype.observationIdentity;
 export class SQLiteStore {
   readonly #artifactReferencePath: string | null;
+  #validatedNativeSchema: {
+    readonly persistence: SQLiteStorePersistence;
+    readonly baseline: SQLiteBaselineObservation;
+    readonly engine: SqlJsStatic;
+    readonly plan: NativeKnowledgeSchemaReadPlan;
+    readonly validator: SqliteStoreInitOptions['validateCurrentSchema'];
+    readonly schemaVersion: number;
+  } | undefined;
   #artifactReferenceOrigin: { readonly persistence: SQLiteStorePersistence; readonly engine: SqlJsStatic; readonly schemaVersion: number; readonly path: string } | undefined;
   private db: SqlDatabase | null = null;
   private readonly dbPath: string | null;
@@ -1723,7 +1732,7 @@ export class SQLiteStore {
         if (stamp && persisted && this.persistence && plan && frame.persisted) {
           privateMapSet(frameImageStamps, stamp, { store: this, frame, data: persisted, persistence: this.persistence,
             plan, validator: this.validateCurrentSchema, schemaVersion: this.schemaVersion,
-            imageEpoch: this.imageEpoch, observationEpoch: this.observationEpoch, evidence: frame.persisted });
+            imageEpoch: this.imageEpoch, observationEpoch: this.observationEpoch, evidence: frame.persisted, baseline: persistedImage?.baseline });
         }
         try { frame.db = this.openPrivateReadImage(stamp); }
         finally { if (stamp) privateMapDelete(frameImageStamps, stamp); }
@@ -1781,8 +1790,7 @@ export class SQLiteStore {
       generations: new Map<string, string | null>(),
       assertCurrent: (verifyNative = true) => {
         const original = assertReadFrameOrigin(this, frame).observation;
-        if (frame.poisoned || this.observationEpoch !== observationEpoch || this.imageEpoch !== imageEpoch
-          || (original && this.persistence?.observationIdentity() !== original.identity)) {
+        if (frame.poisoned || this.observationEpoch !== observationEpoch || this.imageEpoch !== imageEpoch) {
           throw new SQLiteObservationRetiredError();
         }
         if (original?.localState) {
@@ -1794,6 +1802,9 @@ export class SQLiteStore {
               && databaseProbe(state.raw, ownedProbePlans(state)).signature !== original.localProbe)) throw new SQLiteObservationRetiredError();
           }
         }
+        // Check retained native dependencies before a physical-owner walk can
+        // use a replaced collection method (including Array.prototype.push).
+        if (original && this.persistence?.observationIdentity() !== original.identity) throw new SQLiteObservationRetiredError();
       },
     };
     const assertCurrent = frame.assertCurrent;
@@ -2231,13 +2242,17 @@ export class SQLiteStore {
 
   private openCurrentImage(privateReadPlan?: NativeKnowledgeSchemaReadPlan, stamp?: NativeFrameImageStamp): SqlDatabase {
     assertNativeEngineIdentity(this.sqlEngine);
-    this.getDb(true);
+    const local = this.getDb(true), epoch = this.imageEpoch;
     if (!this.persistence && (this.cleanContent === null || this.cleanBytes === null
       || observeDatabase(this.getDb(), 'clean-content') !== this.cleanContent)) {
       throw new Error('SQLiteStore: no proven clean ephemeral image is available');
     }
     let entryBytes: Uint8Array | undefined;
     let entryEvidence: SQLiteImageObservation | undefined;
+    let entryBaseline: SQLiteBaselineObservation | undefined;
+    let entryIdentity: string | undefined;
+    const persistence = this.persistence, engine = this.sqlEngine, plan = this.nativeSchemaReadPlan;
+    const validator = this.validateCurrentSchema, schemaVersion = this.schemaVersion;
     if (stamp) {
       const captured = privateMapGet(frameImageStamps, stamp), frame = this.persistedReadFrame;
       if (captured?.store === this) privateMapDelete(frameImageStamps, stamp);
@@ -2251,9 +2266,23 @@ export class SQLiteStore {
         if (captured.persistence.observationIdentity() !== frame.identity) throw new SQLiteObservationRetiredError();
         entryBytes = captured.data;
         entryEvidence = captured.evidence;
+        entryBaseline = captured.baseline;
+        entryIdentity = frame.identity;
       }
     }
-    const data = entryBytes ?? (this.persistence ? this.persistence.read() : this.cleanBytes);
+    const persistedImage = entryBytes === undefined && persistence ? readSQLitePersistedImage(persistence) : undefined;
+    const data = entryBytes ?? (persistedImage ? persistedImage.data : this.cleanBytes);
+    const baseline = entryBaseline ?? persistedImage?.baseline, identity = entryIdentity ?? persistedImage?.identity;
+    const nativePlan = nativeKnowledgeSchemaReadPlanMatches(plan, validator, schemaVersion);
+    const known = this.#validatedNativeSchema;
+    const previouslyValidated = Boolean(baseline && nativePlan && known?.baseline === baseline && known.persistence === persistence
+      && known.engine === engine && known.plan === plan && known.validator === validator && known.schemaVersion === schemaVersion);
+    const assertNativeSchemaSource = () => {
+      assertNativeEngineIdentity(engine);
+      if (this.db !== local || this.imageEpoch !== epoch || this.persistence !== persistence || this.sqlEngine !== engine || this.nativeSchemaReadPlan !== plan
+        || this.validateCurrentSchema !== validator || this.schemaVersion !== schemaVersion
+        || (persistence && identity !== nativeApply(artifactReferenceObservation, persistence, []))) throw new SQLiteObservationRetiredError();
+    };
     if (data !== null) assertSqliteImage(data);
     const Database = currentDatabaseConstructor(this.sqlEngine!);
     const current = constructOwnedDatabase(this.sqlEngine!, data ?? undefined, Database);
@@ -2268,13 +2297,29 @@ export class SQLiteStore {
       } else if (sqlJsVersionHandle(current).getUserVersion() !== this.schemaVersion) {
         throw new Error('SQLiteStore: persisted schema changed; reopen the store before writing');
       }
+      let fullyValidated = false;
       if (data !== null && nativeKnowledgeSchemaReadPlanMatches(privateReadPlan, this.validateCurrentSchema, this.schemaVersion)
-        && validateNativeKnowledgeReadSchema({ exec: sql => readDatabaseRow(current, sql, []) })) {
+        && validateNativeKnowledgeReadSchema({ exec: (sql, params, config) => readDatabaseRow(current, sql, params ?? [], config) })) {
         this.privateSchemaImages.add(current);
         const frame = this.persistedReadFrame, state = privateMapGet(ownedDatabases, current), origin = frame ? privateMapGet(nativeReadFrameIdentities, frame)?.identity : undefined;
         if (entryEvidence && origin && state && frame) privateMapSet(nativeReadImages, frame, nativeFreeze({ db: current, store: this, origin,
           evidence: entryEvidence, state, revision: state.revision }));
-      } else this.validateCurrentSchema?.(current);
+      } else if (previouslyValidated) {
+        // The original native reader compared fresh bytes against the existing
+        // accepted baseline. Borrowed callback images and physical replacements
+        // cannot manufacture this private full-validation acknowledgment.
+      } else {
+        this.validateCurrentSchema?.(current);
+        fullyValidated = validator !== undefined;
+      }
+      if (nativePlan) {
+        assertNativeSchemaSource();
+        // Never bless a successful write or structural empty-table fast path.
+        // A changed accepted publication must pass the full validator first.
+        if (fullyValidated && baseline && persistence && engine && plan) {
+          this.#validatedNativeSchema = { persistence, baseline, engine, plan, validator, schemaVersion };
+        }
+      }
       return current;
     } catch (error) { current.close(); throw error; }
   }

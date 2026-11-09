@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Reuse completed native schema validation only for unchanged accepted SQLite
+  bytes and their original file. Writes and file replacements require fresh
+  validation. Repeated reads no longer rehash unrelated saved records.
+
 - Connect the TUI's `/triggers` command to the selected paired daemon for status
   and explicit migration. Agent continues to use its own local supervisor.
   Both paths preserve owner acknowledgement and current connection checks.

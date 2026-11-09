@@ -41,7 +41,11 @@ async function captureImages(sqlite: SQLiteStore) {
 function read(sqlite: SQLiteStore) { return sqlite.readPersistedRow('knowledge_sources', 'id', 'missing'); }
 
 test('the authentic empty-authority profile uses one unloaned image without an export copy', async () => {
-  const sqlite = await fixture(), images = await captureImages(sqlite);
+  const sqlite = await fixture();
+  // An earlier complete callback read must not retire the existing empty-table
+  // private path when its exact full-schema baseline is already acknowledged.
+  sqlite.readPersisted(() => undefined);
+  const images = await captureImages(sqlite);
   try {
     sqlite.assertPersistedReadFrame(() => { expect(read(sqlite)).toEqual([]); expect(read(sqlite)).toEqual([]); });
     expect(images.current).toHaveLength(1);

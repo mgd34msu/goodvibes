@@ -23,15 +23,15 @@ afterEach(async () => {
 });
 function path() { const root = mkdtempSync(join(tmpdir(), 'knowledge-read-frame-')); roots.push(root); return join(root, 'knowledge.sqlite'); }
 function instrument(sqlite: SQLiteStore) {
-  const internal = sqlite as unknown as { openCurrentImage(): SqlDatabase; openPrivateReadImage(): SqlDatabase; closeReadImage(db: SqlDatabase): void };
+  const internal = sqlite as unknown as { openCurrentImage(...args: unknown[]): SqlDatabase; openPrivateReadImage(...args: unknown[]): SqlDatabase; closeReadImage(db: SqlDatabase): void };
   const currentImages = new Set<SqlDatabase>(), privateImages = new Set<SqlDatabase>();
   const open = internal.openCurrentImage.bind(sqlite); let opened = 0, closed = 0;
-  spyOn(internal, 'openCurrentImage').mockImplementation(() => {
-    opened++; const db = open(); currentImages.add(db); return db;
+  spyOn(internal, 'openCurrentImage').mockImplementation((...args) => {
+    opened++; const db = open(...args); currentImages.add(db); return db;
   });
   const privateOpen = internal.openPrivateReadImage.bind(sqlite); let privateOpened = 0, privateClosed = 0;
-  spyOn(internal, 'openPrivateReadImage').mockImplementation(() => {
-    privateOpened++; const db = privateOpen(); privateImages.add(db); return db;
+  spyOn(internal, 'openPrivateReadImage').mockImplementation((...args) => {
+    privateOpened++; const db = privateOpen(...args); privateImages.add(db); return db;
   });
   // Count the same cleanup calls without overwriting frozen facade methods.
   const close = internal.closeReadImage.bind(sqlite);
@@ -1281,8 +1281,13 @@ test('exact native source restoration preserves original persisted clocks and re
     const persisted = store.getSourceSnapshot({ id: source.id });
     expect(restored).not.toBe(source);
     expect(restored).toEqual(source);
-    expect(persisted.raw).toEqual(original.raw);
-    expect(typeof persisted.raw?.created_at).toBe('string');
+    if (!persisted.raw || !original.raw) throw new Error('No original/restored native source row');
+    const { gv_revision: restoredRevision, ...restoredValues } = persisted.raw;
+    const { gv_revision: originalRevision, ...originalValues } = original.raw;
+    expect(restoredValues).toEqual(originalValues);
+    expect(restoredRevision).not.toBe(originalRevision);
+    expect(persisted.generation).not.toBe(original.generation);
+    expect(typeof persisted.raw.created_at).toBe('string');
     expect(typeof persisted.raw?.updated_at).toBe('string');
     expect(() => old.assertCurrent()).toThrow(KnowledgeRecordAdmissionHeldError);
     expect(() => prepareKnowledgeRecordAdmission(store, 'source', restored)).not.toThrow();
@@ -1309,13 +1314,16 @@ test.each(['clone', 'changed-origin'] as const)('source restoration never suppli
 function observeExpectedRawRows(sqlite: SQLiteStore) {
   const original: unknown = Reflect.get(sqlite, 'readPrivatePersistedRows');
   if (typeof original !== 'function') throw new Error('No private row reader');
-  let count = 0;
+  let count = 0, generations = 0;
   Object.defineProperty(sqlite, 'readPrivatePersistedRows', { configurable: true, writable: true,
     value: (...args: unknown[]) => {
-      if (typeof args[0] === 'string' && /^SELECT \* FROM knowledge_(sources|nodes|extractions) WHERE id/.test(args[0])) count++;
+      if (typeof args[0] === 'string') {
+        if (/^SELECT \* FROM knowledge_(sources|nodes|extractions) WHERE id/.test(args[0])) count++;
+        if (/^SELECT gv_revision FROM knowledge_(sources|nodes|extractions) WHERE id/.test(args[0])) generations++;
+      }
       return Reflect.apply(original, sqlite, args);
     } });
-  return { count: () => count, reset: () => { count = 0; }, restore: () => { Reflect.deleteProperty(sqlite, 'readPrivatePersistedRows'); } };
+  return { count: () => count, generations: () => generations, reset: () => { count = 0; generations = 0; }, restore: () => { Reflect.deleteProperty(sqlite, 'readPrivatePersistedRows'); } };
 }
 
 test('actual v12 ALTER migration preserves the compiled native readset path', async () => {
@@ -1379,9 +1387,11 @@ test('compiled expected readsets return equality only and still open a fresh phy
     expect(Object.isFrozen(captured)).toBe(true);
     expect(Object.isFrozen(captured.expected)).toBe(true);
     expect(Object.isFrozen(captured.originalGenerations)).toBe(true);
-    // The existing actual-current API still selects and hashes original rows.
+    // The actual-current API reads both native generations, without transferring
+    // complete source/extraction bodies or reconstructing removed row hashes.
+    rows.reset();
     expect(store.getRecordGenerations(selectors)).toEqual(captured.originalGenerations);
-    expect(rows.count()).toBe(2);
+    expect(rows.count()).toBe(0); expect(rows.generations()).toBe(2);
     expect(Reflect.get(sqlite, 'expectedRecordReadsets')).toBeUndefined();
   } finally { rows.restore(); physical.restore(); }
 });
@@ -1456,7 +1466,12 @@ test.each(['view', 'generated-column', 'custom-validator', 'native-method'] as c
     }
     const selectors = [{ kind: 'source' as const, id: source.id }];
     if (mode === 'generated-column') {
-      expect(() => store.captureExpectedRecordReadset(selectors)).toThrow('unsupported local observation shape');
+      const captured = store.captureExpectedRecordReadset(selectors);
+      expect(store.getSourceSnapshot({ id: source.id }).raw?.generated).toBe(source.title!.toLowerCase());
+      expect(store.matchesExpectedRecordReadsets([{ expected: captured.expected, selectors }])).toEqual([true]);
+      sqlite.run('UPDATE knowledge_sources SET title=? WHERE id=?', ['Changed generated source meaning', source.id]); await sqlite.save();
+      expect(store.getSourceSnapshot({ id: source.id }).raw?.generated).toBe('changed generated source meaning');
+      expect(store.matchesExpectedRecordReadsets([{ expected: captured.expected, selectors }])).toEqual([false]);
       return;
     }
     if (mode === 'view') {
@@ -1853,13 +1868,13 @@ test.each(['writer rollback', 'native alias restore', 'identical file replacemen
     const main = retained.exec('PRAGMA database_list')[0]?.values.find(row => row[1] === 'main')?.[2];
     if (typeof main !== 'string') throw new Error('No actual original native main');
     alias.run('ATTACH DATABASE ? AS original', [main]);
-    const bytes = readFileSync(store.storagePath), stringify = JSON.stringify;
+    const bytes = readFileSync(store.storagePath), freeze = Object.freeze;
     let changed = false, published = false;
-    const observing = spyOn(JSON, 'stringify').mockImplementation((value, replacer, space) => {
-      const result = typeof replacer === 'function'
-        ? stringify(value, replacer, space)
-        : stringify(value, replacer, space);
-      if (!changed && Array.isArray(value) && value.some(entry => Array.isArray(entry) && entry[0] === 'id' && entry[1] === source.id)) {
+    const observing = spyOn(Object, 'freeze').mockImplementation(value => {
+      const result = freeze(value);
+      // Observe the actual complete raw-row tuple construction, after the
+      // removed row serialization path. Mutation occurs before the next group.
+      if (!changed && Array.isArray(value) && value[0] === 'id' && value[1] === source.id) {
         changed = true;
         if (mutation === 'writer rollback') {
           retained.run('BEGIN'); retained.run('UPDATE knowledge_extractions SET sections=? WHERE id=?', ['["Temporary native evidence"]', extraction.id]); retained.run('ROLLBACK');

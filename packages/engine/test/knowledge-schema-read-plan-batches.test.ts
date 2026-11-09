@@ -33,10 +33,10 @@ test('native packets preserve the full validator and all original statements wit
   expect(() => validateCurrentKnowledgeSchema(db)).not.toThrow();
   const { reader, queries } = observe(db);
   expect(validateNativeKnowledgeReadSchema(reader)).toBe(true);
-  expect(queries).toHaveLength(7);
+  expect(queries).toHaveLength(22);
   const statements = queries.flatMap(query => query.split(';'));
-  expect(statements).toHaveLength(25);
-  expect(statements.filter(query => query.startsWith('PRAGMA table_info('))).toHaveLength(11);
+  expect(statements).toHaveLength(40);
+  expect(statements.filter(query => query.startsWith('PRAGMA table_info('))).toHaveLength(12);
   expect(statements.filter(query => query.startsWith('PRAGMA index_list('))).toHaveLength(2);
   expect(statements.filter(query => query.startsWith('PRAGMA index_info('))).toHaveLength(2);
   expect(statements.filter(query => query.startsWith('SELECT 1 FROM '))).toEqual([
@@ -56,8 +56,11 @@ test.each(['work_ledgers', 'native_conversation_captures', 'knowledge_edge_chang
     db.run(`DROP TABLE ${table}`);
     const { reader, queries } = observe(db);
     expect(validateNativeKnowledgeReadSchema(reader)).toBe(false);
-    expect(queries).toHaveLength(1);
-    expect(db.exec(queries[0]!)).toHaveLength(6);
+    expect(queries).toHaveLength(17);
+    const layouts = ['work_ledgers', 'native_work_executions', 'native_work_execution_intents', 'native_conversation_captures',
+      'native_work_execution_settlements', 'native_ci_continuations', 'knowledge_edge_changes'];
+    expect(queries.at(-1)).toBe(layouts.map(name => `PRAGMA table_info(${name})`).join(';'));
+    expect(db.exec(queries.at(-1)!)).toHaveLength(6);
     expect(() => validateCurrentKnowledgeSchema(db)).toThrow();
   },
 );

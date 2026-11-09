@@ -8,10 +8,16 @@ import { AtomicWriteDurabilityError, confirmFileDurable, writeFileAtomic } from 
 const imageObservationBrand: unique symbol = Symbol('sqlite-persisted-image');
 /** One actual read's identity; never a schema certificate or permission grant. */
 export interface SQLiteImageObservation { readonly [imageObservationBrand]: true }
+const baselineObservationBrand: unique symbol = Symbol('sqlite-accepted-baseline');
+/** Original accepted bytes and physical owner only; never a schema certificate. */
+export interface SQLiteBaselineObservation { readonly [baselineObservationBrand]: true }
 export interface SQLitePersistedImage {
   readonly data: Buffer | null;
   readonly evidence: SQLiteImageObservation;
   readonly identity: string;
+  /** Issued by the native reader only when this exact read still equals the
+   * already accepted private baseline and its original physical file. */
+  readonly baseline?: SQLiteBaselineObservation;
 }
 // Native readers are registered only by the actual constructor. Replacing a
 // public read/stat method cannot mint another store's physical image evidence.
@@ -67,6 +73,8 @@ export class SQLiteStorePersistence {
   readonly #nativePublication: boolean;
   readonly #directories: readonly string[];
   #baseline: Buffer | null = null;
+  #baselineIdentity: string | undefined;
+  #baselineObservation: SQLiteBaselineObservation | undefined;
   #established = false;
   readonly #absentObservation = `absent:${randomUUID()}`;
 
@@ -133,7 +141,9 @@ export class SQLiteStorePersistence {
     // Evidence belongs to this exact read. A stat match cannot prove that a
     // different read has the same contents on every supported filesystem.
     const evidence = nativeFreeze<SQLiteImageObservation>({ [imageObservationBrand]: true });
-    return nativeFreeze({ data, evidence, identity });
+    const baseline = data !== null && this.#baseline !== null && identity === this.#baselineIdentity
+      && data.equals(this.#baseline) ? this.#baselineObservation : undefined;
+    return nativeFreeze({ data, evidence, identity, ...(baseline ? { baseline } : {}) });
   }
 
   acceptBaseline(data: Uint8Array | null): void { this.#acceptBaseline(data); }
@@ -148,6 +158,11 @@ export class SQLiteStorePersistence {
     // compared above and never retained as the baseline. Keep exact original
     // content privately; equality needs no cryptographic commitment.
     this.#baseline = current.data;
+    this.#baselineIdentity = current.identity;
+    // Each accepted publication gets new metadata, including an identical-byte
+    // rewrite. Reading a foreign/current image never adopts a write baseline.
+    this.#baselineObservation = current.data === null ? undefined
+      : nativeFreeze<SQLiteBaselineObservation>({ [baselineObservationBrand]: true });
   }
 
   async lock(): Promise<() => void> {

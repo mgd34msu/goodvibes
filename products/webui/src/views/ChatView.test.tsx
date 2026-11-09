@@ -35,6 +35,11 @@ interface StreamCall {
   };
 }
 
+let modelCatalogResponse: unknown = {};
+let currentModelResponse: unknown = {};
+const routeUpdates: { sessionId: string; input: Record<string, unknown> }[] = [];
+const defaultModelWrites: string[] = [];
+let updateSessionImpl: (sessionId: string, input: Record<string, unknown>) => Promise<unknown> = async (sessionId, input) => ({ session: { id: sessionId, ...input } });
 const streamCalls: StreamCall[] = [];
 const createCalls: string[] = [];
 const messageCalls: string[] = [];
@@ -78,15 +83,15 @@ mock.module('../lib/goodvibes', () => ({
         create: mock((sessionId: string) => { messageCalls.push(sessionId); return createMessageImpl(); }),
       },
       sessions: {
-        update: mock(() => Promise.resolve({})),
+        update: mock((sessionId: string, input: Record<string, unknown>) => { routeUpdates.push({ sessionId, input }); return updateSessionImpl(sessionId, input); }),
         create: mock(() => { createCalls.push('create'); return createSessionImpl(); }),
       },
     },
     operator: {
-      providers: { list: mock(() => Promise.resolve([])) },
+      providers: { list: mock(() => Promise.resolve(modelCatalogResponse)) },
       models: {
-        list: mock(() => Promise.resolve({})),
-        current: { get: mock(() => Promise.resolve({})) },
+        list: mock(() => Promise.resolve(modelCatalogResponse)),
+        current: { get: mock(() => Promise.resolve(currentModelResponse)), set: mock((key: string) => { defaultModelWrites.push(key); return Promise.resolve({}); }) },
       },
       sessions: { toolCalls: { cancel: mock(() => Promise.resolve({ cancelled: true })) } },
     },
@@ -178,6 +183,8 @@ async function waitFor(predicate: () => boolean, timeoutMs = 1000): Promise<void
 }
 
 beforeEach(() => {
+  modelCatalogResponse = {}; currentModelResponse = {}; routeUpdates.length = 0; defaultModelWrites.length = 0;
+  updateSessionImpl = async (sessionId, input) => ({ session: { id: sessionId, ...input } });
   chatSelection = createChatSelectionTracker('chat', '');
   streamCalls.length = 0;
   createCalls.length = 0;
@@ -379,4 +386,113 @@ test('regeneration stays active over cached historical assistant messages', asyn
   await waitFor(() => stopButton() !== null);
   await new Promise(resolve => setTimeout(resolve, 20)); flushSync(() => {});
   expect(stopButton()).not.toBeNull();
+});
+
+
+function routingProps() {
+  localStorage.setItem('goodvibes.webui.token', 'synthetic-route-owner');
+  modelCatalogResponse = { providers: [{ id: 'openai', name: 'OpenAI', models: ['first', 'second', 'default'].map(id => ({
+    id, registryKey: `openai:${id}`, displayName: `${id} model`, selectable: true,
+    reasoningOptions: { levels: ['high', 'xhigh', 'max'], source: 'explicit fixture' },
+  })) }] };
+  currentModelResponse = { model: { provider: 'openai', id: 'default', registryKey: 'openai:default', effort: 'high' } };
+  let session: Record<string, unknown> = { ...SESSION_A, provider: 'openai', model: 'first', reasoningEffort: 'xhigh' };
+  const acknowledged: unknown[] = [];
+  const props: ChatViewProps = { ...baseProps(SESSION_A.id), sessionItems: [session], onLocalSessionUpdated(id, update) {
+    acknowledged.push(update); session = { ...session, ...(update as Record<string, unknown>) };
+    renderChatView({ ...props, sessionItems: [session], activeSessionId: id });
+  } };
+  return { props, acknowledged };
+}
+async function chooseRouteItem(label: string) {
+  await waitFor(() => (container.querySelector('.composer-model-btn')?.textContent ?? '').includes('first model')
+    || (container.querySelector('.composer-model-btn')?.textContent ?? '').includes('second model'));
+  flushSync(() => container.querySelector<HTMLButtonElement>('.composer-model-btn')?.click());
+  await waitFor(() => [...document.querySelectorAll('[role="menuitem"] .gv-menu-item__label')].some(item => item.textContent === label));
+  const item = [...document.querySelectorAll('[role="menuitem"]')].find(item => item.querySelector('.gv-menu-item__label')?.textContent === label);
+  flushSync(() => (item as HTMLButtonElement).click());
+}
+
+describe('ChatView: acknowledged session-local routing', () => {
+  test('existing chat displays and changes its actual session model, preserving effort without touching defaults', async () => {
+    const f = routingProps(); renderChatView(f.props);
+    await waitFor(() => container.querySelector('.composer-model-btn')?.textContent?.includes('first model') === true);
+    expect(container.querySelector('.composer-model-btn')?.textContent).toContain('X-high');
+    await chooseRouteItem('second model');
+    await waitFor(() => f.acknowledged.length === 1);
+    expect(routeUpdates).toEqual([{ sessionId: SESSION_A.id, input: { provider: 'openai', model: 'second' } }]);
+    expect(defaultModelWrites).toEqual([]);
+    expect(container.querySelector('.composer-model-btn')?.textContent).toContain('second model');
+    expect(container.querySelector('.composer-model-btn')?.textContent).toContain('X-high');
+  });
+
+  test('max and provider-default effort choices update only the actual session and wait for acknowledgement', async () => {
+    const f = routingProps(); renderChatView(f.props); await chooseRouteItem('Max');
+    await waitFor(() => f.acknowledged.length === 1);
+    expect(routeUpdates[0]).toEqual({ sessionId: SESSION_A.id, input: { reasoningEffort: 'max' } });
+    expect(container.querySelector('.composer-model-btn')?.textContent).toContain('Max');
+    await chooseRouteItem('Default'); await waitFor(() => f.acknowledged.length === 2);
+    expect(routeUpdates[1]).toEqual({ sessionId: SESSION_A.id, input: { reasoningEffort: null } });
+    expect(defaultModelWrites).toEqual([]);
+  });
+
+  test('a model switch shows its effective capped effort while preserving Max for the return switch', async () => {
+    const f = routingProps();
+    modelCatalogResponse = { providers: [{ id: 'openai', name: 'OpenAI', models: [
+      { id: 'first', registryKey: 'openai:first', displayName: 'first model', selectable: true,
+        reasoningOptions: { levels: ['high', 'xhigh', 'max'], source: 'declared', effectiveByRequested: { high: 'high', xhigh: 'xhigh', max: 'max' } } },
+      { id: 'second', registryKey: 'openai:second', displayName: 'second model', selectable: true,
+        reasoningOptions: { levels: ['low', 'medium', 'high'], source: 'declared', effectiveByRequested: { low: 'low', medium: 'medium', high: 'high', xhigh: 'high', max: 'high' } } },
+    ] }] };
+    renderChatView(f.props); await chooseRouteItem('Max');
+    await waitFor(() => f.acknowledged.length === 1);
+    await chooseRouteItem('second model'); await waitFor(() => f.acknowledged.length === 2);
+    expect(container.querySelector('.composer-model-btn')?.textContent).toContain('High (requested Max)');
+    flushSync(() => container.querySelector<HTMLButtonElement>('.composer-model-btn')?.click());
+    const high = [...document.querySelectorAll('[role="menuitem"]')].find(item => item.querySelector('.gv-menu-item__label')?.textContent === 'High');
+    expect(high?.querySelector('svg')).not.toBeNull();
+    flushSync(() => container.querySelector<HTMLButtonElement>('.composer-model-btn')?.click());
+    await chooseRouteItem('first model'); await waitFor(() => f.acknowledged.length === 3);
+    expect(container.querySelector('.composer-model-btn')?.textContent).toContain('Max');
+    expect(container.querySelector('.composer-model-btn')?.textContent).not.toContain('requested');
+    expect(routeUpdates).toEqual([
+      { sessionId: SESSION_A.id, input: { reasoningEffort: 'max' } },
+      { sessionId: SESSION_A.id, input: { provider: 'openai', model: 'second' } },
+      { sessionId: SESSION_A.id, input: { provider: 'openai', model: 'first' } },
+    ]);
+    expect(defaultModelWrites).toEqual([]);
+  });
+
+  test('failed session publication leaves its displayed model and global default unchanged', async () => {
+    const f = routingProps(); updateSessionImpl = async () => { throw new Error('Session publication held'); };
+    renderChatView(f.props); await chooseRouteItem('second model');
+    await waitFor(() => client.isMutating() === 0);
+    expect(f.acknowledged).toEqual([]); expect(defaultModelWrites).toEqual([]);
+    expect(container.querySelector('.composer-model-btn')?.textContent).toContain('first model');
+  });
+
+  test('a delayed acknowledgement cannot retarget a newly selected chat', async () => {
+    const f = routingProps(), response = deferredResult(); updateSessionImpl = () => response.promise;
+    renderChatView(f.props); await chooseRouteItem('second model'); await waitFor(() => routeUpdates.length === 1);
+    renderChatView({ ...f.props, activeSessionId: SESSION_B.id, sessionItems: [{ ...SESSION_B, provider: 'openai', model: 'first' }] });
+    response.resolve({ session: { id: SESSION_A.id, provider: 'openai', model: 'second' } });
+    await waitFor(() => client.isMutating() === 0);
+    expect(f.acknowledged).toEqual([]); expect(routeUpdates.map(value => value.sessionId)).toEqual([SESSION_A.id]);
+    expect(defaultModelWrites).toEqual([]);
+  });
+
+  test('a mismatched session acknowledgement is never adopted as the selected route', async () => {
+    const f = routingProps(); updateSessionImpl = async () => ({ session: { id: SESSION_B.id, provider: 'openai', model: 'second' } });
+    renderChatView(f.props); await chooseRouteItem('second model'); await waitFor(() => client.isMutating() === 0);
+    expect(f.acknowledged).toEqual([]); expect(defaultModelWrites).toEqual([]);
+    expect(container.querySelector('.composer-model-btn')?.textContent).toContain('first model');
+  });
+
+  test('an actual active-turn event disables model and effort selection', async () => {
+    const f = routingProps(); renderChatView(f.props);
+    await waitFor(() => streamCalls.some(value => value.sessionId === SESSION_A.id));
+    flushSync(() => streamCalls.find(value => value.sessionId === SESSION_A.id)?.options.onEvent('companion-chat.turn.started', { sessionId: SESSION_A.id, type: 'turn.started', turnId: 'owned-turn' }));
+    await waitFor(() => container.querySelector<HTMLButtonElement>('.composer-model-btn')?.disabled === true);
+    expect(routeUpdates).toEqual([]); expect(defaultModelWrites).toEqual([]);
+  });
 });

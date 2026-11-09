@@ -7587,6 +7587,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "title": "sample",
       "model": "sample",
       "provider": "sample",
+      "reasoningEffort": "none",
       "systemPrompt": "sample"
     },
     "output": {
@@ -7595,6 +7596,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "session": {
         "id": "sample",
         "kind": "companion-chat",
+        "reasoningEffort": "none",
         "title": "sample",
         "model": "sample",
         "provider": "sample",
@@ -7624,6 +7626,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "session": {
         "id": "sample",
         "kind": "companion-chat",
+        "reasoningEffort": "none",
         "title": "sample",
         "model": "sample",
         "provider": "sample",
@@ -7676,6 +7679,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         {
           "id": "sample",
           "kind": "companion-chat",
+          "reasoningEffort": "none",
           "title": "sample",
           "model": "sample",
           "provider": "sample",
@@ -7702,6 +7706,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "session": {
         "id": "sample",
         "kind": "companion-chat",
+        "reasoningEffort": "none",
         "title": "sample",
         "model": "sample",
         "provider": "sample",
@@ -22604,7 +22609,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                 "levels": [
                   "sample"
                 ],
-                "source": "catalog"
+                "source": "catalog",
+                "effectiveByRequested": {}
               }
             }
           ]

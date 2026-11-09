@@ -20,6 +20,7 @@ export type ProviderModelRef = z.infer<typeof ProviderModelRefSchema>;
 export const ModelReasoningOptionsSchema = z.object({
   levels: z.array(z.string()),
   source: z.enum(['catalog', 'declared', 'family', 'fallback']),
+  effectiveByRequested: z.record(z.string(), z.string().nullable()).optional(),
 }).strict();
 export type ModelReasoningOptions = z.infer<typeof ModelReasoningOptionsSchema>;
 

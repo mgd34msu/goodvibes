@@ -103,6 +103,8 @@ export interface CompanionChatSession {
   readonly title: string;
   readonly model: string | null;
   readonly provider: string | null;
+  /** Requested session override; absent historical records and null use provider defaults. */
+  readonly reasoningEffort?: string | null | undefined;
   readonly systemPrompt: string | null;
   readonly status: CompanionChatSessionStatus;
   readonly createdAt: number;
@@ -119,6 +121,7 @@ export interface CreateCompanionChatSessionInput {
   readonly title?: string | undefined;
   readonly model?: string | undefined;
   readonly provider?: string | undefined;
+  readonly reasoningEffort?: string | null | undefined;
   readonly systemPrompt?: string | undefined;
 }
 
@@ -131,6 +134,7 @@ export interface UpdateCompanionChatSessionInput {
   readonly title?: string | undefined;
   readonly model?: string | undefined;
   readonly provider?: string | undefined;
+  readonly reasoningEffort?: string | null | undefined;
   readonly systemPrompt?: string | null | undefined;
 }
 

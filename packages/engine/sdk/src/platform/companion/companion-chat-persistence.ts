@@ -12,9 +12,10 @@
  * - Default storage root: ~/.goodvibes/companion-chat/sessions/
  */
 
-import { existsSync, mkdirSync, readdirSync, renameSync } from 'node:fs';
+import { readdirSync, unlinkSync } from 'node:fs';
+import { prepareAtomicPublicationDirectory, writeFileAtomic } from '../utils/atomic-json-store.js';
 import { promises as fs } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { homedir } from 'node:os';
 import type { CompanionChatMessage, CompanionChatSession } from './companion-chat-types.js';
 import { logger } from '../utils/logger.js';
@@ -51,6 +52,7 @@ export function defaultSessionsDir(homeDirectory?: string): string {
 
 export class CompanionChatPersistence {
   private readonly sessionsDir: string;
+  private directoryOwner: ReturnType<typeof prepareAtomicPublicationDirectory> | undefined;
 
   constructor(sessionsDir?: string) {
     this.sessionsDir = sessionsDir ?? defaultSessionsDir();
@@ -58,10 +60,12 @@ export class CompanionChatPersistence {
 
   /** Ensure the sessions directory exists. */
   private ensureDir(): void {
-    mkdirSync(this.sessionsDir, { recursive: true });
+    if (!this.directoryOwner) this.directoryOwner = prepareAtomicPublicationDirectory(this.sessionsDir);
+    this.directoryOwner.assertCurrent();
   }
 
   private filePath(sessionId: string): string {
+    if (!safeSessionId(sessionId)) throw new Error('Invalid saved chat identifier');
     return join(this.sessionsDir, `${sessionId}.json`);
   }
 
@@ -85,9 +89,11 @@ export class CompanionChatPersistence {
       entries.map(async (filename) => {
         const filePath = join(this.sessionsDir, filename);
         try {
+          this.directoryOwner!.assertCurrent();
           const raw = await fs.readFile(filePath, 'utf-8');
+          this.directoryOwner!.assertCurrent();
           const parsed = JSON.parse(raw) as unknown;
-          if (isPersistedChatSession(parsed)) {
+          if (isPersistedChatSession(parsed) && safeSessionId(parsed.meta.id) && filename === `${parsed.meta.id}.json`) {
             results.push(parsed);
           }
         } catch (err) {
@@ -99,42 +105,30 @@ export class CompanionChatPersistence {
       }),
     );
 
+    this.directoryOwner!.assertCurrent();
     return results;
   }
 
-  /** Atomically persist a single session to disk. Rejects when the write fails. */
-  async save(session: PersistedChatSession): Promise<void> {
+  /** One native synchronous publication lets metadata commit its in-memory
+   * state only after the exact file is durable, without an async adoption gap. */
+  saveSync(session: PersistedChatSession): void {
     const filePath = this.filePath(session.meta.id);
-    const tmpPath = `${filePath}.tmp`;
-
-    try {
-      this.ensureDir();
-      mkdirSync(dirname(filePath), { recursive: true });
-      const content = JSON.stringify(session, null, 2) + '\n';
-      await fs.writeFile(tmpPath, content, 'utf-8');
-      renameSync(tmpPath, filePath);
-    } catch (err) {
-      if (existsSync(tmpPath)) {
-        try {
-          await fs.unlink(tmpPath);
-        } catch (cleanupErr) {
-          logger.warn('CompanionChatPersistence: failed to remove save tmp file', {
-            sessionId: session.meta.id,
-            tmpPath,
-            error: summarizeError(cleanupErr),
-          });
-        }
-      }
-      throw new Error(`Companion chat session save failed for ${session.meta.id}: ${summarizeError(err)}`);
-    }
+    this.ensureDir();
+    const content = JSON.stringify(session, null, 2) + '\n';
+    writeFileAtomic(filePath, content, { durable: true, mode: 0o600, mkdirp: false, assertCurrent: () => this.directoryOwner!.assertCurrent() });
   }
+
+  /** The queued background-save API preserves its existing async contract. */
+  async save(session: PersistedChatSession): Promise<void> { this.saveSync(session); }
 
   /** Delete a session file from disk (called when a closed session is GC'd). Rejects on unlink failure. */
   async delete(sessionId: string): Promise<void> {
-    const filePath = this.filePath(sessionId);
+    this.filePath(sessionId);
+    this.ensureDir();
 
     try {
-      await fs.unlink(filePath);
+      this.directoryOwner!.assertCurrent();
+      unlinkSync(join(this.directoryOwner!.canonical, `${sessionId}.json`));
     } catch (err) {
       if (isNodeErrorCode(err, 'ENOENT')) return;
       throw new Error(`Companion chat session delete failed for ${sessionId}: ${summarizeError(err)}`);
@@ -145,6 +139,8 @@ export class CompanionChatPersistence {
 // ---------------------------------------------------------------------------
 // Type guard
 // ---------------------------------------------------------------------------
+
+function safeSessionId(id: string): boolean { return id.length > 0 && !/[\\/\0]/.test(id); }
 
 function isPersistedChatSession(value: unknown): value is PersistedChatSession {
   if (typeof value !== 'object' || value === null) return false;

@@ -28897,7 +28897,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "companion.chat.sessions.create",
         "title": "Create Companion Chat Session",
-        "description": "Create a new companion-chat session. Optional `provider` / `model` override the registry default; `title` and `systemPrompt` are stored on the session record.",
+        "description": "Create a new companion-chat session. Optional `provider` / `model` override the registry default. The session retains its requested `reasoningEffort`; null restores provider defaults. Title and system prompt are stored on the session record.",
         "category": "companion",
         "source": "builtin",
         "access": "authenticated",
@@ -28923,6 +28923,26 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "provider": {
               "type": "string"
+            },
+            "reasoningEffort": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "instant",
+                    "minimal",
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "systemPrompt": {
               "type": "string"
@@ -28957,6 +28977,26 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "type": "string",
                   "enum": [
                     "companion-chat"
+                  ]
+                },
+                "reasoningEffort": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "instant",
+                        "minimal",
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
                   ]
                 },
                 "title": {
@@ -29135,6 +29175,26 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "type": "string",
                   "enum": [
                     "companion-chat"
+                  ]
+                },
+                "reasoningEffort": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "instant",
+                        "minimal",
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
                   ]
                 },
                 "title": {
@@ -29403,6 +29463,26 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "companion-chat"
                     ]
                   },
+                  "reasoningEffort": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "none",
+                          "instant",
+                          "minimal",
+                          "low",
+                          "medium",
+                          "high",
+                          "xhigh",
+                          "max"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "title": {
                     "type": "string"
                   },
@@ -29511,7 +29591,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "companion.chat.sessions.update",
         "title": "Update Companion Chat Session",
-        "description": "Update companion-chat session metadata, including session-local `provider` and `model`, without changing the daemon/TUI current model.",
+        "description": "Update companion-chat session metadata, including session-local provider, model and requested reasoning effort, without changing the daemon/TUI current model. Routing changes are refused while a reply is active; null effort restores provider defaults.",
         "category": "companion",
         "source": "builtin",
         "access": "authenticated",
@@ -29540,6 +29620,26 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "provider": {
               "type": "string"
+            },
+            "reasoningEffort": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "instant",
+                    "minimal",
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "systemPrompt": {
               "type": "string"
@@ -29605,6 +29705,35 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "systemPrompt"
               ],
               "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "reasoningEffort": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "instant",
+                        "minimal",
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "reasoningEffort"
+              ],
+              "additionalProperties": true
             }
           ]
         },
@@ -29621,6 +29750,26 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "type": "string",
                   "enum": [
                     "companion-chat"
+                  ]
+                },
+                "reasoningEffort": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "instant",
+                        "minimal",
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
                   ]
                 },
                 "title": {
@@ -114884,6 +115033,19 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "family",
                                 "fallback"
                               ]
+                            },
+                            "effectiveByRequested": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
                             }
                           },
                           "required": [

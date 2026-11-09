@@ -1,3 +1,4 @@
+import { requestedEffortOverride, resolveEffortForModelSurface } from '../providers/reasoning-effort-surface.js';
 import { assertSynchronousCurrent } from './reading-lifetime.js';
 import { captureOwnedJson } from '../gate/judgment-input.js';
 import { createTelegramSourceAccountOwner } from '../channels/telegram/source-account.js';
@@ -177,6 +178,7 @@ export function createCompanionProviderAdapter(providerRegistry: ProviderRegistr
       // options.model is the provider-qualified registry key (for example
       // "inception:mercury-2"); provider.chat() receives the provider's id.
       let providerModelId: string;
+      let modelDefinition: import('../providers/registry-types.js').ModelDefinition;
       try {
         const modelRegistry = providerRegistry.listModels();
         const def = options.model
@@ -188,6 +190,7 @@ export function createCompanionProviderAdapter(providerRegistry: ProviderRegistr
           throw new Error(`Model '${options.model}' is not in the provider registry.`);
         }
         providerModelId = def.id;
+        modelDefinition = def;
       } catch (err) {
         yield {
           type: 'error' as const,
@@ -207,7 +210,10 @@ export function createCompanionProviderAdapter(providerRegistry: ProviderRegistr
         resolve?.();
         resolve = null;
       };
+      const effort = resolveEffortForModelSurface(options.reasoningEffort ?? '', modelDefinition);
       const chatPromise = provider.chat({
+        ...(effort.value === undefined ? {} : { reasoningEffort: effort.value }),
+        reasoningEffortSpec: effort.spec,
         model: providerModelId,
         ...(options.routingContext === undefined ? {} : { routingContext: options.routingContext }),
         messages: messages.map((m) => {
@@ -379,9 +385,14 @@ export function resolveDaemonFacadeRuntime(config: DaemonConfig): ResolvedDaemon
   const companionChatManager = new CompanionChatManager({
     eventPublisher: controlPlaneGateway,
     provider: createCompanionProviderAdapter(runtimeServices.providerRegistry),
+    resolveDefaultRoute: () => {
+      const model = runtimeServices.providerRegistry.getCurrentModel();
+      return { provider: model.provider, model: model.id, systemPrompt: null, reasoningEffort: requestedEffortOverride(runtimeServices.configManager) };
+    },
     // Explicitly opt into disk persistence for the daemon. Default is false
     // for tests and embedded hosts.
     persist: true,
+    nativeDataWriter: runtimeServices.configManager.getNativeDataWriter(),
     // Honor the runtime's injected home so an isolated-home daemon never reads
     // or writes the real ~/.goodvibes/companion-chat.
     sessionsDir: runtimeServices.shellPaths.resolveUserPath('companion-chat', 'sessions'),

@@ -2,6 +2,7 @@ import { ChangeEvent, Dispatch, FormEvent, KeyboardEvent, SetStateAction, useCal
 import { createPortal } from 'react-dom';
 import { BookOpen, CalendarDays, LayoutGrid, Mail } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { getClientLifetime, isClientLifetimeCurrent } from '../lib/client-lifetime';
 import { sdk } from '../lib/goodvibes';
 import { asRecord, bestId, bestTitle, firstString } from '../lib/object';
 import { queryKeys } from '../lib/queries';
@@ -140,12 +141,18 @@ export function ChatView({
     }
     return sortProvidersConfiguredFirst([...byId.values()]);
   }, [catalogProviderOptions, providers.data]);
+  const activeSession = useMemo(
+    () => sessionItems.find((session) => bestId(session) === activeSessionId),
+    [activeSessionId, sessionItems],
+  );
+  const sessionProvider = activeSessionId ? firstString(activeSession, ['provider']) : '';
+  const sessionModel = activeSessionId ? firstString(activeSession, ['model']) : '';
   const currentModelRecord = asRecord(asRecord(currentModel.data).model);
   const currentModelData = Object.keys(currentModelRecord).length ? currentModelRecord : asRecord(currentModel.data);
-  const currentRegistryKey = firstString(currentModelData, ['registryKey'])
+  const defaultRegistryKey = firstString(currentModelData, ['registryKey'])
     || firstString(asRecord(asRecord(modelCatalog.data).currentModel), ['registryKey'])
     || '';
-  const currentProviderId = firstString(currentModelData, ['provider', 'providerId', 'runtimeProviderId'])
+  const currentProviderId = sessionProvider || firstString(currentModelData, ['provider', 'providerId', 'runtimeProviderId'])
     || firstString(asRecord(asRecord(modelCatalog.data).currentModel), ['provider', 'providerId', 'runtimeProviderId'])
     || '';
   const selectedProvider = providerOptions.find((provider) => provider.id === selectedProviderId)?.value ?? providerOptions[0]?.value;
@@ -154,6 +161,12 @@ export function ChatView({
     `${activeSessionId}:${providers.dataUpdatedAt}:${modelCatalog.dataUpdatedAt}`,
     providers.isSuccess && modelCatalog.isSuccess && !providers.isFetching && !modelCatalog.isFetching);
   const providerModelOptions = providerModels.models;
+  // Existing chats retain their own route. A default-model change elsewhere
+  // must not make this composer claim that its pinned session changed.
+  const currentRegistryKey = sessionProvider && sessionModel
+    ? (providerModelOptions.find(model => model.providerId === sessionProvider && model.rawModelId === sessionModel)
+      ?? providerModelOptions.find(model => model.providerId === sessionProvider && model.registryKey === sessionModel))?.registryKey ?? ''
+    : defaultRegistryKey;
   const selectedModelRegistryKey = providerModelOptions.some((model) => model.registryKey === currentRegistryKey) ? currentRegistryKey : '';
   // The effort ladder for the CURRENT model, from its own models.list entry.
   // Null on daemons predating the field, no control renders.
@@ -161,14 +174,16 @@ export function ChatView({
     () => reasoningOptionsForModel(catalogProviderOptions.map((provider) => provider.value), currentRegistryKey),
     [catalogProviderOptions, currentRegistryKey],
   );
-  const currentEffort = firstString(currentModelData, ['effort'])
-    || firstString(asRecord(currentModel.data), ['effort'])
-    || '';
+  const requestedEffort = activeSessionId ? firstString(activeSession, ['reasoningEffort'])
+    : firstString(currentModelData, ['effort']) || firstString(asRecord(currentModel.data), ['effort']) || '';
 
-  const activeSession = useMemo(
-    () => sessionItems.find((session) => bestId(session) === activeSessionId),
-    [activeSessionId, sessionItems],
-  );
+  // The native model projection uses the same resolver as the answering adapter.
+  // Keep the preference while showing the effective wire level on the selected model.
+  const currentEffort = activeSessionId
+    ? effortOptions?.effectiveByRequested?.[requestedEffort]
+      ?? (effortOptions?.levels.includes(requestedEffort) ? requestedEffort : '')
+    : requestedEffort;
+
   const activeSessionTitle = activeSessionId ? bestTitle(activeSession, activeSessionId) : 'New chat';
 
   useEffect(() => {
@@ -176,6 +191,8 @@ export function ChatView({
     const preferredProviderId = currentProviderId || providerOptions[0]?.id || '';
     if (preferredProviderId) setSelectedProviderId(preferredProviderId);
   }, [currentProviderId, providerOptions, selectedProviderId]);
+
+  useEffect(() => { if (currentProviderId) setSelectedProviderId(currentProviderId); }, [selectedChat, currentProviderId]);
 
   useEffect(
     () => setSessionTitleDraft(activeSessionTitle === activeSessionId ? '' : activeSessionTitle),
@@ -191,12 +208,40 @@ export function ChatView({
     },
   });
 
+  const routeSelectionCurrent = (selection: typeof selectedChat, lifetime: ReturnType<typeof getClientLifetime>) => {
+    if (!chatSelection.isCurrent(selection) || !isClientLifetimeCurrent(lifetime)) throw new Error('The selected chat or connection changed. Choose the model again.');
+  };
+  const applySessionRoute = async (patch: { provider?: string; model?: string; reasoningEffort?: string | null }) => {
+    const lifetime = getClientLifetime(); routeSelectionCurrent(selectedChat, lifetime);
+    if (ACTIVE_TURN_STATES.includes(turnState)) throw new Error('Wait for this chat’s current reply to finish before changing its model or effort.');
+    const result = await sdk.chat.sessions.update(activeSessionId, patch);
+    routeSelectionCurrent(selectedChat, lifetime);
+    const acknowledged = companionSessionFromDetail(result);
+    if (bestId(acknowledged) !== activeSessionId
+      || patch.provider !== undefined && firstString(acknowledged, ['provider']) !== patch.provider
+      || patch.model !== undefined && firstString(acknowledged, ['model']) !== patch.model
+      || patch.reasoningEffort !== undefined && asRecord(acknowledged).reasoningEffort !== patch.reasoningEffort) {
+      throw new Error('The selected chat’s model or effort change could not be confirmed. Refresh this chat before retrying.');
+    }
+    onLocalSessionUpdated(activeSessionId, acknowledged);
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['companion-chat', 'sessions'] }),
+      queryClient.invalidateQueries({ queryKey: ['companion-chat', activeSessionId] }),
+    ]);
+  };
   const selectModel = useMutation({
-    mutationFn: (registryKey: string) => {
+    mutationFn: async (registryKey: string) => {
       if (!providerModels.hasCurrentModel(registryKey)) throw new Error('Model options changed. Choose a current model.');
-      return sdk.operator.models.current.set(registryKey);
+      const model = providerModelOptions.find(option => option.registryKey === registryKey);
+      if (!model) throw new Error('The selected model is unavailable.');
+      if (activeSessionId) return applySessionRoute({ provider: model.providerId, model: model.rawModelId });
+      const lifetime = getClientLifetime(); routeSelectionCurrent(selectedChat, lifetime);
+      const result = await sdk.operator.models.current.set(registryKey);
+      routeSelectionCurrent(selectedChat, lifetime); return result;
     },
+    onError: () => setSelectedProviderId(currentProviderId),
     onSuccess: async () => {
+      if (activeSessionId) return;
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['models'] }),
         queryClient.invalidateQueries({ queryKey: ['models', 'current'] }),
@@ -206,13 +251,14 @@ export function ChatView({
   });
 
   const selectEffort = useMutation({
-    // '' is the "default" option: an explicit null clears the persisted level
-    // (omission would silently preserve it).
-    mutationFn: (effort: string) =>
-      sdk.operator.models.current.set(currentRegistryKey, effort === '' ? null : effort),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['models', 'current'] });
+    mutationFn: async (effort: string) => {
+      if (sessionProvider === 'decision-router') throw new Error('Decision Router effort is configured by category.');
+      if (activeSessionId) return applySessionRoute({ reasoningEffort: effort === '' ? null : effort });
+      const lifetime = getClientLifetime(); routeSelectionCurrent(selectedChat, lifetime);
+      const result = await sdk.operator.models.current.set(currentRegistryKey, effort === '' ? null : effort);
+      routeSelectionCurrent(selectedChat, lifetime); return result;
     },
+    onSuccess: async () => { if (!activeSessionId) await queryClient.invalidateQueries({ queryKey: ['models', 'current'] }); },
   });
 
   const invalidateChatState = useCallback(async (sessionId: string) => {
@@ -704,6 +750,7 @@ export function ChatView({
           providerModelOptions={providerModelOptions}
           selectedModelRegistryKey={selectedModelRegistryKey}
           selectModelPending={selectModel.isPending}
+          modelChangesDisabled={isStreaming || send.isPending}
           composerRef={composerRef}
           fileInputRef={fileInputRef}
           slashCommands={slashCommands}
@@ -717,6 +764,7 @@ export function ChatView({
           onModelChange={(registryKey) => selectModel.mutate(registryKey)}
           effortLevels={effortOptions?.levels ?? []}
           currentEffort={currentEffort}
+          requestedEffort={requestedEffort}
           effortPending={selectEffort.isPending}
           onEffortChange={(effort) => selectEffort.mutate(effort)}
         />

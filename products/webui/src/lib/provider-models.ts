@@ -57,7 +57,7 @@ export function providerOptionsFromResponse(value: unknown): ProviderOption[] {
 export function reasoningOptionsForModel(
   providers: readonly unknown[],
   registryKey: string,
-): { levels: readonly string[]; source: string } | null {
+): { levels: readonly string[]; source: string; effectiveByRequested?: Readonly<Record<string, string | null>> } | null {
   if (!registryKey) return null;
   for (const provider of providers) {
     const models = asRecord(provider).models;
@@ -71,7 +71,10 @@ export function reasoningOptionsForModel(
         ? options.levels.filter((level): level is string => typeof level === 'string' && level.length > 0)
         : [];
       if (levels.length === 0) return null;
-      return { levels, source: firstString(options, ['source']) || 'unknown' };
+      const effectiveByRequested = Object.fromEntries(Object.entries(asRecord(options.effectiveByRequested))
+        .filter((entry): entry is [string, string | null] => entry[1] === null || typeof entry[1] === 'string' && levels.includes(entry[1])));
+      return { levels, source: firstString(options, ['source']) || 'unknown',
+        ...(Object.hasOwn(options, 'effectiveByRequested') ? { effectiveByRequested } : {}) };
     }
   }
   return null;

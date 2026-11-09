@@ -23,6 +23,7 @@ import type {
   CancelCompanionChatTurnInput,
   CancelCompanionChatTurnOutput,
   CompanionChatMessage,
+  CompanionChatSession,
   CompanionChatTurnEvent,
   CompanionChatTurnStoppedBy,
   ConversationMessageEnvelope,
@@ -56,6 +57,7 @@ export interface CompanionLLMProvider {
       readonly systemPrompt?: string | null | undefined;
       readonly model?: string | null | undefined;
       readonly provider?: string | null | undefined;
+      readonly reasoningEffort?: string | null | undefined;
       readonly tools?: readonly ToolDefinition[] | undefined;
       readonly abortSignal?: AbortSignal | undefined;
     },
@@ -388,6 +390,8 @@ export interface CompanionPostMessageOptions {
 
 export interface QueuedCompanionTurn {
   readonly userMessageId: string;
+  /** Route captured before attachment preparation; queued turns never adopt later metadata. */
+  readonly route: Pick<CompanionChatSession, 'model' | 'provider' | 'systemPrompt' | 'reasoningEffort'>;
   /**
    * True when the transport that posted this message can honestly attest the
    * OWNER sent it, it authenticated them over the daemon's bearer-token API.

@@ -18,6 +18,7 @@
  * a plain `set` on one named thing. `select` would be a fourth word for it.
  */
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import { nullableSchema } from './operator-contract-schemas-shared.js';
 import {
   BOOLEAN_SCHEMA,
   NUMBER_SCHEMA,
@@ -49,6 +50,7 @@ const PROVIDER_MODEL_REF_SCHEMA = objectSchema({
 const MODEL_REASONING_OPTIONS_SCHEMA = objectSchema({
   levels: arraySchema(STRING_SCHEMA),
   source: { type: 'string', enum: ['catalog', 'declared', 'family', 'fallback'] },
+  effectiveByRequested: { type: 'object', additionalProperties: nullableSchema(STRING_SCHEMA) },
 }, ['levels', 'source']);
 
 const PROVIDER_MODEL_ENTRY_SCHEMA = objectSchema({

@@ -20,6 +20,7 @@
  * dispatching to API routes).
  */
 
+import { readReasoningEffortLevel } from '../providers/reasoning-effort.js';
 import { SDKErrorCodes } from '@goodvibes-jev/engine/errors';
 import type {
   CancelCompanionChatTurnInput,
@@ -163,10 +164,15 @@ async function handleCreateSession(
     ? (context.resolveDefaultProviderModel?.() ?? null)
     : null;
 
+  const reasoningEffort = body['reasoningEffort'];
+  if (reasoningEffort !== undefined && reasoningEffort !== null && readReasoningEffortLevel(reasoningEffort) === undefined) {
+    return Response.json({ error: 'Invalid chat reasoning effort', code: 'INVALID_ARGUMENT' }, { status: 400 });
+  }
   const input: CreateCompanionChatSessionInput = {
     title: typeof body['title'] === 'string' ? body['title'] : undefined,
     model: hasModel ? (body['model'] as string) : (resolvedDefaults?.model ?? undefined),
     provider: hasProvider ? (body['provider'] as string) : (resolvedDefaults?.provider ?? undefined),
+    reasoningEffort: reasoningEffort === null ? null : readReasoningEffortLevel(reasoningEffort) ?? resolvedDefaults?.reasoningEffort,
     systemPrompt: typeof body['systemPrompt'] === 'string' ? body['systemPrompt'] : undefined,
   };
 
@@ -180,6 +186,7 @@ async function handleCreateSession(
   }
 
   const session = context.chatManager.createSession(input);
+  await context.chatManager.flushSession(session.id);
   // Drain the best-effort broker mirror before responding so /api/sessions
   // reflects this session synchronously, matching CompanionBrokerSync's
   // documented contract (see companion-chat-broker-sync.ts).
@@ -304,19 +311,26 @@ async function handleUpdateSession(
     );
   }
 
+  const effort = body['reasoningEffort'];
+  if (effort !== undefined) {
+    const parsed = effort === null ? null : readReasoningEffortLevel(effort);
+    if (parsed === undefined) return Response.json({ error: 'Invalid chat reasoning effort', code: 'INVALID_ARGUMENT' }, { status: 400 });
+    (input as { reasoningEffort?: string | null }).reasoningEffort = parsed;
+  }
+
   const systemPrompt = readOptionalSystemPrompt(body);
   if (systemPrompt instanceof Response) return systemPrompt;
   if (systemPrompt !== undefined) (input as { systemPrompt?: string | null }).systemPrompt = systemPrompt;
 
   if (Object.keys(input).length === 0) {
     return Response.json(
-      { error: 'At least one of title, provider, model, or systemPrompt is required', code: 'INVALID_ARGUMENT' },
+      { error: 'At least one of title, provider, model, reasoningEffort, or systemPrompt is required', code: 'INVALID_ARGUMENT' },
       { status: 400 },
     );
   }
 
   try {
-    const session = context.chatManager.updateSession(sessionId, input);
+    const session = await context.chatManager.updateSessionPersisted(sessionId, input);
     // Drain the best-effort broker mirror before responding, an update
     // heartbeats the shared record (see CompanionBrokerSync.registerSession).
     await context.chatManager.flushBrokerSync();
@@ -340,6 +354,7 @@ async function handleCloseSession(
   context: CompanionChatRouteContext,
 ): Promise<Response> {
   const session = context.chatManager.closeSession(sessionId);
+  await context.chatManager.flushSession(sessionId);
   if (!session) {
     return Response.json({ error: 'Session not found', code: 'SESSION_NOT_FOUND' }, { status: 404 });
   }

@@ -17,7 +17,7 @@ export interface CompanionChatRouteContext {
   /** Parse optional JSON body. Returns null if body is absent. */
   readonly parseOptionalJsonBody: (req: Request) => Promise<{ [k: string]: unknown } | null | Response>;
   /** Resolve the current provider/model when session creation omits an explicit route. */
-  readonly resolveDefaultProviderModel?: (() => { provider: string; model: string } | null) | undefined;
+  readonly resolveDefaultProviderModel?: (() => { provider: string; model: string; reasoningEffort?: string | null | undefined } | null) | undefined;
   /**
    * Open an SSE event stream scoped to a session.
    * Callers must call chatManager.registerSubscriber(sessionId, clientId)

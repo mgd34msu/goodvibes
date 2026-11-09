@@ -25,6 +25,7 @@ import {
 } from './method-catalog-shared.js';
 import {
   COMPANION_CHAT_MESSAGES_LIST_SCHEMA,
+  COMPANION_CHAT_REASONING_EFFORT_SCHEMA,
   COMPANION_CHAT_SESSION_SCHEMA,
   COMPANION_CHAT_SESSIONS_LIST_SCHEMA,
   COMPANION_CHAT_SESSION_WITH_MESSAGES_SCHEMA,
@@ -79,7 +80,7 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
   methodDescriptor({
     id: 'companion.chat.sessions.create',
     title: 'Create Companion Chat Session',
-    description: 'Create a new companion-chat session. Optional `provider` / `model` override the registry default; `title` and `systemPrompt` are stored on the session record.',
+    description: 'Create a new companion-chat session. Optional `provider` / `model` override the registry default. The session retains its requested `reasoningEffort`; null restores provider defaults. Title and system prompt are stored on the session record.',
     category: 'companion',
     scopes: ['write:sessions'],
     http: { method: 'POST', path: '/api/companion/chat/sessions' },
@@ -87,6 +88,7 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
       title: STRING_SCHEMA,
       model: STRING_SCHEMA,
       provider: STRING_SCHEMA,
+      reasoningEffort: COMPANION_CHAT_REASONING_EFFORT_SCHEMA,
       systemPrompt: STRING_SCHEMA,
     }, [], { dependentRequired: COMPANION_MODEL_ROUTE_DEPENDENCY }),
     outputSchema: objectSchema({
@@ -121,7 +123,7 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
   methodDescriptor({
     id: 'companion.chat.sessions.update',
     title: 'Update Companion Chat Session',
-    description: 'Update companion-chat session metadata, including session-local `provider` and `model`, without changing the daemon/TUI current model.',
+    description: 'Update companion-chat session metadata, including session-local provider, model and requested reasoning effort, without changing the daemon/TUI current model. Routing changes are refused while a reply is active; null effort restores provider defaults.',
     category: 'companion',
     scopes: ['write:sessions'],
     http: { method: 'PATCH', path: '/api/companion/chat/sessions/{sessionId}' },
@@ -135,10 +137,11 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
         title: STRING_SCHEMA,
         model: STRING_SCHEMA,
         provider: STRING_SCHEMA,
+        reasoningEffort: COMPANION_CHAT_REASONING_EFFORT_SCHEMA,
         systemPrompt: STRING_SCHEMA,
       }, ['sessionId'], { dependentRequired: COMPANION_MODEL_ROUTE_DEPENDENCY }),
-      (['title', 'model', 'provider', 'systemPrompt'] as const).map((field) =>
-        requirementBranch({ [field]: STRING_SCHEMA }, [field])),
+      (['title', 'model', 'provider', 'systemPrompt', 'reasoningEffort'] as const).map((field) =>
+        requirementBranch({ [field]: field === 'reasoningEffort' ? COMPANION_CHAT_REASONING_EFFORT_SCHEMA : STRING_SCHEMA }, [field])),
     ),
     outputSchema: objectSchema({
       session: COMPANION_CHAT_SESSION_SCHEMA,

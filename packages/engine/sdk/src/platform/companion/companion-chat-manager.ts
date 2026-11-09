@@ -1,3 +1,7 @@
+import { captureOwnedJson } from '../gate/judgment-input.js';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { readReasoningEffortLevel } from '../providers/reasoning-effort.js';
+import type { NativeDataWriteOwner } from '../runtime/native-reader-compatibility.js';
 /**
  * companion-chat-manager.ts
  *
@@ -142,6 +146,8 @@ interface InternalSession {
   activeTurn?: ActiveCompanionTurn | null;
   /** User messages whose turns have not started yet (queue-when-busy + steer-to-front). */
   pendingTurns?: QueuedCompanionTurn[];
+  preparingTurns?: number;
+  routingUpdatePending?: boolean;
   lastActivityAt: number;
   // The SSE client ID for this session (set when a subscriber connects)
   subscriberClientId: string | null;
@@ -177,6 +183,8 @@ interface PendingReply {
 
 export interface CompanionChatManagerConfig {
   readonly provider: CompanionLLMProvider;
+  /** Resolve historical null routes once at admission, never per tool round. */
+  readonly resolveDefaultRoute?: (() => QueuedCompanionTurn['route']) | undefined;
   readonly eventPublisher: CompanionChatEventPublisher;
   /**
    * ToolRegistry to use for executing tool calls emitted by the LLM.
@@ -216,6 +224,8 @@ export interface CompanionChatManagerConfig {
   readonly closedSessionRetentionMs?: number | undefined;
   /** Pass `false` to disable disk persistence entirely (useful in tests). Default: true */
   readonly persist?: boolean | undefined;
+  /** Actual installed writer declares retained session-effort semantics before publication. */
+  readonly nativeDataWriter?: NativeDataWriteOwner | undefined;
   /** Rate-limiting options. Defaults: 30 msgs/min per client, 10/min per session. */
   readonly rateLimiter?: CompanionChatRateLimiterOptions | false | undefined;
   /** Override for tests */
@@ -230,6 +240,8 @@ export class CompanionChatManager {
   readonly #ownedMessages = new WeakSet<CompanionChatMessage>();
   private readonly sessions = new Map<string, InternalSession>();
   private readonly provider: CompanionLLMProvider;
+  private readonly resolveDefaultRoute: CompanionChatManagerConfig['resolveDefaultRoute'];
+  private readonly nativeDataWriter: NativeDataWriteOwner | undefined;
   private readonly eventPublisher: CompanionChatEventPublisher;
   private readonly toolRegistry: ToolRegistry | null;
   private readonly permissionManager: PermissionManager | null;
@@ -256,9 +268,14 @@ export class CompanionChatManager {
    * overwriting a newer one.
    */
   private readonly _pendingSaves = new Map<string, Promise<void>>();
+  private readonly saveFailures = new Map<string, unknown>();
+  private readonly activeWork = new Set<Promise<unknown>>();
+  private closing: Promise<void> | undefined;
 
   constructor(config: CompanionChatManagerConfig) {
     this.provider = config.provider;
+    this.resolveDefaultRoute = config.resolveDefaultRoute;
+    this.nativeDataWriter = config.nativeDataWriter;
     this.eventPublisher = config.eventPublisher;
     this.toolRegistry = config.toolRegistry ?? null;
     this.permissionManager = config.permissionManager ?? null;
@@ -346,7 +363,10 @@ export class CompanionChatManager {
   // ---------------------------------------------------------------------------
 
   createSession(input: CreateCompanionChatSessionInput = {}): CompanionChatSession {
+    this.assertAvailable();
     assertCompleteProviderModelRoute(input);
+    this.assertEffortPublication(input.reasoningEffort);
+    this.assertAvailable();
     const id = randomUUID();
     const now = Date.now();
     const meta: CompanionChatSession = {
@@ -355,6 +375,7 @@ export class CompanionChatManager {
       title: input.title ?? 'Chat',
       model: input.model ?? null,
       provider: input.provider ?? null,
+      ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
       systemPrompt: input.systemPrompt ?? null,
       status: 'active',
       createdAt: now,
@@ -383,6 +404,7 @@ export class CompanionChatManager {
   }
 
   getSession(sessionId: string): CompanionChatSession | null {
+    if (this.disposed) return null;
     return this.sessions.get(sessionId)?.meta ?? null;
   }
 
@@ -436,21 +458,8 @@ export class CompanionChatManager {
     sessionId: string,
     input: UpdateCompanionChatSessionInput,
   ): CompanionChatSession {
-    assertCompleteProviderModelRoute(input);
-    const session = this.sessions.get(sessionId);
-    if (!session) {
-      throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'SESSION_NOT_FOUND', status: 404 });
-    }
-    if (session.meta.status === 'closed') {
-      throw Object.assign(new Error('Session is closed'), { code: SDKErrorCodes.SESSION_CLOSED, status: 409 });
-    }
-
-    const patch: Partial<MutableSessionMeta> = { updatedAt: Date.now() };
-    if (input.title !== undefined) patch.title = input.title;
-    if (input.model !== undefined) patch.model = input.model;
-    if (input.provider !== undefined) patch.provider = input.provider;
-    if (input.systemPrompt !== undefined) patch.systemPrompt = input.systemPrompt;
-
+    const session = this._requireOpenSession(sessionId);
+    const patch = this.prepareSessionPatch(session, input);
     const updated = this._updateMeta(session, patch);
     this._persist(sessionId);
     // Heartbeat the broker record (advances participant.lastSeenAt). Title is
@@ -464,6 +473,47 @@ export class CompanionChatManager {
    * the correct subscriber. Replaces any previous registration (single subscriber
    * per session in v1, the last SSE connection wins).
    */
+  /** HTTP metadata changes publish before acknowledging or changing the live
+   * route. A failure leaves the old in-memory metadata and saved bytes intact
+   * when publication was not reached; uncertain publication holds the session. */
+  async updateSessionPersisted(sessionId: string, input: UpdateCompanionChatSessionInput): Promise<CompanionChatSession> {
+    const session = this._requireOpenSession(sessionId);
+    const admitted = captureOwnedJson(input) as UpdateCompanionChatSessionInput;
+    this.prepareSessionPatch(session, admitted);
+    const routing = admitted.model !== undefined || admitted.provider !== undefined || admitted.reasoningEffort !== undefined;
+    if (routing) session.routingUpdatePending = true;
+    try {
+      return await this.queueSave(sessionId, () => {
+        if (this.sessions.get(sessionId) !== session || session.meta.status !== 'active') throw new Error('Original chat ended before metadata publication');
+        const patch = this.prepareSessionPatch(session, admitted, routing);
+        const updated = { ...session.meta, ...patch };
+        if (this.persistence) this.persistence.saveSync({ meta: updated, messages: session.messages });
+        const committed = this._updateMeta(session, patch);
+        this._brokerSync.track(committed.id, () => this._brokerSync.registerSession(committed));
+        return committed;
+      });
+    } catch { throw this.storageUnavailable(); }
+    finally { if (routing) session.routingUpdatePending = false; }
+  }
+
+  private prepareSessionPatch(session: InternalSession, input: UpdateCompanionChatSessionInput, ownPending = false): Partial<MutableSessionMeta> {
+    assertCompleteProviderModelRoute(input);
+    if ((session.activeTurn || session.preparingTurns || session.routingUpdatePending && !ownPending)
+      && (input.model !== undefined || input.provider !== undefined || input.reasoningEffort !== undefined)) {
+      throw Object.assign(new Error('Wait for this chat’s current reply to finish before changing its model or effort.'), { code: 'CHAT_ROUTE_BUSY', status: 409 });
+    }
+    const original = session.meta, closing = this.disposed;
+    this.assertEffortPublication(input.reasoningEffort);
+    if (session.meta !== original || this.sessions.get(original.id) !== session || this.disposed !== closing) throw this.storageUnavailable();
+    const patch: Partial<MutableSessionMeta> = { updatedAt: Date.now() };
+    if (input.title !== undefined) patch.title = input.title;
+    if (input.model !== undefined) patch.model = input.model;
+    if (input.provider !== undefined) patch.provider = input.provider;
+    if (input.reasoningEffort !== undefined) patch.reasoningEffort = input.reasoningEffort;
+    if (input.systemPrompt !== undefined) patch.systemPrompt = input.systemPrompt;
+    return patch;
+  }
+
   registerSubscriber(sessionId: string, clientId: string): void {
     const session = this.sessions.get(sessionId);
     if (session) {
@@ -498,6 +548,7 @@ export class CompanionChatManager {
    * bounded finalization wait live in companion-chat-turn-control.ts.
    */
   async cancelTurn(sessionId: string, input: CancelCompanionChatTurnInput = {}): Promise<CancelCompanionChatTurnOutput> {
+    this.assertAvailable(sessionId);
     const session = this.sessions.get(sessionId);
     if (!session) {
       throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'SESSION_NOT_FOUND', status: 404 });
@@ -519,6 +570,7 @@ export class CompanionChatManager {
    * `{ code: 'SESSION_NOT_FOUND', status: 404 }`, delete is not a 200-noop.
    */
   async deleteSession(sessionId: string): Promise<{ readonly sessionId: string; readonly deleted: true }> {
+    this.assertAvailable(sessionId);
     const session = this.sessions.get(sessionId);
     if (!session) {
       throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'SESSION_NOT_FOUND', status: 404 });
@@ -593,6 +645,7 @@ export class CompanionChatManager {
       readonly ownerDirect?: boolean | undefined;
     } = {},
   ): Promise<string> {
+    this.assertAvailable(sessionId);
     const session = this.sessions.get(sessionId);
     if (!session) {
       throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'SESSION_NOT_FOUND', status: 404 });
@@ -604,6 +657,9 @@ export class CompanionChatManager {
     // Rate-limit check (throws GoodVibesSdkError on violation)
     this.rateLimiter?.check(sessionId, clientId);
 
+    if (session.routingUpdatePending) throw Object.assign(new Error('Wait for this chat’s model or effort change to finish.'), { code: 'CHAT_ROUTE_BUSY', status: 409 });
+    this.assertEffortPublication(session.meta.reasoningEffort);
+    const route = this.captureTurnRoute(session.meta);
     const attachments = resolveAttachments(options.attachments ?? [], this.artifactStore);
     if (!content.trim() && attachments.length === 0) {
       throw Object.assign(new Error('content or attachments are required'), { code: 'INVALID_ARGUMENT', status: 400 });
@@ -632,7 +688,15 @@ export class CompanionChatManager {
     // conversation only when the turn STARTS, committing now would leak a
     // queued message into the active turn's later tool rounds, which re-read
     // the conversation every round.
-    const providerContent = await buildProviderUserContent(content, attachments, this.artifactStore);
+    session.preparingTurns = (session.preparingTurns ?? 0) + 1;
+    let providerContent: QueuedCompanionTurn['providerContent'];
+    const preparation = buildProviderUserContent(content, attachments, this.artifactStore);
+    this.activeWork.add(preparation);
+    try { providerContent = await preparation; }
+    finally { session.preparingTurns--; this.activeWork.delete(preparation); }
+    if (this.disposed || this.sessions.get(sessionId) !== session || session.meta.status !== 'active') {
+      throw Object.assign(new Error('The original chat ended before its message was prepared.'), { code: SDKErrorCodes.SESSION_CLOSED, status: 409 });
+    }
 
     session.messages.push(this.normalizeMessage(userMsg));
     session.lastActivityAt = now;
@@ -649,6 +713,7 @@ export class CompanionChatManager {
 
     const entry: QueuedCompanionTurn = {
       userMessageId: messageId,
+      route,
       providerContent,
       ...(options.onTurnEvent ? { onTurnEvent: options.onTurnEvent } : {}),
       ...(options.ownerDirect === undefined ? {} : { ownerDirect: options.ownerDirect }),
@@ -661,17 +726,26 @@ export class CompanionChatManager {
     return messageId;
   }
 
-  dispose(): void {
+  dispose(): void { void this.close().catch(error => logger.warn('[companion-chat] close failed', { error: summarizeError(error) })); }
+
+  close(): Promise<void> {
+    if (this.closing) return this.closing;
+    const completion = Promise.withResolvers<void>();
+    this.closing = completion.promise;
+    // Reserve the one close operation before synchronous abort listeners can reenter.
+    void this.closing.catch(() => {});
     this.disposed = true;
-    if (this.gcTimer) {
-      clearInterval(this.gcTimer);
-      this.gcTimer = null;
-    }
-    // Abort all in-flight turns
-    for (const session of this.sessions.values()) {
-      session.abortController.abort();
-    }
-    this.sessions.clear();
+    if (this.gcTimer) { clearInterval(this.gcTimer); this.gcTimer = null; }
+    for (const session of this.sessions.values()) session.abortController.abort();
+    void (async () => {
+      while (this.activeWork.size) await Promise.allSettled([...this.activeWork]);
+      while (this._pendingSaves.size) await Promise.allSettled([...this._pendingSaves.values()]);
+      await this._brokerSync.flush();
+      const failures = [...this.saveFailures.values()];
+      this.sessions.clear();
+      if (failures.length) throw new AggregateError(failures, 'Companion chat persistence did not complete');
+    })().then(completion.resolve, completion.reject);
+    return this.closing;
   }
 
   /**
@@ -726,7 +800,7 @@ export class CompanionChatManager {
    * queued sends and steers can never race into concurrent turns.
    */
   private _startNextTurn(session: InternalSession): void {
-    if (session.activeTurn || session.meta.status === 'closed') return;
+    if (this.disposed || session.activeTurn || session.meta.status === 'closed') return;
     const next = session.pendingTurns?.shift();
     if (!next) return;
     const idx = session.messages.findIndex((m) => m.id === next.userMessageId);
@@ -742,7 +816,7 @@ export class CompanionChatManager {
 
     // Deferred from post time (see _postMessageInternal).
     session.conversation.addUserMessage(next.providerContent);
-    void this._runTurn(session, next.userMessageId, next.onTurnEvent).catch((error: unknown) => {
+    this.ownTurn(this._runTurn(session, next.userMessageId, next.onTurnEvent, next.route), (error: unknown) => {
       logger.warn('[companion-chat] turn execution failed', {
         sessionId: session.meta.id,
         messageId: next.userMessageId,
@@ -751,7 +825,27 @@ export class CompanionChatManager {
     });
   }
 
-  private async _runTurn(session: InternalSession, userMessageId: string, onTurnEvent?: (event: CompanionChatTurnEvent) => void): Promise<void> {
+  private ownTurn(work: Promise<void>, failed: (error: unknown) => void): void {
+    this.activeWork.add(work);
+    void work.then(() => { this.activeWork.delete(work); }, error => { this.activeWork.delete(work); failed(error); });
+  }
+
+  private captureTurnRoute(meta: CompanionChatSession): QueuedCompanionTurn['route'] {
+    if ((meta.model === null) !== (meta.provider === null)) throw new Error('The saved chat route is incomplete');
+    let fallback: QueuedCompanionTurn['route'] | undefined;
+    if (meta.model === null && this.resolveDefaultRoute) {
+      const value: unknown = this.resolveDefaultRoute();
+      try {
+        fallback = captureOwnedJson(value) as QueuedCompanionTurn['route'];
+        if (!fallback || typeof fallback.provider !== 'string' || !fallback.provider || typeof fallback.model !== 'string' || !fallback.model) throw new Error();
+      } catch { drainOwned(value); throw new Error('The default chat route is unavailable'); }
+    }
+    const effort = meta.reasoningEffort !== undefined ? meta.reasoningEffort : fallback?.reasoningEffort;
+    return Object.freeze({ model: meta.model ?? fallback?.model ?? null, provider: meta.provider ?? fallback?.provider ?? null, systemPrompt: meta.systemPrompt,
+      ...(effort === undefined ? {} : { reasoningEffort: effort }) });
+  }
+
+  private async _runTurn(session: InternalSession, userMessageId: string, onTurnEvent?: (event: CompanionChatTurnEvent) => void, route = this.captureTurnRoute(session.meta)): Promise<void> {
     const turnId = randomUUID();
     const sessionId = session.meta.id;
 
@@ -832,9 +926,10 @@ export class CompanionChatManager {
       while (!abortSignal.aborted) {
         const stream = this.provider.chatStream([...session.conversation.getMessagesForLLM()], {
           routingContext: { sessionId, turnId, ...(userMsg ? { prompt: userMsg.content } : {}) },
-          systemPrompt: appendGoodVibesRuntimeAwarenessPrompt(session.meta.systemPrompt),
-          model: session.meta.model,
-          provider: session.meta.provider,
+          systemPrompt: appendGoodVibesRuntimeAwarenessPrompt(route.systemPrompt),
+          model: route.model,
+          provider: route.provider,
+          reasoningEffort: route.reasoningEffort,
           tools: toolDefinitions,
           abortSignal,
         });
@@ -1022,6 +1117,7 @@ export class CompanionChatManager {
 
   /** Look up an active (open) session or throw the closed/not-found machine codes. */
   private _requireOpenSession(sessionId: string): InternalSession {
+    this.assertAvailable(sessionId);
     const session = this.sessions.get(sessionId);
     if (!session) {
       throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'SESSION_NOT_FOUND', status: 404 });
@@ -1052,7 +1148,7 @@ export class CompanionChatManager {
     session.conversation = conversation;
     this._updateMeta(session, { messageCount: session.messages.length, updatedAt: now });
     this._persist(sessionId);
-    void this._runTurn(session, anchorUserMessageId).catch((error: unknown) => {
+    this.ownTurn(this._runTurn(session, anchorUserMessageId), (error: unknown) => {
       logger.warn('[companion-chat] branch turn execution failed', { sessionId, error: summarizeError(error) });
     });
   }
@@ -1159,38 +1255,62 @@ export class CompanionChatManager {
    * complete before writing. The save always reads the CURRENT session state,
    * so rapid create→update→close sequences correctly persist the final state.
    */
+  private assertEffortPublication(effort: string | null | undefined): void {
+    if (effort === undefined) return;
+    if (effort !== null && readReasoningEffortLevel(effort) === undefined) {
+      throw Object.assign(new Error('Invalid chat reasoning effort.'), { code: 'INVALID_ARGUMENT', status: 400 });
+    }
+    if (!this.persistence) return;
+    try {
+      const result: unknown = this.nativeDataWriter?.declare('companion-chat-effort-v1');
+      if (result !== undefined) { drainOwned(result); throw new Error('Session effort publication requires a synchronous native writer'); }
+    } catch (error) { drainOwned(error); throw error instanceof Error ? error : new Error('Session effort publication is unavailable'); }
+  }
+
+  async flushSession(sessionId: string): Promise<void> {
+    try {
+      await this._pendingSaves.get(sessionId);
+      if (this.saveFailures.has(sessionId)) throw this.storageUnavailable();
+    } catch { throw this.storageUnavailable(); }
+  }
+
+  private storageUnavailable(): Error & { readonly code: string; readonly status: number } {
+    return Object.assign(new Error('Chat storage or its original owner is unavailable. Reopen this chat after checking its saved state.'), { code: 'CHAT_PERSISTENCE_UNAVAILABLE', status: 503 });
+  }
+
+  private assertAvailable(sessionId?: string): void {
+    if (this.disposed || sessionId !== undefined && this.saveFailures.has(sessionId)) {
+      throw this.storageUnavailable();
+    }
+  }
+
+  private queueSave<T>(sessionId: string, save: () => T | Promise<T>): Promise<T> {
+    const prior = this._pendingSaves.get(sessionId) ?? Promise.resolve();
+    const operation = prior.then(() => { this.assertAvailableForSave(sessionId); return save(); });
+    const tracked = operation.then(() => undefined);
+    this._pendingSaves.set(sessionId, tracked);
+    const done = () => { if (this._pendingSaves.get(sessionId) === tracked) this._pendingSaves.delete(sessionId); };
+    void tracked.then(done, error => {
+      this.saveFailures.set(sessionId, error); done();
+      logger.warn('[companion-chat] session persistence failed', { sessionId, error: summarizeError(error) });
+    });
+    return operation;
+  }
+
+  private assertAvailableForSave(sessionId: string): void {
+    if (this.saveFailures.has(sessionId)) throw this.saveFailures.get(sessionId);
+  }
+
   private _persist(sessionId: string): void {
     if (!this.persistence) return;
-    const prior = this._pendingSaves.get(sessionId) ?? Promise.resolve();
-    const next = prior
-      .catch((error: unknown) => {
-        logger.warn('[companion-chat] previous session persistence failed before a newer save', {
-          sessionId,
-          error: summarizeError(error),
-        });
-      })
-      .then(() => this._doSave(sessionId))
-      .catch((error: unknown) => {
-        logger.warn('[companion-chat] session persistence failed', {
-          sessionId,
-          error: summarizeError(error),
-        });
-      });
-    this._pendingSaves.set(
-      sessionId,
-      next.finally(() => {
-        // Clean up the slot once this save is the settled head.
-        if (this._pendingSaves.get(sessionId) === next) {
-          this._pendingSaves.delete(sessionId);
-        }
-      }),
-    );
+    void this.queueSave(sessionId, () => this._doSave(sessionId));
   }
 
   private async _doSave(sessionId: string): Promise<void> {
     if (!this.persistence) return;
     const session = this.sessions.get(sessionId);
     if (!session) return;
+    this.assertEffortPublication(session.meta.reasoningEffort);
     await this.persistence.save({ meta: session.meta, messages: session.messages });
   }
 

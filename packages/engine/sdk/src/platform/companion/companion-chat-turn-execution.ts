@@ -35,6 +35,7 @@ interface FinalizerSession {
     readonly id: string;
     readonly model: string | null;
     readonly provider: string | null;
+    readonly reasoningEffort?: string | null | undefined;
     readonly systemPrompt: string | null;
   };
   readonly conversation: ConversationManager;
@@ -66,6 +67,7 @@ export async function runToolExhaustionFinalizer(
     routingContext: { sessionId, turnId },
     model: session.meta.model,
     provider: session.meta.provider,
+    reasoningEffort: session.meta.reasoningEffort,
     abortSignal,
   });
 

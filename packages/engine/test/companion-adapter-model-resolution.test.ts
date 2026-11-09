@@ -314,3 +314,21 @@ test('companion tool rounds share one Decision Router selection and expose actua
   expect(answer.recordedModel).toBe('target');
   expect(terminal).toMatchObject({ decisionRoute: { provider: 'answer', model: 'target' }, usage: { inputTokens: 0, outputTokens: 0 } });
 });
+
+
+test('ordinary companion adapter forwards requested xhigh/max with the actual selected model spec and null omits override', async () => {
+  const calls: ChatRequest[] = [];
+  const provider: LLMProvider = { name: 'synthetic-sol', models: ['gpt-6.1-sol'], isConfigured: () => true,
+    async chat(request) { calls.push(request); return { content: 'synthetic ordinary answer', toolCalls: [], stopReason: 'completed', usage: { inputTokens: 1, outputTokens: 1 } }; } };
+  const model: ModelDefinition = { ...makeModelDef('gpt-6.1-sol', provider.name),
+    capabilities: { toolCalling: true, codeEditing: true, reasoning: true, multimodal: false },
+    reasoningEffort: { kind: 'effort', source: 'declared', values: ['high', 'xhigh', 'max'], defaultValue: 'high' } };
+  const adapter = createCompanionProviderAdapter(makeStubRegistry(model, provider));
+  const messages = [{ role: 'user' as const, content: 'Retain this whole authorized original message.' }];
+  for (const reasoningEffort of ['xhigh', 'max', null]) {
+    for await (const _chunk of adapter.chatStream(messages, { provider: provider.name, model: model.registryKey, reasoningEffort })) { /* drain actual bridge */ }
+  }
+  expect(calls.map(call => call.reasoningEffort)).toEqual(['xhigh', 'max', undefined]);
+  expect(calls.map(call => call.reasoningEffortSpec?.values)).toEqual([['high', 'xhigh', 'max'], ['high', 'xhigh', 'max'], ['high', 'xhigh', 'max']]);
+  expect(calls.every(call => call.messages[0]?.content === messages[0]?.content)).toBe(true);
+});

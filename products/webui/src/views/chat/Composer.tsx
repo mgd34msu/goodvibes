@@ -50,6 +50,7 @@ export interface ComposerProps {
   providerModelOptions: ModelOption[];
   selectedModelRegistryKey: string;
   selectModelPending: boolean;
+  modelChangesDisabled?: boolean;
   composerRef: RefObject<HTMLTextAreaElement | null>;
   fileInputRef: RefObject<HTMLInputElement | null>;
   onDraftChange: (value: string) => void;
@@ -70,8 +71,10 @@ export interface ComposerProps {
    * models.list entry). Empty = the daemon reports none, no control renders.
    */
   effortLevels?: readonly string[];
-  /** The persisted effort selection, '' when unset (provider default). */
+  /** The effective effort on the current model, '' for provider default. */
   currentEffort?: string;
+  /** Remembered request; can differ when the current model caps it. */
+  requestedEffort?: string;
   effortPending?: boolean;
   onEffortChange?: (effort: string) => void;
   /**
@@ -147,10 +150,12 @@ interface ModelMenuProps {
   providerModelOptions: ModelOption[];
   selectedModelRegistryKey: string;
   selectModelPending: boolean;
+  modelChangesDisabled?: boolean;
   onProviderChange: (providerId: string) => void;
   onModelChange: (registryKey: string) => void;
   effortLevels: readonly string[];
   currentEffort: string;
+  requestedEffort: string;
   effortPending: boolean;
   onEffortChange?: (effort: string) => void;
 }
@@ -178,10 +183,12 @@ function ModelMenu({
   providerModelOptions,
   selectedModelRegistryKey,
   selectModelPending,
+  modelChangesDisabled = false,
   onProviderChange,
   onModelChange,
   effortLevels,
   currentEffort,
+  requestedEffort,
   effortPending,
   onEffortChange,
 }: ModelMenuProps) {
@@ -189,8 +196,13 @@ function ModelMenu({
   const modelLabel = selectModelPending
     ? 'Switching…'
     : selectedModel?.label ?? (providerModelOptions.length ? 'Choose a model' : 'No models');
-  const showEffort = effortLevels.length > 1 && Boolean(onEffortChange);
-  const effortLabel = showEffort && currentEffort ? effortWord(currentEffort) : '';
+  const byCategory = selectedModel?.providerId === 'decision-router';
+  const showEffort = !byCategory && effortLevels.length > 1 && Boolean(onEffortChange);
+  const capped = requestedEffort !== currentEffort && requestedEffort !== '';
+  const effortLabel = byCategory ? 'by category' : showEffort
+    ? capped ? `${effortWord(currentEffort)} (requested ${effortWord(requestedEffort)})`
+      : currentEffort ? effortWord(currentEffort) : ''
+    : '';
   const selectedProvider = providerOptions.find((provider) => provider.id === selectedProviderId);
 
   return (
@@ -206,7 +218,7 @@ function ModelMenu({
           className="composer-model-btn"
           aria-label={`Model: ${modelLabel}${effortLabel ? `, effort ${effortLabel}` : ''}`}
           data-pending={selectModelPending || effortPending ? 'true' : undefined}
-          disabled={!providerOptions.length}
+          disabled={!providerOptions.length || modelChangesDisabled}
         >
           <span className="composer-model-label">{modelLabel}</span>
           {effortLabel && <span className="composer-model-effort">{effortLabel}</span>}
@@ -323,6 +335,7 @@ export function Composer({
   providerModelOptions,
   selectedModelRegistryKey,
   selectModelPending,
+  modelChangesDisabled = false,
   composerRef,
   fileInputRef,
   onDraftChange,
@@ -335,6 +348,7 @@ export function Composer({
   onModelChange,
   effortLevels = [],
   currentEffort = '',
+  requestedEffort = currentEffort,
   effortPending = false,
   onEffortChange,
   slashCommands = [],
@@ -592,10 +606,12 @@ export function Composer({
               providerModelOptions={providerModelOptions}
               selectedModelRegistryKey={selectedModelRegistryKey}
               selectModelPending={selectModelPending}
+              modelChangesDisabled={modelChangesDisabled}
               onProviderChange={onProviderChange}
               onModelChange={onModelChange}
               effortLevels={effortLevels}
               currentEffort={currentEffort}
+              requestedEffort={requestedEffort}
               effortPending={effortPending || isSendPending}
               onEffortChange={onEffortChange}
             />

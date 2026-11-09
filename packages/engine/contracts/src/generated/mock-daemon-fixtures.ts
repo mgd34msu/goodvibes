@@ -5037,6 +5037,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "session": {
         "id": "sample",
         "kind": "companion-chat",
+        "reasoningEffort": "none",
         "title": "sample",
         "model": "sample",
         "provider": "sample",
@@ -5072,6 +5073,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "session": {
         "id": "sample",
         "kind": "companion-chat",
+        "reasoningEffort": "none",
         "title": "sample",
         "model": "sample",
         "provider": "sample",
@@ -5126,6 +5128,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         {
           "id": "sample",
           "kind": "companion-chat",
+          "reasoningEffort": "none",
           "title": "sample",
           "model": "sample",
           "provider": "sample",
@@ -5155,6 +5158,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "session": {
         "id": "sample",
         "kind": "companion-chat",
+        "reasoningEffort": "none",
         "title": "sample",
         "model": "sample",
         "provider": "sample",
@@ -19778,7 +19782,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                 "levels": [
                   "sample"
                 ],
-                "source": "catalog"
+                "source": "catalog",
+                "effectiveByRequested": {}
               }
             }
           ]

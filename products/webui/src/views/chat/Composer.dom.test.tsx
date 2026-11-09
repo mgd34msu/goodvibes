@@ -369,3 +369,17 @@ describe('effort in the model menu', () => {
     unmount();
   });
 });
+
+
+test('selected Decision Router shows category-owned effort without a misleading ordinary effort picker', () => {
+  const { container, unmount } = mountComposer(makeProps({ selectedProviderId: 'decision-router',
+    providerOptions: [{ id: 'decision-router', label: 'Decision Router', value: {} }],
+    selectedModelRegistryKey: 'decision-router:auto', providerModelOptions: [{ id: 'decision-router:auto', label: 'Auto', value: {}, providerId: 'decision-router', rawModelId: 'auto', registryKey: 'decision-router:auto' }],
+    effortLevels: ['xhigh', 'max'], currentEffort: 'max', onEffortChange: noop,
+  }));
+  try {
+    expect(container.querySelector('.composer-model-btn')?.textContent).toContain('by category');
+    const menu = openModelMenu(container);
+    expect(menuItem(menu, 'Max')).toBeUndefined(); expect(menuItem(menu, 'X-high')).toBeUndefined();
+  } finally { unmount(); }
+});

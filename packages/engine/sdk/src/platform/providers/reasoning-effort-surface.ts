@@ -398,3 +398,15 @@ export function toEffortModel(model: EffortModelLike): EffortModelLike {
     ...(model.reasoningEffort ? { reasoningEffort: model.reasoningEffort } : {}),
   };
 }
+
+
+/** Explicit stored preference; null means the user restored provider defaults. */
+export function requestedEffortOverride(config: RequestedEffortReader & {
+  describeConfigKeySource(key: 'provider.reasoningEffort'): { readonly effectiveOrigin?: string | undefined; readonly tier?: string | undefined };
+}): string | null {
+  try {
+    const source = config.describeConfigKeySource('provider.reasoningEffort');
+    if ((source.effectiveOrigin ?? source.tier) === 'default') return null;
+    return requestedEffortLevel(config) || null;
+  } catch { return null; }
+}

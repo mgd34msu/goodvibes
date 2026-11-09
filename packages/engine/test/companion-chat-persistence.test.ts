@@ -350,9 +350,10 @@ describe('persistence failures are observable', () => {
       const persistence = new CompanionChatPersistence(sessionsDir);
       mkdirSync(join(sessionsDir, 'blocked.json'));
 
-      await expect(persistence.save(makePersistedSession('blocked'))).rejects.toThrow(
-        'Companion chat session save failed for blocked',
-      );
+      await expect(persistence.save(makePersistedSession('blocked'))).rejects.toMatchObject({
+        code: 'ATOMIC_WRITE_DURABILITY_FAILED', phase: 'before-publication',
+      });
+      expect(existsSync(join(sessionsDir, 'blocked.json'))).toBe(true);
     } finally {
       rmSync(sessionsDir, { recursive: true, force: true });
     }

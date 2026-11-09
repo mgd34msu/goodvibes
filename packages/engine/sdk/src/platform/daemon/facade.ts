@@ -1,3 +1,4 @@
+import { requestedEffortOverride } from '../providers/reasoning-effort-surface.js';
 import { completeGatewayScopePolicyBootstrap } from '../control-plane/scope-policy-bootstrap.js';
 import { withChannelExecutionMode } from '../channel-profiles/install-inbound-intake.js';
 import { runDaemonBootGuarantees } from './facade-boot-guarantees.js';
@@ -277,7 +278,7 @@ export class DaemonServer {
         try {
           const current = resolved.runtimeServices.providerRegistry.getCurrentModel();
           if (!current.provider || !current.id) return null;
-          return { provider: current.provider, model: current.id };
+          return { provider: current.provider, model: current.id, reasoningEffort: requestedEffortOverride(resolved.runtimeServices.configManager) };
         } catch {
           return null;
         }
@@ -869,7 +870,8 @@ export class DaemonServer {
     this.surfaceActionHelper.closeDelegatedTelegram();
     this.releaseBrowserJudgmentChats?.();
     this.releaseBrowserJudgmentChats = undefined;
-    this.companionChatManager.dispose();
+    try { await this.companionChatManager.close(); }
+    catch (error) { runtimeCloseFailures.push(error); }
     // Kill-policy sessions end here; survive-policy ones are parked with their transcript.
     if (this.hostedSessions) await this.hostedSessions.dispose();
 

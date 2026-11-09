@@ -1,3 +1,4 @@
+import { requestedEffortOverride } from '../../providers/reasoning-effort-surface.js';
 /**
  * model-routes.ts
  *
@@ -24,6 +25,7 @@ import { BUILTIN_PROVIDER_ENV_KEYS } from '../../config/provider-credential-cata
 import {
   REASONING_EFFORT_SEVERITY,
   readReasoningEffortLevel,
+  resolveEffortForModel,
   type ReasoningEffortSource,
 } from '../../providers/reasoning-effort.js';
 import { resolveReasoningEffortSpec } from '../../providers/reasoning-effort-families.js';
@@ -91,6 +93,8 @@ export interface ProviderModelRef {
 export interface ModelReasoningOptions {
   readonly levels: string[];
   readonly source: ReasoningEffortSource;
+  /** Exact SDK resolution for a remembered request on this model; null omits the wire field. */
+  readonly effectiveByRequested?: Readonly<Record<string, string | null>> | undefined;
 }
 
 export interface ProviderModelEntry {
@@ -293,23 +297,6 @@ async function resolveProviderConfiguredStatus(
   };
 }
 
-/**
- * The effective configured reasoning level, or null when the key still
- * resolves from its schema default (including explicit invocation authority). The default is a real level
- * ('medium'), so the tier report is the only honest way to tell "the operator
- * chose this" from "nothing was ever set".
- */
-function readPersistedEffort(configManager: ConfigManager): string | null {
-  try {
-    const source = configManager.describeConfigKeySource('provider.reasoningEffort');
-    if ((source.effectiveOrigin ?? source.tier) === 'default') return null;
-    const value = configManager.get('provider.reasoningEffort');
-    return typeof value === 'string' && value.length > 0 ? value : null;
-  } catch {
-    return null;
-  }
-}
-
 async function buildCurrentModelResponse(
   providerRegistry: ProviderRegistry,
   configManager: ConfigManager,
@@ -339,7 +326,7 @@ async function buildCurrentModelResponse(
     configured,
     configuredVia,
     ...(routes ? { routes } : {}),
-    effort: readPersistedEffort(configManager),
+    effort: requestedEffortOverride(configManager),
   };
 }
 
@@ -423,7 +410,12 @@ async function handleListProviderModels(context: ModelRouteContext): Promise<Res
       label: model.displayName ?? model.id,
       contextWindow: model.contextWindow > 0 ? model.contextWindow : undefined,
       ...(reasoningSpec
-        ? { reasoningOptions: { levels: [...reasoningSpec.values], source: reasoningSpec.source } }
+        ? { reasoningOptions: {
+          levels: [...reasoningSpec.values], source: reasoningSpec.source,
+          effectiveByRequested: Object.fromEntries(REASONING_EFFORT_SEVERITY.map(requested => [
+            requested, resolveEffortForModel(requested, { ...model, reasoningEffort: reasoningSpec }).value ?? null,
+          ])),
+        } }
         : {}),
     });
   }

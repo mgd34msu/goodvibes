@@ -136,9 +136,12 @@ export const SHARED_SESSION_RECORD_SCHEMA = objectSchema({
   metadata: METADATA_SCHEMA,
 }, ['id', 'kind', 'title', 'status', 'createdAt', 'updatedAt', 'lastActivityAt', 'messageCount', 'pendingInputCount', 'routeIds', 'surfaceKinds', 'participants', 'metadata']);
 
+export const COMPANION_CHAT_REASONING_EFFORT_SCHEMA = nullableSchema(enumSchema([...REASONING_EFFORT_SEVERITY]));
+
 export const COMPANION_CHAT_SESSION_SCHEMA = objectSchema({
   id: STRING_SCHEMA,
   kind: enumSchema(['companion-chat']),
+  reasoningEffort: COMPANION_CHAT_REASONING_EFFORT_SCHEMA,
   title: STRING_SCHEMA,
   model: nullableSchema(STRING_SCHEMA),
   provider: nullableSchema(STRING_SCHEMA),

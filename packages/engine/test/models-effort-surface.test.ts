@@ -15,6 +15,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { dispatchModelRoutes } from '../sdk/src/platform/daemon/http/model-routes.ts';
 import type { ModelRouteContext } from '../sdk/src/platform/daemon/http/model-routes.ts';
+import { ModelReasoningOptionsSchema } from '../contracts/src/zod-schemas/providers.ts';
 import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
 import type { ProviderRegistry } from '../sdk/src/platform/providers/registry.ts';
 import type { ConfigManager } from '../sdk/src/platform/config/manager.ts';
@@ -121,8 +122,10 @@ describe('models.list reasoningOptions', () => {
     const models = body.providers.find((provider) => provider.id === 'inception')!.models;
 
     const thinkEntry = models.find((model) => model['id'] === 'mercury-think')!;
-    expect(thinkEntry['reasoningOptions']).toEqual({ levels: ['low', 'medium', 'high'], source: 'declared' });
+    expect(thinkEntry['reasoningOptions']).toMatchObject({ levels: ['low', 'medium', 'high'], source: 'declared', effectiveByRequested: { low: 'low', medium: 'medium', high: 'high', xhigh: 'high', max: 'high' } });
 
+    expect(ModelReasoningOptionsSchema.parse(thinkEntry['reasoningOptions'])).toEqual(thinkEntry['reasoningOptions']);
+    expect(ModelReasoningOptionsSchema.parse({ levels: ['high'], source: 'declared' })).toEqual({ levels: ['high'], source: 'declared' });
     const plainEntry = models.find((model) => model['id'] === 'mercury-2')!;
     expect(plainEntry['reasoningOptions']).toBeUndefined();
   });

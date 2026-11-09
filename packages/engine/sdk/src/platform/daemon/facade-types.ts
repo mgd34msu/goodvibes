@@ -159,5 +159,5 @@ export interface CreateDaemonFacadeCollaboratorsOptions {
    */
   readonly swapManager: import('./http/system-route-types.js').WorkspaceSwapManagerLike | null;
   /** Resolve the current provider/model for companion-chat session creation. */
-  readonly resolveDefaultProviderModel?: () => { provider: string; model: string } | null;
+  readonly resolveDefaultProviderModel?: () => { provider: string; model: string; reasoningEffort?: string | null | undefined } | null;
 }

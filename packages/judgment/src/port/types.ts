@@ -72,7 +72,9 @@ export interface JudgmentRequest<Q extends Questions> {
    * Omitted keeps the recording decorator's documented-field projection.
    */
   readonly captureResult?: <T extends JudgmentResult<Q>>(result: T) => T;
-  /** Observes temporary unavailability without settling the reading. Observer errors are ignored. */
+  /** Observes temporary unavailability without settling the reading. Async
+   * observers finish before failover; their errors are ignored. Cancellation
+   * interrupts the wait and prevents another endpoint attempt. */
   readonly onRetry?: (progress: JudgmentRetryProgress) => void;
   /** Attribution for the decision log; never sent to the model. */
   readonly context?: DecisionContext;

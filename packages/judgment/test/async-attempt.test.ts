@@ -214,4 +214,66 @@ describe('asynchronous judgment attempt admission', () => {
     })).rejects.toMatchObject({ kind: 'invalid-request' });
     expect(asyncCalls).toBe(1); expect(calls).toBe(0);
   });
+
+  test('a retry observer finishes before the backup admission and wire attempt', async () => {
+    const entered = deferred<void>(), release = deferred<void>(); const steps: string[] = []; let calls = 0;
+    const port = createSystemOnePort({ ...config(async () => { steps.push(`fetch ${++calls}`); return calls === 1 ? unavailable() : good(); }),
+      fallbacks: [{ endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:2', apiKey: 'fallback-key' }, model: DEFAULT_MODEL }],
+    });
+    const pending = port.ask({ ...request, beforeAttempt() { steps.push('guard'); }, async onRetry(progress) {
+      expect(progress.attempt.outcome).toBe('unavailable'); steps.push('observer entered'); entered.resolve();
+      await release.promise; steps.push('observer drained');
+    } });
+    await entered.promise; await tick();
+    expect(calls).toBe(1); expect(steps).toEqual(['guard', 'fetch 1', 'observer entered']);
+    release.resolve(); const result = await pending;
+    expect(steps).toEqual(['guard', 'fetch 1', 'observer entered', 'observer drained', 'guard', 'fetch 2']);
+    expect(result.lineage?.attempts.map(attempt => attempt.outcome)).toEqual(['unavailable', 'answered']);
+  });
+
+  test.each(['sync', 'async'] as const)('a rejected %s progress observer remains isolated from configured failover', async kind => {
+    let calls = 0; const privateFailure = new Error('synthetic private observer failure');
+    const port = createSystemOnePort({ ...config(async () => ++calls === 1 ? unavailable() : good()),
+      fallbacks: [{ endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:2', apiKey: 'fallback-key' }, model: DEFAULT_MODEL }],
+    });
+    const result = await port.ask({ ...request, onRetry() {
+      if (kind === 'sync') throw privateFailure;
+      return Promise.reject(privateFailure);
+    } });
+    expect(calls).toBe(2); expect(result.answers.yes.noul).toBe(0.9);
+    expect(result.lineage?.attempts.map(attempt => attempt.outcome)).toEqual(['unavailable', 'answered']);
+    expect(port.health?.().map(endpoint => endpoint.lastOutcome)).toEqual(['unavailable', 'answered']);
+  });
+
+  test('authority revoked during a retry observer is checked before the backup wire attempt', async () => {
+    const entered = deferred<void>(), release = deferred<void>(); let allowed = true, calls = 0, guards = 0;
+    const port = createSystemOnePort({ ...config(async () => { calls++; return unavailable(); }),
+      fallbacks: [{ endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:2', apiKey: 'fallback-key' }, model: DEFAULT_MODEL }],
+    });
+    const pending = port.ask({ ...request, beforeAttempt() { guards++; if (!allowed) throw new Error('synthetic owner retired'); },
+      async onRetry() { entered.resolve(); await release.promise; },
+    });
+    await entered.promise; allowed = false; release.resolve();
+    await expect(pending).rejects.toMatchObject({ kind: 'rejected', lineage: { attempts: [{ outcome: 'unavailable' }] } });
+    expect(calls).toBe(1); expect(guards).toBe(2); expect(port.health?.().map(endpoint => endpoint.attempts)).toEqual([1, 0]);
+  });
+
+  test.each(['resolve', 'reject'] as const)('cancellation interrupts an owned retry observer and drains its late %s', async outcome => {
+    const owner = new AbortController(), entered = deferred<void>(), release = deferred<void>(); let calls = 0;
+    const observed: unknown[] = [], unhandled = (reason: unknown) => { observed.push(reason); };
+    const port = createSystemOnePort({ ...config(async () => { calls++; return unavailable(); }),
+      fallbacks: [{ endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:2', apiKey: 'fallback-key' }, model: DEFAULT_MODEL }],
+    });
+    process.on('unhandledRejection', unhandled);
+    const pending = port.ask({ ...request, signal: owner.signal, async onRetry() { entered.resolve(); await release.promise; } });
+    void pending.catch(() => {});
+    try {
+      await entered.promise; expect(calls).toBe(1); owner.abort();
+      await expect(pending).rejects.toMatchObject({ kind: 'aborted', lineage: { attempts: [{ outcome: 'unavailable' }] } });
+      expect(getEventListeners(owner.signal, 'abort')).toHaveLength(0);
+      if (outcome === 'resolve') release.resolve(); else release.reject(new Error('synthetic late observer rejection'));
+      await tick(); expect(observed).toEqual([]); expect(calls).toBe(1);
+      expect(port.health?.().map(endpoint => endpoint.attempts)).toEqual([1, 0]);
+    } finally { release.resolve(); await pending.catch(() => {}); process.off('unhandledRejection', unhandled); }
+  });
 });

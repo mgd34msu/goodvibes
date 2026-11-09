@@ -199,14 +199,26 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
               controller.signal.removeEventListener('abort', abortAttempt);
             }
             checkCancellation();
-            if (eligibleIndex + 1 < eligible.length) {
+            if (eligibleIndex + 1 < eligible.length && onRetry) {
               // A Retry-After applies to the failed target, never to an independent backup.
               try {
-                const observed = onRetry?.(Object.freeze({ logicalRequestId,
+                const progress = Object.freeze({ logicalRequestId,
                   attempt: Object.freeze({ ...attempts[attempts.length - 1]! }),
-                  elapsedMs: performance.now() - started, nextDelayMs: 0 }));
-                void Promise.resolve(observed).catch(() => {});
-              } catch { /* Progress reporting never decides the reading. */ }
+                  elapsedMs: performance.now() - started, nextDelayMs: 0 });
+                // The observer remains owned until it settles or the call is
+                // cancelled. In particular, a next endpoint cannot race an
+                // asynchronous observer changing the original host authority.
+                await interruptible(Promise.resolve().then(() => {
+                  checkCancellation();
+                  return onRetry(progress);
+                }), controller.signal);
+              } catch {
+                // Progress failures stay isolated from provider outcomes;
+                // cancellation still halts, and the next attempt rechecks its
+                // actual asynchronous and synchronous host admission guards.
+                checkCancellation();
+              }
+              checkCancellation();
             }
             break;
           }

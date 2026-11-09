@@ -7,10 +7,10 @@ import { isAbsolute, join, dirname, resolve } from 'node:path';
 import { statSync } from 'node:fs';
 import type { GoodVibesHomeOwnership } from '@goodvibes-jev/engine/sdk/platform/config';
 import type { DaemonUpdateArtifact } from '@goodvibes-jev/engine/sdk/platform/daemon';
-import { captureUpdateFileIo, DAEMON_NATIVE_TARGETS, inspectDaemonNativeInstallation, nativeReaderCapabilities, realUpdateFileIo,
+import { captureUpdateFileIo, isCompiledBunModuleUrl, DAEMON_NATIVE_TARGETS, inspectDaemonNativeInstallation, nativeReaderCapabilities, realUpdateFileIo,
   resolveDaemonNativePayloads, resolveDaemonNativeTargets, retainDaemonNativeFiles } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 import { detectInstallKind } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import { VERSION } from '../version.js';
+import { COMPILED_VERSION, VERSION } from '../version.js';
 
 export interface ResolveDaemonUpdateArtifactOptions {
   /** The executable to identify; defaults to process.execPath. */
@@ -44,8 +44,8 @@ export function resolveInstalledDaemonUpdateArtifact(
   ownership: Pick<GoodVibesHomeOwnership, 'isOverridden'>,
   options: ResolveInstalledDaemonUpdateArtifactOptions = {},
 ): DaemonUpdateArtifact | undefined {
-  const { execPath = process.execPath, version = VERSION, platform = process.platform, arch = process.arch,
-    bundled = import.meta.url.includes('$bunfs'), signal } = options;
+  const { execPath = process.execPath, version = COMPILED_VERSION, platform = process.platform, arch = process.arch,
+    bundled = isCompiledBunModuleUrl(import.meta.url), signal } = options;
   if (ownership.isOverridden || !bundled || detectInstallKind(execPath) !== 'binary') return undefined;
   signal?.throwIfAborted();
   if (!isAbsolute(execPath) || resolve(execPath) !== execPath) throw new Error('Native daemon executable must have an absolute normalized path');

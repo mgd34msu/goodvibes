@@ -23,6 +23,7 @@ import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import { writeFileAtomic } from '../utils/atomic-json-store.js';
 import { fileObservationIdentity, readFileObservation } from '../utils/file-observation.js';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { isContractInputSnapshot } from './input-snapshot.js';
 import { validateNativeDecisionState } from './native-decisions.js';
 import { assertNativeContractSource, bindNativeContractSource } from './native-source.js';
@@ -170,6 +171,8 @@ export interface ContractReapSummary {
 
 export interface ContractStoreOptions {
   readonly projectRoot: string;
+  /** Actual installed native owner; declare its reader floor before writes. */
+  readonly beforeWrite?: (() => void) | undefined;
   /** Clock seam for tests. */
   readonly now?: (() => number) | undefined;
   /** Debounce for event-triggered writes; defaults to 250 ms. */
@@ -218,6 +221,7 @@ export class ContractStore {
   private readonly now: () => number;
   private readonly debounceMs: number;
   private readonly sweepIntervalMs: number;
+  private readonly beforeWrite: (() => void) | undefined;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(options: ContractStoreOptions) {
@@ -225,6 +229,7 @@ export class ContractStore {
     this.now = options.now ?? Date.now;
     this.debounceMs = options.debounceMs ?? DEBOUNCE_MS;
     this.sweepIntervalMs = options.sweepIntervalMs ?? SWEEP_INTERVAL_MS;
+    this.beforeWrite = options.beforeWrite?.bind(options);
   }
 
   /** The live contract, which the runner mutates in place. */
@@ -234,6 +239,12 @@ export class ContractStore {
 
   list(): Contract[] {
     return [...this.contracts.values()];
+  }
+
+  /** Also used by the runner's first atomic durable-admission checkpoint. */
+  prepareCheckpointWrite(): void {
+    const result: unknown = this.beforeWrite?.();
+    if (result !== undefined) { drainOwned(result); throw new Error('Contract checkpoint publication requires a synchronous native owner'); }
   }
 
   /** Holds a contract in memory and schedules its write. */
@@ -265,6 +276,7 @@ export class ContractStore {
     const path = contractPath(this.projectRoot, contract.id);
     try {
       this.assertStoredVersion(contract.id);
+      this.prepareCheckpointWrite();
       if (contract.durableAdmission !== undefined) new DurableContractAdmissions(this.projectRoot).update(contract.durableAdmission, json);
       writeFileAtomic(path, json);
       if (contract.durableAdmission !== undefined) syncContractDirectory(contractsDir(this.projectRoot));

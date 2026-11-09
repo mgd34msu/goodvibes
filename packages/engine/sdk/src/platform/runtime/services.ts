@@ -652,9 +652,9 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
       return record.id;
     },
   });
-  const knowledgeStore = new KnowledgeStore({ configManager, dbFileName: REGULAR_KNOWLEDGE_DB_FILE, family: 'wiki' });
-  const agentKnowledgeStore = new KnowledgeStore({ configManager, dbFileName: GOODVIBES_AGENT_KNOWLEDGE_DB_FILE, family: 'agent' });
-  const homeGraphKnowledgeStore = new KnowledgeStore({ configManager, dbFileName: HOME_GRAPH_KNOWLEDGE_DB_FILE, family: 'home-graph' });
+  const knowledgeStore = new KnowledgeStore({ nativeDataWriter: options.nativeDataWriter ?? configManager.getNativeDataWriter(), configManager, dbFileName: REGULAR_KNOWLEDGE_DB_FILE, family: 'wiki' });
+  const agentKnowledgeStore = new KnowledgeStore({ nativeDataWriter: options.nativeDataWriter ?? configManager.getNativeDataWriter(), configManager, dbFileName: GOODVIBES_AGENT_KNOWLEDGE_DB_FILE, family: 'agent' });
+  const homeGraphKnowledgeStore = new KnowledgeStore({ nativeDataWriter: options.nativeDataWriter ?? configManager.getNativeDataWriter(), configManager, dbFileName: HOME_GRAPH_KNOWLEDGE_DB_FILE, family: 'home-graph' });
   const knowledgeSemanticLlm = createProviderBackedKnowledgeSemanticLlm(providerRegistry, {
     maxConcurrent: 1,
   });
@@ -868,6 +868,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // The contract runner, over the project's work plan and execution plans; its
   // units share the fleet ceiling (fleetCapacityProbe, hoisted below).
   const contracts = composeContractRunner({
+    nativeDataWriter: options.nativeDataWriter ?? options.configManager.getNativeDataWriter(),
     judgmentLog: judgment.decisionLog,
     surfaceRoot,
     readAccessFilter: async (path) => (await backgroundPermissionManager.readAccess(path)) === 'allow',

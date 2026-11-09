@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /** Actual configuration-owner epochs. File contents alone cannot preserve A -> B -> A history. */
 import { createHash, randomUUID } from 'node:crypto';
 import { lstatSync, mkdirSync, readFileSync, rmdirSync, type BigIntStats } from 'node:fs';
@@ -172,7 +173,7 @@ export class DurablePolicyEpochOwner {
       catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
     });
   }
-  constructor(roots: readonly string[], initialize: boolean) {
+  constructor(roots: readonly string[], initialize: boolean, private readonly beforeV2Write: () => void = () => {}) {
     this.roots = Object.freeze([...new Set(roots)].sort());
     this.enabled = initialize;
     if (!initialize) { this.failed = true; return; }
@@ -189,6 +190,11 @@ export class DurablePolicyEpochOwner {
         assertUnlocked(path); this.accepted.set(root, current);
       }
     } catch { this.failed = true; }
+  }
+
+  private declareV2Write(): void {
+    const result: unknown = this.beforeV2Write();
+    if (result !== undefined) { drainOwned(result); throw new Error('Configuration reader ownership must complete synchronously'); }
   }
 
   /** Explicit fresh-source issuance establishes history; recovery never does. */
@@ -213,6 +219,7 @@ export class DurablePolicyEpochOwner {
           if (current) throw new Error('Configuration policy owner changed during issuance');
           const identity = fileIdentity(root, this.#observations, 2);
           current = { version: 2, incarnation: randomUUID(), fileIdentity: identity };
+          this.declareV2Write();
           writeJsonFileAtomic(path, current, { durable: true, mode: 0o600 });
           this.accepted.set(root, current);
         });
@@ -258,6 +265,7 @@ export class DurablePolicyEpochOwner {
           // an earlier v1 owner to physical observations only at that real
           // mutation boundary, never while merely recovering an old grant.
           const next: Epoch = { version: 2, incarnation: randomUUID(), fileIdentity: fileIdentity(root, this.#observations, 2) };
+          this.declareV2Write();
           writeJsonFileAtomic(path, next, { durable: true, mode: 0o600 });
           accepted.set(root, next);
         });
@@ -302,7 +310,10 @@ export class DurablePolicyEpochOwner {
           const expected = this.accepted.get(root);
           if (!expected || row.incarnation !== expected.incarnation) throw new Error('Configuration policy owner changed');
           const next = { ...row, fileIdentity: identity };
-          if (row.fileIdentity !== identity) writeJsonFileAtomic(path, next, { durable: true, mode: 0o600 });
+          if (row.fileIdentity !== identity) {
+            if (next.version === 2) this.declareV2Write();
+            writeJsonFileAtomic(path, next, { durable: true, mode: 0o600 });
+          }
           this.accepted.set(root, next);
         });
       }

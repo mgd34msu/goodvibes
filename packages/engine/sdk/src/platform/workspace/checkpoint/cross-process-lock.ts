@@ -515,8 +515,11 @@ function refreshLockMtime(fd: number): void {
 const inProcessTails = new Map<string, Promise<void>>();
 
 /** One synchronous attempt for short boot-time transactions. Only proven-dead owners are replaced. */
-export function tryAcquireCrossProcessLock(lockPath: string): (() => void) | null {
+export function tryAcquireCrossProcessLock(lockPath: string, options: { readonly assertCurrent?: (() => void) | undefined } = {}): (() => void) | null {
+  const assertCurrent = options.assertCurrent?.bind(options);
+  assertCurrent?.();
   mkdirSync(dirname(lockPath), { recursive: true });
+  assertCurrent?.();
   const token = randomBytes(8).toString('hex');
   const fd = createLockAtomically(lockPath, token, true)
     ?? tryTakeOverStaleLock(lockPath, Infinity, token, true);
@@ -527,6 +530,9 @@ export function tryAcquireCrossProcessLock(lockPath: string): (() => void) | nul
     if (released) return;
     released = true;
     try {
+      // Retired physical parents withhold all pathname cleanup while the
+      // descriptor still closes in finally. The replacement tree is foreign.
+      assertCurrent?.();
       const current = statSync(lockPath);
       if (current.ino === owned.ino && current.dev === owned.dev) unlinkSync(lockPath);
     } catch (error) {

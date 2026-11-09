@@ -14,7 +14,7 @@ import type { UpdateFileIo } from './self-update.js';
 export const NATIVE_READER_REQUIREMENT_FILE = '.goodvibes-reader-requirements.json';
 /** Installation metadata support, separate from application-data write floors. */
 export const NATIVE_PREVIOUS_READER_RECEIPT_FORMAT = 'daemon-previous-reader-receipt-v1';
-export type NativeDataFormat = 'payment-retained-holds-v2' | 'telegram-account-cursors-v2' | 'payment-window-checkpoints-v1' | 'payment-window-checkpoints-v2' | 'payment-reply-history-v1' | 'payment-reply-coverage-v1' | 'payment-operation-reconciliation-v2' | 'delegated-review-owner-v2' | 'discord-inbox-identities-v1' | 'telegram-payment-spans-v3' | 'payment-receive-spans-v1' | 'account-inbox-identities-v1' | 'inbox-triage-identities-v1';
+export type NativeDataFormat = 'payment-retained-holds-v2' | 'telegram-account-cursors-v2' | 'payment-window-checkpoints-v1' | 'payment-window-checkpoints-v2' | 'payment-reply-history-v1' | 'payment-reply-coverage-v1' | 'payment-operation-reconciliation-v2' | 'delegated-review-owner-v2' | 'discord-inbox-identities-v1' | 'telegram-payment-spans-v3' | 'payment-receive-spans-v1' | 'account-inbox-identities-v1' | 'inbox-triage-identities-v1' | 'knowledge-schema-v12' | 'configuration-policy-epochs-v2' | 'contract-review-observations-v1' | 'device-capture-observations-v2';
 const requirements: Readonly<Record<NativeDataFormat, string>> = {
   'payment-retained-holds-v2': '3.1.2', 'telegram-account-cursors-v2': '3.1.2',
   'payment-window-checkpoints-v1': '3.1.2',
@@ -28,6 +28,10 @@ const requirements: Readonly<Record<NativeDataFormat, string>> = {
   'payment-receive-spans-v1': '3.1.2',
   'account-inbox-identities-v1': '3.1.2',
   'inbox-triage-identities-v1': '3.1.2',
+  'knowledge-schema-v12': '3.1.2',
+  'configuration-policy-epochs-v2': '3.1.2',
+  'contract-review-observations-v1': '3.1.2',
+  'device-capture-observations-v2': '3.1.2',
 };
 export interface NativeReaderCapabilities {
   readonly schema: 1;
@@ -119,11 +123,32 @@ function read(path: string): { readonly value: ReaderRequirements | null; readon
   }
 }
 
+/** Filesystem lifetime is independent of execution cancellation. Existing
+ * declared floors remain usable while accounting drains, but a replaced parent
+ * never authorizes creating or cleaning a lock in a replacement directory. */
+function retainPublisherDirectory(execPath: string): () => void {
+  const retained: Array<{ readonly path: string; readonly identity: string }> = [];
+  const identity = (path: string): string => {
+    const stat = lstatSync(path, { bigint: true });
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new NativeDataCompatibilityError('unavailable');
+    // Own lock/publication changes directory clocks and link counts, which are
+    // not directory-incarnation changes. Retain physical owner/mode instead.
+    return [stat.dev, stat.ino, stat.mode, stat.uid, stat.gid, stat.birthtimeNs].join(':');
+  };
+  for (let path = dirname(execPath);;) {
+    retained.push({ path, identity: identity(path) });
+    const next = dirname(path); if (next === path) break; path = next;
+  }
+  return () => { for (const entry of retained) if (identity(entry.path) !== entry.identity) throw new NativeDataCompatibilityError('unavailable'); };
+}
+
 /** The real composition passes the already-admitted executable and its retained
  * native installation guard. Preserve that guard across every publication. */
 export function createNativeDataWriteOwner(publisher: AdmittedNativeDataPublisher): NativeDataWriteOwner {
   const execPath = publisher.execPath, runningVersion = publisher.version, guard = publisher.assertCurrent;
   const path = pathFor(execPath); version(runningVersion);
+  let physicalCurrent: () => void;
+  try { physicalCurrent = retainPublisherDirectory(execPath); } catch { throw new NativeDataCompatibilityError('unavailable'); }
   let observedFile = false, failed = false;
   const current = () => {
     if (failed || publisher.execPath !== execPath || publisher.version !== runningVersion || publisher.assertCurrent !== guard) throw new NativeDataCompatibilityError('unavailable');
@@ -135,10 +160,13 @@ export function createNativeDataWriteOwner(publisher: AdmittedNativeDataPublishe
     try {
       if (failed) throw new NativeDataCompatibilityError('unavailable');
       if (!Object.hasOwn(requirements, format)) throw new Error();
-      release = tryAcquireCrossProcessLock(`${path}.lock`);
+      physicalCurrent();
+      release = tryAcquireCrossProcessLock(`${path}.lock`, { assertCurrent: physicalCurrent });
       if (!release) throw new NativeDataCompatibilityError('busy');
+      physicalCurrent();
       const lease = readFileObservation(`${path}.lock`);
       const assertLease = () => {
+        physicalCurrent();
         const now = readFileObservation(`${path}.lock`);
         if (now.physical !== lease.physical || !now.bytes.equals(lease.bytes)) throw new Error();
       };
@@ -154,7 +182,7 @@ export function createNativeDataWriteOwner(publisher: AdmittedNativeDataPublishe
         const next: ReaderRequirements = { schema: 1, minimumReader, formats: [...(previous.value?.formats ?? []), format].filter((value, index, all) => all.indexOf(value) === index) };
         const contents = `${JSON.stringify(next)}\n`;
         atomicWriteFileSync(path, contents, { mode: 0o600, assertCurrent: () => {
-          current(); assertLease();
+          physicalCurrent(); current(); physicalCurrent(); assertLease();
           const now = read(path);
           if (now.observed?.physical !== previous.observed?.physical || (now.observed !== null && !now.observed.bytes.equals(previous.observed?.bytes ?? Buffer.alloc(0)))) throw new Error();
         } });
@@ -162,7 +190,7 @@ export function createNativeDataWriteOwner(publisher: AdmittedNativeDataPublishe
         observedFile = true;
         current();
       }
-      assertLease();
+      physicalCurrent(); assertLease();
       // An already established requirement is a retained data fact, not a
       // fresh execution grant. Final accounting may use it while the host
       // drains after cancellation; no new requirement is published there.

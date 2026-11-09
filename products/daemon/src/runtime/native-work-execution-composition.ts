@@ -38,7 +38,7 @@ export async function createDaemonNativeWorkExecutionServices(options: Omit<Daem
     ...(options.cancelForeground ? { cancelForeground: options.cancelForeground } : {}),
     ...(options.joinForeground ? { joinForeground: options.joinForeground } : {}) });
   try {
-    const contracts = createDaemonContractServices({ ...options, projectRoot: realpathSync(options.projectRoot), nativeOwner: execution.nativeOwner });
+    const contracts = createDaemonContractServices({ ...options, nativeDataWriter: options.nativeDataWriter ?? options.configManager.getNativeDataWriter(), projectRoot: realpathSync(options.projectRoot), nativeOwner: execution.nativeOwner });
     execution.attachRunner(contracts.runner);
     let closing: Promise<void> | undefined;
     return { execution, runner: contracts.runner, close() {

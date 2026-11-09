@@ -224,7 +224,9 @@ export class KnowledgeStore {
     this.nodeActivationConfidenceFloor = config.nodeAutoAcceptConfidence;
     // Every writer, including ordinary saves and batches, shares this boundary.
     // Configuration supplied by a caller cannot turn coordination off.
-    this.sqlite = new SQLiteStore(this.dbPath, { coordinated: true });
+    const nativeDataWriter = config.nativeDataWriter ?? config.configManager?.getNativeDataWriter?.();
+    const declareNativeData = nativeDataWriter?.declare.bind(nativeDataWriter);
+    this.sqlite = new SQLiteStore(this.dbPath, { coordinated: true, beforePersist: () => declareNativeData?.('knowledge-schema-v12') });
     nativePublicationApply(nativePublicationAdd, nativeNodePublicationOwners, [this]);
     void this.init().catch((error: unknown) => {
       logger.error('[knowledge-store] initialization failed', {

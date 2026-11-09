@@ -1209,9 +1209,20 @@ export class SQLiteStore {
   private readonly activeBatches = new Set<Promise<void>>();
   private fenced = false;
 
-  constructor(dbPath?: string, options: { readonly coordinated?: boolean } = {}) {
+  private readonly beforePersist: (() => void) | undefined;
+
+  constructor(dbPath?: string, options: { readonly coordinated?: boolean; readonly beforePersist?: (() => void) | undefined } = {}) {
+    this.beforePersist = options.beforePersist?.bind(options);
     this.dbPath = dbPath ?? null;
     this.coordinated = options.coordinated === true;
+  }
+
+  private beforePersistentWrite(): void {
+    const result: unknown = this.beforePersist?.();
+    if (result !== undefined) {
+      if (nativeNodeTypes.isPromise(result)) Reflect.apply(Promise.prototype.then, result, [undefined, () => {}]);
+      throw new TypeError('SQLiteStore: persistence owner must complete synchronously');
+    }
   }
 
   get isReady(): boolean {
@@ -1698,7 +1709,7 @@ export class SQLiteStore {
         if (result.changed) {
           const data = current.export();
           const cleanContent = this.readCleanContent(current);
-          this.persistence?.write(data);
+          if (this.persistence) { this.beforePersistentWrite(); this.persistence.write(data); }
           const previous = this.db;
           this.db = current;
           current = null;
@@ -1775,7 +1786,7 @@ export class SQLiteStore {
         assertOwnedImage();
         assertCurrent();
         assertOwnedImage();
-        try { persistence?.writeIfCurrent(data); }
+        try { if (persistence) { this.beforePersistentWrite(); persistence.writeIfCurrent(data); } }
         catch (error) {
           if (error instanceof SQLitePublicationError && error.phase === 'indeterminate') {
             // A failed directory sync cannot undo a visible rename. Mirror only
@@ -1864,6 +1875,7 @@ export class SQLiteStore {
           if (this.imageEpoch !== epoch) {
             throw new Error('SQLiteStore: persisted state changed; captured image was superseded');
           }
+          this.beforePersistentWrite();
           this.persistence!.writeIfCurrent(data);
           this.cleanContent = cleanContent;
           this.cleanBytes = this.persistence ? null : data;
@@ -1873,6 +1885,7 @@ export class SQLiteStore {
     }
 
     try {
+      this.beforePersistentWrite();
       mkdirSync(dirname(dbPath), { recursive: true });
       const data = this.db.export();
       writeFileSync(dbPath, Buffer.from(data));
@@ -1955,7 +1968,7 @@ export class SQLiteStore {
       // but only for a store that already lived on disk: a brand-new store
       // keeps the long-standing contract of touching disk on first save().
       if (result.applied.length > 0 && existedOnDisk) {
-        if (this.persistence) this.persistence.writeIfCurrent(this.getDb().export());
+        if (this.persistence) { this.beforePersistentWrite(); this.persistence.writeIfCurrent(this.getDb().export()); }
         else await this.save();
       }
       if (this.coordinated) {

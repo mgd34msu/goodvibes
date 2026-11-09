@@ -1,3 +1,4 @@
+import { assertStagedClientReaderCompatible } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 import { reportUpdateRollback, createSelfUpdateCommand } from '@goodvibes-jev/engine/terminal-shell/release-update-preflight';
 import {
   checkReleaseUpdate,
@@ -34,13 +35,11 @@ import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../../runt
  *                                (and, being an exchange, one more command
  *                                forward again).
  *
- * IT DOES NOT UPDATE THE DAEMON. `goodvibes-daemon` used to sit beside this
- * binary as part of the same release, and this command swapped both. The daemon
- * is its own product now, released from its own repository on its own version
- * line, and it updates itself on an hourly loop. A swap from here would fetch
- * an asset this repository's releases do not publish, and if one ever appeared
- * under that name, would overwrite a working daemon with a build from the wrong
- * line. The daemon is a neighbour in the install directory, not cargo.
+ * This command owns the selected terminal and its native companions. All
+ * products share the monorepo release version; the daemon retains its own
+ * update transaction. The release installer upgrades the selected suite
+ * together, while this command checks saved-data compatibility for its own
+ * candidate before replacing any terminal files.
  *   /update review             , install/subscription/sandbox posture,
  *                                unrelated to the update mechanics above.
  *   /update bundle export|inspect <path>, portable posture bundle, as before.
@@ -267,6 +266,7 @@ export async function applyUpdate(options: ApplyUpdateOptions): Promise<void> {
   const targets: UpdateTarget[] = [
     { label: 'app binary', path: appBinaryPath, assetName: artifacts.app, executable: true },
     ...runtimeTargets,
+    ...(checksums.has(artifacts.app + '.reader-ci-artifact.json') ? [{ label: 'compiled terminal readers', path: appBinaryPath + '.readers.json', assetName: artifacts.app + '.reader-ci-artifact.json', executable: false }] : []),
     ...(addon && addonTargetPath ? [{ label: 'vector addon', path: addonTargetPath, assetName: addon.assetName, executable: false }] : []),
   ];
 
@@ -281,6 +281,8 @@ export async function applyUpdate(options: ApplyUpdateOptions): Promise<void> {
       targets,
       io,
       platform: options.platform,
+      native: io.observe !== undefined && io.readFile !== undefined,
+      beforeCommit: () => assertStagedClientReaderCompatible(appBinaryPath, appBinaryPath + '.update-download', io, latestTag, artifacts.app),
       ...(signal ? { signal } : {}),
     });
     if (progress) {
@@ -344,11 +346,14 @@ export function rollbackUpdate(options: RollbackUpdateOptions): void {
   // would undo an update this app did not perform.
   const targets = [
     { label: 'app binary', path: options.execPath },
+    { label: 'compiled terminal readers', path: options.execPath + '.readers.json' },
     ...(options.platform === 'linux' ? ['.bun', '.bun.json', '.bun.LICENSE.md'].map(suffix => ({label:'captured Bun' + suffix,path:options.execPath + suffix})) : []),
     ...(addon ? [{ label: 'vector addon', path: join(dirname(options.execPath), 'lib', addon.dirName, addon.fileName) }] : []),
   ];
 
-  const result = rollbackKeptPrevious(targets, io);
+  const result = rollbackKeptPrevious(targets, io, () => {
+    if (io.exists(options.execPath + '.previous')) assertStagedClientReaderCompatible(options.execPath, options.execPath + '.previous', io, undefined, resolveArtifactNames(options.platform, options.arch)?.app);
+  }, { native: io.observe !== undefined && io.readFile !== undefined });
   reportUpdateRollback(options, result.restored, [], () => {
     const serviceInfo = detectDaemonServiceManaged(options.platform, options.configManager, options.runCommand);
     return [

@@ -310,6 +310,7 @@ export type ClientOnlyServiceMember =
 export type ClientRuntimeServicesFromHost = Omit<ClientRuntimeServices, ClientOnlyServiceMember>;
 
 export interface ClientRuntimeServicesOptions {
+  readonly nativeDataWriter?: import('./native-reader-compatibility.js').NativeDataWriteOwner | undefined;
   /** A nested workspace borrows its host's recorded owner for the host lifetime.
    * Closing this workspace must neither replace that port nor close its log. */
   readonly judgment?: JudgmentServices | undefined;
@@ -553,6 +554,7 @@ export function createClientRuntimeServices(options: ClientRuntimeServicesOption
   const sessionLiveTurnControls = new SessionLiveTurnControlsHolder();
 
   const contracts = composeContractRunner({
+    nativeDataWriter: options.nativeDataWriter ?? options.configManager.getNativeDataWriter(),
     judgmentLog: judgment.decisionLog,
     surfaceRoot,
     readAccessFilter: async (path) => (await permissionManager.readAccess(path)) === 'allow',

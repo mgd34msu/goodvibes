@@ -19,7 +19,7 @@ export function createDaemonContractServices(options: DaemonContractCompositionO
     } } : options.agentManager,
     acpHost,
   });
-  const contracts = composeContractRunner({ ...dependencies, fleetCapacity });
+  const contracts = composeContractRunner({ ...dependencies, nativeDataWriter: options.nativeDataWriter ?? options.configManager.getNativeDataWriter(), fleetCapacity });
   const operator = createContractOperatorService({ runner: contracts.runner, workingDirectory: options.projectRoot });
   return { ...contracts, operator };
 }

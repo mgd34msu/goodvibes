@@ -25,6 +25,7 @@ export const KNOWLEDGE_FAMILY_DB_FILE: Readonly<Record<KnowledgeStoreFamily, str
 });
 
 export interface KnowledgeStoreConfig {
+  readonly nativeDataWriter?: import('../runtime/native-reader-compatibility.js').NativeDataWriteOwner | undefined;
   readonly dbPath?: string | undefined;
   readonly dbFileName?: string | undefined;
   /**
@@ -38,6 +39,7 @@ export interface KnowledgeStoreConfig {
   readonly nodeAutoAcceptConfidence?: number | undefined;
   readonly configManager?: {
     getControlPlaneConfigDir?: (() => string) | undefined;
+    getNativeDataWriter?: (() => import('../runtime/native-reader-compatibility.js').NativeDataWriteOwner | undefined) | undefined;
   };
 }
 

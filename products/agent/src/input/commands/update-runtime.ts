@@ -1,3 +1,4 @@
+import { assertStagedClientReaderCompatible } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 import { reportUpdateRollback, createSelfUpdateCommand } from '@goodvibes-jev/engine/terminal-shell/release-update-preflight';
 import {
   checkReleaseUpdate,
@@ -54,6 +55,7 @@ import { dirname, join } from 'node:path';
 import {
   applyVerifiedUpdate,
   realUpdateFileIo,
+  captureUpdateFileIo,
   rollbackKeptPrevious,
   sha256,
   swapFileAtomically,
@@ -186,7 +188,7 @@ export async function applyUpdate(options: ApplyUpdateOptions): Promise<void> {
   if (!prepared) return;
   const { latestTag, baseUrl } = prepared;
   const binaryAsset = prepared.asset;
-  const io = options.io ?? realUpdateFileIo;
+  const io = captureUpdateFileIo(options.io ?? realUpdateFileIo);
   const appBinaryPath = options.execPath;
 
   // The sqlite-vec native addon travels with the binary as a tar.gz archive
@@ -244,9 +246,12 @@ export async function applyUpdate(options: ApplyUpdateOptions): Promise<void> {
   await applyVerifiedUpdate({
     fetchImpl: options.fetchImpl,
     downloadBaseUrl: baseUrl,
-    targets: [{ label: 'agent binary', path: appBinaryPath, assetName: binaryAsset, executable: true }, ...runtimeTargets],
+    targets: [{ label: 'agent binary', path: appBinaryPath, assetName: binaryAsset, executable: true }, ...runtimeTargets,
+      ...(checksums.has(binaryAsset + '.reader-ci-artifact.json') ? [{ label: 'compiled terminal readers', path: appBinaryPath + '.readers.json', assetName: binaryAsset + '.reader-ci-artifact.json', executable: false }] : [])],
     io,
     platform: options.platform,
+    native: io.observe !== undefined && io.readFile !== undefined,
+    beforeCommit: () => assertStagedClientReaderCompatible(appBinaryPath, appBinaryPath + '.update-download', io, latestTag, binaryAsset),
   });
   if (addonFileBytes !== null && addonTargetPath !== null) {
     swapFileAtomically(addonTargetPath, addonFileBytes, { executable: false, io, platform: options.platform });
@@ -312,15 +317,18 @@ export function rollbackDirectory(targetPath: string, io: UpdateDirectoryIo): bo
 export function rollbackUpdate(options: RollbackUpdateOptions): void {
   if (!requireBinaryUpdateInstall(options.execPath, options.print, fallbackUpdateCommand, true)) return;
 
-  const io = options.io ?? realUpdateFileIo;
+  const io = captureUpdateFileIo(options.io ?? realUpdateFileIo);
   const addon = resolveSqliteVecArchive(options.platform, options.arch);
   const targets = [
     { label: 'agent binary', path: options.execPath },
+    { label: 'compiled terminal readers', path: options.execPath + '.readers.json' },
     ...(options.platform === 'linux' ? ['.bun', '.bun.json', '.bun.LICENSE.md'].map(suffix => ({label:'captured Bun' + suffix,path:options.execPath + suffix})) : []),
     ...(addon ? [{ label: 'vector addon', path: join(dirname(options.execPath), 'lib', addon.dirName, addon.fileName) }] : []),
   ];
 
-  const result = rollbackKeptPrevious(targets, io);
+  const result = rollbackKeptPrevious(targets, io, () => {
+    if (io.exists(options.execPath + '.previous')) assertStagedClientReaderCompatible(options.execPath, options.execPath + '.previous', io, undefined, resolveAgentBinaryAssetName(options.platform, options.arch) ?? undefined);
+  }, { native: io.observe !== undefined && io.readFile !== undefined });
   // The driver is a directory, so it rolls back through its own exchange
   // rather than rollbackKeptPrevious. It travels with the binary in both
   // directions: rolling a binary back onto a newer driver is the same mismatch

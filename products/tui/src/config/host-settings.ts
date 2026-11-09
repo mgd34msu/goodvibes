@@ -1,3 +1,4 @@
+import { installedDataWriter } from '../runtime/native-data-writer.ts';
 import { ConfigManager, type ConfigKey, type HostBooleanSetting } from '@goodvibes-jev/engine/sdk/platform/config';
 import { NOTIFICATIONS_METADATA_ONLY_KEY, NOTIFICATIONS_METADATA_ONLY_SETTING } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
 
@@ -18,7 +19,7 @@ const TERMINAL_TURN_END_SETTING: HostBooleanSetting = Object.freeze({
 /** Register TUI-owned settings without changing the shared SDK schema or defaults. */
 export class TuiConfigManager extends ConfigManager {
   constructor(options: ConstructorParameters<typeof ConfigManager>[0]) {
-    super({ ...options, hostSettings: [...(options.hostSettings ?? []), NOTIFICATIONS_METADATA_ONLY_SETTING, TERMINAL_TURN_END_SETTING] });
+    super({ ...options, nativeDataWriter: options.nativeDataWriter ?? installedDataWriter, hostSettings: [...(options.hostSettings ?? []), NOTIFICATIONS_METADATA_ONLY_SETTING, TERMINAL_TURN_END_SETTING] });
   }
 }
 

@@ -104,7 +104,7 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
       if (result !== undefined) { drainOwned(result); throw new Error('Native data publication requires a synchronous installation guard'); }
       fence();
     },
-  })) : options.runtime.nativeDataWriter;
+  })) : options.runtime.nativeDataWriter ?? options.runtime.configManager.getNativeDataWriter();
   // Never inspect, stringify or retain rejection values from external owners.
   async function bounded(label: string, action: () => void | Promise<void>): Promise<void> {
     try { await action(); } catch {

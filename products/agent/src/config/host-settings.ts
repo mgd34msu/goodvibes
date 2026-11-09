@@ -1,3 +1,4 @@
+import { installedDataWriter } from '../runtime/native-data-writer.ts';
 import { ConfigManager, type HostBooleanSetting } from '@goodvibes-jev/engine/sdk/platform/config';
 import { NOTIFICATIONS_METADATA_ONLY_KEY, NOTIFICATIONS_METADATA_ONLY_SETTING } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
 
@@ -27,6 +28,6 @@ const HOSTED_RESEARCH_SCREENING_SETTING: HostBooleanSetting = Object.freeze({
 /** Agent construction opts into the public instance-owned SDK host schema. */
 export class AgentConfigManager extends ConfigManager {
   constructor(options: ConstructorParameters<typeof ConfigManager>[0]) {
-    super({ ...options, hostSettings: [...(options.hostSettings ?? []), NOTIFICATIONS_METADATA_ONLY_SETTING, HOSTED_RESEARCH_SCREENING_SETTING] });
+    super({ ...options, nativeDataWriter: options.nativeDataWriter ?? installedDataWriter, hostSettings: [...(options.hostSettings ?? []), NOTIFICATIONS_METADATA_ONLY_SETTING, HOSTED_RESEARCH_SCREENING_SETTING] });
   }
 }

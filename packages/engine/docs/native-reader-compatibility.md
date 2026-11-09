@@ -1,0 +1,11 @@
+# Saved-data compatibility and native updates
+
+Installed GoodVibes programs publish reader requirements before writing a format that older builds cannot safely read. The TUI, Agent and daemon share `.goodvibes-reader-requirements.json` beside their executables. It contains format names and the minimum supported version, without configuration values or saved content.
+
+This applies to knowledge schema 12, configuration policy epochs version 2, contract review observations, and the daemon's newer payment, inbox and device formats. Opening an empty knowledge store or reading configuration does not create a new requirement. The requirement is established before the first incompatible persisted image or policy sidecar.
+
+The release installer checks every selected program before replacing the first installed program. Terminal self-update and rollback check the candidate under their existing file transaction claims. New terminal releases include checksum-verified `*.reader-ci-artifact.json` metadata, installed as `<executable>.readers.json`; the executable and its reader metadata are kept and restored together. That metadata binds the reader capabilities to the actual executable and any captured Bun companions. A version label alone is insufficient.
+
+When saved data requires a format that the proposed build cannot confirm, installation or rollback stops and keeps the current files. Historical terminal binaries without reader metadata are also refused when a saved-data requirement exists. GoodVibes does not start an older program to guess whether it understands the new data. Keep the current installation and choose a release with matching reader support. Deleting the requirement file does not convert saved data to an older schema.
+
+The native publisher is admitted by the compiled executable root before its first awaited startup work. Linux also checks the OS-loaded executable inode; Darwin retains the initially selected physical executable and rejects later replacement. This publisher only records compatibility restrictions. It grants no permission to read private data or execute saved work. Source and package-managed runs retain their existing explicit store behavior and do not infer an installed publisher from a filename or environment variable.

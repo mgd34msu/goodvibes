@@ -135,6 +135,8 @@ export type DeepReadonly<T> = {
 
 /** Constructor overrides for CLI args and programmatic instantiation. */
 interface ConfigCliOverrides {
+  /** Installation-admitted data publisher, supplied by the actual executable root. */
+  readonly nativeDataWriter?: import('../runtime/native-reader-compatibility.js').NativeDataWriteOwner | undefined;
   /** Per-instance surface-owned boolean leaves; their declared defaults must be restrictive. */
   hostSettings?: readonly HostBooleanSetting[] | undefined;
   /** Read without filesystem effects; persistent mutators refuse, runtime inputs are allowed. */
@@ -396,7 +398,13 @@ export class ConfigManager {
   private ingestionNotices: SettingsIngestionNotice[] = [];
   private readonly unknownSettingForms = new UnknownSettingFormsQueue();
 
+  private readonly nativeDataWriter: import('../runtime/native-reader-compatibility.js').NativeDataWriteOwner | undefined;
+
+  /** Native installation ownership stays attached to the actual configuration owner. */
+  getNativeDataWriter(): import('../runtime/native-reader-compatibility.js').NativeDataWriteOwner | undefined { return this.nativeDataWriter; }
+
   constructor(overrides: ConfigOverrides) {
+    this.nativeDataWriter = overrides.nativeDataWriter;
     this.readOnly = overrides.readOnly ?? false;
     this.diagnosticMode = overrides.diagnosticMode ?? 'default';
     this.hostSettings = new HostSettings(overrides.hostSettings);
@@ -456,7 +464,7 @@ export class ConfigManager {
     this.daemonTierOwner = !this.readOnly && overrides.ownsDaemonTier === true;
 
     this.durablePolicy = new DurablePolicyEpochOwner([this.configPath, this.projectConfigPath, this.sharedTierPath, this.daemonTierPath, join(this.configDir, 'settings-sync.json')]
-      .filter((path): path is string => path !== null), !this.readOnly);
+      .filter((path): path is string => path !== null), !this.readOnly, () => this.nativeDataWriter?.declare('configuration-policy-epochs-v2'));
     try { this.load(); } finally { this.hydrating = false; }
 
     // Apply constructor overrides (CLI args, etc.) after load

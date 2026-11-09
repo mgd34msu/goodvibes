@@ -1,3 +1,6 @@
+import { admitInstalledClientDataWriter } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { COMPILED_VERSION } from '../version.js';
+const installedDataWriter = admitInstalledClientDataWriter({ moduleUrl: import.meta.url, execPath: process.execPath, compiledVersion: COMPILED_VERSION, platform: process.platform });
 /** One home/tier resolution shared by command and explicit serving entrypoints. */
 import { resolve } from 'node:path';
 import { ConfigManager, daemonConfigPathForHome, resolveGoodVibesHomeOwnership } from '@goodvibes-jev/engine/sdk/platform/config';
@@ -36,6 +39,7 @@ export function createDaemonCliConfiguration(
     runDaemonConfigMigration(homes.homeDirectory, daemonConfigPathForHome(homes.daemonHomeDirectory), options);
   }
   const config = new ConfigManager({
+    nativeDataWriter: installedDataWriter,
     workingDir: workingDirectory, homeDir: homes.homeDirectory,
     surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT,
     daemonTierPath: daemonConfigPathForHome(homes.daemonHomeDirectory),

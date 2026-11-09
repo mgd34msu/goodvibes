@@ -940,6 +940,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     if (contract.durableAdmission !== undefined) {
       const checkpoint = serializeContract(contract, now());
       if (checkpoint === null) throw new DurableContractAdmissionError('checkpoint');
+      deps.store.prepareCheckpointWrite();
       durableAdmissions.write(contract.durableAdmission, checkpoint);
     }
     const run = newRun(contract);

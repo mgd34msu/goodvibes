@@ -50,6 +50,7 @@ export interface AgentGraph extends AgentExecutionGraph {
 }
 
 export interface AgentGraphOptions extends AgentExecutionGraphOptions {
+  readonly nativeDataWriter?: import('./native-reader-compatibility.js').NativeDataWriteOwner | undefined;
   readonly judgmentLog?: Pick<import('@goodvibes-jev/judgment').DecisionLog, 'get'> | undefined;
   readonly surfaceRoot?: string | undefined;
   readonly readAccessFilter?: import('../tools/shared/read-access.js').ReadAccessFilter | undefined;
@@ -97,6 +98,7 @@ export function createAgentGraph(options: AgentGraphOptions): AgentGraph {
   const graph = createAgentExecutionGraph(options);
   const { agentMessageBus, agentManager } = graph;
   const composed = composeContractRunner({
+    nativeDataWriter: options.nativeDataWriter ?? options.configManager.getNativeDataWriter(),
     judgmentLog: options.judgmentLog,
     surfaceRoot: options.surfaceRoot,
     readAccessFilter: options.readAccessFilter,

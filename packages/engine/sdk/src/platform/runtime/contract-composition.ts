@@ -77,6 +77,7 @@ export interface ContractRunnerCompositionOptions {
   readonly planManager?: ExecutionPlans | undefined;
   /** Trusted paired native owners. Absent keeps historical composition; never sourced from config or wire input. */
   readonly nativeOwner?: NativeContractCompositionOwner | undefined;
+  readonly nativeDataWriter?: import('./native-reader-compatibility.js').NativeDataWriteOwner | undefined;
 }
 
 /**
@@ -217,7 +218,9 @@ export function composeContractRunner(options: ContractRunnerCompositionOptions)
   if (options.nativeOwner && (typeof options.readAccessFilter !== 'function' || typeof options.nativeOwner.decisions?.authorityOf !== 'function' || typeof options.nativeOwner.admission?.withCurrent !== 'function')) {
     throw new Error('Native composition requires both authenticated owners and the original read authorization');
   }
-  const store = new ContractStore({ projectRoot: options.projectRoot });
+  const writer = options.nativeDataWriter;
+  const store = new ContractStore({ projectRoot: options.projectRoot,
+    beforeWrite: () => writer?.declare('contract-review-observations-v1') });
   const { priceUsage, priceProvenance } = buildPricingSeams(options.providerRegistry);
   const planner = createBenchmarkRoutePlanner({
     catalog: options.providerRegistry,

@@ -1,16 +1,15 @@
 /** Owned synthetic SQLite fixtures; these tests never read user settings or pairing tokens. */
 import * as nativeFs from 'node:fs';
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { createSchema, KNOWLEDGE_SCHEMA_VERSION } from '../platform/src/platform/knowledge/store-schema.js';
 import { SQLiteStore, loadSqlJsEngine, type SqlDatabase } from '../platform/src/platform/state/sqlite-store.js';
-import type { SQLitePublicationIO } from '../platform/src/platform/state/sqlite-store-persistence.js';
 import { createWorkLedger } from '../platform/src/platform/workflow/work-ledger/service.js';
 import { workLedgerStateSchema, type LedgerWork, type WorkLedgerEvent } from '../platform/src/platform/workflow/work-ledger/types.js';
-import { parseNativeWorkExecutionIntent, parseNativeWorkExecutionRecord, nativeExecutionTargetRevision, type NativeWorkExecutionIntent } from '../platform/src/platform/workflow/work-ledger/native-execution-types.js';
+import { bindNativeExecutionRequest, parseNativeWorkExecutionIntent, parseNativeWorkExecutionRecord, nativeExecutionTargetRevision, type NativeWorkExecutionIntent } from '../platform/src/platform/workflow/work-ledger/native-execution-types.js';
 import { criteriaSetIdForWork, durableKeyHash, freezeDurableRequest } from '../platform/src/platform/contract/durable-admission.js';
 
 const roots: string[] = [];
@@ -99,6 +98,23 @@ test('association publishes record and intent atomically before the durable call
   const reopened = await open(f.file); expect(reopened.storage.currentByAttempt(f.key.attemptId)).toMatchObject({ intent: { state: 'associated' }, record: f.record });
 });
 
+test('native scope parsing and request binding require complete own array entries without invoking accessors', async () => {
+  const f = await fixture();
+  const owner = { principalId: 'fixture-owner', authorityRevision: 'fixture-epoch', scopeId: 'fixture-scope', scopeRevision: 'fixture-scope-epoch' };
+  for (const scopes of [[], ['read:work-ledger'], ['read:work-ledger', 'write:fleet']]) {
+    expect(parseNativeWorkExecutionIntent({ ...f.intent, authorityScopes: scopes }).authorityScopes).toEqual(scopes);
+    expect(() => bindNativeExecutionRequest(f.intent.request, 'project', owner, scopes)).not.toThrow();
+  }
+  let getters = 0;
+  const accessor = Object.defineProperty(new Array<string>(1), '0', { enumerable: true, get() { getters++; return 'read:work-ledger'; } });
+  for (const scopes of [new Array<string>(1), Object.assign(new Array<string>(1), { extra: 'read:work-ledger' }),
+    Object.assign(['read:work-ledger'], { extra: 'write:fleet' }), ['read:work-ledger', , 'write:fleet'], accessor]) {
+    expect(() => parseNativeWorkExecutionIntent({ ...f.intent, authorityScopes: scopes })).toThrow('invalid');
+    expect(() => bindNativeExecutionRequest(f.intent.request, 'project', owner, scopes)).toThrow();
+  }
+  expect(getters).toBe(0);
+});
+
 test('earliest attempt cancellation persists an irreversible tombstone without execution', async () => {
   const f = await fixture();
   await f.storage.transactionByAttempt(f.key.attemptId, () => ({ next: null, nextIntent: { ...f.intent, state: 'cancelled' }, value: undefined }));
@@ -144,10 +160,15 @@ test('same-attempt key collision and cross-project or cross-attempt writes are r
   const request = freezeDurableRequest({ ...f.intent.request, key, input: { ...f.intent.request.input, nativeSource: { ...f.intent.request.input.nativeSource!, criteriaRevision: key.criteriaRevision } } });
   const collision = { ...f.intent, target: { ...f.intent.target, criteriaRevision: 99 }, request };
   expect(f.storage.current(key).intent).toEqual(f.intent);
-  await expect(f.storage.transaction(key, () => ({ next: null, nextIntent: collision, value: undefined }))).rejects.toMatchObject({ code: 'conflict' });
+  expect(() => parseNativeWorkExecutionIntent(collision)).not.toThrow();
+  const bytes = readFileSync(f.file);
+  // An independently valid candidate cannot replace the original attempt's
+  // immutable facts; its retained parser rejects that change before storage.
+  await expect(f.storage.transaction(key, () => ({ next: null, nextIntent: collision, value: undefined }))).rejects.toMatchObject({ code: 'invalid' });
   await expect(f.storage.transaction(f.key, () => ({ next: null, nextIntent: { ...f.intent, projectId: 'other' }, value: undefined }))).rejects.toMatchObject({ code: 'invalid' });
   await expect(f.storage.transactionByAttempt('other-attempt', () => ({ next: null, nextIntent: f.intent, value: undefined }))).rejects.toMatchObject({ code: 'invalid' });
   expect(f.storage.currentByAttempt(f.key.attemptId).intent).toEqual(f.intent);
+  expect(readFileSync(f.file)).toEqual(bytes);
 });
 
 test('mutation callbacks cannot change the comparison baseline or regress an associated intent', async () => {
@@ -267,18 +288,26 @@ test('old binary refuses schema5 and an already-open schema3 writer cannot erase
 
 for (const phase of ['before', 'after'] as const) test(`${phase}-publication failure cannot expose a half-associated intent or invoke the durable boundary`, async () => {
   const f = await fixture(); await reserve(f); const original = readFileSync(f.file);
-  const persistence = (f.store as unknown as { sqlite: { persistence: { io: SQLitePublicationIO } } }).sqlite.persistence;
   let fail = true;
-  persistence.io = { ...nativeFs,
-    renameSync(from, to) { if (phase === 'before' && fail) { fail = false; throw new Error('owned before-publication fault'); } nativeFs.renameSync(from, to); },
-    fsyncSync(fd) { if (phase === 'after' && fail && nativeFs.fstatSync(fd).isDirectory()) { fail = false; throw new Error('owned after-publication fault'); } nativeFs.fsyncSync(fd); },
-  };
+  const actualRename = nativeFs.renameSync, actualSync = nativeFs.fsyncSync;
+  const effect = phase === 'before' ? spyOn(nativeFs, 'renameSync').mockImplementation((from, to) => {
+    if (String(to) === f.file && String(from).startsWith(`${f.file}.tmp-`) && fail) {
+      fail = false; throw new Error('owned before-publication fault');
+    }
+    actualRename(from, to);
+  }) : spyOn(nativeFs, 'fsyncSync').mockImplementation(fd => {
+    if (fail && nativeFs.fstatSync(fd).isDirectory()) { fail = false; throw new Error('owned after-publication fault'); }
+    actualSync(fd);
+  });
   let boundary = 0;
   const mutation = () => ({ next: f.record, nextIntent: { ...f.intent, state: 'associated' as const }, value: undefined });
-  await expect(f.storage.transaction(f.key, mutation, () => { boundary++; })).rejects.toThrow(); expect(boundary).toBe(0);
-  const visible = f.storage.current(f.key);
-  if (phase === 'before') { expect(readFileSync(f.file)).toEqual(original); expect(visible).toMatchObject({ intent: { state: 'admitting' }, record: null }); }
-  else expect(visible).toMatchObject({ intent: { state: 'associated' }, record: f.record });
-  await f.storage.transaction(f.key, current => current.record ? { next: null, value: undefined } : mutation(), (_value, current) => { boundary++; expect(current()).toMatchObject({ intent: { state: 'associated' }, record: f.record }); });
-  expect(boundary).toBe(1); expect((await open(f.file)).storage.current(f.key)).toMatchObject({ intent: { state: 'associated' }, record: f.record });
+  try {
+    await expect(f.storage.transaction(f.key, mutation, () => { boundary++; })).rejects.toThrow();
+    expect(fail).toBe(false); expect(boundary).toBe(0);
+    const visible = f.storage.current(f.key);
+    if (phase === 'before') { expect(readFileSync(f.file)).toEqual(original); expect(visible).toMatchObject({ intent: { state: 'admitting' }, record: null }); }
+    else expect(visible).toMatchObject({ intent: { state: 'associated' }, record: f.record });
+    await f.storage.transaction(f.key, current => current.record ? { next: null, value: undefined } : mutation(), (_value, current) => { boundary++; expect(current()).toMatchObject({ intent: { state: 'associated' }, record: f.record }); });
+    expect(boundary).toBe(1); expect((await open(f.file)).storage.current(f.key)).toMatchObject({ intent: { state: 'associated' }, record: f.record });
+  } finally { effect.mockRestore(); }
 });

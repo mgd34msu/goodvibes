@@ -1,4 +1,5 @@
 import { selfImprovementFixtureReading, gapAssessmentFixture } from './_helpers/knowledge-self-improvement-readings.js';
+import { protectedHistoricalFactId, seedProtectedHistoricalFact } from './_helpers/protected-historical-fact-fixture.js';
 import { repairSubjectFixtureReading } from './_helpers/repair-subject-fixture-readings.js';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -20,13 +21,14 @@ import { repairProfileFixtureReading, repairUsefulFixtureReading } from './_help
 
 const spaceId = 'support-test';
 let previous: JudgmentPort | undefined;
-const roots: string[] = [];
+const roots: string[] = [], stores: KnowledgeStore[] = [];
 beforeEach(() => { previous = installJudgmentPort(undefined); });
-afterEach(() => { installJudgmentPort(previous); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(async () => { installJudgmentPort(previous); await Promise.all(stores.splice(0).map(store => store.close())); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'goodvibes-repair-reference-')); roots.push(root);
   const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') });
+  stores.push(store);
   const fake = fakePort((name, question) => {
     if (name === 'factTrust' || name === 'sourceSupport' || name === 'subjectSupport') return scoreAnswer(question, 4, 0.99); // Authored supported synthetic facts; grading behavior has separate controls.
 
@@ -39,11 +41,13 @@ async function fixture() {
   const extraction = await store.upsertExtraction({ sourceId: source.id, extractorId: 'synthetic', format: 'text', excerpt: 'AC-7 has four HDMI ports.', metadata: { knowledgeSpaceId: spaceId } });
   const gap = await seedKnowledgeResearchTask(store, { id: 'gap', kind: 'knowledge_gap', slug: 'gap', title: 'AC-7 ports', sourceId: source.id, metadata: { knowledgeSpaceId: spaceId, linkedObjectIds: [subject.id] } });
   const scope = createGeneratedClaimReferenceScope(store);
+  await seedProtectedHistoricalFact(store, spaceId, source.id, subject.id);
   const prepared = await prepareSourceLinkedRepairProfileFacts([{ store, spaceId, source, extraction, subjects: [subject], authority: 'secondary',
     title: 'HDMI ports', summary: 'AC-7 has four HDMI ports.', evidence: 'AC-7 has four HDMI ports.', extractor: 'synthetic',
     classification: { kind: 'specification', title: 'HDMI ports', summary: 'AC-7 has four HDMI ports.', value: 'four hdmi ports', labels: [], aliases: [] },
   }]);
   const [fact] = await prepared.write({ nodeWritten: scope.rememberGenerated });
+  expect(fact!.id).toBe(protectedHistoricalFactId);
   expect(judgmentInputProblem({ id: fact!.id })).toBe('card-material');
   return { store, source, extraction, subject, gap, fact: fact!, scope, fake };
 }
@@ -62,7 +66,7 @@ describe('repair operation generated-reference scope', () => {
     const current = item.store.getNode(item.fact.id)!;
     expect(generatedClaimSupportReferences(item.scope.relinking, item.store, current)?.claimId).toBe(item.fact.id);
     expect((current.metadata.generatedFactSupport as { receipts: { claimId: string }[] }).receipts.every((receipt) => receipt.claimId === item.fact.id)).toBe(true);
-    const reopened = new KnowledgeStore({ dbPath: item.store.storagePath }); await reopened.init();
+    const reopened = new KnowledgeStore({ dbPath: item.store.storagePath }); stores.push(reopened); await reopened.init();
     expect(reopened.getNode(item.fact.id)).toEqual(current);
     expect(reopened.listEdges()).toEqual(item.store.listEdges());
   });
@@ -75,7 +79,7 @@ describe('repair operation generated-reference scope', () => {
     }
   });
   test('a valid token cannot cross store instances, including reopening the same SQLite file', async () => {
-    const item = await fixture(); const reopened = new KnowledgeStore({ dbPath: item.store.storagePath }); await reopened.init();
+    const item = await fixture(); const reopened = new KnowledgeStore({ dbPath: item.store.storagePath }); stores.push(reopened); await reopened.init();
     const before = snapshot(reopened), calls = item.fake.requests.length;
     await expect(relink(item, item.scope.relinking, reopened)).rejects.toBeInstanceOf(KnowledgeGeneratedFactSupportHeldError);
     expect(snapshot(reopened)).toBe(before); expect(item.fake.requests).toHaveLength(calls);

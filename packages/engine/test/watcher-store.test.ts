@@ -260,17 +260,17 @@ describe('watcher store: quarantine-don\'t-crash load', () => {
     const tie = new Date('2026-01-01T00:00:00Z');
     for (let i = 0; i < 8; i += 1) {
       writeFileSync(storePath, `still not json #${i}`, 'utf-8');
+      // Give each actual source the same mtime BEFORE quarantine captures it.
+      // Editing an already-receipted archive would correctly retire its native
+      // physical proof and preserve it instead of testing the retention bound.
+      utimesSync(storePath, tie, tie);
       expect(loadWatcherSnapshotFromPath(storePath)).toBeNull();
-      // Flatten every quarantine artifact onto one identical mtime so the
-      // sort's mtime component carries no information at all.
-      for (const name of siblingsMatching(dir, `${basename(storePath)}.corrupt-`)) {
-        utimesSync(join(dir, name), tie, tie);
-      }
     }
 
     const remaining = corruptSiblings(dir, storePath);
     expect(remaining.length).toBeLessThanOrEqual(5);
     for (const name of remaining) {
+      expect(statSync(join(dir, name)).mtimeMs).toBe(tie.getTime());
       expect(existsSync(join(dir, `${name}.why`))).toBe(true);
     }
     const whyFiles = siblingsMatching(dir, `${basename(storePath)}.corrupt-`).filter((name) => name.endsWith('.why'));

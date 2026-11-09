@@ -45,7 +45,7 @@ if (input.hold) {
       if (hold.phase === 'after-directory-sync' && targetPublished && original.fstatSync(fd).isDirectory()) pauseAtPublication(input.dbPath, input.dbPath);
     },
     renameSync(from: fs.PathLike, to: fs.PathLike): void {
-      const targetWrite = String(to) === input.dbPath && String(from).startsWith(`${input.dbPath}.pending-`);
+      const targetWrite = String(to) === input.dbPath && String(from).startsWith(`${input.dbPath}.tmp-`);
       if (targetWrite && hold.phase === 'before-rename') pauseAtPublication(from, to);
       original.renameSync(from, to);
       if (targetWrite) targetPublished = true;

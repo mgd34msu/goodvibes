@@ -87,13 +87,22 @@ function fields(value: unknown, keys: readonly string[]): value is Record<string
     && Reflect.ownKeys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key))
     && Object.values(Object.getOwnPropertyDescriptors(value)).every(descriptor => 'value' in descriptor);
 }
+/** Scope lists are dense wire arrays, never sparse arrays with named substitutes. */
+function scopeList(value: unknown): value is readonly string[] {
+  if (!Array.isArray(value) || Reflect.ownKeys(value).length !== value.length + 1) return false;
+  for (let index = 0; index < value.length; index++) {
+    const slot = Object.getOwnPropertyDescriptor(value, String(index));
+    if (!slot || !('value' in slot) || typeof slot.value !== 'string' || !slot.value) return false;
+  }
+  return new Set(value).size === value.length;
+}
 function common(value: Record<string, unknown>, previous?: NativeExecutionOriginal) {
   if ((value['version'] !== 1 && value['version'] !== 2) || typeof value['projectId'] !== 'string' || !value['projectId']) throw new Error();
   const target = value['target'], scopes = value['authorityScopes'];
   if (!fields(target, ['workId', 'attemptId', 'workRevision', 'criteriaRevision', 'attemptRevision'])
     || !['workId', 'attemptId'].every(key => typeof target[key] === 'string' && target[key])
     || !['workRevision', 'criteriaRevision', 'attemptRevision'].every(key => Number.isSafeInteger(target[key]) && Number(target[key]) >= 0)
-    || !Array.isArray(scopes) || scopes.some(scope => typeof scope !== 'string' || !scope) || new Set(scopes).size !== scopes.length) throw new Error();
+    || !scopeList(scopes)) throw new Error();
   const owner = value['owner'];
   if (value['version'] === 2 && (!fields(owner, ['principalId', 'authorityRevision', 'scopeId', 'scopeRevision'])
     || Object.values(owner).some(item => typeof item !== 'string' || !item))) throw new Error();
@@ -127,7 +136,7 @@ export function bindNativeExecutionRequest(request: DurableContractRequest, proj
   const input = clone(captureOwnedJson(request, isProxy)) as DurableContractRequest;
   const facts = clone(captureOwnedJson({ owner, authorityScopes }, isProxy)) as { owner: NativeExecutionOwnerFacts; authorityScopes: string[] };
   if (!fields(facts.owner, ['principalId', 'authorityRevision', 'scopeId', 'scopeRevision']) || Object.values(facts.owner).some(value => typeof value !== 'string' || !value)
-    || !Array.isArray(facts.authorityScopes) || facts.authorityScopes.some(scope => typeof scope !== 'string' || !scope) || new Set(facts.authorityScopes).size !== facts.authorityScopes.length) throw new NativeWorkExecutionError('invalid');
+    || !scopeList(facts.authorityScopes)) throw new NativeWorkExecutionError('invalid');
   const data = { projectId, projectRoot: input.input.projectRoot, owner: freeze(facts.owner), authorityScopes: freeze([...facts.authorityScopes].sort()) };
   const commitment = ownerCommitment(data), result = freezeDurableRequest({ ...input, binding: { ...input.binding, authorityRevision: commitment } });
   nativeApply(nativeSet, requestOwners, [result, freeze({ ...data, commitment })]); return result;

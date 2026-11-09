@@ -1,7 +1,6 @@
 import { KNOWLEDGE_SCHEMA_VERSION } from '../platform/src/platform/knowledge/store-schema.js';
 import * as nativeFs from 'node:fs';
-import type { SQLitePublicationIO } from '../platform/src/platform/state/sqlite-store-persistence.js';
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -241,24 +240,27 @@ test('postcommit lock cleanup failure preserves success and durable replay while
 
 test('actual ledger directory-sync ambiguity returns indeterminate then exact retry proves durable receipt', async () => {
   const file = path(); const first = await open(file);
-  const persistence = (first.store as unknown as { sqlite: { persistence: { io: SQLitePublicationIO } } }).sqlite.persistence;
   let fail = true; const synced: string[] = [];
-  persistence.io = { ...nativeFs, fsyncSync(fd) {
+  const actualSync = nativeFs.fsyncSync;
+  const sync = spyOn(nativeFs, 'fsyncSync').mockImplementation(fd => {
     const kind = nativeFs.fstatSync(fd).isDirectory() ? 'directory' : 'file'; synced.push(kind);
     if (kind === 'directory' && fail) { fail = false; throw new Error('injected directory sync ambiguity'); }
-    nativeFs.fsyncSync(fd);
-  } };
-  expect(await first.service.execute(command, first.actor)).toMatchObject({ kind: 'indeterminate', requestId: 'request' });
-  const bytes = readFileSync(file); synced.length = 0;
-  expect(await first.service.execute(command, first.actor)).toMatchObject({ kind: 'accepted', replayed: true });
-  const expected = ['file'];
-  for (let path = dirname(file);; path = dirname(path)) {
-    expected.push('directory');
-    if (dirname(path) === path) break;
-  }
-  expect(synced).toEqual(expected);
-  expect(readFileSync(file)).toEqual(bytes);
-  expect((await first.service.history(0, first.actor))).toHaveLength(1);
+    actualSync(fd);
+  });
+  try {
+    expect(await first.service.execute(command, first.actor)).toMatchObject({ kind: 'indeterminate', requestId: 'request' });
+    expect(fail).toBe(false);
+    const bytes = readFileSync(file); synced.length = 0;
+    expect(await first.service.execute(command, first.actor)).toMatchObject({ kind: 'accepted', replayed: true });
+    const expected = ['file'];
+    for (let path = dirname(file);; path = dirname(path)) {
+      expected.push('directory');
+      if (dirname(path) === path) break;
+    }
+    expect(synced).toEqual(expected);
+    expect(readFileSync(file)).toEqual(bytes);
+    expect((await first.service.history(0, first.actor))).toHaveLength(1);
+  } finally { sync.mockRestore(); }
 });
 
 test('documented boundary: a fresh owner has no manifest to distinguish deleted whole DB from first creation', async () => {

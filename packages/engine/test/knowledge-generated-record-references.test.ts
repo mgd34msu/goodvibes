@@ -1,4 +1,5 @@
 import { repairScoringFixtureReading } from './_helpers/repair-scoring-fixture-readings.js';
+import { protectedHistoricalFactId, seedProtectedHistoricalFact } from './_helpers/protected-historical-fact-fixture.js';
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -27,7 +28,7 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-async function fixture(batched = false, extractionClock?: number) {
+async function fixture(batched = false, extractionClock?: number, historical = true) {
   const root = mkdtempSync(join(tmpdir(), 'knowledge-native-fact-proof-')); roots.push(root);
   const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') }); stores.push(store);
   const fake = fakePort((name, question, state) => {
@@ -58,6 +59,7 @@ async function fixture(batched = false, extractionClock?: number) {
     factMetadata: { ordinaryTail: { description: 'Complete retained native metadata.' } },
     classification: { kind: 'specification' as const, title: 'HDMI ports', summary: 'AC-7 has four HDMI ports.', value: 'four hdmi ports', labels: [], aliases: [] },
   };
+  if (historical) await seedProtectedHistoricalFact(store, spaceId, source.id, subject.id);
   const prepared = await prepareSourceLinkedRepairProfileFacts([input]);
   const [fact] = batched ? await store.batch(async () => {
     const written = await prepared.write();
@@ -69,9 +71,24 @@ async function fixture(batched = false, extractionClock?: number) {
   }) : await prepared.write();
   const plan = prepared.plans[0];
   if (!fact || !plan) throw new Error('Native fact producer returned no committed record');
-  expect(judgmentInputProblem({ id: fact.id })).toBe('card-material');
+  if (historical) {
+    expect(fact.id).toBe(protectedHistoricalFactId);
+    expect(judgmentInputProblem({ id: fact.id })).toBe('card-material');
+  } else {
+    expect(fact.id).toMatch(/^sem-fact-[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}$/);
+    expect(judgmentInputProblem({ id: fact.id })).toBeUndefined();
+  }
   return { store, source, extraction, subject, fact, plan, fake, spaceId, input };
 }
+
+test('fresh opaque fact labels need no structural exception for ordinary copied admission', async () => {
+  const item = await fixture(false, undefined, false), copy = structuredClone(item.fact);
+  const snapshot = item.store.getRecordSnapshot('node', item.fact.id);
+  if (!snapshot.raw) throw new Error('Native fact snapshot missing');
+  expect(projectGeneratedFactRecordAdmission(item.store, copy, snapshot.raw)).toBeUndefined();
+  prepareKnowledgeRecordAdmission(item.store, 'node', copy).assertCurrent();
+  prepareKnowledgeRecordAdmission(item.store, 'node', item.fact).assertCurrent();
+});
 
 test('operation-local generated claims retain the whole snapshot and never lend proof to a copy or another store', async () => {
   const item = await fixture();

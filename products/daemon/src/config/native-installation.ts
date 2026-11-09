@@ -100,5 +100,5 @@ export function resolveInstalledDaemonUpdateArtifact(
     // as an unrelated unfinished installation. Publication still owns all slots.
     assertInstallationCurrent();
   } });
-  return Object.freeze({ version, execPath, currentReader, assertStarting, assertCurrent });
+  return Object.freeze({ version, execPath, suite: true as const, currentReader, assertStarting, assertCurrent });
 }

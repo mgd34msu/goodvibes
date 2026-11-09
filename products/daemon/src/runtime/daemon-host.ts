@@ -8,7 +8,7 @@ import type { DaemonBootSnapshot } from './boot-tasks.js';
 import { createHostedSessionOptions } from './hosted-session-composition.js';
 import { createRuntimeServices, type RuntimeServices, type RuntimeServicesOptions } from './services.js';
 import { observeNativeStartupPhase } from './startup-observation.js';
-import { createNativeDataWriteOwner } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { createNativeDataWriteOwner, createInstalledReaderCohort } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 import { drainOwned } from '@goodvibes-jev/judgment';
 
 export interface DaemonHostBinding {
@@ -96,6 +96,7 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
   const fence = (): void => { if (closed) throw INTERRUPTED; };
   const nativeDataWriter = updateArtifact && nativeGuard && nativeExecPath && nativeVersion ? createNativeDataWriteOwner(Object.freeze({
     execPath: nativeExecPath, version: nativeVersion,
+    readerCohort: createInstalledReaderCohort({ execPath: nativeExecPath, version: nativeVersion, platform: process.platform, arch: process.arch }),
     assertCurrent() {
       fence();
       if (options.updateArtifact !== updateArtifact || updateArtifact.assertCurrent !== nativeGuard

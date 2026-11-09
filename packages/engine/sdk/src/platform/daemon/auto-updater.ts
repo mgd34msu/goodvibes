@@ -74,6 +74,7 @@ import { PeriodicUpdateLoop, type PeriodicCheckOutcome } from '../runtime/update
 import { formatReceiptTime, type DaemonReceiptStore } from './receipts.js';
 import { CLIENT_COMPATIBILITY_FLOOR } from '../control-plane/client-compatibility.js';
 import type { ServiceHandoverOutcome } from './service-handover.js';
+import { applySuiteUpdate, installedSuiteNeedsRepair, retainSuiteUpdateConfiguration, SuiteUpdateRecoveryError, type SuiteUpdateResult } from '../runtime/suite-update.js';
 
 export interface AutoUpdateServiceActions {
   /** Whether the daemon currently runs under the platform service manager. */
@@ -116,6 +117,9 @@ export interface DaemonAutoUpdaterOptions {
   readonly currentVersion: string;
   /** Compiled reader evidence retained by the original running installation. */
   readonly currentReader?: DaemonCurrentReader;
+  /** Actual monorepo composition opts in; unrelated embedding hosts retain
+   * their explicitly selected daemon-only update contract. */
+  readonly suite?: { readonly configManager: { get(key: string): unknown } } | undefined;
   readonly execPath: string;
   readonly platform: NodeJS.Platform;
   readonly arch: string;
@@ -454,9 +458,11 @@ export class DaemonAutoUpdater {
     // Capture member methods per check, so pre-tick injected adapters remain
     // supported while asynchronous lookup cannot redirect resolve or commit I/O.
     const io = captureUpdateFileIo(this.options.io ?? realUpdateFileIo);
+    const suiteConfiguration = this.options.suite ? retainSuiteUpdateConfiguration(this.options.suite.configManager) : undefined;
     const deadline = performance.now() + this.updateTimeoutMs;
     const assertLifecycleCurrent = () => {
       signal.throwIfAborted();
+      suiteConfiguration?.assertCurrent();
       if (signal !== this.failureReadAbort.signal || this.handoverCancelled || this.appliedVersion !== null || this.recoveryRequired) {
         throw new Error('update check no longer belongs to the current updater lifecycle');
       }
@@ -479,9 +485,9 @@ export class DaemonAutoUpdater {
         signal, timeoutMs: remainingBudget(),
       });
       assertCurrent();
-      if (compareVersions(this.options.currentVersion, latestTag) >= 0) {
-        return; // already current
-      }
+      const comparison = compareVersions(this.options.currentVersion, latestTag);
+      if (comparison > 0 || comparison === 0 && (!suiteConfiguration || !installedSuiteNeedsRepair({ execPath: this.options.execPath,
+        platform: this.options.platform, arch: this.options.arch, version: latestTag, io, webuiDirectory: suiteConfiguration.webuiDirectory }))) return;
       // A release that already crash looped on this host does not get installed
       // again just because it is still the newest one. Without this the loop is
       // a cycle: swap, fail to start three times, roll back, and one check
@@ -525,8 +531,20 @@ export class DaemonAutoUpdater {
       : defaultDownloadBaseUrl(this.options.releasesLatestUrl, tag);
 
     const busyBeforeCommit = new Error('daemon became busy before update commit');
+    let suiteResult: SuiteUpdateResult | undefined;
+    const admitIdle = () => {
+      assertCurrent();
+      const idle = this.options.isIdle();
+      assertCurrent();
+      if (!idle) throw busyBeforeCommit;
+    };
     try {
-      await applyVerifiedUpdate({
+      if (suiteConfiguration) {
+        suiteResult = await applySuiteUpdate({ execPath: this.options.execPath, platform: this.options.platform, arch: this.options.arch,
+          version: tag, downloadBaseUrl: downloadBase, fetchImpl, io, signal, timeoutMs: remainingBudget(),
+          webuiDirectory: suiteConfiguration.webuiDirectory, ...(this.options.currentReader ? { currentReader: this.options.currentReader } : {}),
+          assertCurrent: assertLifecycleCurrent, beforeCommit: admitIdle });
+      } else await applyVerifiedUpdate({
         fetchImpl,
         downloadBaseUrl: downloadBase,
         targets,
@@ -537,15 +555,18 @@ export class DaemonAutoUpdater {
         daemonNative: { execPath: this.options.execPath, platform: this.options.platform, arch: this.options.arch, version: tag,
           ...(this.options.currentReader ? { currentReader: this.options.currentReader } : {}) },
         assertCurrent: assertLifecycleCurrent,
-        beforeCommit: () => {
-          assertCurrent();
-          const idle = this.options.isIdle();
-          // Even an injected activity probe can synchronously stop/restart us.
-          assertCurrent();
-          if (!idle) throw busyBeforeCommit;
-        },
+        beforeCommit: admitIdle,
       });
     } catch (error) {
+      if (error instanceof SuiteUpdateRecoveryError) {
+        const original = error.cause;
+        if (original instanceof UpdateTransactionError) this.pauseForTransactionRecovery(tag, new UpdateTransactionError({ ...original.receipt,
+          targets: [...new Set([...original.receipt.targets, ...error.paths])], recoveryPaths: [...new Set([...original.receipt.recoveryPaths, ...error.paths])] }, error));
+        else this.pauseForTransactionRecovery(tag, new UpdateTransactionError({ operation: 'update', phase: 'cleanup', committed: error.committed,
+          recoveryRequired: true, targets: [...targets.map(target => target.path), ...error.paths], recoveryPaths: [...error.paths],
+          recoveryErrors: error.problems.map(problem => summarizeError(problem)) }, error));
+        return;
+      }
       if (error instanceof UpdateTransactionError) {
         if (error.receipt.recoveryRequired) {
           this.pauseForTransactionRecovery(tag, error);
@@ -579,6 +600,7 @@ export class DaemonAutoUpdater {
     // rather than only being asked to restart.
     this.recordReceipt(
       `updated from ${from} to ${to} at ${formatReceiptTime(now())}`
+      + (suiteResult ? `; installed suite: ${suiteResult.programs.join(', ')}, browser/WebUI directories: ${suiteResult.directoryPaths.join(', ')};` + (suiteResult.preservedPaths.length ? ` retained earlier backups: ${suiteResult.preservedPaths.join(', ')};` : '') : '')
       + ` on disk; service handover is pending, already-running goodvibes clients keep their old build until restarted;`
       + ` anything older than ${CLIENT_COMPATIBILITY_FLOOR} has stopped taking shared-session work`,
     );

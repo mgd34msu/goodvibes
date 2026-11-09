@@ -1,3 +1,4 @@
+import { createInstalledReaderCohort } from './native-reader-cohort.js';
 import { isCompiledBunModuleUrl } from '../utils/bun-module.js';
 /** A compiled terminal admits its own selected installation synchronously,
  * before CLI setup/awaits. This capability only restricts later readers; it
@@ -15,6 +16,7 @@ export interface InstalledClientDataOptions {
   /** Exact baked version, never a nearby package.json or requested version. */
   readonly compiledVersion: string;
   readonly platform: string;
+  readonly arch?: string | undefined;
 }
 export function admitInstalledClientDataWriter(options: InstalledClientDataOptions): NativeDataWriteOwner | undefined {
   if (!isCompiledBunModuleUrl(options.moduleUrl)) return undefined;
@@ -41,7 +43,9 @@ export function admitInstalledClientDataWriter(options: InstalledClientDataOptio
   };
   // Construction is read-only. Unfinished swaps withhold publication when
   // declare() runs; metadata/help and explicit recovery remain reachable.
-  return createNativeDataWriteOwner(Object.freeze({ execPath, version, assertCurrent }));
+  return createNativeDataWriteOwner(Object.freeze({ execPath, version, assertCurrent,
+    readerCohort: createInstalledReaderCohort({ execPath, version, platform: options.platform, arch: options.arch ?? process.arch }),
+  }));
 }
 
 /** Metadata-only CLI; invoke before configuration/provider/runtime setup. */

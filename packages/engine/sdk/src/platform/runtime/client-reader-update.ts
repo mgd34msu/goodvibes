@@ -8,13 +8,13 @@ import { verifiedUpdateStageMembers, type VerifiedUpdateStage } from './verified
 import { hasNativeUpdateObservations } from './update-file-io.js';
 import type { UpdateFileIo } from './update-file-io.js';
 
-export function assertStagedClientReaderCompatible(execPath: string, candidatePath: string, io: UpdateFileIo, expectedVersion?: string, expectedAsset?: string, verifiedStage?: VerifiedUpdateStage): void {
+export function assertStagedClientReaderCompatible(execPath: string, candidatePath: string, io: UpdateFileIo, expectedVersion?: string, expectedAsset?: string, verifiedStage?: VerifiedUpdateStage, requireEvidence = false): void {
   const observe = io.observe, readFile = io.readFile;
   if (!observe || !readFile) {
-    if (io.exists(join(dirname(execPath), NATIVE_READER_REQUIREMENT_FILE))) throw new NativeDataCompatibilityError('unavailable');
+    if (requireEvidence || io.exists(join(dirname(execPath), NATIVE_READER_REQUIREMENT_FILE))) throw new NativeDataCompatibilityError('unavailable');
     return;
   }
-  if (observe(join(dirname(execPath), NATIVE_READER_REQUIREMENT_FILE)) === null) return;
+  if (!requireEvidence && observe(join(dirname(execPath), NATIVE_READER_REQUIREMENT_FILE)) === null) return;
   const suffix = candidatePath.slice(execPath.length);
   if (!candidatePath.startsWith(execPath) || (suffix !== '.previous' && suffix !== '.update-download')) throw new NativeDataCompatibilityError('unavailable');
   const companion = execPath + '.readers.json' + suffix;
@@ -28,6 +28,7 @@ export function assertStagedClientReaderCompatible(execPath: string, candidatePa
   if (expectedVersion !== undefined && artifact.version !== expectedVersion.replace(/^v/i, '')) throw new NativeDataCompatibilityError('unconfirmed-reader');
   const asset = clientReaderAsset(artifact.packageName, artifact.target);
   if (expectedAsset !== undefined && asset !== expectedAsset) throw new NativeDataCompatibilityError('unconfirmed-reader');
+  if (requireEvidence && artifact.target.startsWith('linux-') && artifact.files.length !== 4) throw new NativeDataCompatibilityError('unconfirmed-reader');
   const basename = execPath.slice(execPath.lastIndexOf('/') + 1);
   const product = artifact.packageName === '@goodvibes-jev/tui' ? 'goodvibes' : artifact.packageName === '@goodvibes-jev/agent' ? 'goodvibes-agent' : 'goodvibes-daemon';
   if (basename !== product && basename !== asset) throw new NativeDataCompatibilityError('unconfirmed-reader');

@@ -29,6 +29,7 @@ import {
   type LifecycleMarkerIo,
 } from './lifecycle-marker.js';
 import { crashLoopRollbackReceipt, decideCrashLoopRollback } from './boot-rollback.js';
+import { configuredSuiteWebuiDirectory, rollbackSuiteUpdate, SuiteUpdateRecoveryError } from '../runtime/suite-update.js';
 import { rollbackKeptPrevious, realUpdateFileIo, captureUpdateFileIo, inspectDaemonNativeInstallation, resolveDaemonInstallationReaders, retainDaemonNativeFiles, resolveDaemonNativeTargets, UpdateTransactionError, type UpdateFileIo, type UpdateTransactionReceipt, type DaemonCurrentReader } from '../runtime/self-update.js';
 import { currentProcessSignals, isCompiledBinaryInvocation } from './daemon-exec-invocation.js';
 import { deliverOwnerAlert } from './owner-alert.js';
@@ -119,6 +120,8 @@ export function registerDaemonHeartbeatWatcher(
 export interface DaemonUpdateArtifact {
   /** The running artifact's own version, compared against release tags. */
   readonly version: string;
+  /** This actual installed executable is part of the monorepo suite. */
+  readonly suite?: true;
   /** The executable the verified swap replaces. Defaults to process.execPath. */
   readonly execPath?: string | undefined;
   /** Retained healthy installation; required before normal startup or promotion. */
@@ -410,9 +413,16 @@ export class DaemonLifecycleRuntime {
     try {
       const installed = inspectDaemonNativeInstallation(execPath, process.platform, process.arch, '', io, { integrity: false });
       if (!installed || installed.version !== this.options.updateArtifact?.version) throw new Error('The running daemon does not own the current native installation version');
-      if (!inspectDaemonNativeInstallation(execPath, process.platform, process.arch, '.previous', io)) throw new Error('No complete verified previous native daemon installation is available');
-      const current = retainDaemonNativeFiles(nativeTargets, io);
-      result = rollbackKeptPrevious(targets, io, () => {
+      if (this.options.updateArtifact?.suite) {
+        const restored = rollbackSuiteUpdate({ execPath, platform: process.platform, arch: process.arch, currentVersion: this.options.updateArtifact.version,
+          webuiDirectory: configuredSuiteWebuiDirectory(this.options.configManager), io, assertCurrent: () => {
+            if (this.stopping || this.rollbackRecovery || this.rollbackApplied) throw new Error('Suite rollback no longer belongs to the current lifecycle');
+          } });
+        result = { restored: [...restored.files], skipped: [] };
+      } else {
+        if (!inspectDaemonNativeInstallation(execPath, process.platform, process.arch, '.previous', io)) throw new Error('No complete verified previous native daemon installation is available');
+        const current = retainDaemonNativeFiles(nativeTargets, io);
+        result = rollbackKeptPrevious(targets, io, () => {
         if (this.stopping || this.rollbackRecovery || this.rollbackApplied) throw new Error('Native rollback no longer belongs to the current lifecycle');
         current();
         const previous = inspectDaemonNativeInstallation(execPath, process.platform, process.arch, '.previous', io);
@@ -421,7 +431,12 @@ export class DaemonLifecycleRuntime {
       }, { requireComplete: true, native: true, assertCurrent: () => {
         if (this.stopping || this.rollbackRecovery || this.rollbackApplied) throw new Error('Native rollback no longer belongs to the current lifecycle');
       } });
-    } catch (error) {
+      }
+    } catch (failure) {
+      const error = failure instanceof SuiteUpdateRecoveryError
+        ? new UpdateTransactionError({ operation: 'rollback', phase: 'cleanup', committed: failure.committed, recoveryRequired: true,
+          targets: [...targets.map(target => target.path), ...failure.paths], recoveryPaths: [...failure.paths], recoveryErrors: failure.problems.map(problem => summarizeError(problem)) }, failure)
+        : failure;
       if (error instanceof UpdateTransactionError && (error.receipt.committed || error.receipt.recoveryRequired)) {
         this.rollbackRecovery = {
           ...error.receipt,
@@ -699,6 +714,7 @@ export class DaemonLifecycleRuntime {
     const alertAfter = Number(configManager.get('update.alertAfterFailedChecks') ?? 3);
     const updater = new DaemonAutoUpdater({
       currentVersion: artifact.version,
+      ...(artifact.suite ? { suite: { configManager } } : {}),
       ...(this.currentReader ? { currentReader: this.currentReader } : {}),
       execPath: artifact.execPath ?? process.execPath,
       platform: process.platform,

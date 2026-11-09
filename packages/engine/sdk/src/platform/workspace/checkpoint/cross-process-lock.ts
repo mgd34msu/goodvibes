@@ -75,6 +75,7 @@ import {
   fstatSync,
   futimesSync,
   linkSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -201,7 +202,8 @@ interface LockVerdict {
 function inspectLock(lockPath: string, staleMs: number, strictOwnership = false): LockVerdict | null {
   let stat: ReturnType<typeof statSync>;
   try {
-    stat = statSync(lockPath);
+    stat = lstatSync(lockPath);
+    if (!stat.isFile() || stat.isSymbolicLink() || (strictOwnership && stat.nlink !== 1)) return null;
   } catch {
     return null;
   }
@@ -533,8 +535,8 @@ export function tryAcquireCrossProcessLock(lockPath: string, options: { readonly
       // Retired physical parents withhold all pathname cleanup while the
       // descriptor still closes in finally. The replacement tree is foreign.
       assertCurrent?.();
-      const current = statSync(lockPath);
-      if (current.ino === owned.ino && current.dev === owned.dev) unlinkSync(lockPath);
+      const current = lstatSync(lockPath);
+      if (current.isFile() && !current.isSymbolicLink() && current.ino === owned.ino && current.dev === owned.dev) unlinkSync(lockPath);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     } finally { closeSync(fd); }
@@ -655,8 +657,9 @@ async function acquireFileLock(
       }
 
       const verdict = inspectLock(lockPath, staleMs, strictOwnership);
-      if (!verdict) continue; // vanished, retry the create immediately
-      if (verdict.stale) fd = tryTakeOverStaleLock(lockPath, staleMs, token, strictOwnership);
+      // An absent or inadmissible entry grants no takeover. Back off as for
+      // ordinary contention: a persistent alias must not hot-spin the loop.
+      if (verdict?.stale) fd = tryTakeOverStaleLock(lockPath, staleMs, token, strictOwnership);
       if (fd === null) {
         await sleep(backoffMs);
         backoffMs = Math.min(backoffMs * 2, maxBackoffMs);
@@ -685,8 +688,8 @@ async function acquireFileLock(
       } catch { /* best effort */ }
 
       try {
-        const onDisk = statSync(lockPath);
-        if (!owned || Number(onDisk.ino) !== owned.ino || Number(onDisk.dev) !== owned.dev) {
+        const onDisk = lstatSync(lockPath);
+        if (!owned || !onDisk.isFile() || onDisk.isSymbolicLink() || Number(onDisk.ino) !== owned.ino || Number(onDisk.dev) !== owned.dev) {
           // Someone took this lock over while we held it (we ran longer than
           // staleMs without refreshing, or the file was replaced by hand).
           // The file at the lock path belongs to the current holder, leave it.

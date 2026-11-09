@@ -76,13 +76,18 @@ export function parseNativeReaderCapabilities(value: unknown): NativeReaderCapab
 }
 interface ReaderRequirements { readonly schema: 1; readonly minimumReader: string; readonly formats: readonly NativeDataFormat[] }
 export interface NativeDataWriteOwner { declare(format: NativeDataFormat): void }
-export interface AdmittedNativeDataPublisher { readonly execPath: string; readonly version: string; readonly assertCurrent: () => void }
+export interface AdmittedNativeDataPublisher {
+  readonly execPath: string; readonly version: string; readonly assertCurrent: () => void;
+  /** Actual native root supplies affirmative installed peer evidence for a new format. */
+  readonly readerCohort?: ((formats: readonly NativeDataFormat[]) => () => void) | undefined;
+}
 
 export class NativeDataCompatibilityError extends Error {
   override readonly name = 'NativeDataCompatibilityError';
-  constructor(readonly kind: 'unavailable' | 'incompatible' | 'busy' | 'unconfirmed-reader', minimum?: string) {
+  constructor(readonly kind: 'unavailable' | 'incompatible' | 'busy' | 'unconfirmed-reader' | 'mixed-readers', minimum?: string) {
     super(kind === 'incompatible' && minimum
       ? `Saved application data requires GoodVibes ${minimum} or newer. The previous reader cannot be installed or restored.`
+      : kind === 'mixed-readers' ? 'The installed TUI, Agent and daemon do not confirm a compatible shared-data reader cohort. Update the GoodVibes suite together and restart active programs before continuing.'
       : kind === 'unconfirmed-reader' ? 'This candidate build does not confirm support for the saved data formats. Keep the current installation and select a build with verified reader capabilities.'
       : kind === 'busy' ? 'Another native owner is publishing data-reader requirements. Retry after that operation settles.'
       : 'The installed data-reader requirements could not be confirmed. Keep the current installation and inspect its original compatibility evidence.');
@@ -146,13 +151,13 @@ function retainPublisherDirectory(execPath: string): () => void {
 /** The real composition passes the already-admitted executable and its retained
  * native installation guard. Preserve that guard across every publication. */
 export function createNativeDataWriteOwner(publisher: AdmittedNativeDataPublisher): NativeDataWriteOwner {
-  const execPath = publisher.execPath, runningVersion = publisher.version, guard = publisher.assertCurrent;
+  const execPath = publisher.execPath, runningVersion = publisher.version, guard = publisher.assertCurrent, captureCohort = publisher.readerCohort;
   const path = pathFor(execPath); version(runningVersion);
   let physicalCurrent: () => void;
   try { physicalCurrent = retainPublisherDirectory(execPath); } catch { throw new NativeDataCompatibilityError('unavailable'); }
   let observedFile = false, failed = false;
   const current = () => {
-    if (failed || publisher.execPath !== execPath || publisher.version !== runningVersion || publisher.assertCurrent !== guard) throw new NativeDataCompatibilityError('unavailable');
+    if (failed || publisher.execPath !== execPath || publisher.version !== runningVersion || publisher.assertCurrent !== guard || publisher.readerCohort !== captureCohort) throw new NativeDataCompatibilityError('unavailable');
     const result: unknown = guard.call(publisher);
     if (result !== undefined) { drainOwned(result); throw new NativeDataCompatibilityError('unavailable'); }
   };
@@ -182,14 +187,22 @@ export function createNativeDataWriteOwner(publisher: AdmittedNativeDataPublishe
         current();
         const next: ReaderRequirements = { schema: 1, minimumReader, formats: [...(previous.value?.formats ?? []), format].filter((value, index, all) => all.indexOf(value) === index) };
         const contents = `${JSON.stringify(next)}\n`;
+        const cohort: unknown = captureCohort?.call(publisher, Object.freeze([...next.formats]));
+        if (cohort !== undefined && typeof cohort !== 'function') { drainOwned(cohort); throw new NativeDataCompatibilityError('unconfirmed-reader'); }
+        const assertCohort = () => {
+          if (typeof cohort !== 'function') return;
+          const result: unknown = cohort();
+          if (result !== undefined) { drainOwned(result); throw new NativeDataCompatibilityError('unconfirmed-reader'); }
+        };
+        assertCohort();
         atomicWriteFileSync(path, contents, { mode: 0o600, assertCurrent: () => {
-          physicalCurrent(); current(); physicalCurrent(); assertLease();
+          physicalCurrent(); current(); physicalCurrent(); assertCohort(); assertLease();
           const now = read(path);
           if (now.observed?.physical !== previous.observed?.physical || (now.observed !== null && !now.observed.bytes.equals(previous.observed?.bytes ?? Buffer.alloc(0)))) throw new Error();
         } });
         if (!readFileObservation(path).bytes.equals(Buffer.from(contents))) throw new Error();
         observedFile = true;
-        current();
+        current(); assertCohort();
       }
       physicalCurrent(); assertLease();
       // An already established requirement is a retained data fact, not a

@@ -1,6 +1,12 @@
+import { tryAcquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
 import { withVerifiedUpdateStage, type VerifiedUpdateStage, type VerifiedUpdateMember } from './verified-update-stage.js';
 export { verifiedUpdateStageMembers } from './verified-update-stage.js';
 export type { VerifiedUpdateStage, VerifiedUpdateMember } from './verified-update-stage.js';
+export { applySuiteUpdate, rollbackSuiteUpdate, configuredSuiteWebuiDirectory, retainSuiteUpdateConfiguration, installedSuiteNeedsRepair, suiteUpdateRequiresRecovery, SuiteUpdateRecoveryError, SuiteUpdatePreparationError } from './suite-update.js';
+export type { SuiteUpdateOptions, SuiteUpdateResult, SuiteRollbackOptions, SuiteUpdateConfigurationSource } from './suite-update.js';
+export { resolveSuiteUpdatePlan } from './suite-update-plan.js';
+export type { SuiteUpdatePlan, SuiteProgram } from './suite-update-plan.js';
+export { createInstalledReaderCohort } from './native-reader-cohort.js';
 export { isCompiledBunModuleUrl } from '../utils/bun-module.js';
 export { parseClientReaderArtifact, clientReaderAsset, assertClientReaderPayload } from './client-reader-artifact.js';
 export type { ClientReaderArtifact, ClientReaderPackage, ClientReaderTarget } from './client-reader-artifact.js';
@@ -16,13 +22,13 @@ import { drainOwned } from '@goodvibes-jev/judgment/decisions';
  * Process crashes require inspection of the retained transaction files; this is
  * not a power-loss durable journal or a guarantee against unrelated writers.
  */
-import { createHash } from 'node:crypto';
-import { captureUpdateFileIo, hasNativeUpdateObservations, realUpdateFileIo, type UpdateFileIo } from './update-file-io.js';
-export { captureUpdateFileIo, realUpdateFileIo, type UpdateFileIo } from './update-file-io.js';
-import { dirname, isAbsolute, resolve, sep } from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
+import { captureUpdateFileIo, createOwnedNativeUpdateFile, retainNativeUpdateDirectory, hasNativeUpdateObservations, realUpdateFileIo, type OwnedNativeUpdateFile, type NativeUpdateDirectoryOwner, type UpdateFileIo } from './update-file-io.js';
+export { captureUpdateFileIo, realUpdateFileIo, retainNativeUpdateDirectory, type NativeUpdateDirectoryOwner, type UpdateFileIo } from './update-file-io.js';
+import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { compareSemanticVersions, parseSemanticVersion } from './semantic-version.js';
-import { assertDaemonNativePayloadBytes, createDaemonNativeRenameGuard, inspectDaemonNativeInstallation, parseDaemonCiArtifact, resolveDaemonNativeTargets, retainDaemonNativeFiles, type DaemonNativeTarget, type DaemonNativeRenameGuard, type DaemonPreviousReader, type DaemonInstallationReceipt } from './daemon-native-cohort.js';
-import { assertNativeReaderCompatible, NATIVE_PREVIOUS_READER_RECEIPT_FORMAT, parseNativeReaderCapabilities, type NativeReaderCapabilities } from './native-reader-compatibility.js';
+import { assertDaemonNativePayloadPins, createDaemonNativeRenameGuard, inspectDaemonNativeInstallation, parseDaemonCiArtifact, resolveDaemonNativeTargets, retainDaemonNativeFiles, type DaemonNativeTarget, type DaemonNativeRenameGuard, type DaemonPreviousReader, type DaemonInstallationReceipt } from './daemon-native-cohort.js';
+import { assertNativeReaderCompatible, NATIVE_READER_REQUIREMENT_FILE, NATIVE_PREVIOUS_READER_RECEIPT_FORMAT, parseNativeReaderCapabilities, type NativeReaderCapabilities } from './native-reader-compatibility.js';
 export { DAEMON_NATIVE_TARGETS, DAEMON_INSTALLATION_RECEIPT, assertDaemonNativePayloadBytes, inspectDaemonNativeInstallation,
   parseDaemonCiArtifact, parseDaemonInstallationReceipt, resolveDaemonInstallationReaders, resolveDaemonNativePayloads, resolveDaemonNativeTargets, retainDaemonNativeFiles,
   type DaemonNativeTarget, type DaemonNativePayload, type DaemonArtifactSource, type DaemonCiArtifact, type DaemonInstallationReceipt, type DaemonPreviousReader } from './daemon-native-cohort.js';
@@ -97,7 +103,7 @@ export interface UpdateRequestOptions {
 export const DEFAULT_UPDATE_TIMEOUT_MS = 120_000;
 
 /** Bound even injected fetch/body implementations that ignore AbortSignal. */
-async function withUpdateBudget<T>(options: UpdateRequestOptions, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+export async function withUpdateBudget<T>(options: UpdateRequestOptions, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_UPDATE_TIMEOUT_MS;
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error('update timeoutMs must be positive and finite');
   const controller = new AbortController();
@@ -328,111 +334,135 @@ function validateTargets(targets: readonly { readonly path: string }[]): Transac
  * renames. Exclusive per-target claim files also fence cooperating processes.
  * Claims left by a crash or incomplete undo require inspection, never replay.
  */
+/** Borrowed logical adapters still prove their original successful exclusive
+ * creation through their own observations/bytes. This does not confer native
+ * filesystem provenance or a verified native staging receipt. */
+function createLogicalUpdateFile(path: string, bytes: Buffer, mode: number, io: UpdateFileIo): OwnedNativeUpdateFile {
+  if (!io.writeExclusive || !io.remove) throw new Error('Exclusive update I/O is unavailable');
+  const expectedBytes = Buffer.from(bytes);
+  io.writeExclusive(path, bytes);
+  let selected = path, observed = io.observe?.(path);
+  const body = () => { if (io.readFile && !io.readFile(selected).equals(expectedBytes)) throw new Error('Update source bytes changed'); };
+  body(); const originalOwner = observed?.ownerIdentity;
+  io.chmod(path, mode);
+  if (io.observe) { const after = io.observe(path); if (!after || after.ownerIdentity !== originalOwner) throw new Error('Update creation source changed'); observed = after; }
+  const assertAt = (path: string) => {
+    if (path !== selected || !io.exists(path)) throw new Error('Update source is unavailable');
+    if (io.observe) { const current = io.observe(path); if (!current || !observed || current.identity !== observed.identity || current.ownerIdentity !== observed.ownerIdentity || current.mode !== observed.mode) throw new Error('Update original source changed'); }
+    body();
+  };
+  return { assertAt, renamed(from, to) {
+    if (from !== selected || io.exists(from)) throw new Error('Update rename source changed'); selected = to;
+    if (io.observe) { const after = io.observe(to); if (!after || after.ownerIdentity !== originalOwner) throw new Error('Update rename ownership changed'); observed = after; }
+    assertAt(to);
+  }, removeAt(path) { assertAt(path); io.remove!(path); }, close() {} };
+}
+function acquireUpdateReaderLease(execPath: string, io: UpdateFileIo, physical: () => void): () => void {
+  const path = join(dirname(execPath), NATIVE_READER_REQUIREMENT_FILE + '.lock'); physical();
+  if (hasNativeUpdateObservations(io, io.readFile, io.observe)) {
+    const release = tryAcquireCrossProcessLock(path, { assertCurrent: physical });
+    if (!release) throw new Error('Another native reader requirement publication is active');
+    return release;
+  }
+  const bytes = Buffer.from(JSON.stringify({ pid: process.pid, token: randomUUID().replace(/-/g, '').slice(0, 16), acquiredAt: Date.now() }));
+  const lease = createLogicalUpdateFile(path, bytes, 0o600, io); let released = false;
+  return () => { if (released) return; released = true; physical(); lease.removeAt(path); lease.close(); };
+}
+
 function transact(
   operation: 'update' | 'rollback',
   paths: readonly TransactionPaths[],
   io: UpdateFileIo,
-  stage: (track: (path: string) => void) => void,
+  stage: (write: (path: string, bytes: Buffer, mode: number) => void) => void,
   beforeCommit: (() => void) | undefined,
   commit: (rename: (from: string, to: string) => void) => void,
-  restrictions: { readonly current?: () => void; readonly prepareNativeGuard?: () => DaemonNativeRenameGuard } = {},
+  restrictions: { readonly current?: () => void; readonly directory?: NativeUpdateDirectoryOwner; readonly readerExecPath?: string; readonly prepareNativeGuard?: () => DaemonNativeRenameGuard } = {},
 ): void {
   if (paths.length === 0) return;
   if (!io.writeExclusive || !io.remove) throw new Error('update I/O adapter must support writeExclusive and remove; refusing mutation');
-  const claims: string[] = [];
-  const staged: string[] = [];
+  const claims: string[] = [], staged: string[] = [];
+  const created = new Map<string, OwnedNativeUpdateFile>();
+  const creators = new Set<OwnedNativeUpdateFile>(), activeClaims = new Set<string>();
   const journal: Array<{ from: string; to: string }> = [];
-  let phase: UpdateTransactionReceipt['phase'] = 'claim';
-  let committed = false;
-  let blockedClaim = false;
-  let nativeGuard: DaemonNativeRenameGuard | undefined;
+  let phase: UpdateTransactionReceipt['phase'] = 'claim', committed = false, blockedClaim = false, blockedStage = false;
+  let nativeGuard: DaemonNativeRenameGuard | undefined, readerLease: (() => void) | undefined;
+  const nativeIo = hasNativeUpdateObservations(io, io.readFile, io.observe);
+  const physical = () => restrictions.directory?.assertCurrent();
+  const assertClaims = () => { for (const claim of activeClaims) { const owner = created.get(claim); if (!owner) throw new Error('Native update claim is unavailable'); owner.assertAt(claim); } };
+  const current = () => { physical(); assertClaims(); assertSynchronousCurrent(restrictions.current); physical(); assertClaims(); };
   const claimData = Buffer.from(JSON.stringify({ operation, targets: paths, instruction: 'Interrupted transaction: inspect retained files before removing any fence. Do not blindly retry.' }));
-  const rename = (from: string, to: string) => {
-    assertSynchronousCurrent(restrictions.current);
-    nativeGuard?.beforeRename(from, to, false);
+  const create = (path: string, bytes: Buffer, mode: number) => {
+    current();
+    const owner = nativeIo ? createOwnedNativeUpdateFile(path, bytes, mode, physical) : createLogicalUpdateFile(path, bytes, mode, io);
+    created.set(path, owner); creators.add(owner); return owner;
+  };
+  const move = (from: string, to: string, recovering: boolean) => {
+    if (recovering) { physical(); assertClaims(); } else current();
+    nativeGuard?.beforeRename(from, to, recovering);
+    const owner = created.get(from); owner?.assertAt(from);
     if (io.exists(to)) throw new Error(`transaction destination is occupied: ${to}`);
-    io.rename(from, to);
-    journal.push({ from, to });
-    nativeGuard?.afterRename(from, to, false);
+    io.rename(from, to); if (!recovering) journal.push({ from, to });
+    if (owner) { owner.renamed(from, to); created.delete(from); created.set(to, owner); }
+    nativeGuard?.afterRename(from, to, recovering); physical();
+  };
+  const removeCreated = (path: string) => {
+    physical();
+    const owner = created.get(path);
+    if (owner) { owner.removeAt(path); created.delete(path); activeClaims.delete(path); }
+    else if (io.exists(path)) throw new Error('Update cleanup source is foreign or unconfirmed');
+  };
+  const removeBackup = (path: string) => {
+    physical(); if (!io.exists(path)) return;
+    nativeGuard?.beforeRemove(path); io.remove!(path); nativeGuard?.afterRemove(path); physical();
   };
   try {
     for (const path of [...paths].sort((a, b) => a.target.localeCompare(b.target))) {
-      assertSynchronousCurrent(restrictions.current);
-      io.mkdir(dirname(path.target));
-      assertSynchronousCurrent(restrictions.current);
-      try { io.writeExclusive(path.claim, claimData); }
-      catch (error) {
-        // An exclusive write can fail after creating partial evidence. If even
-        // presence cannot be read, report uncertainty rather than clear retry.
-        blockedClaim = true;
-        try { blockedClaim = io.exists(path.claim); } catch { /* retain uncertainty */ }
-        throw error;
-      }
-      claims.push(path.claim);
+      current();
+      if (restrictions.directory) restrictions.directory.ensure(dirname(path.target)); else io.mkdir(dirname(path.target));
+      current();
+      try { create(path.claim, claimData, 0o600); }
+      catch (error) { blockedClaim = true; try { physical(); blockedClaim = io.exists(path.claim); } catch { /* Unknown creation retains its fence. */ } throw error; }
+      claims.push(path.claim); activeClaims.add(path.claim); current();
     }
-    // Inspect slots only after all claims, so no cooperating writer can race us.
-    for (const path of paths) {
-      for (const slot of [path.stage, path.saved, path.exchange]) {
-        if (io.exists(slot)) throw new Error(`unresolved update recovery file: ${slot}`);
-      }
+    for (const path of paths) for (const slot of [path.stage, path.saved, path.exchange]) {
+      physical(); if (io.exists(slot)) throw new Error(`unresolved update recovery file: ${slot}`);
     }
     phase = 'stage';
-    stage((path) => staged.push(path));
+    stage((path, bytes, mode) => {
+      try { create(path, bytes, mode); staged.push(path); current(); }
+      catch (error) { if (!created.has(path)) { blockedStage = true; try { physical(); blockedStage = io.exists(path); } catch { /* Unknown stage is retained. */ } } throw error; }
+    });
     phase = 'admission';
     nativeGuard = restrictions.prepareNativeGuard?.();
+    if (restrictions.readerExecPath) readerLease = acquireUpdateReaderLease(restrictions.readerExecPath, io, physical);
     const admission = beforeCommit?.();
-    if (admission !== undefined) {
-      drainOwned(admission);
-      throw new Error('beforeCommit must complete synchronously without returning a value');
-    }
-    phase = 'commit';
-    commit(rename);
-    committed = true;
+    if (admission !== undefined) { drainOwned(admission); throw new Error('beforeCommit must complete synchronously without returning a value'); }
+    current();
+    phase = 'commit'; commit((from, to) => move(from, to, false)); committed = true;
     phase = 'cleanup';
-    // Superseded backups are disposable ONLY after every target committed.
-    for (const path of paths) if (io.exists(path.saved)) io.remove(path.saved);
-    for (const path of staged) io.remove(path);
-    for (const claim of claims) io.remove(claim);
+    for (const path of paths) removeBackup(path.saved);
+    for (const path of staged) removeCreated(path);
+    for (const claim of claims) removeCreated(claim);
+    readerLease?.(); readerLease = undefined;
   } catch (cause) {
     const recoveryErrors: string[] = [];
-    const attempt = (action: () => void) => {
-      try { action(); } catch (error) { recoveryErrors.push(error instanceof Error ? error.message : String(error)); }
-    };
-    if (!committed) {
-      // Do not overwrite a destination when an earlier undo failed. Continue
-      // independent targets while retaining all bytes of the blocked chain.
-      for (const { from, to } of [...journal].reverse()) {
-        attempt(() => {
-          if (io.exists(from)) throw new Error(`undo destination occupied: ${from}`);
-          nativeGuard?.beforeRename(to, from, true);
-          io.rename(to, from);
-          nativeGuard?.afterRename(to, from, true);
-        });
-      }
-    }
-    if (recoveryErrors.length === 0 && !committed) {
-      for (const path of staged) attempt(() => io.remove!(path));
-    }
-    // A pre-existing slot belongs to another/interrupted operation. Keep a
-    // fence rather than silently making it eligible for an overwrite/retry.
+    const attempt = (action: () => void) => { try { action(); } catch (error) { recoveryErrors.push(error instanceof Error ? error.message : String(error)); } };
+    if (!committed) for (const { from, to } of [...journal].reverse()) attempt(() => move(to, from, true));
+    if (recoveryErrors.length === 0 && !committed) for (const path of staged) attempt(() => removeCreated(path));
     const staleSlot = phase === 'claim' && claims.length === paths.length;
-    const needsFence = committed || recoveryErrors.length > 0 || staleSlot;
-    if (!needsFence) for (const claim of claims) attempt(() => io.remove!(claim));
-    if (committed || recoveryErrors.length > 0 || staleSlot) {
-      // Cleanup may have released some claims before failing. Reacquire those
-      // we released without ever overwriting an existing claimant/journal.
-      for (const claim of claims) attempt(() => {
-        if (!io.exists(claim)) io.writeExclusive!(claim, claimData);
-      });
-    }
-    const recoveryRequired = committed || recoveryErrors.length > 0 || staleSlot || blockedClaim;
+    const needsFence = committed || recoveryErrors.length > 0 || staleSlot || blockedStage;
+    if (!needsFence) for (const claim of claims) attempt(() => removeCreated(claim));
+    if (needsFence) for (const claim of claims) attempt(() => { physical(); if (!io.exists(claim)) { create(claim, claimData, 0o600); activeClaims.add(claim); } });
+    const recoveryRequired = needsFence || recoveryErrors.length > 0 || blockedClaim;
     const recoveryPaths: string[] = [];
     for (const path of paths) for (const slot of Object.values(path)) {
-      try { if (io.exists(slot)) recoveryPaths.push(slot); }
-      catch { recoveryPaths.push(slot); }
+      try { physical(); if (io.exists(slot)) recoveryPaths.push(slot); } catch { recoveryPaths.push(slot); }
     }
     throw new UpdateTransactionError({ operation, phase, committed, recoveryRequired,
-      targets: paths.map((path) => path.target), recoveryPaths: recoveryRequired ? recoveryPaths : [], recoveryErrors }, cause);
+      targets: paths.map(path => path.target), recoveryPaths: recoveryRequired ? recoveryPaths : [], recoveryErrors }, cause);
+  } finally {
+    try { readerLease?.(); } catch { /* The transaction receipt already retains physical ambiguity. */ }
+    for (const owner of creators) try { owner.close(); } catch { /* Never close a different reused descriptor. */ }
   }
 }
 
@@ -442,19 +472,15 @@ interface StagedUpdate {
 }
 
 function installVerifiedBuffers(
-  verified: readonly StagedUpdate[], io: UpdateFileIo, platform: NodeJS.Platform, beforeCommit?: () => void,
-  restrictions: { readonly current?: () => void; readonly prepareNativeGuard?: () => DaemonNativeRenameGuard } = {},
+  verified: readonly StagedUpdate[], io: UpdateFileIo, _platform: NodeJS.Platform, beforeCommit?: () => void,
+  restrictions: { readonly current?: () => void; readonly directory?: NativeUpdateDirectoryOwner; readonly readerExecPath?: string; readonly prepareNativeGuard?: () => DaemonNativeRenameGuard } = {},
 ): void {
   const paths = validateTargets(verified.map(({ target }) => target));
-  transact('update', paths, io, (track) => {
+  transact('update', paths, io, (write) => {
     for (let index = 0; index < verified.length; index += 1) {
       const { target, buffer } = verified[index]!;
       const path = paths[index]!;
-      track(path.stage); // A failing write may leave partial bytes; cleanup owns it.
-      assertSynchronousCurrent(restrictions.current);
-      io.writeFile(path.stage, buffer);
-      assertSynchronousCurrent(restrictions.current);
-      if (platform !== 'win32') io.chmod(path.stage, target.executable ? 0o755 : 0o644);
+      write(path.stage, buffer, target.executable ? 0o755 : 0o644);
     }
   }, beforeCommit, (rename) => {
     for (const path of paths) {
@@ -495,11 +521,16 @@ export interface ApplyVerifiedUpdateOptions extends UpdateRequestOptions {
   readonly beforeCommit?: (stage: VerifiedUpdateStage) => void;
   /** Native daemon publication requires its complete payload and source-receipt cohort. */
   readonly daemonNative?: { readonly execPath: string; readonly platform: string; readonly arch: string; readonly version: string; readonly allowLegacyBinary?: boolean;
+    /** Explicit host-owned extra suite members. The complete fixed daemon
+     * cohort still comes first and retains its original receipt semantics. */
+    readonly additionalTargets?: readonly UpdateTarget[];
     /** Actual outgoing program's compiled readers and original installation
      * owner. Host-only input; candidate version strings establish no support. */
     readonly currentReader?: DaemonCurrentReader };
   /** Preserve physical ownership for an already admitted complete native cohort. */
   readonly native?: boolean;
+  /** Explicit installation root for the shared saved-data reader lease. */
+  readonly readerExecPath?: string;
   /** Construction-owned effect lifetime, checked before each forward native filesystem mutation. */
   readonly assertCurrent?: () => void;
 }
@@ -509,9 +540,15 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
   // TypeScript readonly is not runtime ownership. Capture every effect-bearing
   // value before the first await, including adapter methods and each member.
   options = { ...options, io: captureUpdateFileIo(options.io ?? realUpdateFileIo),
-    targets: options.targets.map((target) => ({ ...target })), ...(options.daemonNative ? { daemonNative: { ...options.daemonNative } } : {}) };
+    targets: options.targets.map((target) => ({ ...target })), ...(options.daemonNative ? { daemonNative: { ...options.daemonNative,
+      ...(options.daemonNative.additionalTargets ? { additionalTargets: options.daemonNative.additionalTargets.map(target => ({ ...target })) } : {}) } } : {}) };
   validateTargets(options.targets);
   const native = options.daemonNative;
+  const readerExecPath = options.readerExecPath ?? native?.execPath ?? (options.native ? options.targets[0]?.path : undefined);
+  if (readerExecPath && (!isAbsolute(readerExecPath) || resolve(readerExecPath) !== readerExecPath)) throw new Error('Native reader executable must be absolute and normalized');
+  const capturedIo = options.io ?? realUpdateFileIo;
+  const directory = readerExecPath && hasNativeUpdateObservations(capturedIo, capturedIo.readFile, capturedIo.observe)
+    ? retainNativeUpdateDirectory(dirname(readerExecPath), options.targets.map(target => dirname(target.path))) : undefined;
   const verifiedMembers = new Map<string, VerifiedUpdateMember>();
   let assertStagedCurrent: (() => void) | undefined;
   let nativeStage = false;
@@ -521,9 +558,11 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
   const readerGuard = readerOwner?.assertCurrent.bind(readerOwner);
   const currentReaders = readerOwner ? parseNativeReaderCapabilities(readerOwner.readers) : undefined;
   let assertNativeCurrent: (() => void) | undefined;
+  let daemonTargets: readonly UpdateTarget[] = [];
   if (native) {
     const expected = resolveDaemonNativeTargets(native.execPath, native.platform, native.arch);
-    if (!expected || JSON.stringify(options.targets) !== JSON.stringify(expected) || !parseSemanticVersion(normalizeVersion(native.version))) throw new Error('Native daemon update target identity is invalid');
+    if (!expected || JSON.stringify(options.targets) !== JSON.stringify([...expected, ...(native.additionalTargets ?? [])]) || !parseSemanticVersion(normalizeVersion(native.version))) throw new Error('Native daemon update target identity is invalid');
+    daemonTargets = expected;
     const io = options.io ?? realUpdateFileIo;
     let installed: DaemonInstallationReceipt | null = null;
     if (native.allowLegacyBinary) {
@@ -572,7 +611,8 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
       verified.push({ target, buffer });
     }
     if (native) {
-      const descriptor = verified[verified.length - 1];
+      const descriptorIndex = verified.findIndex(member => member.target.path === daemonTargets[daemonTargets.length - 1]?.path);
+      const descriptor = verified[descriptorIndex];
       if (!descriptor) throw new Error('Native daemon source manifest is missing');
       const target: DaemonNativeTarget = native.arch === 'x64' ? 'linux-x64' : 'linux-arm64';
       let artifact = parseDaemonCiArtifact(JSON.parse(descriptor.buffer.toString('utf8')), target);
@@ -598,11 +638,16 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
       if (artifact.schema === 2 && artifact.readers.version !== normalizeVersion(native.version)) throw new Error('Native daemon reader version differs from the requested release');
       nativeReaders = artifact.readers;
       if (previousReader && !nativeReaders?.formats.includes(NATIVE_PREVIOUS_READER_RECEIPT_FORMAT)) throw new Error('Native daemon candidate cannot preserve previous-reader receipt evidence');
-      assertDaemonNativePayloadBytes(artifact, verified.slice(0, -1).map(member => member.buffer));
+      const payloads = daemonTargets.slice(0, -1).map(target => {
+        const pin = verifiedMembers.get(target.path), member = verified.find(member => member.target.path === target.path);
+        if (!pin || !member) throw new Error('Native daemon verified source member is missing');
+        return { pin, bytes: member.buffer };
+      });
+      assertDaemonNativePayloadPins(artifact, payloads.map(member => member.pin), payloads[3]?.bytes);
       // The installed receipt is a native transformation, not the downloaded
       // source artifact's bytes. Do not expose its former release pin as proof.
       verifiedMembers.delete(descriptor.target.path);
-      verified[verified.length - 1] = { target: descriptor.target, buffer: Buffer.from(JSON.stringify({ schema: 1,
+      verified[descriptorIndex] = { target: descriptor.target, buffer: Buffer.from(JSON.stringify({ schema: 1,
         packageName: '@goodvibes-jev/daemon', version: normalizeVersion(native.version), artifact,
         ...(previousReader === undefined ? {} : { previousReader }) }, null, 2) + '\n') };
     }
@@ -610,9 +655,11 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
     return verified;
   });
   const assertCurrent = () => {
+    directory?.assertCurrent();
     options.signal?.throwIfAborted();
     if (performance.now() >= deadline) throw new Error('update timed out before commit');
     assertSynchronousCurrent(options.assertCurrent);
+    directory?.assertCurrent();
   };
   assertCurrent();
   // The race above owns only read-only asynchronous preparation. A cancellation
@@ -630,7 +677,7 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
     assertCurrent();
     assertNativeCurrent?.();
     if (native) assertNativeReaderCompatible(native.execPath, native.version, options.io ?? realUpdateFileIo, nativeReaders);
-  }, { current: assertCurrent, ...(native || options.native ? { prepareNativeGuard: () => {
+  }, { current: assertCurrent, ...(directory ? { directory } : {}), ...(readerExecPath ? { readerExecPath } : {}), ...(native || options.native ? { prepareNativeGuard: () => {
     const io = options.io ?? realUpdateFileIo;
     if (!io.readFile || !io.observe) throw new Error('Native daemon staged owner is unavailable');
     for (const member of verified) {
@@ -658,11 +705,15 @@ export interface RollbackResult {
 export function rollbackKeptPrevious(
   targets: readonly RollbackTarget[], io: UpdateFileIo = realUpdateFileIo,
   beforeCommit?: () => void,
-  options: { readonly requireComplete?: boolean; readonly assertCurrent?: () => void; readonly native?: boolean } = {},
+  options: { readonly requireComplete?: boolean; readonly assertCurrent?: () => void; readonly native?: boolean; readonly readerExecPath?: string } = {},
 ): RollbackResult {
   targets = targets.map(target => ({ ...target }));
   io = captureUpdateFileIo(io);
   const paths = validateTargets(targets);
+  const readerExecPath = options.readerExecPath ?? (options.native ? targets[0]?.path : undefined);
+  if (readerExecPath && (!isAbsolute(readerExecPath) || resolve(readerExecPath) !== readerExecPath)) throw new Error('Native reader executable must be absolute and normalized');
+  const directory = readerExecPath && hasNativeUpdateObservations(io, io.readFile, io.observe)
+    ? retainNativeUpdateDirectory(dirname(readerExecPath), targets.map(target => dirname(target.path))) : undefined;
   const restored: RollbackTarget[] = [];
   const skipped: RollbackTarget[] = [];
   transact('rollback', paths, io, () => {}, () => {
@@ -686,7 +737,7 @@ export function rollbackKeptPrevious(
       }
       restored.push(target);
     }
-  }, { ...(options.assertCurrent ? { current: options.assertCurrent } : {}), ...(options.native ? {
+  }, { ...(options.assertCurrent ? { current: options.assertCurrent } : {}), ...(directory ? { directory } : {}), ...(readerExecPath ? { readerExecPath } : {}), ...(options.native ? {
     prepareNativeGuard: () => createDaemonNativeRenameGuard(targets.map(target => ({ ...target, executable: false, assetName: '' })), io),
   } : {}) });
   return { restored, skipped };

@@ -119,7 +119,20 @@ export function assertDaemonNativePayloadBytes(artifact: DaemonCiArtifact, buffe
     if (actual !== file.sha256) throw new Error(`Native daemon payload differs from its source manifest: ${file.path}`);
     if (index === 1) bunDigest = actual;
   }
-  const metadata = buffers[3];
+  assertCapturedBunMetadata(artifact, bunDigest, buffers[3]);
+}
+/** Download verification already computed these exact pins. Comparing the
+ * source descriptor against them must not hash the same payloads again. */
+export function assertDaemonNativePayloadPins(artifact: DaemonCiArtifact, members: readonly {
+  readonly sha256: string; readonly size: number; readonly mode: number;
+}[], metadata: Buffer | undefined): void {
+  if (members.length !== artifact.files.length || members.some((member, index) => {
+    const file = artifact.files[index];
+    return !file || file.sha256 !== member.sha256 || file.size !== member.size || file.mode !== member.mode;
+  })) throw new Error('Native daemon payload differs from its source manifest');
+  assertCapturedBunMetadata(artifact, members[1]?.sha256, metadata);
+}
+function assertCapturedBunMetadata(artifact: DaemonCiArtifact, bunDigest: string | undefined, metadata: Buffer | undefined): void {
   if (!bunDigest || !metadata) throw new Error('Native daemon runtime is incomplete');
   const value: unknown = JSON.parse(metadata.toString('utf8'));
   if (!record(value) || value.version !== '1.3.14' || value.target !== artifact.target || value.sha256 !== bunDigest
@@ -186,6 +199,8 @@ export function retainDaemonNativeFiles(targets: readonly UpdateTarget[], io: Up
 }
 export interface DaemonNativeRenameGuard {
   assertCurrent(): void;
+  beforeRemove(path: string): void;
+  afterRemove(path: string): void;
   beforeRename(from: string, to: string, recovering: boolean): void;
   afterRename(from: string, to: string, recovering: boolean): void;
 }
@@ -217,6 +232,8 @@ export function createDaemonNativeRenameGuard(targets: readonly UpdateTarget[], 
   };
   return {
     assertCurrent() { for (const path of states.keys()) check(path); },
+    beforeRemove(path) { check(path); },
+    afterRemove(path) { if (snapshot(path) !== null) throw new Error('Native update removal is unknown'); states.set(path, null); },
     beforeRename(from, to, recovering) {
       if (recovering) { check(from); check(to); }
       else for (const path of states.keys()) check(path);

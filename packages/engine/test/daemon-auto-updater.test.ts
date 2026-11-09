@@ -896,7 +896,11 @@ describe('post-swap service handover', () => {
     let renames = 0;
     const rename = h.io.rename;
     h.io.rename = (from, to) => { renames++; rename(from, to); };
-    h.io.chmod = () => h.updater.stop();
+    const chmod = h.io.chmod;
+    h.io.chmod = (path, mode) => {
+      chmod(path, mode);
+      if (path.endsWith('.update-download')) h.updater.stop();
+    };
     try {
       await h.updater.tick(); await h.updater.drainHandover();
       expect(renames).toBe(0);
@@ -982,7 +986,11 @@ describe('post-swap service handover', () => {
   test('a stop during staging cannot hide a failed cleanup or re-arm an unsafe transaction', async () => {
     const h = makeHarness({ idle: () => true });
     const remove = h.io.remove!;
-    h.io.chmod = () => h.updater.stop();
+    const chmod = h.io.chmod;
+    h.io.chmod = (path, mode) => {
+      chmod(path, mode);
+      if (path.endsWith('.update-download')) h.updater.stop();
+    };
     h.io.remove = (path) => {
       if (path.endsWith('.update-download')) throw new Error('synthetic staged cleanup failure');
       remove(path);

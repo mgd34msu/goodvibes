@@ -14,7 +14,7 @@ function writeChecksums() {
 }
 function readerArtifact() {
   const base = JSON.parse(readFileSync(join(assets, 'goodvibes-daemon-linux-x64.ci-artifact.json'), 'utf8'));
-  return { ...base, schema: 2, readers: nativeReaderCapabilities(version) };
+  return { ...base, schema: 2, readers: structuredClone(nativeReaderCapabilities(version)) };
 }
 function terminalReaderArtifact(command: 'goodvibes' | 'goodvibes-agent') {
   const asset = `${command}-linux-x64`;
@@ -269,7 +269,7 @@ test('interrupted suite publication retains exact claims and refuses a blind sec
 });
 
 test('directory replacement during the real install cannot redirect later companion writes', () => {
-  const result = run(false, 'prefix'); expect(result.status).not.toBe(0); expect(result.stderr).toContain('installation directory changed');
+  const result = run(false, 'prefix'); expect(result.status).not.toBe(0); expect(result.stderr).toContain('original installation or private claim directory changed');
   expect(readdirSync(join(home, 'bin'))).toEqual(['foreign']);
   expect(readFileSync(join(home, 'bin/foreign'), 'utf8')).toBe('foreign');
   for (const command of ['goodvibes', 'goodvibes-daemon', 'goodvibes-agent']) {

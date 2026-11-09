@@ -84,7 +84,8 @@ test('directory retention allows owned child changes while refusing foreign repl
 test('short native lease release never removes a substituted symlink to its original inode', () => {
   const f = fixture(), path = join(f.directory, 'lock'), retained = path + '.retained', release = tryAcquireCrossProcessLock(path);
   if (!release) throw new Error('Fixture lease unavailable');
-  fs.renameSync(path, retained); fs.symlinkSync(retained, path); release();
+  fs.renameSync(path, retained); fs.symlinkSync(retained, path);
+  expect(() => release()).toThrow('Original native lock owner changed');
   expect(fs.lstatSync(path).isSymbolicLink()).toBe(true); expect(fs.existsSync(retained)).toBe(true);
 });
 
@@ -92,7 +93,8 @@ test('short native lease release never removes a substituted symlink to its orig
 test('async native lease release also retains a substituted symlink to its original inode', async () => {
   const f = fixture(), path = join(f.directory, 'async-lock'), retained = path + '.retained';
   const release = await acquireCrossProcessLock(path, { strictOwnership: true });
-  fs.renameSync(path, retained); fs.symlinkSync(retained, path); release();
+  fs.renameSync(path, retained); fs.symlinkSync(retained, path);
+  expect(() => release()).not.toThrow();
   expect(fs.lstatSync(path).isSymbolicLink()).toBe(true); expect(fs.existsSync(retained)).toBe(true);
 });
 

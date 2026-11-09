@@ -84,26 +84,49 @@ describe('owned update transaction fault matrix', () => {
   for (const operation of [
     'mkdir /fixture', 'mkdir /fixture/lib',
     ...targets.map(({ path }) => `claim ${path}.update-transaction`),
-    ...targets.flatMap(({ path, executable }) => [`write ${path}.update-download`, `chmod ${path}.update-download ${executable ? '755' : '644'}`]),
+    ...targets.flatMap(({ path, executable }) => [`claim ${path}.update-download`, `chmod ${path}.update-download ${executable ? '755' : '644'}`]),
     ...commitRenames,
   ]) {
-    test(`restores original cohort and genuine baseline after ${operation} fails, then safely retries`, async () => {
+    const unknownCreation = operation.startsWith('chmod ');
+    test(`${unknownCreation ? 'preserves the unconfirmed borrowed stage and fences retry' : 'restores original cohort and genuine baseline, then safely retries'} after ${operation} fails`, async () => {
       let fired = false;
-      const state = memory(initial, (seen, files) => {
+      const state = memory(initial, seen => {
         if (!fired && seen === operation) {
           fired = true;
-          if (seen.startsWith('write ')) files.set(seen.slice(6), Buffer.from('partial write'));
           throw new Error(`injected ${seen}`);
         }
       });
       const error = await failure(() => apply(state.io));
       expect(fired).toBe(true);
       expect(error.receipt.committed).toBe(false);
+      if (unknownCreation) {
+        // The borrowed adapter threw before returning its original created-file
+        // owner. A pathname alone cannot prove this stage is still ours.
+        expect(error.receipt.recoveryRequired).toBe(true);
+        for (const [path, bytes] of Object.entries(initial)) expect(state.files.get(path)?.toString()).toBe(bytes);
+        const preserved = state.contents();
+        await failure(() => apply(state.io)); expect(state.contents()).toEqual(preserved);
+        return;
+      }
       expect(error.receipt.recoveryRequired).toBe(false);
       expect(state.contents()).toEqual(initial);
       await apply(state.io);
       expect(state.files.get('/fixture/daemon.previous')?.toString()).toBe('old daemon');
       expect(state.files.get('/fixture/lib/addon.previous')?.toString()).toBe('old addon');
+    });
+  }
+
+  for (const target of targets) {
+    test(`a partial exclusive payload at ${target.path} remains fenced without touching the original cohort`, async () => {
+      const stage = target.path + '.update-download';
+      const state = memory(initial, (operation, files) => {
+        if (operation === `claim ${stage}`) { files.set(stage, Buffer.from('Partial unconfirmed payload')); throw new Error('Synthetic disk full'); }
+      });
+      const error = await failure(() => apply(state.io));
+      expect(error.receipt).toMatchObject({ phase: 'stage', committed: false, recoveryRequired: true });
+      for (const [path, bytes] of Object.entries(initial)) expect(state.files.get(path)?.toString()).toBe(bytes);
+      expect(state.files.get(stage)?.toString()).toBe('Partial unconfirmed payload');
+      const preserved = state.contents(); await failure(() => apply(state.io)); expect(state.contents()).toEqual(preserved);
     });
   }
 

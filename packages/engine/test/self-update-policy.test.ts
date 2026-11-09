@@ -27,6 +27,7 @@ function memoryIo(initial: Record<string, Buffer> = {}) {
   const operations: string[] = [];
   const io: UpdateFileIo = {
     writeExclusive: (path, data) => {
+      operations.push(`claim ${path}`);
       if (files.has(path)) throw new Error(`exclusive file exists: ${path}`);
       files.set(path, data);
     },
@@ -144,7 +145,9 @@ describe('atomic swap with kept previous', () => {
     expect(files.get(`/opt/gv/daemon${PREVIOUS_FILE_SUFFIX}`)?.toString()).toBe('old');
     expect(operations).toEqual([
       'mkdir /opt/gv',
-      'write /opt/gv/daemon.update-download',
+      'claim /opt/gv/daemon.update-transaction',
+      'chmod /opt/gv/daemon.update-transaction 600',
+      'claim /opt/gv/daemon.update-download',
       'chmod /opt/gv/daemon.update-download 755',
       `rename /opt/gv/daemon -> /opt/gv/daemon${PREVIOUS_FILE_SUFFIX}`,
       'rename /opt/gv/daemon.update-download -> /opt/gv/daemon',

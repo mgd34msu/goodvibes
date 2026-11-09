@@ -29,8 +29,9 @@ import {
   type LifecycleMarkerIo,
 } from './lifecycle-marker.js';
 import { crashLoopRollbackReceipt, decideCrashLoopRollback } from './boot-rollback.js';
+import { inspectDaemonUpdateInstallation, resolveDaemonUpdateTargets } from '../runtime/daemon-update-installation.js';
 import { configuredSuiteWebuiDirectory, rollbackSuiteUpdate, SuiteUpdateRecoveryError } from '../runtime/suite-update.js';
-import { rollbackKeptPrevious, realUpdateFileIo, captureUpdateFileIo, inspectDaemonNativeInstallation, resolveDaemonInstallationReaders, retainDaemonNativeFiles, resolveDaemonNativeTargets, UpdateTransactionError, type UpdateFileIo, type UpdateTransactionReceipt, type DaemonCurrentReader } from '../runtime/self-update.js';
+import { rollbackKeptPrevious, realUpdateFileIo, captureUpdateFileIo, retainDaemonNativeFiles, UpdateTransactionError, type UpdateFileIo, type UpdateTransactionReceipt, type DaemonCurrentReader } from '../runtime/self-update.js';
 import { currentProcessSignals, isCompiledBinaryInvocation } from './daemon-exec-invocation.js';
 import { deliverOwnerAlert } from './owner-alert.js';
 import type { DaemonUpdateStatus } from './update-status.js';
@@ -406,12 +407,12 @@ export class DaemonLifecycleRuntime {
    */
   private rollBackToKeptPrevious(execPath: string, failedStarts: number): boolean {
     const io = captureUpdateFileIo(this.options.rollbackIo ?? realUpdateFileIo);
-    const nativeTargets = resolveDaemonNativeTargets(execPath, process.platform, process.arch);
+    const nativeTargets = resolveDaemonUpdateTargets(execPath, process.platform, process.arch);
     if (!nativeTargets) return false;
     const targets = nativeTargets.map(({ label, path }) => ({ label, path }));
     let result: ReturnType<typeof rollbackKeptPrevious>;
     try {
-      const installed = inspectDaemonNativeInstallation(execPath, process.platform, process.arch, '', io, { integrity: false });
+      const installed = inspectDaemonUpdateInstallation(execPath, process.platform, process.arch, '', io, { integrity: false });
       if (!installed || installed.version !== this.options.updateArtifact?.version) throw new Error('The running daemon does not own the current native installation version');
       if (this.options.updateArtifact?.suite) {
         const restored = rollbackSuiteUpdate({ execPath, platform: process.platform, arch: process.arch, currentVersion: this.options.updateArtifact.version,
@@ -420,14 +421,14 @@ export class DaemonLifecycleRuntime {
           } });
         result = { restored: [...restored.files], skipped: [] };
       } else {
-        if (!inspectDaemonNativeInstallation(execPath, process.platform, process.arch, '.previous', io)) throw new Error('No complete verified previous native daemon installation is available');
+        if (!inspectDaemonUpdateInstallation(execPath, process.platform, process.arch, '.previous', io)) throw new Error('No complete verified previous native daemon installation is available');
         const current = retainDaemonNativeFiles(nativeTargets, io);
         result = rollbackKeptPrevious(targets, io, () => {
         if (this.stopping || this.rollbackRecovery || this.rollbackApplied) throw new Error('Native rollback no longer belongs to the current lifecycle');
         current();
-        const previous = inspectDaemonNativeInstallation(execPath, process.platform, process.arch, '.previous', io);
+        const previous = inspectDaemonUpdateInstallation(execPath, process.platform, process.arch, '.previous', io);
         if (!previous) throw new Error('Previous native reader is unavailable');
-        assertNativeReaderCompatible(execPath, previous.version, io, resolveDaemonInstallationReaders(previous, installed));
+        assertNativeReaderCompatible(execPath, previous.version, io, previous.readers);
       }, { requireComplete: true, native: true, assertCurrent: () => {
         if (this.stopping || this.rollbackRecovery || this.rollbackApplied) throw new Error('Native rollback no longer belongs to the current lifecycle');
       } });

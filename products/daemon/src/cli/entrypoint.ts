@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { initializeOriginalDarwinDaemonInstallation } from '../config/original-darwin-installation.js';
 import { initializeDaemonNativeSqlite } from './native-sqlite-runtime.js';
 
 const args = process.argv.slice(2);
@@ -8,7 +9,12 @@ if (args[0] === 'check-install-reader') {
   const { runInstallReaderCheck } = await import('./check-install-reader.js');
   process.exitCode = runInstallReaderCheck(args.slice(1));
 } else {
-  initializeDaemonNativeSqlite();
+  try {
+    const sqlite = initializeDaemonNativeSqlite();
+    initializeOriginalDarwinDaemonInstallation(sqlite);
+  } catch {
+    throw new Error('Native daemon startup could not verify its installation. Repair using the released suite installer: curl -fsSL https://goodvibes.sh/install.sh | sh . The installer preserves existing application data.');
+  }
   // Service imports occur only after the compiled Darwin database owner is selected.
   const { runDaemonCli } = await import('./run.js');
   const { resolveShippedServiceExecutable } = await import('./service-executable.js');

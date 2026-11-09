@@ -60,8 +60,6 @@ import {
   UpdateTransactionError,
   normalizeVersion,
   resolveLatestReleaseTag,
-  resolveDaemonNativeTargets,
-  inspectDaemonNativeInstallation,
   retainDaemonNativeFiles,
   type UpdateFetchLike,
   type UpdateFileIo,
@@ -74,6 +72,8 @@ import { PeriodicUpdateLoop, type PeriodicCheckOutcome } from '../runtime/update
 import { formatReceiptTime, type DaemonReceiptStore } from './receipts.js';
 import { CLIENT_COMPATIBILITY_FLOOR } from '../control-plane/client-compatibility.js';
 import type { ServiceHandoverOutcome } from './service-handover.js';
+import { inspectDaemonUpdateInstallation, resolveDaemonUpdateTargets } from '../runtime/daemon-update-installation.js';
+import { assertStagedClientReaderCompatible } from '../runtime/client-reader-update.js';
 import { hasNativeUpdateObservations } from '../runtime/update-file-io.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { applySuiteUpdate, installedSuiteNeedsRepair, retainSuiteUpdateConfiguration, SuiteUpdateRecoveryError, type SuiteUpdateResult } from '../runtime/suite-update.js';
@@ -107,12 +107,12 @@ export interface DaemonInstalledFile {
 }
 
 /**
- * Fixed Linux daemon payloads and their installation receipt. Updates and
+ * Fixed native daemon payloads and their installation reader evidence. Updates and
  * rollback use this same cohort, regardless of whether a required file is
  * currently present. The selected feed must supply all checksum-bound assets.
  */
 export function resolveDaemonInstalledFiles(location: DaemonUpdateInstallLocation): DaemonInstalledFile[] {
-  return [...(resolveDaemonNativeTargets(location.execPath, location.platform, location.arch) ?? [])];
+  return [...(resolveDaemonUpdateTargets(location.execPath, location.platform, location.arch) ?? [])];
 }
 
 export interface DaemonAutoUpdaterOptions {
@@ -470,7 +470,7 @@ export class DaemonAutoUpdater {
       }
       if (performance.now() >= deadline) throw new Error('update check deadline exceeded');
     };
-    const installedTargets = resolveDaemonNativeTargets(this.options.execPath, this.options.platform, this.options.arch);
+    const installedTargets = resolveDaemonUpdateTargets(this.options.execPath, this.options.platform, this.options.arch);
     if (!installedTargets) return;
     const readerOwner = this.options.currentReader;
     const retainedNative = readerOwner !== undefined && hasNativeUpdateObservations(io, io.readFile, io.observe);
@@ -484,7 +484,7 @@ export class DaemonAutoUpdater {
     // program/runtime/library on each idle update tick. Borrowed installations
     // without that original owner still need their initial integrity check.
     retainedCurrent();
-    const installed = inspectDaemonNativeInstallation(this.options.execPath, this.options.platform, this.options.arch, '', io, { integrity: !retainedNative });
+    const installed = inspectDaemonUpdateInstallation(this.options.execPath, this.options.platform, this.options.arch, '', io, { integrity: !retainedNative });
     retainedCurrent();
     if (!installed || compareVersions(installed.version, this.options.currentVersion) !== 0) throw new Error('Running daemon does not own the complete installed native cohort');
     const assertInstallationCurrent = retainDaemonNativeFiles(installedTargets, io);
@@ -567,10 +567,13 @@ export class DaemonAutoUpdater {
         platform: this.options.platform,
         signal,
         timeoutMs: remainingBudget(),
-        daemonNative: { execPath: this.options.execPath, platform: this.options.platform, arch: this.options.arch, version: tag,
-          ...(this.options.currentReader ? { currentReader: this.options.currentReader } : {}) },
+        ...(this.options.platform === 'linux' ? { daemonNative: { execPath: this.options.execPath, platform: this.options.platform, arch: this.options.arch, version: tag,
+          ...(this.options.currentReader ? { currentReader: this.options.currentReader } : {}) } } : { native: true, readerExecPath: this.options.execPath }),
         assertCurrent: assertLifecycleCurrent,
-        beforeCommit: admitIdle,
+        beforeCommit: stage => {
+          admitIdle();
+          if (this.options.platform === 'darwin') assertStagedClientReaderCompatible(this.options.execPath, this.options.execPath + '.update-download', io, tag, undefined, stage, true);
+        },
       });
     } catch (error) {
       if (error instanceof SuiteUpdateRecoveryError) {
@@ -606,11 +609,10 @@ export class DaemonAutoUpdater {
     const now = this.options.now ?? Date.now;
     const from = normalizeVersion(this.options.currentVersion);
     const to = normalizeVersion(tag);
-    // One update, one receipt. The second sentence is here because a swap
-    // replaces the DAEMON binary and nothing else: every terminal UI and agent
-    // process already attached keeps running the build it started with, so the
-    // owner would otherwise have to infer the restart from behavior that did
-    // not change. Clients below CLIENT_COMPATIBILITY_FLOOR additionally stop
+    // One update, one receipt. A suite swap replaces installed files, while
+    // every terminal UI and agent process already attached keeps running the
+    // build it started with until restarted. Report those distinct outcomes.
+    // Clients below CLIENT_COMPATIBILITY_FLOOR additionally stop
     // taking shared-session work (control-plane/client-compatibility.ts)
     // rather than only being asked to restart.
     this.recordReceipt(

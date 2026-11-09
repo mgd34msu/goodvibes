@@ -3,7 +3,7 @@
  * might otherwise launch their ordinary chat/configuration runtime. */
 import { dirname, join } from 'node:path';
 import { assertNativeReaderCompatible, NATIVE_READER_REQUIREMENT_FILE, NativeDataCompatibilityError } from './native-reader-compatibility.js';
-import { assertClientReaderPayload, clientReaderAsset, parseClientReaderArtifact, type ClientReaderArtifact } from './client-reader-artifact.js';
+import { assertClientReaderPayload, clientReaderMemberPath, clientReaderMemberAsset, clientReaderAsset, parseClientReaderArtifact, type ClientReaderArtifact } from './client-reader-artifact.js';
 import { verifiedUpdateStageMembers, type VerifiedUpdateStage } from './verified-update-stage.js';
 import { hasNativeUpdateObservations } from './update-file-io.js';
 import type { UpdateFileIo } from './update-file-io.js';
@@ -28,7 +28,7 @@ export function assertStagedClientReaderCompatible(execPath: string, candidatePa
   if (expectedVersion !== undefined && artifact.version !== expectedVersion.replace(/^v/i, '')) throw new NativeDataCompatibilityError('unconfirmed-reader');
   const asset = clientReaderAsset(artifact.packageName, artifact.target);
   if (expectedAsset !== undefined && asset !== expectedAsset) throw new NativeDataCompatibilityError('unconfirmed-reader');
-  if (requireEvidence && artifact.target.startsWith('linux-') && artifact.files.length !== 4) throw new NativeDataCompatibilityError('unconfirmed-reader');
+  if (requireEvidence && (artifact.target.startsWith('linux-') || artifact.packageName === '@goodvibes-jev/daemon') && artifact.files.length !== 4) throw new NativeDataCompatibilityError('unconfirmed-reader');
   const basename = execPath.slice(execPath.lastIndexOf('/') + 1);
   const product = artifact.packageName === '@goodvibes-jev/tui' ? 'goodvibes' : artifact.packageName === '@goodvibes-jev/agent' ? 'goodvibes-agent' : 'goodvibes-daemon';
   if (basename !== product && basename !== asset) throw new NativeDataCompatibilityError('unconfirmed-reader');
@@ -36,11 +36,11 @@ export function assertStagedClientReaderCompatible(execPath: string, candidatePa
     ? verifiedUpdateStageMembers(verifiedStage) : undefined;
   if (alreadyVerified && !alreadyVerified.some(member => member.path === execPath + '.readers.json' && member.assetName === asset + '.reader-ci-artifact.json')) throw new NativeDataCompatibilityError('unconfirmed-reader');
   for (const member of artifact.files) {
-    const selected = execPath + member.path.slice(asset.length) + suffix, before = observe(selected);
+    const selected = clientReaderMemberPath(execPath, artifact, member.path, suffix), before = observe(selected);
     if (!before || before.mode !== member.mode) throw new NativeDataCompatibilityError('unavailable');
     if (alreadyVerified) {
-      const pin = alreadyVerified.find(pin => pin.path === execPath + member.path.slice(asset.length));
-      if (!pin || pin.assetName !== member.path || pin.sha256 !== member.sha256 || pin.mode !== member.mode || pin.size !== member.size) throw new NativeDataCompatibilityError('unconfirmed-reader');
+      const pin = alreadyVerified.find(pin => pin.path === clientReaderMemberPath(execPath, artifact, member.path));
+      if (!pin || pin.assetName !== clientReaderMemberAsset(artifact, member.path) || pin.sha256 !== member.sha256 || pin.mode !== member.mode || pin.size !== member.size) throw new NativeDataCompatibilityError('unconfirmed-reader');
     } else {
       // Rollback has no download verification receipt. Its published previous
       // image needs this one integrity-pin check before original claims swap it.

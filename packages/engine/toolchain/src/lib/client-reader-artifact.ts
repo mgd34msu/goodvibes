@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { clientReaderAsset, nativeReaderCapabilities, parseClientReaderArtifact, parseNativeReaderCapabilities,
+import { clientReaderPayloadPaths, clientReaderAsset, nativeReaderCapabilities, parseClientReaderArtifact, parseNativeReaderCapabilities,
   type ClientReaderArtifact, type ClientReaderPackage, type ClientReaderTarget } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 import { fileObservationIdentity } from '@goodvibes-jev/engine/sdk/platform/utils';
 import { writeFileAtomic } from '@goodvibes-jev/engine/sdk/platform/utils';
@@ -28,8 +28,7 @@ export interface TerminalReaderArtifactInput extends TerminalReaderSource {
 }
 
 export function retainTerminalReaderCohort(directory: string, packageName: ClientReaderPackage, target: ClientReaderTarget): () => void {
-  const asset = clientReaderAsset(packageName, target);
-  const names = [asset, ...(target.startsWith('linux-') ? [asset + '.bun', asset + '.bun.LICENSE.md', asset + '.bun.json'] : [])];
+  const names = clientReaderPayloadPaths(packageName, target);
   const files = names.map(name => ({ path: join(directory, name), identity: fileObservationIdentity(join(directory, name)) }));
   return () => { for (const file of files) if (fileObservationIdentity(file.path) !== file.identity) throw new Error('Native terminal cohort changed'); };
 }
@@ -40,7 +39,7 @@ export function inspectTerminalReaderArtifact(input: TerminalReaderArtifactInput
   input.assertCurrent();
   if (input.target !== `${process.platform}-${process.arch}`) throw new Error('Compiled reader evidence requires its native build host');
   const asset = clientReaderAsset(input.packageName, input.target);
-  const expectedPaths = [asset, ...(input.target.startsWith('linux-') ? [asset + '.bun', asset + '.bun.LICENSE.md', asset + '.bun.json'] : [])];
+  const expectedPaths = clientReaderPayloadPaths(input.packageName, input.target);
   const files = expectedPaths.map(path => {
     const file = input.files.find(file => file.path === path);
     if (!file) throw new Error('Native terminal reader cohort is incomplete');

@@ -8,9 +8,16 @@ import { statSync } from 'node:fs';
 import type { GoodVibesHomeOwnership } from '@goodvibes-jev/engine/sdk/platform/config';
 import type { DaemonUpdateArtifact } from '@goodvibes-jev/engine/sdk/platform/daemon';
 import { captureUpdateFileIo, isCompiledBunModuleUrl, DAEMON_NATIVE_TARGETS, inspectDaemonNativeInstallation, nativeReaderCapabilities, realUpdateFileIo,
+  createNativeDataWriteOwner, createInstalledReaderCohort, type NativeDataWriteOwner,
+  inspectDarwinDaemonInstallation,
   resolveDaemonNativePayloads, resolveDaemonNativeTargets, retainDaemonNativeFiles } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 import { detectInstallKind } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
 import { COMPILED_VERSION, VERSION } from '../version.js';
+
+export { captureOriginalDarwinDaemonInstallation, initializeOriginalDarwinDaemonInstallation } from './original-darwin-installation.js';
+export type { OriginalDarwinDaemonInstallation } from './original-darwin-installation.js';
+import { originalDarwinSelection, originalDarwinProof, type OriginalDarwinDaemonInstallation } from './original-darwin-installation.js';
+const darwinWriters = new WeakMap<OriginalDarwinDaemonInstallation, NativeDataWriteOwner>();
 
 export interface ResolveDaemonUpdateArtifactOptions {
   /** The executable to identify; defaults to process.execPath. */
@@ -37,6 +44,7 @@ export interface ResolveInstalledDaemonUpdateArtifactOptions extends ResolveDaem
    * loaded executable, not the potentially replaced path in process.execPath. */
   readonly runningExecutableIdentity?: () => string;
   readonly signal?: AbortSignal;
+  readonly darwinInstallation?: OriginalDarwinDaemonInstallation;
 }
 
 /** Only a compiled daemon owning a complete native installation can self-manage. */
@@ -49,6 +57,30 @@ export function resolveInstalledDaemonUpdateArtifact(
   if (ownership.isOverridden || !bundled || detectInstallKind(execPath) !== 'binary') return undefined;
   signal?.throwIfAborted();
   if (!isAbsolute(execPath) || resolve(execPath) !== execPath) throw new Error('Native daemon executable must have an absolute normalized path');
+  if (platform === 'darwin') {
+    const selected = options.darwinInstallation ?? originalDarwinSelection(), proof = selected && originalDarwinProof(selected);
+    if (!selected || !proof || selected.execPath !== execPath || selected.version !== version || proof.sqlite.owner.target !== `darwin-${arch}`) throw new Error('Original compiled Darwin daemon selection is unavailable');
+    selected.assertCurrent();
+    const installation = proof.installation ?? inspectDarwinDaemonInstallation(execPath, arch, '', proof.io, {
+      expectedSqliteOwner: proof.sqlite.owner, assertCompiledSqliteCurrent: proof.sqlite.assertCurrent,
+    });
+    if (!installation || installation.version !== version || !installation.compiledSqliteVerified) throw new Error('Running Darwin daemon does not own a complete verified installation');
+    selected.assertCurrent(); installation.assertCurrent();
+    const actualReaders = nativeReaderCapabilities(version);
+    if (installation.readers.formats.length !== actualReaders.formats.length || actualReaders.formats.some(format => !installation.readers.formats.includes(format))) throw new Error('Darwin daemon reader profile differs from its actual compiled readers');
+    proof.installation = installation;
+    const original = () => { signal?.throwIfAborted(); selected.assertCurrent(); installation.assertCurrent(); };
+    const assertCurrent = () => {
+      original();
+      for (const member of proof.targets) for (const suffix of ['.update-transaction', '.update-download', '.update-previous', '.rollback-exchange']) {
+        if (proof.io.exists(member.path + suffix)) throw new Error('Darwin daemon installation has an unfinished transaction');
+      }
+      original();
+    };
+    assertCurrent();
+    return Object.freeze({ version, execPath, suite: true as const, assertCurrent, assertStarting: assertCurrent,
+      currentReader: Object.freeze({ readers: actualReaders, assertCurrent: original }) });
+  }
   const targets = resolveDaemonNativeTargets(execPath, platform, arch);
   if (!targets) return undefined;
   const io = captureUpdateFileIo(realUpdateFileIo);
@@ -101,4 +133,20 @@ export function resolveInstalledDaemonUpdateArtifact(
     assertInstallationCurrent();
   } });
   return Object.freeze({ version, execPath, suite: true as const, currentReader, assertStarting, assertCurrent });
+}
+
+/** Config/migration publication uses the same original complete Darwin owner as
+ * serving. Lazy construction keeps metadata-only CI commands independent of an
+ * installed reader sidecar that this very build is about to emit. */
+export function createOriginalDarwinDaemonDataWriter(selected: OriginalDarwinDaemonInstallation | undefined = originalDarwinSelection()): NativeDataWriteOwner | undefined {
+  if (!selected) return undefined;
+  const proof = originalDarwinProof(selected); if (!proof) throw new Error('Original Darwin data publisher is unavailable');
+  selected.assertCurrent(); const saved = darwinWriters.get(selected); if (saved) return saved;
+  const arch = proof.sqlite.owner.target.slice('darwin-'.length);
+  const artifact = resolveInstalledDaemonUpdateArtifact({ isOverridden: false }, { execPath: selected.execPath, version: selected.version,
+    platform: 'darwin', arch, bundled: true, darwinInstallation: selected });
+  if (!artifact?.assertCurrent) throw new Error('Original complete Darwin data publisher is unavailable');
+  const writer = createNativeDataWriteOwner({ execPath: selected.execPath, version: selected.version, assertCurrent: artifact.assertCurrent,
+    readerCohort: createInstalledReaderCohort({ execPath: selected.execPath, version: selected.version, platform: 'darwin', arch }) });
+  darwinWriters.set(selected, writer); return writer;
 }

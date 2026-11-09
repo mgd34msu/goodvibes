@@ -1024,6 +1024,11 @@
       "types": "./sdk/dist/platform/runtime/sandbox.d.ts",
       "import": "./sdk/dist/platform/runtime/sandbox.js"
     },
+    "./sdk/platform/runtime/compiled-native-startup": {
+      "bun": "./sdk/src/platform/runtime/compiled-native-startup.ts",
+      "types": "./sdk/dist/platform/runtime/compiled-native-startup.d.ts",
+      "import": "./sdk/dist/platform/runtime/compiled-native-startup.js"
+    },
     "./sdk/platform/runtime/self-update": {
       "bun": "./sdk/src/platform/runtime/self-update.ts",
       "types": "./sdk/dist/platform/runtime/self-update.d.ts",

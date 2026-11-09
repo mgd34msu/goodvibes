@@ -112,3 +112,12 @@ test('asynchronous current restriction refuses and consumes rejection before sel
   expect(() => initializeDaemonNativeSqlite({ ...f.options, assertCurrent: () => Promise.reject(new Error('restriction failure')), setCustomSQLite: () => { calls++; return true; } })).toThrow('must be synchronous');
   await Promise.resolve(); expect(calls).toBe(0);
 });
+
+test('retained compiled SQLite admission tolerates sibling bookkeeping and still rejects original-file replacement', () => {
+  const f = fixture();
+  const admitted = initializeDaemonNativeSqlite({ ...f.options, setCustomSQLite: () => true });
+  expect(admitted).toBeDefined(); writeFileSync(join(f.cohort, 'native-reader-floor.tmp'), 'Sibling bookkeeping');
+  expect(() => admitted?.assertCurrent()).not.toThrow();
+  const foreign = f.library + '.later'; writeFileSync(foreign, f.bytes, { mode: 0o644 }); renameSync(foreign, f.library);
+  expect(() => admitted?.assertCurrent()).toThrow('Original native SQLite');
+});

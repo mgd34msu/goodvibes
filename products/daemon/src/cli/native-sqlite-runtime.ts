@@ -1,4 +1,5 @@
-import { isCompiledBunModuleUrl } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import type { DarwinDaemonSqliteOwner } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { isCompiledBunModuleUrl } from '@goodvibes-jev/engine/sdk/platform/runtime/compiled-native-startup';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { createHash } from 'node:crypto';
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, realpathSync } from 'node:fs';
@@ -31,31 +32,21 @@ export function assertDaemonSqliteArchitecture(bytes: Buffer, target: DaemonSqli
     || bytes.readUInt32LE(12) !== 6) throw new Error('Native SQLite library is not the declared Mach-O architecture');
 }
 
-export interface DaemonSqliteOwner {
-  readonly schema: 1;
-  readonly packageName: '@goodvibes-jev/daemon';
-  readonly daemonVersion: string;
-  readonly target: DaemonSqliteRuntime['target'];
-  readonly sqliteVersion: string;
-  readonly sourceUrl: string;
-  readonly sourceSha3: string;
-  readonly sha256: string;
-  readonly size: number;
-}
+export interface DaemonSqliteOwner extends DarwinDaemonSqliteOwner {}
 
 // The producer supplies this literal through Bun.define after verifying its
 // actual native output. Adjacent provenance never grants byte authority.
 declare const __DAEMON_NATIVE_SQLITE_OWNER__: DaemonSqliteOwner | null;
 
-function retainedFile(path: string, cohortRoot: string): string {
+function retainedFile(path: string, cohortRoot: string, strictClocks = false): string {
   const parents: string[] = [];
   for (let current = dirname(path);;) {
     const stat = lstatSync(current, { bigint: true });
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Native SQLite parent is not a regular directory');
     const within = relative(cohortRoot, current);
     const selectedParent = within === '' || (!within.startsWith(`..${sep}`) && within !== '..' && !within.startsWith(sep));
-    const revision = selectedParent ? `:${stat.ctimeNs}:${stat.mtimeNs}` : '';
-    parents.push(`${realpathSync(current)}:${stat.dev}:${stat.ino}:${stat.mode}:${stat.uid}:${stat.gid}${revision}`);
+    const revision = strictClocks && selectedParent ? `:${stat.ctimeNs}:${stat.mtimeNs}` : '';
+    parents.push(`${realpathSync(current)}:${stat.dev}:${stat.ino}:${stat.mode}:${stat.uid}:${stat.gid}:${stat.birthtimeNs}${revision}`);
     const parent = dirname(current); if (parent === current) break; current = parent;
   }
   const stat = lstatSync(path, { bigint: true });
@@ -93,8 +84,15 @@ export interface DaemonSqliteOptions {
   readonly setCustomSQLite?: (path: string) => boolean;
 }
 
+export interface DaemonSqliteAdmission {
+  readonly owner: Readonly<DaemonSqliteOwner>;
+  readonly execPath: string;
+  readonly libraryPath: string;
+  readonly provenancePath: string;
+  assertCurrent(): void;
+}
 /** Run before importing any service module that can construct a database. */
-export function initializeDaemonNativeSqlite(options: DaemonSqliteOptions = {}): void {
+export function initializeDaemonNativeSqlite(options: DaemonSqliteOptions = {}): DaemonSqliteAdmission | undefined {
   const { platform = process.platform, arch = process.arch, execPath = process.execPath,
     bundled = isCompiledBunModuleUrl(import.meta.url), version = COMPILED_VERSION,
     capturedOwner = typeof __DAEMON_NATIVE_SQLITE_OWNER__ === 'undefined' ? null : __DAEMON_NATIVE_SQLITE_OWNER__, signal, assertCurrent,
@@ -112,7 +110,7 @@ export function initializeDaemonNativeSqlite(options: DaemonSqliteOptions = {}):
   const cohortRoot = dirname(execPath);
   const libraryPath = join(cohortRoot, runtime.libraryPath);
   const provenancePath = join(cohortRoot, runtime.provenancePath);
-  const libraryOwner = retainedFile(libraryPath, cohortRoot), provenanceOwner = retainedFile(provenancePath, cohortRoot);
+  const libraryOwner = retainedFile(libraryPath, cohortRoot, true), provenanceOwner = retainedFile(provenancePath, cohortRoot, true);
   const bytes = readRetainedBytes(libraryPath, expected.size, true);
   const provenance: unknown = JSON.parse(readRetainedBytes(provenancePath, 16_384).toString('utf8'));
   if (bytes.length !== expected.size || createHash('sha256').update(bytes).digest('hex') !== expected.sha256) {
@@ -128,9 +126,19 @@ export function initializeDaemonNativeSqlite(options: DaemonSqliteOptions = {}):
     signal?.throwIfAborted();
     const result = assertCurrent?.();
     if (result !== undefined) { drainOwned(result); throw new Error('Native SQLite lifetime must be synchronous'); }
-    if (retainedFile(libraryPath, cohortRoot) !== libraryOwner || retainedFile(provenancePath, cohortRoot) !== provenanceOwner) throw new Error('Native SQLite companion changed before database construction');
+    if (retainedFile(libraryPath, cohortRoot, true) !== libraryOwner || retainedFile(provenancePath, cohortRoot, true) !== provenanceOwner) throw new Error('Native SQLite companion changed before database construction');
   };
   current();
   if (!setCustomSQLite(libraryPath)) throw new Error('Bun refused the retained native SQLite runtime before database construction');
   current();
+  // The synchronous loader selection above retains strict directory clocks
+  // across native admission. Later sibling publication is legitimate; keep the
+  // actual original files/physical ancestors rather than their child clocks.
+  const librarySource = retainedFile(libraryPath, cohortRoot), provenanceSource = retainedFile(provenancePath, cohortRoot);
+  return Object.freeze({ owner: expected, execPath, libraryPath, provenancePath, assertCurrent() {
+    signal?.throwIfAborted(); const result: unknown = assertCurrent?.();
+    if (result !== undefined) { drainOwned(result); throw new Error('Native SQLite lifetime must be synchronous'); }
+    if (retainedFile(libraryPath, cohortRoot) !== librarySource || retainedFile(provenancePath, cohortRoot) !== provenanceSource) throw new Error('Original native SQLite source changed');
+    signal?.throwIfAborted();
+  } });
 }

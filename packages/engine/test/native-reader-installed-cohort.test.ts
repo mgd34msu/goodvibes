@@ -1,11 +1,11 @@
 /** Regression source intentionally UNRUN during the coding-first pass. */
 import { expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { createNativeDataWriteOwner, nativeReaderCapabilities, NATIVE_READER_REQUIREMENT_FILE } from '../sdk/src/platform/runtime/native-reader-compatibility.js';
 import { createInstalledReaderCohort } from '../sdk/src/platform/runtime/native-reader-cohort.js';
-import { clientReaderAsset, type ClientReaderArtifact, type ClientReaderPackage } from '../sdk/src/platform/runtime/client-reader-artifact.js';
+import { clientReaderAsset, clientReaderPayloadPaths, clientReaderMemberPath, type ClientReaderArtifact, type ClientReaderPackage } from '../sdk/src/platform/runtime/client-reader-artifact.js';
 import { sha256 } from '../sdk/src/platform/runtime/self-update.js';
 import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
 import { makeProjectTempDir } from './_helpers/project-temp.js';
@@ -15,12 +15,18 @@ function fixture() {
   const owner = createNativeDataWriteOwner({ execPath, version: '3.1.2', assertCurrent() {}, readerCohort: cohort });
   return { root, execPath, cohort, owner, file: join(root, NATIVE_READER_REQUIREMENT_FILE) };
 }
-function peer(root: string, packageName: ClientReaderPackage = '@goodvibes-jev/agent', formats: readonly string[] = nativeReaderCapabilities('3.1.2').formats, version = '3.1.2') {
+function peer(root: string, packageName: ClientReaderPackage = '@goodvibes-jev/agent', formats: readonly string[] = nativeReaderCapabilities('3.1.2').formats, version = '3.1.2', historicalProgramOnly = false) {
   const program = packageName === '@goodvibes-jev/tui' ? 'goodvibes' : packageName === '@goodvibes-jev/agent' ? 'goodvibes-agent' : 'goodvibes-daemon';
   const path = join(root, program), bytes = Buffer.from(`Published ${program} ${version}`), target = 'darwin-x64';
   writeFileSync(path, bytes, { mode: 0o755 });
+  const files: Array<ClientReaderArtifact['files'][number]> = [{ path: clientReaderAsset(packageName, target), sha256: sha256(bytes), mode: 0o755, size: bytes.length }];
   const artifact: ClientReaderArtifact = { schema: 1, packageName, version, target, sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40), headCommit: 'c'.repeat(40),
-    files: [{ path: clientReaderAsset(packageName, target), sha256: sha256(bytes), mode: 0o755, size: bytes.length }], readers: { schema: 1, version, formats } };
+    files, readers: { schema: 1, version, formats } };
+  if (packageName === '@goodvibes-jev/daemon' && !historicalProgramOnly) for (const member of clientReaderPayloadPaths(packageName, target).slice(1)) {
+    const payload = Buffer.from('Published companion ' + member), memberPath = clientReaderMemberPath(path, artifact, member);
+    mkdirSync(dirname(memberPath), { recursive: true }); writeFileSync(memberPath, payload, { mode: 0o644 });
+    files.push({ path: member, sha256: sha256(payload), mode: 0o644, size: payload.length });
+  }
   writeFileSync(path + '.readers.json', JSON.stringify(artifact), { mode: 0o644 }); return { path, bytes, artifact };
 }
 
@@ -74,4 +80,20 @@ test('already declared accounting uses its saved floor after execution cancellat
   owner.declare('payment-retained-holds-v2'); const before = readFileSync(f.file); active = false;
   expect(() => owner.declare('payment-retained-holds-v2')).not.toThrow(); expect(readFileSync(f.file)).toEqual(before);
   expect(() => owner.declare('configuration-policy-epochs-v2')).toThrow(); expect(readFileSync(f.file)).toEqual(before);
+});
+
+// Historical one-file Darwin metadata remains readable for history; it cannot
+// certify the installed daemon's vector/SQLite companions for a new data floor.
+test('historical Darwin daemon reader metadata cannot approve a new shared format', () => {
+  const f = fixture(), daemon = peer(f.root, '@goodvibes-jev/daemon', nativeReaderCapabilities('3.1.2').formats, '3.1.2', true);
+  expect(daemon.artifact.files).toHaveLength(1);
+  expect(() => f.owner.declare('contract-review-observations-v1')).toThrow();
+  expect(existsSync(f.file)).toBe(false);
+  expect(readFileSync(daemon.path)).toEqual(daemon.bytes);
+});
+
+test('a complete matching Darwin daemon peer can approve a shared format', () => {
+  const f = fixture(); peer(f.root, '@goodvibes-jev/daemon');
+  expect(() => f.owner.declare('contract-review-observations-v1')).not.toThrow();
+  expect(JSON.parse(readFileSync(f.file, 'utf8')).formats).toEqual(['contract-review-observations-v1']);
 });

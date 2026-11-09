@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Apply the same decision endpoint validation in settings, terminal selection
+  and transport. WebUI destination/provider changes disable the previous target
+  credential until the user explicitly chooses it; invalid addresses make no
+  credential-setting write.
+
 - Match Home Graph objects by their saved space, kind and original object ID,
   preserving existing IDs and URLs across renames and restarts. New nodes use
   full opaque IDs; missing-object reads create nothing. Snapshot links and

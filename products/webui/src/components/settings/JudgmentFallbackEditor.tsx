@@ -69,7 +69,8 @@ export function JudgmentFallbackEditor({
     <div>
       <p>
         Targets are tried in this order after the primary decision model becomes unavailable.
-        Credentials are reference names only.
+        Credentials are reference names only. Changing an endpoint or provider resets authentication
+        to none; choose its credential source explicitly before saving.
       </p>
       {malformed && (
         <>
@@ -94,7 +95,7 @@ export function JudgmentFallbackEditor({
             <Input
               aria-label={`Fallback ${index + 1} endpoint`}
               value={typeof row.endpoint === "string" ? row.endpoint : ""}
-              onChange={(event) => update(index, { endpoint: event.target.value })}
+              onChange={(event) => update(index, { endpoint: event.target.value, keySource: "none", keyName: "" })}
             />
           </Field>
           <Field label="Provider">
@@ -108,6 +109,7 @@ export function JudgmentFallbackEditor({
               ]}
               onChange={(adapter) =>
                 update(index, {
+                  keySource: "none", keyName: "",
                   backend: {
                     ...row.backend,
                     adapter: adapter as "system-one" | "cloudflare-workers-ai" | "laya",

@@ -188,3 +188,13 @@ test('structured terminal settings describe their actual picker controls', () =>
   expect(value('judgment.fallbacks', [{ model: 'english' }])).toBe('1 fallback target (Enter to edit order)');
   expect(value('provider.decisionRouter', {})).toBe('Enter to configure category routes');
 });
+
+
+test('terminal decision endpoint chooser refuses the same unsafe destinations that native settings and transport refuse', () => {
+  for (const endpoint of ['https://user:pass@example.test', 'https://example.test?token=example', 'https://example.test#fragment', ' https://example.test', 'https://example.test\\private']) {
+    const f = fixture('judgment-model'); f.choose('kev-9b');
+    f.type(endpoint);
+    expect(f.modal.filteredItems.some(item => item.id === endpoint)).toBe(false);
+    expect(f.config.get('judgment.endpoint')).toBe('');
+  }
+});

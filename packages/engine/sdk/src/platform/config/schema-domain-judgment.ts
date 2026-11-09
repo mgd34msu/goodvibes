@@ -8,7 +8,7 @@ import { type ConfigSettingDefinition, intRange } from './schema-shared.js';
 import type { JudgmentSettings } from './schema-types-judgment.js';
 import type { ConfigSetting } from './schema-types.js';
 import { validJudgmentFallbackSettings, validJudgmentCredentialName } from './judgment-fallback-settings.js';
-import { captureJudgmentBackendSettings } from '@goodvibes-jev/judgment/decisions';
+import { captureJudgmentBackendSettings, validEndpointURL } from '@goodvibes-jev/judgment/decisions';
 
 export const judgmentConfigDefaults: { judgment: JudgmentSettings } = {
   judgment: {
@@ -24,14 +24,7 @@ export const judgmentConfigDefaults: { judgment: JudgmentSettings } = {
 };
 
 function isEndpoint(value: unknown): boolean {
-  if (typeof value !== 'string') return false;
-  if (value === '') return true;
-  try {
-    const url = new URL(value);
-    return url.protocol === 'https:' || url.protocol === 'http:';
-  } catch {
-    return false;
-  }
+  return typeof value === 'string' && (value === '' || validEndpointURL(value));
 }
 
 export const judgmentConfigSettings: (ConfigSettingDefinition | ConfigSetting)[] = [
@@ -46,7 +39,7 @@ export const judgmentConfigSettings: (ConfigSettingDefinition | ConfigSetting)[]
     default: '',
     description: 'System One endpoint the engine asks for judgments; empty uses TYPESAFE_BASE_URL, then the hosted endpoint. A loopback address selects a local model',
     validate: isEndpoint,
-    validationHint: 'empty, or an http(s) URL',
+    validationHint: 'empty, or an http(s) URL without embedded credentials, query or fragment',
   },
   {
     key: 'judgment.keySource',

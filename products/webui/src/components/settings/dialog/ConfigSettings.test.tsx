@@ -16,6 +16,8 @@ type SetOutcome = "ok" | "reject";
 let setOutcome: SetOutcome = "ok";
 let fallbackValue: unknown = [];
 let semanticCalls = 0;
+let primaryEndpoint = "https://api.typesafe.ai";
+let primaryKeySource = "env";
 
 // Enough of a live config to exercise: a typed string field
 // (provider.systemPromptFile), the engine-declared display.theme field,
@@ -68,7 +70,7 @@ mock.module("../../../lib/goodvibes", () => ({
           if (outcome === "network-error") {
             return Promise.reject(new Error("Failed to fetch"));
           }
-          return Promise.resolve({ ...CONFIG_FIXTURE, judgment: { fallbacks: fallbackValue } });
+          return Promise.resolve({ ...CONFIG_FIXTURE, judgment: { fallbacks: fallbackValue, endpoint: primaryEndpoint, keySource: primaryKeySource, keyName: "TYPESAFE_API_KEY" } });
         },
         set: (key: string, value: unknown) => {
           configSetCalls.push([key, value]);
@@ -78,6 +80,8 @@ mock.module("../../../lib/goodvibes", () => ({
             );
           }
           if (key === "judgment.fallbacks") fallbackValue = value;
+          if (key === "judgment.endpoint") primaryEndpoint = String(value);
+          if (key === "judgment.keySource") primaryKeySource = String(value);
           // daemonOwned surfaces.* keys report a daemon-tier persistedTo; everything
           // else reports the ordinary client settings path, mirrors system-routes.ts.
           const daemonOwned = key.startsWith("surfaces.");
@@ -231,6 +235,7 @@ afterEach(() => {
   configSetCalls.length = 0;
   fallbackValue = [];
   semanticCalls = 0;
+  primaryEndpoint = "https://api.typesafe.ai"; primaryKeySource = "env";
 });
 
 describe("settings config groups: schema-driven structure", () => {
@@ -786,3 +791,64 @@ describe("the Payments category offers card entry", () => {
     unmount();
   });
 });
+
+
+async function showJudgmentSettings(el: HTMLElement): Promise<void> {
+  await waitFor(() => [...el.querySelectorAll('.settings-category')].some(button => button.textContent === 'Judgment'));
+  clickCategory(el, 'Judgment');
+}
+
+test('changing the actual primary endpoint disables prior authentication before publishing the new destination', async () => {
+  const ui = render();
+  try {
+    await showJudgmentSettings(ui.el);
+    const input = ui.el.querySelector('[aria-label="judgment.endpoint"]') as HTMLInputElement | null;
+    if (!input) throw new Error('Missing primary endpoint editor');
+    setInputValue(input, 'http://127.0.0.1:4321'); commitByBlur(input);
+    await waitFor(() => configSetCalls.some(([key]) => key === 'judgment.endpoint'));
+    expect(configSetCalls).toEqual([['judgment.keySource', 'none'], ['judgment.endpoint', 'http://127.0.0.1:4321']]);
+    expect(primaryKeySource).toBe('none'); expect(primaryEndpoint).toBe('http://127.0.0.1:4321');
+    expect(semanticCalls).toBe(0);
+  } finally { ui.unmount(); }
+});
+
+for (const endpoint of ['https://user:pass@example.test', 'https://example.test?token=example', 'https://example.test#fragment']) {
+  test(`an invalid primary endpoint is refused without changing the saved destination or credential source: ${endpoint}`, async () => {
+    const ui = render();
+    try {
+      await showJudgmentSettings(ui.el);
+      const input = ui.el.querySelector('[aria-label="judgment.endpoint"]') as HTMLInputElement | null;
+      if (!input) throw new Error('Missing primary endpoint editor');
+      setInputValue(input, endpoint); commitByBlur(input);
+      await waitFor(() => Boolean(ui.el.querySelector('[data-config-key="judgment.endpoint"] [role="alert"]')));
+      expect(configSetCalls).toEqual([]); expect(primaryKeySource).toBe('env'); expect(primaryEndpoint).toBe('https://api.typesafe.ai');
+    } finally { ui.unmount(); }
+  });
+}
+
+for (const edit of ['endpoint', 'provider'] as const) {
+  test(`the actual fallback ${edit} control clears the previous target credential until the owner chooses it explicitly`, async () => {
+    fallbackValue = [{ endpoint: 'https://fallback.example.test', model: 'jev-latest', keySource: 'secret', keyName: 'judgment/prior' }];
+    const ui = render();
+    try {
+      await showJudgmentSettings(ui.el);
+      const field = ui.el.querySelector('[data-config-key="judgment.fallbacks"]');
+      if (!field) throw new Error('Missing fallback editor');
+      if (edit === 'endpoint') {
+        const input = field.querySelector('[aria-label="Fallback 1 endpoint"]') as HTMLInputElement | null;
+        if (!input) throw new Error('Missing fallback endpoint');
+        setInputValue(input, 'http://127.0.0.1:4321');
+      } else {
+        const provider = field.querySelector('[aria-label="Fallback 1 provider"]') as HTMLButtonElement | null;
+        if (!provider) throw new Error('Missing fallback provider');
+        openSelect(provider); pickOption('Laya');
+      }
+      flushSync(() => [...field.querySelectorAll('button')].find(button => button.textContent === 'Save')
+        ?.dispatchEvent(new window.MouseEvent('click', { bubbles: true })));
+      await waitFor(() => configSetCalls.some(([key]) => key === 'judgment.fallbacks'));
+      expect(configSetCalls).toHaveLength(1);
+      expect(fallbackValue).toMatchObject([{ keySource: 'none', keyName: '',
+        ...(edit === 'endpoint' ? { endpoint: 'http://127.0.0.1:4321' } : { backend: { adapter: 'laya', responseModels: ['laya-rl-agent'] } }) }]);
+    } finally { ui.unmount(); }
+  });
+}

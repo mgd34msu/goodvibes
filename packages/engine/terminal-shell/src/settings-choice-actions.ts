@@ -1,6 +1,6 @@
 import type { ConfigKey, ConfigManager, JudgmentFallbackSettings } from '@goodvibes-jev/engine/sdk/platform/config';
 import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/sdk/platform/config';
-import { DECISION_MODEL_PROFILES, captureJudgmentBackendSettings, type DecisionModelProfile } from '@goodvibes-jev/judgment';
+import { DECISION_MODEL_PROFILES, captureJudgmentBackendSettings, validEndpointURL, type DecisionModelProfile } from '@goodvibes-jev/judgment';
 import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
 import type { OpenSelection, SelectionItem } from './selection-modal.js';
 
@@ -94,8 +94,8 @@ export function openSettingsChoice(
     const hosted = profile.id === 'jev' ? 'https://api.typesafe.ai' : '';
     const valid = (text: string): boolean => {
       try {
+        if (!validEndpointURL(text)) return false;
         const url = new URL(text);
-        if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) return false;
         return profile.adapter !== 'cloudflare-workers-ai'
           || url.hostname === 'api.cloudflare.com' && url.pathname.endsWith(`/ai/run/@cf/cloudflare/${profile.model}`);
       } catch { return false; }

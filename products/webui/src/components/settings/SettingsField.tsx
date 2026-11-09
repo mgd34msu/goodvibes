@@ -1,3 +1,4 @@
+import { validEndpointURL } from '@goodvibes-jev/judgment/decisions';
 import { JudgmentFallbackEditor } from "./JudgmentFallbackEditor";
 import { JudgmentModelField, JudgmentProviderField } from "./JudgmentModelFields";
 import { DecisionRouterEditor } from "./DecisionRouterEditor";
@@ -328,7 +329,17 @@ export function SettingsField({ field, onCommit, persisted, currency }: Settings
       <ScalarSettingsField
         key={field.key}
         field={field}
-        onCommit={(value) => onCommit(field.key, value)}
+        onCommit={async (value) => {
+          if (field.key === "judgment.endpoint") {
+            if (typeof value !== "string" || value !== "" && !validEndpointURL(value)) {
+              throw new Error("Use an http(s) decision endpoint without embedded credentials, a query or a fragment.");
+            }
+            // Changing a destination never implicitly forwards the previous
+            // target's credential. The owner selects its source explicitly.
+            if (value !== effectiveValue(field)) await onCommit("judgment.keySource", "none");
+          }
+          await onCommit(field.key, value);
+        }}
       />
     );
   })();

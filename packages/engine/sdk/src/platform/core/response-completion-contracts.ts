@@ -10,17 +10,18 @@ import { originalObligationSource } from '../contract/batteries/original-obligat
 // Process-local provenance: copied tool JSON cannot mint a native work receipt.
 // These are work checkpoints, never final-response publication permits.
 const nativeWorkReceipts = new WeakMap<object, RetainedOwnedJson>();
+const applyReceipt = Reflect.apply, receiptGet = WeakMap.prototype.get, receiptSet = WeakMap.prototype.set, receiptDelete = WeakMap.prototype.delete;
 export function isNativeCompletedWorkReceipt(original: unknown, admitted: unknown): boolean {
   if (!original || typeof original !== 'object') return false;
-  const retained = nativeWorkReceipts.get(original);
+  const retained = applyReceipt(receiptGet, nativeWorkReceipts, [original]) as RetainedOwnedJson | undefined;
   if (!retained) return false;
   try { retained.assertCurrent(); }
-  catch { nativeWorkReceipts.delete(original); return false; }
+  catch { applyReceipt(receiptDelete, nativeWorkReceipts, [original]); return false; }
   try { return isDeepStrictEqual(retained.snapshot, captureOwnedJson(admitted, nodeTypes.isProxy)); }
   catch { return false; }
 }
 
-function recordedReview(contract: ContractView, target: 'final-answer-review' | 'goal-obligations' | 'original-obligations') {
+function recordedReview(contract: ContractView, target: 'final-answer-review' | 'goal-obligations' | 'original-obligations', answerDigest: () => string | null) {
   const decision = contract.decisions.findLast(entry => entry.targetId === `${contract.id}.${target}`);
   if (!decision) return null;
   try {
@@ -49,7 +50,7 @@ function recordedReview(contract: ContractView, target: 'final-answer-review' | 
           : record.schemaVersion === 1 && version(policy) && digest(record.literalSourceDigest) && ids(record.sourceJudgmentDecisionIds)
             && reading(record.reading) && reading(record.sourceGoal));
     return { record, recordedDecisionId: decision.id, wellFormed,
-      matchesSavedAnswer: wellFormed && typeof contract.answer === 'string' && record.outputDigest === hashState(contract.answer),
+      matchesSavedAnswer: wellFormed && record.outputDigest === answerDigest(),
       ...(target === 'goal-obligations' ? { matchesOriginalScope: wellFormed && record.literalSourceDigest === hashState(goalObligationSource(contract)) } : {}),
       ...(target === 'original-obligations' ? { matchesOriginalScope: wellFormed && record.sourceDigest === hashState(originalObligationSource(contract)) } : {}),
       meaning: 'Exact saved native Jev receipt with host-computed bindings. A mismatched or rejected receipt is not acceptance. A matching passed receipt establishes review of that saved result under its recorded policy; it grants no current final-response permit.' };
@@ -63,7 +64,13 @@ export function completedContractEvidence(runner: Pick<ContractRunner, 'list'>, 
   return runner.list({ sessionId, includeTerminal: true, includeInputSnapshot: false })
     .filter(contract => contract.sessionId === sessionId && isTerminalContractStatus(contract.status))
     .map(contract => {
-      const originalObligationCoverage = recordedReview(contract, 'original-obligations');
+      // Actual saved receipts independently bind this one original answer.
+      // Hash only when a well-formed receipt needs comparison, once for this
+      // observation. The complete answer itself is already returned below.
+      const answer = contract.answer;
+      let retainedAnswerDigest: string | undefined;
+      const answerDigest = () => typeof answer === 'string' ? retainedAnswerDigest ??= hashState(answer) : null;
+      const originalObligationCoverage = recordedReview(contract, 'original-obligations', answerDigest);
       const hasOriginalObligationCoverage = contract.decisions.some(decision => decision.targetId === `${contract.id}.original-obligations`);
       const work = {
       kind: 'host-completed-contract', id: contract.id, sessionId: contract.sessionId,
@@ -76,13 +83,12 @@ export function completedContractEvidence(runner: Pick<ContractRunner, 'list'>, 
         dispositionReason: criterion.dispositionReason ?? null, status: criterion.status,
         reading: criterion.readings.at(-1) ?? null })),
       finalCheck: contract.checks.at(-1) ?? null,
-      savedAnswerDigest: typeof contract.answer === 'string' ? hashState(contract.answer) : null,
-      contentReview: recordedReview(contract, 'final-answer-review'),
-      goalCoverage: recordedReview(contract, 'goal-obligations'),
+      contentReview: recordedReview(contract, 'final-answer-review', answerDigest),
+      goalCoverage: recordedReview(contract, 'goal-obligations', answerDigest),
       ...(originalObligationCoverage ? { originalObligationCoverage } : {}),
       units: contract.units.map(unit => ({ id: unit.id, goal: unit.goal, status: unit.status,
         check: unit.checks.at(-1) ?? null })),
-      answer: contract.answer ?? null, publication: contract.commit ?? null,
+      answer: answer ?? null, publication: contract.commit ?? null,
       error: contract.error ?? null, failureKind: contract.failureKind ?? null,
       meaning: 'Actual terminal runtime record for this identified contract and original scope. Its checks describe the saved work, not current final-response approval. A passed status alone does not establish unsupported new claims, current artifact contents, successful publication or unrelated work. Failed/cancelled checks and publication failures remain evidence. Compare the current response and original request with the exact recorded scope, checks, answer, publication and any later invalidating observations.',
       };
@@ -93,7 +99,7 @@ export function completedContractEvidence(runner: Pick<ContractRunner, 'list'>, 
           || (!hasOriginalObligationCoverage && work.goalCoverage?.wellFormed && work.goalCoverage.matchesSavedAnswer && work.goalCoverage.matchesOriginalScope
             && work.goalCoverage.record.passed === true))
         && ['applied', 'committed'].includes(String(work.publication?.status)))
-        nativeWorkReceipts.set(work, retainOwnedJson(work, nodeTypes.isProxy));
+        applyReceipt(receiptSet, nativeWorkReceipts, [work, retainOwnedJson(work, nodeTypes.isProxy)]);
       return work;
     });
 }

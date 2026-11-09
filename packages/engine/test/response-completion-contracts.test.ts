@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort as baseFakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 
@@ -57,6 +57,50 @@ test('native work receipts compare exact detached values without invoking suppli
   expect(isNativeCompletedWorkReceipt(work, proxy)).toBe(false);
   expect(accessed).toBe(false);
   expect(isNativeCompletedWorkReceipt(work, structuredClone(work))).toBe(true);
+});
+
+// Regression source UNRUN during the coding-first pass.
+test('saved contract observation hashes no unreviewed answer and compares a shared reviewed answer only once', () => {
+  const viewed = contract({ answer: 'Complete observed answer. '.repeat(20_000) });
+  const hashes = spyOn(Bun.CryptoHasher, 'hash');
+  try {
+    const unreviewed = completedContractEvidence({ list: () => [viewed] }, 'session')[0]!;
+    expect(unreviewed.answer).toBe(viewed.answer);
+    expect(unreviewed).not.toHaveProperty('savedAnswerDigest');
+    expect(hashes.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+    const reviewed = approvedWork()[0]!;
+    // Two saved answer receipts and their scope still compare independently;
+    // the same complete answer is not rehashed for each of them.
+    expect(reviewed.contentReview?.matchesSavedAnswer).toBe(true);
+    expect(reviewed.goalCoverage?.matchesSavedAnswer).toBe(true);
+    // approvedWork constructs its independent old-format fixtures using SHA.
+    // Observe actual matching calls by the unique large answer in a second pass.
+    hashes.mockClear();
+    const content = reviewed.contentReview!.record, goal = reviewed.goalCoverage!.record;
+    const answer = viewed.answer!;
+    const commitment = hashState(answer);
+    const large = contract({ answer, decisions: [
+      { id: 'large-content', targetId: 'work.final-answer-review', reason: JSON.stringify({ ...content, outputDigest: commitment }) },
+      { id: 'large-goal', targetId: 'work.goal-obligations', reason: JSON.stringify({ ...goal, outputDigest: commitment }) },
+    ] });
+    hashes.mockClear();
+    const current = completedContractEvidence({ list: () => [large] }, 'session')[0]!;
+    expect(current.contentReview!.matchesSavedAnswer).toBe(true);
+    expect(current.goalCoverage!.matchesSavedAnswer).toBe(true);
+    expect(hashes.mock.calls.filter(([algorithm, input]) => algorithm === 'sha256' && input === JSON.stringify(answer))).toHaveLength(1);
+  } finally { hashes.mockRestore(); }
+});
+
+test('a later map override cannot grant a copied saved-work checkpoint native provenance', () => {
+  const work = approvedWork()[0]!, copied = structuredClone(work);
+  const get = WeakMap.prototype.get, set = WeakMap.prototype.set, apply = Reflect.apply;
+  const observations: boolean[] = [];
+  try {
+    WeakMap.prototype.get = () => ({ snapshot: copied, assertCurrent() {} });
+    Reflect.apply = (() => ({ snapshot: copied, assertCurrent() {} })) as typeof Reflect.apply;
+    observations.push(isNativeCompletedWorkReceipt(copied, copied), isNativeCompletedWorkReceipt(work, copied));
+  } finally { WeakMap.prototype.get = get; WeakMap.prototype.set = set; Reflect.apply = apply; }
+  expect(observations).toEqual([false, true]);
 });
 
 test('an observed mutation retires a native completed-work receipt even if its old values are restored', () => {

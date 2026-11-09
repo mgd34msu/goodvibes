@@ -121,7 +121,7 @@ export function verificationSources(state: Record<string, unknown>, own: Verific
       const { units: _units, answer: _answer, ...acceptance } = work;
       add('observation', `host completed contract ${work.id}; acceptance and publication`, acceptance);
       if (typeof work.answer === 'string') add('observation', `host completed contract ${work.id}; exact saved answer`, {
-        kind: 'host-saved-contract-answer', id: work.id, answer: work.answer, savedAnswerDigest: work.savedAnswerDigest,
+        kind: 'host-saved-contract-answer', id: work.id, answer: work.answer,
         contentReview: work.contentReview, goalCoverage: work.goalCoverage,
         meaning: 'Exact saved result whose native review bindings are supplied beside it. This is the prior checked result, not the current proposed answer, user instructions or a new completion permit.',
       });

@@ -230,12 +230,14 @@ function parseClientData(bytes: Uint8Array<ArrayBuffer>): ParsedClientData | nul
 
 /**
  * Verify a WebAuthn assertion against a stored credential and the expected
- * challenge/rpId/origin. The full ceremony, in order: clientData type +
- * challenge + origin, rpIdHash, user-presence (always) and user-verification
+ * challenge/rpId/origin. ClientData type, challenge, origin and authenticator
+ * structure are checked first; malformed DER is then refused before any digest.
+ * The remaining ceremony checks rpIdHash, user-presence (always) and user-verification
  * (when required) flags, the ECDSA-P256 signature over
  * `authenticatorData || SHA-256(clientDataJSON)`, then the signature-counter
- * regression check. Any failure returns a specific reason; nothing partial ever
- * reads as a pass.
+ * regression check. Malformed DER takes precedence over later RP/flag/key
+ * failures when multiple inputs are invalid. Any failure returns a specific
+ * reason; nothing partial ever reads as a pass.
  */
 export async function verifyStepUpAssertion(params: StepUpVerifyParams): Promise<StepUpVerifyResult> {
   const { envelope, credential } = params;
@@ -261,6 +263,10 @@ export async function verifyStepUpAssertion(params: StepUpVerifyParams): Promise
 
   const parsedAuth = parseAuthenticatorData(authData);
   if (!parsedAuth) return { ok: false, reason: 'malformed-envelope' };
+  // An impossible DER structure cannot authenticate any relying party. Parse
+  // it before hashing RP/client data; viable signatures still take every check.
+  const rawSignature = derToRawEcdsaSignature(signatureDer);
+  if (!rawSignature) return { ok: false, reason: 'bad-signature' };
   const expectedRpIdHash = await sha256(new TextEncoder().encode(params.rpId) as Uint8Array<ArrayBuffer>);
   if (toBase64Url(parsedAuth.rpIdHash) !== toBase64Url(expectedRpIdHash)) return { ok: false, reason: 'rpid-mismatch' };
   if (!parsedAuth.userPresent) return { ok: false, reason: 'user-presence-missing' };
@@ -268,8 +274,6 @@ export async function verifyStepUpAssertion(params: StepUpVerifyParams): Promise
 
   const rawPoint = coseP256ToRawPoint(fromBase64Url(credential.publicKeyCose));
   if (!rawPoint) return { ok: false, reason: 'bad-public-key' };
-  const rawSignature = derToRawEcdsaSignature(signatureDer);
-  if (!rawSignature) return { ok: false, reason: 'bad-signature' };
 
   let key: CryptoKey;
   try {

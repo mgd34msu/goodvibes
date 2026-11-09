@@ -12,13 +12,13 @@
  * challenge, a replayed (consumed) challenge, a wrong origin, and a signature
  * counter that goes backwards (a cloned-authenticator signal).
  */
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { fromBase64Url, toBase64Url } from '@goodvibes-jev/engine/transport-core/relay';
 import {
   StepUpService,
   encodeAssertionHeader,
 } from '../platform/src/platform/relay/step-up-service.ts';
-import type { StepUpAssertionEnvelope } from '../platform/src/platform/relay/step-up-webauthn.ts';
+import { verifyStepUpAssertion, type StepUpAssertionEnvelope, type StoredStepUpCredential } from '../platform/src/platform/relay/step-up-webauthn.ts';
 
 const RP_ID = 'daemon.example';
 const ORIGIN = 'https://daemon.example';
@@ -261,4 +261,29 @@ describe('relay step-up WebAuthn ceremony', () => {
     const result = await service.verify(encodeAssertionHeader(envelope));
     expect(result).toEqual({ ok: false, reason: 'no-credential' });
   });
+});
+
+
+test('malformed DER assertion structure spends no SHA while viable signatures retain actual ceremony verification', async () => {
+  const credential = await makeCredential(), challenge = toBase64Url(u8(8, 7, 6, 5));
+  const envelope = await signAssertion({ credential, challenge, signCount: 1 });
+  const stored: StoredStepUpCredential = { credentialId: credential.credentialId, publicKeyCose: credential.publicKeyCose, signCount: 0, createdAt: 1 };
+  const params = { envelope, credential: stored, expectedChallenge: challenge, rpId: RP_ID, allowedOrigins: [ORIGIN], requireUserVerification: true };
+  const digests = spyOn(crypto.subtle, 'digest'), verification = spyOn(crypto.subtle, 'verify');
+  try {
+    for (const signature of [u8(), u8(0), u8(0x30, 6, 0x02), u8(0x30, 6, 0x04, 1, 1, 0x02, 1, 1)]) {
+      expect(await verifyStepUpAssertion({ ...params, envelope: { ...envelope, signature: toBase64Url(signature) } }))
+        .toEqual({ ok: false, reason: 'bad-signature' });
+    }
+    // The structural failure deliberately precedes later RP/policy failures.
+    expect(await verifyStepUpAssertion({ ...params, rpId: 'wrong.example', envelope: { ...envelope, signature: toBase64Url(u8(0)) } }))
+      .toEqual({ ok: false, reason: 'bad-signature' });
+    expect(digests).not.toHaveBeenCalled(); expect(verification).not.toHaveBeenCalled();
+    expect(await verifyStepUpAssertion(params)).toEqual({ ok: true, signCount: 1 });
+    expect(digests).toHaveBeenCalledTimes(2); expect(verification).toHaveBeenCalledTimes(1);
+    const changed = fromBase64Url(envelope.signature); changed[changed.length - 1] = changed[changed.length - 1]! ^ 1;
+    expect(await verifyStepUpAssertion({ ...params, envelope: { ...envelope, signature: toBase64Url(changed) } }))
+      .toEqual({ ok: false, reason: 'signature-invalid' });
+    expect(digests).toHaveBeenCalledTimes(4); expect(verification).toHaveBeenCalledTimes(2);
+  } finally { digests.mockRestore(); verification.mockRestore(); }
 });

@@ -228,9 +228,10 @@ export class KnowledgeStore {
     // Configuration supplied by a caller cannot turn coordination off.
     const nativeDataWriter = config.nativeDataWriter ?? config.configManager?.getNativeDataWriter?.();
     const declareNativeData = nativeDataWriter?.declare.bind(nativeDataWriter);
+    const beforeInitialRead = config.beforeInitialRead?.bind(config);
     this.declareNativeConversationFormat = declareNativeData ? () => declareNativeData('native-conversation-captures-v2') : undefined;
     this.declareNativeExplicitSourceFormat = declareNativeData ? () => declareNativeData('native-explicit-sources-v3') : undefined;
-    this.sqlite = new SQLiteStore(this.dbPath, { coordinated: true, beforePersist: () => declareNativeData?.('knowledge-schema-v12') });
+    this.sqlite = new SQLiteStore(this.dbPath, { coordinated: true, beforePersist: () => declareNativeData?.('knowledge-schema-v12'), ...(beforeInitialRead ? { beforeInitialRead } : {}) });
     nativePublicationApply(nativePublicationAdd, nativeNodePublicationOwners, [this]);
     void this.init().catch((error: unknown) => {
       logger.error('[knowledge-store] initialization failed', {

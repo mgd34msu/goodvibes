@@ -25,6 +25,10 @@ export const KNOWLEDGE_FAMILY_DB_FILE: Readonly<Record<KnowledgeStoreFamily, str
 });
 
 export interface KnowledgeStoreConfig {
+  /** Restricts the original persisted image selected before automatic init.
+   * Checked under the initial coordinated lock before/after native read; no
+   * callback supplies a schema, replacement image or project authority. */
+  readonly beforeInitialRead?: (() => void) | undefined;
   readonly nativeDataWriter?: import('../runtime/native-reader-compatibility.js').NativeDataWriteOwner | undefined;
   readonly dbPath?: string | undefined;
   readonly dbFileName?: string | undefined;

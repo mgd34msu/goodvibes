@@ -43,7 +43,7 @@ import type {
 export const DEFAULT_KNOWLEDGE_DB_FILE = 'knowledge-wiki.sqlite';
 // v12 is also a writer-format barrier: planning source IDs are opaque and old
 // writers must not recreate the same artifact under a computed hash identity.
-export const KNOWLEDGE_SCHEMA_VERSION = 12;
+export { KNOWLEDGE_SCHEMA_VERSION } from './store-schema-version.js';
 
 export function resolveKnowledgeDbPathFromControlPlaneDir(
   controlPlaneDir: string,

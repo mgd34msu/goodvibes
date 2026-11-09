@@ -1,3 +1,5 @@
+import { queryPersistedPlanningProjects } from '../knowledge/project-planning/persisted-project-query.js';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { createSqlJsDatabase } from './sqljs-database.js';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -1072,6 +1074,25 @@ function isEphemeralDbPath(path: string | null | undefined): boolean {
   return /^file:.*(?:^|[?&])mode=memory(?:&|$)/.test(path);
 }
 
+/** Internal closed readonly selector. Never supplies a custom constructor or
+ * public observer with private persisted bytes, and never opens a disk writer.
+ */
+export async function inspectNativePlanningProjectImage(data: Uint8Array, assertCurrent: () => void): Promise<readonly string[]> {
+  const current = () => { const result: unknown = assertCurrent(); if (result !== undefined) { drainOwned(result); throw new SQLiteObservationRetiredError(); } };
+  current(); assertSqliteImage(data); const engine = await loadSqlJsEngine(); current();
+  const original = privateMapGet(nativeEngineIdentities, engine), origin = original?.statement, scalar = original?.scalar;
+  if (!original || !origin || !scalar) throw new SQLiteObservationRetiredError();
+  const before = () => { current(); assertNativeEngineIdentity(engine); if (!nativeOwnerPrototypeFactsMatch(origin) || !nativeScalarRuntimeMatches(scalar)
+    || !Object.entries(original.methods).every(([key, method]) => nativeGetDescriptor(original.prototype, key)?.value === method)) throw new SQLiteObservationRetiredError(); };
+  before(); const raw = createSqlJsDatabase(original.constructor, data);
+  const check = () => { before(); if (!nativeMethodsMatch(engine, raw) || !nativeExecutionDependenciesMatch(origin, raw)) throw new SQLiteObservationRetiredError(); };
+  try {
+    check();
+    const projectIds = queryPersistedPlanningProjects({ exec(sql, params) { check(); const rows = nativeApply(original.methods.exec, raw, [sql, params]); check(); return rows; } });
+    check(); return projectIds;
+  } finally { nativeApply(original.methods.close, raw, []); }
+}
+
 function assertSqliteImage(data: Uint8Array): void {
   if (data.byteLength < 100 || Buffer.from(data.subarray(0, 16)).toString('binary') !== 'SQLite format 3\0') {
     throw new Error('SQLiteStore: existing database image is corrupt; refusing initialization');
@@ -1210,9 +1231,11 @@ export class SQLiteStore {
   private fenced = false;
 
   private readonly beforePersist: (() => void) | undefined;
+  private readonly beforeInitialRead: (() => void) | undefined;
 
-  constructor(dbPath?: string, options: { readonly coordinated?: boolean; readonly beforePersist?: (() => void) | undefined } = {}) {
+  constructor(dbPath?: string, options: { readonly coordinated?: boolean; readonly beforePersist?: (() => void) | undefined; readonly beforeInitialRead?: (() => void) | undefined } = {}) {
     this.beforePersist = options.beforePersist?.bind(options);
+    this.beforeInitialRead = options.beforeInitialRead?.bind(options);
     this.dbPath = dbPath ?? null;
     this.coordinated = options.coordinated === true;
     // Full local equality frames contain private SQLite values. Keep them out
@@ -1221,6 +1244,11 @@ export class SQLiteStore {
       const descriptor = nativeGetDescriptor(this, field);
       if (descriptor) nativeDefineProperty(this, field, { ...descriptor, enumerable: false });
     }
+  }
+
+  private assertInitialReadCurrent(): void {
+    const result: unknown = this.beforeInitialRead?.();
+    if (result !== undefined) { drainOwned(result); throw new TypeError('SQLiteStore: initial read owner must complete synchronously'); }
   }
 
   private beforePersistentWrite(): void {
@@ -1922,6 +1950,7 @@ export class SQLiteStore {
       this.schemaVersion = options.schemaVersion ?? 1;
       this.validateCurrentSchema = options.validateCurrentSchema;
       this.nativeSchemaReadPlan = options.nativeSchemaReadPlan;
+      this.assertInitialReadCurrent();
       if (this.coordinated && this.dbPath && !isEphemeralDbPath(this.dbPath)) {
         this.persistence = new SQLiteStorePersistence(this.dbPath);
         release = await this.persistence.lock();
@@ -1929,9 +1958,11 @@ export class SQLiteStore {
       const dbPath = this.persistence?.path ?? this.dbPath;
       const persistent = Boolean(dbPath && !isEphemeralDbPath(dbPath));
       const existedOnDisk = persistent && existsSync(dbPath!);
+      this.assertInitialReadCurrent();
       const original = this.persistence?.read() ?? (existedOnDisk ? readFileSync(dbPath!) : null);
       if (this.coordinated && original !== null) assertSqliteImage(original);
       this.persistence?.acceptBaseline(original);
+      this.assertInitialReadCurrent();
 
       if (existedOnDisk) {
         this.db = constructOwnedDatabase(SQL, original!);

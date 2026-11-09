@@ -161,13 +161,18 @@ const DOCUMENTED_MODEL_SPECS = new Map([
     .map(id => [id, effort(['low', 'medium', 'high', 'xhigh', 'max'], 'medium')] as const),
 ]);
 
+/** Exact documented model controls, without a family or catalog inference. */
+export function documentedReasoningEffortSpec(modelId: string): ReasoningEffortSpec | undefined {
+  return DOCUMENTED_MODEL_SPECS.get(modelId.trim());
+}
+
 /**
  * Curated spec for a model the live catalog does not cover: its family's row
  * once routing.reasoning-family has read the id, else undefined (not read
  * yet, or no documented family).
  */
 export function findFamilyReasoningEffortSpec(modelId: string): ReasoningEffortSpec | undefined {
-  const documented = DOCUMENTED_MODEL_SPECS.get(modelId.trim());
+  const documented = documentedReasoningEffortSpec(modelId);
   if (documented) return documented;
   if (isClassicOperation()) return undefined;
   const family = knownReasoningFamily(modelId.trim());
@@ -195,7 +200,7 @@ export async function readFamilyReasoningEffortSpec(modelId: string, site: strin
  */
 export async function prepareReasoningEffort(requested: string | undefined, input: ReasoningEffortSpecRequest, site: string): Promise<void> {
   if (requested === undefined || requested === '') return;
-  if (DOCUMENTED_MODEL_SPECS.has(input.modelId.trim())) return;
+  if (documentedReasoningEffortSpec(input.modelId)) return;
   const declared = input.spec?.source === 'catalog' ? input.spec : catalogReasoningSpec(input) ?? input.spec;
   if (declared && reasoningEffortSourceRank(declared.source) >= reasoningEffortSourceRank('family')) return;
   await readFamilyReasoningEffortSpec(input.modelId, site);
@@ -223,9 +228,10 @@ function catalogReasoningSpec(input: ReasoningEffortSpecRequest): ReasoningEffor
 }
 
 /**
- * Apply the source precedence: live catalog, then a declaration attached to
- * this exact model, then the curated family table, then the labelled best
- * guess.
+ * For the exact documented Sol aliases, an explicit endpoint declaration wins,
+ * then the documented controls. Third-party catalogs can lag those controls;
+ * their cached high-only rows must not silently remove xhigh or max.
+ * Other models retain catalog, attached declaration, family, then best guess.
  *
  * The caller's spec is consulted before the table rather than after it. The
  * table matches bare id prefixes, so a local `deepseek-r1:70b` served by ollama
@@ -234,6 +240,8 @@ function catalogReasoningSpec(input: ReasoningEffortSpecRequest): ReasoningEffor
  * weights; a prefix does not.
  */
 export function resolveReasoningEffortSpec(input: ReasoningEffortSpecRequest): ReasoningEffortSpec {
+  const documented = documentedReasoningEffortSpec(input.modelId);
+  if (documented) return input.spec?.source === 'declared' ? input.spec : documented;
   const declared = input.spec?.source === 'catalog' ? input.spec : catalogReasoningSpec(input) ?? input.spec;
   if (declared && reasoningEffortSourceRank(declared.source) >= reasoningEffortSourceRank('family')) {
     return declared;

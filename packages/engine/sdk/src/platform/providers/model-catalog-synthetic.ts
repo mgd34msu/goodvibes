@@ -5,7 +5,7 @@ import { compositeScore } from './model-benchmarks.js';
 import type { CatalogModel } from './model-catalog.js';
 import type { ContextWindowProvenance } from './registry-types.js';
 import { type ReasoningEffortSpec, parseReasoningOptions } from './reasoning-effort.js';
-import { resolveReasoningEffortSpec } from './reasoning-effort-families.js';
+import { documentedReasoningEffortSpec, resolveReasoningEffortSpec } from './reasoning-effort-families.js';
 import type { SyntheticBackend, CanonicalModel, SyntheticTier } from './synthetic.js';
 import { ModelIdentityResolver, type IdentityCandidate, type IdentityQuery } from '../routing/model-identity.js';
 
@@ -195,7 +195,7 @@ export function getSyntheticModelDefinitions(
     const catalogMatch = models.find((model) => canonical.backends.some((backend) => backend.modelId === model.id));
     const displayName = catalogMatch?.name ?? canonical.id;
     const catalogSpec = parseReasoningOptions(catalogMatch?.reasoningOptions);
-    const hasReasoning = catalogMatch?.reasoning === true
+    const hasReasoning = documentedReasoningEffortSpec(bestBackend.modelId) !== undefined || catalogMatch?.reasoning === true
       || (catalogSpec !== undefined && catalogSpec.kind !== 'unavailable');
 
     const hasCatalogContextWindow = bestBackend?.contextWindow != null && bestBackend.contextWindow > 0;

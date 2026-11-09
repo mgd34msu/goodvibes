@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Preserve Sol xhigh and max effort choices when cached catalog rows list only
+  high or incorrectly disable reasoning. Apply the documented exact-model
+  controls to catalog and synthetic model surfaces while honoring explicit
+  endpoint restrictions and retaining the saved user preference.
+
 - Sync Home Assistant helpers alongside entities, preserve omitted snapshot
   groups and their original source evidence, and refuse unidentified input before
   writing a partial snapshot. Membership-only updates preserve saved device

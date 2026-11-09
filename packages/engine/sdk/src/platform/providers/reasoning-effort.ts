@@ -28,6 +28,10 @@ export {
  *   4. a best-guess ladder that says in its own note that it is a guess
  *      rather than verified provider data.
  *
+ * Exact documented Sol aliases are the narrow exception: explicit endpoint
+ * declarations win, then their documented controls, ahead of stale catalog
+ * metadata. See `resolveReasoningEffortSpec` for that identity lookup.
+ *
  * {@link resolveEffortForModel} maps a requested level onto whatever the
  * resolved model actually offers. It only ever snaps DOWN the severity
  * ordering: silently spending more reasoning tokens than the caller asked for

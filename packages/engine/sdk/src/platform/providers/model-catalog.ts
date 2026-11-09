@@ -5,7 +5,7 @@ import { logger } from '../utils/logger.js';
 import { knownFallbackContextWindow } from './context-window-fallback.js';
 import { type ModelsDevReasoningOption, parseReasoningOptions } from './reasoning-effort.js';
 import type { ModelCapabilityFacts, ModelCapabilityFactsSource } from './capabilities.js';
-import { resolveReasoningEffortSpec } from './reasoning-effort-families.js';
+import { documentedReasoningEffortSpec, resolveReasoningEffortSpec } from './reasoning-effort-families.js';
 import { ModelIdentityResolver } from '../routing/model-identity.js';
 import type { ModelTierStore } from '../routing/model-tiers.js';
 
@@ -229,7 +229,9 @@ export function getCatalogModelDefinitionsFrom(models: readonly CatalogModel[], 
     // A populated `reasoning_options` array also counts as proof, for entries
     // that carry the options but not the boolean.
     const catalogSpec = parseReasoningOptions(model.reasoningOptions);
-    const hasReasoning = model.reasoning === true
+    // Exact documented controls can precede a stale third-party catalog row.
+    // This producer contains catalog facts, never an owner's endpoint override.
+    const hasReasoning = documentedReasoningEffortSpec(model.id) !== undefined || model.reasoning === true
       || (catalogSpec !== undefined && catalogSpec.kind !== 'unavailable');
     const reasoningEffort = hasReasoning
       ? resolveReasoningEffortSpec({
@@ -283,7 +285,8 @@ export function modelCapabilityFactsFromCatalog(
 
   for (const model of models) {
     const catalogSpec = parseReasoningOptions(model.reasoningOptions);
-    const hasReasoning = model.reasoning === true
+    const documented = documentedReasoningEffortSpec(model.id);
+    const hasReasoning = documented !== undefined || model.reasoning === true
       || (catalogSpec !== undefined && catalogSpec.kind !== 'unavailable');
     const facts: ModelCapabilityFacts = {
       ...(model.contextWindow != null && model.contextWindow > 0
@@ -295,7 +298,7 @@ export function modelCapabilityFactsFromCatalog(
       // Only a positive statement is made. `reasoning: false` in the feed is
       // an answer, so it is carried; an entry that says nothing at all leaves
       // the field undefined and the static tables decide.
-      ...(model.reasoning !== undefined || catalogSpec !== undefined
+      ...(documented !== undefined || model.reasoning !== undefined || catalogSpec !== undefined
         ? { reasoningControls: hasReasoning }
         : {}),
     };

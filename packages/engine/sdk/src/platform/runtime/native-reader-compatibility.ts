@@ -14,7 +14,7 @@ import type { UpdateFileIo } from './self-update.js';
 export const NATIVE_READER_REQUIREMENT_FILE = '.goodvibes-reader-requirements.json';
 /** Installation metadata support, separate from application-data write floors. */
 export const NATIVE_PREVIOUS_READER_RECEIPT_FORMAT = 'daemon-previous-reader-receipt-v1';
-export type NativeDataFormat = 'payment-retained-holds-v2' | 'telegram-account-cursors-v2' | 'payment-window-checkpoints-v1' | 'payment-window-checkpoints-v2' | 'payment-reply-history-v1' | 'payment-reply-coverage-v1' | 'payment-operation-reconciliation-v2' | 'delegated-review-owner-v2' | 'discord-inbox-identities-v1' | 'telegram-payment-spans-v3' | 'payment-receive-spans-v1' | 'account-inbox-identities-v1' | 'inbox-triage-identities-v1' | 'knowledge-schema-v12' | 'configuration-policy-epochs-v2' | 'contract-review-observations-v1' | 'device-capture-observations-v2' | 'inbox-triage-model-receipts-v2' | 'contract-tree-baselines-v2' | 'session-recovery-opaque-paths-v1' | 'worktree-opaque-identities-v1' | 'native-conversation-captures-v2' | 'trigger-snapshots-v2' | 'native-explicit-sources-v3' | 'native-execution-bindings-v2' | 'native-ci-continuations-v2';
+export type NativeDataFormat = 'payment-retained-holds-v2' | 'telegram-account-cursors-v2' | 'payment-window-checkpoints-v1' | 'payment-window-checkpoints-v2' | 'payment-reply-history-v1' | 'payment-reply-coverage-v1' | 'payment-operation-reconciliation-v2' | 'delegated-review-owner-v2' | 'discord-inbox-identities-v1' | 'telegram-payment-spans-v3' | 'payment-receive-spans-v1' | 'account-inbox-identities-v1' | 'inbox-triage-identities-v1' | 'knowledge-schema-v12' | 'configuration-policy-epochs-v2' | 'contract-review-observations-v1' | 'device-capture-observations-v2' | 'inbox-triage-model-receipts-v2' | 'contract-tree-baselines-v2' | 'session-recovery-opaque-paths-v1' | 'worktree-opaque-identities-v1' | 'native-conversation-captures-v2' | 'trigger-snapshots-v2' | 'native-explicit-sources-v3' | 'native-execution-bindings-v2' | 'native-ci-continuations-v2' | 'contract-answer-claim-scopes-v2';
 const requirements: Readonly<Record<NativeDataFormat, string>> = {
   'payment-retained-holds-v2': '3.1.2', 'telegram-account-cursors-v2': '3.1.2',
   'payment-window-checkpoints-v1': '3.1.2',
@@ -38,6 +38,7 @@ const requirements: Readonly<Record<NativeDataFormat, string>> = {
   'native-explicit-sources-v3': '3.1.2',
   'native-execution-bindings-v2': '3.1.2',
   'native-ci-continuations-v2': '3.1.2',
+  'contract-answer-claim-scopes-v2': '3.1.2',
   'session-recovery-opaque-paths-v1': '3.1.2',
   'device-capture-observations-v2': '3.1.2',
   'inbox-triage-model-receipts-v2': '3.1.2',

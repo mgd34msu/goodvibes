@@ -222,7 +222,7 @@ export function composeContractRunner(options: ContractRunnerCompositionOptions)
   const writer = options.nativeDataWriter;
   const store = new ContractStore({ projectRoot: options.projectRoot,
     beforeWrite: contract => {
-      const formats: import('./native-reader-compatibility.js').NativeDataFormat[] = ['contract-review-observations-v1', 'contract-tree-baselines-v2'];
+      const formats: import('./native-reader-compatibility.js').NativeDataFormat[] = ['contract-review-observations-v1', 'contract-tree-baselines-v2', 'contract-answer-claim-scopes-v2'];
       if (contract?.nativeSource?.continuation?.version === 2) formats.push('native-conversation-captures-v2');
       for (const format of formats) {
         const result: unknown = writer?.declare(format);

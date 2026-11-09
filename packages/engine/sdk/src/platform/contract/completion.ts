@@ -69,7 +69,7 @@ import { addJudgmentUsage } from './usage.js';
 import { preserveDeclaredReadReceipts, readPrivateReceiptArchives, verifyPrivateReceiptPreservation } from './private-read-receipts.js';
 import { completionEvidenceCommitment } from './completion-evidence-binding.js';
 import { finalAnswerEvidence, finalContentEvidence } from './final-answer-evidence.js';
-import { answerClaimScopes, completeAnswerClaimCoverage, recordAnswerClaimReview, scopedClaimQuestion, type AnswerClaimReview, type AnswerClaimScope } from './final-answer-claims.js';
+import { captureAnswerClaimOutput, answerClaimScopes, completeAnswerClaimCoverage, recordAnswerClaimReview, scopedClaimQuestion, type AnswerClaimReview, type AnswerClaimScope, type AnswerClaimOutput } from './final-answer-claims.js';
 import { judgmentExecutionEvidence } from './judgment-execution-evidence.js';
 import { GOAL_OBLIGATIONS } from './batteries/goal-obligations.js';
 import { ORIGINAL_OBLIGATION_COVERAGE, originalObligationSource } from './batteries/original-obligation-coverage.js';
@@ -331,8 +331,9 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     const primary = input.scope === 'deliverable' ? finalAnswerEvidence(contract, rawEvidence, input.summaries, changes, input.output) : undefined;
     // The saved final/claim/goal/original receipts bind one immutable output.
     // Compute its private persisted commitment at most once, only if needed.
-    let retainedOutputDigest: string | undefined;
-    const outputDigestForCurrentAnswer = (): string => retainedOutputDigest ??= hashState(evidence.output);
+    let retainedOutput: AnswerClaimOutput | undefined;
+    const outputOwnerForCurrentAnswer = (): AnswerClaimOutput => retainedOutput ??= captureAnswerClaimOutput(evidence.output);
+    const outputDigestForCurrentAnswer = (): string => outputOwnerForCurrentAnswer().digest;
     const acceptanceEvidence = primary?.evidence ?? rawEvidence;
     const judgedCriteria = judged(input.criteria);
     const site = input.scope === 'group' ? COMPLETION_SITES.group : COMPLETION_SITES.deliverable;
@@ -477,7 +478,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
               review.recordAction(criterionVerdict(reading) === 'met' ? 'This exact passage is supported; all other passages, original requirements and publication checks remain required.' : 'Retain this exact passage and primary evidence for focused investigation; a broad suspicion is not a new drafting task.');
               if (!stateHash || !review.result.decisionId) throw new Error('Scoped answer review has no native input/decision binding');
               if (criterionVerdict(reading) === 'unmet' && reading.outcome !== 'act' && scope.end - scope.start > 512) {
-                const children = answerClaimScopes(evidence.output, scope.start, scope.end, Math.ceil((scope.end - scope.start) / 2));
+                const children = answerClaimScopes(evidence.output, scope.start, scope.end, Math.ceil((scope.end - scope.start) / 2), outputOwnerForCurrentAnswer());
                 if (children.length > 1) {
                   const resolved: AnswerClaimReview[] = [];
                   for (const child of children) resolved.push(...await inspect(child));
@@ -489,7 +490,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
             };
             const pending = new Set<Promise<AnswerClaimReview[]>>();
             try {
-              claimReviews = (await mapLimit(answerClaimScopes(evidence.output), 4, async scope => {
+              claimReviews = (await mapLimit(answerClaimScopes(evidence.output, 0, evidence.output.length, 4_000, outputOwnerForCurrentAnswer()), 4, async scope => {
                 const job = inspect(scope); pending.add(job);
                 try { return await job; }
                 catch (error) { claimAbort.abort(error); throw error; }
@@ -500,7 +501,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
               while (pending.size) await Promise.allSettled([...pending]);
               throw error;
             }
-            if (!completeAnswerClaimCoverage(evidence.output, claimReviews)) throw new Error('Scoped answer checks do not cover the complete answer');
+            if (!completeAnswerClaimCoverage(evidence.output, claimReviews, outputOwnerForCurrentAnswer())) throw new Error('Scoped answer checks do not cover the complete answer');
             const worst = claimReviews.reduce((previous, current) => current.reading.probability > previous.reading.probability ? current : previous);
             readings.unsupported = { kind: 'yes-no', ...worst.reading };
           }

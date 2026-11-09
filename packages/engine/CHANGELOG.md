@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Reuse the complete-answer commitment for scoped factual reviews instead of
+  hashing every passage. Saved reviews still bind exact ranges to independently
+  recorded questions; older passage receipts remain readable. New checkpoint
+  writes require the installed scope-reader capability.
+
 - Persist opaque native execution and CI-successor identities once instead of
   recomputing descriptive hashes during live checks. Preserve original paired
   owner, scope, receipt, replay and cancellation bindings; existing records

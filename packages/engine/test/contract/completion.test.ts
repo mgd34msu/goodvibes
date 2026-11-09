@@ -87,7 +87,7 @@ test('an uncertain overall factual objection is resolved by exact complete answe
     const entry = log.get(claim.decisionId)!;
     expect(entry.stateHash).toBe(claim.stateHash);
     expect(entry.questions).toMatchObject({ unsupported: { instructions: { claimScope: {
-      start: claim.start, end: claim.end, textDigest: claim.textDigest, outputDigest: hashState(current.answer!) } } } });
+      version: 2, start: claim.start, end: claim.end, outputDigest: hashState(current.answer!) } } } });
     expect(current.checks.at(-1)!.decisionIds).toContain(claim.decisionId);
   }
   const scopes = answerClaimScopes(output);

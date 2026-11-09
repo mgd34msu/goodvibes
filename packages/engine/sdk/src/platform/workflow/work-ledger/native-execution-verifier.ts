@@ -9,7 +9,7 @@ import { assertNativeContractSource, nativeContractSourceForAdmission } from '..
 import { UNIT_JUDGE_BANDS } from '../../contract/batteries/unit-judge.js';
 import { FINAL_ANSWER_REVIEWS } from '../../contract/batteries/final-answer-review.js';
 import { ORIGINAL_OBLIGATION_COVERAGE, originalObligationSource } from '../../contract/batteries/original-obligation-coverage.js';
-import { completeAnswerClaimCoverage, scopedClaimQuestion, type AnswerClaimReview } from '../../contract/final-answer-claims.js';
+import { captureAnswerClaimOutput, completeAnswerClaimCoverage, scopedClaimQuestion, type AnswerClaimReview, type AnswerClaimOutput } from '../../contract/final-answer-claims.js';
 import { GOAL_OBLIGATIONS } from '../../contract/batteries/goal-obligations.js';
 import { goalObligationSource, goalObligationQuestion } from '../../contract/goal-obligation-proof.js';
 import { UNIT_QUALITY_BAND } from '../../contract/batteries/unit-quality.js';
@@ -129,8 +129,9 @@ export async function verifyNativeWorkExecution(options: {
   // One exact immutable answer is compared with several saved receipt/question
   // bindings. Reuse its commitment within this verification; never re-hash the
   // entire answer per claim or carry it into another verification lifetime.
-  let retainedAnswerCommitment: string | undefined;
-  const answerCommitment = (): string => retainedAnswerCommitment ??= hashState(contract.answer ?? '');
+  let retainedAnswerOutput: AnswerClaimOutput | undefined;
+  const answerOutput = (): AnswerClaimOutput => retainedAnswerOutput ??= captureAnswerClaimOutput(contract.answer ?? '');
+  const answerCommitment = (): string => answerOutput().digest;
   assertDurableCheckpoint(contract, admission); assertNativeContractSource(contract);
   if (contract.status !== 'passed') throw new Error('Native verifier requires the bound passed contract');
   const contractDigest = nativeSettlementDigest(contract);
@@ -232,7 +233,7 @@ export async function verifyNativeWorkExecution(options: {
   function genuineClaims(): boolean {
     if (!Array.isArray(claims) || !claims.length || new Set(claimIds).size !== claimIds.length
       || !Array.isArray(contentIds) || !claimIds.every(id => typeof id === 'string' && contentIds.includes(id))
-      || !completeAnswerClaimCoverage(contract.answer ?? '', claims as AnswerClaimReview[])) return false;
+      || !completeAnswerClaimCoverage(contract.answer ?? '', claims as AnswerClaimReview[], answerOutput())) return false;
     const overview = object(content?.['overviewUnsupported']);
     const overviewQuestion = contentQuestions?.get('unsupported');
     const rawOverview = overviewQuestion?.answer.noul;

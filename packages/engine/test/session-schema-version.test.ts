@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SessionManager, CURRENT_SESSION_SCHEMA_VERSION } from '../platform/src/platform/sessions/manager.js';
 import { logger } from '../platform/src/platform/utils/logger.js';
+import { ConversationManager } from '../platform/src/platform/core/conversation.js';
 
 function makeTmpDir(): string {
   return mkdtempSync(join(tmpdir(), 'session-schema-'));
@@ -200,6 +201,29 @@ describe('SessionManager schemaVersion', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  test('an owner rename of an automatic title survives native reopen and cannot be overwritten by later automatic naming', () => {
+    const dir = makeTmpDir();
+    try {
+      const manager = new SessionManager('/unused', { sessionsDir: dir });
+      const { filePath } = manager.save('owner-renamed', SAMPLE_MESSAGES, { ...SAMPLE_META, saveSource: 'auto' });
+      const originalMessages = readFileSync(filePath, 'utf8').split('\n').slice(1);
+      manager.rename('owner-renamed', 'The owner’s chosen title');
+      const reopened = new SessionManager('/unused', { sessionsDir: dir });
+      const stored = reopened.load('owner-renamed');
+      expect(stored.meta).toMatchObject({ title: 'The owner’s chosen title', titleSource: 'user', saveSource: 'user',
+        model: SAMPLE_META.model, provider: SAMPLE_META.provider, timestamp: SAMPLE_META.timestamp, schemaVersion: CURRENT_SESSION_SCHEMA_VERSION });
+      const raw = JSON.parse(readFileSync(filePath, 'utf8').split('\n')[0]!);
+      expect(raw).toMatchObject({ titleSource: 'user', saveSource: 'user' });
+      expect(readFileSync(filePath, 'utf8').split('\n').slice(1)).toEqual(originalMessages);
+      expect(stored.messages).toEqual(SAMPLE_MESSAGES);
+      const conversation = new ConversationManager();
+      conversation.fromJSON({ messages: SAMPLE_MESSAGES as Parameters<ConversationManager['fromJSON']>[0]['messages'],
+        title: stored.meta.title, titleSource: stored.meta.titleSource });
+      conversation.setSystemTitle('Later generated title');
+      expect(conversation.title).toBe('The owner’s chosen title'); expect(conversation.getTitleSource()).toBe('user');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
   test('CURRENT_SESSION_SCHEMA_VERSION is exported and equals 2', () => {

@@ -33,7 +33,7 @@ export interface WebuiMethodSample {
 /**
  * Every operator method that advertises a plain-REST http binding, keyed by
  * method id. The webui derives its EXTRA_METHOD_ROUTES from this by removing
- * the ids its pinned browser SDK route maps already cover.
+ * the ids its pinned browser engine route maps already cover.
  */
 export const WEBUI_METHOD_ROUTES: Readonly<Record<string, WebuiRouteDefinition>> = {
   "accounts.snapshot": {

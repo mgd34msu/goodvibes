@@ -4,7 +4,7 @@
  * @goodvibes-jev/engine: DAEMON_OWNED_CONFIG_PREFIXES, DAEMON_OWNED_CONFIG_KEYS
  * and DAEMON_OWNED_NON_SCHEMA_CONFIG_PATHS (platform/config).
  *
- * This is a build-time snapshot so the browser bundle never imports the SDK
+ * This is a build-time snapshot so the browser bundle never imports the engine
  * config barrel (which drags SecretsManager / OAuth / google-auth, node-only).
  *
  * Regenerate: `bun run config-ownership:generate`.

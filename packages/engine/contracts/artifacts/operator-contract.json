@@ -56242,7 +56242,7 @@
       {
         "id": "control.status",
         "title": "Daemon Status",
-        "description": "Return daemon status and version. THREE version fields, because there are two versions and they are not the same number: `buildVersion` is the running artifact's own release version, what a person installed, and what the auto-update loop compares against release tags, and `platformVersion` is the SDK build it is composed from. `version` carries the build version and exists because every client already reads it; on an embedded daemon that ships no artifact of its own, all three are the platform build. Pass receipts=consume to also receive undelivered daemon receipts (update/crash/migration notices) and mark them delivered, exactly once across all consuming readers. Without the flag no receipts are returned or consumed, so identity probes and keepalives never eat them.",
+        "description": "Return daemon status and version. THREE version fields, because there are two versions and they are not the same number: `buildVersion` is the running artifact's own release version, what a person installed, and what the auto-update loop compares against release tags, and `platformVersion` is the platform build it is composed from. `version` carries the build version and exists because every client already reads it; on an embedded daemon that ships no artifact of its own, all three are the platform build. Pass receipts=consume to also receive undelivered daemon receipts (update/crash/migration notices) and mark them delivered, exactly once across all consuming readers. Without the flag no receipts are returned or consumed, so identity probes and keepalives never eat them.",
         "category": "control-plane",
         "source": "builtin",
         "access": "authenticated",
@@ -74390,7 +74390,7 @@
       {
         "id": "homeassistant.homeGraph.generateHomeGraphPacket",
         "title": "Generate Home Graph Packet",
-        "description": "Render a scoped Home Graph packet with SDK-owned inclusion/exclusion profile rules.",
+        "description": "Render a scoped Home Graph packet with platform-owned inclusion/exclusion profile rules.",
         "category": "knowledge",
         "source": "builtin",
         "access": "admin",
@@ -96011,7 +96011,7 @@
       {
         "id": "projectPlanning.status",
         "title": "Project Planning Status",
-        "description": "Return passive, project-scoped planning artifact counts and SDK capabilities without starting a planning loop.",
+        "description": "Return passive, project-scoped planning artifact counts and platform capabilities without starting a planning loop.",
         "category": "knowledge",
         "source": "builtin",
         "access": "authenticated",

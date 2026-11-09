@@ -507,7 +507,8 @@ export class SessionManager {
   /**
    * Rename a session by rewriting its meta line with a new title.
    * The file is stored under the sanitized name, rename updates the title
-   * field inside the file but does NOT rename the file itself.
+   * field inside the file but does NOT rename the file itself. The explicit
+   * owner choice is a user save; automatic titles belong to the conversation.
    * Throws if the session does not exist.
    */
   rename(name: string, newTitle: string): void {
@@ -523,6 +524,10 @@ export class SessionManager {
     try {
       const record = JSON.parse(lines[0]!) as Record<string, unknown>;
       record.title = newTitle;
+      // This is the explicit owner-rename contract, not automatic title generation.
+      // Preserve the choice after reload and keep curated sessions out of auto retention.
+      record.titleSource = newTitle.trim().length > 0 ? 'user' : 'system';
+      record.saveSource = 'user';
       // A metadata rewrite must not carry retired pane state forward.
       if ('returnContext' in record) {
         const returnContext = loadedReturnContext(record.returnContext);

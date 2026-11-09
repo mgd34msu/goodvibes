@@ -8,7 +8,7 @@
  * This is a layer SEPARATE from src/styles/tokens.css: tokens.css owns the
  * web UI's own brand palette / layout / motion tokens (an explicitly
  * webui-only, NOT-contract layer, documented at its own top); this file
- * owns only the values the SDK contract actually defines: status glyphs
+ * owns only the values the engine contract actually defines: status glyphs
  * and the state tone-color table.
  *
  * Regenerate: `bun run presentation:generate`.

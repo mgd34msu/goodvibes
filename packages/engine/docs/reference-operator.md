@@ -29215,7 +29215,7 @@ Close a companion-chat session (soft close). The session record and its messages
 
 #### `companion.chat.sessions.create`
 
-Create a new companion-chat session. Optional `provider` / `model` override the registry default; `title` and `systemPrompt` are stored on the session record.
+Create a new companion-chat session. Optional `provider` / `model` override the registry default. The session retains its requested `reasoningEffort`; null restores provider defaults. Title and system prompt are stored on the session record.
 
 - Title: `Create Companion Chat Session`
 - Source: `builtin`
@@ -29241,6 +29241,26 @@ Create a new companion-chat session. Optional `provider` / `model` override the 
     },
     "provider": {
       "type": "string"
+    },
+    "reasoningEffort": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "none",
+            "instant",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "systemPrompt": {
       "type": "string"
@@ -29280,6 +29300,26 @@ Create a new companion-chat session. Optional `provider` / `model` override the 
           "type": "string",
           "enum": [
             "companion-chat"
+          ]
+        },
+        "reasoningEffort": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "none",
+                "instant",
+                "minimal",
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ]
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "title": {
@@ -29466,6 +29506,26 @@ Return a companion-chat session record together with its full message history.
           "type": "string",
           "enum": [
             "companion-chat"
+          ]
+        },
+        "reasoningEffort": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "none",
+                "instant",
+                "minimal",
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ]
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "title": {
@@ -29738,6 +29798,26 @@ List active companion-chat sessions. Pass `includeClosed` to include recently cl
               "companion-chat"
             ]
           },
+          "reasoningEffort": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "instant",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "title": {
             "type": "string"
           },
@@ -29845,7 +29925,7 @@ List active companion-chat sessions. Pass `includeClosed` to include recently cl
 
 #### `companion.chat.sessions.update`
 
-Update companion-chat session metadata, including session-local `provider` and `model`, without changing the daemon/TUI current model.
+Update companion-chat session metadata, including session-local provider, model and requested reasoning effort, without changing the daemon/TUI current model. Routing changes are refused while a reply is active; null effort restores provider defaults.
 
 - Title: `Update Companion Chat Session`
 - Source: `builtin`
@@ -29874,6 +29954,26 @@ Update companion-chat session metadata, including session-local `provider` and `
     },
     "provider": {
       "type": "string"
+    },
+    "reasoningEffort": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "none",
+            "instant",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "systemPrompt": {
       "type": "string"
@@ -29939,6 +30039,35 @@ Update companion-chat session metadata, including session-local `provider` and `
         "systemPrompt"
       ],
       "additionalProperties": true
+    },
+    {
+      "type": "object",
+      "properties": {
+        "reasoningEffort": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "none",
+                "instant",
+                "minimal",
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "reasoningEffort"
+      ],
+      "additionalProperties": true
     }
   ]
 }
@@ -29960,6 +30089,26 @@ Update companion-chat session metadata, including session-local `provider` and `
           "type": "string",
           "enum": [
             "companion-chat"
+          ]
+        },
+        "reasoningEffort": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "none",
+                "instant",
+                "minimal",
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ]
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "title": {
@@ -56536,7 +56685,7 @@ Return the current control-plane gateway snapshot.
 
 #### `control.status`
 
-Return daemon status and version. THREE version fields, because there are two versions and they are not the same number: `buildVersion` is the running artifact's own release version, what a person installed, and what the auto-update loop compares against release tags, and `platformVersion` is the SDK build it is composed from. `version` carries the build version and exists because every client already reads it; on an embedded daemon that ships no artifact of its own, all three are the platform build. Pass receipts=consume to also receive undelivered daemon receipts (update/crash/migration notices) and mark them delivered, exactly once across all consuming readers. Without the flag no receipts are returned or consumed, so identity probes and keepalives never eat them.
+Return daemon status and version. THREE version fields, because there are two versions and they are not the same number: `buildVersion` is the running artifact's own release version, what a person installed, and what the auto-update loop compares against release tags, and `platformVersion` is the platform build it is composed from. `version` carries the build version and exists because every client already reads it; on an embedded daemon that ships no artifact of its own, all three are the platform build. Pass receipts=consume to also receive undelivered daemon receipts (update/crash/migration notices) and mark them delivered, exactly once across all consuming readers. Without the flag no receipts are returned or consumed, so identity probes and keepalives never eat them.
 
 - Title: `Daemon Status`
 - Source: `builtin`
@@ -74976,7 +75125,7 @@ Export a complete Home Graph knowledge space.
 
 #### `homeassistant.homeGraph.generateHomeGraphPacket`
 
-Render a scoped Home Graph packet with SDK-owned inclusion/exclusion profile rules.
+Render a scoped Home Graph packet with platform-owned inclusion/exclusion profile rules.
 
 - Title: `Generate Home Graph Packet`
 - Source: `builtin`
@@ -96880,7 +97029,7 @@ Persist project-scoped planning state from the TUI interview loop and evaluate r
 
 #### `projectPlanning.status`
 
-Return passive, project-scoped planning artifact counts and SDK capabilities without starting a planning loop.
+Return passive, project-scoped planning artifact counts and platform capabilities without starting a planning loop.
 
 - Title: `Project Planning Status`
 - Source: `builtin`
@@ -116330,6 +116479,19 @@ Every provider this daemon knows about with the models it offers, whether it is 
                         "family",
                         "fallback"
                       ]
+                    },
+                    "effectiveByRequested": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
                     }
                   },
                   "required": [

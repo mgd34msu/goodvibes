@@ -4,7 +4,7 @@
  * @goodvibes-jev/engine: CONFIG_SCHEMA (platform/config) plus the per-feature
  * settings metadata (FEATURE_SETTINGS, platform/runtime/feature-flags).
  *
- * This is a build-time snapshot so the browser bundle never imports the SDK
+ * This is a build-time snapshot so the browser bundle never imports the engine
  * config barrel (which drags SecretsManager / OAuth / google-auth, node-only).
  *
  * Regenerate: `bun run config-schema:generate`.
@@ -1609,7 +1609,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "voice.wake.models",
     "type": "string",
     "default": "hey_goodvibes",
-    "description": "Comma-separated wake-word models to run concurrently, by id. Default \"hey_goodvibes\" is the model the SDK pins, hosts, and verifies by checksum. Additional ids resolve against voice.wake.customModelDir. Each model costs one classifier inference per 80 ms frame, the shared melspectrogram and speech-embedding front end is computed once regardless of how many models are listed, so a second model is far cheaper than a second detector. An empty list disables detection without stopping the service."
+    "description": "Comma-separated wake-word models to run concurrently, by id. Default \"hey_goodvibes\" is the model the platform pins, hosts, and verifies by checksum. Additional ids resolve against voice.wake.customModelDir. Each model costs one classifier inference per 80 ms frame, the shared melspectrogram and speech-embedding front end is computed once regardless of how many models are listed, so a second model is far cheaper than a second detector. An empty list disables detection without stopping the service."
   },
   {
     "key": "voice.wake.threshold",
@@ -3163,7 +3163,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "batch.maxJobsPerProviderBatch",
     "type": "number",
     "default": 100,
-    "description": "Maximum SDK jobs grouped into a single upstream provider batch submission",
+    "description": "Maximum platform jobs grouped into a single upstream provider batch submission",
     "validationHint": "integer in [1, 100000]"
   },
   {
@@ -3177,7 +3177,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "batch.maxQueueMessagesPerDay",
     "type": "number",
     "default": 1000,
-    "description": "SDK-side free-tier guardrail for Cloudflare queue message volume",
+    "description": "platform-side free-tier guardrail for Cloudflare queue message volume",
     "validationHint": "integer in [0, 10000000]"
   },
   {
@@ -3196,19 +3196,19 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "cloudflare.accountId",
     "type": "string",
     "default": "",
-    "description": "Cloudflare account id used by SDK-owned Worker/Queue provisioning"
+    "description": "Cloudflare account id used by platform-owned Worker/Queue provisioning"
   },
   {
     "key": "cloudflare.apiTokenRef",
     "type": "string",
     "default": "",
-    "description": "GoodVibes secret reference for the Cloudflare API token. If empty, the SDK falls back to CLOUDFLARE_API_TOKEN."
+    "description": "GoodVibes secret reference for the Cloudflare API token. If empty, the platform falls back to CLOUDFLARE_API_TOKEN."
   },
   {
     "key": "cloudflare.zoneId",
     "type": "string",
     "default": "",
-    "description": "Optional Cloudflare zone id selected for SDK-managed DNS and Zero Trust Access hostnames"
+    "description": "Optional Cloudflare zone id selected for platform-managed DNS and Zero Trust Access hostnames"
   },
   {
     "key": "cloudflare.zoneName",
@@ -3398,7 +3398,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "watchers.triggers.probeTimeoutMs",
     "type": "number",
     "default": 15000,
-    "description": "Ceiling on one probe execution (http request, file read, command run, or sdk-tool call) before it is abandoned and counted as a failed check. Keeps a hung endpoint from stalling the whole check queue.",
+    "description": "Ceiling on one probe execution (http request, file read, command run, or platform-tool call) before it is abandoned and counted as a failed check. Keeps a hung endpoint from stalling the whole check queue.",
     "validationHint": "integer in [250, 600000]"
   },
   {
@@ -4582,7 +4582,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "otel-foundation",
     "name": "OTel Foundation",
-    "description": "Enables the OpenTelemetry instrumentation foundation: SDK init, span creation, and in-process export.",
+    "description": "Enables the OpenTelemetry instrumentation foundation: platform init, span creation, and in-process export.",
     "domain": "telemetry",
     "enablement": {
       "key": "telemetry.otelMode",

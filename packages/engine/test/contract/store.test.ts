@@ -24,6 +24,7 @@ import {
   type ContractSnapshotRejection,
 } from '../../sdk/src/platform/contract/index.js';
 import { makeContract } from './fixtures.js';
+import { quarantineCorruptFile } from '../../sdk/src/platform/utils/atomic-json-store.js';
 
 const DAY = 24 * 60 * 60 * 1000;
 const roots: string[] = [];
@@ -62,6 +63,11 @@ function writeRaw(root: string, id: string, text: string): string {
   const path = contractPath(root, id);
   writeFileSync(path, text, 'utf-8');
   return path;
+}
+
+function nativeQuarantines(path: string): string[] {
+  const directory = path.slice(0, path.lastIndexOf('/')), name = path.slice(path.lastIndexOf('/') + 1);
+  return readdirSync(directory).filter(entry => entry.startsWith(`${name}.corrupt-`) && !entry.endsWith('.why')).map(entry => join(directory, entry));
 }
 
 function storeAt(root: string, now: number = Date.now()): ContractStore {
@@ -266,14 +272,17 @@ describe('quarantine', () => {
   ];
 
   for (const [name, text, reason] of cases) {
-    test(`${name} is moved to .unrecognized and not loaded`, () => {
+    test(`${name} is exclusively archived with its native receipt and not loaded`, () => {
       const root = tempRoot();
       const contract = makeContract();
       const path = writeRaw(root, contract.id, text(contract));
       expect(readContractSnapshot(text(contract))).toEqual({ rejected: reason });
       expect(storeAt(root).load(contract.id)).toBeNull();
       expect(existsSync(path)).toBe(false);
-      expect(readFileSync(`${path}.unrecognized`, 'utf-8')).toBe(text(contract));
+      const saved = nativeQuarantines(path);
+      expect(saved).toHaveLength(1);
+      expect(readFileSync(saved[0]!, 'utf-8')).toBe(text(contract));
+      expect(existsSync(`${saved[0]}.why`)).toBe(true);
     });
   }
 
@@ -282,7 +291,7 @@ describe('quarantine', () => {
     const contract = makeContract();
     const path = writeRaw(root, 'ctr-0000ffff', envelope(contract));
     expect(storeAt(root).load('ctr-0000ffff')).toBeNull();
-    expect(existsSync(`${path}.unrecognized`)).toBe(true);
+    expect(nativeQuarantines(path)).toHaveLength(1);
   });
 
   test('deserializeContract refuses a newer schema rather than trusting part of it', () => {
@@ -342,28 +351,41 @@ describe('reaping', () => {
     expect(store.get(contract.id)).toEqual(contract);
   });
 
-  test('quarantine files go after 30 days, and beyond 20 the oldest go', () => {
-    const root = tempRoot();
-    const now = Date.now();
+  test('native quarantine pairs have one global 30-day / 20-file bound across both checkpoint namespaces', () => {
+    const root = tempRoot(), now = Date.now();
     mkdirSync(contractCheckpointsDir(root), { recursive: true });
-    const files = Array.from({ length: MAX_CONTRACT_QUARANTINE_FILES + 4 }, (_, index) => {
-      const path = join(contractCheckpointsDir(root), `ctr-${index.toString(16).padStart(8, '0')}.json.unrecognized`);
-      writeFileSync(path, 'x', 'utf-8');
-      const at = new Date(now - (index + 1) * 60_000);
-      utimesSync(path, at, at);
-      return path;
-    });
-    const expired = join(contractCheckpointsDir(root), 'ctr-ffffffff.json.unrecognized');
-    writeFileSync(expired, 'x', 'utf-8');
-    const long = new Date(now - CONTRACT_QUARANTINE_MAX_AGE_MS - 60_000);
-    utimesSync(expired, long, long);
-
+    const makeArchive = (index: number, at: number) => {
+      const directory = index % 2 === 0 ? contractCheckpointsDir(root) : contractsDir(root);
+      const path = join(directory, `ctr-${index.toString(16).padStart(8, '0')}.json`);
+      writeFileSync(path, `damaged ${index}`);
+      return quarantineCorruptFile(path, { label: 'contract test', reason: 'unparseable', recovery: 'Inspect preserved evidence.', now: at, maxFiles: 100 }).quarantinePath;
+    };
+    const files = Array.from({ length: MAX_CONTRACT_QUARANTINE_FILES + 4 }, (_, index) => makeArchive(index, now - (index + 1) * 60_000));
+    const expired = makeArchive(999, now - CONTRACT_QUARANTINE_MAX_AGE_MS - 60_000);
+    const unknown = join(contractCheckpointsDir(root), 'ctr-ffffffff.json.unrecognized');
+    writeFileSync(unknown, 'earlier forensic copy');
     const summary = storeAt(root, now).reap();
     expect(summary.quarantineExpired).toBe(1);
     expect(summary.quarantineOverCap).toBe(4);
+    expect(summary.bytesReclaimed).toBeGreaterThan(0);
     expect(existsSync(expired)).toBe(false);
-    // The newest 20 remain: files are numbered newest first.
-    expect(files.filter((path) => existsSync(path))).toEqual(files.slice(0, MAX_CONTRACT_QUARANTINE_FILES));
+    expect(existsSync(`${expired}.why`)).toBe(false);
+    expect(files.filter(path => existsSync(path))).toEqual(files.slice(0, MAX_CONTRACT_QUARANTINE_FILES));
+    expect(readFileSync(unknown, 'utf8')).toBe('earlier forensic copy');
+    expect(storeAt(root, now).reap().total).toBe(0);
+  });
+
+  test('each corruption also enforces the global native bound without replacing a prior unrecognized copy', () => {
+    const root = tempRoot(), now = Date.now(), store = storeAt(root, now);
+    const paths: string[] = [];
+    for (let index = 0; index < MAX_CONTRACT_QUARANTINE_FILES + 4; index++) {
+      const id = `ctr-${index.toString(16).padStart(8, '0')}`, path = writeRaw(root, id, 'damaged');
+      paths.push(path);
+      if (index === 0) writeFileSync(`${path}.unrecognized`, 'prior forensic evidence');
+      expect(store.load(id)).toBeNull();
+    }
+    expect(paths.flatMap(nativeQuarantines)).toHaveLength(MAX_CONTRACT_QUARANTINE_FILES);
+    expect(readFileSync(`${paths[0]}.unrecognized`, 'utf8')).toBe('prior forensic evidence');
   });
 
   test('a refused file is left for load() to quarantine, not deleted by the reap', () => {

@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Preserve the actual checkpoint read when quarantining malformed contracts,
+  without replacing earlier forensic copies. Apply the existing owned archive
+  retention across both checkpoint directories, and preserve unknown or newer
+  formats. Checkpoint reads keep their original file checks after closing.
+
 - Apply synchronous caller restrictions before URL or artifact ingestion starts
   and throughout finalization. An async restriction cannot be ignored before
   storage initialization or outward work, and changing the caller retires it.

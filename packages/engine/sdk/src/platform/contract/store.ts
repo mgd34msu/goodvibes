@@ -16,13 +16,13 @@ import { claimContractCreation, contractCreationPathAbsent, publishInitialContra
  * Modeled on orchestration/persistence.ts.
  */
 import { DurableContractAdmissions, parseDurableAdmission, syncContractDirectory } from './durable-admission.js';
-import { existsSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync, readdirSync, statSync, unlinkSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import type { ContractEvent } from '../../events/contract.js';
 import { CONTRACT_STATUSES } from '../../events/contract.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
-import { captureExistingDirectory, reapOwnedAtomicTempFile, writeFileAtomic } from '../utils/atomic-json-store.js';
+import { captureExistingDirectory, captureQuarantineSource, QuarantineEncodingError, quarantineCorruptFile, reapOwnedQuarantineDirectories, reapOwnedAtomicTempFile, writeFileAtomic, type QuarantineSource } from '../utils/atomic-json-store.js';
 import { fileObservationIdentity, readFileObservation } from '../utils/file-observation.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { contractWithStoredReviewObservations, hydrateStoredReviewObservations } from './review-file-observations.js';
@@ -144,7 +144,7 @@ export type ContractSnapshotRejection = 'unparseable' | 'not-an-envelope' | 'fut
  * Parses an envelope. A snapshot written by a newer schema is refused, never
  * partially trusted; so is one whose contract fails the shape check.
  */
-function parseContractSnapshot(json: string, receipt?: OwnedContractCheckpointRead): { readonly snapshot: ContractSnapshot } | { readonly rejected: ContractSnapshotRejection } {
+function parseContractSnapshot(json: string, receipt?: OwnedContractCheckpointRead, maximumVersion = CURRENT_CONTRACT_SCHEMA_VERSION): { readonly snapshot: ContractSnapshot } | { readonly rejected: ContractSnapshotRejection } {
   let raw: unknown;
   try {
     raw = JSON.parse(json);
@@ -154,7 +154,7 @@ function parseContractSnapshot(json: string, receipt?: OwnedContractCheckpointRe
   if (!isRecord(raw) || typeof raw['schemaVersion'] !== 'number' || !Number.isFinite(raw['schemaVersion'])) {
     return { rejected: 'not-an-envelope' };
   }
-  if (raw['schemaVersion'] > CURRENT_CONTRACT_SCHEMA_VERSION) return { rejected: 'future-version' };
+  if (raw['schemaVersion'] > maximumVersion) return { rejected: 'future-version' };
   if (!isContractShape(raw['contract'])) return { rejected: 'invalid-contract' };
   if (raw['contract'].nativeDecisions !== undefined && raw['schemaVersion'] < 4) return { rejected: 'invalid-contract' };
   if (raw['contract'].nativeSource !== undefined && raw['schemaVersion'] < 3) return { rejected: 'invalid-contract' };
@@ -450,34 +450,36 @@ export class ContractStore {
     const currentPath = contractPath(this.projectRoot, contractId);
     const path = existsSync(currentPath) ? currentPath : historicalContractPath(this.projectRoot, contractId);
     if (!existsSync(path)) return null;
-    let text: string;
-    let receipt: OwnedContractCheckpointRead;
+    const source = captureQuarantineSource(path);
+    if (!source) return null;
     try {
-      receipt = readOwnedContractCheckpoint(path, 'contract');
-      text = ownedContractCheckpointText(receipt);
-    } catch (error) {
-      logger.warn('contract store: read failed', { path, error: summarizeError(error) });
-      return null;
-    }
-    const read = parseContractSnapshot(text, receipt);
-    if ('snapshot' in read && path !== currentPath && read.snapshot.schemaVersion > 5) throw new ContractStoreVersionError(contractId);
-    if ('rejected' in read) {
-      if (read.rejected === 'future-version') throw new ContractStoreVersionError(contractId);
-      this.quarantine(path, read.rejected);
-      return null;
-    }
-    if (read.snapshot.contract.id !== contractId) {
-      this.quarantine(path, 'invalid-contract');
-      return null;
-    }
-    try {
-      if (read.snapshot.contract.durableAdmission === undefined
-        && new DurableContractAdmissions(this.projectRoot).findByContractId(contractId) !== null) {
-        this.quarantine(path, 'invalid-contract');
+      let receipt: OwnedContractCheckpointRead;
+      try { receipt = readOwnedContractCheckpoint(path, 'contract', source); }
+      catch (error) {
+        if (error instanceof QuarantineEncodingError) { this.quarantine(path, 'unparseable', source); return null; }
+        throw error;
+      }
+      const read = parseContractSnapshot(ownedContractCheckpointText(receipt), receipt, path === currentPath ? CURRENT_CONTRACT_SCHEMA_VERSION : 5);
+      source.assertCurrent();
+      if ('rejected' in read) {
+        if (read.rejected === 'future-version') throw new ContractStoreVersionError(contractId);
+        this.quarantine(path, read.rejected, source);
         return null;
       }
-    } catch { return null; } // Corrupt authority metadata is not evidence that an unbound alias is safe.
-    return read.snapshot.contract;
+      if (read.snapshot.contract.id !== contractId) {
+        this.quarantine(path, 'invalid-contract', source);
+        return null;
+      }
+      let hasAdmission: boolean;
+      try { hasAdmission = read.snapshot.contract.durableAdmission === undefined && new DurableContractAdmissions(this.projectRoot).findByContractId(contractId) !== null; }
+      catch { return null; } // Corrupt authority metadata is not evidence that an unbound alias is safe.
+      source.assertCurrent();
+      if (read.snapshot.contract.durableAdmission === undefined && hasAdmission) {
+        this.quarantine(path, 'invalid-contract', source);
+        return null;
+      }
+      return read.snapshot.contract;
+    } finally { source.close(); }
   }
 
   /** Ids with a contract file on disk, after a housekeeping pass, so a reaped id is never handed back. */
@@ -563,8 +565,8 @@ export class ContractStore {
   }
 
   /**
-   * Housekeeping: terminal contract files past 14 days or beyond 50, quarantine
-   * files past 30 days or beyond 20, and temp files left by a dead writer. A
+   * Housekeeping: completed contracts remain available; native quarantine pairs
+   * have a global 30-day / 20-file bound, plus temp files left by a dead writer. A
    * contract that is not terminal (on disk, or held in memory) is never
    * reaped. A reaped terminal contract is also released from memory.
    * Safe to run from two processes at once: a file already gone is success.
@@ -583,7 +585,6 @@ export class ContractStore {
     if (entries.length === 0) return empty;
     const now = this.now();
     const terminal: DatedFile[] = [];
-    const quarantined: DatedFile[] = [];
     let staleTempRemoved = 0;
     let bytesReclaimed = 0;
 
@@ -600,14 +601,9 @@ export class ContractStore {
         } catch { /* No proven original directory/writer ownership: preserve it. */ }
         continue;
       }
-      if (entry.endsWith(QUARANTINE_SUFFIX)) {
-        try {
-          quarantined.push({ path, at: statSync(path).mtimeMs });
-        } catch {
-          // Gone between the listing and the stat: another process reaped it.
-        }
-        continue;
-      }
+      // Historical .unrecognized paths have no original-file receipt. Preserve
+      // them; a matching suffix and mtime cannot authorize deletion.
+      if (entry.endsWith(QUARANTINE_SUFFIX)) continue;
       if (!entry.endsWith(JSON_SUFFIX)) continue;
       const id = entry.slice(0, -JSON_SUFFIX.length);
       if (!isContractId(id)) continue;
@@ -643,18 +639,15 @@ export class ContractStore {
     const terminalExcess = overCap(terminalWithinAge, MAX_TERMINAL_CONTRACT_FILES);
     terminalExcess.forEach(reapFile);
 
-    const quarantineWithinAge = quarantined.filter((file) => now - file.at <= CONTRACT_QUARANTINE_MAX_AGE_MS);
-    const quarantineExpired = quarantined.length - quarantineWithinAge.length;
-    quarantined.filter((file) => now - file.at > CONTRACT_QUARANTINE_MAX_AGE_MS).forEach(reapFile);
-    const quarantineExcess = overCap(quarantineWithinAge, MAX_CONTRACT_QUARANTINE_FILES);
-    quarantineExcess.forEach(reapFile);
-
-    const total = terminalExpired + terminalExcess.length + quarantineExpired + quarantineExcess.length + staleTempRemoved;
+    const quarantine = this.reapQuarantines(now);
+    const quarantineExpired = quarantine.expired;
+    bytesReclaimed += quarantine.bytesReclaimed;
+    const total = terminalExpired + terminalExcess.length + quarantine.reaped + staleTempRemoved;
     const summary: ContractReapSummary = {
       terminalExpired,
       terminalOverCap: terminalExcess.length,
       quarantineExpired,
-      quarantineOverCap: quarantineExcess.length,
+      quarantineOverCap: quarantine.overCap,
       staleTempRemoved,
       bytesReclaimed,
       total,
@@ -701,13 +694,27 @@ export class ContractStore {
     this.timers.delete(contractId);
   }
 
-  private quarantine(path: string, reason: ContractSnapshotRejection): void {
-    const quarantinePath = `${path}${QUARANTINE_SUFFIX}`;
-    try {
-      renameSync(path, quarantinePath);
-      logger.warn('contract store: quarantined an unrecognized contract file', { path, quarantinePath, reason });
-    } catch (error) {
-      logger.error('contract store: failed to quarantine an unrecognized contract file', { path, error: summarizeError(error) });
-    }
+  private quarantine(path: string, reason: ContractSnapshotRejection, source: QuarantineSource): void {
+    // Static rejection vocabulary only: parser excerpts can contain private asks.
+    // The shared helper checks the exact original read before exclusive archive
+    // publication; a replacement source and earlier forensic files stay intact.
+    const outcome = quarantineCorruptFile(path, {
+      source, label: 'contract store', reason,
+      recovery: 'Inspect the preserved checkpoint before recreating this contract.',
+      now: this.now(), maxFiles: MAX_CONTRACT_QUARANTINE_FILES,
+      maximumAgeMs: CONTRACT_QUARANTINE_MAX_AGE_MS,
+    });
+    logger.warn('contract store: quarantined an unrecognized contract file', { path, quarantinePath: outcome.quarantinePath, reason });
+    // Different IDs share the same forensic budget, including historical and
+    // current checkpoint namespaces. Keep the just-published original visible.
+    this.reapQuarantines(this.now(), basename(outcome.quarantinePath));
+  }
+
+  private reapQuarantines(now: number, currentName?: string) {
+    return reapOwnedQuarantineDirectories(
+      [contractCheckpointsDir(this.projectRoot), contractsDir(this.projectRoot)],
+      name => name.endsWith(JSON_SUFFIX) && isContractId(name.slice(0, -JSON_SUFFIX.length)),
+      { maxFiles: MAX_CONTRACT_QUARANTINE_FILES, maximumAgeMs: CONTRACT_QUARANTINE_MAX_AGE_MS, now, currentName },
+    );
   }
 }

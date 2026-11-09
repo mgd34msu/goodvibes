@@ -7,7 +7,7 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { captureQuarantineSource, readCapturedQuarantineSourceAsync, quarantineCorruptFile, readJsonFileOrQuarantine, reapOwnedQuarantines } from '../sdk/src/platform/utils/atomic-json-store.ts';
+import { captureQuarantineSource, readCapturedQuarantineSourceAsync, quarantineCorruptFile, readJsonFileOrQuarantine, reapOwnedQuarantines, reapOwnedQuarantineDirectories } from '../sdk/src/platform/utils/atomic-json-store.ts';
 import { JsonFileStore } from '../sdk/src/platform/state/json-file-store.ts';
 import { logger } from '../sdk/src/platform/utils/logger.ts';
 const roots: string[] = [];
@@ -122,4 +122,51 @@ test('an actual async read failure propagates as IO failure rather than a corrup
   try { await expect(new JsonFileStore(f.path).load()).rejects.toBe(failure); }
   finally { read.mockRestore(); }
   expect(readFileSync(f.path, 'utf8')).toBe('{"saved":true}'); expect(payloads(f.root)).toEqual([]);
+});
+
+
+test('global native retention scans each namespace once and never reads corrupt payload bodies', () => {
+  const f = fixture(), other = join(f.root, 'other'); mkdirSync(other);
+  const archives: string[] = [];
+  for (let index = 0; index < 6; index++) {
+    const path = join(index % 2 === 0 ? f.root : other, `source-${index}.json`); writeFileSync(path, `bad ${index}`);
+    archives.push(quarantineCorruptFile(path, { ...options, now: index + 1, maxFiles: 100 }).quarantinePath);
+  }
+  const originalFiles = new Set(archives.map(path => fs.statSync(path, { bigint: true }).ino.toString()));
+  const nativeRead = fs.readFileSync;
+  const read = spyOn(fs, 'readFileSync').mockImplementation(((...args: Parameters<typeof fs.readFileSync>) => {
+    if (typeof args[0] === 'number' && originalFiles.has(fs.fstatSync(args[0], { bigint: true }).ino.toString())) throw Error('Unexpected corrupt payload read');
+    return nativeRead(...args);
+  }) as typeof fs.readFileSync);
+  const list = spyOn(fs, 'readdirSync');
+  let result: ReturnType<typeof reapOwnedQuarantineDirectories>;
+  try {
+    result = reapOwnedQuarantineDirectories([f.root, other], name => /^source-[0-9]+\.json$/.test(name), { now: 10, maxFiles: 2 });
+    expect(list).toHaveBeenCalledTimes(2);
+  } finally { list.mockRestore(); read.mockRestore(); }
+  expect(result.reaped).toBe(4); expect(result.preservedUnknown).toBe(0);
+  expect(archives.filter(path => existsSync(path))).toEqual(archives.slice(-2));
+});
+
+test('global reaping preserves a same-byte foreign payload substituted while reading its native receipt', () => {
+  const f = fixture(); writeFileSync(f.path, 'damaged'); const archive = quarantineCorruptFile(f.path, options).quarantinePath;
+  const bytes = readFileSync(archive), nativeParse = JSON.parse; let replaced = false;
+  const parse = spyOn(JSON, 'parse').mockImplementation((text, reviver) => {
+    const value: unknown = nativeParse(text, reviver);
+    if (!replaced && typeof text === 'string' && text.includes('goodvibes-owned-quarantine')) {
+      replaced = true; renameSync(archive, `${archive}.retained`); writeFileSync(archive, bytes);
+    }
+    return value;
+  });
+  let result: ReturnType<typeof reapOwnedQuarantineDirectories>;
+  try { result = reapOwnedQuarantineDirectories([f.root], name => name === 'store.json', { maxFiles: 0 }); }
+  finally { parse.mockRestore(); }
+  expect(replaced).toBe(true); expect(result.reaped).toBe(0); expect(result.preservedUnknown).toBeGreaterThan(0);
+  expect(readFileSync(archive)).toEqual(bytes); expect(readFileSync(`${archive}.retained`)).toEqual(bytes); expect(existsSync(`${archive}.why`)).toBe(true);
+});
+
+test('per-file native retention still accepts a source filename containing the archive delimiter', () => {
+  const f = fixture(), path = join(f.root, 'source.corrupt-name.json'); writeFileSync(path, 'bad');
+  const archived = quarantineCorruptFile(path, options).quarantinePath;
+  expect(reapOwnedQuarantines(path, { maxFiles: 0 }).reaped).toBe(1); expect(existsSync(archived)).toBe(false);
 });

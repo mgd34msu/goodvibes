@@ -701,47 +701,90 @@ function receiptDocument(value: unknown, base: string, name: string): Quarantine
 /** A receipt is local retention metadata, never authentication against another
  * same-user writer. Full original native facts fence both sides of deletion.
  */
-export function reapOwnedQuarantines(filePath: string, options: { readonly maxFiles?: number | undefined; readonly maximumAgeMs?: number | undefined; readonly now?: number | undefined; readonly assertCurrent?: (() => void) | undefined; readonly onEffect?: ((published?: boolean) => void) | undefined; readonly currentName?: string | undefined } = {}): { readonly reaped: number; readonly preservedUnknown: number } {
+export interface OwnedQuarantineReapOptions {
+  readonly maxFiles?: number | undefined;
+  readonly maximumAgeMs?: number | undefined;
+  readonly now?: number | undefined;
+  readonly assertCurrent?: (() => void) | undefined;
+  readonly onEffect?: ((published?: boolean) => void) | undefined;
+  readonly currentName?: string | undefined;
+}
+export interface OwnedQuarantineReapSummary {
+  readonly reaped: number;
+  readonly expired: number;
+  readonly overCap: number;
+  readonly bytesReclaimed: number;
+  readonly preservedUnknown: number;
+}
+export function reapOwnedQuarantines(filePath: string, options: OwnedQuarantineReapOptions = {}): { readonly reaped: number; readonly preservedUnknown: number } {
+  const absolute = absoluteQuarantinePath(filePath), base = basename(absolute);
+  const result = reapQuarantineScopes([dirname(absolute)], name => name.startsWith(`${base}.corrupt-`) ? base : undefined, options);
+  return { reaped: result.reaped, preservedUnknown: result.preservedUnknown };
+}
+/** Global retention across a store's actual namespaces. Only native archive /
+ * receipt pairs for selected source basenames can be removed. One directory
+ * inventory and bounded receipt reads; corrupt payload bodies are never read. */
+export function reapOwnedQuarantineDirectories(directories: readonly string[], acceptsSource: (name: string) => boolean, options: OwnedQuarantineReapOptions = {}): OwnedQuarantineReapSummary {
+  return reapQuarantineScopes(directories, name => {
+    const separator = name.indexOf('.corrupt-'), base = name.slice(0, separator);
+    return separator > 0 && acceptsSource(base) === true ? base : undefined;
+  }, options);
+}
+function reapQuarantineScopes(directories: readonly string[], sourceForArchive: (name: string) => string | undefined, options: OwnedQuarantineReapOptions): OwnedQuarantineReapSummary {
   const guard = options.assertCurrent?.bind(options), effect = options.onEffect?.bind(options), now = options.now ?? Date.now(), cap = options.maxFiles ?? CORRUPT_QUARANTINE_MAX_FILES, age = options.maximumAgeMs, currentName = options.currentName;
   if (!Number.isSafeInteger(cap) || cap < 0 || !Number.isFinite(now) || (age !== undefined && (!Number.isFinite(age) || age < 0))) quarantineUnavailable();
-  const absolute = absoluteQuarantinePath(filePath), dir = dirname(absolute), base = basename(absolute), prefix = `${base}.corrupt-`;
-  if (!lstatSync(dir, { throwIfNoEntry: false })) return { reaped: 0, preservedUnknown: 0 };
-  const parent = captureExistingDirectory(dir), current = () => { invokeQuarantineCallback(guard); parent.assertCurrent(); };
-  current(); const names = readdirSync(parent.canonical).filter(name => name.startsWith(prefix)), nameSet = new Set(names);
-  if (names.length > MAX_QUARANTINE_RECORDS * 2) quarantineUnavailable();
-  const rows: Array<{ name: string; path: string; why: string; dataPhysical: string; receiptPhysical: string; createdAt: number }> = [];
-  let preservedUnknown = 0, reaped = 0;
-  for (const name of names.filter(name => !name.endsWith('.why'))) {
-    current(); const path = join(parent.canonical, name), why = `${path}.why`; let data: QuarantineSource | null = null, receipt: QuarantineSource | null = null;
-    try {
-      data = captureQuarantineSource(path); receipt = captureQuarantineSource(why); if (!data || !receipt) { preservedUnknown++; continue; }
-      const native = originalQuarantineSource(data), originalReceipt = originalQuarantineSource(receipt);
-      if (originalReceipt.original.size > 65536n) { preservedUnknown++; continue; }
-      const record = receiptDocument(JSON.parse(receipt.read()) as unknown, base, name);
-      if (!record || atomicFileStamp(native.original) !== record.physical || (native.original.mode & 0o777n) !== 0o600n || (originalReceipt.original.mode & 0o777n) !== 0o600n) { preservedUnknown++; continue; }
-      data.assertCurrent(); receipt.assertCurrent(); rows.push({ name, path, why, dataPhysical: atomicFileStamp(native.original), receiptPhysical: atomicFileStamp(originalReceipt.original), createdAt: record.createdAt });
-    } catch { preservedUnknown++; } finally { try { data?.close(); } finally { receipt?.close(); } }
+  const rows: Array<{ name: string; path: string; why: string; dataPhysical: string; receiptPhysical: string; createdAt: number; bytes: number; current: () => void }> = [];
+  let preservedUnknown = 0, reaped = 0, expired = 0, overCap = 0, bytesReclaimed = 0, candidates = 0;
+  const currents: Array<() => void> = [], canonical = new Set<string>();
+  for (const directory of new Set(directories.map(absoluteQuarantinePath))) {
+    if (!lstatSync(directory, { throwIfNoEntry: false })) continue;
+    const parent = captureExistingDirectory(directory), current = () => { invokeQuarantineCallback(guard); parent.assertCurrent(); };
+    currents.push(current); current();
+    if (canonical.has(parent.canonical)) continue;
+    canonical.add(parent.canonical);
+    const bases = new Map<string, string>();
+    const names = readdirSync(parent.canonical).filter(name => {
+      const base = sourceForArchive(name);
+      if (base === undefined) return false;
+      bases.set(name, base); return true;
+    }), nameSet = new Set(names);
+    candidates += names.length;
+    if (candidates > MAX_QUARANTINE_RECORDS * 2) quarantineUnavailable();
+    for (const name of names.filter(name => !name.endsWith('.why'))) {
+      current(); const path = join(parent.canonical, name), why = `${path}.why`, base = bases.get(name)!;
+      let data: QuarantineSource | null = null, receipt: QuarantineSource | null = null;
+      try {
+        data = captureQuarantineSource(path); receipt = captureQuarantineSource(why); if (!data || !receipt) { preservedUnknown++; continue; }
+        const native = originalQuarantineSource(data), originalReceipt = originalQuarantineSource(receipt);
+        if (originalReceipt.original.size > 65536n) { preservedUnknown++; continue; }
+        const record = receiptDocument(JSON.parse(receipt.read()) as unknown, base, name);
+        if (!record || atomicFileStamp(native.original) !== record.physical || (native.original.mode & 0o777n) !== 0o600n || (originalReceipt.original.mode & 0o777n) !== 0o600n) { preservedUnknown++; continue; }
+        data.assertCurrent(); receipt.assertCurrent(); rows.push({ name, path, why, dataPhysical: atomicFileStamp(native.original), receiptPhysical: atomicFileStamp(originalReceipt.original), createdAt: record.createdAt, bytes: Number(native.original.size + originalReceipt.original.size), current });
+      } catch { preservedUnknown++; } finally { try { data?.close(); } finally { receipt?.close(); } }
+    }
+    preservedUnknown += names.filter(name => name.endsWith('.why') && !nameSet.has(name.slice(0, -4))).length;
   }
-  // Unknown orphan .why paths are preserved too; no name-only unlink.
-  preservedUnknown += names.filter(name => name.endsWith('.why') && !nameSet.has(name.slice(0, -4))).length;
-  rows.sort((a, b) => b.createdAt - a.createdAt || b.name.localeCompare(a.name));
+  rows.sort((a, b) => b.createdAt - a.createdAt || b.path.localeCompare(a.path));
   const retained = currentName ? rows.filter(row => row.name === currentName).concat(rows.filter(row => row.name !== currentName)) : rows;
   for (let index = 0; index < retained.length; index++) {
-    const row = retained[index]!;
-    if (row.name === currentName || (index < cap && (age === undefined || now - row.createdAt <= age))) continue;
-    current(); let data: QuarantineSource | null = null, receipt: QuarantineSource | null = null;
+    const row = retained[index]!, old = age !== undefined && now - row.createdAt > age;
+    if (row.name === currentName || (index < cap && !old)) continue;
+    row.current(); let data: QuarantineSource | null = null, receipt: QuarantineSource | null = null;
     try {
       data = captureQuarantineSource(row.path); receipt = captureQuarantineSource(row.why);
       if (!data || !receipt) { if (data || receipt) preservedUnknown++; continue; }
       if (atomicFileStamp(originalQuarantineSource(data).original) !== row.dataPhysical || atomicFileStamp(originalQuarantineSource(receipt).original) !== row.receiptPhysical) { preservedUnknown++; continue; }
-      current(); data.assertCurrent(); receipt.assertCurrent();
+      row.current(); data.assertCurrent(); receipt.assertCurrent();
       try { unlinkSync(row.path); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue; throw error; }
-      logger.warn('[atomic-json-store] physically owned quarantine payload removed', { filePath, quarantinePath: row.path });
-      invokeQuarantineCallback(() => effect?.(false)); current(); receipt.assertCurrent();
+      logger.warn('[atomic-json-store] physically owned quarantine payload removed', { quarantinePath: row.path });
+      invokeQuarantineCallback(() => effect?.(false)); row.current(); receipt.assertCurrent();
       unlinkSync(row.why); invokeQuarantineCallback(() => effect?.(false)); reaped++;
+      if (old) expired++; else overCap++;
+      bytesReclaimed += row.bytes;
     } finally { try { data?.close(); } finally { receipt?.close(); } }
   }
-  current(); return { reaped, preservedUnknown };
+  for (const current of currents) current();
+  return { reaped, expired, overCap, bytesReclaimed, preservedUnknown };
 }
 
 /** Preserve the exact already-read file with exclusive link publication. A

@@ -433,7 +433,7 @@ export async function collectUnitEvidence(
   const currentFiles = planChecks.length ? currentFileObservations(sources.cwd, [...unit.files,
     ...(contract.reviewInventory ? assignedReviewPaths(contract.reviewInventory, unit.files) : []), ...changes.map(change => change.path),
     ...(contract.units ?? []).flatMap(planned => planned.checks.at(-1)?.reviewedFiles?.map(file => file.path) ?? []),
-    ...(contract.units ?? []).filter(planned => planned.status === 'passed').flatMap(planned => planned.touchedPaths ?? [])]) : [];
+    ...(contract.units ?? []).filter(planned => planned.status === 'passed').flatMap(planned => planned.touchedPaths ?? [])], { owner: contract }) : [];
   const owner = sources.ownerEvidence;
   const ownerReads = owner && typeof owner === 'object' && !Array.isArray(owner) && Array.isArray(owner['sourceReads'])
     ? owner['sourceReads'].flatMap(read => read && typeof read === 'object' && !Array.isArray(read) && typeof read['path'] === 'string'

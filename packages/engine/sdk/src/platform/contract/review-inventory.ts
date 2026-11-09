@@ -5,6 +5,8 @@ import { promisify } from 'node:util';
 import { buildGlobMatcher } from '../utils/glob-to-regex.js';
 import type { ContractView, ContractUnitView } from './types.js';
 import type { JsonValue } from '@goodvibes-jev/judgment';
+import { isCurrentNativeFileObservation } from './current-file-observations.js';
+import { hasNativeReviewedFileReference, reviewedFileProvenance, reviewedFileVersionState, type ReviewedFileReference } from './review-file-observations.js';
 
 const executeFile = promisify(execFile);
 const runtimeDirectories = new Set(['.git', '.goodvibes', '.plat', 'node_modules', '.venv']);
@@ -103,24 +105,24 @@ export function reviewInventoryObservation(contract: Pick<ContractView, 'project
   currentFiles: readonly JsonValue[] = []) {
   const inventory = contract.reviewInventory;
   if (!inventory) return undefined;
-  const versions = new Map<string, string | null>();
+  const versions = new Map<string, JsonValue | null>();
   for (const value of currentFiles) if (value && typeof value === 'object' && !Array.isArray(value)
     && value['operation'] === 'read-current-file' && value['source'] === 'native-host-filesystem' && typeof value['path'] === 'string') {
-    versions.set(value['path'], value['success'] === true && typeof value['sha256'] === 'string' && /^[a-f0-9]{64}$/.test(value['sha256']) ? value['sha256'] : null);
+    versions.set(value['path'], value['success'] === true && isCurrentNativeFileObservation(value) ? value : null);
   }
   const excluded = new Map<string, string[]>();
   for (const exclusion of contract.reviewExclusions ?? []) for (const path of assignedReviewPaths(inventory, exclusion.files)) {
     const reasons = excluded.get(path) ?? []; reasons.push(exclusion.reason); excluded.set(path, reasons);
   }
-  const accepted = new Map<string, { unitId: string; checkId: string; sha256: string; criteria: string[]; state: string }[]>();
+  const accepted = new Map<string, (ReviewedFileReference & { unitId: string; checkId: string; criteria: string[]; state: string; provenance: string })[]>();
   for (const unit of contract.units) {
     const check = unit.checks.at(-1);
     if (unit.role !== 'research' || unit.status !== 'passed' || check?.result !== 'pass' || !check.decisionIds.length) continue;
     for (const file of check.reviewedFiles ?? []) {
-      if (!/^[a-f0-9]{64}$/.test(file.sha256)) continue;
       const records = accepted.get(file.path) ?? [];
-      records.push({ unitId: unit.id, checkId: check.id, sha256: file.sha256, criteria: unit.criteria.map(criterion => criterion.id),
-        state: versions.get(file.path) === file.sha256 ? 'current' : versions.has(file.path) ? 'changed' : 'version-unchecked' });
+      const current = versions.get(file.path);
+      records.push({ ...file, unitId: unit.id, checkId: check.id, criteria: unit.criteria.map(criterion => criterion.id), provenance: reviewedFileProvenance(file),
+        state: !hasNativeReviewedFileReference(file) ? 'unverified' : current ? reviewedFileVersionState(current, file) : versions.has(file.path) ? 'changed' : 'version-unchecked' });
       accepted.set(file.path, records);
     }
   }
@@ -145,7 +147,7 @@ export function reviewInventoryObservation(contract: Pick<ContractView, 'project
     reviewedFiles: files.filter(file => file.assessment === 'reviewed').length,
     remainingFiles: files.filter(file => file.scope === 'included' && ['unreviewed', 'changed'].includes(file.assessment)).map(file => file.path),
     versionChecksPending: files.filter(file => file.scope === 'included' && file.assessment === 'version-unchecked').map(file => file.path), files,
-    meaning: 'Native project inventory compared with actual read observations and accepted scoped research checks. Inspected never means reviewed. A reviewed entry requires a passed native assessment and matching current file SHA256. Changed or unknown versions remain open. File inventory is not an instruction to review unrelated files: the original requested scope and any explicitly justified exclusions remain controlling. These facts never approve the final response.' };
+    meaning: 'Native project inventory compared with actual read observations and accepted scoped research checks. Inspected never means reviewed. A reviewed entry requires a passed native assessment and the matching original physical file observation. Actual older saved SHA256 records establish historical byte equality only; their original physical ownership was not recorded, as provenance states. Changed, copied, imported or unknown versions remain open. File inventory is not an instruction to review unrelated files: the original requested scope and any explicitly justified exclusions remain controlling. These facts never approve the final response.' };
 }
 
 /** Counting and matching identities are host bookkeeping. Keep the exact gap

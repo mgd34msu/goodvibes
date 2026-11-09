@@ -236,11 +236,11 @@ describe('what each trigger collects', () => {
     const read = () => collectUnitEvidence(planned, current, 'resume', { ...sources(), turns: [], mustWrite: false });
     const evidence = await read();
     expect(judgeEvidence(evidence)).toMatchObject({ hostOperations: [{ operation: 'read-current-file', success: true,
-      path: 'artifact.zip', bytes: 3, sha256: 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad' }] });
+      path: 'artifact.zip', bytes: 3, observationId: expect.any(String) }] });
     expect(qualityState(current, evidence).commands).toEqual([]);
     writeFileSync(join(dir, 'artifact.zip'), 'abcd');
     expect(judgeEvidence(await read())).toMatchObject({ hostOperations: [{ bytes: 4,
-      sha256: '88d4266fd4e6338d13b845fcf289579d209c897823b9217da3e161936f031589' }] });
+      observationId: expect.any(String) }] });
   });
 
   test('actual plan acceptance reaches the unit checks without claiming unit completion', async () => {

@@ -1,14 +1,21 @@
-import { expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
+import { afterEach, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { currentFileObservations } from '../../sdk/src/platform/contract/current-file-observations.js';
 import { compactJsonReference } from '../../sdk/src/platform/contract/json-reference.js';
 import type { SourceReadEvidence } from '../../sdk/src/platform/contract/evidence.js';
 import { compareJsonReadReferences } from '../../sdk/src/platform/contract/read-reference-comparison.js';
 
+const roots: string[] = [];
+afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function fixture(text: string) {
   const read: SourceReadEvidence = { path: 'input.json', returnedRanges: [`1-${text.split('\n').length}`], returnedLines: text.split('\n').length,
     contentKind: 'declared-reference', returnedContent: text.split('\n').map((line, index) => `${index + 1} | ${line}`).join('\n') };
-  const file = { path: read.path, operation: 'read-current-file', source: 'native-host-filesystem', success: true, binary: false,
-    bytes: Buffer.byteLength(text), sha256: createHash('sha256').update(text).digest('hex') };
+  const root = mkdtempSync(join(tmpdir(), 'native-json-reference-')); roots.push(root);
+  writeFileSync(join(root, read.path), text);
+  const file = currentFileObservations(root, [read.path])[0];
+  if (!file || typeof file !== 'object' || Array.isArray(file) || typeof file['observationId'] !== 'string') throw new Error('Missing native fixture observation');
   return { read, file };
 }
 
@@ -18,7 +25,7 @@ test('JSON reference compaction preserves strings, duplicate keys and exact nume
   const projected = compactJsonReference(f.read, [f.file]);
   expect(projected.returnedContent).toBe('{"literal":"a b\\t\\n","same":1,"same":9007199254740993}');
   expect(JSON.parse(projected.returnedContent!)).toEqual(JSON.parse('{"literal":"a b\\t\\n","same":9007199254740993}'));
-  expect(projected).toMatchObject({ referenceProjection: { currentFileSha256: f.file.sha256, currentFileBytes: f.file.bytes } });
+  expect(projected).toMatchObject({ referenceProjection: { currentFileObservationId: f.file.observationId, currentFileBytes: f.file.bytes } });
   expect(JSON.stringify(f.read)).toBe(original);
 });
 
@@ -30,7 +37,7 @@ test('escaped quotes and backslashes keep their original JSON string values', ()
 
 test('a compact view never substitutes stale, partial or invalid reference contents', () => {
   const f = fixture('{\n "data": [1, 2, 3]\n}\n');
-  expect(compactJsonReference(f.read, [{ ...f.file, sha256: 'other bytes' }])).toBe(f.read);
+  expect(compactJsonReference(f.read, [{ ...f.file, observationId: 'forged-copy' }])).toBe(f.read);
   const partial = { ...f.read, returnedContent: f.read.returnedContent!.split('\n').slice(1).join('\n') };
   expect(compactJsonReference(partial, [f.file])).toBe(partial);
   const invalid = fixture('not JSON');
@@ -59,7 +66,7 @@ test('native JSON reference arithmetic unions attributed observations and expose
     { source: 'passed worker', reads: [{ path: 'source.ts', returnedRanges: ['2-4'] }] },
     { source: 'current worker', reads: [{ path: 'source.ts', returnedRanges: ['6-8'] }, { path: 'unrelated.ts', returnedRanges: ['1-999'] }] },
   ]);
-  expect(result).toMatchObject([{ source: 'native-host-interval-comparison', referencePath: 'input.json', referenceSha256: f.file.sha256,
+  expect(result).toMatchObject([{ source: 'native-host-interval-comparison', referencePath: 'input.json', referenceObservationId: f.file.observationId,
     observationSources: [{ source: 'qualified owner' }, { source: 'passed worker' }, { source: 'current worker' }],
     groups: [{ reference: '$["partitions"][0]["files"]', arrayItems: 3, literalRecords: 3, paths: 2,
       referencedLines: 9, coveredReferencedLines: 7, missingReferencedLines: 2,
@@ -69,7 +76,7 @@ test('native JSON reference arithmetic unions attributed observations and expose
 
 test('scope arithmetic cannot credit stale, partial or duplicate-key reference data', () => {
   const f = fixture('{"files":[{"path":"source.ts","ranges":[[1,5]]}]}');
-  expect(compareJsonReadReferences([f.read], [{ ...f.file, sha256: 'changed' }], [])).toEqual([]);
+  expect(compareJsonReadReferences([f.read], [{ ...f.file, observationId: 'changed-copy' }], [])).toEqual([]);
   expect(compareJsonReadReferences([{ ...f.read, returnedContent: f.read.returnedContent!.slice(0, -2) }], [f.file], [])).toEqual([]);
   const duplicate = fixture('{"files":[{"path":"source.ts","ranges":[[1,5]],"ranges":[]}]}');
   expect(compareJsonReadReferences([duplicate.read], [duplicate.file], [])).toEqual([]);

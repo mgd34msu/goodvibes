@@ -570,7 +570,7 @@ describe('persistence', () => {
     const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'the contract to end');
     h.store.flush();
-    expect(existsSync(join(h.root, '.goodvibes', 'contracts', `${contract.id}.json`))).toBe(true);
+    expect(existsSync(join(h.root, '.goodvibes', 'contracts', 'checkpoints-v6', `${contract.id}.json`))).toBe(true);
     expect(JSON.parse(h.runner.serializeContract(contract.id)!).contract.status).toBe('passed');
     expect(h.runner.get(contract.id)!.status).toBe('passed');
     expect(h.runner.list()).toEqual([]);

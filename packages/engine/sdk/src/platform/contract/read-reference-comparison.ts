@@ -125,7 +125,7 @@ export function compareJsonReadReferences(reads: readonly SourceReadEvidence[], 
     }
     if (!groups.length) return [];
     return [{ source: 'native-host-interval-comparison', referencePath: read.path,
-      referenceSha256: projected.referenceProjection.currentFileSha256,
+      referenceObservationId: projected.referenceProjection.currentFileObservationId,
       observationSources: observations.map(({ source, reads }) => ({ source, records: reads.length })),
       groups: groups.map(group => {
         const expected = new Map<string, Interval[]>();

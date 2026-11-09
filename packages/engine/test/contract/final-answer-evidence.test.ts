@@ -1,5 +1,4 @@
-import { expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
+import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,7 +8,6 @@ import { finalAnswerEvidence, finalContentEvidence } from '../../sdk/src/platfor
 import { commandObservation } from '../../sdk/src/platform/contract/command-observation.js';
 import { makeContract, makeUnit } from './fixtures.js';
 
-const digest = (text: string) => createHash('sha256').update(text).digest('hex');
 
 test('content review references previously checked read accounting while preserving all primary content, failures and scope comparisons', () => {
   const f = fixture();
@@ -29,6 +27,8 @@ test('content review references previously checked read accounting while preserv
   expect(finalContentEvidence({ orchestration: { units: [{ status: 'running', readObservations: reads }] } }))
     .toMatchObject({ orchestration: { units: [{ status: 'running', readObservations: reads }] } });
 });
+const fixtureRoots: string[] = [];
+afterEach(() => { for (const root of fixtureRoots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function fixture() {
   const contract = makeContract({ units: [makeUnit({ status: 'passed', answer: 'A historical draft with superseded progress.',
     checks: [{ id: 'u1.k1', at: 1, trigger: 'completion', result: 'pass', quality: {}, decisionIds: ['native-unit-check'],
@@ -36,21 +36,27 @@ function fixture() {
     readEvidence: [{ path: 'review.md', returnedRanges: ['1-1'], returnedLines: 1,
       contentKind: 'declared-reference', returnedContent: '1 | Ready.' }],
   })] });
-  const current = { operation: 'read-current-file', success: true, path: 'review.md', bytes: 7, binary: false, sha256: digest('Ready.\n') };
+  const root = mkdtempSync(join(tmpdir(), 'native-final-artifact-')); fixtureRoots.push(root);
+  writeFileSync(join(root, 'review.md'), 'Ready.\n');
+  const current = currentFileObservations(root, ['review.md'])[0];
+  if (!current || typeof current !== 'object' || Array.isArray(current)) throw new Error('Missing native current-file fixture');
   const evidence = { orchestration: { currentFiles: [current], continuationEvidence: 'Initial work was unfinished.',
     units: [{ id: 'u1', status: 'passed', acceptedAnswer: contract.units[0]!.answer!, acceptedAnswerDigest: 'answer-digest',
       latestCheck: contract.units[0]!.checks[0]!, criteria: [{ text: 'The review is complete', verdict: 'met' }], readObservations: [] }] },
     diff: '-Initial limited draft\n+Ready.', hostOperations: [current],
     commands: [{ command: 'verify-archive', success: true, head: 'Integrity passed.' }], gates: [] };
-  // JSON projection mirrors the real native host records, without widening their types.
-  return { contract, evidence: JSON.parse(JSON.stringify(evidence)), current };
+  // Other metadata is detached, while real judgeEvidence preserves the native
+  // current-file objects themselves. A JSON copy carries no native byte proof.
+  const projected = JSON.parse(JSON.stringify(evidence));
+  projected.orchestration.currentFiles = [current]; projected.hostOperations = [current];
+  return { contract, evidence: projected, current, root };
 }
 
 test('content review receives only byte-matched current primary artifact text and actual native receipts', () => {
   const f = fixture(); const before = JSON.stringify(f.contract);
   const checks = [{ criterion: 'c1', servedBy: ['u1.c1'] }];
   const view = finalAnswerEvidence(f.contract, f.evidence, { reports: 'Superseded draft', checks })!;
-  expect(view.artifacts).toMatchObject([{ path: 'review.md', sha256: digest('Ready.\n'), content: '1 | Ready.',
+  expect(view.artifacts).toMatchObject([{ path: 'review.md', observationId: expect.any(String), content: '1 | Ready.',
     sourceUnitId: 'u1', sourceCheckId: 'u1.k1', decisionIds: ['native-unit-check'] }]);
   expect(view.evidence).toMatchObject({ originalRequest: f.contract.ask, criteria: checks,
     commands: f.evidence.commands, gates: f.evidence.gates,
@@ -65,7 +71,7 @@ test('content review receives only byte-matched current primary artifact text an
 test('root projection retains actual scope calculations and repair-plan admissions rather than replacing them with acceptance labels', () => {
   const f = fixture();
   const sourceJsonReferenceComparisons = [{ source: 'native-host-interval-comparison', referencePath: 'input.json',
-    referenceSha256: 'bound-reference', groups: [{ referencedLines: 12, coveredReferencedLines: 11, missingReferencedLines: 1,
+    referenceObservationId: 'bound-reference', groups: [{ referencedLines: 12, coveredReferencedLines: 11, missingReferencedLines: 1,
       missing: [{ path: 'source.ts', ranges: [[7, 7]] }] }] }];
   const repairPlanAdmissions = [{ id: 'repair-plan', decisionIds: ['native-repair-validation'] }];
   const native = { ...f.evidence, orchestration: { ...f.evidence.orchestration, sourceJsonReferenceComparisons, repairPlanAdmissions } };
@@ -135,8 +141,8 @@ test('current execution citations and every failure keep full primary bodies whi
   expect(JSON.stringify(f.contract)).toBe(before);
   expect(view.evidence['fullSourceEvidence']).toMatchObject({ digest: hashState(f.evidence) });
   f.contract.units[0]!.readEvidence = [{ ...f.contract.units[0]!.readEvidence![0]!, returnedContent: '1 | call-inactive.' }];
-  f.evidence.orchestration.currentFiles[0].sha256 = digest('call-inactive.\n');
-  f.evidence.orchestration.currentFiles[0].bytes = Buffer.byteLength('call-inactive.\n');
+  writeFileSync(join(f.root, 'review.md'), 'call-inactive.\n');
+  f.evidence.orchestration.currentFiles = currentFileObservations(f.root, ['review.md']);
   const artifactView = finalAnswerEvidence(f.contract, f.evidence, {}, [], 'Read the report.')!;
   expect((artifactView.evidence['commands'] as unknown[])[0]).toEqual(observed[0]);
 });
@@ -195,32 +201,37 @@ test('root criterion references resolve to complete identical unit criteria and 
 
 test('stale reads and unaccepted observations never replace full original evidence', () => {
   const f = fixture();
-  f.evidence.orchestration.currentFiles[0].sha256 = digest('Changed.\n');
+  f.evidence.orchestration.currentFiles[0] = { ...f.current, observationId: 'copied-stale-observation' };
   expect(finalAnswerEvidence(f.contract, f.evidence, {})).toBeUndefined();
-  f.evidence.orchestration.currentFiles[0].sha256 = f.current.sha256;
+  f.evidence.orchestration.currentFiles[0] = f.current;
   f.contract.units[0]!.checks[0] = { ...f.contract.units[0]!.checks[0]!, decisionIds: [] };
   expect(finalAnswerEvidence(f.contract, f.evidence, {})).toBeUndefined();
 });
 
 test('an unrepresented textual change keeps the full evidence path; binary identity is not semantic approval', () => {
   const f = fixture();
-  f.evidence.orchestration.currentFiles.push({ ...f.current, path: 'unknown.txt' });
+  writeFileSync(join(f.root, 'unknown.txt'), 'Unrepresented text');
+  f.evidence.orchestration.currentFiles.push(currentFileObservations(f.root, ['unknown.txt'])[0]);
   expect(finalAnswerEvidence(f.contract, f.evidence, {})).toBeUndefined();
-  f.evidence.orchestration.currentFiles[1].binary = true;
+  writeFileSync(join(f.root, 'unknown.txt'), Buffer.from([0, 1, 2]));
+  f.evidence.orchestration.currentFiles[1] = currentFileObservations(f.root, ['unknown.txt'])[0];
   expect(finalAnswerEvidence(f.contract, f.evidence, {})?.artifacts).toHaveLength(1);
-  f.evidence.orchestration.currentFiles[0].binary = true;
+  writeFileSync(join(f.root, 'review.md'), Buffer.from([0, 1, 2]));
+  f.evidence.orchestration.currentFiles[0] = currentFileObservations(f.root, ['review.md'])[0];
   expect(finalAnswerEvidence(f.contract, f.evidence, {})).toBeUndefined();
 });
 
 test('an auxiliary file keeps its complete actual native diff without dropping current primary report contents', () => {
   const f = fixture();
-  f.evidence.orchestration.currentFiles.push({ ...f.current, path: 'SHA256SUMS', sha256: digest('new-checksum') });
+  writeFileSync(join(f.root, 'SHA256SUMS'), 'new-checksum');
+  const extra = currentFileObservations(f.root, ['SHA256SUMS'])[0]!;
+  f.evidence.orchestration.currentFiles.push(extra);
   const change = { path: 'SHA256SUMS', diff: '--- SHA256SUMS\n-old-checksum\n+new-checksum' };
   f.evidence.diff += '\n' + change.diff;
   const before = JSON.stringify(f.evidence);
   const primary = finalAnswerEvidence(f.contract, f.evidence, {}, [change])!;
   expect(primary.artifacts).toHaveLength(1);
-  expect(primary.evidence['currentTextualChanges']).toEqual([{ ...change, sha256: digest('new-checksum') }]);
+  expect(primary.evidence['currentTextualChanges']).toEqual([{ ...change, observationId: expect.any(String) }]);
   expect(JSON.stringify(f.evidence)).toBe(before);
   expect(finalAnswerEvidence(f.contract, f.evidence, {}, [{ ...change, diff: 'Invented replacement text' }])).toBeUndefined();
 });
@@ -252,11 +263,11 @@ test('final artifact review receives complete actual current text when the diff 
     const evidence = { orchestration: { currentFiles: observed }, hostOperations: observed,
       diff: '-Old attribution\n+Updated execution attribution.' };
     const view = finalAnswerEvidence(contract, evidence, {})!;
-    expect(view.artifacts).toMatchObject([{ path: 'review.md', sha256: digest(text), content: text,
+    expect(view.artifacts).toMatchObject([{ path: 'review.md', observationId: expect.any(String), content: text,
       decisionIds: [], sourceHostOperation: { operation: 'read-current-file', source: 'native-host-filesystem', success: true } }]);
     expect(JSON.stringify(view.evidence).split('Unchanged findings and source assessments.')).toHaveLength(2);
     expect(view.artifacts[0]).not.toHaveProperty('sourceCheckId');
-    expect(view.evidence['orchestration']).toMatchObject({ currentFiles: [{ sha256: digest(text) }] });
+    expect(view.evidence['orchestration']).toMatchObject({ currentFiles: [{ observationId: expect.any(String) }] });
     expect(view.evidence['fullSourceEvidence']).toMatchObject({ digest: hashState(evidence) });
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

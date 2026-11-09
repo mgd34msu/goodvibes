@@ -96,7 +96,7 @@ export async function admitPublicationInput(contract: Contract, filter: ReadAcce
       await authorizeContractInputPath(authority, path, filter, signal);
       const expected = after.get(path);
       const currentOwner = currentFileObservations(original.sourceRoot, [path], {
-        includeText: true, ...(expected?.kind === 'file' ? { inputFile: expected } : {}),
+        includeText: true, owner: contract, ...(expected?.kind === 'file' ? { inputFile: expected } : {}),
       });
       if (expected?.kind === 'file') {
         const observation = currentOwner[0] as { success?: unknown; inputBlobOid?: unknown; sha256?: unknown } | undefined;

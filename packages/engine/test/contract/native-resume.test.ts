@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
+import { currentFileObservations, currentFileMatchesText } from '../../sdk/src/platform/contract/current-file-observations.js';
 import { SqliteDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { contractPath, createContractIntake, type Contract, type NativeContractSource } from '../../sdk/src/platform/contract/index.js';
@@ -22,17 +23,25 @@ function writeSnapshot(path: string, contract: Contract, schemaVersion: number) 
 test('deferred plan survives restart; no replan, unit or old receipt runs before condition change', async () => {
   const directory = root(); using log = new SqliteDecisionLog(':memory:');
   let revision = '1'; let waits = 0; let wake: (() => void) | undefined;
+  writeFileSync(join(directory, 'reference.json'), '{"files":[]}');
   const host: NativeContractDecisionHost = { authorityOf: authority, conditions: (_contract, stage) => stage !== 'plan' ? [] : [{ ref: { id: 'build-evidence', revision }, description: 'Independent evidence arrives', current: () => ({ id: 'build-evidence', revision }),
     wait: signal => new Promise<void>((resolve, reject) => { waits += 1; wake = resolve; signal.addEventListener('abort', () => reject(signal.reason), { once: true }); }) }] };
   const first = add(makeHarness({ root: directory, recordNative: true, decisionLog: log, nativeDecisions: host, plan: plan(), scripts: {}, port: context => context.name === 'disposition' ? choiceAnswer(context.question, 'defer_0', 0.99) : undefined }));
   const id = (await startContract(first, { nativeSource: source })).contract.id;
   await waitFor(() => waits === 1, 'first registered deferral');
   const prior = first.store.get(id)!.nativeDecisions!.history.at(-1)!.decision;
+  const beforeRead = currentFileObservations(directory, ['reference.json'], { owner: first.store.get(id)! })[0]!;
+  expect(first.store.write(id)).toBe(true);
   first.dispose(); await first.runner.join(id); harnesses.splice(harnesses.indexOf(first), 1);
   let modelRuns = 0;
   const second = add(makeHarness({ root: directory, recordNative: true, decisionLog: log, nativeDecisions: host, scripts: { u1: finishes('parser complete') }, planner: { run: async () => { modelRuns += 1; throw new Error('Existing checked plan must be retained'); } } }));
   const report = await second.runner.resumeAll(); expect(report.resumed).toEqual([{ contractId: id, step: 'plan' }]);
   await waitFor(() => waits === 2, 'restored registered deferral');
+  const afterRead = currentFileObservations(directory, ['reference.json'], { owner: second.store.get(id)! })[0]!;
+  expect(afterRead).toEqual(beforeRead);
+  expect(currentFileMatchesText(afterRead, '{"files":[]}')).toBe(true);
+  expect(currentFileMatchesText(structuredClone(afterRead), '{"files":[]}')).toBe(false);
+  expect(JSON.stringify(second.store.get(id))).not.toContain('nativeFileLabels');
   expect(second.agentsOf('u1')).toHaveLength(0); expect(modelRuns).toBe(0); expect(second.store.get(id)!.nativeDecisions!.spent.plan).toBe(1);
   revision = '2'; wake!(); await waitFor(() => terminal(second, id), 'resumed native contract'); await second.runner.join(id);
   const done = second.store.get(id)!; expect(done.error).toBeUndefined(); expect(done.status).toBe('passed'); expect(modelRuns).toBe(0);

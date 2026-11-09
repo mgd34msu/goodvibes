@@ -6,6 +6,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { JevDecisionBinding } from '@goodvibes-jev/judgment/decisions';
 import { createAtomicTempPath, writeFileAtomic } from '../utils/atomic-json-store.js';
 import { readFileObservation } from '../utils/file-observation.js';
+import { readOwnedContractCheckpoint, ownedContractCheckpointText, type OwnedContractCheckpointRead } from './owned-checkpoint-read.js';
 import { acquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
 import { CONTRACT_ORIGINS, isContractId, type ContractView, type StartContractInput } from './types.js';
 import { captureNativeContractSource } from './native-source.js';
@@ -376,6 +377,14 @@ export class DurableContractAdmissions {
     const envelope = this.envelope(key);
     if (envelope === null) throw new DurableContractAdmissionError('missing');
     return envelope.checkpoint;
+  }
+
+  /** Retain the original actual file read; public parsed JSON cannot mint it. */
+  checkpointRead(key: DurableContractKey): OwnedContractCheckpointRead {
+    const expected = this.checkpoint(key);
+    const receipt = readOwnedContractCheckpoint(this.path(key), 'durable-admission');
+    if (ownedContractCheckpointText(receipt) !== expected) throw new DurableContractAdmissionError('checkpoint');
+    return receipt;
   }
 
   private persist(admission: DurableContractAdmission, checkpoint: string): void {

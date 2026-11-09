@@ -260,7 +260,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     const evidenceUnits = contract.units.filter(unit => evidenceGroups.has(unit.groupId));
     const ownerPriorReads = context.readOwnerEvidence?.(contract, input.output + '\n' + changes.map(change => change.diff).join('\n')) ?? null;
     const sourceScope = contractSourceScope({ ...contract, units: evidenceUnits }, tree, ownerPriorReads ?? undefined,
-      input.criteria.map(criterion => ({ field: `criterion ${criterion.id}`, text: criterion.text })));
+      input.criteria.map(criterion => ({ field: `criterion ${criterion.id}`, text: criterion.text })), contract);
     const answerSource = input.scope === 'deliverable' ? finalAnswerUnit(contract) : undefined;
     const sourceReport = answerSource ? parseCompletionReportParts(answerSource.answer ?? '')?.report : undefined;
     const sourceCheck = answerSource?.checks.at(-1);
@@ -286,9 +286,9 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
       repairPlanAdmissions: contract.decisions.filter(decision => decision.action === 'fix-planned' && decision.decisionIds.length > 0)
         .map(decision => ({ id: decision.id, targetId: decision.targetId, at: decision.at, reason: decision.reason, decisionIds: [...decision.decisionIds],
           meaning: 'Actual host admission of this repair plan with its validation decision identities; this is not approval of the repaired result or final answer.' })),
-      currentFiles: currentFileObservations(tree, changes.map(change => change.path), { includeText: input.scope === 'deliverable' }),
+      currentFiles: currentFileObservations(tree, changes.map(change => change.path), { includeText: input.scope === 'deliverable', owner: contract }),
       ...(contract.reviewInventory ? { reviewInventory: compactReviewInventory(reviewInventoryObservation(contract,
-        currentFileObservations(tree, contract.units.flatMap(unit => unit.checks.at(-1)?.reviewedFiles?.map(file => file.path) ?? [])))!) as unknown as JsonValue } : {}),
+        currentFileObservations(tree, contract.units.flatMap(unit => unit.checks.at(-1)?.reviewedFiles?.map(file => file.path) ?? []), { owner: contract }))!) as unknown as JsonValue } : {}),
       privateArtifacts: readPrivateReceiptArchives(contract),
       currentValidation: {
         scope: input.scope, targetId: input.targetId, outputDigest: hashState(input.output), status: 'in-progress',

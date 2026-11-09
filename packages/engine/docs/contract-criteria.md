@@ -288,7 +288,7 @@ An escalation names the unmet and unshown criteria (`contract/escalation.ts`). T
 | `CONTRACT_PASSED` | `criteriaMet`, `criteriaJudged`, `excluded`, `nudges` |
 | Fleet nodes | `ProcessCheckSummary` on contract, group and unit nodes: each criterion's latest verdict, met and judged counts, nudges |
 
-The contract tree persists every reading under `.goodvibes/contracts/<contractId>.json`, so a restarted runner resumes with the full history.
+The contract tree persists every reading under `.goodvibes/contracts/checkpoints-v6/<contractId>.json`, so a restarted runner resumes with the full history. Earlier schema1–5 checkpoints in the flat `.goodvibes/contracts/` directory remain readable without moving or deleting their files; new writes use the versioned directory. Native durable admission identities and execution leases retain their original location.
 
 ---
 

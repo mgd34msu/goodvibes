@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { SqliteDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import {
-  buildFixPlannerPrompt, contractPath, readContractSnapshot,
+  buildFixPlannerPrompt, contractPath, readContractSnapshot, CURRENT_CONTRACT_SCHEMA_VERSION,
   type Contract, type DurableContractRequest, type NativeContractSource,
 } from '../../sdk/src/platform/contract/index.js';
 import { DurableContractAdmissions } from '../../sdk/src/platform/contract/durable-admission.js';
@@ -136,8 +136,8 @@ describe('native semantic and durable admission union', () => {
     expect(planner.requests).toHaveLength(2); expect(h.agentsOf('u1')).toHaveLength(1);
     const disk = JSON.parse(readFileSync(contractPath(h.root, id), 'utf8')) as { schemaVersion: number; contract: Contract };
     const durable = JSON.parse(new DurableContractAdmissions(h.root).checkpoint(request(h.root).key)) as { schemaVersion: number; contract: Contract };
-    expect(disk.schemaVersion).toBe(5); expect(disk.contract.schemaVersion).toBe(5);
-    expect(durable.schemaVersion).toBe(5); expect(durable.contract.nativeSource).toEqual(source());
+    expect(disk.schemaVersion).toBe(CURRENT_CONTRACT_SCHEMA_VERSION); expect(disk.contract.schemaVersion).toBe(CURRENT_CONTRACT_SCHEMA_VERSION);
+    expect(durable.schemaVersion).toBe(CURRENT_CONTRACT_SCHEMA_VERSION); expect(durable.contract.nativeSource).toEqual(source());
     expect(durable.contract.nativeDecisions).toEqual(result.nativeDecisions);
     expect('snapshot' in readContractSnapshot(JSON.stringify(durable))).toBe(true);
   }, 20_000);

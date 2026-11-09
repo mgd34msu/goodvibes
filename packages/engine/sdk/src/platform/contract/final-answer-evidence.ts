@@ -1,10 +1,10 @@
-import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { hashState, type JsonValue } from '@goodvibes-jev/judgment';
 import type { ContractView } from './types.js';
 import type { FileChange } from './evidence.js';
 import { commandObservation } from './command-observation.js';
 import { acceptedResearchIds } from './accepted-research.js';
+import { currentFileMatchesText, isCurrentNativeFileObservation } from './current-file-observations.js';
 
 type JsonObject = { [key: string]: JsonValue };
 const object = (value: JsonValue | undefined): value is JsonObject => value !== undefined && value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -114,15 +114,16 @@ export function finalAnswerEvidence(contract: Pick<ContractView, 'id' | 'ask' | 
   const host = evidence['orchestration'];
   if (!object(host) || !Array.isArray(host['currentFiles'])) return undefined;
   const files = host['currentFiles'].filter(object);
-  if (!files.length || files.some(file => file['success'] !== true || typeof file['binary'] !== 'boolean')) return undefined;
-  const artifacts: { path: string; sha256: string; sourceUnitId?: string; sourceCheckId?: string; content: string; decisionIds: string[]; sourceHostOperation?: JsonValue }[] = [];
-  const currentChanges: { path: string; sha256: string; diff: string }[] = [];
+  if (!files.length || files.some(file => file['success'] !== true || typeof file['binary'] !== 'boolean' || !isCurrentNativeFileObservation(file))) return undefined;
+  const artifacts: { path: string; observationId: string; sha256?: string; sourceUnitId?: string; sourceCheckId?: string; content: string; decisionIds: string[]; sourceHostOperation?: JsonValue }[] = [];
+  const currentChanges: { path: string; observationId: string; sha256?: string; diff: string }[] = [];
   for (const file of files) {
     if (file['binary'] === true) continue;
-    if (typeof file['path'] !== 'string' || typeof file['sha256'] !== 'string') return undefined;
+    if (typeof file['path'] !== 'string' || typeof file['observationId'] !== 'string') return undefined;
+    const reference = { observationId: file['observationId'], ...(typeof file['sha256'] === 'string' ? { sha256: file['sha256'] } : {}) };
     if (file['operation'] === 'read-current-file' && file['source'] === 'native-host-filesystem' && typeof file['text'] === 'string') {
-      if (Buffer.byteLength(file['text']) !== file['bytes'] || createHash('sha256').update(file['text']).digest('hex') !== file['sha256']) return undefined;
-      artifacts.push({ path: file['path'], sha256: file['sha256'], content: file['text'], decisionIds: [], sourceHostOperation: metadata(file) });
+      if (!currentFileMatchesText(file, file['text'])) return undefined;
+      artifacts.push({ path: file['path'], ...reference, content: file['text'], decisionIds: [], sourceHostOperation: metadata(file) });
       continue;
     }
     let found: typeof artifacts[number] | undefined;
@@ -133,8 +134,8 @@ export function finalAnswerEvidence(contract: Pick<ContractView, 'id' | 'ask' | 
         if (read.contentKind !== 'declared-reference' || read.returnedContent === undefined
           || !(read.path === file['path'] || read.path.endsWith('/' + file['path']))) continue;
         const text = read.returnedContent.split('\n').map(line => line.replace(/^\s*\d+\s*\| ?/, '')).join('\n');
-        if (![text, text + '\n', text.replace(/\n$/, '')].some(value => createHash('sha256').update(value).digest('hex') === file['sha256'])) continue;
-        found = { path: file['path'], sha256: file['sha256'], sourceUnitId: unit.id,
+        if (![text, text + '\n', text.replace(/\n$/, '')].some(value => currentFileMatchesText(file, value))) continue;
+        found = { path: file['path'], ...reference, sourceUnitId: unit.id,
           sourceCheckId: check.id, content: read.returnedContent, decisionIds: [...check.decisionIds] };
         break;
       }
@@ -145,12 +146,12 @@ export function finalAnswerEvidence(contract: Pick<ContractView, 'id' | 'ask' | 
     if (!found) {
       const change = changes.find(change => change.path === file['path'] && change.diff.trim().length > 0);
       if (!change || typeof evidence['diff'] !== 'string' || !evidence['diff'].includes(change.diff)) return undefined;
-      currentChanges.push({ path: file['path'], sha256: file['sha256'], diff: change.diff });
+      currentChanges.push({ path: file['path'], ...reference, diff: change.diff });
       continue;
     }
     artifacts.push(found);
   }
-  if (!artifacts.length && !currentChanges.length) return undefined;
+  if ((!artifacts.length && !currentChanges.length) || files.some(file => !isCurrentNativeFileObservation(file))) return undefined;
   const artifactPaths = new Set(files.flatMap(file => typeof file['path'] === 'string' ? [file['path']] : []));
   const researchIds = acceptedResearchIds(contract, artifactPaths);
   const units = Array.isArray(host['units']) ? host['units'].filter(object).map(unit => {
@@ -190,8 +191,8 @@ export function finalAnswerEvidence(contract: Pick<ContractView, 'id' | 'ask' | 
       inputGeneration: host['inputGeneration'] ?? null, firstUnitStartedAt: host['firstUnitStartedAt'] ?? null,
       currentFiles: host['currentFiles'].map(metadata), privateArtifacts: host['privateArtifacts'] ?? [],
       historicalContextSource: { storage: 'native-contract-store', contractId: host['contractId'] ?? contract.id, field: 'taskEvidence' },
-      meaning: 'Current artifact contents are complete actual host filesystem reads bound to current byte size and SHA256, or retained successful worker reads matching that identity and their real passed native checks. A sourceHostOperation records a fresh host read for this review, never a worker inspection, execution or earlier acceptance. The native reviewer must judge those actual contents now. Current textual changes retain the exact native-collected diff already supplied in the original evidence beside fresh file identity; a diff does not establish unchanged whole-file contents or semantic approval. No textual change is omitted. Prior native checks establish only their checked scope; they do not approve this new answer or later changes. Every original requirement remains unchanged in the separate mandatory fulfillment check. Complete source records remain retained and digest-bound. Historical task progress and superseded answer drafts are not the current final answer.',
+      meaning: 'Current artifact contents are complete actual host filesystem reads bound to their original bytes and physical owner, or retained successful worker reads matching those exact bytes and their real passed native checks. An observation ID only names its native read; copied labels are not proof. A sourceHostOperation records a fresh host read for this review, never a worker inspection, execution or earlier acceptance. The native reviewer must judge those actual contents now. Current textual changes retain the exact native-collected diff already supplied in the original evidence beside a fresh original file observation; a diff does not establish unchanged whole-file contents or semantic approval. No textual change is omitted. Prior native checks establish only their checked scope; they do not approve this new answer or later changes. Every original requirement remains unchanged in the separate mandatory fulfillment check. Complete source records remain retained. Historical task progress and superseded answer drafts are not the current final answer.',
     },
   };
-  return { evidence: view, artifacts };
+  return files.every(isCurrentNativeFileObservation) ? { evidence: view, artifacts } : undefined;
 }

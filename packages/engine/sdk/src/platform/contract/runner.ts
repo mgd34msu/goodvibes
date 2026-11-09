@@ -69,7 +69,8 @@ import { createContractFleetControls, type ContractFleetControls } from './fleet
 import type { OwnerEvidenceReader } from './owner-evidence.js';
 import { ContractRun, failureFromError, type RunEnv } from './run-context.js';
 import { createContractSteps, type ContractSteps, type ContractStepsWithReplies } from './steps.js';
-import { deserializeContract, serializeContract, type ContractStore } from './store.js';
+import { deserializeContract, deserializeOwnedContractCheckpoint, serializeContract, type ContractStore } from './store.js';
+import { retainOriginalReviewDescriptors } from './review-file-observations.js';
 import {
   CURRENT_CONTRACT_SCHEMA_VERSION,
   isTerminalContractStatus,
@@ -562,7 +563,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
   }
 
   function durableResult(admission: DurableContractAdmission): DurableStartedContract {
-    const contract = runs.get(admission.contractId)?.contract ?? deserializeContract(durableAdmissions.checkpoint(admission.key));
+    const contract = runs.get(admission.contractId)?.contract ?? deserializeOwnedContractCheckpoint(durableAdmissions.checkpointRead(admission.key));
     if (contract === null || contract.durableAdmission?.payloadRevision !== admission.payloadRevision
       || contract.ownerAgentId !== admission.ownerAgentId) throw new DurableContractAdmissionError('checkpoint');
     assertDurableCheckpoint(contract, admission);
@@ -716,15 +717,17 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       if (admission.execution === undefined) throw new DurableContractAdmissionError('checkpoint');
       const lease = await durableAdmissions.lease(frozenKey);
       durableLeases.set(admission.contractId, lease);
-      const contract = deserializeContract(durableAdmissions.checkpoint(admission.key));
-      if (contract === null) { durableLeases.delete(admission.contractId); lease(); throw new DurableContractAdmissionError('checkpoint'); }
+      let contract: Contract;
       try {
+        const restored = deserializeOwnedContractCheckpoint(durableAdmissions.checkpointRead(admission.key));
+        if (restored === null) throw new DurableContractAdmissionError('checkpoint');
+        contract = restored;
         assertDurableCheckpoint(contract, admission);
         if (contract.inputSnapshot !== undefined) contract.inputSnapshot = await restoreContractInputDevice(contract.inputSnapshot);
         requireDecisionFeature('autonomous contract planning and acceptance');
+        deps.store.hold(contract);
       }
       catch (error) { durableLeases.delete(admission.contractId); lease(); throw error; }
-      deps.store.hold(contract);
       const run = newRun(contract);
       run.requireSettlement = true;
       resume.prepareNative(run);
@@ -1346,7 +1349,9 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       placementAbort.abort(new Error('Contract runner is disposed'));
       for (const run of new Set([...runs.values(), ...settling.values()])) {
         const json = serializeContract(run.contract, now());
-        disposalCheckpoints.set(run.id, json === null ? null : deserializeContract(json));
+        const copy = json === null ? null : deserializeContract(json);
+        if (copy) retainOriginalReviewDescriptors(run.contract, copy);
+        disposalCheckpoints.set(run.id, copy);
       }
       watchdog.dispose();
       failures.dispose();

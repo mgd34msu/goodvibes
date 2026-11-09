@@ -120,12 +120,15 @@ export {
   MAX_TERMINAL_CONTRACT_FILES,
   TERMINAL_CONTRACT_MAX_AGE_MS,
   contractPath,
+  contractCheckpointsDir,
   contractsDir,
   deserializeContract,
   readContractSnapshot,
   serializeContract,
 } from './store.js';
 export type { ContractReapSummary, ContractSnapshot, ContractSnapshotRejection, ContractStoreOptions } from './store.js';
+export type { ReviewedFileReference } from './review-file-observations.js';
+export type { OwnedContractCheckpointRead } from './owned-checkpoint-read.js';
 export { CHANGING_TOOLS, createUnitCheckLoop } from './agent-hooks.js';
 export type { ContractAgentHooks, ContractHoldOutcome, ContractSessionHooks, UnitCheckEscalations, UnitCheckLoop, UnitCheckLoopDeps } from './agent-hooks.js';
 // Running contracts (sections 2.2, 4, 6.1, 7.3 and 7.4).

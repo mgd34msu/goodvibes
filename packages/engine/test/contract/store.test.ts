@@ -15,6 +15,7 @@ import {
   ContractStoreVersionError,
   MAX_CONTRACT_QUARANTINE_FILES,
   contractPath,
+  contractCheckpointsDir,
   contractsDir,
   deserializeContract,
   readContractSnapshot,
@@ -36,7 +37,7 @@ function tempRoot(): string {
 
 afterEach(() => {
   for (const root of roots.splice(0)) {
-    const dir = contractsDir(root);
+    const dir = contractCheckpointsDir(root);
     if (existsSync(dir)) chmodSync(dir, 0o700);
     rmSync(root, { recursive: true, force: true });
   }
@@ -47,7 +48,7 @@ function envelope(contract: unknown, schemaVersion = 1, writtenAt = 5): string {
 }
 
 function writeRaw(root: string, id: string, text: string): string {
-  mkdirSync(contractsDir(root), { recursive: true });
+  mkdirSync(contractCheckpointsDir(root), { recursive: true });
   const path = contractPath(root, id);
   writeFileSync(path, text, 'utf-8');
   return path;
@@ -92,6 +93,65 @@ describe('round trip', () => {
   });
 });
 
+describe('checkpoint namespaces', () => {
+  test('flat schema1–5 checkpoints are read without rewriting and a new write preserves the old reader file', () => {
+    for (const schemaVersion of [1, 2, 3, 4, 5]) {
+      const root = tempRoot(), contract = makeContract(), store = storeAt(root);
+      mkdirSync(contractsDir(root), { recursive: true });
+      const oldPath = join(contractsDir(root), `${contract.id}.json`), original = envelope(contract, schemaVersion);
+      writeFileSync(oldPath, original);
+      expect(store.listStoredIds()).toEqual([contract.id]);
+      const restored = store.load(contract.id)!; expect(restored.id).toBe(contract.id);
+      expect(existsSync(contractPath(root, contract.id))).toBe(false);
+      restored.goal = 'Updated by the schema-six reader'; store.hold(restored);
+      expect(store.write(contract.id)).toBe(true);
+      expect(readFileSync(oldPath, 'utf8')).toBe(original);
+      // This is the actual old reader's flat-directory discovery rule.
+      expect(readdirSync(contractsDir(root)).filter(name => name.endsWith('.json'))).toEqual([`${contract.id}.json`]);
+      expect(JSON.parse(readFileSync(contractPath(root, contract.id), 'utf8')).schemaVersion).toBe(6);
+      expect(store.listStoredIds()).toEqual([contract.id]);
+      expect(storeAt(root).load(contract.id)?.goal).toBe(restored.goal);
+      store.dispose();
+    }
+  });
+
+  test('new checkpoints stay outside an already-running old reader scan and export/import uses the new namespace', () => {
+    const root = tempRoot(), store = storeAt(root), contract = makeContract();
+    store.hold(contract); expect(store.write(contract.id)).toBe(true);
+    expect(readdirSync(contractsDir(root)).filter(name => name.endsWith('.json'))).toEqual([]);
+    const targetRoot = tempRoot(), target = storeAt(targetRoot);
+    expect(target.importContract(store.serialize(contract.id)!)).toBe(true);
+    expect(existsSync(contractPath(targetRoot, contract.id))).toBe(true);
+    expect(existsSync(join(contractsDir(targetRoot), `${contract.id}.json`))).toBe(false);
+  });
+
+  test('a future current checkpoint never falls back to an older flat checkpoint', () => {
+    const root = tempRoot(), store = storeAt(root), contract = makeContract();
+    mkdirSync(contractsDir(root), { recursive: true });
+    const oldPath = join(contractsDir(root), `${contract.id}.json`), old = envelope(contract, 5);
+    writeFileSync(oldPath, old);
+    const future = envelope(contract, CURRENT_CONTRACT_SCHEMA_VERSION + 1), path = writeRaw(root, contract.id, future);
+    expect(() => store.load(contract.id)).toThrow(ContractStoreVersionError);
+    expect(() => store.hold(contract)).toThrow(ContractStoreVersionError);
+    expect(store.importContract(envelope(contract), true)).toBe(false);
+    expect(readFileSync(path, 'utf8')).toBe(future); expect(readFileSync(oldPath, 'utf8')).toBe(old);
+    expect(store.reap().total).toBe(0); expect(store.listStoredIds()).toEqual([contract.id]);
+  });
+
+  test('housekeeping covers abandoned files in both namespaces without moving an old active checkpoint', () => {
+    const root = tempRoot(), store = storeAt(root), contract = makeContract({ status: 'running' });
+    mkdirSync(contractsDir(root), { recursive: true });
+    const oldPath = join(contractsDir(root), `${contract.id}.json`), old = envelope(contract, 5);
+    writeFileSync(oldPath, old); writeRaw(root, contract.id, envelope({ ...contract, goal: 'new' }));
+    const stale = [oldPath, contractPath(root, contract.id)].map(path => `${path}.tmp-999-1-deadbeef`);
+    const past = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    for (const path of stale) { writeFileSync(path, '{}'); utimesSync(path, past, past); }
+    expect(store.reap().staleTempRemoved).toBe(2);
+    expect(readFileSync(oldPath, 'utf8')).toBe(old);
+    expect(storeAt(root).load(contract.id)?.goal).toBe('new');
+  });
+});
+
 describe('atomic write', () => {
   test('a write leaves only the contract file behind, and a rewrite replaces it whole', () => {
     const root = tempRoot();
@@ -102,7 +162,7 @@ describe('atomic write', () => {
     contract.goal = 'A second goal';
     contract.status = 'judging';
     store.write(contract.id);
-    expect(readdirSync(contractsDir(root))).toEqual([`${contract.id}.json`]);
+    expect(readdirSync(contractCheckpointsDir(root))).toEqual([`${contract.id}.json`]);
     expect(storeAt(root).load(contract.id)?.goal).toBe('A second goal');
   });
 
@@ -112,12 +172,12 @@ describe('atomic write', () => {
     const contract = makeContract();
     store.put(contract);
     store.write(contract.id);
-    chmodSync(contractsDir(root), 0o500);
+    chmodSync(contractCheckpointsDir(root), 0o500);
     contract.goal = 'Never written';
     expect(store.write(contract.id)).toBe(false);
-    chmodSync(contractsDir(root), 0o700);
+    chmodSync(contractCheckpointsDir(root), 0o700);
     expect(storeAt(root).load(contract.id)?.goal).toBe('A parser for every documented input form');
-    expect(readdirSync(contractsDir(root))).toEqual([`${contract.id}.json`]);
+    expect(readdirSync(contractCheckpointsDir(root))).toEqual([`${contract.id}.json`]);
   });
 
   test('a temp file left by a dead writer is reaped after an hour; a fresh one is left alone', () => {
@@ -140,7 +200,7 @@ describe('atomic write', () => {
   test('no contract id can name a path outside the contract directory', () => {
     expect(() => contractPath('/p', '../ctr-00000000')).toThrow('Not a contract id');
     expect(() => contractPath('/p', 'ctr-0000000g')).toThrow('Not a contract id');
-    expect(contractPath('/p', 'ctr-0000abcd')).toBe(join('/p', '.goodvibes', 'contracts', 'ctr-0000abcd.json'));
+    expect(contractPath('/p', 'ctr-0000abcd')).toBe(join('/p', '.goodvibes', 'contracts', 'checkpoints-v6', 'ctr-0000abcd.json'));
   });
 });
 
@@ -234,7 +294,7 @@ describe('reaping', () => {
     const summary = storeAt(root, now).reap();
     expect(summary.terminalOverCap).toBe(0);
     expect(summary.reapedIds).toEqual([]);
-    expect(readdirSync(contractsDir(root))).toHaveLength(53 + 5);
+    expect(readdirSync(contractCheckpointsDir(root))).toHaveLength(53 + 5);
   });
 
   test('a contract held live in memory is not reaped even when its file on disk says terminal', () => {
@@ -261,15 +321,15 @@ describe('reaping', () => {
   test('quarantine files go after 30 days, and beyond 20 the oldest go', () => {
     const root = tempRoot();
     const now = Date.now();
-    mkdirSync(contractsDir(root), { recursive: true });
+    mkdirSync(contractCheckpointsDir(root), { recursive: true });
     const files = Array.from({ length: MAX_CONTRACT_QUARANTINE_FILES + 4 }, (_, index) => {
-      const path = join(contractsDir(root), `ctr-${index.toString(16).padStart(8, '0')}.json.unrecognized`);
+      const path = join(contractCheckpointsDir(root), `ctr-${index.toString(16).padStart(8, '0')}.json.unrecognized`);
       writeFileSync(path, 'x', 'utf-8');
       const at = new Date(now - (index + 1) * 60_000);
       utimesSync(path, at, at);
       return path;
     });
-    const expired = join(contractsDir(root), 'ctr-ffffffff.json.unrecognized');
+    const expired = join(contractCheckpointsDir(root), 'ctr-ffffffff.json.unrecognized');
     writeFileSync(expired, 'x', 'utf-8');
     const long = new Date(now - CONTRACT_QUARANTINE_MAX_AGE_MS - 60_000);
     utimesSync(expired, long, long);
@@ -296,7 +356,7 @@ describe('reaping', () => {
     const live = makeContract();
     writeRaw(root, old.id, envelope(old));
     writeRaw(root, live.id, envelope(live));
-    writeFileSync(join(contractsDir(root), 'notes.json'), '{}', 'utf-8');
+    writeFileSync(join(contractCheckpointsDir(root), 'notes.json'), '{}', 'utf-8');
     expect(storeAt(root, 100 * DAY).listStoredIds().sort()).toEqual([live.id, old.id].sort());
   });
 });
@@ -343,7 +403,7 @@ describe('importContract', () => {
     store.hold(original); expect(store.write(original.id)).toBe(true);
     const path = contractPath(root, original.id);
     const before = readFileSync(path, 'utf8');
-    chmodSync(contractsDir(root), 0o500);
+    chmodSync(contractCheckpointsDir(root), 0o500);
     try {
       expect(store.importContract(serializeContract({ ...original, goal: 'uncommitted import' }, 2)!, true)).toBe(false);
       expect(store.get(original.id)?.goal).toBe(original.goal);
@@ -351,7 +411,7 @@ describe('importContract', () => {
       const other = makeContract({ id: 'failed-new-import' });
       expect(store.importContract(serializeContract(other, 2)!)).toBe(false);
       expect(store.get(other.id)).toBeNull();
-    } finally { chmodSync(contractsDir(root), 0o700); store.dispose(); }
+    } finally { chmodSync(contractCheckpointsDir(root), 0o700); store.dispose(); }
   });
 
   test('refuses a snapshot it cannot trust', () => {

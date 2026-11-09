@@ -20,6 +20,7 @@ import { requireDecisionFeature } from '../runtime/decision-policy.js';
  */
 import { nativeContractPort, type NativeContractServices } from './native-decisions.js';
 import { assignedReviewPaths, reviewProjectPath } from './review-inventory.js';
+import { reviewedFileFromObservation } from './review-file-observations.js';
 import type { Contract } from './types.js';
 import { hashState, type JudgmentPort, type YesNoReading } from '@goodvibes-jev/judgment';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
@@ -298,9 +299,10 @@ export async function runUnitCheck(input: UnitCheckInput): Promise<UnitCheckOutc
       && typeof evidence.orchestration === 'object' && !Array.isArray(evidence.orchestration) && Array.isArray(evidence.orchestration['currentFiles'])
       ? { reviewedFiles: evidence.orchestration['currentFiles'].flatMap(file => {
         if (!file || typeof file !== 'object' || Array.isArray(file) || file['operation'] !== 'read-current-file' || file['source'] !== 'native-host-filesystem'
-          || file['success'] !== true || typeof file['path'] !== 'string' || typeof file['sha256'] !== 'string'
+          || file['success'] !== true || typeof file['path'] !== 'string'
           || !assignedFiles.has(file['path']) || !inspectedFiles.has(file['path'])) return [];
-        return [{ path: file['path'], sha256: file['sha256'] }];
+        const descriptor = reviewedFileFromObservation(file);
+        return descriptor ? [descriptor] : [];
       }) } : {}),
     id: checkId,
     at: input.now,

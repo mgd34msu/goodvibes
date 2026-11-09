@@ -160,7 +160,10 @@ const CHECK_SCHEMA = objectSchema({
   qualityProblems: arraySchema(enumSchema(QUALITY_ITEMS)),
   decisionIds: STRING_LIST_SCHEMA,
   evidenceDigest: STRING_SCHEMA,
-  reviewedFiles: arraySchema(objectSchema({ path: STRING_SCHEMA, sha256: STRING_SCHEMA }, ['path', 'sha256'])),
+  reviewedFiles: arraySchema({ anyOf: [
+    objectSchema({ path: STRING_SCHEMA, sha256: STRING_SCHEMA }, ['path', 'sha256']),
+    objectSchema({ path: STRING_SCHEMA, observationId: STRING_SCHEMA }, ['path', 'observationId']),
+  ] }),
 }, ['id', 'at', 'trigger', 'goal', 'quality', 'result', 'decisionIds', 'evidenceDigest']);
 
 const NUDGE_SCHEMA = objectSchema({

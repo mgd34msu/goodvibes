@@ -2,15 +2,14 @@
  * ContractStore: the contract tree in memory and on disk
  * (docs/design/contract-runner.md section 7.1).
  *
- * One file per contract at `<projectRoot>/.goodvibes/contracts/<contractId>.json`
- * holding `{ schemaVersion, writtenAt, contract }`, written atomically (temp
- * file, fsync, rename), so a crash leaves the previous file whole. A file that
- * does not parse, fails the shape check, or was written by a newer schema is
- * moved aside to `<path>.unrecognized` rather than trusted or deleted. Writes
- * are debounced (250 ms) and triggered by every contract event. Terminal
- * contracts are reaped after 14 days or beyond 50 files, quarantine files after
- * 30 days or beyond 20; a contract that is not terminal is never reaped, since
- * its file is the resume point.
+ * Schema6 checkpoints live in `.goodvibes/contracts/checkpoints-v6/`; the
+ * original flat directory remains a read fallback for schema1–5. Old running
+ * readers must not discover and quarantine a new checkpoint. Original durable
+ * admission keys and execution leases stay in their existing directory.
+ * Writes use an atomic temp-file/fsync/rename. Unsupported future versions
+ * remain at their original path and refuse replacement; malformed known
+ * versions are quarantined. Completed checkpoints are retained until removed;
+ * quarantine and abandoned temporary files have bounded housekeeping.
  *
  * Modeled on orchestration/persistence.ts.
  */
@@ -24,6 +23,9 @@ import { logger } from '../utils/logger.js';
 import { writeFileAtomic } from '../utils/atomic-json-store.js';
 import { fileObservationIdentity, readFileObservation } from '../utils/file-observation.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { contractWithStoredReviewObservations, hydrateStoredReviewObservations } from './review-file-observations.js';
+import { ownedContractCheckpointText, readOwnedContractCheckpoint, type OwnedContractCheckpointRead } from './owned-checkpoint-read.js';
+import { storedCurrentFileLabels, restoreCurrentFileLabels } from './current-file-observations.js';
 import { isContractInputSnapshot } from './input-snapshot.js';
 import { validateNativeDecisionState } from './native-decisions.js';
 import { assertNativeContractSource, bindNativeContractSource } from './native-source.js';
@@ -63,23 +65,36 @@ export class ContractStoreVersionError extends Error {
   }
 }
 
-/** The directory contract files live in. */
+/** Original contract authority root. Durable admission keys and leases never move. */
 export function contractsDir(projectRoot: string): string {
   return join(projectRoot, '.goodvibes', 'contracts');
 }
 
-/** A contract's file path. Throws for an id that is not `ctr-<8 hex>`, so no id can name a path outside the directory. */
+/** The current writer namespace, isolated from schema1–5 readers' flat scans. */
+export function contractCheckpointsDir(projectRoot: string): string {
+  return join(contractsDir(projectRoot), 'checkpoints-v6');
+}
+
+/** A contract's current checkpoint file path. Throws for an id that is not `ctr-<8 hex>`, so no id can name a path outside the directory. */
 export function contractPath(projectRoot: string, contractId: string): string {
+  if (!isContractId(contractId)) throw new Error(`Not a contract id: ${JSON.stringify(contractId)}`);
+  return join(contractCheckpointsDir(projectRoot), `${contractId}${JSON_SUFFIX}`);
+}
+
+/** Compatibility lookup only. New writers never modify these checkpoints. */
+function historicalContractPath(projectRoot: string, contractId: string): string {
   if (!isContractId(contractId)) throw new Error(`Not a contract id: ${JSON.stringify(contractId)}`);
   return join(contractsDir(projectRoot), `${contractId}${JSON_SUFFIX}`);
 }
 
 /** The envelope as JSON; null when the contract cannot be serialized. */
 export function serializeContract(contract: Contract, writtenAt: number): string | null {
-  const snapshot: ContractSnapshot = { schemaVersion: CURRENT_CONTRACT_SCHEMA_VERSION, writtenAt, contract };
   try {
     assertNativeContractSource(contract);
     validateNativeDecisionState(contract);
+    const labels = storedCurrentFileLabels(contract);
+    const snapshot = { schemaVersion: CURRENT_CONTRACT_SCHEMA_VERSION, writtenAt, contract: contractWithStoredReviewObservations(contract),
+      ...(labels === undefined ? {} : { nativeFileLabels: labels }) };
     return JSON.stringify(snapshot);
   } catch (error) {
     logger.error('contract store: JSON serialization failed', { contractId: contract.id, error: summarizeError(error) });
@@ -126,7 +141,7 @@ export type ContractSnapshotRejection = 'unparseable' | 'not-an-envelope' | 'fut
  * Parses an envelope. A snapshot written by a newer schema is refused, never
  * partially trusted; so is one whose contract fails the shape check.
  */
-export function readContractSnapshot(json: string): { readonly snapshot: ContractSnapshot } | { readonly rejected: ContractSnapshotRejection } {
+function parseContractSnapshot(json: string, receipt?: OwnedContractCheckpointRead): { readonly snapshot: ContractSnapshot } | { readonly rejected: ContractSnapshotRejection } {
   let raw: unknown;
   try {
     raw = JSON.parse(json);
@@ -142,8 +157,24 @@ export function readContractSnapshot(json: string): { readonly snapshot: Contrac
   if (raw['contract'].nativeSource !== undefined && raw['schemaVersion'] < 3) return { rejected: 'invalid-contract' };
   try { bindNativeContractSource(raw['contract']); validateNativeDecisionState(raw['contract']); recoverRepeatedStructuralCriteria(raw['contract']); recoverPendingFixIdentities(raw['contract']); } catch { return { rejected: 'invalid-contract' }; }
   if (raw['contract'].durableAdmission !== undefined && raw['schemaVersion'] < 2) return { rejected: 'invalid-contract' };
+  try {
+    hydrateStoredReviewObservations(raw['contract'], raw['schemaVersion'], json, receipt);
+    if (receipt !== undefined && raw['schemaVersion'] >= 6) restoreCurrentFileLabels(raw['contract'], receipt);
+  }
+  catch { return { rejected: 'invalid-contract' }; }
   const writtenAt = typeof raw['writtenAt'] === 'number' && Number.isFinite(raw['writtenAt']) ? raw['writtenAt'] : 0;
   return { snapshot: { schemaVersion: raw['schemaVersion'], writtenAt, contract: raw['contract'] } };
+}
+
+/** Public parsing retains metadata without creating native review provenance. */
+export function readContractSnapshot(json: string): { readonly snapshot: ContractSnapshot } | { readonly rejected: ContractSnapshotRejection } {
+  return parseContractSnapshot(json);
+}
+
+/** Internal restore seam: the receipt can only come from actual native file I/O. */
+export function deserializeOwnedContractCheckpoint(receipt: OwnedContractCheckpointRead): Contract | null {
+  const read = parseContractSnapshot(ownedContractCheckpointText(receipt), receipt);
+  return 'snapshot' in read ? read.snapshot.contract : null;
 }
 
 /** The contract in an envelope, or null when the envelope is refused. */
@@ -279,7 +310,10 @@ export class ContractStore {
       this.prepareCheckpointWrite();
       if (contract.durableAdmission !== undefined) new DurableContractAdmissions(this.projectRoot).update(contract.durableAdmission, json);
       writeFileAtomic(path, json);
-      if (contract.durableAdmission !== undefined) syncContractDirectory(contractsDir(this.projectRoot));
+      if (contract.durableAdmission !== undefined) {
+        syncContractDirectory(contractCheckpointsDir(this.projectRoot));
+        syncContractDirectory(contractsDir(this.projectRoot));
+      }
       return true;
     } catch (error) {
       logger.error('contract store: write failed', { path, error: summarizeError(error) });
@@ -310,16 +344,20 @@ export class ContractStore {
    * Does not hold the contract.
    */
   load(contractId: string): Contract | null {
-    const path = contractPath(this.projectRoot, contractId);
+    const currentPath = contractPath(this.projectRoot, contractId);
+    const path = existsSync(currentPath) ? currentPath : historicalContractPath(this.projectRoot, contractId);
     if (!existsSync(path)) return null;
     let text: string;
+    let receipt: OwnedContractCheckpointRead;
     try {
-      text = readFileSync(path, 'utf-8');
+      receipt = readOwnedContractCheckpoint(path, 'contract');
+      text = ownedContractCheckpointText(receipt);
     } catch (error) {
       logger.warn('contract store: read failed', { path, error: summarizeError(error) });
       return null;
     }
-    const read = readContractSnapshot(text);
+    const read = parseContractSnapshot(text, receipt);
+    if ('snapshot' in read && path !== currentPath && read.snapshot.schemaVersion > 5) throw new ContractStoreVersionError(contractId);
     if ('rejected' in read) {
       if (read.rejected === 'future-version') throw new ContractStoreVersionError(contractId);
       this.quarantine(path, read.rejected);
@@ -342,17 +380,20 @@ export class ContractStore {
   /** Ids with a contract file on disk, after a housekeeping pass, so a reaped id is never handed back. */
   listStoredIds(): string[] {
     this.reap();
-    const dir = contractsDir(this.projectRoot);
-    if (!existsSync(dir)) return [];
-    try {
-      return readdirSync(dir)
-        .filter((entry) => entry.endsWith(JSON_SUFFIX))
-        .map((entry) => entry.slice(0, -JSON_SUFFIX.length))
-        .filter(isContractId);
-    } catch (error) {
-      logger.warn('contract store: failed to list the contract directory', { dir, error: summarizeError(error) });
-      return [];
+    const ids = new Set<string>();
+    for (const dir of [contractCheckpointsDir(this.projectRoot), contractsDir(this.projectRoot)]) {
+      if (!existsSync(dir)) continue;
+      try {
+        for (const entry of readdirSync(dir)) {
+          if (!entry.endsWith(JSON_SUFFIX)) continue;
+          const id = entry.slice(0, -JSON_SUFFIX.length);
+          if (isContractId(id)) ids.add(id);
+        }
+      } catch (error) {
+        logger.warn('contract store: failed to list the contract directory', { dir, error: summarizeError(error) });
+      }
     }
+    return [...ids];
   }
 
   /**
@@ -399,7 +440,11 @@ export class ContractStore {
   }
 
   private assertStoredVersion(contractId: string): void {
-    const path = contractPath(this.projectRoot, contractId);
+    this.assertCheckpointVersion(contractId, contractPath(this.projectRoot, contractId), CURRENT_CONTRACT_SCHEMA_VERSION);
+    this.assertCheckpointVersion(contractId, historicalContractPath(this.projectRoot, contractId), 5);
+  }
+
+  private assertCheckpointVersion(contractId: string, path: string, maximumVersion: number): void {
     let observed: string;
     try { observed = fileObservationIdentity(path); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') { this.supportedStoredVersions.delete(path); return; } throw error; }
@@ -408,7 +453,7 @@ export class ContractStore {
     if (file.physical !== observed) throw new Error('Contract checkpoint changed during its version check');
     let value: unknown;
     try { value = JSON.parse(file.bytes.toString('utf8')); } catch { this.supportedStoredVersions.set(path, observed); return; }
-    if (isRecord(value) && typeof value['schemaVersion'] === 'number' && value['schemaVersion'] > CURRENT_CONTRACT_SCHEMA_VERSION) {
+    if (isRecord(value) && typeof value['schemaVersion'] === 'number' && value['schemaVersion'] > maximumVersion) {
       throw new ContractStoreVersionError(contractId);
     }
     this.supportedStoredVersions.set(path, observed);
@@ -426,22 +471,20 @@ export class ContractStore {
       terminalExpired: 0, terminalOverCap: 0, quarantineExpired: 0, quarantineOverCap: 0,
       staleTempRemoved: 0, bytesReclaimed: 0, total: 0, reapedIds: [],
     };
-    const dir = contractsDir(this.projectRoot);
-    if (!existsSync(dir)) return empty;
-    let entries: string[];
-    try {
-      entries = readdirSync(dir);
-    } catch (error) {
-      logger.warn('contract store: failed to list the contract directory for housekeeping', { dir, error: summarizeError(error) });
-      return empty;
+    const entries: { dir: string; entry: string }[] = [];
+    for (const dir of [contractCheckpointsDir(this.projectRoot), contractsDir(this.projectRoot)]) {
+      if (!existsSync(dir)) continue;
+      try { for (const entry of readdirSync(dir)) entries.push({ dir, entry }); }
+      catch (error) { logger.warn('contract store: failed to list the contract directory for housekeeping', { dir, error: summarizeError(error) }); }
     }
+    if (entries.length === 0) return empty;
     const now = this.now();
     const terminal: DatedFile[] = [];
     const quarantined: DatedFile[] = [];
     let staleTempRemoved = 0;
     let bytesReclaimed = 0;
 
-    for (const entry of entries) {
+    for (const { dir, entry } of entries) {
       const path = join(dir, entry);
       if (entry.includes(TEMP_MARKER)) {
         let mtimeMs: number;
@@ -518,7 +561,7 @@ export class ContractStore {
     };
     if (total > 0) {
       const { reapedIds: _ids, ...counts } = summary;
-      logger.info('contract store: reclaimed contract files', { dir, ...counts });
+      logger.info('contract store: reclaimed contract files', { directory: contractsDir(this.projectRoot), ...counts });
     }
     return summary;
   }

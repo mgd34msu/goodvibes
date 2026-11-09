@@ -12,7 +12,7 @@ import { compactReviewInventory, reviewInventoryObservation } from './review-inv
 
 /** The same actual source accounting used by native acceptance and recovery. */
 export function contractSourceScope(contract: Pick<ContractView, 'units'> & Partial<Pick<ContractView, 'criteria'>>, cwd: string,
-  ownerEvidence?: JsonValue, contexts = (contract.criteria ?? []).map(criterion => ({ field: `criterion ${criterion.id}`, text: criterion.text }))) {
+  ownerEvidence?: JsonValue, contexts = (contract.criteria ?? []).map(criterion => ({ field: `criterion ${criterion.id}`, text: criterion.text })), owner: object = contract) {
   const ownerReads = ownerEvidence && typeof ownerEvidence === 'object' && !Array.isArray(ownerEvidence)
     && Array.isArray(ownerEvidence['sourceReads']) ? ownerEvidence['sourceReads'].flatMap(read =>
       read && typeof read === 'object' && !Array.isArray(read) && typeof read['path'] === 'string'
@@ -32,7 +32,7 @@ export function contractSourceScope(contract: Pick<ContractView, 'units'> & Part
     if (index === undefined) { contents.set(read.returnedContent, references.length); references.push(read); }
     else references[index] = read;
   }
-  const referenceOperations = currentFileObservations(cwd, references.map(read => read.path));
+  const referenceOperations = currentFileObservations(cwd, references.map(read => read.path), { owner });
   return { referenceOperations,
     sourceJsonReferenceComparisons: compareJsonReadReferences(references, referenceOperations, observations),
     sourceReferenceComparisons: compareReadReferences(contexts, observations.flatMap(source => source.reads), observations),

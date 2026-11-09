@@ -1,5 +1,6 @@
 import type { NativeConversationContinuation } from '../workflow/work-ledger/native-continuation-context.js';
 import type { ReviewInventory } from './review-inventory.js';
+import type { ReviewedFileReference } from './review-file-observations.js';
 import type { DurableContractAdmission } from './durable-admission.js';
 /**
  * The contract runner's data model (docs/design/contract-runner.md section 2.3):
@@ -96,7 +97,9 @@ export type AgentManagerLike = Pick<AgentManager, 'spawn' | 'getStatus' | 'list'
 /** Schema version of a persisted contract; `deserializeContract` refuses a newer one. */
 // Version 5 composes durable admission, immutable native source, semantic ownership and captured input authority.
 // Older v2/v4 readers must refuse it rather than auto-resume a partially understood binding.
-export const CURRENT_CONTRACT_SCHEMA_VERSION = 5;
+// Version 6 retains native physical review observations as private checkpoint
+// bookkeeping. Older readers must refuse it rather than erase those records.
+export const CURRENT_CONTRACT_SCHEMA_VERSION = 6;
 
 /** `ctr-<8 hex>`. Also the store's file name, so it is checked before any path is built from it. */
 export const CONTRACT_ID_PATTERN = /^ctr-[0-9a-f]{8}$/;
@@ -256,7 +259,7 @@ export interface Criterion {
 
 export interface UnitCheck {
   /** Actual file versions supplied to this passed research assessment. */
-  readonly reviewedFiles?: readonly { readonly path: string; readonly sha256: string }[];
+  readonly reviewedFiles?: readonly ReviewedFileReference[];
   /** `${unitId}.k${n}` for a unit; the group or contract id in place of the unit id for group and deliverable checks. */
   readonly id: string;
   readonly at: number;

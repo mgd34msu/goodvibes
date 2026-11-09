@@ -252,7 +252,7 @@ as approve, amend or reject. No reply can pass a criterion that reads unmet.
   applied as uncommitted changes, or left in place. A commit failure is a
   warning on a passed contract, never a failure.
 - **Persistence.** Each contract is written to
-  `.goodvibes/contracts/<contractId>.json` (`ContractStore`,
+  `.goodvibes/contracts/checkpoints-v6/<contractId>.json` (`ContractStore`,
   `contract/store.ts`). At startup `resumeAll()` imports every unfinished
   contract; one whose workstream snapshot or worktree is gone is failed as a
   zombie, and the rest resume at the step they left.

@@ -455,6 +455,42 @@ function inertConfiguredNativeServer(): hosts.DaemonHostServer {
     async waitForRestart() {}, get isRunning() { return running; }, boundHost: '127.0.0.1', boundPort: 3499, boundScheme: 'http' };
 }
 
+for (const kind of ['release', 'custom'] as const) test(`native startup serves the selected ${kind} WebUI without a separate release download`, async () => {
+  const native = writeNativeInstallationFixture(makeOwnedTempDir('cli-suite-webui'), getPackageVersion());
+  const resolveArtifact = nativeLifecycle.resolveInstalledDaemonUpdateArtifact;
+  keep(spyOn(nativeLifecycle, 'resolveInstalledDaemonUpdateArtifact').mockImplementation((ownership, options) =>
+    resolveArtifact(ownership, { ...options, ...native.options })));
+  const f = await fixture(undefined, { createServer(config) {
+    expect(config?.updateArtifact?.suite).toBe(true);
+    return inertConfiguredNativeServer();
+  } }, 'default');
+  const bundle = kind === 'release' ? join(native.execPath, '..', 'webui', '3.1.0') : join(f.root, 'owner-ui');
+  mkdirSync(bundle, { recursive: true }); writeFileSync(join(bundle, 'index.html'), 'Already admitted suite WebUI');
+  applyRuntimeConfigValue(f.configuration.config, 'update.auto', true);
+  applyRuntimeConfigValue(f.configuration.config, 'controlPlane.webui.serve', true);
+  applyRuntimeConfigValue(f.configuration.config, 'controlPlane.webui.bundleDir', bundle);
+  // The selected version-named path intentionally differs from the program
+  // version. Suite update retains that configured path and replaces its tree.
+  const originalExecutable = Object.getOwnPropertyDescriptor(process, 'execPath')!;
+  Object.defineProperty(process, 'execPath', { ...originalExecutable, value: native.execPath });
+  restores.push(() => { Object.defineProperty(process, 'execPath', originalExecutable); });
+  const downloads: string[] = [];
+  const fetch = globalThis.fetch;
+  keep(spyOn(globalThis, 'fetch').mockImplementation(((input: string | URL | Request, init?: RequestInit) => {
+    const url = input instanceof Request ? input.url : String(input);
+    if (url.includes('/releases/download/')) {
+      downloads.push(url); return Promise.reject(new Error('Startup must not download a separate WebUI'));
+    }
+    return fetch(input, init);
+  }) as typeof fetch));
+  const handle = f.start(); expect(await handle.ready).toBeDefined();
+  expect(downloads).toEqual([]);
+  expect(f.configuration.config.get('controlPlane.webui.bundleDir')).toBe(bundle);
+  expect(readFileSync(join(bundle, 'index.html'), 'utf8')).toBe('Already admitted suite WebUI');
+  expect(f.stderr.join('\n')).not.toContain('WebUI release refresh');
+  expect(await handle.shutdown()).toBe(0);
+});
+
 for (const home of ['default', 'override'] as const) test(`configured CLI ${home} home forwards native lifecycle admission without activating real services`, async () => {
   const native = writeNativeInstallationFixture(makeOwnedTempDir('cli-native-lifecycle'), getPackageVersion());
   const resolveArtifact = nativeLifecycle.resolveInstalledDaemonUpdateArtifact;

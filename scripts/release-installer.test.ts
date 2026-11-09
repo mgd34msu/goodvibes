@@ -31,7 +31,8 @@ beforeEach(() => {
   for (const command of ['goodvibes', 'goodvibes-daemon', 'goodvibes-agent']) {
     const binary = `${command}-linux-x64`;
     const retire = command === 'goodvibes' ? 'if [ "$FIXTURE_RETIRE_PREFIX" = 1 ]; then mv "$HOME/bin" "$HOME/retired-bin"; mkdir "$HOME/bin"; printf foreign > "$HOME/bin/foreign"; fi; ' : '';
-    writeFileSync(join(assets, binary), `#!/bin/sh\ncase "$1" in --version) ${retire}echo '${command} ${version}' ;; webui) echo 'http://127.0.0.1:3421' ;; check-install-reader) exec "$FIXTURE_REAL_BUN" "$FIXTURE_READER_CLI" "$@" ;; esac\n`);
+    const checkSettled = `if [ "\${FIXTURE_REQUIRE_SETTLED:-0}" = 1 ]; then for product in goodvibes goodvibes-daemon goodvibes-agent; do [ ! -e "$(dirname "$0")/$product.update-transaction" ] || { echo 'native data publication refused: installation is busy' >&2; exit 78; }; done; printf '%s\\n' "$1" >> "$FIXTURE_SETUP_TRACE"; fi; `;
+    writeFileSync(join(assets, binary), `#!/bin/sh\ncase "$1" in --version) ${retire}echo '${command} ${version}' ;; webui) ${checkSettled}echo 'http://127.0.0.1:3421' ;; config|provision-wake-model) ${checkSettled}: ;; check-install-reader) exec "$FIXTURE_REAL_BUN" "$FIXTURE_READER_CLI" "$@" ;; esac\n`);
     writeFileSync(join(assets, binary + '.bun'), '#!/bin/sh\n[ "$1" = -e ] || exit 77\nexec "$FIXTURE_REAL_BUN" "$@"\n');
     writeFileSync(join(assets, binary + '.bun.json'), JSON.stringify({ version: '1.3.14', target: 'linux-x64', source: 'build-interpreter', sha256: digest(join(assets, binary + '.bun')), upstreamSource: 'https://github.com/oven-sh/bun/tree/bun-v1.3.14' }));
     writeFileSync(join(assets, binary + '.bun.LICENSE.md'), 'Fixture runtime notice');
@@ -54,7 +55,7 @@ beforeEach(() => {
   writeChecksums();
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
-function run(uninstall = false, fault?: 'agent' | 'prefix', platform?: 'darwin') {
+function run(uninstall = false, fault?: 'agent' | 'prefix', platform?: 'darwin', controls: Readonly<Record<string, string>> = {}) {
   const script = resolve(import.meta.dir, 'install.sh');
   return spawnSync('sh', ['-c', `set -eu
     umask 077
@@ -67,13 +68,13 @@ function run(uninstall = false, fault?: 'agent' | 'prefix', platform?: 'darwin')
     migrate_legacy_installer_unit() { :; }
     uninstall_services_and_processes() { :; }
     if [ "$FIXTURE_FAIL_AFTER_PROGRAMS" = 1 ]; then install_agent() { fail 'fixture interrupted suite'; }; fi
-    main
+    if [ -n "\${FIXTURE_DECISION_POLICY:-}" ]; then main --decision-policy "$FIXTURE_DECISION_POLICY"; else main; fi
   `, 'release-installer-test', script], { encoding: 'utf8', timeout: 20_000,
     env: { ...process.env, HOME: home, PATH: `${home}/bin:${process.env.PATH}`, GOODVIBES_INSTALL_SH_LIB: '1', GOODVIBES_VERSION: `v${version}`,
       GOODVIBES_INSTALL_DIR: join(home, 'bin'), GOODVIBES_WAKE_MODEL: '0', GOODVIBES_DAEMON_SERVICE: '0', GOODVIBES_RESTART_DAEMON: '0',
       GOODVIBES_UNINSTALL: uninstall ? '1' : '0', FIXTURE_REAL_BUN: process.execPath, FIXTURE_READER_CLI: resolve(import.meta.dir, 'test-helpers/check-install-reader.ts'),
       FIXTURE_FAIL_AFTER_PROGRAMS: fault === 'agent' ? '1' : '0', FIXTURE_RETIRE_PREFIX: fault === 'prefix' ? '1' : '0', FIXTURE_DARWIN: platform === 'darwin' ? '1' : '0',
-      FIXTURE_ASSETS: assets, FETCH_TRACE: join(root, 'fetches') } });
+      FIXTURE_ASSETS: assets, FETCH_TRACE: join(root, 'fetches'), FIXTURE_SETUP_TRACE: join(root, 'setup-trace'), ...controls } });
 }
 function darwinAssets() {
   for (const command of ['goodvibes', 'goodvibes-daemon', 'goodvibes-agent']) {
@@ -107,6 +108,33 @@ test.each(['sqlite-darwin-x64.dylib', 'sqlite-darwin-x64.dylib.json'])('a missin
   darwinAssets(); rmSync(join(assets, asset)); writeChecksums();
   mkdirSync(join(home, 'bin')); writeFileSync(join(home, 'bin/goodvibes'), 'Original installation');
   const result = run(false, undefined, 'darwin'); expect(result.status).not.toBe(0);
+  expect(readFileSync(join(home, 'bin/goodvibes'), 'utf8')).toBe('Original installation');
+});
+
+test('the former vector opt-out cannot omit the required Darwin daemon runtime member', () => {
+  darwinAssets();
+  const result = run(false, undefined, 'darwin', { GOODVIBES_VECTOR: '0' });
+  expect(result.status, result.stderr).toBe(0);
+  expect(readFileSync(join(home, 'bin/lib/sqlite-vec-darwin-x64/vec0.dylib'), 'utf8')).toBe('Fixture vector companion');
+});
+
+test('policy, wake setup and WebUI configuration run only after the complete suite releases its installation claims', () => {
+  const result = run(false, undefined, undefined, {
+    FIXTURE_REQUIRE_SETTLED: '1', FIXTURE_DECISION_POLICY: 'Classic - Off', GOODVIBES_WAKE_MODEL: '1',
+  });
+  expect(result.status, result.stderr).toBe(0);
+  expect(readFileSync(join(root, 'setup-trace'), 'utf8').trim().split('\n')).toEqual(['config', 'provision-wake-model', 'webui']);
+  expect(result.stdout).not.toContain('the bundle is on disk but the daemon was not configured');
+  for (const program of ['goodvibes', 'goodvibes-daemon', 'goodvibes-agent']) {
+    expect(existsSync(join(home, 'bin', program + '.update-transaction'))).toBe(false);
+  }
+});
+
+test('a missing required Darwin vector refuses before installed programs change even with the former opt-out', () => {
+  darwinAssets(); rmSync(join(assets, 'sqlite-vec-darwin-x64.dylib')); writeChecksums();
+  mkdirSync(join(home, 'bin')); writeFileSync(join(home, 'bin/goodvibes'), 'Original installation');
+  const result = run(false, undefined, 'darwin', { GOODVIBES_VECTOR: '0' });
+  expect(result.status).not.toBe(0);
   expect(readFileSync(join(home, 'bin/goodvibes'), 'utf8')).toBe('Original installation');
 });
 test('released suite installs all products, companions and native receipt without a build', () => {

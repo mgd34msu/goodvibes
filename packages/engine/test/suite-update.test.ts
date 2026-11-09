@@ -34,6 +34,10 @@ test('updates all installed products, browser driver, WebUI and native companion
   expect([...result.programs].sort()).toEqual(['goodvibes', 'goodvibes-agent', 'goodvibes-daemon']);
   for (const program of f.programs) expect(readFileSync(join(f.root, program.name), 'utf8')).toBe(program.name + ' version 3.1.3');
   expect(readFileSync(join(f.driver, 'index.js'), 'utf8')).toBe('new driver'); expect(readFileSync(join(f.webui, 'index.html'), 'utf8')).toBe('New WebUI');
+  // The selected configured path survives; its name is not a version proof
+  // that authorizes another startup fetch or a second per-product updater.
+  expect(result.directoryPaths).toContain(f.webui);
+  expect(JSON.parse(readFileSync(join(f.webui, '.goodvibes-release.json'), 'utf8')).version).toBe('3.1.3');
   const rollback = rollbackSuiteUpdate({ ...f.options, currentVersion: '3.1.3' }); expect(rollback.version).toBe('3.1.2');
   for (const [path, bytes] of f.original) expect(readFileSync(path)).toEqual(bytes);
   for (const directory of [f.driver, f.webui]) expect(readFileSync(join(directory, 'original.txt'), 'utf8')).toBe('Retained original directory');

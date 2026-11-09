@@ -223,7 +223,7 @@ Agent builds on the existing terminal renderer and workspace foundations of the 
 
 ```sh
 git clone https://github.com/mgd34msu/goodvibes.git
-cd goodvibes-jev
+cd goodvibes
 bun install
 bun run build
 bun run --cwd products/agent dev

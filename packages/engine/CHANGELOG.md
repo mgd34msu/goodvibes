@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Set up native configuration after the installer releases its completed suite
+  claims, install required vector companions on macOS as well as Linux, and
+  let the suite updater own WebUI replacement without a second boot download.
+  Keep the selected WebUI directory through updates and rollback.
+
 - Keep Decision Router previews inside the configured minimum context budget
   and remove classification-only context from the answering adapter request.
   Preserve the original conversation and tool arrays for the selected model.

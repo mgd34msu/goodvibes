@@ -303,7 +303,7 @@ Paid and subscription models never auto-switch to a different model. That choice
 
 ```sh
 git clone https://github.com/mgd34msu/goodvibes.git
-cd goodvibes-jev
+cd goodvibes
 bun install
 bun run build
 bun run --cwd products/tui dev

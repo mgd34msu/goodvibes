@@ -4,9 +4,11 @@
 # No Git checkout, package-manager install, compiler, Bun or Node is required.
 #
 # curl -fsSL https://goodvibes.sh/install.sh | sh
-# GOODVIBES_VERSION=v3.1.0 selects a release (default: latest).
-# GOODVIBES_INSTALL_DIR changes ~/.local/bin. GOODVIBES_AGENT/WEBUI/VECTOR/
+# GOODVIBES_VERSION=v3.1.2 selects a release (default: latest).
+# GOODVIBES_INSTALL_DIR changes ~/.local/bin. GOODVIBES_AGENT/WEBUI/
 # WAKE_MODEL/DAEMON_SERVICE/RESTART_DAEMON=0 disable their respective steps.
+# Native SQLite/vector companions are required on every supported platform;
+# the former GOODVIBES_VECTOR opt-out no longer skips those runtime files.
 # GOODVIBES_SHADOW_REMOVE=ask|0|1 controls existing command shadow removal.
 # GOODVIBES_UNINSTALL=1 removes installed programs/services, preserving data.
 # Upgrade, service ownership/migration, PATH and uninstall behavior is retained
@@ -23,7 +25,6 @@ REQUESTED_WEBUI_VERSION="${GOODVIBES_WEBUI_VERSION:-$REQUESTED_VERSION}"
 WITH_AGENT="${GOODVIBES_AGENT:-1}"
 WITH_WEBUI="${GOODVIBES_WEBUI:-1}"
 RESTART_DAEMON="${GOODVIBES_RESTART_DAEMON:-1}"
-WITH_VECTOR="${GOODVIBES_VECTOR:-1}"
 WITH_WAKE_MODEL="${GOODVIBES_WAKE_MODEL:-1}"
 DAEMON_SERVICE="${GOODVIBES_DAEMON_SERVICE:-1}"
 UNINSTALL="${GOODVIBES_UNINSTALL:-0}"
@@ -357,7 +358,7 @@ prepare_release() {
     fi
   done
   if [ "$os_tag" = linux ]; then fetch_release_asset "goodvibes-daemon-$PLATFORM_SUFFIX.ci-artifact.json"; fi
-  if [ "$WITH_VECTOR" = 1 ] || [ "$os_tag" = linux ]; then fetch_release_asset "sqlite-vec-$VEC_OS-$arch_tag.$VEC_SUFFIX"; fi
+  fetch_release_asset "sqlite-vec-$VEC_OS-$arch_tag.$VEC_SUFFIX"
   if [ "$os_tag" = macos ]; then
     fetch_release_asset "sqlite-darwin-$arch_tag.dylib"
     fetch_release_asset "sqlite-darwin-$arch_tag.dylib.json"
@@ -2042,7 +2043,6 @@ install_daemon() {
 # a skip. Placed with an atomic rename so a running process never dlopen()s a
 # half-written file.
 install_sqlite_vec() {
-  [ "$WITH_VECTOR" = "1" ] || [ "$os_tag" = linux ] || return 0
   addon_asset="sqlite-vec-${VEC_OS}-${arch_tag}.${VEC_SUFFIX}"
 
   # Selected addons were required and verified before any program changed.
@@ -2333,6 +2333,13 @@ install_webui() {
   webui_target="$WEBUI_ROOT/$webui_plain_version"
   publish_release_directory "$webui_staging/goodvibes-webui" "$webui_target"
   say "  installed  $webui_target"
+}
+
+# Configuration is a real native data write. Run only after all suite files
+# are settled and our executable transaction claims have been released; the
+# installed writer correctly refuses to publish while those claims exist.
+configure_webui() {
+  [ "$WITH_WEBUI" = "1" ] || return 0
 
   # Point the daemon at it. The binary owns the settings; this reads its receipt
   # and prints it, so the install's own output states the URL and the posture.
@@ -3488,9 +3495,6 @@ main() {
   # (which rides its manifest), before the wake model (which runs this binary)
   # and before the web UI (which this binary configures).
   install_daemon
-  if [ -n "$DECISION_POLICY" ]; then
-    "$INSTALL_DIR/goodvibes-daemon" config set judgment.policy "$DECISION_POLICY"
-  fi
 
   ensure_path_on_shell_rc
 
@@ -3509,17 +3513,8 @@ main() {
   # process picks it up and semantic vector search is live immediately.
   install_sqlite_vec
 
-  # Same ordering reason: put the wake-word model on disk before the daemon is
-  # (re)started, so the started process finds it verified and the feature is
-  # usable the moment voice.wake.enabled is turned on. A daemon that starts
-  # first would fetch it itself at boot; doing it here means the install's own
-  # output says whether it worked.
-  install_wake_word_model
-
-  # And again the same reason: unpack the web UI bundle and write the settings
-  # that point the daemon at it BEFORE the restart below, so the daemon that
-  # comes up is already serving it and the URL in the receipt works immediately
-  # rather than after the next restart.
+  # Publish support trees while the suite is excluded. Configure the WebUI only
+  # after the complete native cohort settles, before restarting its services.
   install_webui
 
   # The driver is shared platform support, including when Agent is skipped.
@@ -3530,6 +3525,15 @@ main() {
   # the new cohort. Startup must not see our own in-flight update claims.
   INSTALL_SWAP_FINISHED=1
   release_install_claims || fail 'Suite files were installed, but changed transaction claims require inspection before starting services.'
+
+  if [ -n "$DECISION_POLICY" ]; then
+    "$INSTALL_DIR/goodvibes-daemon" config set judgment.policy "$DECISION_POLICY"
+  fi
+  # Both commands may load configuration and publish native data. Their real
+  # writer checks must see a complete, idle suite, never our own in-flight
+  # installation. Provisioning still precedes the first service start.
+  install_wake_word_model
+  configure_webui
 
   # Bring a platform-managed canonical unit up to the current (config-derived)
   # launch shape BEFORE the restart below, so the restart applies it.

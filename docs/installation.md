@@ -12,13 +12,15 @@ Missing assets or mismatched checksums stop installation before replacing progra
 To pin the complete suite:
 
 ```sh
-curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.1.0 sh
+curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.1.2 sh
 ```
 
 The installer uses POSIX shell, curl or wget, tar, and sha256sum or shasum.
 It detects Linux/macOS and x64/arm64; the selected release must publish the
 complete asset set for that platform. Linux runtime companions are downloaded
-with the binaries. No system Bun, Node, Git or package manager is required.
+with the binaries. macOS includes the daemon's required SQLite and vector
+libraries and their release metadata. No system Bun, Node, Git or package manager
+is required.
 
 ## Options
 
@@ -26,9 +28,9 @@ with the binaries. No system Bun, Node, Git or package manager is required.
 | --- | --- |
 | `GOODVIBES_VERSION` | One monorepo release, default `latest` |
 | `GOODVIBES_INSTALL_DIR` | Command directory, default `~/.local/bin` |
-| `GOODVIBES_AGENT=0` | Skip Agent and its browser driver |
+| `GOODVIBES_AGENT=0` | Skip Agent; the shared browser driver is still installed |
 | `GOODVIBES_WEBUI=0` | Skip WebUI |
-| `GOODVIBES_VECTOR=0` | Skip the SQLite vector addon |
+| `GOODVIBES_VECTOR=0` | Retained compatibility input; required native vector libraries are still installed |
 | `GOODVIBES_WAKE_MODEL=0` | Skip optional wake-word provisioning |
 | `GOODVIBES_DAEMON_SERVICE=0` | Skip first-run service registration |
 | `GOODVIBES_RESTART_DAEMON=0` | Leave running daemon/agent processes untouched |
@@ -66,6 +68,29 @@ Installation holds transaction claims beside the three executables while suite
 files are replaced. A competing updater is refused. If replacement is interrupted
 after it begins, retained claims require inspection and recovery before another
 attempt; the installer does not report a complete install or blindly retry it.
+
+## Automatic updates and rollback
+
+Released native installations enable automatic updates by default. The daemon
+checks shortly after startup and then hourly, deferring replacement while work
+is active. The TUI and Agent also check at launch. An update selects one release
+for installed sibling programs, their native companions, the browser driver and
+the configured release WebUI. Programs already running continue their original
+build until restarted. Source and package-managed runs keep their own update
+mechanism.
+
+To disable all unattended updates, set both `update.auto` and
+`update.autoUpdateAtLaunch` to `false` in settings. Setting only
+`update.autoUpdateAtLaunch` to `false` disables terminal launch updates and their
+periodic updater unless `update.auto` was explicitly enabled. A daemon uses
+`update.auto` independently. Installation preserves these existing choices.
+
+`/update rollback` restores the retained complete suite when its programs and
+directory assets agree on a previous release and its readers support saved data.
+A failed daemon startup can request the same complete-suite rollback. A missing,
+mixed or incompatible previous cohort is refused; retained transaction recovery
+files require inspection. The installer itself preserves partial replacement
+claims rather than promising crash-atomic installation or automatic rollback.
 
 ## Uninstall
 

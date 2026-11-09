@@ -136,6 +136,8 @@ export async function verifyNativeWorkExecution(options: {
   let retainedAnswerOutput: AnswerClaimOutput | undefined;
   const answerOutput = (): AnswerClaimOutput => retainedAnswerOutput ??= captureAnswerClaimOutput(contract.answer ?? '');
   const answerCommitment = (): string => answerOutput().digest;
+  let retainedGoalSourceDigest: string | undefined;
+  const goalSourceCommitment = (): string => retainedGoalSourceDigest ??= hashState(goalObligationSource(contract));
   assertDurableCheckpoint(contract, admission); assertNativeContractSource(contract);
   if (contract.status !== 'passed') throw new Error('Native verifier requires the bound passed contract');
   const units = contract.units.flatMap(unit => unit.attemptUnits?.length ? unit.attemptUnits.filter(attempt => attempt.status === 'passed') : [unit]);
@@ -173,14 +175,13 @@ export async function verifyNativeWorkExecution(options: {
     const entry = options.decisionLog.get(ids[0]);
     const battery = entry?.context.battery === GOAL_OBLIGATIONS.critical.name ? GOAL_OBLIGATIONS.critical : GOAL_OBLIGATIONS.high;
     const source = nativeQuestionBatches(ids, ['omitted'], 'contract.check.goal-obligations', options.decisionLog)?.get('omitted');
-    const literalSourceDigest = hashState(goalObligationSource(contract));
     const initial = readYesNo({ type: 'noul', noul: sourceProbability }, UNIT_JUDGE_BANDS.high);
     const recordedInitial = object(proof['sourceGoal']), recorded = object(proof['reading']), policy = object(proof['policy']);
     if (!source || !entry || entry.context.battery !== battery.name || entry.context.batteryVersion !== battery.version
-      || entry.stateHash !== proof['stateHash'] || proof['literalSourceDigest'] !== literalSourceDigest || proof['outputDigest'] !== answerCommitment()
+      || entry.stateHash !== proof['stateHash'] || typeof proof['literalSourceDigest'] !== 'string'
       || !isDeepStrictEqual(proof['sourceJudgmentDecisionIds'], sourceIds)
       || !isDeepStrictEqual(decision.decisionIds, ids)
-      || !isDeepStrictEqual(source.question, goalObligationQuestion(battery.items.omitted.question, literalSourceDigest))
+      || !isDeepStrictEqual(source.question, goalObligationQuestion(battery.items.omitted.question, proof['literalSourceDigest']))
       || sourceProbability <= 0.5 || initial.outcome === 'act' || recordedInitial?.['probability'] !== sourceProbability
       || recordedInitial['verdict'] !== initial.verdict || recordedInitial['outcome'] !== initial.outcome
       || policy?.['name'] !== battery.name || policy['version'] !== battery.version) return false;
@@ -189,7 +190,8 @@ export async function verifyNativeWorkExecution(options: {
     const worstPremise = actualPremises ? Math.max(...contract.criteria.filter(criterion => criterion.disposition === 'judged')
       .map((_, index) => actualPremises.get(`criterion_${index}`)!.answer.noul)) : Infinity;
     return probability !== null && recorded?.['probability'] === probability && recorded['verdict'] === 'no' && recorded['outcome'] === 'act'
-      && check.goal.probabilityUnmet === Math.max(probability, worstPremise) && check.goal.verdict === 'met' && check.goal.outcome === 'act';
+      && check.goal.probabilityUnmet === Math.max(probability, worstPremise) && check.goal.verdict === 'met' && check.goal.outcome === 'act'
+      && proof['literalSourceDigest'] === goalSourceCommitment() && proof['outputDigest'] === answerCommitment();
   }
   function genuine(unit: ContractView['units'][number]): boolean {
     const check = unit.checks.at(-1);
@@ -287,12 +289,12 @@ export async function verifyNativeWorkExecution(options: {
     || originalEntry.status !== 'answered' || originalEntry.context.battery !== originalBattery.name
     || originalEntry.context.batteryVersion !== originalBattery.version || originalEntry.stateHash !== original['stateHash']
     || originalPolicy?.['name'] !== originalBattery.name || originalPolicy['version'] !== originalBattery.version
-    || original['sourceDigest'] !== hashState(originalObligationSource(contract)) || original['outputDigest'] !== answerCommitment()
     || !originalQuestion || originalProbability === null
     || originalReading?.['probability'] !== originalProbability || originalReading['verdict'] !== 'no' || originalReading['outcome'] !== 'act'
     || !isDeepStrictEqual(originalQuestion.question, originalBattery.items.original_obligations_unmet.question)
     || !isDeepStrictEqual(originalDecision?.decisionIds, originalIds)
-    || !deliverable.decisionIds.includes(originalId)) {
+    || !deliverable.decisionIds.includes(originalId)
+    || original['sourceDigest'] !== hashState(originalObligationSource(contract)) || original['outputDigest'] !== answerCommitment()) {
     throw new Error('Native execution lacks genuine original-obligation coverage');
   }
   let claimsValid: boolean | undefined;

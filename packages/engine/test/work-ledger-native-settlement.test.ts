@@ -1,5 +1,7 @@
 import { JudgmentContextLimitError } from '../../judgment/src/port/errors.ts';
 import { checkSettings } from '../sdk/src/platform/contract/check.js';
+import { goalObligationSource } from '../sdk/src/platform/contract/goal-obligation-proof.js';
+import { originalObligationSource } from '../sdk/src/platform/contract/batteries/original-obligation-coverage.js';
 import { CONTRACT_CONFIG_DEFAULTS } from '../sdk/src/platform/contract/config.js';
 import { verifyNativeWorkExecution } from '../sdk/src/platform/workflow/work-ledger/native-execution-verifier.js';
 import { nativeExecutionProvider } from './helpers/native-execution-provider.js';
@@ -151,18 +153,31 @@ test('native settlement verifies the logical goal proof and all actual premises 
   expect(contract.status).toBe('passed');
   const proof = JSON.parse(contract.decisions.findLast(decision => decision.targetId === `${contract.id}.goal-obligations`)!.reason);
   expect(proof.sourceGoal.probability).toBe(0.61);
-  const proofId = proof.decisionIds[0];
+  const proofId = proof.decisionIds[0], literalSource = canonicalJson(goalObligationSource(contract));
   for (const mutation of ['missing', 'wrong-source', 'uncertain', 'wrong-state'] as const) {
-    await expect(verifyNativeWorkExecution({ execution: f.storage.current(f.key).record!, runner: f.harness.runner,
-      port: f.hostOptions.port, decisionLog: { get(id) {
-        const entry = f.log.get(id); if (id !== proofId || entry?.status !== 'answered') return entry;
-        if (mutation === 'missing') return undefined;
-        if (mutation === 'uncertain') return { ...entry, answers: { omitted: noulAnswer(0.4) } };
-        if (mutation === 'wrong-state') return { ...entry, stateHash: 'another-goal' as typeof entry.stateHash };
-        return { ...entry, questions: { omitted: { type: 'noul', instructions: 'Different literal original source' } } };
-      } }, settings: checkSettings(CONTRACT_CONFIG_DEFAULTS), readAccessFilter: async () => true,
-      signal: new AbortController().signal, assertCurrent() {} })).rejects.toThrow('genuine deliverable check');
+    const hashing = spyOn(Bun.CryptoHasher, 'hash');
+    try {
+      await expect(verifyNativeWorkExecution({ execution: f.storage.current(f.key).record!, runner: f.harness.runner,
+        port: f.hostOptions.port, decisionLog: { get(id) {
+          const entry = f.log.get(id); if (id !== proofId || entry?.status !== 'answered') return entry;
+          if (mutation === 'missing') return undefined;
+          if (mutation === 'uncertain') return { ...entry, answers: { omitted: noulAnswer(0.4) } };
+          if (mutation === 'wrong-state') return { ...entry, stateHash: 'another-goal' as typeof entry.stateHash };
+          return { ...entry, questions: { omitted: { type: 'noul', instructions: 'Different literal original source' } } };
+        } }, settings: checkSettings(CONTRACT_CONFIG_DEFAULTS), readAccessFilter: async () => true,
+        signal: new AbortController().signal, assertCurrent() {} })).rejects.toThrow('genuine deliverable check');
+      expect(hashing.mock.calls.filter(([algorithm, input]) => algorithm === 'sha256' && input === literalSource)).toHaveLength(0);
+    } finally { hashing.mockRestore(); }
   }
+  const hashing = spyOn(Bun.CryptoHasher, 'hash'), originalSource = canonicalJson(originalObligationSource(contract));
+  try {
+    const verified = await verifyNativeWorkExecution({ execution: f.storage.current(f.key).record!, runner: f.harness.runner,
+      port: f.hostOptions.port, decisionLog: f.log, settings: checkSettings(CONTRACT_CONFIG_DEFAULTS), readAccessFilter: async () => true,
+      signal: new AbortController().signal, assertCurrent() {} });
+    expect(verified.attestation.outcome).toBe('verified');
+    expect(hashing.mock.calls.filter(([algorithm, input]) => algorithm === 'sha256' && input === literalSource)).toHaveLength(1);
+    expect(hashing.mock.calls.filter(([algorithm, input]) => algorithm === 'sha256' && input === originalSource)).toHaveLength(1);
+  } finally { hashing.mockRestore(); }
   expect(f.storage.current(f.key).settlement).toBeNull();
   expect((await f.host.settle(f.key, f.authority)).attestation.outcome).toBe('verified');
 });
@@ -193,22 +208,28 @@ test('native settlement requires recorded original-obligation coverage bound to 
   const contract = await completed(f.harness, started.admission.contractId);
   const coverageId = contract.checks.at(-1)!.decisionIds.find(id => f.log.get(id)?.context.site === 'contract.check.original-obligation-coverage')!;
   expect(coverageId).toBeDefined();
+  const originalSource = canonicalJson(originalObligationSource(contract));
   for (const mutation of ['absent', 'failed-answer', 'wrong-state', 'wrong-question', 'wrong-policy'] as const) {
-    await expect(verifyNativeWorkExecution({ execution: f.storage.current(f.key).record!, runner: f.harness.runner,
-      port: f.hostOptions.port, decisionLog: { get(id) {
-        const entry = f.log.get(id);
-        if (id !== coverageId || entry?.status !== 'answered') return entry;
-        if (mutation === 'absent') return undefined;
-        if (mutation === 'failed-answer') return { ...entry, answers: { original_obligations_unmet: noulAnswer(0.99) } };
-        if (mutation === 'wrong-state') return { ...entry, stateHash: 'copied-from-another-state' as typeof entry.stateHash };
-        if (mutation === 'wrong-policy') return { ...entry, context: { ...entry.context, batteryVersion: 0 } };
-        return { ...entry, questions: { original_obligations_unmet: { type: 'noul', instructions: 'A different check' } } };
-      } }, settings: checkSettings(CONTRACT_CONFIG_DEFAULTS), readAccessFilter: async () => true,
-      signal: new AbortController().signal, assertCurrent() {} })).rejects.toThrow('genuine original-obligation coverage');
+    const hashing = spyOn(Bun.CryptoHasher, 'hash');
+    try {
+      await expect(verifyNativeWorkExecution({ execution: f.storage.current(f.key).record!, runner: f.harness.runner,
+        port: f.hostOptions.port, decisionLog: { get(id) {
+          const entry = f.log.get(id);
+          if (id !== coverageId || entry?.status !== 'answered') return entry;
+          if (mutation === 'absent') return undefined;
+          if (mutation === 'failed-answer') return { ...entry, answers: { original_obligations_unmet: noulAnswer(0.99) } };
+          if (mutation === 'wrong-state') return { ...entry, stateHash: 'copied-from-another-state' as typeof entry.stateHash };
+          if (mutation === 'wrong-policy') return { ...entry, context: { ...entry.context, batteryVersion: 0 } };
+          return { ...entry, questions: { original_obligations_unmet: { type: 'noul', instructions: 'A different check' } } };
+        } }, settings: checkSettings(CONTRACT_CONFIG_DEFAULTS), readAccessFilter: async () => true,
+        signal: new AbortController().signal, assertCurrent() {} })).rejects.toThrow('genuine original-obligation coverage');
+      expect(hashing.mock.calls.filter(([algorithm, input]) => algorithm === 'sha256' && input === originalSource)).toHaveLength(0);
+    } finally { hashing.mockRestore(); }
   }
   expect(f.storage.current(f.key).ledger.revision).toBe(2);
   expect(f.storage.current(f.key).settlement).toBeNull();
 });
+
 
 test('original-coverage v2 verifies without an unused digest, actual v1 stays readable and future or mixed receipt versions refuse', async () => {
   const f = await fixture(), started = await f.host.start(f.target, f.authority);

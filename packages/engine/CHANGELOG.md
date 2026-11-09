@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Reject missing or mismatched native work proofs before hashing their current
+  source. Reuse one actual goal-source comparison within a verification, while
+  retaining the saved proof and answer checks required for settlement.
+
 - Reuse Home Graph source IDs and URLs by their saved role and locator instead
   of hashing them. Preserve explicit snapshot replay and distinct capture
   events; keep earlier sources unchanged. Hold ambiguous or unsupported records

@@ -1,5 +1,5 @@
 import type { DecisionLog } from '@goodvibes-jev/judgment';
-import { number, strictObject, unknown } from 'zod/v4';
+import { boolean, number, strictObject, unknown } from 'zod/v4';
 import {
   captureJudgmentVolumeBudgets,
   judgmentVolumeBreaches,
@@ -7,11 +7,16 @@ import {
   type JudgmentVolumeBreach,
 } from './judgment-volume.js';
 
+export type JudgmentVolumeLog = Pick<DecisionLog, 'query'> & Partial<Pick<DecisionLog, 'queryVolume'>>;
+
 export interface JudgmentVolumeMonitorSettings {
   readonly budgets: readonly JudgmentVolumeBudget[];
   readonly intervalMs: number;
   readonly windowMs: number;
   readonly limit: number;
+}
+export interface JudgmentVolumeMonitorControl extends JudgmentVolumeMonitorSettings {
+  readonly enabled: boolean;
 }
 export type JudgmentVolumeAlert =
   | { readonly kind: 'budget-exceeded'; readonly breaches: readonly JudgmentVolumeBreach[] }
@@ -35,9 +40,17 @@ export function captureJudgmentVolumeMonitorSettings(value: unknown): JudgmentVo
   return { ...settings, budgets };
 }
 
+/** Product settings can remain disabled until the owner supplies a budget. */
+export function captureJudgmentVolumeMonitorControl(value: unknown): JudgmentVolumeMonitorControl {
+  const parsed = settingsSchema.extend({ enabled: boolean().default(false), budgets: unknown().default([]) }).parse(value === undefined ? {} : value);
+  const budgets = captureJudgmentVolumeBudgets(parsed.budgets);
+  if (budgets.length > 100 || parsed.enabled && budgets.length === 0) throw new Error('Enabled judgment monitoring requires between one and 100 budgets.');
+  return Object.freeze({ ...parsed, budgets: Object.freeze(budgets.map(budget => Object.freeze(budget))) });
+}
+
 /** Local observation only: budget alerts neither call models nor authorize/stop actions. */
 export function startJudgmentVolumeMonitor(options: {
-  readonly log: Pick<DecisionLog, 'query'>;
+  readonly log: JudgmentVolumeLog;
   readonly settings: JudgmentVolumeMonitorSettings;
   readonly notify: (alert: JudgmentVolumeAlert) => void;
   readonly now?: () => number;
@@ -52,11 +65,14 @@ export function startJudgmentVolumeMonitor(options: {
     let alert: JudgmentVolumeAlert;
     try {
       const now = options.now?.() ?? Date.now();
-      const entries = options.log.query({
+      const query = {
         since: new Date(now - settings.windowMs).toISOString(),
         until: new Date(now).toISOString(),
         limit: settings.limit + 1,
-      });
+      };
+      // Native logs return only context and dispatch counters. The bounded
+      // full-entry path remains for older/custom DecisionLog implementations.
+      const entries = options.log.queryVolume ? options.log.queryVolume(query) : options.log.query(query);
       if (entries.length > settings.limit) alert = { kind: 'incomplete-window', limit: settings.limit };
       else {
         const breaches = judgmentVolumeBreaches(entries, settings.budgets);

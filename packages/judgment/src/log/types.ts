@@ -123,6 +123,20 @@ export interface DecisionQuery {
   readonly limit?: number;
 }
 
+/** Payload-free counter projection for bounded local volume monitoring.
+ * It contains no questions, answers, error text, attempt details or notes. */
+export interface DecisionVolumeEntry {
+  readonly id: DecisionId;
+  readonly context: Pick<DecisionContext, 'battery' | 'site'>;
+  readonly volume: {
+    readonly logicalRequestId?: string;
+    readonly targetAttempts: number;
+    readonly wireAttempts: number;
+    readonly unknownDispatchAttempts: number;
+    readonly callsWithoutAttemptEvidence: 0 | 1;
+  };
+}
+
 /**
  * Durable record of every reading. The engine state layer hosts an
  * implementation; this package ships the SQLite one.
@@ -134,6 +148,8 @@ export interface DecisionLog {
   attach(id: string, note: DecisionNote): void;
   get(id: string): DecisionEntry | undefined;
   query(query?: DecisionQuery): readonly DecisionEntry[];
+  /** Optional on older/custom logs. Native SQLite reads only bounded counters. */
+  queryVolume?(query?: DecisionQuery): readonly DecisionVolumeEntry[];
 }
 
 const isPlainObject = (value: unknown): value is Readonly<Record<string, unknown>> =>

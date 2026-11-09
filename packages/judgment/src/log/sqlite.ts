@@ -1,7 +1,8 @@
 import type { Database, Statement } from 'bun:sqlite';
 import type { JsonValue } from '../port/types.ts';
 import { opaqueUuid } from '../port/opaque-uuid.ts';
-import type { DecisionEntry, DecisionId, DecisionLog, DecisionNote, DecisionQuery, DecisionTruth, NewDecisionEntry } from './types.ts';
+import type { DecisionEntry, DecisionId, DecisionLog, DecisionNote, DecisionQuery, DecisionTruth, DecisionVolumeEntry, NewDecisionEntry } from './types.ts';
+import { decisionVolumeRow, type DecisionVolumeRow } from './volume-row.ts';
 import { COLUMNS, NOTES_TABLE, TABLE, openLog, rowsOf, type Params } from './sqlite-schema.ts';
 
 /** What reading an entry back needs from its row. */
@@ -54,6 +55,34 @@ const SQL = {
        (SELECT json_group_array(json_object('kind', kind, 'payload', payload)) FROM
          (SELECT kind, payload FROM ${NOTES_TABLE} WHERE decision_id = ${TABLE}.id ORDER BY seq)) AS notes
      FROM ${TABLE} WHERE ${['TRUE', ...conditions].join(' AND ')} ORDER BY at DESC, id DESC LIMIT $limit`,
+  /** Limit the indexed entry window before expanding only its lineage.
+   * No question, answer or note payload is returned. */
+  volume: (conditions: readonly string[]) => `WITH selected AS (
+      SELECT id, at, battery, site,
+        json_type(entry, '$.context') AS context_kind,
+        json_type(entry, '$.context.battery') AS battery_kind,
+        json_type(entry, '$.context.site') AS site_kind,
+        json_type(entry, '$.lineage') AS lineage_kind,
+        CASE WHEN json_type(entry, '$.lineage') = 'object' THEN json_extract(entry, '$.lineage') END AS lineage
+      FROM ${TABLE} WHERE ${['TRUE', ...conditions].join(' AND ')}
+      ORDER BY at DESC, id DESC LIMIT $limit
+    ) SELECT selected.id, selected.battery, selected.site,
+      selected.context_kind, selected.battery_kind, selected.site_kind, selected.lineage_kind,
+      json_extract(selected.lineage, '$.logicalRequestId') AS logical_id,
+      json_type(selected.lineage, '$.logicalRequestId') AS logical_kind,
+      json_type(selected.lineage, '$.attempts') AS attempts_kind,
+      json_array_length(selected.lineage, '$.attempts') AS attempt_count,
+      json_extract(selected.lineage, '$.omittedAttempts') AS omitted_count,
+      json_type(selected.lineage, '$.omittedAttempts') AS omitted_kind,
+      sum(CASE WHEN attempt.type = 'object'
+        THEN CASE WHEN json_type(attempt.value, '$.dispatched') = 'true' THEN 1 ELSE 0 END ELSE 0 END) AS wire_attempts,
+      sum(CASE WHEN attempt.type = 'object'
+        THEN CASE WHEN json_type(attempt.value, '$.dispatched') IS NULL THEN 1 ELSE 0 END ELSE 0 END) AS unknown_attempts,
+      sum(CASE WHEN attempt.key IS NULL THEN 0 WHEN attempt.type <> 'object' THEN 1
+        WHEN json_type(attempt.value, '$.dispatched') IS NULL OR json_type(attempt.value, '$.dispatched') IN ('true', 'false') THEN 0
+        ELSE 1 END) AS invalid_attempts
+    FROM selected LEFT JOIN json_each(selected.lineage, '$.attempts') AS attempt ON TRUE
+    GROUP BY selected.id ORDER BY selected.at DESC, selected.id DESC`,
 };
 
 const OUTCOME_FILTER =
@@ -120,6 +149,15 @@ export class SqliteDecisionLog implements DecisionLog, Disposable {
   query(query: DecisionQuery = {}): readonly DecisionEntry[] {
     const { where, params } = filterFor(query);
     return this.#entries(SQL.matching(where), { ...params, limit: query.limit ?? 1000 });
+  }
+
+  /** Native local monitoring never materializes full entries or their notes. */
+  queryVolume(query: DecisionQuery = {}): readonly DecisionVolumeEntry[] {
+    const limit = query.limit ?? 1000;
+    // The monitor uses one sentinel row beyond its configured 100k maximum.
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100_001) throw new RangeError('Decision volume query requires a bounded limit.');
+    const { where, params } = filterFor(query);
+    return rowsOf<DecisionVolumeRow>(this.#db, SQL.volume(where), { ...params, limit }).map(decisionVolumeRow);
   }
 
   #entries(sql: string, params: Params): DecisionEntry[] {

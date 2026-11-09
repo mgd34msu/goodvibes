@@ -9,6 +9,7 @@ export {
   isoTime,
   type AnsweredEntry,
   type DecisionEntry,
+  type DecisionVolumeEntry,
   type DecisionNote,
   type DecisionTruth,
   type TruthSource,

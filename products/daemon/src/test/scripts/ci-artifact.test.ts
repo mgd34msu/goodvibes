@@ -177,7 +177,7 @@ test('a trusted release coordinator can verify recorded evidence without claimin
   const base = writeV1NativeArtifactFixture(root, source);
   const artifact = { ...base, schema: 2, readers: { schema: 1, version: '3.1.2', formats: ['payment-retained-holds-v2'] } };
   writeFileSync(join(root, 'native/ci-artifact.json'), JSON.stringify(artifact));
-  expect(await readVerifiedDaemonCiArtifact(root, source, { readerEvidence: 'recorded-ci' })).toEqual(artifact);
+  expect<unknown>(await readVerifiedDaemonCiArtifact(root, source, { readerEvidence: 'recorded-ci' })).toEqual(artifact);
   expect(() => readFileSync(marker)).toThrow();
   // Recorded mode still validates this archive's source and exact payloads.
   await expect(readVerifiedDaemonCiArtifact(root, { ...source, headCommit: 'd'.repeat(40) }, { readerEvidence: 'recorded-ci' })).rejects.toThrow('differs');

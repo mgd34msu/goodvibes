@@ -39,7 +39,7 @@ test('retiring the original parent during async write withholds foreign publicat
 });
 test('directory fsync failures are indeterminate and never restore/delete the visible new destination', async () => {
   const f = fixture(), nativeSync = fs.fsync;
-  const sync = spyOn(fs, 'fsync').mockImplementation((fd, callback) => { if (fstatSync(fd).isDirectory()) { queueMicrotask(() => callback(Object.assign(Error('synthetic directory durability failure'), { code: 'EIO' }))); return; } nativeSync(fd, callback); });
+  const sync = spyOn(fs, 'fsync').mockImplementation(((fd: number, callback: fs.NoParamCallback) => { if (fstatSync(fd).isDirectory()) { queueMicrotask(() => callback(Object.assign(Error('synthetic directory durability failure'), { code: 'EIO' }))); return; } nativeSync(fd, callback); }) as typeof fs.fsync);
   let failure: unknown; try { await new JsonFileStore(f.path).save({ next: true }).catch(error => { failure = error; }); }
   finally { sync.mockRestore(); }
   expect(failure).toMatchObject({ phase: 'published-indeterminate' }); expect(JSON.parse(readFileSync(f.path, 'utf8'))).toEqual({ next: true });
@@ -69,7 +69,7 @@ for (const asyncWriter of [false, true]) test(`${asyncWriter ? 'async' : 'sync'}
 test('existing saves fsync only their actual parent; new parent entries flush their own ancestry without unrelated roots', async () => {
   const f = fixture(), nativeOpen = fs.openSync, nativeSync = fs.fsync, opened = new Map<number, string>(), synced: string[] = [];
   const open = spyOn(fs, 'openSync').mockImplementation((path, flags, mode) => { const fd = nativeOpen(path, flags, mode); if (typeof path === 'string') opened.set(fd, path); return fd; });
-  const sync = spyOn(fs, 'fsync').mockImplementation((fd, callback) => { if (fstatSync(fd).isDirectory()) { const path = opened.get(fd); if (!path) throw Error('Missing original native directory'); synced.push(path); } nativeSync(fd, callback); });
+  const sync = spyOn(fs, 'fsync').mockImplementation(((fd: number, callback: fs.NoParamCallback) => { if (fstatSync(fd).isDirectory()) { const path = opened.get(fd); if (!path) throw Error('Missing original native directory'); synced.push(path); } nativeSync(fd, callback); }) as typeof fs.fsync);
   try {
     await new JsonFileStore(f.path).save({ next: true }); expect(synced).toEqual([f.root]); synced.length = 0;
     const nested = join(f.root, 'new', 'nested'); await new JsonFileStore(join(nested, 'state.json')).save({ next: true });

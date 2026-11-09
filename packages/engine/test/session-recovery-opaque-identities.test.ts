@@ -171,7 +171,7 @@ process.stdout.write(JSON.stringify({ path: surface.recoveryFile(input.id) }));
     }));
     expect(results[0]?.path).toBe(results[1]?.path);
     expect(files(f.surface.recoveryDir)).toHaveLength(1);
-    expect(['A', 'B']).toContain(loadRecoveryConversation({ surface: f.surface }, id)?.messages[0]?.content);
+    expect<unknown>(['A', 'B']).toContain(loadRecoveryConversation({ surface: f.surface }, id)?.messages[0]?.content);
     expect(fs.readdirSync(f.surface.recoveryDir).some(name => name.includes('.tmp'))).toBe(false);
   } finally { for (const child of children) child.kill(); }
 }, 30_000);

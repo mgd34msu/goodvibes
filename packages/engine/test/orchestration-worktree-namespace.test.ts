@@ -117,7 +117,7 @@ test('exact private tuple allocations survive restart and never expose arbitrary
   const root = repo(), names = ['contract-a-same', 'contract-b-same', '', '../../escape\n☃', 'CONTRACT-a-same'];
   const branches: string[] = [];
   for (const namespace of names) {
-    const ws = stream(); ws.id = '../group'; ws.items[0]!.id = '../unit';
+    const original = stream(), ws = { ...original, id: '../group', items: original.items.map(item => ({ ...item, id: '../unit' })) };
     const first = await reserve(root, ws, namespace), reopened = await reserve(root, ws, namespace);
     expect(reopened.branch).toBe(first.branch); expect(first.branch).toMatch(/^ws-owned\/[a-p-]+$/);
     expect(first.branch).not.toContain(namespace || 'unit'); branches.push(first.branch);

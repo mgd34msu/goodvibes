@@ -71,7 +71,7 @@ test('a fresh all-current split election heals with the noncryptographic order a
   const hash = spyOn(crypto, 'createHash');
   try {
     world.bus.heal(); await advance(world, 4000);
-    expect(holders(world, topic)).toEqual([rank < 0 ? first : second]); expect(hash).not.toHaveBeenCalled();
+    expect<unknown>(holders(world, topic)).toEqual([rank < 0 ? first : second]); expect(hash).not.toHaveBeenCalled();
   } finally { hash.mockRestore(); await Promise.all(world.nodes.map(node => node.election.stop())); }
 });
 
@@ -94,7 +94,7 @@ test('a v1 wire peer and two current peers converge on one old total order after
   await startNode(world, second); await advance(world, 1100);
   const surface = idFor(topic), expected = [old, first, second].sort((a, b) => oldRank(a.id, surface).localeCompare(oldRank(b.id, surface)))[0];
   world.bus.heal(); await advance(world, 5000);
-  expect(holders(world, topic)).toEqual([expected]);
+  expect<unknown>(holders(world, topic)).toEqual([expected]);
   for (const node of [first, second]) {
     const latest = world.bus.sent.filter(sent => sent.from === node.id).at(-1);
     expect(latest && decodeMessage(latest.raw, secret).message?.nodeVersion.endsWith(CLUSTER_V1_PEER_RANK_FEATURE)).toBe(true);

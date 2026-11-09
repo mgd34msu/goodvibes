@@ -65,7 +65,7 @@ test('saved contract observation hashes no unreviewed answer and compares a shar
   const hashes = spyOn(Bun.CryptoHasher, 'hash');
   try {
     const unreviewed = completedContractEvidence({ list: () => [viewed] }, 'session')[0]!;
-    expect(unreviewed.answer).toBe(viewed.answer);
+    expect<unknown>(unreviewed.answer).toBe(viewed.answer);
     expect(unreviewed).not.toHaveProperty('savedAnswerDigest');
     expect(hashes.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
     const reviewed = approvedWork()[0]!;

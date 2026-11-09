@@ -29,7 +29,7 @@ describe('validatePluginSignature', () => {
     expect(validatePluginSignature({ ...manifest, signature: forged }, publicKey).valid).toBe(false);
   });
 
-  test.each([
+  test.each<Partial<typeof manifest>>([
     { name: 'another-plugin' }, { version: '1.3.0' }, { capabilities: ['shell.exec'] },
     { main: 'another-entry.js' }, { hooks: ['TOOL_EXECUTING'] }, { minRuntimeVersion: '3.0.0' }, { description: 'Changed disclosure' },
   ])('rejects a changed manifest field: %j', change => {

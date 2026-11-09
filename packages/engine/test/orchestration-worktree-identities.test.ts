@@ -92,7 +92,7 @@ test('actual acquired row is tied to the original instance and survives native r
   expect(() => registry.retainAcquired({ ...row }, handle.path)).toThrow();
   const resumed = stream(), restarted = manager(f.root); restarted.reconcileOrphans(resumed);
   expect(resumed.items[0]!.worktreePath).toBe(handle.path); expect(resumed.items[0]!.worktreeInitialized).toBe(true);
-  expect((await restarted.ensureWorktree(resumed, resumed.items[0]!)).path).toBe(handle.path);
+  expect<unknown>((await restarted.ensureWorktree(resumed, resumed.items[0]!)).path).toBe(handle.path);
 });
 
 test('linked repository roots resolve the same actual Git common directory and private tuple', async () => {
@@ -185,7 +185,7 @@ test('ordinary fresh allocation and current native restore never run the old SHA
   try {
     const ws = stream(), owner = manager(f.root); await owner.ensureWorktree(ws, ws.items[0]!);
     const resumed = stream(), restarted = manager(f.root); restarted.reconcileOrphans(resumed);
-    expect((await restarted.ensureWorktree(resumed, resumed.items[0]!)).path).toBe(ws.items[0]!.worktreePath);
+    expect<unknown>((await restarted.ensureWorktree(resumed, resumed.items[0]!)).path).toBe(ws.items[0]!.worktreePath);
     expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256' || algorithm === 'sha1')).toHaveLength(0);
   } finally { hashing.mockRestore(); }
 });

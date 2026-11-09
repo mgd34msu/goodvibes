@@ -445,7 +445,7 @@ test('scope ordering does not change owner identity and public revisions remain 
   const record = result.record as { ownerRevision: string; workspaceRevision: string; owner: { authorityId: string; scopes: string[] }; origin: { routeRevision: string } };
   expect(record.ownerRevision).toMatch(/^[0-9a-f-]{36}$/);
   expect(record.workspaceRevision).toMatch(/^[0-9a-f-]{36}$/);
-  expect(record.origin.routeRevision).toBe(f.hostDeps.routes.getBindingIncarnation(f.hostDeps.routes.listBindings()[0]!.id));
+  expect<unknown>(record.origin.routeRevision).toBe(f.hostDeps.routes.getBindingIncarnation(f.hostDeps.routes.listBindings()[0]!.id));
   expect(record.owner.authorityId).toBe(f.authority.current()!.authorityId);
   expect(record.owner.scopes).toEqual([...f.authority.current()!.scopes].sort());
   expect(JSON.stringify(record)).not.toContain('EXTERNAL ORIGINAL');

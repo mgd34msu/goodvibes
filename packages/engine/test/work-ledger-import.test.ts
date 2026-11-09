@@ -78,7 +78,7 @@ test('actual historical manifest1 commits and replays after restart without adop
   expect(first).toMatchObject({ kind: 'accepted', replayed: false, event: { manifest: { version: 1 } } });
   await host.service.close(); await host.store.close();
   const reopened = await fixture(host.file, 'different-host'), before = fs.readFileSync(host.file);
-  expect(await reopened.service.execute(historical, reopened.actor)).toEqual({ ...first, replayed: true });
+  expect<unknown>(await reopened.service.execute(historical, reopened.actor)).toEqual({ ...first, replayed: true });
   expect(fs.readFileSync(host.file)).toEqual(before);
   const history = await reopened.service.history(0, reopened.actor);
   expect(history[0]).toMatchObject({ manifest: historical.manifest });

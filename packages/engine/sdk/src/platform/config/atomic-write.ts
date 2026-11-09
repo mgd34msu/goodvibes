@@ -1,90 +1,29 @@
-/**
- * atomic-write.ts, the one write primitive every store on this platform uses
- * when a reader must never observe a half-written file.
- *
- * Write to a sibling temp file, fsync it, rename it into place, then fsync the
- * parent directory. rename(2) is atomic on POSIX, so a concurrent reader sees
- * either the previous file or the complete new one, and a hard crash straight
- * after the rename cannot lose the directory entry.
- */
-import { closeSync, fsyncSync, mkdirSync, openSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
-import { dirname } from 'node:path';
+/** Durable configuration publication uses the platform's single owned-stage
+ * primitive. Source guards retain their old mkdirp/effect contract: a parent or
+ * staging creation advances only directory facts, and publication advances the
+ * target only after the original staged inode is visibly in place. */
+import { writeFileAtomic } from '../utils/atomic-json-store.js';
 
 export interface AtomicWriteOptions {
   /** Optional operation lifetime restriction, checked at each physical write. */
   readonly assertCurrent?: (() => void) | undefined;
   /** Trusted owner advances its captured write target after this operation's effect. */
   readonly onEffect?: ((published?: boolean) => void) | undefined;
-  /**
-   * File permission mode for the written file. Defaults to 0o600 (owner read/write only).
-   */
+  /** Exact resulting permissions; defaults to owner read/write only. */
   readonly mode?: number;
-  /**
-   * When true, creates parent directories if they do not exist. Defaults to false.
-   */
+  /** Create missing ordinary parents only when explicitly true. Defaults to false. */
   readonly mkdirp?: boolean;
 }
 
-/**
- * Writes `data` to `path` atomically: writes to a sibling temp file, fsyncs
- * it, then renames it into place. On POSIX, rename(2) is atomic so readers
- * always see either the old file or the new file, never a partial write.
- *
- * If the write or fsync fails, the temp file is cleaned up before rethrowing.
- *
- * @param path   Destination file path.
- * @param data   UTF-8 string content, or raw bytes, to write. A `Uint8Array`
- *               is written as-is; a string is written with `writeFileSync`'s
- *               default UTF-8 encoding, exactly as before this accepted bytes.
- * @param opts   Optional mode and mkdirp flags.
- */
-export function atomicWriteFileSync(
-  path: string,
-  data: string | Uint8Array,
-  opts: AtomicWriteOptions = {},
-): void {
-  const mode = opts.mode ?? 0o600;
-  const tmp = `${path}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
-
-  if (opts.mkdirp) {
-    opts.assertCurrent?.();
-    mkdirSync(dirname(path), { recursive: true });
-    opts.onEffect?.();
-  }
-
-  try {
-    opts.assertCurrent?.();
-    writeFileSync(tmp, data, { mode });
-    opts.onEffect?.();
-
-    // fsync the temp file to flush OS write buffers before rename.
-    const fd = openSync(tmp, 'r+');
-    try {
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
-    }
-
-    opts.assertCurrent?.();
-    renameSync(tmp, path);
-    opts.onEffect?.(true);
-
-    // fsync the parent directory to ensure the renamed directory entry is
-    // flushed. Without this, a hard crash immediately after rename could lose
-    // the entry on some filesystems (ext3/ext4 with data=ordered, etc.).
-    const dirFd = openSync(dirname(path), 'r');
-    try {
-      fsyncSync(dirFd);
-    } finally {
-      closeSync(dirFd);
-    }
-  } catch (err) {
-    try {
-      unlinkSync(tmp);
-    } catch {
-      // Best-effort cleanup, original error takes priority.
-    }
-    throw err;
-  }
+/** Write exact text/binary bytes through an exclusive original temporary inode.
+ * Failures before publication preserve the old destination. A failed durability
+ * confirmation after rename reports published-indeterminate and never restores
+ * or removes the visible destination. Foreign temporary paths are never cleaned. */
+export function atomicWriteFileSync(path: string, data: string | Uint8Array, opts: AtomicWriteOptions = {}): void {
+  const assertCurrent = opts.assertCurrent?.bind(opts), onEffect = opts.onEffect?.bind(opts);
+  writeFileAtomic(path, data, {
+    mode: opts.mode ?? 0o600, mkdirp: opts.mkdirp === true, durable: true,
+    // A configuration mutation owns this publication, not other writers' GC.
+    cleanupStaleTemps: false, assertCurrent, onEffect,
+  });
 }

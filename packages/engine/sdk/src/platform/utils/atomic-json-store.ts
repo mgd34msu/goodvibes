@@ -130,6 +130,11 @@ export function createAtomicTempPath(filePath: string): string {
 }
 
 export interface AtomicWriteOptions {
+  /** Defaults to true here. A false requires an already-existing parent. */
+  readonly mkdirp?: boolean;
+  /** Native owner advances only its own filesystem effects: false for created
+   * parents/staging, true after the original stage becomes the destination. */
+  readonly onEffect?: ((published?: boolean) => void) | undefined;
   /** Additional operation restriction, completed synchronously before each physical write. */
   readonly assertCurrent?: (() => void) | undefined;
   /**
@@ -264,7 +269,7 @@ function atomicMissing(error: unknown): boolean { return error !== null && typeo
 /** Plan the actual parent lookup, including configured existing aliases and
  * symlink-aware '..', before creating anything. Never create a dangling alias's
  * target. Original directories and links stay pinned through publication. */
-function prepareAtomicDirectory(absolute: string, assertOwner: () => void): AtomicDirectoryOwner {
+function prepareAtomicDirectory(absolute: string, assertOwner: () => void, effect: (() => void) | undefined, mkdirp: boolean): AtomicDirectoryOwner {
   const directories = new Map<string, string>(), links: Array<{ path: string; identity: string; target: string }> = [];
   const absent = new Set<string>();
   let cursor = parse(absolute).root, pending = absolute.slice(cursor.length).split(sep);
@@ -302,6 +307,7 @@ function prepareAtomicDirectory(absolute: string, assertOwner: () => void): Atom
     }
   };
   current();
+  if (!mkdirp && absent.size) throw Object.assign(new Error('Atomic publication parent does not exist'), { code: 'ENOENT' });
   for (const path of [...absent]) {
     assertOwner(); current(); mkdirSync(path);
     const created = lstatSync(path, { bigint: true });
@@ -314,7 +320,7 @@ function prepareAtomicDirectory(absolute: string, assertOwner: () => void): Atom
       if (after.dev !== created.dev || after.ino !== created.ino) throw new Error('Atomic file created parent changed');
       directories.set(path, atomicDirectoryStamp(after));
     }
-    current();
+    current(); if (effect) { effect(); current(); }
   }
   current(); if (realpathSync(absolute) !== canonical) throw new Error('Atomic file parent lookup changed');
   const physical: Array<{ path: string; identity: string }> = [];
@@ -338,14 +344,22 @@ function ownsAtomicFile(stat: BigIntStats | undefined, original: BigIntStats | u
  */
 export function writeFileAtomic(filePath: string, contents: string | Uint8Array, options: AtomicWriteOptions = {}): void {
   const input = typeof contents === 'string' ? contents : Buffer.from(contents);
-  const expected = typeof input === 'string' ? Buffer.from(input, 'utf8') : input;
-  const guard = options.assertCurrent?.bind(options), mode = options.mode ?? DEFAULT_STORE_FILE_MODE;
-  const durable = options.durable === true, sweep = options.cleanupStaleTemps !== false;
+  const expectedLength = typeof input === 'string' ? Buffer.byteLength(input, 'utf8') : input.byteLength;
+  const guard = options.assertCurrent?.bind(options), onEffect = options.onEffect?.bind(options), mode = options.mode ?? DEFAULT_STORE_FILE_MODE;
+  const durable = options.durable === true, sweep = options.cleanupStaleTemps !== false, mkdirp = options.mkdirp !== false;
   const absolute = isAbsolute(filePath) ? filePath : `${process.cwd()}${sep}${filePath}`;
   const leaf = basename(absolute);
-  let parent: AtomicDirectoryOwner | undefined, tmpPath: string | undefined;
-  let fd: number | undefined, original: BigIntStats | undefined, prepared: BigIntStats | undefined;
-  let published = false, attempted = false;
+  let parent: AtomicDirectoryOwner | undefined, tmpPath: string | undefined, target: string | undefined;
+  let fd: number | undefined, original: BigIntStats | undefined, prepared: BigIntStats | undefined, publishedImage: BigIntStats | undefined;
+  let published = false, attempted = false, publicationNotified = false;
+  const effect = (isPublished = false) => {
+    if (isPublished) { if (publicationNotified) return; publicationNotified = true; }
+    const returned: unknown = onEffect?.(isPublished);
+    if (returned !== undefined) {
+      if (nodeTypes.isPromise(returned)) Reflect.apply(Promise.prototype.then, returned, [undefined, () => {}]);
+      throw new Error('Atomic file effect notification must complete synchronously');
+    }
+  };
   const current = () => {
     const result: unknown = guard?.();
     if (result !== undefined) {
@@ -361,6 +375,17 @@ export function writeFileAtomic(filePath: string, contents: string | Uint8Array,
     if (!ownsAtomicFile(descriptor, original) || !ownsAtomicFile(selected, original)
       || (prepared !== undefined && (atomicFileStamp(descriptor) !== atomicFileStamp(prepared) || !selected || atomicFileStamp(selected) !== atomicFileStamp(prepared)))) throw new Error('Atomic staging source changed');
   };
+  const observePublished = (): BigIntStats => {
+    parent?.assertCurrent();
+    if (fd === undefined || !target || !original) throw new Error('Atomic published ownership is unavailable');
+    const descriptor = fstatSync(fd, { bigint: true }), selected = lstatSync(target, { bigint: true });
+    if (!ownsAtomicFile(descriptor, original) || !ownsAtomicFile(selected, original)
+      || atomicFileStamp(descriptor) !== atomicFileStamp(selected)) throw new Error('Atomic publication is not the original staged image');
+    return descriptor;
+  };
+  const assertPublished = () => {
+    if (!publishedImage || atomicFileStamp(observePublished()) !== atomicFileStamp(publishedImage)) throw new Error('Atomic published image changed');
+  };
   const cleanup = () => {
     if (!parent || !tmpPath || !original || published) return;
     try { parent.assertPhysicalCurrent(); if (ownsAtomicFile(lstatSync(tmpPath, { bigint: true, throwIfNoEntry: false }), original)) unlinkSync(tmpPath); }
@@ -368,17 +393,19 @@ export function writeFileAtomic(filePath: string, contents: string | Uint8Array,
   };
   try {
     if (!leaf || leaf === '.' || leaf === '..' || absolute.endsWith(sep) || absolute.includes('\0')) throw new Error('Atomic publication requires a file target');
-    parent = prepareAtomicDirectory(dirname(absolute), current); current();
-    const target = join(parent.canonical, leaf);
-    if (sweep) cleanupStaleTempFiles(parent.canonical, target, current);
+    parent = prepareAtomicDirectory(dirname(absolute), current, onEffect ? () => effect() : undefined, mkdirp); current();
+    target = join(parent.canonical, leaf);
+    if (sweep) cleanupStaleTempFiles(parent.canonical, target, current, onEffect ? () => { parent?.assertCurrent(); effect(); parent?.assertCurrent(); } : undefined);
     tmpPath = createAtomicTempPath(target); current();
     fd = openSync(tmpPath, constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_NONBLOCK, DEFAULT_STORE_FILE_MODE);
-    original = fstatSync(fd, { bigint: true }); current(); assertTemporary();
+    original = fstatSync(fd, { bigint: true });
+    if (onEffect) { assertTemporary(); effect(); assertTemporary(); }
+    current(); assertTemporary();
     fchmodSync(fd, mode); current(); assertTemporary();
     const written = typeof input === 'string' ? writeSync(fd, input, null, 'utf8') : writeSync(fd, input, 0, input.byteLength, null);
-    if (written !== expected.byteLength) throw new Error('Incomplete atomic file write');
+    if (written !== expectedLength) throw new Error('Incomplete atomic file write');
     prepared = fstatSync(fd, { bigint: true });
-    if (prepared.size !== BigInt(expected.byteLength)) throw new Error('Atomic staging size changed');
+    if (prepared.size !== BigInt(expectedLength)) throw new Error('Atomic staging size changed');
     current(); assertTemporary(); fsyncSync(fd);
     current(); assertTemporary();
     // The prepared nanosecond file stamp detects edits by a borrowed guard;
@@ -386,8 +413,10 @@ export function writeFileAtomic(filePath: string, contents: string | Uint8Array,
     // No borrowed callback or async gap is allowed between the identity proof
     // and the native rename into the retained original physical parent.
     attempted = true; renameSync(tmpPath, target); published = true;
-    parent.assertCurrent();
-    if (!ownsAtomicFile(lstatSync(target, { bigint: true }), original)) throw new Error('Atomic publication is not the original staged file');
+    // rename changes ctime. Capture the new exact descriptor/path stamp before
+    // any borrowed observer may advance its own source receipt.
+    publishedImage = observePublished();
+    if (onEffect) { effect(true); assertPublished(); }
     if (durable) {
       try { confirmFileDurable(absolute); }
       catch (error) {
@@ -395,14 +424,19 @@ export function writeFileAtomic(filePath: string, contents: string | Uint8Array,
         throw error;
       }
     }
-    parent.assertCurrent();
-    if (!ownsAtomicFile(lstatSync(target, { bigint: true }), original)) throw new Error('Atomic publication changed during confirmation');
+    assertPublished();
     closeSync(fd); fd = undefined;
   } catch (error) {
     if (!published && attempted) {
       // A thrown rename is only pre-publication when the exact original stage
       // still exists under the original parent. Otherwise retain uncertainty.
       try { assertTemporary(); } catch { published = true; }
+      if (onEffect && published && !publicationNotified && target && parent) {
+        try {
+          publishedImage = observePublished();
+          effect(true); assertPublished();
+        } catch { /* Uncertain/foreign publication cannot supply an effect receipt. */ }
+      }
     }
     if (fd !== undefined) { try { closeSync(fd); } catch { /* The original error remains the diagnostic. */ } fd = undefined; }
     cleanup();
@@ -628,7 +662,7 @@ export function quarantineCorruptFile(filePath: string, options: QuarantineOptio
 /** Reclaim only aged native temporary files whose recorded writer is proven
  * dead. Hold the original directory and exact regular-file metadata through
  * unlink; a live, inaccessible, unknown, aliased or replaced source is retained. */
-function cleanupStaleTempFiles(dir: string, filePath: string, assertCurrent: () => void): void {
+function cleanupStaleTempFiles(dir: string, filePath: string, assertCurrent: () => void, onEffect: (() => void) | undefined): void {
   const prefix = `${basename(filePath)}.tmp-`;
   let names: string[]; try { names = readdirSync(dir); } catch { return; }
   const staleBefore = Date.now() - STALE_TEMP_FILE_MIN_AGE_MS;
@@ -647,12 +681,16 @@ function cleanupStaleTempFiles(dir: string, filePath: string, assertCurrent: () 
     // Permission/source failures abort the publication; they are not swallowed
     // as an optional failure to inspect one stale candidate.
     assertCurrent();
+    let removed = false;
     try {
       const after = lstatSync(stalePath, { bigint: true });
       if (atomicFileStamp(after) !== atomicFileStamp(before)) continue;
-      unlinkSync(stalePath);
-      logger.warn('[atomic-json-store] removed a stale temp file left by a dead writer', { filePath, stalePath, ageMs: Math.max(0, Date.now() - Number(before.mtimeMs)) });
+      unlinkSync(stalePath); removed = true;
     } catch { /* Unknown ownership or replacement leaves the source untouched. */ }
+    if (removed) {
+      onEffect?.(); // A failed owner notification is never an optional GC miss.
+      logger.warn('[atomic-json-store] removed a stale temp file left by a dead writer', { filePath, stalePath, ageMs: Math.max(0, Date.now() - Number(before.mtimeMs)) });
+    }
   }
 }
 

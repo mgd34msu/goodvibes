@@ -30,7 +30,7 @@ export interface GeneratedFactSupportOptions {
   readonly timeoutMs?: number | undefined;
 }
 export interface GeneratedFactSupportReceipt {
-  /** Deterministic local attestation ID, NOT a provider/decision-log ID. */
+  /** Opaque local label, not evidence or a provider/decision-log ID. Saved earlier labels remain readable. */
   readonly receiptId: string;
   readonly decisionId?: string | undefined;
   readonly battery: string;

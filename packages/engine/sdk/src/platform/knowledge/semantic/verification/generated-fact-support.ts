@@ -1,4 +1,5 @@
 import { requireSemanticKnowledge } from '../../decision-policy.js';
+import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { knowledgeClockIso } from '../../store-record-representation.js';
 import { createSupportReferenceLabels } from './structural-references.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
@@ -73,7 +74,9 @@ function receipt(request: RequestPlan, probability: number, decisionId?: string)
     evidenceReference: { extractionId: input.extractionId, evidenceHash: input.evidenceHash },
     verdict: 'yes' as const, outcome: 'act' as const, probability,
   };
-  return freezeSupport({ receiptId: `fact-support-${supportHash(body)}`, ...body });
+  // The saved whole receipt and its source/field tuple carry the evidence.
+  // Its local label is never recomputed or used to verify that evidence.
+  return freezeSupport({ receiptId: `fact-support-${opaqueUuid()}`, ...body });
 }
 
 /**

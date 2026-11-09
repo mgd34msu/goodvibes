@@ -104,7 +104,7 @@ describe('recording authority', () => {
     } finally { hash.mockRestore(); }
   });
 
-  test.each(['promise', 'thenable', 'throwing-then'] as const)('consumes refused %s without an unhandled private rejection', async (kind) => {
+  test.each(['promise', 'thenable', 'throwing-then'] as const)('refuses %s while draining only intrinsic promises', async (kind) => {
     using log = new SqliteDecisionLog(':memory:'); let consumed = 0;
     const hash = spyOn(Bun.CryptoHasher, 'hash');
     try {
@@ -114,7 +114,9 @@ describe('recording authority', () => {
         return { then(_resolve: unknown, reject: (reason: unknown) => void) { consumed++; reject(new Error(PRIVATE)); } };
       } }).catch((error: unknown) => error));
       await new Promise<void>((resolve) => setImmediate(resolve));
-      expect(consumed).toBe(kind === 'promise' ? 0 : 1);
+      // The refusal must not execute a borrowed thenable or its getter.
+      // Only an intrinsic Promise represents already-started owned work.
+      expect(consumed).toBe(0);
       expect(hash).not.toHaveBeenCalled(); expect(log.query()).toEqual([]);
     } finally { hash.mockRestore(); }
   });

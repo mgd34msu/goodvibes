@@ -21,10 +21,13 @@ test('plain and proxy thenables are refused without reading borrowed properties'
 });
 
 test('a genuine cross-realm Promise rejection is observed without reading an overridden then', async () => {
-  const work: unknown = runInNewContext('Promise.reject(new Error("Synthetic other-realm failure"))');
+  // Own the pending work before it rejects. Bun's test runner reports an
+  // already rejected vm promise during runInNewContext, before it returns.
+  const { work, reject } = runInNewContext('(() => { let reject; const work = new Promise((_, fail) => { reject = fail; }); return { work, reject }; })()') as { work: Promise<unknown>; reject: (reason: Error) => void };
   let reads = 0;
   Object.defineProperty(work, 'then', { get() { reads++; throw new Error('Borrowed then'); } });
   expect(() => { drainOwned(work); throw new Error('Original refusal'); }).toThrow('Original refusal');
+  reject(new Error('Synthetic other-realm failure'));
   await new Promise(resolve => setTimeout(resolve, 0)); expect(reads).toBe(0);
 });
 

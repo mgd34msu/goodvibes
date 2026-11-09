@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Connect the TUI's `/triggers` command to the selected paired daemon for status
+  and explicit migration. Agent continues to use its own local supervisor.
+  Both paths preserve owner acknowledgement and current connection checks.
+
 - Reuse an authentic native record's existing validation during its synchronous
   schema read. Repeated settlement reads retain full value checks without
   recomputing that record's request and publication hashes.

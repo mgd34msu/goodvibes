@@ -185,6 +185,7 @@ export function retainDaemonNativeFiles(targets: readonly UpdateTarget[], io: Up
   } };
 }
 export interface DaemonNativeRenameGuard {
+  assertCurrent(): void;
   beforeRename(from: string, to: string, recovering: boolean): void;
   afterRename(from: string, to: string, recovering: boolean): void;
 }
@@ -215,6 +216,7 @@ export function createDaemonNativeRenameGuard(targets: readonly UpdateTarget[], 
     }
   };
   return {
+    assertCurrent() { for (const path of states.keys()) check(path); },
     beforeRename(from, to, recovering) {
       if (recovering) { check(from); check(to); }
       else for (const path of states.keys()) check(path);

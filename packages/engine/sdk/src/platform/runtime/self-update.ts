@@ -1,3 +1,6 @@
+import { withVerifiedUpdateStage, type VerifiedUpdateStage, type VerifiedUpdateMember } from './verified-update-stage.js';
+export { verifiedUpdateStageMembers } from './verified-update-stage.js';
+export type { VerifiedUpdateStage, VerifiedUpdateMember } from './verified-update-stage.js';
 export { isCompiledBunModuleUrl } from '../utils/bun-module.js';
 export { parseClientReaderArtifact, clientReaderAsset, assertClientReaderPayload } from './client-reader-artifact.js';
 export type { ClientReaderArtifact, ClientReaderPackage, ClientReaderTarget } from './client-reader-artifact.js';
@@ -14,7 +17,7 @@ import { drainOwned } from '@goodvibes-jev/judgment/decisions';
  * not a power-loss durable journal or a guarantee against unrelated writers.
  */
 import { createHash } from 'node:crypto';
-import { captureUpdateFileIo, realUpdateFileIo, type UpdateFileIo } from './update-file-io.js';
+import { captureUpdateFileIo, hasNativeUpdateObservations, realUpdateFileIo, type UpdateFileIo } from './update-file-io.js';
 export { captureUpdateFileIo, realUpdateFileIo, type UpdateFileIo } from './update-file-io.js';
 import { dirname, isAbsolute, resolve, sep } from 'node:path';
 import { compareSemanticVersions, parseSemanticVersion } from './semantic-version.js';
@@ -489,7 +492,7 @@ export interface ApplyVerifiedUpdateOptions extends UpdateRequestOptions {
   readonly io?: UpdateFileIo;
   readonly platform?: NodeJS.Platform;
   /** Final synchronous admission/cancellation check AFTER all staging, BEFORE live renames. This is not a work-admission lease. */
-  readonly beforeCommit?: () => void;
+  readonly beforeCommit?: (stage: VerifiedUpdateStage) => void;
   /** Native daemon publication requires its complete payload and source-receipt cohort. */
   readonly daemonNative?: { readonly execPath: string; readonly platform: string; readonly arch: string; readonly version: string; readonly allowLegacyBinary?: boolean;
     /** Actual outgoing program's compiled readers and original installation
@@ -509,6 +512,9 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
     targets: options.targets.map((target) => ({ ...target })), ...(options.daemonNative ? { daemonNative: { ...options.daemonNative } } : {}) };
   validateTargets(options.targets);
   const native = options.daemonNative;
+  const verifiedMembers = new Map<string, VerifiedUpdateMember>();
+  let assertStagedCurrent: (() => void) | undefined;
+  let nativeStage = false;
   let nativeReaders: NativeReaderCapabilities | undefined;
   let previousReader: DaemonPreviousReader | undefined;
   const readerOwner = native?.currentReader;
@@ -560,7 +566,9 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
       if (!response.ok) throw new Error(`download failed (${response.status}) for ${url}`);
       const buffer = Buffer.from(new Uint8Array(await response.arrayBuffer()));
       signal.throwIfAborted();
-      verifyChecksum(target.assetName, sha256(buffer), checksums.get(target.assetName));
+      const pin = sha256(buffer);
+      verifyChecksum(target.assetName, pin, checksums.get(target.assetName));
+      verifiedMembers.set(target.path, { path: target.path, assetName: target.assetName, sha256: pin, size: buffer.length, mode: target.executable ? 0o755 : 0o644 });
       verified.push({ target, buffer });
     }
     if (native) {
@@ -591,6 +599,9 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
       nativeReaders = artifact.readers;
       if (previousReader && !nativeReaders?.formats.includes(NATIVE_PREVIOUS_READER_RECEIPT_FORMAT)) throw new Error('Native daemon candidate cannot preserve previous-reader receipt evidence');
       assertDaemonNativePayloadBytes(artifact, verified.slice(0, -1).map(member => member.buffer));
+      // The installed receipt is a native transformation, not the downloaded
+      // source artifact's bytes. Do not expose its former release pin as proof.
+      verifiedMembers.delete(descriptor.target.path);
       verified[verified.length - 1] = { target: descriptor.target, buffer: Buffer.from(JSON.stringify({ schema: 1,
         packageName: '@goodvibes-jev/daemon', version: normalizeVersion(native.version), artifact,
         ...(previousReader === undefined ? {} : { previousReader }) }, null, 2) + '\n') };
@@ -610,7 +621,8 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
     assertCurrent();
     assertNativeCurrent?.();
     assertSynchronousCurrent(readerGuard);
-    const result = options.beforeCommit?.();
+    const result = options.beforeCommit ? withVerifiedUpdateStage([...verifiedMembers.values()], nativeStage,
+      () => { assertCurrent(); assertStagedCurrent?.(); }, stage => options.beforeCommit!(stage)) : undefined;
     if (result !== undefined) {
       drainOwned(result);
       throw new Error('beforeCommit must complete synchronously without returning a value');
@@ -625,7 +637,10 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
       const path = member.target.path + '.update-download', stat = io.observe(path);
       if (!stat || stat.mode !== (member.target.executable ? 0o755 : 0o644) || !io.readFile(path).equals(member.buffer)) throw new Error('Native daemon staging differs from its verified payload');
     }
-    return createDaemonNativeRenameGuard(options.targets, io);
+    const guard = createDaemonNativeRenameGuard(options.targets, io);
+    assertStagedCurrent = guard.assertCurrent.bind(guard);
+    nativeStage = hasNativeUpdateObservations(io, io.readFile, io.observe);
+    return guard;
   } } : {}) });
 }
 

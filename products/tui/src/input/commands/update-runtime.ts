@@ -282,7 +282,7 @@ export async function applyUpdate(options: ApplyUpdateOptions): Promise<void> {
       io,
       platform: options.platform,
       native: io.observe !== undefined && io.readFile !== undefined,
-      beforeCommit: () => assertStagedClientReaderCompatible(appBinaryPath, appBinaryPath + '.update-download', io, latestTag, artifacts.app),
+      beforeCommit: verifiedStage => assertStagedClientReaderCompatible(appBinaryPath, appBinaryPath + '.update-download', io, latestTag, artifacts.app, verifiedStage),
       ...(signal ? { signal } : {}),
     });
     if (progress) {

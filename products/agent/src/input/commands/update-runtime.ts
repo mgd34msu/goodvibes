@@ -251,7 +251,7 @@ export async function applyUpdate(options: ApplyUpdateOptions): Promise<void> {
     io,
     platform: options.platform,
     native: io.observe !== undefined && io.readFile !== undefined,
-    beforeCommit: () => assertStagedClientReaderCompatible(appBinaryPath, appBinaryPath + '.update-download', io, latestTag, binaryAsset),
+    beforeCommit: verifiedStage => assertStagedClientReaderCompatible(appBinaryPath, appBinaryPath + '.update-download', io, latestTag, binaryAsset, verifiedStage),
   });
   if (addonFileBytes !== null && addonTargetPath !== null) {
     swapFileAtomically(addonTargetPath, addonFileBytes, { executable: false, io, platform: options.platform });

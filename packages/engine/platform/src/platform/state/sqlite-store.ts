@@ -358,6 +358,7 @@ interface NativeScalarRuntime {
   readonly exports: readonly { readonly key: keyof SqlJsStatic; readonly descriptor: Readonly<PropertyDescriptor> }[];
   readonly globals: readonly { readonly key: string; readonly descriptor: Readonly<PropertyDescriptor>; readonly facts: readonly NativeObjectFacts[] }[];
   readonly uniqueGlobalFacts: readonly NativeObjectFacts[] | undefined;
+  readonly functionPrototype: NativeObjectFacts;
   readonly step: (statement: number) => number;
   readonly reset: (statement: number) => number;
   readonly clear: (statement: number) => number;
@@ -368,6 +369,37 @@ interface NativeScalarRuntime {
   readonly value: (statement: number, column: number) => number;
   readonly name: (statement: number, column: number) => number;
   readonly decode: (pointer: number) => string;
+}
+const scalarFunctionPrototype = Function.prototype;
+/** SQL.js's UTF-8 decoder invokes the retained TextDecoder and typed-array
+ * operations. It never inspects a function's source spelling. PDF.js's supported
+ * lazy core-js import replaces that inspector, so it is not a decoder dependency.
+ * Every other original Function slot and the prototype link remain guarded. */
+function captureScalarFunctionPrototype(): NativeObjectFacts {
+  const facts = captureNativeObjectFacts(scalarFunctionPrototype);
+  const slots: NativeObjectFacts['slots'][number][] = [];
+  for (let index = 0; index < facts.slots.length; index++) {
+    const slot = facts.slots[index];
+    if (slot && slot.key !== 'toString') nativeDefineProperty(slots, slots.length, { value: slot, enumerable: true, configurable: true, writable: true });
+  }
+  return nativeFreeze({ ...facts, slots: nativeFreeze(slots) });
+}
+function scalarFunctionPrototypeMatches(facts: NativeObjectFacts): boolean {
+  if (facts.object !== scalarFunctionPrototype || nativeGetPrototypeOf(facts.object) !== facts.prototype) return false;
+  const keys = nativeOwnKeys(facts.object); let count = 0;
+  for (let index = 0; index < keys.length; index++) if (keys[index] !== 'toString') count++;
+  return count === facts.slots.length && nativeEvery(facts.slots,
+    slot => nativeDescriptorMatches(nativeGetDescriptor(facts.object, slot.key), slot.descriptor));
+}
+function captureScalarPrototypeFacts(prototype: object | null): readonly NativeObjectFacts[] {
+  // This exception belongs only to scalar constructor-ancestor observations;
+  // statement, driver and all other native object comparisons stay complete.
+  const captured = captureNativePrototypeFacts(prototype), facts: NativeObjectFacts[] = [];
+  for (let index = 0; index < captured.length; index++) {
+    const entry = captured[index];
+    if (entry && entry.object !== scalarFunctionPrototype) nativeDefineProperty(facts, facts.length, { value: entry, enumerable: true, configurable: true, writable: true });
+  }
+  return nativeFreeze(facts);
 }
 interface NativeScalarTextBinding {
   readonly module: SqlJsStatic;
@@ -449,25 +481,27 @@ function captureNativeScalarRuntime(module: SqlJsStatic): NativeScalarRuntime | 
     const prototype: unknown = nativeGetDescriptor(constructor, 'prototype')?.value;
     if (!prototype || typeof prototype !== 'object') return undefined;
     globals.push(nativeFreeze({ key, descriptor: nativeFreeze(descriptor), facts: nativeFreeze([
-      ...captureNativePrototypeFacts(constructor), ...captureNativePrototypeFacts(prototype),
+      ...captureScalarPrototypeFacts(constructor), ...captureScalarPrototypeFacts(prototype),
     ]) }));
   }
   captureNativeScalarTextBinding(module, bind);
   return nativeFreeze({ module, exports: nativeFreeze(exports), globals: nativeFreeze(globals),
     uniqueGlobalFacts: uniqueNativeFacts(globals),
+    functionPrototype: captureScalarFunctionPrototype(),
     step, reset, clear, finalize, count, dataCount, type, value, name, decode });
 }
-function nativeScalarGlobalFactsMatch({ key, descriptor, facts }: NativeScalarRuntime['globals'][number]): boolean {
+function nativeScalarGlobalFactsMatch({ key, descriptor, facts }: NativeScalarRuntime['globals'][number], functionPrototype: NativeObjectFacts): boolean {
   return nativeDescriptorMatches(nativeGetDescriptor(globalThis, key), descriptor)
+    && scalarFunctionPrototypeMatches(functionPrototype)
     && nativeEvery(facts, nativeObjectFactsMatch);
 }
 function nativeScalarGlobalDescriptorMatch({ key, descriptor }: NativeScalarRuntime['globals'][number]): boolean {
   return nativeDescriptorMatches(nativeGetDescriptor(nativeGlobalReceiver, key), descriptor);
 }
 function nativeScalarRuntimeMatches(runtime: NativeScalarRuntime): boolean {
-  if (!nativeScalarExportsMatch(runtime)) return false;
+  if (!nativeScalarExportsMatch(runtime) || !scalarFunctionPrototypeMatches(runtime.functionPrototype)) return false;
   if (!runtime.uniqueGlobalFacts || !nativeGlobalReceiverMatches()) {
-    return nativeEvery(runtime.globals, nativeScalarGlobalFactsMatch);
+    return nativeEvery(runtime.globals, facts => nativeScalarGlobalFactsMatch(facts, runtime.functionPrototype));
   }
   return nativeEvery(runtime.globals, nativeScalarGlobalDescriptorMatch)
     && nativeEvery(runtime.uniqueGlobalFacts, nativeObjectFactsMatch);

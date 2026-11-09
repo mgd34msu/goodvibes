@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, test } from 'bun:test';
@@ -20,12 +20,16 @@ import { createSemanticFactIdentityPlanner } from '../platform/src/platform/know
 import { MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore } from '../platform/src/platform/state/index.js';
 import { trackDisposables } from './_helpers/disposables.ts';
 import { useKnowledgeAnswerReadings } from './_helpers/knowledge-answer-readings.js';
+import { waitFor } from './_helpers/test-timeout.js';
 
 const answerReadings = useKnowledgeAnswerReadings();
 
 const tmpRoots: string[] = [];
+const stores: KnowledgeStore[] = [];
 
-afterEach(() => {
+afterEach(async () => {
+  await disposables.flush();
+  await Promise.all(stores.splice(0).map(store => store.close()));
   for (const root of tmpRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
@@ -188,7 +192,7 @@ describe('knowledge generated projections and maps', () => {
     expect(artifactStore.list(20)).toEqual([]);
   });
 
-  test('removes newly-created projection artifacts when cancellation happens before source persistence', async () => {
+  test('preserves an unpublished canceled candidate until a genuine clean publication permits cleanup', async () => {
     const { store, artifactStore } = createStores();
     const controller = new AbortController();
     const abortingArtifactStore = Object.create(artifactStore) as ArtifactStore;
@@ -213,6 +217,16 @@ describe('knowledge generated projections and maps', () => {
     })).rejects.toThrow('Generated knowledge projection was cancelled');
 
     expect(store.getSource('kg-gen-cancelled-device-page')).toBeNull();
+    expect(store.listSources()).toEqual([]);
+    expect(existsSync(store.storagePath)).toBe(false);
+    const [candidate] = artifactStore.list(20);
+    expect(candidate).toBeDefined();
+    const clean = await store.upsertSource({ id: 'actual-clean-boundary', connectorId: 'test', sourceType: 'document', title: 'Cleanup boundary', status: 'indexed' });
+    const bytes = readFileSync(store.storagePath);
+    await waitFor(() => artifactStore.get(candidate!.id) === null);
+    expect(readFileSync(store.storagePath)).toEqual(bytes);
+    await store.deleteSource(clean.id);
+    expect(store.listSources()).toEqual([]);
     expect(artifactStore.list(20)).toEqual([]);
   });
 
@@ -500,7 +514,7 @@ describe('knowledge generated projections and maps', () => {
   test('scopes generated page listings to the requested knowledge space', async () => {
     const { store, artifactStore } = createStores();
     const defaultPage = await store.upsertSource({
-      connectorId: 'knowledge-projection',
+      connectorId: 'generated-pages',
       sourceType: 'document',
       title: 'Default Space Packet',
       canonicalUri: 'knowledge://generated/default-space',
@@ -513,7 +527,7 @@ describe('knowledge generated projections and maps', () => {
       },
     });
     const otherPage = await store.upsertSource({
-      connectorId: 'knowledge-projection',
+      connectorId: 'generated-pages',
       sourceType: 'document',
       title: 'Other Space Packet',
       canonicalUri: 'knowledge://generated/other-space',
@@ -526,6 +540,9 @@ describe('knowledge generated projections and maps', () => {
         projectionKind: 'packet',
       },
     });
+    const unattributed = await store.upsertSource({ connectorId: 'knowledge-projection', sourceType: 'document',
+      title: 'Preserved older unattributed aggregate', status: 'indexed', metadata: { generatedKnowledgePage: true,
+        generatedProjection: true, projectionKind: 'packet' } });
 
     const pages = await listGeneratedKnowledgePages({
       artifactStore,
@@ -539,6 +556,8 @@ describe('knowledge generated projections and maps', () => {
 
     expect(pages.pages.map((page) => page.source.id)).toContain(defaultPage.id);
     expect(pages.pages.map((page) => page.source.id)).not.toContain(otherPage.id);
+    expect(pages.pages.map((page) => page.source.id)).not.toContain(unattributed.id);
+    expect(store.getSource(unattributed.id)).toBe(unattributed);
   });
 
   test('hides generated pages whose recorded target is stale', async () => {
@@ -599,7 +618,7 @@ describe('knowledge generated projections and maps', () => {
       status: 'active',
     });
     const source = await store.upsertSource({
-      connectorId: 'knowledge-projection',
+      connectorId: 'generated-pages',
       sourceType: 'document',
       title: 'Unlinked Page',
       canonicalUri: 'knowledge://generated/unlinked-page',
@@ -1412,6 +1431,7 @@ function createStores(): {
   const root = mkdtempSync(join(tmpdir(), 'goodvibes-knowledge-projection-'));
   tmpRoots.push(root);
   const store = new KnowledgeStore({ dbPath: join(root, 'knowledge-wiki.sqlite') });
+  stores.push(store);
   const artifactStore = new ArtifactStore({ rootDir: join(root, 'artifacts') });
   configureKnowledgeArtifactReferences({ artifactStore, controlPlaneDirectory: root, stores: [store] });
   return { store, artifactStore };

@@ -546,7 +546,7 @@ test('an actual constructor hook cannot grant native birth provenance to a proxi
 test.each(['own-key', 'descriptor', 'prototype'] as const)('complete shared native prototype %s mutations hold before later callbacks', async mutation => {
   const { sqlite, filename, read } = await fixture(true);
   const before = readFileSync(filename), shared = Function.prototype, originalParent = Object.getPrototypeOf(shared);
-  const key = mutation === 'own-key' ? Symbol('native shared prototype field') : 'toString';
+  const key = mutation === 'own-key' ? Symbol('native shared prototype field') : 'bind';
   const descriptor = Object.getOwnPropertyDescriptor(shared, key);
   if (mutation === 'descriptor' && (!descriptor || !descriptor.configurable)) throw new Error('No replaceable original native prototype descriptor');
   let consumed = false, invoked = 0, caught: unknown;

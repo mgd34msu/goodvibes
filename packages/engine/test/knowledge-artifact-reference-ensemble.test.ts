@@ -9,6 +9,7 @@ import { ArtifactStore } from '../platform/src/platform/artifacts/store.ts';
 import { KnowledgeStore, captureKnowledgeArtifactReferenceOwner } from '../platform/src/platform/knowledge/store.ts';
 import { configureKnowledgeArtifactReferences } from '../platform/src/platform/knowledge/artifact-reference-ensemble.ts';
 import { createInactiveArtifactReferenceOwner } from '../platform/src/platform/knowledge/inactive-artifact-reference-owner.ts';
+import { waitFor } from './_helpers/test-timeout.js';
 const roots: string[] = [], stores: KnowledgeStore[] = [];
 afterEach(async () => { for (const store of stores.splice(0)) await store.close(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 async function fixture(persisted = true) {
@@ -59,7 +60,12 @@ test('pending batch does not pretend unsaved source relations are absent', async
     await f.store.upsertSource({ id: 'pending-source', connectorId: 'test', sourceType: 'document', status: 'indexed', title: 'pending', artifactId: f.artifact.id });
     expect(await f.store.cleanupUnreferencedArtifact(f.artifacts.captureOriginal(f.artifact.id))).toBe('held');
   });
-  expect(await f.store.cleanupUnreferencedArtifact(f.artifacts.captureOriginal(f.artifact.id))).toBe('referenced');
+  // The actual clean-save listener may still own this artifact's strict lease.
+  // Once that admitted retry drains, a fresh read must see the persisted ref.
+  let result: Awaited<ReturnType<KnowledgeStore['cleanupUnreferencedArtifact']>> = 'held';
+  await waitFor(async () => { result = await f.store.cleanupUnreferencedArtifact(f.artifacts.captureOriginal(f.artifact.id)); return result !== 'held'; });
+  expect(result).toBe('referenced');
+  expect(f.artifacts.get(f.artifact.id)).not.toBeNull();
 });
 test('parsed/copied stores and replaced original sqlite slots cannot report a forged empty family', async () => {
   const f = await fixture(), fake = Object.create(KnowledgeStore.prototype) as KnowledgeStore; Object.defineProperties(fake, Object.getOwnPropertyDescriptors(f.store));

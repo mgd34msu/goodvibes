@@ -17,6 +17,7 @@ import { KnowledgeConnectorRegistry } from '../platform/src/platform/knowledge/c
 import { MultimodalService } from '../platform/src/platform/multimodal/service.js';
 import { buildMediaRouteContext } from '../platform/src/platform/daemon/http/router-route-contexts.js';
 import { createDaemonMediaRouteHandlers } from '../daemon-api/src/media-routes.js';
+import { waitFor } from './_helpers/test-timeout.js';
 
 const roots: string[] = [], stores: KnowledgeStore[] = [], services: KnowledgeService[] = [];
 let previous: ReturnType<typeof installJudgmentPort>, installed = false;
@@ -68,6 +69,17 @@ for (const phase of ['artifact', 'knowledge'] as const) for (const change of ['c
     release.resolve();
     try {
       expect((await pending).status).toBe(400);
+      expect(store.listSources()).toHaveLength(0); expect(store.listExtractions()).toHaveLength(0); expect(store.listNodes()).toHaveLength(0);
+      if (phase === 'knowledge') {
+        // This genuinely fresh family has no published reference image. Its
+        // canceled candidate stays held until a real clean publication can
+        // prove it unreferenced; startup/cleanup must not invent empty evidence.
+        const candidates = artifacts.list().filter(item => item.id !== source.id);
+        expect(candidates).toHaveLength(1);
+        const clean = await store.upsertSource({ id: 'actual-clean-boundary', connectorId: 'test', sourceType: 'document', title: 'Cleanup boundary', status: 'indexed' });
+        await waitFor(() => artifacts.get(candidates[0]!.id) === null);
+        await store.deleteSource(clean.id);
+      }
       expect(artifacts.list().map(item => item.id)).toEqual(change === 'source' ? [] : [source.id]);
       expect(readdirSync(artifacts.storagePath).filter(name => !name.startsWith(source.id))).toEqual([]);
       expect(store.listSources()).toHaveLength(0); expect(store.listExtractions()).toHaveLength(0); expect(store.listNodes()).toHaveLength(0);

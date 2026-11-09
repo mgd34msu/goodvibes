@@ -81,12 +81,14 @@ async function fixture(batched = false, extractionClock?: number, historical = t
   return { store, source, extraction, subject, fact, plan, fake, spaceId, input };
 }
 
-test('fresh opaque fact labels need no structural exception for ordinary copied admission', async () => {
+test('fresh opaque fact labels stay safe without lending native record proof to copies', async () => {
   const item = await fixture(false, undefined, false), copy = structuredClone(item.fact);
   const snapshot = item.store.getRecordSnapshot('node', item.fact.id);
   if (!snapshot.raw) throw new Error('Native fact snapshot missing');
   expect(projectGeneratedFactRecordAdmission(item.store, copy, snapshot.raw)).toBeUndefined();
-  prepareKnowledgeRecordAdmission(item.store, 'node', copy).assertCurrent();
+  // Ordinary complete screening cannot turn a detached copy into the actual
+  // current stored object, even though its fresh identifier needs no exemption.
+  expect(() => prepareKnowledgeRecordAdmission(item.store, 'node', copy)).toThrow();
   prepareKnowledgeRecordAdmission(item.store, 'node', item.fact).assertCurrent();
 });
 

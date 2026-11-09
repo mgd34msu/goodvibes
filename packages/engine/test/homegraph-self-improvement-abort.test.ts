@@ -16,10 +16,12 @@ import { refreshHomeGraphDevicePassport } from '../platform/src/platform/knowled
 import { buildHomeGraphMetadata } from '../platform/src/platform/knowledge/home-graph/helpers.js';
 import { runHomeGraphSyncSelfImprovementPump } from '../platform/src/platform/knowledge/home-graph/sync-self-improvement.js';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { configureKnowledgeArtifactReferences } from '../platform/src/platform/knowledge/artifact-reference-ensemble.js';
 
-const tmpRoots: string[] = [];
+const tmpRoots: string[] = [], stores: KnowledgeStore[] = [];
 
-afterEach(() => {
+afterEach(async () => {
+  await Promise.all(stores.splice(0).map(store => store.close()));
   for (const root of tmpRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
@@ -113,8 +115,9 @@ describe('Home Graph sync self-improvement cancellation', () => {
   test('rolls back device passport node and edge when cancellation happens during refresh', async () => {
     const root = mkdtempSync(join(tmpdir(), 'goodvibes-homegraph-abort-'));
     tmpRoots.push(root);
-    const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') });
+    const store = new KnowledgeStore({ dbPath: join(root, 'knowledge-home-graph.sqlite') }); stores.push(store);
     const artifactStore = new ArtifactStore({ rootDir: join(root, 'artifacts') });
+    configureKnowledgeArtifactReferences({ artifactStore, controlPlaneDirectory: root, stores: [store] });
     const spaceId = 'homeassistant:house-1';
     const installationId = 'house-1';
     const deviceId = 'lg-tv';
@@ -172,8 +175,9 @@ describe('Home Graph sync self-improvement cancellation', () => {
   test('rolls back profile facts when cancellation happens during page-profile promotion', async () => {
     const root = mkdtempSync(join(tmpdir(), 'goodvibes-homegraph-abort-'));
     tmpRoots.push(root);
-    const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') });
+    const store = new KnowledgeStore({ dbPath: join(root, 'knowledge-home-graph.sqlite') }); stores.push(store);
     const artifactStore = new ArtifactStore({ rootDir: join(root, 'artifacts') });
+    configureKnowledgeArtifactReferences({ artifactStore, controlPlaneDirectory: root, stores: [store] });
     const spaceId = 'homeassistant:house-1';
     const installationId = 'house-1';
     const deviceId = 'lg-tv';

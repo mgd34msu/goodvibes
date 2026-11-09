@@ -6,10 +6,12 @@ import { afterEach } from 'bun:test';
 import { ArtifactStore } from '../../platform/src/platform/artifacts/index.js';
 import { HomeGraphService } from '../../platform/src/platform/knowledge/index.js';
 import { KnowledgeStore } from '../../platform/src/platform/knowledge/store.js';
+import { configureKnowledgeArtifactReferences } from '../../platform/src/platform/knowledge/artifact-reference-ensemble.js';
 import { waitFor as _canonicalWaitFor } from './test-timeout.js';
 
 const tmpRoots: string[] = [];
 const liveServices: HomeGraphService[] = [];
+const liveStores: KnowledgeStore[] = [];
 
 /**
  * Register this fixture's teardown for the calling test file.
@@ -26,6 +28,7 @@ const liveServices: HomeGraphService[] = [];
 export function useHomeGraphFixtures(): void {
   afterEach(async () => {
     await Promise.all(liveServices.splice(0).map(service => service.dispose()));
+    await Promise.all(liveStores.splice(0).map(store => store.close()));
     for (const root of tmpRoots.splice(0)) {
       rmSync(root, { recursive: true, force: true });
     }
@@ -40,8 +43,10 @@ export function createHomeGraphService(): {
 } {
   const root = mkdtempSync(join(tmpdir(), 'goodvibes-homegraph-'));
   tmpRoots.push(root);
-  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') });
+  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge-home-graph.sqlite') });
+  liveStores.push(store);
   const artifactStore = new ArtifactStore({ rootDir: join(root, 'artifacts') });
+  configureKnowledgeArtifactReferences({ artifactStore, controlPlaneDirectory: root, stores: [store] });
   const service = new HomeGraphService(store, artifactStore);
   liveServices.push(service);
   return { root, store, artifactStore, service };

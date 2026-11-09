@@ -250,6 +250,7 @@ export async function runContractGates(options: RunContractGatesOptions): Promis
   const expectedDefinition = definition;
   const timeoutMs = getContractGateTimeoutMs(options.configManager);
   const results: QualityGateResult[] = [];
+  let sourceObservation: GateSourceInputIdentity | undefined;
   const capture = (): GateInputIdentity => {
     const current = gateDefinitions(getEnabledContractGates(options.configManager));
     if (!isDeepStrictEqual(current, definitionSnapshot)) {
@@ -258,7 +259,8 @@ export async function runContractGates(options: RunContractGatesOptions): Promis
     }
     // Compare configured command bytes privately. The receipt carries only an
     // owned label, so credentials embedded in commands cannot enter provenance.
-    return { ...captureGateInput(options.cwd), definition };
+    sourceObservation = captureGateInput(options.cwd, sourceObservation);
+    return { ...sourceObservation, definition };
   };
   const emitResult = (result: QualityGateResult): void => {
     emitContractEvent(options.runtimeBus, options.sessionId, {

@@ -59,7 +59,7 @@ import { nativeContractPort } from './native-decisions.js';
 import { assertNativeContractSource } from './native-source.js';
 import { collectChanges, commandsFromTurns, currentFileObservations, judgeEvidence, trimEvidence, type ContractTurnRecord, type EvidenceCommand } from './evidence.js';
 import { failedGates, gateEventSummary, refreshGateResults, runContractGates, unverifiedGates } from './gates.js';
-import { captureGateInput } from './gate-input.js';
+import { captureGateInput, type GateSourceInputIdentity } from './gate-input.js';
 import { failureFromError, isAbortError, type ContractRun } from './run-context.js';
 import type { StepContext } from './steps.js';
 import type { CheckTrigger, Contract, Criterion, CriterionReading, CriterionVerdict, NudgeKind, TreeBaseline, UnitCheck } from './types.js';
@@ -168,7 +168,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
   const pendingVerifications = new WeakMap<ContractRun, Map<string, Promise<void>>>();
   const publicationRepairs = new WeakMap<ContractRun, { evidence: JsonValue; decisionIds: readonly string[] }>();
   const publicationAssessments = new WeakMap<ContractRun, { evidence: JsonValue; decisionIds: readonly string[] }>();
-  const acceptedSources = new WeakMap<ContractRun, { checkId: string; tree: string; source: string }>();
+  const acceptedSources = new WeakMap<ContractRun, { checkId: string; tree: string; source: GateSourceInputIdentity }>();
 
   /** Retain work on an unavailable check or unpublished result. Retries validate
    * the current evidence; the owned wait ends immediately when stopped. */
@@ -236,7 +236,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     const { contract } = run;
     assertOwnedContractSource(contract);
     const tree = contractTree(contract);
-    const source = input.scope === 'deliverable' ? captureGateInput(tree).source : undefined;
+    const source = input.scope === 'deliverable' ? captureGateInput(tree) : undefined;
     if (input.scope === 'deliverable') acceptedSources.delete(run);
     preserveDeclaredReadReceipts(contract, context.readOwnerEvidence?.(contract, ''));
     const paths = new Set(contract.units.filter((unit) => input.unitIds.has(unit.id)).flatMap((unit) => unit.touchedPaths));
@@ -662,7 +662,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
       judgment.recordAction('discarded: the contract already ended');
       return null;
     }
-    if (source !== undefined && captureGateInput(tree).source !== source)
+    if (source !== undefined && captureGateInput(tree, source).source !== source.source)
       throw new PublicationPending('The result source changed during acceptance; verify its current contents before publication.');
     const checkId = `${input.targetId}.k${input.checks.length + 1}`;
     const now = run.env.now();
@@ -836,9 +836,9 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     const check = run.contract.checks.at(-1);
     const accepted = acceptedSources.get(run);
     let current: string | undefined;
-    try { if (accepted) current = captureGateInput(accepted.tree).source; }
+    try { if (accepted) current = captureGateInput(accepted.tree, accepted.source).source; }
     catch { throw new PublicationPending('The accepted result source is unavailable; verify its current contents before publication.'); }
-    if (!accepted || accepted.checkId !== check?.id || accepted.tree !== contractTree(run.contract) || accepted.source !== current)
+    if (!accepted || accepted.checkId !== check?.id || accepted.tree !== contractTree(run.contract) || accepted.source.source !== current)
       throw new PublicationPending('The result source changed after acceptance; verify its current contents before publication.');
     const gates = refreshGateResults(check?.gates);
     if (failedGates(gates).length || unverifiedGates(gates).length) {

@@ -74,6 +74,11 @@ export function registerGeneratedKnowledgeSourceReferences(store: KnowledgeStore
   writeNativeReference(sourceIdentities, source, Object.freeze({ ...generated, store, snapshot: captureReferenceRecord(source) }));
 }
 
+/** Existing actual producer registration only; never infer one from a prefix. */
+export function hasGeneratedKnowledgeSourceReferences(store: KnowledgeStore, source: KnowledgeSourceRecord): boolean {
+  return currentSourceIdentity(source)?.store === store;
+}
+
 /** Retain native reference facts through the producer's own record update.
  * The original observation retires; the updated row still gets full preflight. */
 export function captureGeneratedKnowledgeSourceUpdate(store: KnowledgeStore, source: KnowledgeSourceRecord): ((updated: KnowledgeSourceRecord) => void) | undefined {

@@ -712,6 +712,8 @@ export interface KnowledgeMaterializedProjection {
   readonly source?: KnowledgeSourceRecord | undefined;
   readonly linked?: KnowledgeEdgeRecord | undefined;
   readonly artifactCreated?: boolean | undefined;
+  readonly preservedUnscopedSourceIds?: readonly string[] | undefined;
+  readonly note?: string | undefined;
 }
 
 export type KnowledgeMapRecordKind = 'source' | 'node' | 'issue';

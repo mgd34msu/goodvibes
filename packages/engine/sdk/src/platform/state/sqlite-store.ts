@@ -1,3 +1,7 @@
+import { semanticFactCandidateSql, semanticFactCandidateParams, type SemanticFactSelector } from '../knowledge/store-semantic-fact-selector.js';
+import { acquireArtifactReferenceLock } from './artifact-reference-lock.js';
+import { inspectPersistedArtifactReferences } from '../knowledge/store-artifact-references.js';
+import { generatedProjectionIdentitySql, projectionIdentityParams, type GeneratedProjectionIdentity } from '../knowledge/store-generated-projection-selector.js';
 import { sameNativeKnowledgeTableSql } from '../knowledge/store-table-definition.js';
 import { activationCacheRowSql, readKnowledgeActivationDependencies, parseKnowledgeActivationCacheRow, type KnowledgeActivationDependencies, type KnowledgeActivationCacheRow } from '../knowledge/store-node-activation-cache.js';
 import { queryPersistedPlanningProjects } from '../knowledge/project-planning/persisted-project-query.js';
@@ -1079,7 +1083,7 @@ function isEphemeralDbPath(path: string | null | undefined): boolean {
 /** Internal closed readonly selector. Never supplies a custom constructor or
  * public observer with private persisted bytes, and never opens a disk writer.
  */
-export async function inspectNativePlanningProjectImage(data: Uint8Array, assertCurrent: () => void): Promise<readonly string[]> {
+async function inspectNativeReadonlyImage<T>(data: Uint8Array, assertCurrent: () => void, inspect: (database: Pick<SqlDatabase, 'exec'>) => T): Promise<T> {
   const current = () => { const result: unknown = assertCurrent(); if (result !== undefined) { drainOwned(result); throw new SQLiteObservationRetiredError(); } };
   current(); assertSqliteImage(data); const engine = await loadSqlJsEngine(); current();
   const original = privateMapGet(nativeEngineIdentities, engine), origin = original?.statement, scalar = original?.scalar;
@@ -1090,9 +1094,19 @@ export async function inspectNativePlanningProjectImage(data: Uint8Array, assert
   const check = () => { before(); if (!nativeMethodsMatch(engine, raw) || !nativeExecutionDependenciesMatch(origin, raw)) throw new SQLiteObservationRetiredError(); };
   try {
     check();
-    const projectIds = queryPersistedPlanningProjects({ exec(sql, params) { check(); const rows = nativeApply(original.methods.exec, raw, [sql, params]); check(); return rows; } });
-    check(); return projectIds;
+    const result = inspect({ exec(sql, params) { check(); const rows = nativeApply(original.methods.exec, raw, [sql, params]); check(); return rows; } });
+    check(); return result;
   } finally { nativeApply(original.methods.close, raw, []); }
+}
+
+/** Fixed metadata selector. Private images never reach a supplied constructor,
+ * SQL callback, schema repair or migration. */
+export function inspectNativePlanningProjectImage(data: Uint8Array, assertCurrent: () => void): Promise<readonly string[]> {
+  return inspectNativeReadonlyImage(data, assertCurrent, queryPersistedPlanningProjects);
+}
+/** Internal closed artifact selector for an unopened configured family. */
+export function inspectNativeArtifactReferenceImage(data: Uint8Array, ids: readonly string[], assertCurrent: () => void): Promise<readonly string[]> {
+  return inspectNativeReadonlyImage(data, assertCurrent, db => inspectPersistedArtifactReferences(db, ids));
 }
 
 function assertSqliteImage(data: Uint8Array): void {
@@ -1208,7 +1222,10 @@ const expectedRecordReadsets = new WeakMap<object, {
   readonly records: readonly ActualKnowledgeRecordValues[];
 }>();
 
+const artifactReferenceObservation = SQLiteStorePersistence.prototype.observationIdentity;
 export class SQLiteStore {
+  readonly #artifactReferencePath: string | null;
+  #artifactReferenceOrigin: { readonly persistence: SQLiteStorePersistence; readonly engine: SqlJsStatic; readonly schemaVersion: number; readonly path: string } | undefined;
   private db: SqlDatabase | null = null;
   private readonly dbPath: string | null;
   private initPromise: Promise<void> | null = null;
@@ -1239,6 +1256,7 @@ export class SQLiteStore {
     this.beforePersist = options.beforePersist?.bind(options);
     this.beforeInitialRead = options.beforeInitialRead?.bind(options);
     this.dbPath = dbPath ?? null;
+    this.#artifactReferencePath = this.dbPath;
     this.coordinated = options.coordinated === true;
     // Full local equality frames contain private SQLite values. Keep them out
     // of ordinary object serialization; they are never public revision fields.
@@ -1341,6 +1359,16 @@ export class SQLiteStore {
   /** Closed planning tuple selector; never a caller callback or mutable cache. */
   readPersistedPlanningSource(identity: PlanningSourceIdentity): ReturnType<SqlDatabase['exec']> {
     try { return this.readPrivatePersistedRows(planningSourceIdentitySql, planningSourceIdentityParams(identity)); }
+    catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
+  }
+
+  readPersistedSemanticFactCandidates(selector: SemanticFactSelector): ReturnType<SqlDatabase['exec']> {
+    try { return this.readPrivatePersistedRows(semanticFactCandidateSql, semanticFactCandidateParams(selector)); }
+    catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
+  }
+
+  readPersistedGeneratedProjectionSource(identity: GeneratedProjectionIdentity): ReturnType<SqlDatabase['exec']> {
+    try { return this.readPrivatePersistedRows(generatedProjectionIdentitySql, projectionIdentityParams(identity)); }
     catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
   }
 
@@ -1758,7 +1786,7 @@ export class SQLiteStore {
     if (!this.coordinated) return Promise.reject(new Error('SQLiteStore: guarded persistence requires coordinated storage'));
     // Batch callers must not wait for their own save boundary.
     if (this.saveBatchDepth > 0) return Promise.resolve({ kind: 'local-changes' });
-    return this.enqueue(async () => {
+    return this.enqueue<{ readonly kind: 'local-changes' } | { readonly kind: 'completed'; readonly value: T }>(async () => {
       const release = this.persistence ? await this.persistence.lock() : () => {};
       let current: SqlDatabase | null = null;
       try {
@@ -1810,6 +1838,65 @@ export class SQLiteStore {
         try { current?.close(); } catch { /* Detached image cleanup. */ }
         try { release(); } catch { this.fenced = true; }
       }
+    }).then(result => { if (result.kind === 'completed') this.notifyArtifactReferenceClean(); return result; });
+  }
+
+  private readonly artifactReferenceCleanListeners = new Set<() => void>();
+  /** Host lifecycle notification only: listeners receive no SQL, data or
+   * authority, and run after the acknowledged writer promise releases its lock. */
+  subscribeArtifactReferenceClean(listener: () => void): () => void {
+    this.artifactReferenceCleanListeners.add(listener);
+    return () => { this.artifactReferenceCleanListeners.delete(listener); };
+  }
+  private notifyArtifactReferenceClean(): void {
+    for (const listener of this.artifactReferenceCleanListeners) {
+      try { const value: unknown = listener(); if (value !== undefined) { drainOwned(value); throw new Error('Artifact cleanup listener must be synchronous.'); } }
+      catch { logger.warn('Artifact cleanup notification was not accepted.'); }
+    }
+  }
+
+  /** Hold the actual publication queue and file lock for a closed reference
+   * observation. Nested family owners can be acquired while this lock remains
+   * held. No persisted bytes, writable database or SQL callback escapes. Local
+   * changes/batches cannot be discarded or silently refreshed for cleanup.
+   */
+  withArtifactReferenceReads<T>(ids: readonly string[], operation: (referenced: readonly string[], assertCurrent: () => void) => Promise<T>): Promise<{ readonly kind: 'local-changes' } | { readonly kind: 'completed'; readonly value: T }> {
+    if (!Array.isArray(ids) || ids.length < 1 || ids.length > 64 || ids.some(id => typeof id !== 'string' || !id) || new Set(ids).size !== ids.length) throw new TypeError('SQLiteStore: invalid artifact reference batch');
+    const selected = Object.freeze([...ids]);
+    const origin = this.#artifactReferenceOrigin;
+    const assertOrigin = () => {
+      if (!origin || nativeGetDescriptor(this, 'coordinated')?.value !== true
+        || nativeGetDescriptor(this, 'dbPath')?.value !== this.#artifactReferencePath
+        || nativeGetDescriptor(this, 'persistence')?.value !== origin.persistence
+        || nativeGetDescriptor(this, 'sqlEngine')?.value !== origin.engine
+        || nativeGetDescriptor(this, 'schemaVersion')?.value !== origin.schemaVersion) throw new SQLiteObservationRetiredError();
+      assertNativeEngineIdentity(origin.engine);
+    };
+    assertOrigin();
+    if (this.saveBatchDepth > 0) return Promise.resolve({ kind: 'local-changes' });
+    return this.enqueue<{ readonly kind: 'local-changes' } | { readonly kind: 'completed'; readonly value: T }>(async () => {
+      assertOrigin();
+      if (!origin) throw new SQLiteObservationRetiredError();
+      const original = this.db, persistence = origin.persistence, epoch = this.imageEpoch;
+      if (!original || !privateMapHas(ownedDatabases, original)) throw new SQLiteObservationRetiredError();
+      const observePhysical = () => nativeApply(artifactReferenceObservation, persistence, []) as string;
+      const lock = await acquireArtifactReferenceLock(origin.path, () => { assertOrigin(); observePhysical(); });
+      if (!lock) return { kind: 'local-changes' };
+      try {
+        const clean = this.cleanContent;
+        if (this.saveBatchDepth > 0 || clean === null || observeDatabase(original, 'clean-content') !== clean) return { kind: 'local-changes' };
+        const physical = observePhysical(), local = observeDatabase(original);
+        const assertCurrent = () => {
+          assertOrigin(); lock.assertCurrent();
+          if (this.db !== original || this.imageEpoch !== epoch || this.fenced || this.saveBatchDepth > 0
+            || this.cleanContent !== clean || observeDatabase(original) !== local || observePhysical() !== physical) throw new SQLiteObservationRetiredError();
+        };
+        assertCurrent(); const source = readSQLitePersistedImage(persistence); assertCurrent();
+        if (!source.data) throw new SQLiteObservationRetiredError();
+        const referenced = await inspectNativeArtifactReferenceImage(source.data, selected, assertCurrent); assertCurrent();
+        const value = await operation(referenced, assertCurrent); assertCurrent();
+        return { kind: 'completed', value };
+      } finally { try { lock.release(); } catch (error) { this.fenced = true; throw error; } }
     });
   }
 
@@ -1880,7 +1967,7 @@ export class SQLiteStore {
         if (!adopted) try { staged.close(); } catch { /* Detached image cleanup. */ }
         try { release?.(); } catch { this.fenced = true; }
       }
-    });
+    }).then(() => { this.notifyArtifactReferenceClean(); });
   }
 
   /** Drain admitted persistence operations before owner teardown. */
@@ -1903,15 +1990,18 @@ export class SQLiteStore {
     try {
       return await operation();
     } finally {
+      let cleanBoundary = false;
       try {
         this.saveBatchDepth -= 1;
         if (this.saveBatchDepth === 0 && this.saveDirty) {
           this.saveDirty = false;
           await this.save();
         }
+        cleanBoundary = true;
       } finally {
         this.activeBatches.delete(owned);
         release();
+        if (cleanBoundary && this.saveBatchDepth === 0) this.notifyArtifactReferenceClean();
       }
     }
   }
@@ -1952,7 +2042,7 @@ export class SQLiteStore {
           this.cleanBytes = this.persistence ? null : data;
           return true;
         } finally { try { release(); } catch { this.fenced = true; } }
-      });
+      }).then(saved => { if (saved) this.notifyArtifactReferenceClean(); return saved; });
     }
 
     try {
@@ -1989,7 +2079,9 @@ export class SQLiteStore {
       this.nativeSchemaReadPlan = options.nativeSchemaReadPlan;
       this.assertInitialReadCurrent();
       if (this.coordinated && this.dbPath && !isEphemeralDbPath(this.dbPath)) {
-        this.persistence = new SQLiteStorePersistence(this.dbPath);
+        const persistence = new SQLiteStorePersistence(this.dbPath);
+        this.persistence = persistence;
+        this.#artifactReferenceOrigin = Object.freeze({ persistence, engine: SQL, schemaVersion: this.schemaVersion, path: persistence.path });
         release = await this.persistence.lock();
       }
       const dbPath = this.persistence?.path ?? this.dbPath;

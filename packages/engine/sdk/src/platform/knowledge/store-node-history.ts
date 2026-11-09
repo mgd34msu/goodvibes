@@ -198,6 +198,7 @@ export interface KnowledgeNodeMergeView {
   readonly edges: Map<string, KnowledgeEdgeRecord>;
   readonly nodeRevisions: Map<string, KnowledgeNodeRevisionRecord[]>;
   readonly nodeActivationScope: object;
+  readonly beforeNodeWrite?: ((record: KnowledgeNodeRecord) => void) | undefined;
 }
 
 /**
@@ -237,6 +238,7 @@ export async function mergeKnowledgeNodes(
   const plan = planMergedEdges(edges, loserId, winnerId, mergedAt);
   const { record, existing, now, observationEvidence } = preparedNodeWrite(store, prepared, 0, view.nodeActivationScope);
   const revisions = new Map([[record.id, [...(view.nodeRevisions.get(record.id) ?? [])]]]);
+  if (record !== existing) view.beforeNodeWrite?.(record);
   view.sqlite.run('SAVEPOINT knowledge_node_merge');
   try {
     for (const edge of edges) if (!plan.edges.has(edge.id)) view.sqlite.run('DELETE FROM knowledge_edges WHERE id = ?', [edge.id]);

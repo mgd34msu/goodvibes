@@ -58,7 +58,8 @@ interface ProjectionSelection {
 function projectionSelection(target: unknown): ProjectionSelection | null {
   const kind = firstString(target, ['kind']);
   if (!kind) return null;
-  const id = firstString(target, ['targetId', 'id', 'itemId']);
+  const explicitId = firstString(target, ['itemId', 'id']), targetId = firstString(target, ['targetId']);
+  const id = explicitId || (asProjectionKind(kind) && targetId.startsWith(`${kind}:`) ? targetId.slice(kind.length + 1) : targetId);
   return {
     key: `${kind}:${id}`,
     kind,
@@ -85,10 +86,10 @@ function ResultBlock({ title, value }: { title: string; value: unknown }) {
   );
 }
 
-function ItemPane({ itemId, label, onClose }: { itemId: string; label: string; onClose: () => void }) {
+function ItemPane({ itemId, label, onClose, includeAllSpaces = false }: { itemId: string; label: string; onClose: () => void; includeAllSpaces?: boolean }) {
   const detail = useQuery({
-    queryKey: ['knowledge', 'item', itemId],
-    queryFn: () => invokeMethod('knowledge.item.get', { id: itemId }),
+    queryKey: ['knowledge', 'item', itemId, includeAllSpaces],
+    queryFn: () => invokeMethod('knowledge.item.get', { id: itemId, ...(includeAllSpaces ? { includeAllSpaces: true } : {}) }),
   });
   const body = readPath(detail.data, ['item']) ?? detail.data;
   return (
@@ -323,6 +324,8 @@ export function KnowledgeView({ query = '' }: KnowledgeViewProps) {
   } else if (selectedProjection) {
     const blocked = !selectedProjection.renderableKind;
     const blockedNote = `This web UI cannot request a "${selectedProjection.kind}" projection.`;
+    const rendered = renderProjection.variables?.key === selectedProjection.key ? renderProjection.data : undefined;
+    const materialized = materializeProjection.variables?.key === selectedProjection.key ? materializeProjection.data : undefined;
     detail = (
       <DetailPane
         title={bestTitle(selectedProjection.target, selectedProjection.kind)}
@@ -336,18 +339,27 @@ export function KnowledgeView({ query = '' }: KnowledgeViewProps) {
         )}
       >
         {blocked && <div className="dv-notice" role="note"><span>{blockedNote}</span></div>}
-        {renderProjection.error && <div className="dv-notice dv-notice--bad" role="alert"><span>Render failed: {formatError(renderProjection.error)}</span></div>}
-        {materializeProjection.error && <div className="dv-notice dv-notice--bad" role="alert"><span>Materialize failed: {formatError(materializeProjection.error)}</span></div>}
-        <ResultBlock title="Rendered projection" value={renderProjection.data} />
-        <ResultBlock title="Materialized projection" value={materializeProjection.data} />
-        {renderProjection.data === undefined && materializeProjection.data === undefined && !blocked && (
+        {renderProjection.variables?.key === selectedProjection.key && renderProjection.error && <div className="dv-notice dv-notice--bad" role="alert"><span>Render failed: {formatError(renderProjection.error)}</span></div>}
+        {materializeProjection.variables?.key === selectedProjection.key && materializeProjection.error && <div className="dv-notice dv-notice--bad" role="alert"><span>Materialize failed: {formatError(materializeProjection.error)}</span></div>}
+        {firstString(materialized, ['note']) && (
+          <div className="dv-notice" role="status">
+            <span>{firstString(materialized, ['note'])}</span>
+            {firstArray(materialized, ['preservedUnscopedSourceIds']).filter((id): id is string => typeof id === 'string').map(id => (
+              <Button key={id} variant="ghost" size="sm" onClick={() => setSelection(`preserved:${id}`)}>Inspect saved projection {id}</Button>
+            ))}
+          </div>
+        )}
+        <ResultBlock title="Rendered projection" value={rendered} />
+        <ResultBlock title="Materialized projection" value={materialized} />
+        {rendered === undefined && materialized === undefined && !blocked && (
           <p className="lib-quiet"><FileText size={14} aria-hidden="true" /> Render previews the page; Materialize writes it.</p>
         )}
       </DetailPane>
     );
-  } else if (selection && /^(source|node|issue):/.test(selection)) {
+  } else if (selection && /^(source|node|issue|preserved):/.test(selection)) {
     const [kind, ...rest] = selection.split(':');
-    detail = <ItemPane key={selection} itemId={rest.join(':')} label={sentence(kind)} onClose={() => setSelection(null)} />;
+    detail = <ItemPane key={selection} itemId={rest.join(':')} label={kind === 'preserved' ? 'Saved projection · All spaces' : sentence(kind)}
+      includeAllSpaces={kind === 'preserved'} onClose={() => setSelection(null)} />;
   }
 
   return (

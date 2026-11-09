@@ -127,6 +127,7 @@ import {
   KnowledgeStore,
   ProjectPlanningService,
   createConfiguredPlanningStore,
+  configureKnowledgeArtifactReferences,
   createProviderBackedKnowledgeSemanticLlm,
   createWebKnowledgeGapRepairer,
 } from '@goodvibes-jev/engine/sdk/platform/knowledge';
@@ -1416,6 +1417,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     configManager,
     dbFileName: HOME_GRAPH_KNOWLEDGE_DB_FILE,
   });
+  configureKnowledgeArtifactReferences({ artifactStore, controlPlaneDirectory: configManager.getControlPlaneConfigDir(), stores: [agentKnowledgeStore, homeGraphKnowledgeStore] });
   // Memory-governance seams, built EARLY exactly as the SDK's own daemon
   // composition builds them (platform/runtime/services.ts): the knowledge
   // background job and the consolidation scheduler consult the pause

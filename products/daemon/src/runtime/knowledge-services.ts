@@ -26,6 +26,7 @@ import {
   KnowledgeStore,
   ProjectPlanningService,
   createConfiguredPlanningStore,
+  configureKnowledgeArtifactReferences,
   createProviderBackedKnowledgeSemanticLlm,
 } from '@goodvibes-jev/engine/sdk/platform/knowledge';
 import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
@@ -86,6 +87,7 @@ export function createKnowledgeServices(deps: KnowledgeServicesDeps): KnowledgeS
   deps.ownership.registry.add('agent knowledge store', () => agentKnowledgeStore.close());
   const homeGraphKnowledgeStore = new KnowledgeStore({ configManager, dbFileName: HOME_GRAPH_KNOWLEDGE_DB_FILE });
   deps.ownership.registry.add('home graph knowledge store', () => homeGraphKnowledgeStore.close());
+  configureKnowledgeArtifactReferences({ artifactStore, controlPlaneDirectory: configManager.getControlPlaneConfigDir(), stores: [knowledgeStore, agentKnowledgeStore, homeGraphKnowledgeStore] });
   const knowledgeSemanticLlm = createProviderBackedKnowledgeSemanticLlm(providerRegistry, { timeoutMs: 20_000, maxConcurrent: 1 });
   const knowledgeSemanticService = new KnowledgeSemanticService(knowledgeStore, { llm: knowledgeSemanticLlm, maxLlmSourcesPerReindex: 3, isBackgroundPaused, admitExpensiveWork });
   const homeGraphSemanticService = new KnowledgeSemanticService(homeGraphKnowledgeStore, { llm: knowledgeSemanticLlm, maxLlmSourcesPerReindex: 3, objectProfiles: HOME_GRAPH_KNOWLEDGE_EXTENSION.objectProfiles, isBackgroundPaused, admitExpensiveWork });

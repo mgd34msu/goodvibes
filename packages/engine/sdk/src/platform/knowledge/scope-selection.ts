@@ -1,3 +1,5 @@
+import { isGeneratedProjectionViewEdge } from './store-generated-projection-selector.js';
+import { retainStoredGeneratedProjectionReferences } from './generated-projection-legacy-references.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import {
   captureJudgmentPort,
@@ -290,15 +292,23 @@ async function prepareKnowledgeScopeUnderPolicy(store: KnowledgeStore, scope: Kn
     const previous = retained.get(key);
     if (previous) return previous;
     captureStrictRepairJson(value.record);
+    const initialSource = value.kind === 'source' ? store.getSourceSnapshot({ id: value.record.id }) : undefined;
+    if (initialSource && value.kind === 'source') {
+      if (!sameKnowledgeRecord(value.record, initialSource.source)) {
+        assertJudgmentInput(knowledgeRawRepresentation(value.record));
+        throw new KnowledgeScopeSelectionHeldError('stale');
+      }
+      retainStoredGeneratedProjectionReferences(store, value.record, initialSource);
+    }
     const matchesSignature = retainSignature(value);
     snapshots.set(key, matchesSignature);
     const original = readRecord(value)?.record;
     const generation = (adopt = false) => {
       if (value.kind === 'issue') return undefined;
       if (!adopt) return currentGeneration({ kind: value.kind, id: value.record.id });
-      const snapshot = value.kind === 'source' ? (() => { const source = store.getSourceSnapshot({ id: value.record.id });
+      const snapshot = value.kind === 'source' ? (() => { const source = initialSource; if (!source) throw new KnowledgeScopeSelectionHeldError('stale');
         return { record: source.source, generation: source.generation }; })() : store.getRecordSnapshot('node', value.record.id);
-      if (adopt && !sameKnowledgeRecord(value.record, snapshot.record)) {
+      if (value.kind !== 'source' && !sameKnowledgeRecord(value.record, snapshot.record)) {
         assertJudgmentInput(knowledgeRawRepresentation(value.record));
         throw new KnowledgeScopeSelectionHeldError('stale');
       }
@@ -381,7 +391,8 @@ async function prepareKnowledgeScopeUnderPolicy(store: KnowledgeStore, scope: Kn
   });
   const relatedInputs = (value: ScopeRecord, currentLookup = frameLookup) => {
     const related = new Map<string, ScopeRecord>(), outside = new Map<string, string>();
-    const refs = [...references(value), ...(value.kind === 'source' ? [] : (currentLookup.edgeIndex.get(keyFor(value)) ?? [])).flatMap(edge => [
+    const refs = [...references(value), ...(value.kind === 'source' ? [] : (currentLookup.edgeIndex.get(keyFor(value)) ?? []).filter(edge => !isGeneratedProjectionViewEdge(
+      edge.fromKind === 'source' ? currentLookup.sources.get(edge.fromId) : undefined, edge))).flatMap(edge => [
       ...(edge.fromKind === 'source' || edge.fromKind === 'node' ? [{ kind: edge.fromKind, id: edge.fromId }] : []),
       ...(edge.toKind === 'source' || edge.toKind === 'node' ? [{ kind: edge.toKind, id: edge.toId }] : []),
     ])];

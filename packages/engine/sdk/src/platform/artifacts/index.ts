@@ -1,4 +1,5 @@
-export { ArtifactStore } from './store.js';
+export type { ArtifactPublicationLease } from './store.js';
+export { ArtifactStore, acquireArtifactPublication } from './store.js';
 export type {
   ArtifactAcquisitionMode,
   ArtifactAttachment,

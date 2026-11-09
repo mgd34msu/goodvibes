@@ -143,3 +143,69 @@ describe('KnowledgeView: the knowledge map never dumps raw JSON', () => {
     unmount();
   });
 });
+
+function clickButton(el: HTMLElement, label: string): void {
+  const button = [...el.querySelectorAll('button')].find(item => item.textContent === label
+    || item.querySelector('.gv-row__title')?.textContent === label);
+  expect(button).toBeTruthy();
+  flushSync(() => button?.dispatchEvent(new window.MouseEvent('click', { bubbles: true })));
+}
+
+describe('KnowledgeView projection target dispatch and preserved-page inspection', () => {
+  for (const target of [
+    { kind: 'source', targetId: 'source:raw-source', itemId: 'raw-source', title: 'Source projection', expected: 'raw-source' },
+    { kind: 'node', targetId: 'node:node:retained', itemId: 'node:retained', title: 'Node projection', expected: 'node:retained' },
+    { kind: 'issue', targetId: 'issue:raw-issue', title: 'Issue projection', expected: 'raw-issue' },
+    { kind: 'rollup', targetId: 'private:raw-rollup', title: 'Rollup projection', expected: 'private:raw-rollup' },
+    { kind: 'dashboard', targetId: 'dashboard:backlinks', itemId: 'backlinks', title: 'Backlinks Dashboard', expected: 'backlinks' },
+    { kind: 'overview', targetId: 'overview', title: 'Overview projection', expected: undefined },
+    { kind: 'bundle', targetId: 'bundle', title: 'Bundle projection', expected: undefined },
+  ]) {
+    test(`actual ${target.kind} selection sends the selected target to both RPCs`, async () => {
+      const calls: { method: string; input: unknown }[] = [];
+      invokeImpl = async (method, input) => {
+        calls.push({ method, input });
+        if (method === 'knowledge.projections.list') return { targets: [target] };
+        return { sources: [], nodes: [], issues: [], tasks: [] };
+      };
+      const view = render();
+      try {
+        await waitFor(() => Boolean([...view.el.querySelectorAll('.gv-row__title')].find(item => item.textContent === target.title)));
+        clickButton(view.el, target.title);
+        for (const [button, method] of [['Render', 'knowledge.projection.render'], ['Materialize', 'knowledge.projection.materialize']] as const) {
+          clickButton(view.el, button);
+          await waitFor(() => calls.some(call => call.method === method));
+          expect(calls.find(call => call.method === method)?.input).toEqual({ kind: target.kind,
+            ...(target.expected === undefined ? {} : { id: target.expected }), limit: 25 });
+        }
+      } finally { view.unmount(); }
+    });
+  }
+  test('the preserved-page action explicitly inspects all spaces and never carries its result to another target', async () => {
+    const targets = [{ kind: 'overview', targetId: 'overview', title: 'Overview projection' },
+      { kind: 'bundle', targetId: 'bundle', title: 'Bundle projection' }];
+    const calls: { method: string; input: unknown }[] = [];
+    invokeImpl = async (method, input) => {
+      calls.push({ method, input });
+      if (method === 'knowledge.projections.list') return { targets };
+      if (method === 'knowledge.projection.materialize') return {
+        note: 'Saved projections with unknown scope were preserved. Select All spaces to inspect them.',
+        preservedUnscopedSourceIds: ['kg-gen-historical'],
+      };
+      if (method === 'knowledge.item.get') return { item: { title: 'Saved page' } };
+      return { sources: [], nodes: [], issues: [], tasks: [] };
+    };
+    const view = render();
+    try {
+      await waitFor(() => (view.el.textContent ?? '').includes('Overview projection'));
+      clickButton(view.el, 'Overview projection'); clickButton(view.el, 'Materialize');
+      await waitFor(() => (view.el.textContent ?? '').includes('Inspect saved projection kg-gen-historical'));
+      clickButton(view.el, 'Bundle projection');
+      expect(view.el.textContent).not.toContain('Inspect saved projection kg-gen-historical');
+      clickButton(view.el, 'Overview projection');
+      clickButton(view.el, 'Inspect saved projection kg-gen-historical');
+      await waitFor(() => calls.some(call => call.method === 'knowledge.item.get'));
+      expect(calls.find(call => call.method === 'knowledge.item.get')?.input).toEqual({ id: 'kg-gen-historical', includeAllSpaces: true });
+    } finally { view.unmount(); }
+  });
+});

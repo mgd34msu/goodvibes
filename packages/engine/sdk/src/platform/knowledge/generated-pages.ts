@@ -1,3 +1,4 @@
+import { generatedProjectionMatchesSpecificScope } from './store-generated-projection-selector.js';
 import type { ArtifactStore } from '../artifacts/index.js';
 import { logger } from '../utils/logger.js';
 import { mapWithConcurrency } from '../utils/concurrency.js';
@@ -131,7 +132,8 @@ function scopeGeneratedPageRecords(
   readonly edges: readonly KnowledgeEdgeRecord[];
 } {
   const normalized = normalizeKnowledgeSpaceId(spaceId);
-  const scopedSources = sources.filter((source) => recordBelongsToGeneratedPageSpace(source, normalized));
+  const scopedSources = sources.filter((source) => generatedProjectionMatchesSpecificScope(source, { knowledgeSpaceId: normalized })
+    && recordBelongsToGeneratedPageSpace(source, normalized));
   const scopedNodes = nodes.filter((node) => recordBelongsToGeneratedPageSpace(node, normalized));
   const sourceIds = new Set(scopedSources.map((source) => source.id));
   const nodeIds = new Set(scopedNodes.map((node) => node.id));

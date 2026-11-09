@@ -66,11 +66,13 @@ export async function runKnowledgeServiceJobByKind(
     case 'rebuild-projections': {
       const overview = await context.materializeProjection({ kind: 'overview', limit: Math.max(8, input.limit ?? 12) });
       const bundle = await context.materializeProjection({ kind: 'bundle', limit: Math.max(12, input.limit ?? 18) });
+      const preserved = [...new Set([...(overview.preservedUnscopedSourceIds ?? []), ...(bundle.preservedUnscopedSourceIds ?? [])])];
       return {
         projections: [
-          { targetId: overview.bundle.target.targetId, artifactId: overview.artifact.id },
-          { targetId: bundle.bundle.target.targetId, artifactId: bundle.artifact.id },
+          { targetId: overview.bundle.target.targetId, artifactId: overview.artifact.id, ...(overview.source ? { sourceId: overview.source.id } : {}) },
+          { targetId: bundle.bundle.target.targetId, artifactId: bundle.artifact.id, ...(bundle.source ? { sourceId: bundle.source.id } : {}) },
         ],
+        ...(preserved.length ? { preservedUnscopedSourceIds: preserved, note: overview.note ?? bundle.note } : {}),
       };
     }
     case 'semantic-enrichment':

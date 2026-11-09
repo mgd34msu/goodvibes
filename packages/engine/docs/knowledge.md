@@ -605,6 +605,20 @@ unchanged-artifact reuse. Clients can disable or bound this with the sync
 and Home Graph generated sources carry stable ids plus
 `homeGraphGeneratedPage`, `projectionKind`, and `pageEditable` metadata.
 
+Base wiki materialization keeps a separate saved identity for each exact scope
+and target. Default-space, named-space, and All spaces projections therefore
+cannot overwrite one another. Use the returned `source.id` and `canonicalUri`;
+clients must not reconstruct generated IDs from target text. A concurrent
+publication preserves the winner and asks a stale reader to reload the project
+or knowledge store before retrying.
+
+Older base wiki pages whose original scope was not saved are preserved. A
+materialization result lists their IDs in `preservedUnscopedSourceIds` and
+includes an explanatory note. WebUI offers **Inspect saved projection** to open
+one with All spaces explicitly selected. These pages remain readable by their
+original IDs and through All spaces; they are not guessed into a specific
+space. A derived page's backlink does not change the canonical item's space.
+
 The generated pages are excluded from answer/reindex ranking and from
 linked-source page lists so they do not compete with manuals, receipts, notes,
 and other source evidence.
@@ -909,3 +923,28 @@ Base knowledge refinement is part of the same operator surface:
 over `/api/knowledge/refinement/*` (`POST /run`, `GET /tasks`,
 `GET /tasks/{id}`, and `POST /tasks/{id}/cancel`). See
 [Knowledge refinement](./knowledge-refinement.md).
+
+## Generated artifact cleanup
+
+The installed products check the wiki, Agent and Home Graph files together before
+removing a superseded generated artifact. Saved source, extraction and artifact-edge
+references in any family preserve it. Missing inactive family files are inspected
+without creating a database. Pending batches, busy owners, unknown schemas and
+changed original files retain the artifact; acknowledged source publication still
+succeeds. Deferred cleanup retries after a clean save or completed batch.
+
+Current scoped projection artifacts can also be reconsidered after restart. Their
+publication lease excludes a live current publisher while the original artifact
+and all three database owners are checked. Older generated artifacts without the
+scoped projection format remain available for inspection; metadata flags alone
+cannot establish that an older publisher has stopped. The artifact list, metadata
+and content endpoints continue to expose retained files. There is no automatic
+removal of unattributed older artifacts.
+
+Embedders sharing the standard configured artifact directory can explicitly bind
+the actual stores with `configureKnowledgeArtifactReferences`. The binding covers
+`knowledge-wiki.sqlite`, `knowledge-agent.sqlite` and `knowledge-home-graph.sqlite`;
+inactive families participate through readonly owners. An unbound or custom
+artifact root returns `unavailable` for automatic generated-artifact cleanup and
+preserves its data. The binding is a host declaration of the reference locations,
+not a claim that arbitrary external programs or databases are included.

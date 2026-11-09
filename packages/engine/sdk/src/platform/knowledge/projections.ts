@@ -1,8 +1,10 @@
+import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
+import { generatedProjectionIdentity, generatedProjectionIdentityMetadata, KnowledgeProjectionIdentityHeldError, preservedUnscopedProjectionIds } from './store-generated-projection-selector.js';
+import { sameKnowledgeRecord } from './store-record-representation.js';
+import { SQLitePublicationError } from '../state/sqlite-store-persistence.js';
 import type { ArtifactStore } from '../artifacts/index.js';
 import { registerGeneratedKnowledgeSourceReferences } from './source-structural-references.js';
 import {
-  generatedKnowledgeCanonicalUri,
-  generatedKnowledgeSourceId,
   isGeneratedKnowledgeSource,
   materializeGeneratedKnowledgeProjection,
 } from './generated-projections.js';
@@ -165,10 +167,33 @@ export class KnowledgeProjectionService {
     const bundle = this.renderSelected(request, scope);
     const content = this.combineBundleMarkdown(bundle);
     const projectionKind = `knowledge-${bundle.target.kind}`;
-    const sourceId = generatedKnowledgeSourceId(projectionKind, bundle.target.targetId);
-    const canonicalUri = generatedKnowledgeCanonicalUri(projectionKind, bundle.target.targetId);
+    const identity = generatedProjectionIdentity(scope, bundle.target.kind, bundle.target.targetId);
+    const selected = this.store.getGeneratedProjectionSourceSnapshot(identity);
+    if (selected.source && !sameKnowledgeRecord(this.store.getSource(selected.source.id), selected.source)) {
+      throw new KnowledgeProjectionIdentityHeldError('concurrent-update');
+    }
+    let sourceId: string, canonicalUri: string;
+    if (selected.source) {
+      sourceId = selected.source.id;
+      if (!selected.source.canonicalUri) throw new KnowledgeProjectionIdentityHeldError('malformed');
+      canonicalUri = selected.source.canonicalUri;
+    } else {
+      const allocated = opaqueUuid(); sourceId = `kg-gen-${allocated}`; canonicalUri = `knowledge://generated/${allocated}`;
+    }
+    const originalPublication = this.store.captureSourcePublication();
+    const assertIdentityCurrent = () => this.store.assertRecordSnapshotFrame(() => {
+      scope.assertCurrent();
+      const current = this.store.getGeneratedProjectionSourceSnapshot(identity);
+      if (current.generation !== selected.generation || current.source?.id !== selected.source?.id
+        || this.store.getSourceGeneration(sourceId) !== selected.generation) throw new KnowledgeProjectionIdentityHeldError('concurrent-update');
+      return undefined;
+    });
+    assertIdentityCurrent();
+    const preserved = preservedUnscopedProjectionIds(this.store.listSources(Number.MAX_SAFE_INTEGER));
     const target = materializedTargetReference(bundle.target);
     const metadata = {
+      ...bundle.metadata,
+      ...generatedProjectionIdentityMetadata(identity),
       projectionId: bundle.id,
       targetId: bundle.target.targetId,
       targetKind: bundle.target.kind,
@@ -176,7 +201,8 @@ export class KnowledgeProjectionService {
       pagePaths: bundle.pages.map((page) => page.path),
       itemIds: dedupe(bundle.pages.flatMap((page) => page.itemIds), (id) => id),
     };
-    const generated = await materializeGeneratedKnowledgeProjection({
+    let generated: Awaited<ReturnType<typeof materializeGeneratedKnowledgeProjection>>;
+    try { generated = await materializeGeneratedKnowledgeProjection({
       store: this.store,
       artifactStore: this.artifactStore,
       connectorId: 'knowledge-projection',
@@ -192,9 +218,14 @@ export class KnowledgeProjectionService {
       sourceMetadata: metadata,
       artifactMetadata: metadata,
       signal,
-      assertCurrent: scope.assertCurrent,
+      assertCurrent: assertIdentityCurrent,
       ...(target ? { target } : {}),
-    });
+    }); } catch (error) {
+      if (error instanceof KnowledgeProjectionIdentityHeldError
+        || error instanceof SQLitePublicationError && error.phase === 'indeterminate') throw error;
+      try { originalPublication(); } catch { throw new KnowledgeProjectionIdentityHeldError('concurrent-update'); }
+      throw error;
+    }
     registerGeneratedKnowledgeSourceReferences(this.store, generated.source, { id: sourceId, canonicalUri, sourceUri: canonicalUri });
     return {
       bundle,
@@ -202,6 +233,8 @@ export class KnowledgeProjectionService {
       source: generated.source,
       ...(generated.linked ? { linked: generated.linked } : {}),
       artifactCreated: generated.artifactCreated,
+      ...(preserved.length ? { preservedUnscopedSourceIds: preserved,
+        note: 'Saved projections with unknown scope were preserved. Select All spaces to inspect them.' } : {}),
     };
   }
 

@@ -1,6 +1,7 @@
+import { assertCrossProcessLockCurrent, tryAcquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
 import { freezeArtifactRecord, parseArtifactRecord } from './record-snapshot.js';
 import { createHash } from 'node:crypto';
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
+import { drainOwned, opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { chmodSync, closeSync, createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFile as writeFileDescriptor } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { ArtifactStorageOwner, type ArtifactCreatedLeaf } from './storage-ownership.js';
@@ -33,6 +34,11 @@ import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
 export interface ArtifactWriteOwnership {
   readonly signal?: AbortSignal | undefined;
   readonly assertCurrent?: (() => void) | undefined;
+}
+
+function assertArtifactWriteCurrent(owner: { readonly assertCurrent?: (() => void) | undefined }): void {
+  const result: unknown = owner.assertCurrent?.();
+  if (result !== undefined) { drainOwned(result); throw new TypeError('Artifact write owner must complete synchronously and return no value.'); }
 }
 
 export interface ArtifactStoreConfig {
@@ -272,17 +278,62 @@ const nativeApply = Reflect.apply, nativeMapGet = Map.prototype.get, nativeMapSe
 const nativeWeakGet = WeakMap.prototype.get, nativeWeakSet = WeakMap.prototype.set;
 const nativeStoragePrototype = ArtifactStorageOwner.prototype;
 const nativeStorageMethods = Object.freeze(['assertCurrent', 'assertOriginalDirectory', 'importedStamp', 'assertImported'].map(key => Object.freeze({ key, value: Object.getOwnPropertyDescriptor(nativeStoragePrototype, key)?.value as unknown })));
-const originalObservations = new WeakMap<ArtifactOriginalObservation, { readonly id: string; readonly remove: () => boolean }>();
+const cleanupInspectors = new WeakMap<ArtifactStore, () => { readonly candidates: readonly ArtifactOriginalObservation[]; readonly preserved: number; readonly more: boolean }>();
+const originalObservations = new WeakMap<ArtifactOriginalObservation, { readonly id: string; readonly store: ArtifactStore; readonly root: string; readonly assertOriginal: () => void; readonly assertDirectory: () => void; readonly metadataPath: string; readonly remove: () => boolean }>();
 /** Internal native cleanup selectors; neither takes an arbitrary artifact ID. */
 export function artifactOriginalId(observation: ArtifactOriginalObservation): string {
   const original = nativeApply(nativeWeakGet, originalObservations, [observation]) as { readonly id: string } | undefined;
   if (!original) throw new Error('Original artifact observation is unavailable.'); return original.id;
 }
+/** Actual private receipt owner; parsed flags or an overridden public getter
+ * cannot bind another ArtifactStore to a configured cleanup ensemble. */
+export function artifactOriginalOwner(observation: ArtifactOriginalObservation): { readonly store: ArtifactStore; readonly root: string; readonly assertCurrent: () => void } {
+  const original = nativeApply(nativeWeakGet, originalObservations, [observation]) as { readonly store: ArtifactStore; readonly root: string; readonly assertOriginal: () => void } | undefined;
+  if (!original) throw new Error('Original artifact observation is unavailable.');
+  original.assertOriginal(); return Object.freeze({ store: original.store, root: original.root, assertCurrent: original.assertOriginal });
+}
 export function removeOriginalArtifact(observation: ArtifactOriginalObservation): boolean {
   const original = nativeApply(nativeWeakGet, originalObservations, [observation]) as { readonly remove: () => boolean } | undefined;
   if (!original) throw new Error('Original artifact observation is unavailable.'); return original.remove();
 }
+/** Metadata classification only; deletion still needs the complete configured
+ * reference policy and original file custody. No metadata authenticates a producer. */
+export function inspectGeneratedArtifactCleanupCandidates(store: ArtifactStore): { readonly candidates: readonly ArtifactOriginalObservation[]; readonly preserved: number; readonly more: boolean } {
+  const inspect = nativeApply(nativeWeakGet, cleanupInspectors, [store]) as (() => { readonly candidates: readonly ArtifactOriginalObservation[]; readonly preserved: number; readonly more: boolean }) | undefined;
+  if (!inspect) throw new Error('Original artifact cleanup inventory is unavailable.'); return inspect();
+}
+export interface ArtifactPublicationLease {
+  assertCurrent(): void;
+  release(): void;
+}
+function claimArtifactPublication(path: string, assertOwner: () => void): ArtifactPublicationLease | null {
+  assertOwner(); const release = tryAcquireCrossProcessLock(`${path}.projection-lock`, { assertCurrent: assertOwner });
+  if (!release) return null;
+  return Object.freeze({ assertCurrent: () => { assertOwner(); assertCrossProcessLockCurrent(release); }, release });
+}
+/** Cleanup and current-code publishers share this native metadata-file lock.
+ * It is mutual exclusion, not a serialized receipt or permission grant. */
+export function tryAcquireArtifactPublication(observation: ArtifactOriginalObservation): ArtifactPublicationLease | null {
+  const original = nativeApply(nativeWeakGet, originalObservations, [observation]) as { readonly metadataPath: string; readonly assertOriginal: () => void; readonly assertDirectory: () => void } | undefined;
+  if (!original) throw new Error('Original artifact publication is unavailable.');
+  original.assertOriginal(); const lease = claimArtifactPublication(original.metadataPath, original.assertDirectory);
+  if (!lease) return null;
+  try { original.assertOriginal(); return lease; } catch (error) {
+    try { lease.release(); } catch { /* Preserve the original observation failure; the release closes its FD. */ }
+    throw error;
+  }
+}
+export async function acquireArtifactPublication(observation: ArtifactOriginalObservation, signal?: AbortSignal): Promise<ArtifactPublicationLease> {
+  const deadline = Date.now() + 1_000;
+  for (;;) {
+    signal?.throwIfAborted(); const lease = tryAcquireArtifactPublication(observation);
+    if (lease) return lease;
+    if (Date.now() >= deadline) throw new Error('Original artifact publication is currently owned.');
+    await new Promise<void>(resolveWait => { const timer = setTimeout(resolveWait, 25); timer.unref?.(); });
+  }
+}
 export class ArtifactStore {
+  #cleanupIterator: Iterator<ArtifactRecord> | undefined;
   readonly #originalOwner: { readonly slots: readonly { readonly key: string; readonly descriptor: PropertyDescriptor }[]; readonly records: Map<string, ArtifactRecord>; readonly files: Map<string, { readonly content: string; readonly metadata: string }>; readonly storage: ArtifactStorageOwner; readonly storageSlots: readonly { readonly key: string; readonly descriptor: PropertyDescriptor }[]; readonly entries: WeakMap<ArtifactRecord, { readonly content: string; readonly metadata: string }> };
   private readonly rootDir: string;
   private readonly storageOwner: ArtifactStorageOwner;
@@ -312,6 +363,7 @@ export class ArtifactStore {
     this.storageOwner = new ArtifactStorageOwner(this.rootDir);
     this.#originalOwner = Object.freeze({ records: this.records, files: this.recordFiles, storage: this.storageOwner, storageSlots: Object.freeze(Object.entries(Object.getOwnPropertyDescriptors(this.storageOwner)).map(([key, descriptor]) => Object.freeze({ key, descriptor: Object.freeze(descriptor) }))), entries: new WeakMap(), slots: Object.freeze(['rootDir', 'storageOwner', 'records', 'recordFiles'].map(key => { const descriptor = Object.getOwnPropertyDescriptor(this, key); if (!descriptor || !('value' in descriptor)) throw new Error('Artifact original owner is unavailable.'); return Object.freeze({ key, descriptor: Object.freeze(descriptor) }); })) });
     this.loadExisting();
+    nativeApply(nativeWeakSet, cleanupInspectors, [this, () => this.#inspectCleanupCandidates()]);
   }
 
   get storagePath(): string {
@@ -359,31 +411,63 @@ export class ArtifactStore {
     return deleted;
   }
 
-  /** Capture only actual private record/file facts. No prune, content read,
-   * serialization or digest occurs in this readonly observation. */
-  captureOriginal(id: string): ArtifactOriginalObservation {
+  #assertOriginalStorage(): void {
     const owner = this.#originalOwner;
-    const record = nativeApply(nativeMapGet, owner.records, [id]) as ArtifactRecord | undefined;
-    const files = nativeApply(nativeMapGet, owner.files, [id]) as { readonly content: string; readonly metadata: string } | undefined;
-    if (!record || !files || nativeApply(nativeWeakGet, owner.entries, [record]) !== files || !Object.isFrozen(record)) throw new Error('Original artifact record is unavailable.');
-    const original = () => {
       for (const { key, descriptor } of owner.slots) {
         const current = Object.getOwnPropertyDescriptor(this, key);
         if (!current || !('value' in current) || current.value !== descriptor.value || current.writable !== descriptor.writable || current.enumerable !== descriptor.enumerable || current.configurable !== descriptor.configurable) throw new Error('Artifact original owner changed.');
       }
-      if (nativeApply(nativeMapGet, owner.records, [id]) !== record || nativeApply(nativeMapGet, owner.files, [id]) !== files) throw new Error('Artifact original record changed.');
       if (Object.getPrototypeOf(owner.storage) !== nativeStoragePrototype || Reflect.ownKeys(owner.storage).length !== owner.storageSlots.length) throw new Error('Artifact original storage changed.');
       for (const { key, descriptor } of owner.storageSlots) {
         const actual = Object.getOwnPropertyDescriptor(owner.storage, key);
         if (!actual || !('value' in actual) || actual.value !== descriptor.value || actual.writable !== descriptor.writable || actual.enumerable !== descriptor.enumerable || actual.configurable !== descriptor.configurable) throw new Error('Artifact original storage changed.');
       }
       for (const { key, value } of nativeStorageMethods) if (Object.hasOwn(owner.storage, key) || Object.getOwnPropertyDescriptor(nativeStoragePrototype, key)?.value !== value) throw new Error('Artifact original storage method changed.');
+    owner.storage.assertCurrent();
+  }
+
+  /** Capture only actual private record/file facts. No prune, content read,
+   * serialization or digest occurs in this readonly observation. */
+  captureOriginal(id: string): ArtifactOriginalObservation { return this.#captureOriginal(id); }
+  #captureOriginal(id: string): ArtifactOriginalObservation {
+    const owner = this.#originalOwner;
+    const record = nativeApply(nativeMapGet, owner.records, [id]) as ArtifactRecord | undefined;
+    const files = nativeApply(nativeMapGet, owner.files, [id]) as { readonly content: string; readonly metadata: string } | undefined;
+    if (!record || !files || nativeApply(nativeWeakGet, owner.entries, [record]) !== files || !Object.isFrozen(record)) throw new Error('Original artifact record is unavailable.');
+    const original = () => {
+      this.#assertOriginalStorage();
+      if (nativeApply(nativeMapGet, owner.records, [id]) !== record || nativeApply(nativeMapGet, owner.files, [id]) !== files) throw new Error('Artifact original record changed.');
       owner.storage.assertImported(record.contentPath, files.content); owner.storage.assertImported(record.metadataPath, files.metadata);
     };
     const current = () => { original(); if (typeof record.expiresAt === 'number' && record.expiresAt <= Date.now()) throw new Error('Original artifact expired.'); };
     const remove = () => { original(); if (!this.#removeRecordFiles(record)) throw new Error('Original artifact removal was not confirmed.'); return true; };
     original(); const observation = Object.freeze({ id: record.id, assertCurrent: current, deleteOriginal: remove });
-    nativeApply(nativeWeakSet, originalObservations, [observation, Object.freeze({ id: record.id, remove })]); return observation;
+    nativeApply(nativeWeakSet, originalObservations, [observation, Object.freeze({ id: record.id, store: this, root: this.rootDir, metadataPath: record.metadataPath, assertOriginal: original, assertDirectory: () => this.#assertOriginalStorage(), remove })]); return observation;
+  }
+
+  #inspectCleanupCandidates(): { readonly candidates: readonly ArtifactOriginalObservation[]; readonly preserved: number; readonly more: boolean } {
+    this.#assertOriginalStorage(); const candidates: ArtifactOriginalObservation[] = []; let preserved = 0;
+    const kinds = new Set(['overview', 'bundle', 'source', 'node', 'issue', 'dashboard', 'rollup']);
+    this.#cleanupIterator ??= this.#originalOwner.records.values();
+    let more = true;
+    for (let index = 0; index < 128; index++) {
+      const next = this.#cleanupIterator.next();
+      if (next.done) { this.#cleanupIterator = undefined; more = false; break; }
+      const record = next.value;
+      const metadata = record.metadata;
+      if (metadata.generatedKnowledgePage !== true || metadata.generatedProjection !== true) continue;
+      const scope = metadata.projectionScopeKind, space = metadata.projectionSpaceId, kind = metadata.targetKind;
+      const current = record.kind === 'document' && record.mimeType === 'text/markdown' && record.acquisitionMode === 'inline-data'
+        && record.fetchMode === 'not-applicable' && record.expiresAt === undefined && metadata.projectionIdentityVersion === 1
+        && (scope === 'space' || scope === 'all') && typeof space === 'string' && space !== '' && space.trim() === space
+        && (scope === 'all' ? space === 'goodvibes:projection:all-spaces' : space !== 'goodvibes:projection:all-spaces')
+        && typeof kind === 'string' && kinds.has(kind) && typeof metadata.targetId === 'string' && metadata.targetId !== ''
+        && metadata.projectionKind === `knowledge-${kind}` && metadata.knowledgeSpaceId === space && metadata.namespace === space
+        && metadata.includeAllSpaces === (scope === 'all');
+      if (!current) { preserved++; continue; }
+      try { candidates.push(this.#captureOriginal(record.id)); } catch { preserved++; }
+    }
+    return Object.freeze({ candidates: Object.freeze(candidates), preserved, more });
   }
 
   async readContent(id: string): Promise<ArtifactContentRead> {
@@ -402,14 +486,34 @@ export class ArtifactStore {
   }
 
   async create(input: ArtifactCreateInput, ownership: ArtifactWriteOwnership = {}): Promise<ArtifactDescriptor> {
-    ownership.signal?.throwIfAborted(); ownership.assertCurrent?.(); this.storageOwner.assertCurrent();
+    ownership.signal?.throwIfAborted(); assertArtifactWriteCurrent(ownership); this.storageOwner.assertCurrent();
     const intent = resolveArtifactIntent(input);
     const resolved = await this.resolveInput(input, intent, ownership.signal);
     return this.writeResolvedArtifact(input, intent, resolved, ownership);
   }
 
-  async createFromStream(input: ArtifactStreamCreateInput, ownership: ArtifactWriteOwnership = {}): Promise<ArtifactDescriptor> {
-    const check = () => { ownership.signal?.throwIfAborted(); ownership.assertCurrent?.(); this.storageOwner.assertCurrent(); };
+  /** Atomic creation-to-publication handoff: the lock exists before the first
+   * data write await and stays owned while the caller awaits this result. */
+  async createForPublication(input: ArtifactCreateInput, ownership: ArtifactWriteOwnership = {}): Promise<{ readonly artifact: ArtifactDescriptor; readonly original: ArtifactOriginalObservation; readonly lease: ArtifactPublicationLease }> {
+    ownership.signal?.throwIfAborted(); assertArtifactWriteCurrent(ownership); this.storageOwner.assertCurrent();
+    const intent = resolveArtifactIntent(input), resolved = await this.resolveInput(input, intent, ownership.signal);
+    let lease: ArtifactPublicationLease | undefined;
+    try {
+      const artifact = await this.writeResolvedArtifact(input, intent, resolved, ownership, acquired => { lease = acquired; });
+      if (!lease) throw new Error('Original artifact publication was not acquired.');
+      const original = this.#captureOriginal(artifact.id); original.assertCurrent(); lease.assertCurrent();
+      return Object.freeze({ artifact, original, lease });
+    } catch (error) {
+      try { lease?.release(); } catch { logger.warn('Original artifact publication release could not be confirmed; the primary creation failure was preserved.'); }
+      throw error;
+    }
+  }
+
+  createFromStream(input: ArtifactStreamCreateInput, ownership: ArtifactWriteOwnership = {}): Promise<ArtifactDescriptor> {
+    return this.#createFromStream(input, ownership);
+  }
+  async #createFromStream(input: ArtifactStreamCreateInput, ownership: ArtifactWriteOwnership, retainLease?: (lease: ArtifactPublicationLease) => void): Promise<ArtifactDescriptor> {
+    const check = () => { ownership.signal?.throwIfAborted(); assertArtifactWriteCurrent(ownership); this.storageOwner.assertCurrent(); };
     check();
     const id = `artifact-${opaqueUuid()}`;
     const filename = sanitizeArtifactFilename(input.filename, 'artifact');
@@ -418,6 +522,9 @@ export class ArtifactStore {
     const retentionMs = sanitizeRetentionMs(input.retentionMs, this.defaultRetentionMs, this.maxRetentionMs);
     const content = this.storageOwner.leaf(`${id}.data`), metadata = this.storageOwner.leaf(`${id}.json`);
     let record: ArtifactRecord;
+    const lease = retainLease ? claimArtifactPublication(metadataPath, () => this.#assertOriginalStorage()) : null;
+    if (retainLease && !lease) throw new Error('New artifact publication path is already owned.');
+    if (lease) retainLease!(lease);
     try {
       check();
       const { sizeBytes } = await this.writeStreamContent({
@@ -452,7 +559,9 @@ export class ArtifactStore {
       } finally { closeSync(fd); }
       check(); content.assertSealed(); metadata.assertSealed();
     } catch (error) {
-      content.cleanup(); metadata.cleanup();
+      try { content.cleanup(); } catch { /* A retired original parent withholds pathname cleanup. */ }
+      try { metadata.cleanup(); } catch { /* Preserve the original write failure and foreign replacement. */ }
+      try { lease?.release(); } catch { logger.warn('Original artifact publication release could not be confirmed; the primary write failure was preserved.'); }
       // An admission/open failure may precede acquiring a stream reader. A
       // waiting web producer must still hear cancellation, without making an
       // ignored cancel promise ownership of a file it never opened.
@@ -474,6 +583,7 @@ export class ArtifactStore {
     },
     resolved: ResolvedArtifactInput,
     ownership: ArtifactWriteOwnership,
+    retainLease?: (lease: ArtifactPublicationLease) => void,
   ): Promise<ArtifactDescriptor> {
     const streamInput = resolved.stream
       ? {
@@ -484,7 +594,7 @@ export class ArtifactStore {
           stream: [resolved.buffer ?? Buffer.alloc(0)],
           ...(typeof resolved.buffer?.byteLength === 'number' ? { sizeBytes: resolved.buffer.byteLength } : {}),
         };
-    return this.createFromStream({
+    return this.#createFromStream({
       ...streamInput,
       ...(input.kind ? { kind: input.kind } : {}),
       mimeType: resolved.mimeType,
@@ -494,7 +604,7 @@ export class ArtifactStore {
       acquisitionMode: intent.acquisitionMode,
       fetchMode: intent.fetchMode,
       metadata: input.metadata ?? {},
-    }, ownership);
+    }, ownership, retainLease);
   }
 
   private async writeStreamContent(input: {
@@ -511,7 +621,7 @@ export class ArtifactStore {
     let descriptor: number | undefined;
     writer.once('open', fd => {
       descriptor = fd;
-      try { input.leaf.claim(fd); input.assertCurrent?.(); }
+      try { input.leaf.claim(fd); assertArtifactWriteCurrent(input); }
       catch (error) { writer.destroy(error instanceof Error ? error : new Error('Artifact storage owner changed')); }
     });
     writer.once('finish', () => {
@@ -541,7 +651,7 @@ export class ArtifactStore {
       for (;;) {
         const next = await Promise.race([iterator.next(), writerFailure]);
         if (next.done) break;
-        input.assertCurrent?.();
+        assertArtifactWriteCurrent(input);
         const buffer = chunkToBuffer(next.value);
         sizeBytes += buffer.byteLength;
         if (sizeBytes > this.maxBytes) {
@@ -554,7 +664,7 @@ export class ArtifactStore {
       }
       await Promise.race([finishWriter(writer), writerFailure]);
       await settled;
-      input.assertCurrent?.(); input.leaf.assertSealed();
+      assertArtifactWriteCurrent(input); input.leaf.assertSealed();
       return { sizeBytes };
     } catch (error) {
       // Destruction can race the asynchronous open. Wait for actual closure

@@ -25,6 +25,7 @@ import {
   KnowledgeStore,
   ProjectPlanningService,
   createConfiguredPlanningStore,
+  configureKnowledgeArtifactReferences,
   createProviderBackedKnowledgeSemanticLlm,
   createWebKnowledgeGapRepairer,
 } from '../knowledge/index.js';
@@ -656,6 +657,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   const knowledgeStore = createConfiguredPlanningStore(configManager, REGULAR_KNOWLEDGE_DB_FILE, { nativeDataWriter: options.nativeDataWriter ?? configManager.getNativeDataWriter(), family: 'wiki' });
   const agentKnowledgeStore = new KnowledgeStore({ nativeDataWriter: options.nativeDataWriter ?? configManager.getNativeDataWriter(), configManager, dbFileName: GOODVIBES_AGENT_KNOWLEDGE_DB_FILE, family: 'agent' });
   const homeGraphKnowledgeStore = new KnowledgeStore({ nativeDataWriter: options.nativeDataWriter ?? configManager.getNativeDataWriter(), configManager, dbFileName: HOME_GRAPH_KNOWLEDGE_DB_FILE, family: 'home-graph' });
+  configureKnowledgeArtifactReferences({ artifactStore, controlPlaneDirectory: configManager.getControlPlaneConfigDir(), stores: [knowledgeStore, agentKnowledgeStore, homeGraphKnowledgeStore] });
   const knowledgeSemanticLlm = createProviderBackedKnowledgeSemanticLlm(providerRegistry, {
     maxConcurrent: 1,
   });

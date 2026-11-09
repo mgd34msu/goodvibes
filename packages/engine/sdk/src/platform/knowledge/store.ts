@@ -1,12 +1,16 @@
+import { createSemanticFactIdentityIndex, SemanticIdentityHeldError, type SemanticFactSelector } from './store-semantic-fact-selector.js';
+import { savedGeneratedProjectionIdentity, projectionIdentityParams, KnowledgeProjectionIdentityHeldError, type GeneratedProjectionIdentity } from './store-generated-projection-selector.js';
 import { createKnowledgeRowRevisions, knowledgeRawRowForAdmission } from './store-row-revisions.js';
 import { withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { drainOwned, opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { KnowledgeRecordAdmissionHeldError, knowledgeEdgeSnapshotFromRows, knowledgeRecordGenerationFromRows, knowledgeRecordSnapshotFromRows, type KnowledgeRecordSnapshot } from './store-record-snapshot.js';
 import { sameKnowledgeRecord, captureKnowledgeStoreInput, copyKnowledgeRepresentation, prepareKnowledgeOwnedClocks } from './store-record-representation.js';
 import { captureOwnedJson, JudgmentInputError, snapshotJudgmentInput } from '../gate/judgment-input.js';
-import { validateCurrentKnowledgeSchema, validateKnowledgeSchemaV12 } from './store-current-schema-validation.js';
+import { validateCurrentKnowledgeSchema, validateKnowledgeSchemaV12, validateKnowledgeSchemaV13 } from './store-current-schema-validation.js';
 import { createKnowledgeNodeContentRevisions } from './store-node-content-revisions.js';
 import { createKnowledgeNodeActivationCache } from './store-node-activation-cache.js';
+import { createGeneratedProjectionIdentityIndex } from './store-generated-projection-selector.js';
+import { createArtifactReferenceIndexes } from './store-artifact-references.js';
 import { prepareNativeKnowledgeSchemaReadPlan } from '../state/knowledge-schema-read-plan.js';
 import { createNativeCiContinuationTable, validateNativeCiContinuationTable } from './store-native-ci-continuation.js';
 import { createNativeConversationStorage, validateNativeConversationCaptureTable, migrateNativeConversationCaptureTable } from './store-native-intake.js';
@@ -14,7 +18,9 @@ import type { NativeConversationStorage } from '../workflow/work-ledger/native-i
 import { migrateNativeWorkSettlementTable, validateNativeWorkSettlementTable, createNativeWorkSettlementTargetIndex, createNativeWorkExecutionStorage, createNativeWorkExecutionTable, validateNativeWorkExecutionTable, createNativeWorkExecutionIntentTable, validateNativeWorkExecutionIntentTable } from './store-native-work-execution.js';
 import type { NativeWorkExecutionStorage } from '../workflow/work-ledger/native-execution-types.js';
 import { createKnowledgeWorkLedgerStorage, createWorkLedgerTable, validateWorkLedgerTable, migrateWorkLedgerTableToVersion2, type KnowledgeWorkLedgerStorage } from './store-work-ledger.js';
-
+import type { ArtifactOriginalObservation } from '../artifacts/types.js';
+import { cleanupKnowledgeArtifact, retireKnowledgeArtifactCleanup, type ArtifactCleanupResult } from './artifact-reference-ensemble.js';
+import type { KnowledgeArtifactReferenceOwner } from './artifact-reference-owner.js';
 import { KnowledgeSourcePublicationHeldError, knowledgeSourceSnapshotFromRows, planningSourceSnapshotFromRows, readPlanningSourceSnapshot, readKnowledgeSourceSnapshot, type KnowledgeSourceSnapshot, type KnowledgeSourceWriteResult } from './store-source-generation.js';
 import type { PlanningSourceIdentity } from './store-planning-source-selector.js';
 import { applyKnowledgeImport, type KnowledgeImportInput, type KnowledgeImportReceipt, type PrepareKnowledgeImportGraph } from './store-import.js';
@@ -166,6 +172,16 @@ const nativePublicationGet = WeakMap.prototype.get, nativePublicationSet = WeakM
 const nativePublicationHas = WeakSet.prototype.has, nativePublicationAdd = WeakSet.prototype.add;
 const nativePredecessorDeref = WeakRef.prototype.deref;
 
+interface NativeArtifactReferenceStore {
+  readonly sqlite: SQLiteStore;
+  readonly path: string;
+  readonly sqliteSlot: PropertyDescriptor;
+  readonly pathSlot: PropertyDescriptor;
+}
+const nativeArtifactReferenceStores = new WeakMap<KnowledgeStore, NativeArtifactReferenceStore>();
+const nativeArtifactReferenceRead = SQLiteStore.prototype.withArtifactReferenceReads;
+const nativeArtifactReferenceSubscribe = SQLiteStore.prototype.subscribeArtifactReferenceClean;
+
 interface NativeNodePublication {
   readonly store: KnowledgeStore;
   readonly previous: WeakRef<KnowledgeNodeRecord> | undefined;
@@ -208,6 +224,8 @@ export class KnowledgeStore {
   private readonly declareNativeExecutionFormat: (() => void) | undefined;
   private readonly declareNativeCiFormat: (() => void) | undefined;
   private readonly declareNativeSettlementFormat: (() => void) | undefined;
+  private readonly beforeSemanticNodeWrite: (record: KnowledgeNodeRecord) => void;
+  private readonly declareSemanticSourceFormat: (() => void) | undefined;
   private readonly ledgerStorage = new Map<string, KnowledgeWorkLedgerStorage>();
   private initPromise: Promise<void> | null = null;
   private readonly sources = new Map<string, KnowledgeSourceRecord>();
@@ -241,7 +259,16 @@ export class KnowledgeStore {
     this.declareNativeExecutionFormat = declareNativeData ? () => declareNativeData('native-execution-bindings-v2') : undefined;
     this.declareNativeCiFormat = declareNativeData ? () => declareNativeData('native-ci-continuations-v2') : undefined;
     this.declareNativeSettlementFormat = declareNativeData ? () => declareNativeData('native-settlements-v2') : undefined;
-    this.sqlite = new SQLiteStore(this.dbPath, { coordinated: true, beforePersist: () => declareNativeData?.('knowledge-schema-v13'), ...(beforeInitialRead ? { beforeInitialRead } : {}) });
+    this.beforeSemanticNodeWrite = record => {
+      if (record.metadata.semanticIdentityVersion === 1) assertKnowledgeWriteCurrent(() => declareNativeData?.('knowledge-semantic-identities-v1'));
+    };
+    this.declareSemanticSourceFormat = declareNativeData ? () => declareNativeData('knowledge-semantic-source-revisions-v2') : undefined;
+    this.sqlite = new SQLiteStore(this.dbPath, { coordinated: true, beforePersist: () => declareNativeData?.('knowledge-schema-v14'), ...(beforeInitialRead ? { beforeInitialRead } : {}) });
+    nativePublicationApply(nativePublicationSet, nativeArtifactReferenceStores, [this, Object.freeze({
+      sqlite: this.sqlite, path: this.dbPath,
+      sqliteSlot: Object.freeze(Object.getOwnPropertyDescriptor(this, 'sqlite')!),
+      pathSlot: Object.freeze(Object.getOwnPropertyDescriptor(this, 'dbPath')!),
+    })]);
     nativePublicationApply(nativePublicationAdd, nativeNodePublicationOwners, [this]);
     void this.init().catch((error: unknown) => {
       logger.error('[knowledge-store] initialization failed', {
@@ -316,15 +343,23 @@ export class KnowledgeStore {
   close(): Promise<void> {
     if (this.closePromise) return this.closePromise;
     this.closed = true;
+    const artifactCleanup = retireKnowledgeArtifactCleanup(this);
     const drains = [...this.ledgerStorage.values(), ...this.nativeExecutionStorage.values(), ...this.nativeConversationStorage.values()].map(storage => storage.close());
     this.closePromise = (async () => {
       await this.initPromise?.catch(() => {});
       await Promise.all(drains);
       await this.sqlite.settled();
+      await artifactCleanup;
       this.sqlite.close();
       this.ready = false;
     })();
     return this.closePromise;
+  }
+
+  /** Cleanup reads every configured native reference family under its original
+   * owner; an incomplete ensemble preserves the artifact. */
+  cleanupUnreferencedArtifact(observation: ArtifactOriginalObservation): Promise<ArtifactCleanupResult> {
+    return cleanupKnowledgeArtifact(this, observation);
   }
 
   status(): KnowledgeStatus {
@@ -515,6 +550,38 @@ export class KnowledgeStore {
    * Use this instead of computing a historical projectPlanningSourceId. */
   getPlanningSourceSnapshot(identity: PlanningSourceIdentity): KnowledgeSourceSnapshot {
     return planningSourceSnapshotFromRows(this.sqlite.readPersistedPlanningSource(identity));
+  }
+
+  /** Closed indexed lookup returns only original cached rows whose complete
+   * persisted representation still matches this native store's read frame. */
+  getSemanticFactCandidates(selector: SemanticFactSelector): readonly KnowledgeNodeRecord[] {
+    const candidates: KnowledgeNodeRecord[] = [];
+    this.assertRecordSnapshotFrame(() => {
+      const result = this.sqlite.readPersistedSemanticFactCandidates(selector)[0];
+      for (const values of result?.values ?? []) {
+        if (!result) throw new SemanticIdentityHeldError('stale');
+        const snapshot = knowledgeRecordSnapshotFromRows('node', [{ columns: result.columns, values: [values] }]);
+        const record = snapshot.record ? this.nodes.get(snapshot.record.id) : undefined;
+        if (!record || !snapshot.record || snapshot.generation === null || !sameKnowledgeRecord(record, snapshot.record)) throw new SemanticIdentityHeldError('stale');
+        candidates.push(record);
+      }
+      return undefined;
+    });
+    return Object.freeze(candidates);
+  }
+
+  getGeneratedProjectionSourceSnapshot(identity: GeneratedProjectionIdentity): KnowledgeSourceSnapshot {
+    const rows = this.sqlite.readPersistedGeneratedProjectionSource(identity);
+    if ((rows[0]?.values.length ?? 0) > 1) throw new KnowledgeProjectionIdentityHeldError('ambiguous');
+    const snapshot = knowledgeSourceSnapshotFromRows(rows);
+    if (snapshot.source) {
+      const saved = savedGeneratedProjectionIdentity(snapshot.source);
+      const expected = projectionIdentityParams(identity);
+      if (!saved || projectionIdentityParams(saved).some((value, index) => value !== expected[index])) {
+        throw new KnowledgeProjectionIdentityHeldError('malformed');
+      }
+    }
+    return snapshot;
   }
 
   /** Batch only synchronous guard reads, never evidence across an await/write. */
@@ -855,7 +922,7 @@ export class KnowledgeStore {
     input = captureKnowledgeStoreInput(input);
     await this.init();
     await applyKnowledgeImport(this, { sqlite: this.sqlite, sources: this.sources, extractions: this.extractions, nodes: this.nodes,
-      nodeRevisions: this.nodeRevisions, edges: this.edges, issues: this.issues }, input,
+      nodeRevisions: this.nodeRevisions, edges: this.edges, issues: this.issues, beforeNodeWrite: this.beforeSemanticNodeWrite }, input,
     (node) => this.prepareNodeMutation(node), this.nodeActivationConfidenceFloor, this.nodeActivationScope, options);
   }
 
@@ -870,7 +937,7 @@ export class KnowledgeStore {
     input = copyKnowledgeRepresentation(input, captureKnowledgeStoreInput(input));
     await this.init();
     return applyKnowledgeImport(this, { sqlite: this.sqlite, sources: this.sources, extractions: this.extractions, nodes: this.nodes,
-      nodeRevisions: this.nodeRevisions, edges: this.edges, issues: this.issues,
+      nodeRevisions: this.nodeRevisions, edges: this.edges, issues: this.issues, beforeNodeWrite: this.beforeSemanticNodeWrite,
       nodePublished: (record, previous, snapshot) => {
         nativePublicationApply(nativePublicationSet, nativeNodePublications, [record, Object.freeze({ store: this, previous: previous ? new WeakRef(previous) : undefined, snapshot })]);
       } }, input,
@@ -892,6 +959,7 @@ export class KnowledgeStore {
       return record;
     }
     // Everything after the final guard and before save is synchronous.
+    this.beforeSemanticNodeWrite(record);
     const snapshot = knowledgeRecordSnapshotFromRows('node', writeKnowledgeNodeRow(this.sqlite, record));
     recordKnowledgeNodeRevisions(this.sqlite, this.nodeRevisions, record, existing, now);
     retainKnowledgeNodeObservation(existing, record, observationEvidence);
@@ -941,6 +1009,7 @@ export class KnowledgeStore {
     const authority = mutation !== undefined || replacement === existing;
     const prepared = await prepareNodeActivationPass(this, [{ input: record, existing, record: replacement, now, authority, restoration }], {}, this.nodeActivationConfidenceFloor, this.nodeActivationScope);
     const guarded = preparedNodeWrite(this, prepared, 0, this.nodeActivationScope).record;
+    this.beforeSemanticNodeWrite(guarded);
     writeKnowledgeNodeRow(this.sqlite, guarded);
     if (mutation) recordKnowledgeNodeRevisions(this.sqlite, this.nodeRevisions, guarded, existing, now);
     retainKnowledgeNodeObservation(existing, guarded);
@@ -954,7 +1023,7 @@ export class KnowledgeStore {
     await this.init();
     return mergeKnowledgeNodes(this, loserId, winnerId, {
       sqlite: this.sqlite, nodes: this.nodes, edges: this.edges,
-      nodeRevisions: this.nodeRevisions, nodeActivationScope: this.nodeActivationScope,
+      nodeRevisions: this.nodeRevisions, nodeActivationScope: this.nodeActivationScope, beforeNodeWrite: this.beforeSemanticNodeWrite,
     });
   }
 
@@ -969,6 +1038,7 @@ export class KnowledgeStore {
     readonly metadata?: Record<string, unknown> | undefined;
   }): Promise<KnowledgeSemanticEnrichmentStateRecord> {
     await this.init();
+    if (input.metadata?.semanticSourceVersion === 2) assertKnowledgeWriteCurrent(this.declareSemanticSourceFormat);
     const record = upsertKnowledgeSemanticEnrichmentState(this.sqlite, this.semanticEnrichmentStates, input);
     await this.sqlite.save();
     return record;
@@ -1074,7 +1144,7 @@ export class KnowledgeStore {
     const issues = input.issues.map((issue) => prepareKnowledgeIssueRecord({ issues: this.issues, sources: this.sources, nodes: nodeView }, issue));
     beforeWrite();
     assertPreparedNodeWrites(this, prepared, this.nodeActivationScope);
-    commitKnowledgeNodeIssueWrites({ sqlite: this.sqlite, nodes: this.nodes, issues: this.issues, nodeRevisions: this.nodeRevisions },
+    commitKnowledgeNodeIssueWrites({ sqlite: this.sqlite, nodes: this.nodes, issues: this.issues, nodeRevisions: this.nodeRevisions, beforeNodeWrite: this.beforeSemanticNodeWrite },
       nodes, issues.filter((issue) => !issue.preserve).map((issue) => issue.record));
     nodes.forEach(({ existing, record, observationEvidence }, index) => { retainKnowledgeNodeObservation(existing, record, observationEvidence); markPreparedNodeWritten(prepared, index, this.sqlite); });
     await this.sqlite.save();
@@ -1416,6 +1486,16 @@ export class KnowledgeStore {
           createKnowledgeNodeContentRevisions(db);
           createKnowledgeNodeActivationCache(db);
           createNativeWorkSettlementTargetIndex(db);
+          validateKnowledgeSchemaV13(db);
+        } },
+        // A separate version lets existing v13 images pass their original
+        // validator before installing scoped projection identity constraints.
+        // Earlier writers must not publish unscoped pages over these records.
+        { toVersion: 14, migrate: db => {
+          validateKnowledgeSchemaV13(db);
+          createGeneratedProjectionIdentityIndex(db);
+          createArtifactReferenceIndexes(db);
+          createSemanticFactIdentityIndex(db);
           validateCurrentKnowledgeSchema(db);
         } },
       ],
@@ -1468,4 +1548,41 @@ export class KnowledgeStore {
     this.semanticEnrichmentStates.clear();
     for (const record of snapshot.semanticEnrichmentStates) this.semanticEnrichmentStates.set(record.sourceId, record);
   }
+}
+
+
+const nativeArtifactReferenceInit = KnowledgeStore.prototype.init;
+/** Actual native store only: a copied object or replacement database slot cannot
+ * acquire a reference-reader capability by presenting an equal filesystem path. */
+export function captureKnowledgeArtifactReferenceOwner(store: KnowledgeStore): KnowledgeArtifactReferenceOwner {
+  const core: NativeArtifactReferenceStore | undefined = nativePublicationApply(nativePublicationGet, nativeArtifactReferenceStores, [store]);
+  if (!core) throw new Error('Knowledge artifact reference owner is unavailable.');
+  const current = () => {
+    for (const [name, original] of [['sqlite', core.sqliteSlot], ['dbPath', core.pathSlot]] as const) {
+      const actual = Object.getOwnPropertyDescriptor(store, name);
+      if (!actual || !('value' in actual) || actual.value !== original.value || actual.configurable !== original.configurable
+        || actual.writable !== original.writable || actual.enumerable !== original.enumerable) throw new Error('Knowledge artifact reference owner changed.');
+    }
+    const closed = Object.getOwnPropertyDescriptor(store, 'closed');
+    if (!closed || !('value' in closed) || closed.value !== false
+      || Object.getOwnPropertyDescriptor(KnowledgeStore.prototype, 'init')?.value !== nativeArtifactReferenceInit || Object.hasOwn(store, 'init')
+      || Object.getOwnPropertyDescriptor(SQLiteStore.prototype, 'withArtifactReferenceReads')?.value !== nativeArtifactReferenceRead || Object.hasOwn(core.sqlite, 'withArtifactReferenceReads')
+      || Object.getOwnPropertyDescriptor(SQLiteStore.prototype, 'subscribeArtifactReferenceClean')?.value !== nativeArtifactReferenceSubscribe || Object.hasOwn(core.sqlite, 'subscribeArtifactReferenceClean')) throw new Error('Knowledge artifact reference owner is closed or changed.');
+  };
+  current();
+  return Object.freeze({
+    path: core.path,
+    subscribeClean(listener: () => void): () => void {
+      current();
+      return nativePublicationApply(nativeArtifactReferenceSubscribe, core.sqlite, [listener]) as () => void;
+    },
+    async withReads<T>(ids: readonly string[], operation: (referenced: readonly string[], assertCurrent: () => void) => Promise<T>) {
+      current(); await nativePublicationApply(nativeArtifactReferenceInit, store, []); current();
+      const result = await nativePublicationApply(nativeArtifactReferenceRead, core.sqlite, [ids, async (referenced: readonly string[], sqliteCurrent: () => void) => {
+        const assertCurrent = () => { current(); sqliteCurrent(); };
+        assertCurrent(); const value = await operation(referenced, assertCurrent); assertCurrent(); return value;
+      }]) as { readonly kind: 'local-changes' } | { readonly kind: 'completed'; readonly value: T };
+      current(); return result;
+    },
+  });
 }

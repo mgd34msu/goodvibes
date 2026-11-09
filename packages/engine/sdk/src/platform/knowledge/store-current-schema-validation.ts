@@ -1,6 +1,9 @@
+import { validateSemanticFactIdentityIndex } from './store-semantic-fact-selector.js';
 import { validateKnowledgeRowRevisions } from './store-row-revisions.js';
 import { validateKnowledgeNodeContentRevisions } from './store-node-content-revisions.js';
 import { validateKnowledgeNodeActivationCache } from './store-node-activation-cache.js';
+import { validateGeneratedProjectionIdentityIndex } from './store-generated-projection-selector.js';
+import { validateArtifactReferenceIndexes } from './store-artifact-references.js';
 import type { SqlDatabase } from '../state/sqlite-store.js';
 import { validateWorkLedgerTable } from './store-work-ledger.js';
 import { validateNativeWorkExecutionTable, validateNativeWorkExecutionIntentTable, validateNativeWorkSettlementTable } from './store-native-work-execution.js';
@@ -20,9 +23,17 @@ export function validateKnowledgeSchemaV12(db: Pick<SqlDatabase, 'exec'>): void 
   validateKnowledgeRowRevisions(db);
 }
 
-/** Complete current schema checks, shared with the closed native read plan. */
-export function validateCurrentKnowledgeSchema(db: Pick<SqlDatabase, 'exec'>): void {
+/** Original v13 accepts the native activation dependency tables. */
+export function validateKnowledgeSchemaV13(db: Pick<SqlDatabase, 'exec'>): void {
   validateKnowledgeSchemaV12(db);
   validateKnowledgeNodeContentRevisions(db);
   validateKnowledgeNodeActivationCache(db);
+}
+
+/** Complete current schema checks, shared with the closed native read plan. */
+export function validateCurrentKnowledgeSchema(db: Pick<SqlDatabase, 'exec'>): void {
+  validateKnowledgeSchemaV13(db);
+  validateGeneratedProjectionIdentityIndex(db);
+  validateArtifactReferenceIndexes(db);
+  validateSemanticFactIdentityIndex(db);
 }

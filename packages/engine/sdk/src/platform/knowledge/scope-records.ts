@@ -1,3 +1,4 @@
+import { generatedProjectionMatchesSpecificScope, isGeneratedProjectionViewEdge } from './store-generated-projection-selector.js';
 /** Explicit namespace and association membership only. Semantic inclusion belongs to scope-selection.ts. */
 import {
   DEFAULT_KNOWLEDGE_SPACE_ID,
@@ -28,7 +29,7 @@ export function knowledgeSourceMatchesScope(
 ): boolean {
   const scopedSpaceId = resolveKnowledgeSpaceScope(scope);
   if (scopedSpaceId === null) return true;
-  return isInKnowledgeSpaceScope(source, scope);
+  return generatedProjectionMatchesSpecificScope(source, scope) && isInKnowledgeSpaceScope(source, scope);
 }
 
 export function knowledgeNodeMatchesScope(
@@ -110,7 +111,7 @@ function relatedNodeSpaceIds(node: KnowledgeNodeRecord, lookup: KnowledgeScopeLo
     if (linkedSpace) spaces.add(linkedSpace);
   }
   for (const edge of lookup.edges ?? []) {
-    if (!edgeTouchesRecord(edge, 'node', node.id)) continue;
+    if (!edgeTouchesRecord(edge, 'node', node.id) || isGeneratedProjectionViewEdge(edge.fromKind === 'source' ? lookupSource(lookup, edge.fromId) : null, edge)) continue;
     const edgeSpace = getExplicitKnowledgeSpaceId(edge);
     if (edgeSpace) spaces.add(edgeSpace);
     for (const related of relatedEdgeSpaceIds(edge, lookup)) spaces.add(related);

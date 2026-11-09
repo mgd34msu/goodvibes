@@ -1,3 +1,4 @@
+export { configureKnowledgeArtifactReferences } from './artifact-reference-ensemble.js';
 export { KnowledgeUriCanonicalizationHeldError } from './uri-canonicalization/types.js';
 export { KnowledgeConnectorRegistry, createDefaultKnowledgeConnectorRegistry } from './connectors.js';
 export {
@@ -64,8 +65,6 @@ export type {
   GeneratedKnowledgeRelatedPage,
 } from './generated-pages.js';
 export {
-  generatedKnowledgeCanonicalUri,
-  generatedKnowledgeSourceId,
   isGeneratedKnowledgeSource,
   materializeGeneratedKnowledgeProjection,
 } from './generated-projections.js';
@@ -257,6 +256,10 @@ export { KnowledgeProjectionService } from './projections.js';
 export { KnowledgeStore } from './store.js';
 export type { KnowledgeSourceSnapshot, KnowledgeSourceWriteResult } from './store-source-generation.js';
 export type { PlanningSourceIdentity } from './store-planning-source-selector.js';
+export type { GeneratedProjectionIdentity } from './store-generated-projection-selector.js';
+export type { SemanticFactSelector } from './store-semantic-fact-selector.js';
+export { SemanticIdentityHeldError } from './store-semantic-fact-selector.js';
+export { KnowledgeProjectionIdentityHeldError } from './store-generated-projection-selector.js';
 export type { KnowledgeGuardedNodeIssueWrites } from './store-node-issue-writes.js';
 export { createKnowledgeNodeOperatorMutation, KnowledgeNodeMutationHeldError } from './store-node-authority.js';
 export type { KnowledgeNodeMutationContext, KnowledgeNodeFieldCorrection } from './store-node-authority.js';

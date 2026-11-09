@@ -75,6 +75,10 @@ describe('projectionPayload: refuses rather than sending something the daemon re
     });
   });
 
+  test('a dashboard carries the selected optional preset instead of choosing the default', () => {
+    expect(projectionPayload({ kind: 'dashboard', renderableKind: 'dashboard', id: 'backlinks' })).toEqual({ kind: 'dashboard', id: 'backlinks', limit: 25 });
+  });
+
   test('an id-requiring kind carries its id', () => {
     expect(projectionPayload({ kind: 'source', renderableKind: 'source', id: 'src-1' }, 5)).toEqual({
       kind: 'source',

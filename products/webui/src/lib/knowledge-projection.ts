@@ -12,7 +12,7 @@
  *   1. `kind` is a closed union of seven values. Anything else, including a
  *      kind a NEWER daemon invents, is not a valid request.
  *   2. `id` is not uniformly optional. The input is a discriminated union: a
- *      bundle/dashboard/overview projection takes no id, while an
+ *      bundle/overview projection takes no id, a dashboard accepts its preset id, while an
  *      issue/node/rollup/source projection REQUIRES one.
  *
  * So a source-kind target whose id could not be read produced a request the
@@ -94,5 +94,6 @@ export function projectionPayload(selection: ProjectionTargetLike, limit = 25): 
     }
     return { kind, id: selection.id, limit };
   }
+  if (kind === 'dashboard' && selection.id) return { kind, id: selection.id, limit };
   return { kind, limit };
 }

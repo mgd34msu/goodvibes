@@ -78,9 +78,11 @@ export function writeKnowledgeIssueRow(sqlite: Pick<SQLiteStore, 'run'>, record:
 export function commitKnowledgeNodeIssueWrites(view: {
   sqlite: SQLiteStore; nodes: Map<string, KnowledgeNodeRecord>; issues: Map<string, KnowledgeIssueRecord>;
   nodeRevisions: Map<string, KnowledgeNodeRevisionRecord[]>;
+  beforeNodeWrite?: ((record: KnowledgeNodeRecord) => void) | undefined;
 }, nodes: readonly PreparedKnowledgeNode[], issues: readonly KnowledgeIssueRecord[]): void {
   const revisions = new Map<string, KnowledgeNodeRevisionRecord[]>();
   for (const { record } of nodes) revisions.set(record.id, [...(view.nodeRevisions.get(record.id) ?? [])]);
+  for (const { record } of nodes) view.beforeNodeWrite?.(record);
   view.sqlite.run('SAVEPOINT knowledge_guarded_node_issue_write');
   try {
     for (const { record, existing, now } of nodes) {

@@ -52,11 +52,11 @@ device passport page's target is the passport record itself, while its
 subject is the actual device the passport describes.
 
 Refresh state lives on the generated source and artifact themselves as
-`metadata.generatedAt` (when the markdown was last produced) and
-`metadata.generatedContentHash` (a hash of that markdown). When a page is
-regenerated with identical content, the SDK keeps the existing `generatedAt`
-and artifact instead of stamping a new one, so an unchanged page does not look
-freshly written every time reindex or sync runs over it.
+`metadata.generatedAt` (when the markdown was last produced). Refresh compares
+the complete saved markdown, filename and MIME type before reusing an artifact.
+An identical page keeps its artifact and timestamp, so it does not look freshly
+written every time reindex or sync runs. Earlier `generatedContentHash` cache
+fields are cleared during refresh; they do not determine reuse.
 
 ### Local structural references
 

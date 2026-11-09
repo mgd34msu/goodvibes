@@ -12,6 +12,8 @@ import { createKnowledgeApi } from '../sdk/src/platform/knowledge/knowledge-api.
 import { KnowledgeService } from '../sdk/src/platform/knowledge/service.js';
 import { knowledgeSpaceMetadata } from '../sdk/src/platform/knowledge/spaces.js';
 import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
+import { KNOWLEDGE_JOB_RUN_RESULT_SCHEMA } from '../sdk/src/platform/control-plane/operator-contract-schemas-knowledge.js';
+import { firstJsonSchemaFailureAsync } from '../transport-http/src/client-plumbing.js';
 import { MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore } from '../sdk/src/platform/state/index.js';
 import { trackDisposables } from './_helpers/disposables.ts';
 import { useKnowledgeAnswerReadings } from './_helpers/knowledge-answer-readings.js';
@@ -211,4 +213,23 @@ describe('knowledge GraphQL scope selections', () => {
       installJudgmentPort(previous);
     }
   });
+});
+
+test('actual GraphQL materialization and rebuild job preserve unknown-scope diagnostics and returned opaque source IDs', async () => {
+  const { graphql, service, store } = await fixture();
+  const old = await store.upsertSource({ id: 'saved-unscoped-projection', connectorId: 'knowledge-projection', sourceType: 'document',
+    title: 'Saved unknown-scope page', status: 'indexed', metadata: { generatedProjection: true, generatedKnowledgePage: true } });
+  const result = await graphql.execute({
+    query: 'mutation { materializeProjection(kind: OVERVIEW) { source { id } artifactCreated preservedUnscopedSourceIds note } }',
+    admin: true, scopes: ['read:knowledge', 'write:knowledge'],
+  });
+  expect(result.errors).toBeUndefined();
+  expect(result.data).toMatchObject({ materializeProjection: { source: { id: expect.stringMatching(/^kg-gen-[a-p-]+$/) },
+    artifactCreated: true, preservedUnscopedSourceIds: [old.id], note: expect.stringContaining('preserved') } });
+  const job = await service.runJob('knowledge-rebuild-projections', { mode: 'inline' });
+  expect(await firstJsonSchemaFailureAsync(KNOWLEDGE_JOB_RUN_RESULT_SCHEMA, job.result)).toBeUndefined();
+  expect(job.result.preservedUnscopedSourceIds).toEqual([old.id]);
+  expect(job.result.note).toEqual(expect.stringContaining('preserved'));
+  expect(job.result.projections).toEqual(expect.arrayContaining([expect.objectContaining({ sourceId: expect.stringMatching(/^kg-gen-[a-p-]+$/) })]));
+  expect(store.getSource(old.id)?.title).toBe(old.title);
 });

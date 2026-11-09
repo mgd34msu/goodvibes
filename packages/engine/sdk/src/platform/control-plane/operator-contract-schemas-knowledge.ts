@@ -137,6 +137,7 @@ export const KNOWLEDGE_SCHEDULE_INPUT_SCHEMA = {
 const KNOWLEDGE_JOB_RUN_PROJECTION_SCHEMA = objectSchema({
   targetId: STRING_SCHEMA,
   artifactId: STRING_SCHEMA,
+  sourceId: STRING_SCHEMA,
 }, ['targetId', 'artifactId'], { additionalProperties: false });
 const KNOWLEDGE_JOB_RUN_ISSUE_COUNT_RESULT_SCHEMA = objectSchema({
   issueCount: NUMBER_SCHEMA,
@@ -144,6 +145,8 @@ const KNOWLEDGE_JOB_RUN_ISSUE_COUNT_RESULT_SCHEMA = objectSchema({
 const KNOWLEDGE_JOB_RUN_REINDEX_RESULT_SCHEMA = objectSchema({
   sourceCount: NUMBER_SCHEMA,
   issueCount: NUMBER_SCHEMA,
+  provenance: enumSchema(['classic']),
+  semanticEnrichment: enumSchema(['attempted', 'not-evaluated']),
 }, ['sourceCount', 'issueCount'], { additionalProperties: false });
 const KNOWLEDGE_JOB_RUN_REFRESH_RESULT_SCHEMA = objectSchema({
   refreshed: NUMBER_SCHEMA,
@@ -151,11 +154,19 @@ const KNOWLEDGE_JOB_RUN_REFRESH_RESULT_SCHEMA = objectSchema({
 const KNOWLEDGE_JOB_RUN_BROWSER_SYNC_RESULT_SCHEMA = objectSchema({
   imported: NUMBER_SCHEMA,
   failed: NUMBER_SCHEMA,
+  captured: NUMBER_SCHEMA,
+  capturePartial: NUMBER_SCHEMA,
+  captureFailed: NUMBER_SCHEMA,
+  compilationHeld: NUMBER_SCHEMA,
+  compilationFailed: NUMBER_SCHEMA,
+  outcomes: arraySchema(KNOWLEDGE_BROWSER_INGEST_OUTCOME_SCHEMA),
   profileCount: NUMBER_SCHEMA,
   errorCount: NUMBER_SCHEMA,
 }, ['imported', 'failed', 'profileCount', 'errorCount'], { additionalProperties: false });
 const KNOWLEDGE_JOB_RUN_PROJECTIONS_RESULT_SCHEMA = objectSchema({
   projections: arraySchema(KNOWLEDGE_JOB_RUN_PROJECTION_SCHEMA),
+  preservedUnscopedSourceIds: STRING_LIST_SCHEMA,
+  note: STRING_SCHEMA,
 }, ['projections'], { additionalProperties: false });
 const KNOWLEDGE_JOB_RUN_CONSOLIDATION_RESULT_SCHEMA = objectSchema({
   reportId: STRING_SCHEMA,
@@ -694,6 +705,8 @@ export const KNOWLEDGE_MATERIALIZED_PROJECTION_SCHEMA = objectSchema({
   source: KNOWLEDGE_SOURCE_SCHEMA,
   linked: KNOWLEDGE_EDGE_SCHEMA,
   artifactCreated: BOOLEAN_SCHEMA,
+  preservedUnscopedSourceIds: STRING_LIST_SCHEMA,
+  note: STRING_SCHEMA,
 }, ['bundle', 'artifact'], { additionalProperties: true });
 
 export { KNOWLEDGE_MAP_OUTPUT_SCHEMA } from './operator-contract-schemas-knowledge-map.js';

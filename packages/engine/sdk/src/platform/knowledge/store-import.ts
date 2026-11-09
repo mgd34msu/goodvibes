@@ -54,6 +54,7 @@ export interface KnowledgeImportView {
   readonly edges: Map<string, KnowledgeEdgeRecord>;
   readonly issues: Map<string, KnowledgeIssueRecord>;
   /** Native store closure; invoked only alongside the actual committed cache rows. */
+  readonly beforeNodeWrite?: ((record: KnowledgeNodeRecord) => void) | undefined;
   readonly nodePublished?: ((record: KnowledgeNodeRecord, previous: KnowledgeNodeRecord | undefined, snapshot: KnowledgeRecordSnapshot) => void) | undefined;
 }
 function extractionFor(extractions: ReadonlyMap<string, KnowledgeExtractionRecord>, sourceId: string): KnowledgeExtractionRecord | null {
@@ -129,6 +130,7 @@ export async function applyKnowledgeImport(store: KnowledgeStore, view: Knowledg
   const revisions = new Map<string, KnowledgeNodeRevisionRecord[]>();
   for (const { record } of nodes) revisions.set(record.id, [...(view.nodeRevisions.get(record.id) ?? [])]);
   const nodePublicationSnapshots = new NativePublicationMap<KnowledgeNodeRecord, KnowledgeRecordSnapshot>();
+  for (const { record, existing } of nodes) if (record !== existing) view.beforeNodeWrite?.(record);
   await view.sqlite.publishPrepared((sqlite) => {
     for (const record of sourceWrites) writeKnowledgeSourceRow(sqlite, record);
     for (const record of extractionWrites) writeKnowledgeExtractionRow(sqlite, record);

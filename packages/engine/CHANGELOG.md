@@ -4,6 +4,16 @@
 
 ### Fixed
 
+- Keep generated knowledge pages separate for each space and target, including
+  All spaces. Preserve older pages with unknown scope and offer explicit WebUI
+  inspection. Fix projection item and dashboard dispatch, selected-result
+  display, and GraphQL/job response diagnostics.
+
+- Reuse generated artifacts only when their complete bytes, filename and MIME
+  type match. Retain publication ownership through the graph commit, and check
+  persisted references across wiki, Agent and HomeGraph before cleanup. Batch
+  native reference reads, retry after clean writes, and drain cleanup on shutdown.
+
 - Preserve full generated UUIDs for knowledge sources, extractions, nodes, edges,
   issues and job records. Distinct UUIDs sharing the former eight-character
   prefix can no longer overwrite unrelated rows through their generated IDs.

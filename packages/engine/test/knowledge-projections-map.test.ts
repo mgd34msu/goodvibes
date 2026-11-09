@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { ArtifactStore } from '../sdk/src/platform/artifacts/index.js';
+import { configureKnowledgeArtifactReferences } from '../sdk/src/platform/knowledge/artifact-reference-ensemble.js';
 import { ConfigManager } from '../sdk/src/platform/config/manager.js';
 import { listGeneratedKnowledgePages } from '../sdk/src/platform/knowledge/generated-pages.js';
 import { materializeGeneratedKnowledgeProjection } from '../sdk/src/platform/knowledge/generated-projections.js';
@@ -93,6 +94,7 @@ describe('knowledge generated projections and maps', () => {
       projectionKind: 'test-generated-page',
     });
     const failingStore = Object.create(store) as KnowledgeStore;
+    failingStore.cleanupUnreferencedArtifact = store.cleanupUnreferencedArtifact.bind(store);
     failingStore.upsertSource = async () => {
         throw new Error('source persistence failed');
     };
@@ -190,8 +192,9 @@ describe('knowledge generated projections and maps', () => {
     const { store, artifactStore } = createStores();
     const controller = new AbortController();
     const abortingArtifactStore = Object.create(artifactStore) as ArtifactStore;
-    abortingArtifactStore.create = async (input) => {
-      const artifact = await artifactStore.create(input);
+    abortingArtifactStore.captureOriginal = artifactStore.captureOriginal.bind(artifactStore);
+    abortingArtifactStore.createForPublication = async (input, ownership) => {
+      const artifact = await artifactStore.createForPublication(input, ownership);
       controller.abort();
       return artifact;
     };
@@ -217,6 +220,7 @@ describe('knowledge generated projections and maps', () => {
     const { store, artifactStore } = createStores();
     const controller = new AbortController();
     const abortingStore = Object.create(store) as KnowledgeStore;
+    abortingStore.cleanupUnreferencedArtifact = store.cleanupUnreferencedArtifact.bind(store);
     abortingStore.upsertSource = async (input) => {
       const source = await store.upsertSource(input);
       controller.abort();
@@ -243,6 +247,7 @@ describe('knowledge generated projections and maps', () => {
   test('removes newly-created generated sources when source persistence throws after writing', async () => {
     const { store, artifactStore } = createStores();
     const failingStore = Object.create(store) as KnowledgeStore;
+    failingStore.cleanupUnreferencedArtifact = store.cleanupUnreferencedArtifact.bind(store);
     failingStore.upsertSource = async (input) => {
       await store.upsertSource(input);
       throw new Error('source write failed after persistence');
@@ -273,6 +278,7 @@ describe('knowledge generated projections and maps', () => {
     });
     const controller = new AbortController();
     const abortingStore = Object.create(store) as KnowledgeStore;
+    abortingStore.cleanupUnreferencedArtifact = store.cleanupUnreferencedArtifact.bind(store);
     abortingStore.upsertEdge = async (input) => {
       const edge = await store.upsertEdge(input);
       controller.abort();
@@ -311,6 +317,7 @@ describe('knowledge generated projections and maps', () => {
       title: 'Edge Fail Target',
     });
     const failingStore = Object.create(store) as KnowledgeStore;
+    failingStore.cleanupUnreferencedArtifact = store.cleanupUnreferencedArtifact.bind(store);
     failingStore.upsertEdge = async (input) => {
       await store.upsertEdge(input);
       throw new Error('edge write failed after persistence');
@@ -364,6 +371,7 @@ describe('knowledge generated projections and maps', () => {
     const previousEdge = first.linked!;
     const controller = new AbortController();
     const abortingStore = Object.create(store) as KnowledgeStore;
+    abortingStore.cleanupUnreferencedArtifact = store.cleanupUnreferencedArtifact.bind(store);
     abortingStore.upsertEdge = async (input) => {
       const edge = await store.upsertEdge(input);
       controller.abort();
@@ -460,7 +468,7 @@ describe('knowledge generated projections and maps', () => {
       metadata: { generatedKnowledgePage: true },
     });
     const source = await store.upsertSource({
-      connectorId: 'knowledge-projection',
+      connectorId: 'generated-pages',
       sourceType: 'document',
       title: 'Knowledge Packet',
       canonicalUri: 'knowledge://generated/packet/test',
@@ -1402,10 +1410,10 @@ function createStores(): {
 } {
   const root = mkdtempSync(join(tmpdir(), 'goodvibes-knowledge-projection-'));
   tmpRoots.push(root);
-  return {
-    store: new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') }),
-    artifactStore: new ArtifactStore({ rootDir: join(root, 'artifacts') }),
-  };
+  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge-wiki.sqlite') });
+  const artifactStore = new ArtifactStore({ rootDir: join(root, 'artifacts') });
+  configureKnowledgeArtifactReferences({ artifactStore, controlPlaneDirectory: root, stores: [store] });
+  return { store, artifactStore };
 }
 
 function packetContext(store: KnowledgeStore): Parameters<typeof buildKnowledgePacket>[0] {

@@ -1,8 +1,8 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { knowledgeClockIso, knowledgeClockNumber, knowledgeRawRepresentation, retainKnowledgeRepresentation, sameKnowledgeRecord } from './store-record-representation.js';
 import { KnowledgeSourceQualityHeldError } from './source-quality.js';
-import { createHash } from 'node:crypto';
-import type { ArtifactDescriptor } from '../artifacts/types.js';
-import type { ArtifactStore } from '../artifacts/index.js';
+import { sanitizeArtifactFilename, type ArtifactDescriptor } from '../artifacts/types.js';
+import { acquireArtifactPublication, type ArtifactOriginalObservation, type ArtifactPublicationLease, type ArtifactStore } from '../artifacts/index.js';
 import type { KnowledgeStore } from './store.js';
 import type { KnowledgeImportGraph } from './store-import.js';
 import type {
@@ -49,14 +49,6 @@ export interface GeneratedKnowledgeProjectionResult {
   readonly artifactCreated: boolean;
 }
 
-export function generatedKnowledgeSourceId(kind: string, value: string): string {
-  return `kg-gen-${stableHash(`${kind}:${value}`)}`;
-}
-
-export function generatedKnowledgeCanonicalUri(kind: string, value: string): string {
-  return `knowledge://generated/${encodeURIComponent(kind)}/${stableHash(value, 20)}`;
-}
-
 export function isGeneratedKnowledgeSource(source: KnowledgeSourceRecord): boolean {
   return source.metadata.generatedKnowledgePage === true
     || source.metadata.generatedProjection === true;
@@ -77,14 +69,49 @@ export async function materializeGeneratedKnowledgeGraphProjection(
   return { ...result, nodes: result.nodes ?? [] };
 }
 
+interface ProjectionPublication {
+  lease?: ArtifactPublicationLease | undefined;
+  candidate?: ArtifactOriginalObservation | undefined;
+}
 async function materializeProjection(
   input: GeneratedKnowledgeProjectionInput,
   graph?: KnowledgeImportGraph,
 ): Promise<GeneratedKnowledgeProjectionResult & { readonly nodes?: readonly KnowledgeNodeRecord[] }> {
+  const publication: ProjectionPublication = {}, store = input.store;
+  let failed = false;
+  try { return await materializeProjectionOwned(input, graph, publication); }
+  catch (error) {
+    failed = true;
+    // A failed candidate must leave its own publication lock before cleanup
+    // tries the same lock. An uncertain DB publication keeps the artifact.
+    try { releaseProjectionPublication(publication); }
+    catch { logger.warn('Generated knowledge artifact publication release could not be confirmed.'); }
+    if (publication.candidate && !(error instanceof SQLitePublicationError && error.phase === 'indeterminate')) {
+      await cleanOriginalGeneratedArtifact(store, publication.candidate);
+    }
+    throw error;
+  } finally {
+    try { releaseProjectionPublication(publication); }
+    catch (error) { if (!failed) throw error; }
+  }
+}
+function releaseProjectionPublication(publication: ProjectionPublication): void {
+  const lease = publication.lease; publication.lease = undefined;
+  if (lease) assertSynchronousProjectionGuard(lease.release, lease);
+}
+async function materializeProjectionOwned(
+  input: GeneratedKnowledgeProjectionInput,
+  graph: KnowledgeImportGraph | undefined,
+  publication: ProjectionPublication,
+): Promise<GeneratedKnowledgeProjectionResult & { readonly nodes?: readonly KnowledgeNodeRecord[] }> {
   const store = input.store, artifactStore = input.artifactStore;
-  const authority = input.assertCurrent;
+  const authority = input.assertCurrent, graphAssertion = graph?.assertCurrent;
   const signal = input.signal;
   const existing = input.store.getSource(input.sourceId);
+  const oldArtifact = existing?.artifactId ? artifactStore.get(existing.artifactId) : null;
+  const oldOriginal = oldArtifact ? observePreviousGeneratedArtifact(artifactStore, oldArtifact.id) : undefined;
+  const supersededOriginal = oldArtifact && readRecord(oldArtifact.metadata).generatedKnowledgePage === true ? oldOriginal : undefined;
+  let artifactAssertion: (() => void) | undefined;
   const originalSourceVersion = JSON.stringify(existing);
   const target = input.target;
   const readTarget = () => !target ? null : target.kind === 'node' ? input.store.getNode(target.id)
@@ -104,7 +131,12 @@ async function materializeProjection(
     if (authority && (input.store !== store || input.artifactStore !== artifactStore || input.assertCurrent !== authority || input.signal !== signal || outputState() !== outputVersion)) stale();
   };
   const checkOwner = () => {
-    throwIfAborted(signal); authority?.(); graph?.assertCurrent?.();
+    throwIfAborted(signal);
+    assertSynchronousProjectionGuard(authority);
+    if (graph?.assertCurrent !== graphAssertion) stale();
+    assertSynchronousProjectionGuard(graphAssertion, graph);
+    assertSynchronousProjectionGuard(artifactAssertion);
+    if (graph?.assertCurrent !== graphAssertion) stale();
     checkInputCurrent();
     if (authority && (readTarget() !== originalTarget || JSON.stringify(readTarget()) !== targetVersion)) stale();
   };
@@ -122,7 +154,10 @@ async function materializeProjection(
     });
   }
   check();
-  const reusedArtifact = await findReusableGeneratedArtifact(input.artifactStore, existing, input.markdown);
+  const reused = await findReusableGeneratedArtifact(artifactStore, existing, input.markdown, input.filename, oldOriginal, signal, check);
+  publication.lease = reused?.lease;
+  artifactAssertion = reused?.assertCurrent;
+  const reusedArtifact = reused?.artifact;
   check();
   const existingMetadata = readRecord(existing?.metadata);
   const existingGeneratedAt = knowledgeRawRepresentation(existingMetadata).generatedAt;
@@ -141,19 +176,28 @@ async function materializeProjection(
     generatedContentHash: null,
     pageEditable: true,
   };
-  const artifact = reusedArtifact ?? await input.artifactStore.create({
-    kind: 'document',
-    mimeType: 'text/markdown',
-    filename: input.filename,
-    text: input.markdown,
-    retentionMs: 0,
-    metadata: {
-      ...projectionMetadata,
-      ...(input.artifactMetadata ?? {}),
-      generatedAt,
-      generatedContentHash: null,
-    },
-  });
+  let artifact: ArtifactDescriptor;
+  if (reusedArtifact) artifact = reusedArtifact;
+  else {
+    const created = await artifactStore.createForPublication({
+      kind: 'document',
+      mimeType: 'text/markdown',
+      filename: input.filename,
+      text: input.markdown,
+      retentionMs: 0,
+      metadata: {
+        ...projectionMetadata,
+        ...(input.artifactMetadata ?? {}),
+        generatedAt,
+        generatedContentHash: null,
+      },
+    }, { signal, assertCurrent: check });
+    publication.lease = created.lease; publication.candidate = created.original; artifact = created.artifact;
+    artifactAssertion = () => {
+      assertSynchronousProjectionGuard(created.original.assertCurrent, created.original);
+      assertSynchronousProjectionGuard(created.lease.assertCurrent, created.lease);
+    };
+  }
   const sourceInputView = {
     id: input.sourceId,
     connectorId: input.connectorId,
@@ -242,10 +286,8 @@ async function materializeProjection(
       // The guarded ingest either committed atomically under the original owner,
       // or made no mutation. Never overwrite a concurrent writer or compensate
       // an already valid commit after a later owner retirement.
-      if (!reusedArtifact && !store.listSources().some((record) => record.artifactId === artifact.id)) artifactStore.delete(artifact.id);
       throw error;
     }
-    if (!reusedArtifact) input.artifactStore.delete(artifact.id);
     const currentLinked = edgeInput
       ? input.store.edgesFor(edgeInput.fromKind, edgeInput.fromId).find((edge) => (
           edge.toKind === edgeInput.toKind
@@ -269,12 +311,16 @@ async function materializeProjection(
     throw error;
   }
   if (!source) throw new Error(`Generated projection '${input.sourceId}' did not persist a source record.`);
-  if (!reusedArtifact && existing?.artifactId && existing.artifactId !== artifact.id) {
-    const existingArtifact = input.artifactStore.get(existing.artifactId);
-    if (existingArtifact && readRecord(existingArtifact.metadata).generatedKnowledgePage === true
-      && !input.store.listSources().some((record) => record.artifactId === existing.artifactId)) {
-      input.artifactStore.delete(existing.artifactId);
-    }
+  if (!reusedArtifact && supersededOriginal && supersededOriginal.id !== artifact.id) {
+    const publishedTarget = readTarget();
+    const publishedValues = JSON.stringify({ source, linked, nodes, target: publishedTarget });
+    const published = store.captureSourcePublication();
+    await cleanOriginalGeneratedArtifact(store, supersededOriginal);
+    checkInputCurrent();
+    assertSynchronousProjectionGuard(artifactAssertion);
+    published();
+    if (store.getSource(source.id) !== source || (edgeInput && readLinked() !== linked) || readTarget() !== publishedTarget
+      || JSON.stringify({ source, linked, nodes, target: readTarget() }) !== publishedValues) stale();
   }
   return {
     artifact,
@@ -283,6 +329,33 @@ async function materializeProjection(
     artifactCreated: !reusedArtifact,
     ...(nodes ? { nodes } : {}),
   };
+}
+
+/** A broken previous file is a cache miss, not permission to adopt or delete
+ * its replacement. Fresh creation still uses the actual native write owner. */
+function observePreviousGeneratedArtifact(store: ArtifactStore, id: string): ArtifactOriginalObservation | undefined {
+  try { return store.captureOriginal(id); }
+  catch {
+    logger.warn('The previous generated knowledge artifact could not be bound to its original files; preserving it during regeneration.');
+    return undefined;
+  }
+}
+
+/** Cleanup never grants publication authority and never replaces its primary
+ * outcome. Only an actual complete family ensemble may remove the original. */
+async function cleanOriginalGeneratedArtifact(store: KnowledgeStore, original: ArtifactOriginalObservation): Promise<void> {
+  try {
+    const result = await store.cleanupUnreferencedArtifact(original);
+    if (result === 'held' || result === 'unavailable') logger.warn('Generated knowledge artifact cleanup is pending; the original artifact was preserved.', { artifactId: original.id, reason: result });
+  } catch {
+    logger.warn('Generated knowledge artifact cleanup could not be confirmed; the original artifact was preserved.', { artifactId: original.id });
+  }
+}
+
+function assertSynchronousProjectionGuard(guard: (() => void) | undefined, receiver?: unknown): void {
+  if (!guard) return;
+  const result: unknown = Reflect.apply(guard, receiver, []);
+  if (result !== undefined) { drainOwned(result); throw new KnowledgeSourceQualityHeldError('stale'); }
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
@@ -317,25 +390,44 @@ async function findReusableGeneratedArtifact(
   artifactStore: ArtifactStore,
   source: KnowledgeSourceRecord | null,
   markdown: string,
-): Promise<ArtifactDescriptor | undefined> {
-  if (!source?.artifactId) return undefined;
+  filename: string,
+  original: ArtifactOriginalObservation | undefined,
+  signal: AbortSignal | undefined,
+  assertOwner: () => void,
+): Promise<{ readonly artifact: ArtifactDescriptor; readonly lease: ArtifactPublicationLease; readonly assertCurrent: () => void } | undefined> {
+  if (!source?.artifactId || !original || original.id !== source.artifactId) return undefined;
   const artifact = artifactStore.get(source.artifactId);
-  if (!artifact) return undefined;
+  if (!artifact || artifact.kind !== 'document' || artifact.mimeType !== 'text/markdown'
+    || artifact.filename !== sanitizeArtifactFilename(filename, 'artifact.txt')) return undefined;
+  const lease = await acquireArtifactPublication(original, signal);
+  let retained = false, failed = false;
   try {
-    const { buffer } = await artifactStore.readContent(artifact.id);
-    return buffer.equals(Buffer.from(markdown, 'utf-8')) ? artifact : undefined;
-  } catch (error) {
-    logger.warn('Generated knowledge projection artifact reuse failed', {
-      sourceId: source.id,
-      artifactId: artifact.id,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return undefined;
+    assertSynchronousProjectionGuard(assertOwner);
+    let read: Awaited<ReturnType<ArtifactStore['readContent']>>;
+    try { read = await artifactStore.readContent(artifact.id); }
+    catch {
+      logger.warn('Unable to read the previous generated knowledge artifact; preserving it during regeneration.');
+      return undefined;
+    }
+    const assertCurrent = () => {
+      assertSynchronousProjectionGuard(lease.assertCurrent, lease);
+      assertSynchronousProjectionGuard(read.assertCurrent, read);
+      assertSynchronousProjectionGuard(original.assertCurrent, original);
+      assertSynchronousProjectionGuard(lease.assertCurrent, lease);
+    };
+    assertCurrent();
+    if (!read.buffer.equals(Buffer.from(markdown, 'utf-8'))) return undefined;
+    retained = true; return { artifact, lease, assertCurrent };
+  } catch (error) { failed = true; throw error; }
+  finally {
+    if (!retained) {
+      try { assertSynchronousProjectionGuard(lease.release, lease); }
+      catch (error) {
+        if (!failed) throw error;
+        logger.warn('Generated knowledge artifact read publication release could not be confirmed.');
+      }
+    }
   }
-}
-
-function stableHash(value: string, length = 24): string {
-  return createHash('sha256').update(value).digest('hex').slice(0, length);
 }
 
 function readRecord(value: unknown): Record<string, unknown> {

@@ -486,6 +486,11 @@ export const KNOWLEDGE_GRAPHQL_SDL = `
   type KnowledgeMaterializedProjection {
     artifact: ArtifactDescriptor!
     bundle: KnowledgeProjectionBundle!
+    source: KnowledgeSource
+    linked: KnowledgeEdge
+    artifactCreated: Boolean
+    preservedUnscopedSourceIds: [String!]
+    note: String
   }
 `;
 

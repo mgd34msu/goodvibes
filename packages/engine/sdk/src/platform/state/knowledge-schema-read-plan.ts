@@ -1,6 +1,9 @@
+import { validateSemanticFactIdentityIndex } from '../knowledge/store-semantic-fact-selector.js';
 import { validateKnowledgeRowRevisions } from '../knowledge/store-row-revisions.js';
 import { validateKnowledgeNodeContentRevisions } from '../knowledge/store-node-content-revisions.js';
 import { validateKnowledgeNodeActivationCache } from '../knowledge/store-node-activation-cache.js';
+import { validateGeneratedProjectionIdentityIndex } from '../knowledge/store-generated-projection-selector.js';
+import { validateArtifactReferenceIndexes } from '../knowledge/store-artifact-references.js';
 import { KNOWLEDGE_SCHEMA_VERSION } from '../knowledge/store-schema-version.js';
 import type { SqlDatabase } from './sqlite-store.js';
 import { validateCurrentKnowledgeSchema } from '../knowledge/store-current-schema-validation.js';
@@ -54,6 +57,9 @@ export function validateNativeKnowledgeReadSchema(db: Pick<SqlDatabase, 'exec'>)
     validateKnowledgeRowRevisions(db);
     validateKnowledgeNodeContentRevisions(db);
     validateKnowledgeNodeActivationCache(db);
+    validateGeneratedProjectionIdentityIndex(db);
+    validateArtifactReferenceIndexes(db);
+    validateSemanticFactIdentityIndex(db);
   } catch { return false; }
   const layoutResults = db.exec(layouts.map(([table]) => `PRAGMA table_info(${table})`).join(';'));
   // sql.js omits empty statement results. Never attribute a shifted result to

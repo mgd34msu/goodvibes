@@ -1,6 +1,9 @@
+import { createSemanticFactIdentityIndex, semanticFactIdentityIndexSql } from './store-semantic-fact-selector.js';
 import { createKnowledgeRowRevisions, knowledgeRowRevisionTriggers } from './store-row-revisions.js';
 import { createKnowledgeNodeContentRevisions, knowledgeNodeContentRevisionTriggers } from './store-node-content-revisions.js';
 import { createKnowledgeNodeActivationCache, knowledgeNodeActivationCacheSql, knowledgeNodeActivationCacheDeleteSql } from './store-node-activation-cache.js';
+import { createGeneratedProjectionIdentityIndex, generatedProjectionIdentityIndexSql } from './store-generated-projection-selector.js';
+import { createArtifactReferenceIndexes, artifactReferenceIndexes } from './store-artifact-references.js';
 import type { SqlDatabase } from '../state/sqlite-store.js';
 import { knowledgeRecordTableSql } from './store-schema-validation-data.js';
 import { planningSourceIdentityIndexSql } from './store-planning-source-selector.js';
@@ -283,6 +286,9 @@ export function createSchema(db: Pick<SqlDatabase, 'run'> & Partial<Pick<SqlData
     createKnowledgeRowRevisions(native);
     createKnowledgeNodeContentRevisions(native);
     createKnowledgeNodeActivationCache(native);
+    createGeneratedProjectionIdentityIndex(native);
+    createArtifactReferenceIndexes(native);
+    createSemanticFactIdentityIndex(native);
   }
   else {
     // Schema documentation collects DDL without constructing a database.
@@ -291,6 +297,9 @@ export function createSchema(db: Pick<SqlDatabase, 'run'> & Partial<Pick<SqlData
     for (const [, sql] of knowledgeNodeContentRevisionTriggers) db.run(sql);
     db.run(knowledgeNodeActivationCacheSql);
     db.run(knowledgeNodeActivationCacheDeleteSql);
+    db.run(generatedProjectionIdentityIndexSql);
+    for (const index of artifactReferenceIndexes) db.run(index.sql);
+    db.run(semanticFactIdentityIndexSql);
   }
 
 }

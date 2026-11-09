@@ -1,5 +1,6 @@
 import { screeningAnswers } from './_helpers/screening-answers.js';
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
+import * as crypto from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createProtectedSourceOwner } from '../sdk/src/platform/security/source-screening/owner.js';
 import type { ProtectedSourceOwner, ProtectedSourceOwnerOptions, SourceScreeningReceipt,
@@ -397,6 +398,72 @@ test('distinct handles cannot concurrently sample the same uncertain revision', 
   }
   expect(await f.owner.screen(b)).toEqual({ status: 'held', reason: 'unsettled' });
   expect(f.calls).toHaveLength(2);
+});
+
+test('ordinary successful screening and projection create no refusal commitment', async () => {
+  const f = fixture(), hashes = spyOn(crypto, 'createHash');
+  try {
+    const source = f.owner.capture(['An ordinary exact source.']);
+    const result = await f.owner.screen(source);
+    expect(result.status).toBe('settled');
+    if (result.status !== 'settled') throw new Error('Expected settled fixture');
+    for (let guard = 0; guard < 10; guard++) {
+      expect(f.owner.project(result.receipt)).toEqual(['An ordinary exact source.']);
+      expect(await f.owner.screen(source)).toBe(result);
+    }
+    await f.owner.release(source);
+    expect(hashes).not.toHaveBeenCalled();
+  } finally { hashes.mockRestore(); }
+});
+
+test('same-length pending sources compare exact original parts without hashing or sampling duplicates', async () => {
+  const gate = deferred<void>(), started = deferred<void>(); let count = 0;
+  const f = fixture({ propose: async source => {
+    if (++count === 2) started.resolve();
+    await gate.promise; return { revision: source.revision, spans: [] };
+  } });
+  const hashes = spyOn(crypto, 'createHash');
+  const first = f.owner.screen(f.owner.capture(['Source A.']));
+  const second = f.owner.screen(f.owner.capture(['Source B.']));
+  try {
+    await started.promise;
+    expect(await f.owner.screen(f.owner.capture(['Source A.']))).toEqual({ status: 'held', reason: 'busy' });
+    expect(f.calls).toHaveLength(2);
+    gate.resolve();
+    expect((await first).status).toBe('settled'); expect((await second).status).toBe('settled');
+    expect(hashes).not.toHaveBeenCalled();
+  } finally { gate.resolve(); await Promise.allSettled([first, second]); hashes.mockRestore(); }
+});
+
+test('an actual unsettled commitment survives raw handle release and is computed only once per original', async () => {
+  const f = fixture({ judge: body => reading(body, 0.5, 1) });
+  const hashes = spyOn(crypto, 'createHash');
+  try {
+    const source = f.owner.capture(['The same uncertain original.']);
+    expect(await f.owner.screen(source)).toEqual({ status: 'held', reason: 'unsettled' });
+    expect(hashes).toHaveBeenCalledTimes(1);
+    for (let attempt = 0; attempt < 10; attempt++) expect(await f.owner.screen(source)).toEqual({ status: 'held', reason: 'unsettled' });
+    expect(hashes).toHaveBeenCalledTimes(1);
+    await f.owner.release(source);
+    const calls = f.calls.length;
+    const recaptured = f.owner.capture(['The same uncertain original.']);
+    expect(await f.owner.screen(recaptured)).toEqual({ status: 'held', reason: 'unsettled' });
+    expect(f.calls).toHaveLength(calls); expect(hashes).toHaveBeenCalledTimes(2);
+  } finally { hashes.mockRestore(); }
+});
+
+test('released refused input cannot borrow Preferred Classic fallback established by a different source', async () => {
+  await withDecisionModelPolicy(() => 'Preferred', async () => {
+    const f = fixture({ judge: (body, count) => count === 1 ? reading(body, 0.5, 1) : new Response('', { status: 503 }) });
+    const original = f.owner.capture(['Originally unsettled input.']);
+    expect(await f.owner.screen(original)).toEqual({ status: 'held', reason: 'unsettled' });
+    await f.owner.release(original);
+    expect((await f.owner.screen(f.owner.capture(['Different ordinary source.']))).status).toBe('settled');
+    expect(decisionModelPolicyState().operation).toBe('classic');
+    const calls = f.calls.length;
+    expect(await f.owner.screen(f.owner.capture(['Originally unsettled input.']))).toEqual({ status: 'held', reason: 'unsettled' });
+    expect(f.calls).toHaveLength(calls);
+  });
 });
 
 test('unsettled capacity never evicts an earlier hold or sends overflowing work', async () => {

@@ -33,12 +33,22 @@ interface OwnedProjection { readonly source: OwnedSource; readonly parts: readon
 /** Retain only a one-way commitment after raw source release. Exact retained
  * text would violate that lifetime; fresh handle IDs cannot recognize a repeat
  * of an already unsettled input. This never grants permission or supplies a
- * proposal ID. Compute once on first screening, over at most LIMITS.characters.
+ * proposal ID. Compute once only when recording or matching an actual unsettled
+ * input, over at most LIMITS.characters; ordinary successful work needs none.
  */
 function refusalKey(source: OwnedSource): string {
   return source.refusalKey ??= createHash('sha256').update(JSON.stringify([
     source.reference ? 'research-reference' : 'display-preview', source.source.parts,
   ])).digest('hex');
+}
+/** Cheap pending-work bucket, retaining no source text beyond its live owner. */
+function pendingSourceBucket(source: OwnedSource): string {
+  return JSON.stringify([source.reference !== undefined, source.source.parts.map(part => part.length)]);
+}
+function samePendingSource(left: OwnedSource, right: OwnedSource): boolean {
+  return (left.reference !== undefined) === (right.reference !== undefined)
+    && left.source.parts.length === right.source.parts.length
+    && left.source.parts.every((part, index) => part === right.source.parts[index]);
 }
 const held = (reason: Extract<SourceScreeningResult, { status: 'held' }>['reason']): Extract<SourceScreeningResult, { status: 'held' }> => Object.freeze({ status: 'held', reason });
 const invalid = (): never => { throw new Error('Protected source owner is unavailable or the handle is not current'); };
@@ -109,7 +119,11 @@ export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions)
   const referenceReader = createResearchReferenceReader(credentialLiterals);
   // Refusal-only fingerprints survive mapper-handle release, without raw text.
   const unsettled = new Set<string>();
-  const screening = new Set<string>();
+  // Only already-owned pending sources, removed when their original work ends.
+  // Kind/part lengths avoid full-text comparisons across unrelated requests.
+  const screening = new Map<string, Set<OwnedSource>>();
+  let screeningCount = 0;
+  const wasUnsettled = (source: OwnedSource): boolean => unsettled.size > 0 && unsettled.has(refusalKey(source));
   const work = new Set<Promise<unknown>>();
   let closing: Promise<void> | undefined;
   const active = () => {
@@ -202,7 +216,7 @@ export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions)
       const unavailable = error instanceof JudgmentError && error.kind === 'unavailable'
         && (error.status !== undefined && (error.status === 408 || error.status === 429 || error.status >= 500)
           || transport?.availabilityFailed() === true);
-      if (!unsettled.has(refusalKey(source)) && (policySelectedClassic && isClassicOperation() || unavailable && activateClassicFallback(error))) {
+      if (!wasUnsettled(source) && (policySelectedClassic && isClassicOperation() || unavailable && activateClassicFallback(error))) {
         try { return classicResult(); } catch (failure) { return held(failure instanceof JudgmentInputError ? 'protected-input' : 'stale'); }
       }
       return held('route-unavailable');
@@ -211,16 +225,24 @@ export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions)
   const screen = (source: OwnedSource, operation?: ResearchReferenceOperation): Promise<Result> => {
     try { operationCurrent(source, operation); } catch { return Promise.resolve(held(signal.aborted || (operation?.signal && apply(signalAborted, operation.signal, [])) ? 'cancelled' : 'stale')); }
     if (source.pending) return operation || source.pendingOperation ? Promise.resolve(held('busy')) : source.pending;
-    if (unsettled.has(refusalKey(source))) return Promise.resolve(held('unsettled'));
+    if (wasUnsettled(source)) return Promise.resolve(held('unsettled'));
     if (source.result) return Promise.resolve(source.result);
-    if (screening.has(refusalKey(source))) return Promise.resolve(held('busy'));
+    const bucketKey = pendingSourceBucket(source), bucket = screening.get(bucketKey);
+    if (bucket) for (const pending of bucket) {
+      if (samePendingSource(pending, source)) return Promise.resolve(held('busy'));
+    }
     // Reserve future refusal slots before admitting any asynchronous work.
-    if (unsettled.size + screening.size >= LIMITS.unsettledRevisions) return Promise.resolve(held('capacity'));
-    screening.add(refusalKey(source));
+    if (unsettled.size + screeningCount >= LIMITS.unsettledRevisions) return Promise.resolve(held('capacity'));
+    const pendingSources = bucket ?? new Set<OwnedSource>();
+    pendingSources.add(source); screening.set(bucketKey, pendingSources); screeningCount++;
     const pending = own(Promise.resolve().then(() => withConfiguredDecisionModelPolicy(() => run(source, operation))));
     source.pending = pending;
     source.pendingOperation = operation;
-    const finished = () => { screening.delete(refusalKey(source)); if (source.pending === pending) { delete source.pending; delete source.pendingOperation; } };
+    const finished = () => {
+      if (pendingSources.delete(source)) screeningCount--;
+      if (pendingSources.size === 0 && screening.get(bucketKey) === pendingSources) screening.delete(bucketKey);
+      if (source.pending === pending) { delete source.pending; delete source.pendingOperation; }
+    };
     void pending.then(finished, finished);
     return pending;
   };
@@ -259,12 +281,12 @@ export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions)
     },
     project(receipt) {
       const entry = projections.get(receipt);
-      if (!entry || entry.source.reference || unsettled.has(refusalKey(entry.source))) return invalid();
+      if (!entry || entry.source.reference || wasUnsettled(entry.source)) return invalid();
       current(entry.source); return entry.parts;
     },
     projectResearchReference(receipt) {
       const entry = projections.get(receipt);
-      if (!entry?.source.reference || unsettled.has(refusalKey(entry.source))) return invalid();
+      if (!entry?.source.reference || wasUnsettled(entry.source)) return invalid();
       current(entry.source);
       return entry.parts[0] === WITHHELD_RESEARCH_REFERENCE ? Object.freeze({ status: 'omitted' })
         : Object.freeze({ status: 'preserved', url: entry.parts[0]! });

@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Avoid hashing successful private-source screening merely to deduplicate work
+  in flight. Compare the already-owned pending inputs directly, and retain a
+  compact commitment only when recording or matching an actual unsettled input
+  after its raw source is released. Preserve prior refusals in Classic fallback.
+
 - Set up native configuration after the installer releases its completed suite
   claims, install required vector companions on macOS as well as Linux, and
   let the suite updater own WebUI replacement without a second boot download.

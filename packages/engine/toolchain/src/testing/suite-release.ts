@@ -27,13 +27,22 @@ export function suiteReleaseFixture() {
     { name: 'goodvibes-daemon', packageName: '@goodvibes-jev/daemon' },
   ] as const;
   const release = new Map<string, Buffer>(), original = new Map<string, Buffer>();
+  const daemonIdentities: Array<{ readonly previous: boolean; readonly metadata: Omit<ClientReaderArtifact, 'files'> }> = [];
+  const sqlitePins = new Map<boolean, { readonly bytes: Buffer; readonly pin: string }>();
   for (const program of programs) {
     const asset = program.name + '-macos-x64', path = join(root, program.name);
     const before = Buffer.from(program.name + ' version 3.1.2'), after = Buffer.from(program.name + ' version 3.1.3');
     writeFileSync(path, before, { mode: 0o755 }); original.set(path, before); release.set(asset, after);
-    const descriptor = (version: string, bytes: Buffer): ClientReaderArtifact => ({ schema: 1, packageName: program.packageName as ClientReaderPackage,
-      version, target: 'darwin-x64', sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40), headCommit: 'a'.repeat(40),
-      files: [{ path: asset, sha256: sha256(bytes), mode: 0o755, size: bytes.length }], readers: nativeReaderCapabilities(version) });
+    const identity = (version: string): Omit<ClientReaderArtifact, 'files'> => ({ schema: 1, packageName: program.packageName as ClientReaderPackage,
+      version, target: 'darwin-x64', sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40), headCommit: 'a'.repeat(40), readers: nativeReaderCapabilities(version) });
+    if (program.name === 'goodvibes-daemon') {
+      // Its native companions are prepared below. Publish only the complete
+      // final descriptor, rather than hash a discarded binary-only profile.
+      daemonIdentities.push({ previous: true, metadata: identity('3.1.2') }, { previous: false, metadata: identity('3.1.3') });
+      continue;
+    }
+    const descriptor = (version: string, bytes: Buffer): ClientReaderArtifact => ({ ...identity(version),
+      files: [{ path: asset, sha256: sha256(bytes), mode: 0o755, size: bytes.length }] });
     const beforeMetadata = Buffer.from(JSON.stringify(descriptor('3.1.2', before)));
     writeFileSync(path + '.readers.json', beforeMetadata, { mode: 0o644 }); original.set(path + '.readers.json', beforeMetadata);
     release.set(asset + '.reader-ci-artifact.json', Buffer.from(JSON.stringify(descriptor('3.1.3', after))));
@@ -53,9 +62,10 @@ export function suiteReleaseFixture() {
   for (const previous of [true, false]) {
     const version = previous ? '3.1.2' : '3.1.3', library = Buffer.alloc(64, previous ? 1 : 2);
     library.writeUInt32LE(0xfeedfacf, 0); library.writeUInt32LE(0x01000007, 4); library.writeUInt32LE(6, 12);
+    const pin = sha256(library); sqlitePins.set(previous, { bytes: library, pin });
     const owner = Buffer.from(JSON.stringify({ schema: 1, packageName: '@goodvibes-jev/daemon', daemonVersion: version,
       target: 'darwin-x64', sqliteVersion: '3.54.0', sourceUrl: 'https://www.sqlite.org/2026/sqlite-autoconf-3540000.tar.gz',
-      sourceSha3: 'c'.repeat(64), sha256: sha256(library), size: library.length }));
+      sourceSha3: 'c'.repeat(64), sha256: pin, size: library.length }));
     if (previous) {
       writeFileSync(sqlitePath, library); writeFileSync(sqlitePath + '.json', owner);
       original.set(sqlitePath, library); original.set(sqlitePath + '.json', owner);
@@ -64,12 +74,17 @@ export function suiteReleaseFixture() {
   // Darwin's daemon artifact binds its complete native cohort, not only the
   // program. Terminal-only Darwin artifacts remain single-file profiles.
   const daemon = join(root, 'goodvibes-daemon'), daemonAsset = 'goodvibes-daemon-macos-x64';
-  for (const previous of [true, false]) {
-    const metadata = JSON.parse((previous ? original.get(daemon + '.readers.json') : release.get(daemonAsset + '.reader-ci-artifact.json'))!.toString()) as ClientReaderArtifact;
+  for (const { previous, metadata } of daemonIdentities) {
     const files = clientReaderPayloadPaths('@goodvibes-jev/daemon', 'darwin-x64').map(path => {
       const bytes = previous ? original.get(path === daemonAsset ? daemon : join(root, path)) : release.get(clientReaderMemberAsset(metadata, path));
       if (!bytes) throw new Error('Missing synthetic Darwin daemon cohort member');
-      return { path, sha256: sha256(bytes), size: bytes.length, mode: path === daemonAsset ? 0o755 : 0o644 };
+      let pin: string;
+      if (path === 'lib/sqlite-darwin-x64/libsqlite3.dylib') {
+        const sqlite = sqlitePins.get(previous);
+        if (!sqlite || sqlite.bytes !== bytes) throw new Error('Original synthetic SQLite library changed');
+        pin = sqlite.pin;
+      } else pin = sha256(bytes);
+      return { path, sha256: pin, size: bytes.length, mode: path === daemonAsset ? 0o755 : 0o644 };
     });
     const bytes = Buffer.from(JSON.stringify({ ...metadata, files }));
     if (previous) { writeFileSync(daemon + '.readers.json', bytes); original.set(daemon + '.readers.json', bytes); }

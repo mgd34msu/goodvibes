@@ -29,13 +29,13 @@
  *                           REPORT it (leave in place for the operator, NEVER
  *                           deleted on sight).
  *
- * Location + naming: worktrees live under
- * `<projectRoot>/.goodvibes/.worktrees/<branch>`. Without a state namespace,
- * branch names remain `ws/<wsShort>/<itemShort>`. Namespaced engines use
- * `ws-ns/<alphabetic-sha256(namespace)>/<wsShort>/<itemShort>`, deterministic from the
- * construction-owned namespace and (workstreamId, itemId), so
- * `ensureWorktree` and `reconcileOrphans` agree on where a given item's
- * worktree lives without any extra bookkeeping.
+ * Location + naming: each exact construction-owned namespace/workstream/item
+ * tuple gets one private persisted opaque `ws-owned/<id>` branch before Git
+ * allocation. The registry lives in the real shared Git common directory, so
+ * linked contract worktrees agree. Reservation grants no ownership: only an
+ * original native creation receipt records acquired/initialized state.
+ * Existing recorded names remain authoritative. Unrecorded old name-only
+ * resources are reported and preserved, never adopted from a checksum label.
  *
  * SYNCHRONOUS orphan scan (deliberate, mirrors dirty-guard.ts's
  * snapshotDirtyTree precedent): `reconcileOrphans` must resolve BEFORE the
@@ -47,15 +47,19 @@
  * like the launch-dirty snapshot.
  */
 import { createHash } from 'node:crypto';
-import { join } from 'node:path';
+import { isAbsolute, join, relative, sep } from 'node:path';
+import { captureExistingDirectory } from '../utils/atomic-json-store.js';
+import { WorktreeIdentityRegistry, type StoredWorktreeIdentity, type WorktreeIdentityKey } from './worktree-identities.js';
+import type { NativeDataWriteOwner } from '../runtime/native-reader-compatibility.js';
 import { GitService } from '../git/service.js';
-import { IsolatedWorktree, type CommitWorkingTreeResult } from '../agents/worktree.js';
+import { IsolatedWorktree, readIsolatedWorktreeCreation, type CommitWorkingTreeResult } from '../agents/worktree.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { OwnedWork } from '../utils/owned-work.js';
 import type { OrchestrationEvent, WorkItem, Workstream } from './types.js';
 
 export interface WorktreeIsolationManagerDeps {
+  readonly nativeDataWriter?: NativeDataWriteOwner | undefined;
   /** Shared with the engine so nested eviction and resumed integration are owned. */
   readonly ownedWork?: OwnedWork | undefined;
   readonly projectRoot: string;
@@ -112,34 +116,26 @@ export interface WorktreeIsolationManager {
   diffItem(item: WorkItem): Promise<{ files: string[]; unifiedDiff: string; stat: string } | null>;
 }
 
-/** Derives a short, filesystem/branch-safe fragment from an id: the suffix after the last '-' when it's plain alphanumerics, else a stable short hash of the whole id (caller-supplied WorkItemSpec.id can be arbitrary text). */
-function shortId(id: string): string {
+/** Existing old selector spelling only; never a new namespace allocation. The suffix after the last '-' when it's plain alphanumerics, else a stable short hash of the whole id (caller-supplied WorkItemSpec.id can be arbitrary text). */
+function legacyShortId(id: string): string {
   const dash = id.lastIndexOf('-');
   const candidate = dash >= 0 ? id.slice(dash + 1) : id;
   if (candidate.length > 0 && /^[A-Za-z0-9]+$/.test(candidate)) return candidate;
   return createHash('sha1').update(id).digest('hex').slice(0, 8);
 }
 
-function workstreamBranchPrefix(workstreamId: string, stateNamespace?: string, legacyHex = false): string {
-  // Never shorten the namespace using an id suffix: independent contracts may
-  // share that suffix. The complete digest also keeps arbitrary namespace text
-  // out of Git ref names and paths. Keep the legacy namespace disjoint.
-  const hex = stateNamespace === undefined ? undefined : createHash('sha256').update(stateNamespace).digest('hex');
-  // Opaque construction IDs are not numeric user data. Keep every digest bit,
-  // but avoid accidental card-shaped digit runs in paths sent to read judgment.
-  // a-f remain unchanged; 0-9 map bijectively to k-t. New/legacy spellings can
-  // overlap only where the encoding is identity, never across namespaces.
-  const digest = legacyHex ? hex : hex?.replace(/[0-9]/g, digit => String.fromCharCode(107 + Number(digit)));
-  const root = digest === undefined ? 'ws' : `ws-ns/${digest}`;
-  return `${root}/${shortId(workstreamId)}/`;
+/** Lookup only already-existing old Git selectors. New names are allocated
+ * from the exact private tuple store, never this content commitment. */
+function legacyWorkstreamBranchPrefixes(workstreamId: string, stateNamespace?: string): readonly string[] {
+  const stream = legacyShortId(workstreamId);
+  if (stateNamespace === undefined) return [`ws/${stream}/`];
+  const hex = createHash('sha256').update(stateNamespace).digest('hex');
+  const encoded = hex.replace(/[0-9]/g, digit => String.fromCharCode(107 + Number(digit)));
+  return [...new Set([`ws-ns/${encoded}/${stream}/`, `ws-ns/${hex}/${stream}/`])];
 }
 
-export function itemWorktreeBranch(workstreamId: string, itemId: string, stateNamespace?: string): string {
-  return `${workstreamBranchPrefix(workstreamId, stateNamespace)}${shortId(itemId)}`;
-}
-
-function itemWorktreeDir(projectRoot: string, workstreamId: string, itemId: string, stateNamespace?: string): string {
-  return join(projectRoot, '.goodvibes', '.worktrees', ...itemWorktreeBranch(workstreamId, itemId, stateNamespace).split('/'));
+function itemWorktreeDir(projectRoot: string, branch: string): string {
+  return join(projectRoot, '.goodvibes', '.worktrees', ...branch.split('/'));
 }
 
 interface KeptEntry {
@@ -154,7 +150,45 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
   const ownedWork = deps.ownedWork ?? new OwnedWork();
   const keptCap = deps.keptWorktreeCap ?? 20;
   const rootGit = new GitService(deps.projectRoot);
-  const instances = new Map<string, IsolatedWorktree>(); // itemId -> instance
+  // Entity identity includes its real workstream; equal caller item IDs in
+  // different streams must never borrow each other's live resource.
+  const instances = new WeakMap<WorkItem, IsolatedWorktree>();
+  const resourceGuards = new WeakMap<IsolatedWorktree, () => void>();
+  const preparing = new WeakMap<WorkItem, Promise<ItemWorktreeHandle>>();
+  let repositoryGuard: (() => void) | undefined;
+  let identities: WorktreeIdentityRegistry | undefined, openingIdentities: Promise<WorktreeIdentityRegistry> | undefined;
+  const identityKey = (workstream: Workstream, item: WorkItem): WorktreeIdentityKey => ({ namespace: deps.stateNamespace ?? null, workstreamId: workstream.id, itemId: item.id });
+  const unavailable = () => new Error('Worktree identity is unavailable; original resources preserved');
+  const commonOutput = (output: Uint8Array): string => {
+    let text: string;
+    try { text = new TextDecoder('utf-8', { fatal: true }).decode(output); } catch { throw unavailable(); }
+    if (!text.endsWith('\n')) throw unavailable();
+    const path = text.slice(0, -1); if (!path) throw unavailable(); return path;
+  };
+  function identityRegistrySync(): WorktreeIdentityRegistry {
+    if (identities) { repositoryGuard?.(); return identities; }
+    const root = captureExistingDirectory(deps.projectRoot);
+    const result = Bun.spawnSync(['git', '-C', deps.projectRoot, 'rev-parse', '--path-format=absolute', '--git-common-dir']);
+    root.assertCurrent(); if (result.exitCode !== 0) throw unavailable();
+    identities = new WorktreeIdentityRegistry(commonOutput(result.stdout), deps.nativeDataWriter);
+    repositoryGuard = identities.retainRepository(deps.projectRoot);
+    return identities;
+  }
+  function identityRegistry(): Promise<WorktreeIdentityRegistry> {
+    if (identities) { repositoryGuard?.(); return Promise.resolve(identities); }
+    if (openingIdentities) return openingIdentities;
+    const pending = (async () => {
+      const root = captureExistingDirectory(deps.projectRoot);
+      const child = Bun.spawn(['git', '-C', deps.projectRoot, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { stdout: 'pipe', stderr: 'pipe' });
+      const [code, output] = await Promise.all([child.exited, new Response(child.stdout).arrayBuffer(), new Response(child.stderr).arrayBuffer()]);
+      root.assertCurrent(); if (code !== 0) throw unavailable();
+      if (!identities) { identities = new WorktreeIdentityRegistry(commonOutput(new Uint8Array(output)), deps.nativeDataWriter); repositoryGuard = identities.retainRepository(deps.projectRoot); }
+      repositoryGuard?.(); return identities;
+    })();
+    openingIdentities = pending;
+    void pending.then(() => { if (openingIdentities === pending) openingIdentities = undefined; }, () => { if (openingIdentities === pending) openingIdentities = undefined; });
+    return pending;
+  }
   const kept: KeptEntry[] = [];
   let baseBranchCache: string | null = null;
   let integrationLane: Promise<void> = Promise.resolve();
@@ -174,19 +208,29 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
   }
 
   function getOrCreateInstance(workstream: Workstream, item: WorkItem, path: string, branch: string): IsolatedWorktree {
-    let instance = instances.get(item.id);
+    let instance = instances.get(item);
+    if (instance && (instance.path !== path || instance.branch !== branch)) throw unavailable();
     if (!instance) {
       instance = new class extends IsolatedWorktree {
         override async create(startPoint?: string, checkout = true): Promise<void> {
-          await super.create(startPoint, checkout);
-          // Acquisition and initialization are distinct. An initializer may
-          // successfully create the Git worktree, then fail materializing its
-          // files. Own cleanup as soon as Git creation succeeds, but do not
-          // record it as ready for the next claim until initialization returns.
+          if (this.path !== path || this.branch !== branch) throw unavailable();
+          let failed = false, failure: unknown;
+          try { await super.create(startPoint, checkout, repositoryGuard); } catch (error) { failed = true; failure = error; }
+          const proof = readIsolatedWorktreeCreation(this);
+          if (!proof) { if (failed) throw failure; throw unavailable(); }
+          proof.assertCurrent();
+          const registry = identities;
+          if (!registry) throw unavailable();
+          const binding = registry.retainRecorded(this.path, this.branch);
+          const guard = () => { repositoryGuard?.(); proof.assertCurrent(); binding(); };
+          guard(); resourceGuards.set(this, guard);
+          // Own real acquisition before any registry await or initializer.
           item.worktreePath = this.path;
           item.worktreeBranch = this.branch;
           item.worktreeInitialized = false;
-          instances.set(item.id, this);
+          instances.set(item, this);
+          await registry.acquired(identityKey(workstream, item), this, false);
+          if (failed) throw failure;
         }
       }(deps.projectRoot, path, branch, resolveBaseBranch());
     }
@@ -194,46 +238,75 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
   }
 
   async function ensureWorktree(workstream: Workstream, item: WorkItem): Promise<ItemWorktreeHandle> {
-    if (item.worktreeInitialized === false) {
-      throw new Error('worktree initialization did not complete; retained resource requires recovery');
+    const registry = await identityRegistry(), key = identityKey(workstream, item);
+    let row: StoredWorktreeIdentity | undefined = registry.find(key);
+    if (!item.worktreePath && !item.worktreeBranch) {
+      row = await registry.reserve(key);
+      const branchForReservation = row.branch;
+      const resources = await rootGit.worktreeList();
+      const existing = resources.filter(resource => resource.branch === branchForReservation);
+      if (existing.length > 1) throw unavailable();
+      if (existing[0]) {
+        if (row.state === 'reserved') throw new Error('Unproved worktree reservation requires recovery; resource preserved');
+        const guard = registry.retainAcquired(row, existing[0].path);
+        item.worktreePath = existing[0].path; item.worktreeBranch = row.branch;
+        item.worktreeInitialized = row.state === 'initialized';
+        const restored = getOrCreateInstance(workstream, item, item.worktreePath, item.worktreeBranch);
+        resourceGuards.set(restored, () => { repositoryGuard?.(); guard(); });
+      }
     }
-    const path = item.worktreePath ?? itemWorktreeDir(deps.projectRoot, workstream.id, item.id, deps.stateNamespace);
-    const branch = item.worktreeBranch ?? itemWorktreeBranch(workstream.id, item.id, deps.stateNamespace);
+    if (item.worktreeInitialized === false) throw new Error('worktree initialization did not complete; retained resource requires recovery');
+    const branch = item.worktreeBranch ?? row?.branch;
+    if (!branch) throw unavailable();
+    const path = item.worktreePath ?? itemWorktreeDir(deps.projectRoot, branch);
     const instance = getOrCreateInstance(workstream, item, path, branch);
+    resourceGuards.get(instance)?.();
     if (!item.worktreePath) {
-      if (deps.initializeWorktree === undefined) await instance.create();
-      else await deps.initializeWorktree(instance);
-      item.worktreePath = instance.path;
-      item.worktreeBranch = instance.branch;
-      item.worktreeInitialized = true;
-      // Allocation must succeed before cleanup owns this resource. A failed
-      // `worktree add` can mean a user's branch or path already exists; caching
-      // the candidate before creation would let failure cleanup remove it.
-      instances.set(item.id, instance);
-      deps.emit({ type: 'item-worktree-created', workstreamId: workstream.id, itemId: item.id, path: instance.path, branch: instance.branch });
-      // Cold-start setup: install deps, run codegen, carry over untracked
-      // files. Never fails worktree creation, the wiring records the honest
-      // outcome (including a failure) as a visible worktree state.
-      if (deps.runSetup) {
-        try {
-          await deps.runSetup(instance.path);
-        } catch (error) {
-          logger.warn('worktree-isolation: cold-start setup hook threw (worktree kept; failure recorded by the setup wiring)', {
-            itemId: item.id, path: instance.path, error: summarizeError(error),
-          });
+      try {
+        if (deps.initializeWorktree === undefined) await instance.create();
+        else await deps.initializeWorktree(instance);
+        const proof = readIsolatedWorktreeCreation(instance);
+        if (!proof) throw unavailable();
+        const recorded = await registry.acquired(key, instance, true);
+        const binding = registry.retainAcquired(recorded, instance.path);
+        resourceGuards.set(instance, () => { repositoryGuard?.(); proof.assertCurrent(); binding(); });
+      } catch (error) {
+        // A real native creation can exist even when a post hook/initializer
+        // rejects. Only its actual receipt owns recovery or cleanup.
+        const proof = readIsolatedWorktreeCreation(instance);
+        const guard = resourceGuards.get(instance);
+        if (proof && guard) {
+          guard();
+          item.worktreePath = instance.path; item.worktreeBranch = instance.branch;
+          item.worktreeInitialized = false; instances.set(item, instance);
+          resourceGuards.get(instance)?.();
         }
+        throw error;
+      }
+      item.worktreePath = instance.path; item.worktreeBranch = instance.branch; item.worktreeInitialized = true;
+      instances.set(item, instance);
+      deps.emit({ type: 'item-worktree-created', workstreamId: workstream.id, itemId: item.id, path: instance.path, branch: instance.branch });
+      if (deps.runSetup) {
+        try { await deps.runSetup(instance.path); resourceGuards.get(instance)?.(); }
+        catch (error) { logger.warn('worktree-isolation: cold-start setup hook threw (worktree kept; failure recorded by the setup wiring)', { itemId: item.id, path: instance.path, error: summarizeError(error) }); }
       }
     } else {
-      // Persisted names remain authoritative, including pre-namespace records.
-      instances.set(item.id, instance);
+      if (!resourceGuards.has(instance)) {
+        const binding = row && row.branch === branch && row.state !== 'reserved' ? registry.retainAcquired(row, path) : registry.retainRecorded(path, branch);
+        resourceGuards.set(instance, () => { repositoryGuard?.(); binding(); });
+      }
+      resourceGuards.get(instance)?.(); instances.set(item, instance);
     }
-    return { path: instance.path, commit: (message, paths) => instance.commit(message, paths) };
+    resourceGuards.get(instance)?.();
+    return { path: instance.path, commit: async (message, paths) => {
+      resourceGuards.get(instance)?.(); return instance.commit(message, paths, resourceGuards.get(instance));
+    } };
   }
 
   function keepWorktree(workstream: Workstream, item: WorkItem, instance: IsolatedWorktree, reason: string): void {
     item.worktreeKept = true;
     deps.emit({ type: 'item-worktree-kept', workstreamId: workstream.id, itemId: item.id, path: instance.path, reason });
-    kept.push({ workstream, item, instance, keptAt: now() });
+    if (!kept.some(entry => entry.instance === instance)) kept.push({ workstream, item, instance, keptAt: now() });
     enforceKeptCap();
   }
 
@@ -251,6 +324,11 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
 
   async function removeWorktree(workstream: Workstream, item: WorkItem, instance: IsolatedWorktree, evicted: boolean): Promise<void> {
     const path = instance.path;
+    try { repositoryGuard?.(); resourceGuards.get(instance)?.(); }
+    catch {
+      if (!evicted) keepWorktree(workstream, item, instance, 'original worktree binding is unavailable');
+      return;
+    }
     let preservedCommit: string | null = null;
     if (evicted) {
       // Cap eviction never destroys work: uncommitted state is committed onto
@@ -259,7 +337,7 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
       // directory is left in place, an over-cap directory beats lost work,
       // and the tree stays kept/attributed rather than falsely announced gone.
       try {
-        preservedCommit = (await instance.evict()).preservedCommit;
+        preservedCommit = (await instance.evict(resourceGuards.get(instance), repositoryGuard)).preservedCommit;
       } catch (error) {
         logger.error('worktree-isolation: eviction preservation failed; worktree left on disk', {
           itemId: item.id, path, branch: instance.branch, error: summarizeError(error),
@@ -268,12 +346,14 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
       }
     } else {
       try {
-        await instance.remove();
+        await instance.remove(resourceGuards.get(instance), repositoryGuard);
       } catch (error) {
         logger.warn('worktree-isolation: worktree removal did not complete', { itemId: item.id, path, error: summarizeError(error) });
+        keepWorktree(workstream, item, instance, 'worktree removal did not complete');
+        return;
       }
     }
-    instances.delete(item.id);
+    instances.delete(item);
     item.worktreePath = undefined;
     if (!evicted) item.worktreeInitialized = undefined;
     item.worktreeKept = false;
@@ -288,13 +368,19 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
   }
 
   async function integrateOne(workstream: Workstream, item: WorkItem): Promise<void> {
-    const path = item.worktreePath ?? itemWorktreeDir(deps.projectRoot, workstream.id, item.id, deps.stateNamespace);
-    const branch = item.worktreeBranch ?? itemWorktreeBranch(workstream.id, item.id, deps.stateNamespace);
+    const branch = item.worktreeBranch;
+    if (!branch || !item.worktreePath) throw unavailable();
+    const path = item.worktreePath;
+    const registry = await identityRegistry(), row = registry.find(identityKey(workstream, item));
     const instance = getOrCreateInstance(workstream, item, path, branch);
+    if (!resourceGuards.has(instance)) {
+      const binding = row && row.branch === branch && row.state !== 'reserved' ? registry.retainAcquired(row, path) : registry.retainRecorded(path, branch);
+      resourceGuards.set(instance, () => { repositoryGuard?.(); binding(); });
+    }
     item.mergeState = 'pending';
     try {
       if (item.worktreeInitialized === false) throw new Error('worktree initialization did not complete; retained resource requires recovery');
-      const outcome = await instance.integrate();
+      const outcome = await instance.integrate(() => { repositoryGuard?.(); resourceGuards.get(instance)?.(); });
       if (outcome.status === 'merged') {
         item.mergeState = 'merged';
         item.mergeHash = outcome.hash;
@@ -344,14 +430,16 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
     integrationLane = run.catch((error) => {
       logger.error('worktree-isolation: integration lane step did not complete', { itemId: item.id, error: summarizeError(error) });
     });
-    return run;
+    return integrationLane;
   }
 
   async function cleanupTerminated(workstream: Workstream, item: WorkItem): Promise<void> {
-    const instance = instances.get(item.id);
+    const instance = instances.get(item);
     if (!instance) return; // never got a worktree (failed before claim, or shared mode)
     try {
+      resourceGuards.get(instance)?.();
       const clean = await instance.isClean();
+      resourceGuards.get(instance)?.();
       if (clean) {
         await removeWorktree(workstream, item, instance, false);
       } else {
@@ -385,10 +473,6 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
       logger.warn('worktree-isolation: orphan scan (worktree list) did not complete', { error: summarizeError(error) });
       return;
     }
-    const prefixes = [...new Set([
-      workstreamBranchPrefix(workstream.id, deps.stateNamespace),
-      workstreamBranchPrefix(workstream.id, deps.stateNamespace, true),
-    ])];
     const resources = raw.trim().split('\n\n').filter(Boolean).map(block => {
       const lines = block.split('\n');
       const path = lines.find(line => line.startsWith('worktree '))?.slice('worktree '.length) ?? '';
@@ -396,62 +480,73 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
       const branch = branchLine ? branchLine.slice('branch '.length).replace(/^refs\/heads\//, '') : '';
       return { path, branch };
     }).filter(resource => resource.path && resource.branch);
-    const matchingPrefix = (branch: string): string | undefined => prefixes.find(prefix => branch.startsWith(prefix));
-    const knownPaths = new Set(
-      workstream.items.map((i) => i.worktreePath).filter((p): p is string => typeof p === 'string' && p.length > 0),
-    );
+    let registry: WorktreeIdentityRegistry, rows: readonly StoredWorktreeIdentity[];
+    try { registry = identityRegistrySync(); rows = registry.forWorkstream(deps.stateNamespace ?? null, workstream.id); }
+    catch (error) { logger.warn('worktree-isolation: private identity store unavailable; resources preserved', { error: summarizeError(error) }); return; }
+    const oldResources = resources.filter(resource => (resource.branch.startsWith('ws/') || resource.branch.startsWith('ws-ns/'))
+      && !rows.some(row => row.branch === resource.branch)
+      && !workstream.items.some(item => item.worktreePath === resource.path || item.worktreeBranch === resource.branch));
+    // Existing old Git selectors are consulted only for an actual old inventory,
+    // never to mint a new namespace or infer original acquisition authority.
+    const prefixes = oldResources.length === 0 ? [] : legacyWorkstreamBranchPrefixes(workstream.id, deps.stateNamespace);
+    const recordedBranchFromPath = (path: string): string | undefined => {
+      const part = relative(join(deps.projectRoot, '.goodvibes', '.worktrees'), path);
+      if (!part || part === '..' || part.startsWith(`..${sep}`) || isAbsolute(part)) return undefined;
+      return part.split(sep).join('/');
+    };
     for (const { path, branch } of resources) {
-      // Rehydrate explicitly recorded resources even when they retain legacy
-      // names. Cancellation can happen immediately after import, before a new
-      // claim calls ensureWorktree. Never replace a recorded branch identity.
-      const recorded = workstream.items.find((item) =>
-        (item.worktreePath === path && (item.worktreeBranch === undefined || item.worktreeBranch === branch))
+      const recorded = workstream.items.filter(item =>
+        (item.worktreePath === path && (item.worktreeBranch === branch || item.worktreeBranch === undefined && recordedBranchFromPath(path) === branch))
         || (item.worktreePath === undefined && item.worktreeBranch === branch));
-      if (recorded) {
-        recorded.worktreePath = path;
-        recorded.worktreeBranch = branch;
-        instances.set(recorded.id, new IsolatedWorktree(deps.projectRoot, path, branch, resolveBaseBranch()));
-        continue;
+      const mapped = rows.filter(row => row.branch === branch);
+      let adopted = false;
+      if (recorded.length === 1) {
+        const item = recorded[0]!;
+        try {
+          const row = mapped.find(candidate => candidate.itemId === item.id);
+          const guard = row && row.state !== 'reserved' ? registry.retainAcquired(row, path) : registry.retainRecorded(path, branch);
+          const instance = new IsolatedWorktree(deps.projectRoot, path, branch, resolveBaseBranch());
+          item.worktreePath = path; item.worktreeBranch = branch;
+          if (row?.state === 'acquired') item.worktreeInitialized = false;
+          if (row?.state === 'initialized') item.worktreeInitialized = true;
+          instances.set(item, instance); resourceGuards.set(instance, () => { repositoryGuard?.(); guard(); }); adopted = true;
+        } catch { /* Preserve original record, never adopt replacement physical data. */ }
+      } else if (recorded.length === 0 && mapped.length === 1) {
+        const row = mapped[0]!, candidates = workstream.items.filter(item => item.id === row.itemId);
+        const item = candidates.length === 1 ? candidates[0] : undefined;
+        const unresolved = item && ((item.state !== 'passed' && item.state !== 'failed') || item.mergeState === 'pending');
+        if (item && unresolved && row.state !== 'reserved' && !item.worktreePath && (item.worktreeBranch === undefined || item.worktreeBranch === branch)) {
+          try {
+            const guard = registry.retainAcquired(row, path), instance = new IsolatedWorktree(deps.projectRoot, path, branch, resolveBaseBranch());
+            item.worktreePath = path; item.worktreeBranch = branch; item.worktreeInitialized = row.state === 'initialized';
+            instances.set(item, instance); resourceGuards.set(instance, () => { repositoryGuard?.(); guard(); }); adopted = true;
+            deps.emit({ type: 'orphan-worktree-reconciled', workstreamId: workstream.id, path, branch, disposition: 'adopted' });
+          } catch { /* Native acquisition no longer names this original resource. */ }
+        }
       }
-      const prefix = matchingPrefix(branch);
-      if (prefix === undefined) continue;
-      if (knownPaths.has(path)) continue; // already tracked by an item's recorded worktreePath, not an orphan
-      const itemShort = branch.slice(prefix.length);
-      const item = workstream.items.find((i) => shortId(i.id) === itemShort);
-      const unresolved = !!item && (
-        (item.state !== 'passed' && item.state !== 'failed')
-        || item.mergeState === 'pending'
-      );
-      // Both spellings may survive an interrupted upgrade. Without a recorded
-      // identity, Git listing order cannot choose which resource owns the item.
-      const candidates = resources.filter(resource => {
-        const candidatePrefix = matchingPrefix(resource.branch);
-        return candidatePrefix !== undefined && resource.branch.slice(candidatePrefix.length) === itemShort;
-      });
-      if (item && unresolved && candidates.length === 1 && !item.worktreePath && (item.worktreeBranch === undefined || item.worktreeBranch === branch)) {
-        item.worktreePath = path;
-        item.worktreeBranch = branch;
-        // A crash can precede the snapshot that records custom initialization
-        // readiness. Git registration alone proves ownership, not that raw
-        // contract input finished materializing. Retain such orphans but never
-        // execute from them without explicit recovery.
-        if (deps.initializeWorktree !== undefined) item.worktreeInitialized = false;
-        instances.set(item.id, new IsolatedWorktree(deps.projectRoot, path, branch, resolveBaseBranch()));
-        deps.emit({ type: 'orphan-worktree-reconciled', workstreamId: workstream.id, path, branch, disposition: 'adopted' });
-      } else {
+      if (adopted) continue;
+      if (recorded.length > 0 || mapped.length > 0 || prefixes.some(prefix => branch.startsWith(prefix))) {
+        // A historical name, reserved UUID, or ambiguous record is a discovery
+        // hint only. Preserve/report it; neither proves that we created it.
         deps.emit({ type: 'orphan-worktree-reconciled', workstreamId: workstream.id, path, branch, disposition: 'reported' });
       }
     }
   }
 
   async function diffItem(item: WorkItem): Promise<{ files: string[]; unifiedDiff: string; stat: string } | null> {
-    const instance = instances.get(item.id);
+    const instance = instances.get(item);
     if (!instance) return null;
-    return instance.diff();
+    try { resourceGuards.get(instance)?.(); return await instance.diff(); }
+    catch (error) { logger.warn('worktree-isolation: original diff binding unavailable', { itemId: item.id, error: summarizeError(error) }); return null; }
   }
 
   return {
-    ensureWorktree: (workstream, item) => ownedWork.run(() => ensureWorktree(workstream, item)),
+    ensureWorktree: (workstream, item) => {
+      const pending = preparing.get(item); if (pending) return pending;
+      const work = ownedWork.run(() => ensureWorktree(workstream, item)); preparing.set(item, work);
+      void work.then(() => { if (preparing.get(item) === work) preparing.delete(item); }, () => { if (preparing.get(item) === work) preparing.delete(item); });
+      return work;
+    },
     enqueueIntegration,
     cleanupTerminated: (workstream, item) => ownedWork.run(() => cleanupTerminated(workstream, item)),
     reconcileOrphans,

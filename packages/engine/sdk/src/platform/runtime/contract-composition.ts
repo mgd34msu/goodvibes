@@ -254,6 +254,7 @@ export function composeContractRunner(options: ContractRunnerCompositionOptions)
     }),
     decompositionRunner: createAgentManagerDecompositionRunner({ agentManager: options.agentManager }),
     createEngine: (input) => createOrchestrationEngine({
+      nativeDataWriter: options.nativeDataWriter,
       agentManager: options.agentManager,
       configManager: options.configManager,
       runtimeBus: options.runtimeBus,

@@ -63,9 +63,10 @@ import { summarizeError } from '../utils/error-display.js';
 import { OwnedWork } from '../utils/owned-work.js';
 
 export interface OrchestrationEngineDeps {
+  readonly nativeDataWriter?: import('../runtime/native-reader-compatibility.js').NativeDataWriteOwner | undefined;
   readonly prepareInputAuthority?: import('../contract/group-runner.js').ContractEngineInput['prepareInputAuthority'];
   readonly agentManager: PhaseRunnerAgentManagerLike;
-  readonly configManager: Pick<ConfigManager, 'get' | 'getCategory'> & Partial<Pick<ConfigManager, 'getConfigurationIncarnation' | 'onDidChangeIncarnation'>>;
+  readonly configManager: Pick<ConfigManager, 'get' | 'getCategory'> & Partial<Pick<ConfigManager, 'getConfigurationIncarnation' | 'onDidChangeIncarnation' | 'getNativeDataWriter'>>;
   readonly runtimeBus: RuntimeEventBus;
   readonly projectRoot: string;
   /**
@@ -230,7 +231,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     return () => listeners.delete(listener);
   }
 
-  // Dirty-residue guard: snapshot dirty paths+hashes ONCE at launch (sync,
+  // Dirty-residue guard: snapshot original dirty paths+private bytes ONCE at launch (sync,
   // see dirty-guard.ts) so a later scoped commit can tell prior-run residue
   // from this run's own changes.
   const launchDirtySnapshot: DirtyLaunchSnapshot = snapshotDirtyTree(deps.projectRoot);
@@ -252,6 +253,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     });
 
   const worktreeIsolation: WorktreeIsolationManager = createWorktreeIsolationManager({
+    nativeDataWriter: deps.nativeDataWriter ?? deps.configManager.getNativeDataWriter?.(),
     projectRoot: deps.projectRoot,
     stateNamespace: deps.stateNamespace,
     ownedWork,

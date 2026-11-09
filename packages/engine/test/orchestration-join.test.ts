@@ -1,6 +1,6 @@
 /** Actual settlement barriers: terminal statuses/events never stand in for executor cleanup. */
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { IsolatedWorktree } from '../sdk/src/platform/agents/worktree.js';
@@ -20,9 +20,18 @@ function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => voi
 const cleanups: Array<() => void> = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup(); });
 
+let useNativeWorktrees = false;
+function nativeGit(root: string, ...args: string[]): void {
+  const result = Bun.spawnSync(['git', '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.test', ...args], { cwd: root });
+  if (result.exitCode !== 0) throw new Error(new TextDecoder().decode(result.stderr));
+}
 function fixture(overrides: Partial<OrchestrationEngineDeps> = {}) {
   const root = mkdtempSync(join(tmpdir(), 'orch-join-'));
   cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+  if (useNativeWorktrees) {
+    nativeGit(root, 'init', '-q', '-b', 'main'); writeFileSync(join(root, '.gitignore'), '.goodvibes/\n');
+    writeFileSync(join(root, 'seed'), 'native original'); nativeGit(root, 'add', '.'); nativeGit(root, 'commit', '-qm', 'seed');
+  }
   const h = createOrchestrationHarness();
   const engine = createOrchestrationEngine({
     projectRoot: root, agentManager: h.agentManager, runtimeBus: h.bus,
@@ -43,11 +52,13 @@ function observe(promise: Promise<void>): () => boolean {
   return () => settled;
 }
 
-function fakeIsolatedWorktrees(): void {
-  const create = spyOn(IsolatedWorktree.prototype, 'create').mockResolvedValue(undefined);
+function stubIsolatedCleanup(): void {
+  // Creation remains real: settlement barriers must hold resources admitted by
+  // actual native Git, not a public fake that cannot issue creation receipts.
+  useNativeWorktrees = true;
   const clean = spyOn(IsolatedWorktree.prototype, 'isClean').mockResolvedValue(true);
   const remove = spyOn(IsolatedWorktree.prototype, 'remove').mockResolvedValue(undefined);
-  cleanups.push(() => { create.mockRestore(); clean.mockRestore(); remove.mockRestore(); });
+  cleanups.push(() => { useNativeWorktrees = false; clean.mockRestore(); remove.mockRestore(); });
 }
 
 describe('OrchestrationEngine.join', () => {
@@ -222,7 +233,7 @@ describe('OrchestrationEngine.join', () => {
   });
 
   test('kill during isolated setup waits for setup and cleanup without spawning an agent', async () => {
-    fakeIsolatedWorktrees();
+    stubIsolatedCleanup();
     const setup = deferred();
     const entered = deferred();
     const { engine, h, makeStream } = fixture({ runWorktreeSetup: async () => { entered.resolve(); await setup.promise; } });
@@ -243,7 +254,7 @@ describe('OrchestrationEngine.join', () => {
   });
 
   test('best-of-N loser cleanup cannot delete a cancelled sibling before its executor exits', async () => {
-    fakeIsolatedWorktrees();
+    stubIsolatedCleanup();
     const execution = deferred();
     const removed: string[] = [];
     const integrate = spyOn(IsolatedWorktree.prototype, 'integrate').mockResolvedValue({ status: 'empty' });
@@ -252,6 +263,8 @@ describe('OrchestrationEngine.join', () => {
     });
     cleanups.push(() => { integrate.mockRestore(); remove.mockRestore(); });
     const { engine, h } = fixture({ runWorktreeSetup: async () => undefined });
+    const bothSpawned = deferred(), originalSpawn = h.agentManager.spawn; let spawns = 0;
+    h.agentManager.spawn = (input, binding) => { const result = originalSpawn(input, binding); if (++spawns === 2) bothSpawned.resolve(); return result; };
     h.agentManager.join = (id) => id === 'agent-2' ? execution.promise : Promise.resolve();
     const ws = engine.createWorkstream({
       title: 'Attempts', isolation: 'worktree',
@@ -259,7 +272,7 @@ describe('OrchestrationEngine.join', () => {
       phases: [{ kind: 'engineer', role: 'engineer', capacity: 2, gate: { scope: 'off', gates: [] } }],
     });
     engine.start(ws.id);
-    await flushMicrotasks(30);
+    await bothSpawned.promise;
     const winner = ws.items[0]!;
     const loser = ws.items[1]!;
     const loserPath = loser.worktreePath!;
@@ -280,15 +293,17 @@ describe('OrchestrationEngine.join', () => {
   });
 
   test('joins integration started by imported terminal items and its delayed removal', async () => {
-    fakeIsolatedWorktrees();
+    stubIsolatedCleanup();
     const integration = deferred<{ status: 'empty' }>();
     const removal = deferred();
     const removalEntered = deferred();
     const integrate = spyOn(IsolatedWorktree.prototype, 'integrate').mockImplementation(() => integration.promise);
     const remove = spyOn(IsolatedWorktree.prototype, 'remove').mockImplementation(async () => { removalEntered.resolve(); await removal.promise; });
     cleanups.push(() => { integrate.mockRestore(); remove.mockRestore(); });
-    const { engine, makeStream } = fixture();
+    const { root, engine, makeStream } = fixture();
     const ws = makeStream(undefined, 'worktree');
+    const originalOwner = createWorktreeIsolationManager({ projectRoot: root, emit() {} });
+    await originalOwner.ensureWorktree(ws, ws.items[0]!);
     ws.items[0]!.state = 'passed';
     ws.items[0]!.currentPhaseId = null;
     expect(engine.importWorkstream(engine.serializeWorkstream(ws.id)!)).toBe(true);
@@ -336,7 +351,7 @@ describe('orchestration nested work', () => {
   });
 
   test('kept-worktree eviction is joined after the triggering cleanup has returned', async () => {
-    fakeIsolatedWorktrees();
+    stubIsolatedCleanup();
     const eviction = deferred<{ preservedCommit: string | null }>();
     const dirty = spyOn(IsolatedWorktree.prototype, 'isClean').mockResolvedValue(false);
     const evict = spyOn(IsolatedWorktree.prototype, 'evict').mockImplementation(() => eviction.promise);

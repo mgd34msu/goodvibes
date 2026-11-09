@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { lstatSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import type { SimpleGit } from 'simple-git';
@@ -115,10 +116,16 @@ export function conflictPathsFromMergeOutput(message: string): string[] {
 // External Git processes are not participants in this in-process queue.
 const worktreeMutationTails = new Map<string, Promise<void>>();
 
-async function mutateWorktree(git: SimpleGit, cwd: string, args: string[]): Promise<void> {
+function assertGitRestriction(guard?: () => void): void {
+  const result: unknown = guard?.();
+  if (result !== undefined) { drainOwned(result); throw new Error('Native Git restriction must complete synchronously'); }
+}
+
+async function mutateWorktree(git: SimpleGit, cwd: string, args: string[], beforeMutation?: () => void): Promise<void> {
+  assertGitRestriction(beforeMutation);
   const commonDir = realpathSync(resolve(cwd, (await git.raw(['rev-parse', '--git-common-dir'])).trim()));
   const previous = worktreeMutationTails.get(commonDir) ?? Promise.resolve();
-  const operation = previous.then(async () => { await git.raw(args); });
+  const operation = previous.then(async () => { assertGitRestriction(beforeMutation); await git.raw(args); });
   // A failed Git operation must not poison the next item's preparation.
   const tail = operation.then(() => undefined, () => undefined);
   worktreeMutationTails.set(commonDir, tail);
@@ -425,10 +432,13 @@ export class GitService {
 
   async merge(
     branch: string,
+    beforeMutation?: () => void,
   ): Promise<{ success: boolean; conflicts?: string[] }> {
+    assertGitRestriction(beforeMutation);
     await this.firePre('merge', { branch });
     try {
-      await (await this.git()).merge([branch]);
+      const git = await this.git(); assertGitRestriction(beforeMutation);
+      await git.merge([branch]);
       await this.firePost('merge', { branch, success: true });
       return { success: true };
     } catch (err) {
@@ -530,14 +540,15 @@ export class GitService {
   // Worktree (for agent isolation)
   // ---------------------------------------------------------------------------
 
-  async worktreeAdd(path: string, branch: string, startPoint?: string, checkout = true): Promise<void> {
+  async worktreeAdd(path: string, branch: string, startPoint?: string, checkout = true, beforeMutation?: () => void): Promise<void> {
+    assertGitRestriction(beforeMutation);
     worktreeCreations.delete(this);
     await this.firePre('worktreeAdd', { path, branch });
     try {
       // This short-lived client permits only our fixed hook-disabling override, never a caller-provided hook path.
       const rawCheckoutOptions = { baseDir: this.cwd, unsafe: { allowUnsafeHooksPath: true } };
       const git = checkout ? await this.git() : await createSimpleGit(rawCheckoutOptions);
-      await mutateWorktree(git, this.cwd, [...(checkout ? [] : ['-c', 'core.hooksPath=/dev/null']), 'worktree', 'add', ...(checkout ? [] : ['--no-checkout']), path, '-b', branch, ...(startPoint === undefined ? [] : [startPoint])]);
+      await mutateWorktree(git, this.cwd, [...(checkout ? [] : ['-c', 'core.hooksPath=/dev/null']), 'worktree', 'add', ...(checkout ? [] : ['--no-checkout']), path, '-b', branch, ...(startPoint === undefined ? [] : [startPoint])], beforeMutation);
       // Capture before a borrowed post hook can change the new directories.
       worktreeCreations.set(this, captureWorktreeCreation(path, branch, this.cwd));
       await this.firePost('worktreeAdd', { path, branch });
@@ -547,10 +558,11 @@ export class GitService {
     }
   }
 
-  async worktreeRemove(path: string): Promise<void> {
+  async worktreeRemove(path: string, beforeMutation?: () => void): Promise<void> {
+    assertGitRestriction(beforeMutation);
     await this.firePre('worktreeRemove', { path });
     try {
-      await mutateWorktree(await this.git(), this.cwd, ['worktree', 'remove', path]);
+      await mutateWorktree(await this.git(), this.cwd, ['worktree', 'remove', path], beforeMutation);
       await this.firePost('worktreeRemove', { path });
     } catch (err) {
       await this.fireFail('worktreeRemove', { path, error: summarizeError(err) });

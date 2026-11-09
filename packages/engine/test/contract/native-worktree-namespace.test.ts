@@ -68,9 +68,9 @@ test('actual native materialization failure cannot grant member authority after 
   // Fail the real raw-blob materializer after Git has registered its no-checkout
   // tree. README already exists, so materializeFiles' exclusive write fails.
   const original = IsolatedWorktree.prototype.create;
-  const creation = spyOn(IsolatedWorktree.prototype, 'create').mockImplementation(async function (this: IsolatedWorktree, startPoint?: string, checkout = true) {
-    await original.call(this, startPoint, checkout);
-    if (!checkout && (this.branch.startsWith('ws/') || this.branch.startsWith('ws-ns/'))) writeFileSync(join(this.path, 'README.md'), 'partial materialization\n');
+  const creation = spyOn(IsolatedWorktree.prototype, 'create').mockImplementation(async function (this: IsolatedWorktree, startPoint?: string, checkout = true, beforeMutation?: () => void) {
+    await original.call(this, startPoint, checkout, beforeMutation);
+    if (!checkout && (this.branch.startsWith('ws/') || this.branch.startsWith('ws-ns/') || this.branch.startsWith('ws-owned/'))) writeFileSync(join(this.path, 'README.md'), 'partial materialization\n');
   });
   const f = fixture(root, { decisionLog: log, port: context => {
     if ((context.name === 'lineHasCredential' || context.name === 'spanIsCredential') && isDeepStrictEqual(context.state, recoveryProjection)) {

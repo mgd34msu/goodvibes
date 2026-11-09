@@ -95,21 +95,6 @@ async function waitUntil(
   }
 }
 
-/**
- * Best-effort settle wait: polls until the predicate holds or `ceilingMs`
- * elapses and reports which happened. Never throws, for the one call site
- * whose predicate may legitimately never become true, where the real assertion
- * comes afterwards.
- */
-async function waitUpTo(predicate: () => boolean, ceilingMs: number, intervalMs = WAIT_INTERVAL_MS): Promise<boolean> {
-  const deadline = Date.now() + ceilingMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) return false;
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-  return true;
-}
-
 interface WtHarness {
   readonly bus: RuntimeEventBus;
   readonly agentManager: PhaseRunnerAgentManagerLike;
@@ -532,7 +517,7 @@ describe('WorktreeIsolationManager: fail/kill cleanup rules', () => {
 });
 
 describe('WorktreeIsolationManager: orphan reconciliation (adopt-or-report)', () => {
-  test('an unrecorded ws/* worktree matching a known non-terminal item is ADOPTED; an unrecorded one matching no item is REPORTED, never deleted', async () => {
+  test('old unrecorded ws/* trees are reported and preserved even when a shortened name resembles a known item', async () => {
     root = freshRoot();
     const engineA = makeEngine(root, makeWtHarness());
     const ws = engineA.createWorkstream({
@@ -565,23 +550,18 @@ describe('WorktreeIsolationManager: orphan reconciliation (adopt-or-report)', ()
     expect(reconciled).toHaveLength(2);
     const adopted = reconciled.find((e) => e.branch === 'ws/orphan/x');
     const reported = reconciled.find((e) => e.branch === 'ws/orphan/ghost');
-    expect(adopted?.disposition).toBe('adopted');
+    expect(adopted?.disposition).toBe('reported');
     expect(reported?.disposition).toBe('reported');
 
     const importedWs = engineB.getWorkstream('ws-orphan')!;
     const itemX = importedWs.items.find((i) => i.id === 'item-x')!;
-    expect(itemX.worktreePath).toBe(canonicalPath);
-    expect(itemX.worktreeBranch).toBe('ws/orphan/x');
+    expect(itemX.worktreePath).toBeUndefined();
+    expect(itemX.worktreeBranch).toBeUndefined();
 
     // Reported (unmatched) worktree is left exactly in place, never deleted on sight.
     expect(existsSync(ghostPath)).toBe(true);
 
-    // Reusing the adopted worktree at claim time must not attempt to re-create
-    // it (which would throw, the path already exists).
-    engineB.start(importedWs.id);
-    // Best-effort settle: this predicate MAY legitimately never hold, so its
-    // outcome is deliberately not asserted (the assertion below is).
-    await waitUpTo(() => existsSync(join(canonicalPath, '.git')), 5_000);
+    // A name-only historical orphan is not proof of original acquisition.
     expect(existsSync(canonicalPath)).toBe(true);
 
     rmSync(root, { recursive: true, force: true });

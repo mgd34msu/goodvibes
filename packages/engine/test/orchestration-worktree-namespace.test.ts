@@ -1,5 +1,7 @@
 /** Namespace allocation, recovery and cleanup against real Git, without model calls. */
 import { afterEach, expect, test } from 'bun:test';
+import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
+import { WorktreeIdentityRegistry } from '../sdk/src/platform/orchestration/worktree-identities.js';
 import { createHash } from 'node:crypto';
 import { judgmentInputBoundary } from '../sdk/src/platform/gate/boundary.js';
 import { ConfigManager } from '../sdk/src/platform/config/index.js';
@@ -9,7 +11,7 @@ import { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/poli
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createWorktreeIsolationManager, itemWorktreeBranch } from '../sdk/src/platform/orchestration/worktree-isolation.js';
+import { createWorktreeIsolationManager } from '../sdk/src/platform/orchestration/worktree-isolation.js';
 import { CURRENT_WORKSTREAM_SCHEMA_VERSION, type OrchestrationEvent, type WorkItem, type Workstream } from '../sdk/src/platform/orchestration/types.js';
 import { emptyWorkItemUsage } from '../sdk/src/platform/orchestration/types.js';
 import { serializeWorkstreamSnapshot, deserializeWorkstreamSnapshot, deserializeWorkstream } from '../sdk/src/platform/orchestration/persistence.js';
@@ -23,7 +25,7 @@ function git(root: string, ...args: string[]): string {
 }
 function repo(): string {
   const root = mkdtempSync(join(tmpdir(), 'worktree-namespace-')); roots.push(root);
-  git(root, 'init', '-q', '-b', 'main');
+  git(root, 'init', '-q', '-b', 'main'); git(root, 'config', 'user.name', 'fixture'); git(root, 'config', 'user.email', 'fixture@example.test');
   writeFileSync(join(root, '.gitignore'), '.goodvibes/\n');
   writeFileSync(join(root, 'seed.txt'), 'original\n');
   git(root, 'add', '.'); git(root, 'commit', '-qm', 'seed');
@@ -36,6 +38,16 @@ function stream(): Workstream {
 }
 function manager(root: string, stateNamespace?: string, events: OrchestrationEvent[] = []) {
   return createWorktreeIsolationManager({ projectRoot: root, stateNamespace, emit: event => events.push(event) });
+}
+
+function oldResource(root: string, ws: Workstream) {
+  const branch = `ws/${ws.id}/${ws.items[0]!.id}`, path = join(root, '.goodvibes', '.worktrees', branch);
+  git(root, 'worktree', 'add', '-q', '-b', branch, path);
+  ws.items[0]!.worktreePath = path; ws.items[0]!.worktreeBranch = branch;
+  return { path, branch };
+}
+async function reserve(root: string, ws: Workstream, namespace: string | null = null) {
+  return new WorktreeIdentityRegistry(join(root, '.git')).reserve({ namespace, workstreamId: ws.id, itemId: ws.items[0]!.id });
 }
 
 test('full namespace identity isolates duplicate group/unit IDs and cleanup owns only its allocation', async () => {
@@ -56,7 +68,7 @@ test('full namespace identity isolates duplicate group/unit IDs and cleanup owns
 
 test('failed allocation cleanup cannot delete an existing branch even when it has no worktree', async () => {
   const root = repo(); const ws = stream(); const item = ws.items[0]!; const owner = manager(root);
-  const branch = itemWorktreeBranch(ws.id, item.id); git(root, 'branch', branch); const head = git(root, 'rev-parse', branch);
+  const branch = (await reserve(root, ws)).branch; git(root, 'branch', branch); const head = git(root, 'rev-parse', branch);
   await expect(owner.ensureWorktree(ws, item)).rejects.toThrow();
   await owner.cleanupTerminated(ws, item); await owner.join();
   expect(git(root, 'rev-parse', branch)).toBe(head);
@@ -65,7 +77,7 @@ test('failed allocation cleanup cannot delete an existing branch even when it ha
 
 test('failed allocation cleanup cannot remove a pre-existing clean worktree at the derived path', async () => {
   const root = repo(); const ws = stream(); const item = ws.items[0]!; const owner = manager(root);
-  const path = join(root, '.goodvibes', '.worktrees', 'ws', 'g1', 'u1');
+  const path = join(root, '.goodvibes', '.worktrees', (await reserve(root, ws)).branch);
   git(root, 'worktree', 'add', '-q', '-b', 'user-owned', path); const before = git(root, 'worktree', 'list', '--porcelain');
   await expect(owner.ensureWorktree(ws, item)).rejects.toThrow();
   await owner.cleanupTerminated(ws, item); await owner.join();
@@ -92,8 +104,8 @@ test('unrecorded recovery adopts only the same namespace and leaves other namesp
 
 test('resumed recorded legacy names are retained under a namespace and cancellation before claim cleans only that record', async () => {
   const root = repo(); const legacy = stream(); const other = stream();
-  const original = manager(root); const separate = manager(root, 'contract-B');
-  const own = await original.ensureWorktree(legacy, legacy.items[0]!); const foreign = await separate.ensureWorktree(other, other.items[0]!);
+  const separate = manager(root, 'contract-B');
+  const own = oldResource(root, legacy); const foreign = await separate.ensureWorktree(other, other.items[0]!);
   const resumed = stream(); Object.assign(resumed.items[0]!, { worktreePath: own.path, worktreeBranch: legacy.items[0]!.worktreeBranch });
   const recovering = manager(root, 'contract-A'); recovering.reconcileOrphans(resumed);
   expect(resumed.items[0]!.worktreeBranch).toBe('ws/g1/u1'); expect(resumed.items[0]!.worktreePath).toBe(own.path);
@@ -101,22 +113,22 @@ test('resumed recorded legacy names are retained under a namespace and cancellat
   expect(existsSync(own.path)).toBe(false); expect(existsSync(foreign.path)).toBe(true);
 });
 
-test('namespace fragments are deterministic, safe, and never collapse namespaces with identical suffixes', () => {
-  const names = ['contract-a-same', 'contract-b-same', '', '../../escape\n☃', 'CONTRACT-a-same'];
-  const branches = names.map(namespace => itemWorktreeBranch('group-1', 'unit-1', namespace));
-  expect(new Set(branches).size).toBe(names.length);
-  expect(itemWorktreeBranch('group-1', 'unit-1')).toBe('ws/1/1');
-  for (const [index, branch] of branches.entries()) {
-    expect(branch).toBe(itemWorktreeBranch('group-1', 'unit-1', names[index]));
-    expect(branch).toMatch(/^ws-ns\/[a-fk-t]{64}\/1\/1$/);
+test('exact private tuple allocations survive restart and never expose arbitrary caller identifiers', async () => {
+  const root = repo(), names = ['contract-a-same', 'contract-b-same', '', '../../escape\n☃', 'CONTRACT-a-same'];
+  const branches: string[] = [];
+  for (const namespace of names) {
+    const ws = stream(); ws.id = '../group'; ws.items[0]!.id = '../unit';
+    const first = await reserve(root, ws, namespace), reopened = await reserve(root, ws, namespace);
+    expect(reopened.branch).toBe(first.branch); expect(first.branch).toMatch(/^ws-owned\/[a-p-]+$/);
+    expect(first.branch).not.toContain(namespace || 'unit'); branches.push(first.branch);
   }
-  expect(itemWorktreeBranch('../group', '../unit', '../../namespace')).toMatch(/^ws-ns\/[a-fk-t]{64}\/[a-f0-9]{8}\/[a-f0-9]{8}$/);
+  expect(new Set(branches).size).toBe(names.length);
 });
 
 test('recorded legacy resources win over a same-namespace orphan and missing branch metadata comes from Git', async () => {
   const root = repo(); const legacy = stream(); const canonical = stream();
-  const old = manager(root); const fresh = manager(root, 'contract-A');
-  const own = await old.ensureWorktree(legacy, legacy.items[0]!); const extra = await fresh.ensureWorktree(canonical, canonical.items[0]!);
+  const fresh = manager(root, 'contract-A');
+  const own = oldResource(root, legacy); const extra = await fresh.ensureWorktree(canonical, canonical.items[0]!);
   const resumed = stream(); resumed.items[0]!.worktreePath = own.path;
   const events: OrchestrationEvent[] = []; const recovering = manager(root, 'contract-A', events);
   recovering.reconcileOrphans(resumed);
@@ -131,8 +143,8 @@ test('recorded legacy resources win over a same-namespace orphan and missing bra
 
 test('resumed pending integration uses its recorded legacy branch without touching another contract', async () => {
   const root = repo(); const legacy = stream(); const other = stream();
-  const old = manager(root); const foreign = manager(root, 'contract-B');
-  const own = await old.ensureWorktree(legacy, legacy.items[0]!); const separate = await foreign.ensureWorktree(other, other.items[0]!);
+  const foreign = manager(root, 'contract-B');
+  const own = oldResource(root, legacy); const separate = await foreign.ensureWorktree(other, other.items[0]!);
   const otherBranch = other.items[0]!.worktreeBranch!; const otherHead = git(root, 'rev-parse', otherBranch);
   writeFileSync(join(own.path, 'completed.txt'), 'preserved output\n'); git(own.path, 'add', 'completed.txt'); git(own.path, 'commit', '-qm', 'complete');
   const resumed = stream(); Object.assign(resumed.items[0]!, { state: 'passed', mergeState: 'pending', worktreePath: own.path, worktreeBranch: legacy.items[0]!.worktreeBranch });
@@ -152,12 +164,12 @@ test('a successful allocation stays cleanup-owned when its initializer later fai
   await expect(owner.ensureWorktree(ws, item)).rejects.toThrow('requires recovery');
   await owner.cleanupTerminated(ws, item); await owner.join();
   expect(existsSync(acquiredPath)).toBe(false);
-  expect(git(root, 'branch', '--list', itemWorktreeBranch('g1', 'u1', 'contract-A'))).toBe('');
+  expect(git(root, 'branch', '--list', item.worktreeBranch!)).toBe('');
 });
 
 test('branch-only legacy recovery resolves the recorded resource before applying the namespace filter', async () => {
-  const root = repo(); const legacy = stream(); const old = manager(root);
-  const own = await old.ensureWorktree(legacy, legacy.items[0]!);
+  const root = repo(); const legacy = stream();
+  const own = oldResource(root, legacy);
   const resumed = stream(); resumed.items[0]!.worktreeBranch = legacy.items[0]!.worktreeBranch;
   const recovering = manager(root, 'contract-A'); recovering.reconcileOrphans(resumed);
   expect(resumed.items[0]!.worktreePath).toBe(own.path); expect(resumed.items[0]!.worktreeBranch).toBe('ws/g1/u1');
@@ -181,14 +193,14 @@ test('dirty failed initialization survives serialization and recovery cannot exe
   expect(readFileSync(join(path, 'partial.txt'), 'utf8')).toBe('incomplete\n'); expect(existsSync(join(root, 'partial.txt'))).toBe(false);
 });
 
-test('unrecorded initializer-owned orphan is retained with unknown readiness and never reused as complete', async () => {
+test('privately initialized native orphan restores completed readiness independently of the new initializer', async () => {
   const root = repo(); const ws = stream(); const existing = manager(root, 'contract-A');
   const acquired = await existing.ensureWorktree(ws, ws.items[0]!);
   const resumed = stream(); const recovering = createWorktreeIsolationManager({ projectRoot: root, stateNamespace: 'contract-A', emit: () => undefined,
     initializeWorktree: worktree => worktree.create() });
   recovering.reconcileOrphans(resumed);
-  expect(resumed.items[0]!.worktreePath).toBe(acquired.path); expect(resumed.items[0]!.worktreeInitialized).toBe(false);
-  await expect(recovering.ensureWorktree(resumed, resumed.items[0]!)).rejects.toThrow('requires recovery');
+  expect(resumed.items[0]!.worktreePath).toBe(acquired.path); expect(resumed.items[0]!.worktreeInitialized).toBe(true);
+  expect((await recovering.ensureWorktree(resumed, resumed.items[0]!)).path).toBe(acquired.path);
   expect(existsSync(acquired.path)).toBe(true);
 });
 
@@ -202,7 +214,7 @@ test('generated namespace avoids card-shaped path material without relaxing user
   const oldBoundary = judgmentInputBoundary('read', { path: legacy }, root);
   expect(oldBoundary.passed).toBe(false);
   expect(oldBoundary.checks[0]?.detail).toBe('card-material');
-  const generated = join(root, '.goodvibes', '.worktrees', itemWorktreeBranch('g1', 'u1', namespace), 'src', 'csv.ts');
+  const generated = join(root, '.goodvibes', '.worktrees', `ws-owned/${opaqueUuid()}`, 'src', 'csv.ts');
   expect(judgmentInputBoundary('read', { path: generated }, root).passed).toBe(true);
   const syntheticCard = ['4111', '1111', '1111', '1111'].join('');
   const userPath = join(generated, '..', `${syntheticCard}.txt`);
@@ -232,28 +244,28 @@ test.each(['both', 'path-only', 'branch-only'] as const)('recorded hex namespace
   expect(existsSync(own.path)).toBe(false);
 });
 
-test('unrecorded hex recovery is exact-namespace scoped and preserves unrelated resources', async () => {
+test('unknown old hex labels are reported without implying resource ownership', async () => {
   const root = repo(); const own = legacyHexResource(root, 'contract-A'); const foreign = legacyHexResource(root, 'contract-B');
   const newForeignStream = stream(); const newForeign = await manager(root, 'contract-C').ensureWorktree(newForeignStream, newForeignStream.items[0]!);
   const legacyStream = stream(); const legacy = await manager(root).ensureWorktree(legacyStream, legacyStream.items[0]!);
   const resumed = stream(); const events: OrchestrationEvent[] = []; const recovering = manager(root, 'contract-A', events);
   recovering.reconcileOrphans(resumed);
-  expect(resumed.items[0]!.worktreePath).toBe(own.path); expect(resumed.items[0]!.worktreeBranch).toBe(own.branch);
+  expect(resumed.items[0]!.worktreePath).toBeUndefined(); expect(resumed.items[0]!.worktreeBranch).toBeUndefined();
   expect(events.filter(event => event.type === 'orphan-worktree-reconciled')).toEqual([
-    expect.objectContaining({ path: own.path, disposition: 'adopted' }),
+    expect.objectContaining({ path: own.path, disposition: 'reported' }),
   ]);
   await recovering.cleanupTerminated(resumed, resumed.items[0]!); await recovering.join();
-  expect(existsSync(own.path)).toBe(false); expect(existsSync(foreign.path)).toBe(true);
+  expect(existsSync(own.path)).toBe(true); expect(existsSync(foreign.path)).toBe(true);
   expect(existsSync(newForeign.path)).toBe(true); expect(existsSync(legacy.path)).toBe(true);
 });
 
-test('unrecorded hex custom-initializer orphan retains unknown readiness', async () => {
+test('unknown old hex custom-initializer tree is never adopted by its name', async () => {
   const root = repo(); const own = legacyHexResource(root, 'contract-A'); const resumed = stream();
   const recovering = createWorktreeIsolationManager({ projectRoot: root, stateNamespace: 'contract-A', emit: () => undefined,
     initializeWorktree: worktree => worktree.create() });
   recovering.reconcileOrphans(resumed);
-  expect(resumed.items[0]!.worktreePath).toBe(own.path); expect(resumed.items[0]!.worktreeInitialized).toBe(false);
-  await expect(recovering.ensureWorktree(resumed, resumed.items[0]!)).rejects.toThrow('requires recovery');
+  expect(resumed.items[0]!.worktreePath).toBeUndefined(); expect(resumed.items[0]!.worktreeInitialized).toBeUndefined();
+  expect((await recovering.ensureWorktree(resumed, resumed.items[0]!)).path).not.toBe(own.path);
   expect(existsSync(own.path)).toBe(true);
 });
 
@@ -270,15 +282,15 @@ test('recorded hex resource wins over an unrecorded new spelling', async () => {
   expect(existsSync(own.path)).toBe(false); expect(existsSync(extra.path)).toBe(true);
 });
 
-test('two unrecorded namespace spellings remain ambiguous and are never adopted by listing order', async () => {
+test('actual acquired native receipt restores independently while unknown old spelling is preserved', async () => {
   const root = repo(); const old = legacyHexResource(root, 'contract-A'); const fresh = stream();
   const next = await manager(root, 'contract-A').ensureWorktree(fresh, fresh.items[0]!);
   const resumed = stream(); const events: OrchestrationEvent[] = []; const recovering = manager(root, 'contract-A', events);
   recovering.reconcileOrphans(resumed);
-  expect(resumed.items[0]!.worktreePath).toBeUndefined(); expect(resumed.items[0]!.worktreeBranch).toBeUndefined();
-  expect(events.filter(event => event.type === 'orphan-worktree-reconciled').map(event => 'disposition' in event ? event.disposition : null)).toEqual(['reported', 'reported']);
+  expect(resumed.items[0]!.worktreePath).toBe(next.path); expect(resumed.items[0]!.worktreeBranch).toBe(fresh.items[0]!.worktreeBranch);
+  expect(events.filter(event => event.type === 'orphan-worktree-reconciled').map(event => 'disposition' in event ? event.disposition : null).sort()).toEqual(['adopted', 'reported']);
   await recovering.cleanupTerminated(resumed, resumed.items[0]!); await recovering.join();
-  expect(existsSync(old.path)).toBe(true); expect(existsSync(next.path)).toBe(true);
+  expect(existsSync(old.path)).toBe(true); expect(existsSync(next.path)).toBe(false);
 });
 
 test('read access follows explicit owner path rules without classifying file names', async () => {
@@ -287,7 +299,7 @@ test('read access follows explicit owner path rules without classifying file nam
   const store = new UserPermissionRuleStore(':memory:');
   const permission = new PermissionManager(async () => { throw new Error('read access must not prompt'); },
     createPermissionConfigReader(config), new PolicyRuntimeState(), null, { isEnabled: () => true }, store);
-  const path = join(root, '.goodvibes', '.worktrees', itemWorktreeBranch('g1', 'u1', 'ctr-797d133b'), 'src', 'csv.ts');
+  const path = join(root, '.goodvibes', '.worktrees', `ws-owned/${opaqueUuid()}`, 'src', 'csv.ts');
   expect(await permission.readAccess(path)).toBe('allow');
   const syntheticCard = ['4111', '1111', '1111', '1111'].join('');
   expect(await permission.readAccess(join(path, '..', `${syntheticCard}.txt`))).toBe('allow');

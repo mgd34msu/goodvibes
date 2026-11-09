@@ -484,9 +484,9 @@ export class IsolatedWorktree {
   }
 
   /** Add the worktree on a fresh `branch` branched from base (the root tree's current HEAD). */
-  async create(startPoint?: string, checkout = true): Promise<void> {
+  async create(startPoint?: string, checkout = true, beforeMutation?: () => void): Promise<void> {
     logger.debug('IsolatedWorktree.create', { path: this.path, branch: this.branch });
-    try { await this.rootGit.worktreeAdd(this.path, this.branch, startPoint, checkout); }
+    try { await this.rootGit.worktreeAdd(this.path, this.branch, startPoint, checkout, beforeMutation); }
     finally {
       // A post hook can reject after real creation. Retain the real receipt for
       // owned recovery/cleanup; a fake successful public method has no receipt.
@@ -502,8 +502,8 @@ export class IsolatedWorktree {
    * to shared mode. A fresh worktree starts clean, so in worktree mode the
    * launch-dirty snapshot is per-worktree and trivially empty (see the engine).
    */
-  async commit(message: string, paths?: string[]): Promise<CommitWorkingTreeResult> {
-    return new AgentWorktree(this.path).commitWorkingTree(message, paths);
+  async commit(message: string, paths?: string[], beforeCommit?: () => void): Promise<CommitWorkingTreeResult> {
+    return new AgentWorktree(this.path).commitWorkingTree(message, paths, beforeCommit);
   }
 
   /** HEAD of the item branch (inside the worktree), or null if it can't be read. */
@@ -550,14 +550,17 @@ export class IsolatedWorktree {
    * is restored and the lane can continue), or `empty` (no commits to merge).
    * Never auto-resolves a conflict.
    */
-  async integrate(): Promise<IntegrationOutcome> {
-    if (!(await this.branchHasCommits())) {
+  async integrate(beforeMutation?: () => void): Promise<IntegrationOutcome> {
+    beforeMutation?.();
+    const hasCommits = await this.branchHasCommits();
+    beforeMutation?.();
+    if (!hasCommits) {
       logger.debug('IsolatedWorktree.integrate: branch has no commits beyond base, nothing to merge', { branch: this.branch });
       return { status: 'empty' };
     }
     const wgit = await createSimpleGit({ baseDir: this.rootGit.getCwd() });
     const before = (await wgit.raw(['rev-parse', 'HEAD'])).trim();
-    const result = await this.rootGit.merge(this.branch);
+    const result = await this.rootGit.merge(this.branch, beforeMutation);
     if (result.success) {
       const hash = (await wgit.raw(['rev-parse', 'HEAD'])).trim();
       // A fast-forward or an already-merged branch can leave HEAD unmoved; a
@@ -569,6 +572,7 @@ export class IsolatedWorktree {
     // Conflict, restore the root tree so the sequential lane can continue.
     const files = [...(result.conflicts ?? [])];
     try {
+      beforeMutation?.();
       await wgit.raw(['merge', '--abort']);
     } catch (err) {
       logger.warn('IsolatedWorktree.integrate: merge --abort did not complete after conflict', { branch: this.branch, error: summarizeError(err) });
@@ -599,11 +603,13 @@ export class IsolatedWorktree {
   }
 
   /** Remove the worktree directory and delete the item branch (post-merge, or a clean tree after fail/kill). */
-  async remove(): Promise<void> {
+  async remove(beforeRemove?: () => void, beforeRepositoryWrite?: () => void): Promise<void> {
+    beforeRepositoryWrite?.(); beforeRemove?.();
     logger.debug('IsolatedWorktree.remove', { path: this.path, branch: this.branch });
-    await this.removeDirectory();
+    await this.removeDirectory(beforeRemove);
     try {
       const wgit = await createSimpleGit({ baseDir: this.rootGit.getCwd() });
+      beforeRepositoryWrite?.();
       await wgit.raw(['branch', '-D', this.branch]);
     } catch (err) {
       logger.warn('IsolatedWorktree.remove: branch delete did not complete', { branch: this.branch, error: summarizeError(err) });
@@ -625,38 +631,39 @@ export class IsolatedWorktree {
    * @returns the preservation commit hash, or null when the tree was already
    *          clean (nothing needed preserving).
    */
-  async evict(): Promise<{ preservedCommit: string | null }> {
+  async evict(beforeEvict?: () => void, beforeRepositoryWrite?: () => void): Promise<{ preservedCommit: string | null }> {
+    beforeRepositoryWrite?.(); beforeEvict?.();
     logger.debug('IsolatedWorktree.evict', { path: this.path, branch: this.branch });
     let preservedCommit: string | null = null;
     if (existsSync(this.path) && !(await this.isClean())) {
       const wgit = await createSimpleGit({ baseDir: this.path });
+      beforeRepositoryWrite?.(); beforeEvict?.();
       await wgit.raw(['add', '-A']);
       const message = 'preserve uncommitted work at kept-cap eviction';
       try {
+        beforeRepositoryWrite?.(); beforeEvict?.();
         await wgit.raw(['commit', '--no-verify', '-m', message]);
       } catch (err) {
         // Most common cause: no committer identity configured in this
         // environment. Preservation must not depend on host config, retry
         // with an explicit fallback identity rather than lose the tree.
         logger.debug('IsolatedWorktree.evict: commit failed, retrying with fallback identity', { path: this.path, error: summarizeError(err) });
+        beforeRepositoryWrite?.(); beforeEvict?.();
         await wgit.raw(['-c', 'user.email=goodvibes@localhost', '-c', 'user.name=goodvibes-eviction', 'commit', '--no-verify', '-m', message]);
       }
       preservedCommit = (await wgit.raw(['rev-parse', 'HEAD'])).trim();
     }
-    await this.removeDirectory();
+    beforeRepositoryWrite?.();
+    await this.removeDirectory(beforeEvict);
     // The branch is KEPT deliberately, no `branch -D` on the eviction path.
     return { preservedCommit };
   }
 
-  /** Remove the worktree directory (plain remove, then a --force retry). */
-  private async removeDirectory(): Promise<void> {
+  /** Native plain removal protects work added after a cleanliness check.
+   * Failure never escalates into destructive force removal. */
+  private async removeDirectory(beforeRemove?: () => void): Promise<void> {
+    beforeRemove?.();
     if (!existsSync(this.path)) return;
-    try {
-      await this.rootGit.worktreeRemove(this.path);
-    } catch (err) {
-      logger.debug('IsolatedWorktree.removeDirectory: first attempt failed, retrying with --force', { path: this.path, error: summarizeError(err) });
-      const wgit = await createSimpleGit({ baseDir: this.rootGit.getCwd() });
-      await wgit.raw(['worktree', 'remove', '--force', this.path]);
-    }
+    await this.rootGit.worktreeRemove(this.path, beforeRemove);
   }
 }

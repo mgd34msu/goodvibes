@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Report Decision Router readiness through the runtime metadata used by the
+  model selector. A configured General route can be selected without assigning
+  credentials to the virtual provider; answering providers keep their own
+  authentication requirements.
+
 - Reuse completed native schema validation only for unchanged accepted SQLite
   bytes and their original file. Writes and file replacements require fresh
   validation. Repeated reads no longer rehash unrelated saved records.

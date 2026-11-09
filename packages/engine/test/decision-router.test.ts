@@ -188,3 +188,18 @@ test('the supported minimum expanded context keeps all six recent text previews 
     + result.recent.reduce((sum, message) => sum + message.content.text.length, 0)).toBeLessThanOrEqual(512);
   expect(JSON.stringify(messages)).toBe(original);
 });
+
+
+test('Router runtime authentication metadata follows the actual General target without claiming its credentials', () => {
+  const f = fixture();
+  expect(f.router.describeRuntime().auth).toMatchObject({ mode: 'anonymous', configured: true,
+    routes: [{ route: 'anonymous', configured: true, usable: true, freshness: 'healthy' }] });
+  expect(f.router.describeRuntime().auth?.detail).toContain('own authentication');
+  expect(f.fake.requests).toHaveLength(0); expect(f.calls).toHaveLength(0);
+  f.settings({});
+  expect(f.router.describeRuntime().auth).toMatchObject({ configured: false,
+    routes: [{ route: 'anonymous', configured: false, usable: false, freshness: 'unconfigured' }] });
+  f.settings({ categories: { general: { target: general } } });
+  expect(f.router.describeRuntime().auth?.configured).toBe(true);
+  expect(f.fake.requests).toHaveLength(0);
+});

@@ -7,7 +7,7 @@ import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { decisionRouterCategory } from '../routing/batteries/decision-router.js';
 import type { ResolvedReasoningEffort } from './reasoning-effort.js';
 import { resolveEffortForModelSurface } from './reasoning-effort-surface.js';
-import type { ChatRequest, ChatResponse, LLMProvider, ProviderModelSource } from './interface.js';
+import type { ChatRequest, ChatResponse, LLMProvider, ProviderModelSource, ProviderRuntimeMetadata } from './interface.js';
 import type { ModelDefinition } from './registry-types.js';
 import { buildDecisionRoutingPreview, rememberRoutingTask, routingMessageText, type DecisionRoutingContext } from './decision-router-context.js';
 
@@ -66,8 +66,14 @@ export class DecisionRouterProvider implements LLMProvider {
     } catch { return false; }
   }
 
-  describeRuntime() {
+  describeRuntime(): ProviderRuntimeMetadata {
+    const configured = this.isConfigured();
+    const detail = configured
+      ? 'The configured General answer route is available. Answering providers retain their own authentication requirements.'
+      : 'Configure an available General answer provider and model before selecting Decision Router.';
     return {
+      auth: { mode: 'anonymous', configured, detail, routes: [{ route: 'anonymous', label: 'Configured answer route',
+        configured, usable: configured, freshness: configured ? 'healthy' : 'unconfigured', detail }] },
       setup: { description: 'Opt-in request categorization over your configured model, provider and effort per category. Configure General first; empty categories use General. Decision backends use the separate judgment settings.' },
       models: { models: this.models },
     };

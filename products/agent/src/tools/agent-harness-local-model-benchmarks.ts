@@ -1,6 +1,5 @@
 import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import { declaredClassicModelStack } from '@goodvibes-jev/engine/sdk/platform/routing';
-import { createHash } from 'node:crypto';
 import { types as nodeTypes } from 'node:util';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { prepareJudgmentResult } from '@goodvibes-jev/engine/sdk/platform/gate';
@@ -415,14 +414,16 @@ async function readOwnedLocalModelBenchmarkSnapshot(context: BenchmarkArtifactCo
     const assertResultSlots = captureCatalogMethods(result, ['record', 'buffer']); assertResultSlots();
     const record = captureModelArtifactClockSource(result.record).native, bytes = result.buffer;
     if (nodeTypes.isProxy(bytes) || !Buffer.isBuffer(bytes) || record.id !== artifact.id
-      || record.sizeBytes !== bytes.byteLength || record.sha256 !== createHash('sha256').update(bytes).digest('hex')) throw new ToolInputProjectionError('held');
+      || record.sizeBytes !== bytes.byteLength) throw new ToolInputProjectionError('held');
     assertModelReadingInputCurrent(benchmarkArtifactDescriptor(record), JSON.stringify(benchmarkArtifactDescriptor(artifact)));
     const savedBytes = Buffer.from(bytes);
     const content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(savedBytes);
     const source = Object.freeze({ descriptor: artifact, record, content });
     captureModelReadingInput(benchmarkReadingSource(source));
     const serializedRecord = JSON.stringify(record);
+    const assertReadCurrent = result.assertCurrent?.bind(result);
     contentGuards.push(() => {
+      try { assertReadCurrent?.(); } catch { throw new ToolInputProjectionError('held'); }
       assertResultSlots();
       assertModelReadingInputCurrent(result.record, serializedRecord);
       if (!Buffer.prototype.equals.call(bytes, savedBytes)) throw new ToolInputProjectionError('held');

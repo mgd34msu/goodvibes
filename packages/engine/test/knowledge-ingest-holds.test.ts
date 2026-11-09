@@ -12,7 +12,7 @@ import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
 import { KnowledgeConnectorRegistry } from '../sdk/src/platform/knowledge/connectors.js';
 import { finalizeKnowledgeIngestedSource } from '../sdk/src/platform/knowledge/ingest-compile.js';
 import { ingestKnowledgeArtifact, ingestKnowledgeUrl } from '../sdk/src/platform/knowledge/ingest-inputs.js';
-import { prepareKnowledgeExtraction } from '../sdk/src/platform/knowledge/prepared-extraction.js';
+import { prepareKnowledgeExtraction, consumeKnowledgeExtraction } from '../sdk/src/platform/knowledge/prepared-extraction.js';
 import { KnowledgeExtractionJudgmentHoldError } from '../sdk/src/platform/knowledge/extraction-policy.js';
 import { JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.js';
 import { createCompressedPdfBuffer } from './_helpers/homegraph-service-fixtures.js';
@@ -140,4 +140,18 @@ test('ordinary parse failures retain the failed-record path', async () => {
   expect(result.source.crawlError).toContain('PDF extraction failed');
   expect(ctx.store.getExtractionBySourceId(result.source.id)).toBeNull();
   expect(ctx.artifactStore.getRecord(artifact.id)).not.toBeNull();
+});
+
+
+test('prepared native extraction retains its actual artifact file rather than a synthetic content hash', async () => {
+  const ctx = context(); await ctx.store.init();
+  const artifact = await ctx.artifactStore.create({ text: 'Original document.', kind: 'document', filename: 'native.txt' });
+  const source = await ctx.store.upsertSource({ connectorId: 'manual', sourceType: 'document', title: 'Native source', status: 'indexed', tags: [] });
+  const uris = createKnowledgeIngestUriCanonicalizer(ctx); uris.reserveSource(source.id); uris.attachArtifact(artifact.id);
+  const token = await prepareKnowledgeExtraction(ctx, source.id, artifact.id, uris);
+  expect(Object.hasOwn(token, 'contentHash')).toBe(false);
+  const retained = consumeKnowledgeExtraction(ctx, token, source.id, artifact.id, uris), record = ctx.artifactStore.getRecord(artifact.id);
+  if (!record) throw new Error('Missing original artifact');
+  writeFileSync(record.contentPath, 'Different document.', { mode: 0o600 });
+  expect(() => retained.assertCurrent()).toThrow(KnowledgeExtractionJudgmentHoldError);
 });

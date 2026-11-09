@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { lstatSync, realpathSync, statSync, type BigIntStats } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { captureOwnedJson } from '@goodvibes-jev/engine/sdk/platform/gate';
@@ -145,12 +144,13 @@ export function createComparisonOperation(source: AgentModelCompareToolDeps, arg
       assertPhysicalCurrent?.();
       assertCurrent();
       if (result.record.id !== id) throw new Error('Comparison source artifact does not match the requested owner record.');
-      if (createHash('sha256').update(result.buffer).digest('hex') !== result.record.sha256) throw new Error('Comparison source artifact content does not match its recorded hash.');
+      const readCurrent = result.assertCurrent?.bind(result); readCurrent?.();
+      if (result.buffer.byteLength !== result.record.sizeBytes) throw new Error('Comparison source artifact size does not match its owning record.');
       if (beforeBytes && descriptorBytes(result.record) !== beforeBytes) throw new Error('Comparison source artifact changed during acquisition.');
       observeDescriptor(result.record);
-      if (assertPhysicalCurrent) physicalSources.set(id, assertPhysicalCurrent);
+      if (assertPhysicalCurrent || readCurrent) physicalSources.set(id, () => { assertPhysicalCurrent?.(); readCurrent?.(); });
       assertCurrent();
-      return { record: result.record, buffer: Buffer.from(result.buffer) };
+      return { record: result.record, buffer: Buffer.from(result.buffer), assertCurrent: () => { assertCurrent(); assertPhysicalCurrent?.(); readCurrent?.(); } };
     } } : {}),
   };
   const deps: AgentModelCompareToolDeps = {

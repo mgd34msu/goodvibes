@@ -703,7 +703,7 @@ export interface KnowledgeMaterializedProjection {
     readonly mimeType: string;
     readonly filename?: string | undefined;
     readonly sizeBytes: number;
-    readonly sha256: string;
+    readonly sha256?: string | undefined;
     readonly createdAt: number;
     readonly expiresAt?: number | undefined;
     readonly sourceUri?: string | undefined;

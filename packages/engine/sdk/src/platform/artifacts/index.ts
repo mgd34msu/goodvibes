@@ -3,6 +3,7 @@ export type {
   ArtifactAcquisitionMode,
   ArtifactAttachment,
   ArtifactCreateInput,
+  ArtifactContentRead,
   ArtifactDescriptor,
   ArtifactFetchMode,
   ArtifactKind,

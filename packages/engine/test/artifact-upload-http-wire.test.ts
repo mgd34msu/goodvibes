@@ -16,7 +16,6 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -84,8 +83,7 @@ describe('raw and multipart artifact uploads round-trip over a real daemon', () 
     expect(created.artifact.filename).toBe('fixture.bin');
     const kindRequests = readings.requests.filter((request) => request.context?.battery === 'engine.artifacts.kind');
     expect(kindRequests).toHaveLength(0);
-    const digest = createHash('sha256').update(bytes).digest('hex');
-    expect(created).toMatchObject({ artifact: { sha256: digest } });
+    expect(Object.hasOwn(created.artifact, 'sha256')).toBe(false);
 
     const contentRes = await fetch(`${daemon.url}/api/artifacts/${created.artifact.id}/content`, {
       headers: authHeaders(),
@@ -96,7 +94,6 @@ describe('raw and multipart artifact uploads round-trip over a real daemon', () 
     const roundTripped = new Uint8Array(await contentRes.arrayBuffer());
     expect(roundTripped.byteLength).toBe(bytes.byteLength);
     expect(Buffer.from(roundTripped).equals(Buffer.from(bytes))).toBe(true);
-    expect(createHash('sha256').update(roundTripped).digest('hex')).toBe(digest);
   });
 
   test('a multipart/form-data upload round-trips byte-identical with content-type intact', async () => {
@@ -114,8 +111,7 @@ describe('raw and multipart artifact uploads round-trip over a real daemon', () 
     expect(created.artifact.sizeBytes).toBe(bytes.byteLength);
     expect(created.artifact.mimeType).toBe('image/png');
     expect(created.artifact.filename).toBe('photo.png');
-    const digest = createHash('sha256').update(bytes).digest('hex');
-    expect(created).toMatchObject({ artifact: { sha256: digest } });
+    expect(Object.hasOwn(created.artifact, 'sha256')).toBe(false);
 
     const contentRes = await fetch(`${daemon.url}/api/artifacts/${created.artifact.id}/content`, {
       headers: authHeaders(),
@@ -126,7 +122,6 @@ describe('raw and multipart artifact uploads round-trip over a real daemon', () 
     const roundTripped = new Uint8Array(await contentRes.arrayBuffer());
     expect(roundTripped.byteLength).toBe(bytes.byteLength);
     expect(Buffer.from(roundTripped).equals(Buffer.from(bytes))).toBe(true);
-    expect(createHash('sha256').update(roundTripped).digest('hex')).toBe(digest);
   });
 
   test('ordinary small JSON artifact-create bodies are unaffected by the upload hardening', async () => {

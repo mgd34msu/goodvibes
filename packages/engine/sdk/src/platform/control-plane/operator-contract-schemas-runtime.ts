@@ -67,7 +67,7 @@ const COMPANION_CHAT_ATTACHMENT_SCHEMA = objectSchema({
   fetchMode: STRING_SCHEMA,
   label: STRING_SCHEMA,
   metadata: METADATA_SCHEMA,
-}, ['id', 'artifactId', 'kind', 'mimeType', 'sizeBytes', 'sha256', 'createdAt', 'metadata'], { additionalProperties: true });
+}, ['id', 'artifactId', 'kind', 'mimeType', 'sizeBytes', 'createdAt', 'metadata'], { additionalProperties: true });
 
 export const SHARED_SESSION_PARTICIPANT_SCHEMA = objectSchema({
   surfaceKind: STRING_SCHEMA,

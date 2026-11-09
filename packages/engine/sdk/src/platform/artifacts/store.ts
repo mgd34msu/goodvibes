@@ -13,6 +13,7 @@ import type {
   ArtifactAcquisitionMode,
   ArtifactAttachment,
   ArtifactCreateInput,
+  ArtifactContentRead,
   ArtifactDescriptor,
   ArtifactFetchMode,
   ArtifactRecord,
@@ -267,6 +268,8 @@ interface ResolvedArtifactInput {
 export class ArtifactStore {
   private readonly rootDir: string;
   private readonly storageOwner: ArtifactStorageOwner;
+  /** Only actual earlier persisted checksum rows enter this pending set. */
+  private readonly savedChecksumPins = new Map<string, string>();
   private readonly recordFiles = new Map<string, { readonly content: string; readonly metadata: string }>();
   private readonly records = new Map<string, ArtifactRecord>();
   private readonly maxBytes: number;
@@ -337,18 +340,28 @@ export class ArtifactStore {
     return deleted;
   }
 
-  async readContent(id: string): Promise<{ record: ArtifactRecord; buffer: Buffer }> {
+  async readContent(id: string): Promise<ArtifactContentRead> {
     this.pruneExpired();
     const record = this.records.get(id);
     if (!record) throw new Error(`Unknown artifact: ${id}`);
     const files = this.recordFiles.get(id);
     if (!files) throw new Error('Artifact original file ownership is unavailable');
-    this.storageOwner.assertImported(record.contentPath, files.content);
-    this.storageOwner.assertImported(record.metadataPath, files.metadata);
-    const buffer = await readFile(record.contentPath);
-    this.storageOwner.assertImported(record.contentPath, files.content);
-    this.storageOwner.assertImported(record.metadataPath, files.metadata);
-    return { record, buffer };
+    const serialized = JSON.stringify(record), contentPath = record.contentPath, metadataPath = record.metadataPath;
+    const assertCurrent = () => {
+      if (this.records.get(id) !== record || this.recordFiles.get(id) !== files || JSON.stringify(record) !== serialized) throw new Error('Artifact original record changed.');
+      this.storageOwner.assertImported(contentPath, files.content);
+      this.storageOwner.assertImported(metadataPath, files.metadata);
+    };
+    assertCurrent(); const buffer = await readFile(contentPath); assertCurrent();
+    if (buffer.byteLength !== record.sizeBytes) throw new Error('Artifact original size changed.');
+    const savedChecksum = this.savedChecksumPins.get(id);
+    if (savedChecksum !== undefined) {
+      // Verify an actual earlier persisted format's published bytes once on
+      // first byte acquisition. Fresh local records never enter this branch.
+      if (createHash('sha256').update(buffer).digest('hex') !== savedChecksum) throw new Error('The saved artifact checksum does not match its original content.');
+      assertCurrent(); this.savedChecksumPins.delete(id);
+    }
+    return Object.freeze({ record, buffer, assertCurrent });
   }
 
   async create(input: ArtifactCreateInput, ownership: ArtifactWriteOwnership = {}): Promise<ArtifactDescriptor> {
@@ -370,7 +383,7 @@ export class ArtifactStore {
     let record: ArtifactRecord;
     try {
       check();
-      const { sizeBytes, sha256 } = await this.writeStreamContent({
+      const { sizeBytes } = await this.writeStreamContent({
         leaf: content, stream: input.stream, expectedSizeBytes: input.sizeBytes, assertCurrent: check, signal: ownership.signal,
       });
       check();
@@ -382,7 +395,6 @@ export class ArtifactStore {
         mimeType: normalizeMimeType(input.mimeType, filename),
         filename,
         sizeBytes,
-        sha256,
         createdAt: Date.now(),
         ...(retentionMs ? { expiresAt: Date.now() + retentionMs } : {}),
         ...(input.sourceUri ? { sourceUri: input.sourceUri } : {}),
@@ -452,11 +464,10 @@ export class ArtifactStore {
     readonly expectedSizeBytes?: number | undefined;
     readonly assertCurrent?: (() => void) | undefined;
     readonly signal?: AbortSignal | undefined;
-  }): Promise<{ sizeBytes: number; sha256: string }> {
+  }): Promise<{ sizeBytes: number }> {
     if (typeof input.expectedSizeBytes === 'number' && input.expectedSizeBytes > this.maxBytes) {
       throw new Error(`Artifact exceeds the ${this.maxBytes}-byte limit.`);
     }
-    const hash = createHash('sha256');
     const writer = createWriteStream(input.leaf.path, { flags: 'wx', mode: 0o600 });
     let descriptor: number | undefined;
     writer.once('open', fd => {
@@ -498,7 +509,6 @@ export class ArtifactStore {
           writer.destroy();
           throw new Error(`Artifact exceeds the ${this.maxBytes}-byte limit.`);
         }
-        hash.update(buffer);
         if (!writer.write(buffer)) {
           await Promise.race([waitForDrain(writer), writerFailure]);
         }
@@ -506,7 +516,7 @@ export class ArtifactStore {
       await Promise.race([finishWriter(writer), writerFailure]);
       await settled;
       input.assertCurrent?.(); input.leaf.assertSealed();
-      return { sizeBytes, sha256: hash.digest('hex') };
+      return { sizeBytes };
     } catch (error) {
       // Destruction can race the asynchronous open. Wait for actual closure
       // before unlinking this operation's spool or allowing owner cleanup.
@@ -546,7 +556,7 @@ export class ArtifactStore {
       mimeType: record.mimeType,
       filename: record.filename,
       sizeBytes: record.sizeBytes,
-      sha256: record.sha256,
+      ...(record.sha256 === undefined ? {} : { sha256: record.sha256 }),
       createdAt: record.createdAt,
       acquisitionMode: record.acquisitionMode,
       fetchMode: record.fetchMode,
@@ -573,7 +583,7 @@ export class ArtifactStore {
       mimeType: record.mimeType,
       filename: record.filename,
       sizeBytes: record.sizeBytes,
-      sha256: record.sha256,
+      ...(record.sha256 === undefined ? {} : { sha256: record.sha256 }),
       createdAt: record.createdAt,
       ...(typeof record.expiresAt === 'number' ? { expiresAt: record.expiresAt } : {}),
       ...(typeof record.sourceUri === 'string' ? { sourceUri: record.sourceUri } : {}),
@@ -595,7 +605,9 @@ export class ArtifactStore {
         if (!parsed?.id || typeof parsed.contentPath !== 'string' || !existsSync(parsed.contentPath)) continue;
         if (parsed.id !== entry.slice(0, -5) || resolve(parsed.contentPath) !== join(this.rootDir, `${parsed.id}.data`)
           || typeof parsed.metadataPath !== 'string' || resolve(parsed.metadataPath) !== metadataPath) throw new Error('Artifact metadata does not own this file pair');
+        if (parsed.sha256 !== undefined && !/^[0-9a-f]{64}$/.test(parsed.sha256)) throw new Error('Saved artifact checksum format is invalid');
         const files = { content: this.storageOwner.importedStamp(parsed.contentPath), metadata: metadataStamp };
+        if (parsed.sha256 !== undefined) this.savedChecksumPins.set(parsed.id, parsed.sha256);
         this.recordFiles.set(parsed.id, files);
         if (typeof parsed.expiresAt === 'number' && parsed.expiresAt <= Date.now()) {
           this.removeRecordFiles(parsed);
@@ -629,7 +641,7 @@ export class ArtifactStore {
       const metadataPath = assertWithinArtifactRoot(this.rootDir, record.metadataPath, 'Artifact metadata deletion path');
       if (existsSync(contentPath)) rmSync(contentPath, { force: true });
       if (existsSync(metadataPath)) rmSync(metadataPath, { force: true });
-      this.records.delete(record.id); this.recordFiles.delete(record.id); return true;
+      this.records.delete(record.id); this.recordFiles.delete(record.id); this.savedChecksumPins.delete(record.id); return true;
     } catch (error) {
       logger.warn('[artifacts] failed to prune expired artifact files', {
         artifactId: record.id,

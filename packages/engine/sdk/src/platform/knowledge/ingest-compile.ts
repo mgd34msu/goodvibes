@@ -92,7 +92,6 @@ export async function finalizeKnowledgeIngestedSource(
       assertCurrent();
       assertExtractionCurrent();
       assertAliasesCurrent();
-      if (context.artifactStore.getRecord(input.artifactId)?.sha256 !== token.contentHash) throw new KnowledgeExtractionJudgmentHoldError();
     };
     const sourceInput = {
       id: input.sourceId, connectorId: input.connectorId, sourceType: input.sourceType,

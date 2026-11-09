@@ -42,6 +42,7 @@ export interface AgentArtifactsToolOptions {
 }
 
 interface LoadedArtifact {
+  readonly assertReadCurrent?: (() => void) | undefined;
   readonly descriptor: ArtifactDescriptor;
   readonly record?: ArtifactRecord;
   readonly buffer?: Buffer;
@@ -189,7 +190,7 @@ function describeArtifact(artifact: ArtifactDescriptor, options: { readonly incl
     `  created ${isoTime(artifact.createdAt)}`,
     `  purpose ${purpose || '(none)'}`,
     `  source ${source || sanitizeArtifactSourceUri(artifact.sourceUri) || '(none)'}`,
-    `  sha256 ${artifact.sha256}`,
+    ...(artifact.sha256 ? [`  recorded checksum ${artifact.sha256}`] : []),
     ...(options.includeRoute ? [`  inspect agent_artifacts mode:"show" artifactId:"${artifact.id}" includeContent:true`] : []),
     ...(options.includeRoute ? [`  export agent_artifacts mode:"export" artifactId:"${artifact.id}" destinationPath:"${exportPath}"`] : []),
   ];
@@ -231,8 +232,8 @@ async function formatList(artifacts: readonly ArtifactDescriptor[], total: numbe
 
 async function loadArtifact(store: AgentArtifactBrowserStore, artifactId: string, includeContent: boolean): Promise<LoadedArtifact | null> {
   if (includeContent && store.readContent) {
-    const { record, buffer } = await store.readContent(artifactId);
-    return { descriptor: record, record, buffer };
+    const acquired = await store.readContent(artifactId), { record, buffer } = acquired;
+    return { descriptor: record, record, buffer, assertReadCurrent: acquired.assertCurrent?.bind(acquired) };
   }
   const descriptor = store.get?.(artifactId)
     ?? store.list?.(500).find((artifact) => artifact.id === artifactId)
@@ -279,9 +280,9 @@ async function exportArtifactToFile(
   if (!destinationPath) throw new Error('destinationPath is required for mode:"export".');
   const target = captureAgentExportPath(options.projectRoot, destinationPath);
   const resolvedPath = target.path;
-  const { record, buffer: sourceBuffer } = await store.readContent(artifactId);
+  const acquired = await store.readContent(artifactId), { record, buffer: sourceBuffer } = acquired;
   assertAgentArtifactBytes(record, sourceBuffer);
-  const assertSource = captureAgentArtifactSource(store, record);
+  const assertSource = captureAgentArtifactSource(store, record, acquired.assertCurrent?.bind(acquired));
   const buffer = Buffer.from(sourceBuffer);
   assertCurrent(); assertSource(); target.assertCurrent();
   const overwrite = readBoolean(args.overwrite);
@@ -300,7 +301,7 @@ async function exportArtifactToFile(
     `  bytes ${record.sizeBytes}`,
     `  mime ${record.mimeType}`,
     `  filename ${record.filename ?? '(none)'}`,
-    `  sha256 ${record.sha256}`,
+    ...(record.sha256 ? [`  recorded checksum ${record.sha256}`] : []),
     `  overwrite ${overwrite ? 'yes' : 'no'}`,
     '  policy exact artifact bytes copied; artifact retained; content not printed',
   ].join('\n');
@@ -311,17 +312,18 @@ async function loadArtifactsForPackage(
   args: AgentArtifactsToolArgs,
   mode: 'package' | 'archive',
   assertCurrent: () => void,
-): Promise<readonly { readonly record: ArtifactRecord; readonly buffer: Buffer }[]> {
+): Promise<readonly { readonly record: ArtifactRecord; readonly buffer: Buffer; readonly assertCurrent: () => void }[]> {
   if (!store.readContent) throw new Error('Artifact package export requires an artifact store with readContent support.');
   const artifactIds = readStringList(args.artifactIds);
   if (artifactIds.length === 0) throw new Error(`artifactIds is required for mode:"${mode}". Provide a comma-separated string or string array.`);
-  const loaded: Array<{ readonly record: ArtifactRecord; readonly buffer: Buffer }> = [];
+  const loaded: Array<{ readonly record: ArtifactRecord; readonly buffer: Buffer; readonly assertCurrent: () => void }> = [];
   for (const artifactId of artifactIds) {
     assertCurrent();
     const source = await store.readContent(artifactId);
     assertCurrent();
     assertAgentArtifactBytes(source.record, source.buffer);
-    loaded.push({ record: source.record, buffer: Buffer.from(source.buffer) });
+    const assertSource = captureAgentArtifactSource(store, source.record, source.assertCurrent?.bind(source)); assertSource();
+    loaded.push({ record: source.record, buffer: Buffer.from(source.buffer), assertCurrent: assertSource });
   }
   return loaded;
 }
@@ -447,7 +449,7 @@ async function exportArtifactPackage(
   }
 
   const loaded = await loadArtifactsForPackage(store, args, 'package', assertCurrent);
-  const sources = loaded.map(source => captureAgentArtifactSource(store, source.record));
+  const sources = loaded.map(source => source.assertCurrent);
   const check = (path = resolvedPath) => { assertCurrent(); for (const source of sources) source(); target.assertCurrent(path); };
   check();
   const payload = await buildArtifactPackagePayload(loaded, { signal, assertCurrent: check });
@@ -492,7 +494,7 @@ async function exportArtifactArchive(
   }
 
   const loaded = await loadArtifactsForPackage(store, args, 'archive', assertCurrent);
-  const sources = loaded.map(source => captureAgentArtifactSource(store, source.record));
+  const sources = loaded.map(source => source.assertCurrent);
   const check = (path = resolvedPath) => { assertCurrent(); for (const source of sources) source(); target.assertCurrent(path); };
   check();
   const payload = await buildArtifactPackagePayload(loaded, { signal, assertCurrent: check });
@@ -626,7 +628,7 @@ export function createAgentArtifactsTool(
           if (!artifactId) return failure('artifactId is required for mode:"show".');
           const loaded = await loadArtifact(artifactStore, artifactId, readBoolean(args.includeContent));
           if (!loaded) return failure(`Unknown artifact ${artifactId}. Use agent_artifacts mode:"list" to inspect available artifacts.`);
-          const sourceCurrent = captureAgentArtifactSource(artifactStore, loaded.descriptor);
+          const sourceCurrent = captureAgentArtifactSource(artifactStore, loaded.descriptor, loaded.assertReadCurrent);
           const assertShowCurrent = () => {
             executionOptions?.signal?.throwIfAborted(); sourceCurrent();
             if (JSON.stringify(captureOwnedJson(rawArgs)) !== originalArgs) throw new ToolInputProjectionError('stale');

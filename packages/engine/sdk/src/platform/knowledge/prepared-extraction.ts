@@ -1,6 +1,5 @@
 import { createKnowledgeExtractionOwner } from './extraction-ownership.js';
 import type { KnowledgeIngestOwnership } from './ingest-context.js';
-import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { snapshotNodeInput } from './activation/projection.js';
 import { assertKnowledgeIngestUriOperation, beginKnowledgeUriPreparation, completeKnowledgeUriPreparation, cancelKnowledgeUriPreparation, consumeKnowledgeUriPreparation, type KnowledgeIngestUriCanonicalizer } from './uri-canonicalization/ingest-owner.js';
@@ -13,7 +12,6 @@ import type { KnowledgeIngestContext } from './ingest-context.js';
 export interface PreparedKnowledgeExtraction {
   readonly sourceId: string;
   readonly artifactId: string;
-  readonly contentHash: string;
 }
 
 interface PreparedContent {
@@ -50,7 +48,9 @@ export async function prepareKnowledgeExtraction(
     owner.assertCurrent();
     const record = snapshotNodeInput(content.record);
     const { buffer } = content;
-    if (record.id !== artifactId || createHash('sha256').update(buffer).digest('hex') !== record.sha256) {
+    const readCurrent = content.assertCurrent?.bind(content);
+    if (readCurrent) owner.retain(() => { try { readCurrent(); } catch { throw new KnowledgeExtractionJudgmentHoldError(); } });
+    if (record.id !== artifactId || buffer.byteLength !== record.sizeBytes) {
       throw new KnowledgeExtractionJudgmentHoldError();
     }
     const canonicalUri = await uris.canonicalize(record.sourceUri ?? '');
@@ -70,14 +70,14 @@ export async function prepareKnowledgeExtraction(
     };
     const extracted = snapshotNodeInput(await extractKnowledgeArtifact(record, buffer, owner));
     assertCurrent();
-    const token = Object.freeze({ sourceId, artifactId, contentHash: record.sha256 });
+    const token = Object.freeze({ sourceId, artifactId });
     completeKnowledgeUriPreparation(context, uris, sourceId, artifactId, token);
     prepared.set(token, { record, extracted, assertCurrent, uris, context });
     return token;
   } catch (error) { cancelKnowledgeUriPreparation(uris); throw error; }
 }
 
-/** Consume once; changing the source, artifact, or artifact fingerprint holds. */
+/** Consume once; changing the retained source or original artifact owner holds. */
 export function consumeKnowledgeExtraction(
   context: KnowledgeIngestContext,
   token: PreparedKnowledgeExtraction,
@@ -89,7 +89,7 @@ export function consumeKnowledgeExtraction(
   const value = prepared.get(token);
   const record = context.artifactStore.getRecord(artifactId);
   if (!value || value.uris !== uris || value.context !== context || token.sourceId !== sourceId || token.artifactId !== artifactId
-    || !record || record.sha256 !== token.contentHash) {
+    || !record) {
     throw new KnowledgeExtractionJudgmentHoldError();
   }
   value.assertCurrent();

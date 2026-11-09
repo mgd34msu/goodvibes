@@ -1,5 +1,4 @@
 import { KnowledgeWebGapRepairHeldError } from '../semantic/web-gap-repair/types.js';
-import { createHash } from 'node:crypto';
 import { sameKnowledgeRecord } from '../store-record-representation.js';
 import { captureStrictRepairJson } from '../semantic/web-gap-repair/admission.js';
 import { createKnowledgeExtractionOwner, type KnowledgeExtractionOwner } from '../extraction-ownership.js';
@@ -37,9 +36,11 @@ export async function prepareHomeGraphArtifactExtraction(
     owner.retain(() => {
       if (!sameKnowledgeRecord(captureStrictRepairJson(context.artifactStore.getRecord(artifact.id)), original)) throw new KnowledgeExtractionJudgmentHoldError();
     });
-    const { buffer } = await context.artifactStore.readContent(artifact.id);
-    owner.assertCurrent();
-    if (createHash('sha256').update(buffer).digest('hex') !== record.sha256) throw new KnowledgeExtractionJudgmentHoldError();
+    const acquired = await context.artifactStore.readContent(artifact.id);
+    const readCurrent = acquired.assertCurrent?.bind(acquired);
+    if (readCurrent) owner.retain(() => { try { readCurrent(); } catch { throw new KnowledgeExtractionJudgmentHoldError(); } });
+    owner.assertCurrent(); const { buffer } = acquired;
+    if (buffer.byteLength !== record.sizeBytes) throw new KnowledgeExtractionJudgmentHoldError();
     const result = await extractKnowledgeArtifact(record, buffer, owner);
     owner.assertCurrent();
     return result;

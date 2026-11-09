@@ -45,7 +45,9 @@ export function prepareKnowledgeSourceRecord(input: KnowledgeSourceUpsertInput, 
       ...opt('folderPath', _folderPath, existing?.folderPath),
       status: input.status,
       ...opt('artifactId', _artifactId, existing?.artifactId),
-      ...opt('contentHash', _contentHash, existing?.contentHash),
+      // A different immutable artifact cannot inherit the previous bytes'
+      // compatibility checksum when its new native source has no digest.
+      ...opt('contentHash', _contentHash, _artifactId !== null && _artifactId !== existing?.artifactId ? undefined : existing?.contentHash),
       ...(typeof input.lastCrawledAt === 'number' ? { lastCrawledAt: input.lastCrawledAt } : existing?.lastCrawledAt ? { lastCrawledAt: existing.lastCrawledAt } : {}),
       ...opt('crawlError', _crawlError, existing?.crawlError && input.status !== 'indexed' ? existing.crawlError : undefined),
       ...opt('sessionId', _sessionId, existing?.sessionId),

@@ -1,4 +1,4 @@
-import type { ArtifactDescriptor, ArtifactRecord } from '@goodvibes-jev/engine/sdk/platform/artifacts';
+import type { ArtifactDescriptor, ArtifactContentRead } from '@goodvibes-jev/engine/sdk/platform/artifacts';
 
 export interface AgentHarnessModelRoutingArgs {
   readonly modelRouteId?: unknown;
@@ -336,7 +336,7 @@ export interface LocalModelSetupPlan {
 
 export interface ArtifactListLike {
   readonly list?: (limit?: number) => readonly ArtifactDescriptor[];
-  readonly readContent?: (id: string) => Promise<{ readonly record: ArtifactRecord; readonly buffer: Buffer }>;
+  readonly readContent?: (id: string) => Promise<ArtifactContentRead>;
 }
 
 export interface ProviderApiLike {

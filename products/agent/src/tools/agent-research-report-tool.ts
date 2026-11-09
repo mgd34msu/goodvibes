@@ -529,7 +529,7 @@ export function createAgentResearchReportTool(
           readBoolean(args.visualReport) ? '  visualReport markdown-visual-report-packet' : '',
           coverage ? `  citationCoverage ${coverage.citedSourceIds.length}/${coverage.sourceCount} cited; uncited ${coverage.missingSourceIds.length}; unknown ${coverage.unknownCitationIds.length}` : '',
           coverage && coverage.repairSuggestions.length > 0 ? `  citationRepair ${coverage.repairSuggestions.join(' ')}` : '',
-          `  sha256 ${descriptor.sha256}`,
+          ...(descriptor.sha256 ? [`  recorded checksum ${descriptor.sha256}`] : []),
           '  nextRoutes',
           ...reportNextRouteLines(descriptor, args),
           '  policy sourced markdown saved as artifact; content not printed',

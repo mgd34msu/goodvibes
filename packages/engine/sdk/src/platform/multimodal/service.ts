@@ -3,7 +3,7 @@ import { readMultimodalPdf } from './pdf-source.js';
 import { assertJudgmentInput, captureOwnedJson } from '../gate/judgment-input.js';
 import { activateClassicFallback, isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { rankMultimodalEntities, MultimodalEntityHeldError } from './entity-centrality.js';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { ArtifactStore } from '../artifacts/index.js';
 import type { ArtifactDescriptor, ArtifactRecord } from '../artifacts/types.js';
 import { MediaProviderRegistry } from '../media/index.js';
@@ -177,7 +177,7 @@ export class MultimodalService {
           // An absent Default port cannot be replaced by a later installation.
         }
       }
-      const { descriptor, record, buffer } = await this.resolveArtifactInput(owned);
+      const { descriptor, record, buffer, assertCurrent: contentCurrent } = await this.resolveArtifactInput(owned);
       if (!classic && !isClassicOperation()) authority?.assertCurrent();
       const initial = captureOwnedJson(descriptor) as ArtifactDescriptor;
       const assertArtifact = (artifact: ArtifactDescriptor) => {
@@ -186,7 +186,7 @@ export class MultimodalService {
       };
       assertArtifact(initial);
       assertJudgmentInput({ filename: initial.filename, metadata: initial.metadata, prompt: owned.prompt, metadataInput: owned.metadata, artifactMetadata: owned.artifact?.metadata });
-      const assertEntryCurrent = () => { assertArtifact(initial); if (!classic && !isClassicOperation()) authority?.assertCurrent(); };
+      const assertEntryCurrent = () => { try { contentCurrent?.(); } catch { throw new MultimodalEntityHeldError('stale'); } assertArtifact(initial); if (!classic && !isClassicOperation()) authority?.assertCurrent(); };
       let result: MultimodalAnalysisResult;
       switch (this.resolveKind(initial)) {
         case 'image': result = await this.analyzeImage(initial, owned); break;
@@ -338,17 +338,19 @@ export class MultimodalService {
 
   private async resolveArtifactInput(
     request: MultimodalAnalysisRequest,
-  ): Promise<{ descriptor: ArtifactDescriptor; record: ArtifactRecord; buffer: Buffer }> {
+  ): Promise<{ descriptor: ArtifactDescriptor; record: ArtifactRecord; buffer: Buffer; assertCurrent?: (() => void) | undefined }> {
     const artifactId = request.artifactId ?? request.artifact?.artifactId;
     if (artifactId) {
       const descriptor = captureOwnedJson(this.artifactStore.get(artifactId)) as ArtifactDescriptor | null;
       if (!descriptor) throw new MultimodalEntityHeldError('stale');
-      const { record, buffer } = await this.artifactStore.readContent(artifactId);
-      if (record.sha256 !== descriptor.sha256 || createHash('sha256').update(buffer).digest('hex') !== descriptor.sha256) throw new MultimodalEntityHeldError('stale');
+      const acquired = await this.artifactStore.readContent(artifactId), { record, buffer } = acquired;
+      const assertCurrent = acquired.assertCurrent?.bind(acquired); assertCurrent?.();
+      if (record.id !== descriptor.id || record.sizeBytes !== descriptor.sizeBytes || buffer.byteLength !== record.sizeBytes
+        || JSON.stringify(this.artifactStore.get(artifactId)) !== JSON.stringify(descriptor)) throw new MultimodalEntityHeldError('stale');
       return {
         descriptor,
         record,
-        buffer,
+        buffer, assertCurrent,
       };
     }
 
@@ -361,8 +363,8 @@ export class MultimodalService {
       ...(artifact.filename ? { filename: artifact.filename } : {}),
       metadata: artifact.metadata ?? {},
     });
-    const { record, buffer } = await this.artifactStore.readContent(created.id);
-    return { descriptor: created, record, buffer };
+    const acquired = await this.artifactStore.readContent(created.id);
+    return { descriptor: created, record: acquired.record, buffer: acquired.buffer, assertCurrent: acquired.assertCurrent?.bind(acquired) };
   }
 
   private resolveKind(descriptor: ArtifactDescriptor): MultimodalKind {

@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { lstatSync, realpathSync, statSync } from 'node:fs';
 import { resolve, relative, sep } from 'node:path';
 import type { ArtifactDescriptor, ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
@@ -54,10 +53,10 @@ export function captureAgentExportPath(projectRoot: string, destination: string)
 }
 
 export function assertAgentArtifactBytes(descriptor: ArtifactDescriptor, buffer: Buffer): void {
-  if (createHash('sha256').update(buffer).digest('hex') !== descriptor.sha256 || buffer.byteLength !== descriptor.sizeBytes) throw new ToolInputProjectionError('stale');
+  if (buffer.byteLength !== descriptor.sizeBytes) throw new ToolInputProjectionError('stale');
 }
 
-export function captureAgentArtifactSource(store: Partial<Pick<ArtifactStore, 'get' | 'list' | 'readContent'>>, descriptor: ArtifactDescriptor): () => void {
+export function captureAgentArtifactSource(store: Partial<Pick<ArtifactStore, 'get' | 'list' | 'readContent'>>, descriptor: ArtifactDescriptor, readCurrent?: (() => void) | undefined): () => void {
   const fingerprintOf = (source: ArtifactDescriptor) => JSON.stringify({
     id: source.id, kind: source.kind, mimeType: source.mimeType, filename: source.filename,
     sizeBytes: source.sizeBytes, sha256: source.sha256, createdAt: source.createdAt,
@@ -67,6 +66,7 @@ export function captureAgentArtifactSource(store: Partial<Pick<ArtifactStore, 'g
   const fingerprint = fingerprintOf(descriptor);
   const get = store.get, list = store.list, readContent = store.readContent;
   return () => {
+    try { readCurrent?.(); } catch { throw new ToolInputProjectionError('stale'); }
     if (store.get !== get || store.list !== list || store.readContent !== readContent) throw new ToolInputProjectionError('stale');
     const current = get?.call(store, descriptor.id) ?? list?.call(store, 10_000).find(artifact => artifact.id === descriptor.id);
     // A readContent-only store still owns the returned record. Capture that

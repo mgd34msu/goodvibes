@@ -62,7 +62,7 @@ export const ARTIFACT_DESCRIPTOR_SCHEMA = objectSchema({
   acquisitionMode: STRING_SCHEMA,
   fetchMode: STRING_SCHEMA,
   metadata: METADATA_SCHEMA,
-}, ['id', 'kind', 'mimeType', 'sizeBytes', 'sha256', 'createdAt', 'metadata'], { additionalProperties: true });
+}, ['id', 'kind', 'mimeType', 'sizeBytes', 'createdAt', 'metadata'], { additionalProperties: true });
 
 export const ARTIFACT_ATTACHMENT_SCHEMA = objectSchema({
   id: STRING_SCHEMA,
@@ -82,4 +82,4 @@ export const ARTIFACT_ATTACHMENT_SCHEMA = objectSchema({
   dataBase64: STRING_SCHEMA,
   label: STRING_SCHEMA,
   metadata: METADATA_SCHEMA,
-}, ['id', 'artifactId', 'kind', 'mimeType', 'sizeBytes', 'sha256', 'createdAt', 'contentPath', 'metadata'], { additionalProperties: true });
+}, ['id', 'artifactId', 'kind', 'mimeType', 'sizeBytes', 'createdAt', 'contentPath', 'metadata'], { additionalProperties: true });

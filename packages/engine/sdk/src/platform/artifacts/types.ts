@@ -13,7 +13,9 @@ export interface ArtifactDescriptor {
   readonly mimeType: string;
   readonly filename?: string | undefined;
   readonly sizeBytes: number;
-  readonly sha256: string;
+  /** Compatibility metadata supplied by an earlier saved/external artifact.
+   * Fresh local artifacts use their actual store/file owner, without a digest. */
+  readonly sha256?: string | undefined;
   readonly createdAt: number;
   readonly expiresAt?: number | undefined;
   readonly sourceUri?: string | undefined;
@@ -25,6 +27,13 @@ export interface ArtifactDescriptor {
 export interface ArtifactRecord extends ArtifactDescriptor {
   readonly contentPath: string;
   readonly metadataPath: string;
+}
+
+export interface ArtifactContentRead {
+  readonly record: ArtifactRecord;
+  readonly buffer: Buffer;
+  /** Native acquisition fence, not a serialized receipt or content checksum. */
+  readonly assertCurrent?: (() => void) | undefined;
 }
 
 export interface ArtifactReference {

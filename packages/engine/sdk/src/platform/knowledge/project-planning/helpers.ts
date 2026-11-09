@@ -69,6 +69,10 @@ export function projectPlanningCanonicalUri(
   return `goodvibes://planning/${encodeURIComponent(spaceId)}/${kind}/${encodeURIComponent(id)}`;
 }
 
+/** Historical saved-ID formatter, retained for existing stored references only.
+ * @deprecated New sources use opaque IDs. Resolve all versions with
+ * KnowledgeStore.getPlanningSourceSnapshot({ spaceId, kind, artifactId }).
+ */
 export function projectPlanningSourceId(
   spaceId: string,
   kind: ProjectPlanningArtifactKind,

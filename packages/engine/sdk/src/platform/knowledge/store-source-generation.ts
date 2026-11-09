@@ -2,6 +2,17 @@ import { knowledgeRowGenerationFromRows } from './store-row-revisions.js';
 import type { SQLiteStore } from '../state/sqlite-store.js';
 import { mapSourceRow } from './store-schema.js';
 import type { KnowledgeSourceRecord } from './types.js';
+import { planningSourceIdentityParams, planningSourceIdentitySql, type PlanningSourceIdentity } from './store-planning-source-selector.js';
+
+/** Resolve the same exact persisted identity under the publication lock. */
+export function readPlanningSourceSnapshot(sqlite: Pick<SQLiteStore, 'exec'>, identity: PlanningSourceIdentity): KnowledgeSourceSnapshot {
+  return planningSourceSnapshotFromRows(sqlite.exec(planningSourceIdentitySql, planningSourceIdentityParams(identity)));
+}
+
+export function planningSourceSnapshotFromRows(rows: ReturnType<SQLiteStore['exec']>): KnowledgeSourceSnapshot {
+  if ((rows[0]?.values.length ?? 0) > 1) throw new KnowledgeSourcePublicationHeldError('state-changed');
+  return knowledgeSourceSnapshotFromRows(rows);
+}
 
 /** A detached read of the stored row, including all persisted source values. */
 export interface KnowledgeSourceSnapshot {

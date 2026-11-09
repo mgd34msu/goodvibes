@@ -29,7 +29,6 @@ import {
   type ProjectPlanningArtifactKind,
   projectPlanningArtifactSummary,
   projectPlanningCanonicalUri,
-  projectPlanningSourceId,
   projectPlanningProjectIdFromPath,
   readPlanningMetadataObject,
   resolveProjectPlanningSpace,
@@ -388,8 +387,7 @@ export class ProjectPlanningService {
   }
 
   private getArtifactSnapshot(spaceId: string, kind: ProjectPlanningArtifactKind, id: string): KnowledgeSourceSnapshot {
-    const direct = this.store.getSourceSnapshot({ id: projectPlanningSourceId(spaceId, kind, id) });
-    const snapshot = direct.source ? direct : this.store.getSourceSnapshot({ canonicalUri: projectPlanningCanonicalUri(spaceId, kind, id) });
+    const snapshot = this.store.getPlanningSourceSnapshot({ spaceId, kind, artifactId: id });
     admitPlanningSource(snapshot);
     return snapshot;
   }
@@ -899,10 +897,10 @@ export class ProjectPlanningService {
         : [...workPlan.tasks, updated]), updatedAt: now };
       events.push({ task: updated, ...(prior ? { previous: prior } : {}), snapshot: snapshotFromWorkPlan(space, workPlan) });
     }
-    const stateInput = this.artifactSourceInput(space, 'state', normalized.id, normalized);
+    const stateInput = this.artifactSourceInput(space, 'state', normalized.id, normalized, previous.source?.id);
     const writes = [{ input: { ...stateInput, id: previous.source?.id ?? stateInput.id! }, generation: previous.generation }];
     if (events.length) {
-      const workInput = this.artifactSourceInput(space, 'work-plan', workPlan.id, workPlan);
+      const workInput = this.artifactSourceInput(space, 'work-plan', workPlan.id, workPlan, workSnapshot.source?.id);
       writes.push({ input: { ...workInput, id: workSnapshot.source?.id ?? workInput.id! }, generation: workSnapshot.generation });
     }
     let durable = false;
@@ -936,7 +934,13 @@ export class ProjectPlanningService {
     id: string,
     value: ProjectPlanningState | ProjectPlanningDecision | ProjectPlanningLanguageArtifact | ProjectWorkPlanArtifact,
   ): Promise<KnowledgeSourceRecord> {
-    return this.store.upsertCanonicalSource(this.artifactSourceInput(space, kind, id, value));
+    const observation = this.store.captureSourcePublication();
+    const previous = this.getArtifactSnapshot(space.knowledgeSpaceId, kind, id);
+    let current = observation;
+    const written = await this.store.upsertOwnedCanonicalSources([{
+      input: this.artifactSourceInput(space, kind, id, value, previous.source?.id), generation: previous.generation,
+    }], () => current(), (_sources, successor) => { current = successor; });
+    return written[0]!.source!;
   }
 
   private artifactSourceInput(
@@ -944,10 +948,11 @@ export class ProjectPlanningService {
     kind: ProjectPlanningArtifactKind,
     id: string,
     value: ProjectPlanningState | ProjectPlanningDecision | ProjectPlanningLanguageArtifact | ProjectWorkPlanArtifact,
+    sourceId?: string,
   ): KnowledgeSourceUpsertInput {
     const spaceId = space.knowledgeSpaceId;
     return {
-      id: projectPlanningSourceId(spaceId, kind, id),
+      id: sourceId ?? `project-planning-${kind}-${randomUUID().replace(/[0-9a-f]/g, nibble => String.fromCharCode(97 + Number.parseInt(nibble, 16)))}`,
       connectorId: PROJECT_PLANNING_CONNECTOR_ID,
       sourceType: 'dataset',
       title: titleForArtifact(kind, value),

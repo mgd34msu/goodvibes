@@ -13,7 +13,8 @@ import { migrateNativeWorkSettlementTable, validateNativeWorkSettlementTable, cr
 import type { NativeWorkExecutionStorage } from '../workflow/work-ledger/native-execution-types.js';
 import { createKnowledgeWorkLedgerStorage, createWorkLedgerTable, validateWorkLedgerTable, migrateWorkLedgerTableToVersion2, type KnowledgeWorkLedgerStorage } from './store-work-ledger.js';
 import { randomUUID } from 'node:crypto';
-import { KnowledgeSourcePublicationHeldError, knowledgeSourceSnapshotFromRows, readKnowledgeSourceSnapshot, type KnowledgeSourceSnapshot, type KnowledgeSourceWriteResult } from './store-source-generation.js';
+import { KnowledgeSourcePublicationHeldError, knowledgeSourceSnapshotFromRows, planningSourceSnapshotFromRows, readPlanningSourceSnapshot, readKnowledgeSourceSnapshot, type KnowledgeSourceSnapshot, type KnowledgeSourceWriteResult } from './store-source-generation.js';
+import type { PlanningSourceIdentity } from './store-planning-source-selector.js';
 import { applyKnowledgeImport, type KnowledgeImportInput, type KnowledgeImportReceipt, type PrepareKnowledgeImportGraph } from './store-import.js';
 import { prepareKnowledgeEdgeRecord, writeKnowledgeEdgeRow, findKnowledgeEdge } from './store-edge-writes.js';
 import { createKnowledgeEdgeChanges, validateKnowledgeEdgeChanges, knowledgeEdgeChangesFromRows, type KnowledgeEdgeChangeSnapshot, type KnowledgeEdgeGenerationSnapshot } from './store-edge-generations.js';
@@ -493,6 +494,12 @@ export class KnowledgeStore {
       : this.sqlite.readPersistedRow('knowledge_sources', 'canonical_uri', selector.canonicalUri));
   }
 
+  /** Resolve current or historical planning IDs from the actual persisted tuple.
+   * Use this instead of computing a historical projectPlanningSourceId. */
+  getPlanningSourceSnapshot(identity: PlanningSourceIdentity): KnowledgeSourceSnapshot {
+    return planningSourceSnapshotFromRows(this.sqlite.readPersistedPlanningSource(identity));
+  }
+
   /** Batch only synchronous guard reads, never evidence across an await/write. */
   assertRecordSnapshotFrame(assertion: () => undefined): void {
     try { this.sqlite.assertPersistedReadFrame(assertion); }
@@ -629,10 +636,32 @@ export class KnowledgeStore {
     assertCurrent();
     const result = await this.sqlite.transactPersisted<readonly KnowledgeSourceSnapshot[]>((db) => {
       assertCurrent();
+      const selectedIds = new Set<string>(), selectedPlanningTuples = new Set<string>();
       const prepared = captured.map((write) => {
         const { input, generation } = write;
         if (!input.id) throw new TypeError('Owned source publication requires an exact identity');
+        if (selectedIds.has(input.id)) throw new KnowledgeSourcePublicationHeldError('state-changed');
+        selectedIds.add(input.id);
         if (input.connectorId !== 'goodvibes-project-planning') throw new TypeError('Canonical source clocks require a planning artifact');
+        const metadata = input.metadata;
+        const spaceId = metadata?.['knowledgeSpaceId'], kind = metadata?.['planningArtifactKind'], artifactId = metadata?.['planningArtifactId'];
+        if (typeof spaceId === 'string' && typeof artifactId === 'string'
+          && (kind === 'state' || kind === 'decision' || kind === 'language' || kind === 'work-plan')) {
+          // All candidates are prepared before any row is written. Two writes
+          // in this same batch must not both observe an absent tuple and then
+          // publish separate identities for it.
+          const tuple = JSON.stringify([spaceId, kind, artifactId]);
+          if (selectedPlanningTuples.has(tuple)) throw new KnowledgeSourcePublicationHeldError('state-changed');
+          selectedPlanningTuples.add(tuple);
+          const selected = readPlanningSourceSnapshot(db, { spaceId, kind, artifactId });
+          // A competing publisher may have created this tuple with a different
+          // opaque ID since our absent-row observation. Never create a duplicate
+          // or replace a historical ID selected from metadata. Older generic
+          // callers without an artifact tuple keep their exact-ID CAS below.
+          if ((selected.source && selected.source.id !== input.id) || selected.generation !== generation) {
+            throw new KnowledgeSourcePublicationHeldError('state-changed');
+          }
+        }
         const current = readKnowledgeSourceSnapshot(db, { id: input.id });
         if (current.generation !== generation) { snapshotJudgmentInput(write); throw new KnowledgeSourcePublicationHeldError('state-changed'); }
         snapshotJudgmentInput({ ...write, generation: generation === null ? null : { kind: 'selected-native-source-revision' } });
@@ -1347,6 +1376,10 @@ export class KnowledgeStore {
         } },
         { toVersion: 10, migrate: db => { createKnowledgeEdgeChanges(db); } },
         { toVersion: 11, migrate: db => { createKnowledgeRowRevisions(db); validateKnowledgeEdgeChanges(db); } },
+        // Writer semantic barrier only: preserve every source ID, original row
+        // and SQLite-issued revision. Old hash-ID planning writers refuse v12
+        // before the version opener invokes their schema or migration callbacks.
+        { toVersion: 12, migrate: db => { validateCurrentKnowledgeSchema(db); } },
       ],
     });
     try {

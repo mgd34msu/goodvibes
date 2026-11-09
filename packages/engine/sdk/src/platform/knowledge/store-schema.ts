@@ -1,6 +1,7 @@
 import { createKnowledgeRowRevisions, knowledgeRowRevisionTriggers } from './store-row-revisions.js';
 import type { SqlDatabase } from '../state/sqlite-store.js';
 import { knowledgeRecordTableSql } from './store-schema-validation-data.js';
+import { planningSourceIdentityIndexSql } from './store-planning-source-selector.js';
 import { knowledgeClockNumber, knowledgeNodeMetadataView, knowledgeSourceMetadataView, retainKnowledgeRepresentation } from './store-record-representation.js';
 import { createNativeCiContinuationTable } from './store-native-ci-continuation.js';
 import { createKnowledgeEdgeChanges } from './store-edge-generations.js';
@@ -40,7 +41,9 @@ import type {
 } from './types.js';
 
 export const DEFAULT_KNOWLEDGE_DB_FILE = 'knowledge-wiki.sqlite';
-export const KNOWLEDGE_SCHEMA_VERSION = 11;
+// v12 is also a writer-format barrier: planning source IDs are opaque and old
+// writers must not recreate the same artifact under a computed hash identity.
+export const KNOWLEDGE_SCHEMA_VERSION = 12;
 
 export function resolveKnowledgeDbPathFromControlPlaneDir(
   controlPlaneDir: string,
@@ -91,6 +94,7 @@ export function createSchema(db: Pick<SqlDatabase, 'run'> & Partial<Pick<SqlData
   db.run(knowledgeRecordTableSql.knowledge_sources);
   db.run(`CREATE INDEX IF NOT EXISTS idx_knowledge_sources_canonical_uri ON knowledge_sources(canonical_uri)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_knowledge_sources_updated_at ON knowledge_sources(updated_at)`);
+  db.run(planningSourceIdentityIndexSql);
   db.run(knowledgeRecordTableSql.knowledge_nodes);
   db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_nodes_kind_slug ON knowledge_nodes(kind, slug)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_updated_at ON knowledge_nodes(updated_at)`);

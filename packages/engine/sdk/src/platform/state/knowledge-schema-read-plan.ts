@@ -6,7 +6,7 @@ import { knowledgeSchemaColumns, executionAttemptColumns, conversationRequestCol
 const planBrand: unique symbol = Symbol('native-knowledge-schema-read-plan');
 export interface NativeKnowledgeSchemaReadPlan { readonly [planBrand]: true }
 interface Plan {
-  readonly schemaVersion: 11;
+  readonly schemaVersion: 12;
   readonly validator: typeof validateCurrentKnowledgeSchema;
 }
 const plans = new WeakMap<object, Plan>();
@@ -14,7 +14,7 @@ const plans = new WeakMap<object, Plan>();
 /** No caller data or function can define the conditions of this native plan. */
 export function prepareNativeKnowledgeSchemaReadPlan(): NativeKnowledgeSchemaReadPlan {
   const token = Object.freeze({ [planBrand]: true as const });
-  plans.set(token, Object.freeze({ schemaVersion: 11, validator: validateCurrentKnowledgeSchema }));
+  plans.set(token, Object.freeze({ schemaVersion: 12, validator: validateCurrentKnowledgeSchema }));
   return token;
 }
 

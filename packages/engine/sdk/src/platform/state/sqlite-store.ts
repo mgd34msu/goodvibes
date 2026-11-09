@@ -11,6 +11,7 @@ import { readSQLitePersistedImage, SQLitePublicationError, SQLiteStorePersistenc
 import { sqliteLocalObservation } from './sqlite-local-observation.js';
 import { nativeKnowledgeSchemaReadPlanMatches, validateNativeKnowledgeReadSchema, type NativeKnowledgeSchemaReadPlan } from './knowledge-schema-read-plan.js';
 import { knowledgeRecordTableSql } from '../knowledge/store-schema-validation-data.js';
+import { planningSourceIdentityParams, planningSourceIdentitySql, type PlanningSourceIdentity } from '../knowledge/store-planning-source-selector.js';
 
 // The sql.js engine loads exactly once per process, however many stores open.
 // Its WASM loader is not re-entrant: two concurrent initSqlJs() calls race the
@@ -1288,6 +1289,12 @@ export class SQLiteStore {
       }
       return this.readPrivatePersistedRows(`SELECT * FROM ${table} WHERE ${column} = ? LIMIT 1`, [value]);
     } catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
+  }
+
+  /** Closed planning tuple selector; never a caller callback or mutable cache. */
+  readPersistedPlanningSource(identity: PlanningSourceIdentity): ReturnType<SqlDatabase['exec']> {
+    try { return this.readPrivatePersistedRows(planningSourceIdentitySql, planningSourceIdentityParams(identity)); }
+    catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
   }
 
   /** SQLite write revision only; complete evidence stays in separate raw-row reads. */

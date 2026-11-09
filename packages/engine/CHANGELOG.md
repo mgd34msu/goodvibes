@@ -4,6 +4,24 @@
 
 ### Fixed
 
+- Keep each trigger bound to its originally approved command, arguments and
+  directory across saved grant edits and restart. New grants use independent
+  action snapshots and revisions; earlier saved grants remain readable.
+
+- Detect local gate-source changes through the running check's original file
+  observations instead of repeatedly reading and hashing the entire tree.
+  Saved check receipts still require fresh execution after restart.
+
+- Refuse malformed approval time windows and backwards host clocks. Preserve
+  damaged persisted approval evidence and ask the operator to check the clock
+  and obtain a fresh approval.
+
+- Preserve planning source IDs across updates and reopen while assigning fresh
+  sources opaque IDs. Find earlier sources by their saved metadata, reject
+  duplicate artifact identities, and retain original row revisions during the
+  knowledge schema12 migration. Older writers refuse this schema; use a current
+  suite build or restore its matching pre-migration snapshot when rolling back.
+
 - Preserve each decision fallback's own protocol and model aliases while editing
   it. Resolve reasoning effort against the selected provider and exact model,
   including Sol `xhigh` and `max` in category routes. Refuse stale terminal route

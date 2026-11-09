@@ -155,3 +155,22 @@ test('future schema and unknown saved identity versions preserve the original da
   const future = new Database(f.dbPath); try { future.run(`PRAGMA user_version=${KNOWLEDGE_SCHEMA_VERSION + 1}`); } finally { future.close(); }
   const futureBytes = readFileSync(f.dbPath), incompatible = new KnowledgeStore({ dbPath: f.dbPath }); stores.push(incompatible); await expect(incompatible.init()).rejects.toThrow(); expect(readFileSync(f.dbPath)).toEqual(futureBytes);
 });
+
+
+test('actual snapshot sync preserves installation identity across recognized Home Assistant space aliases', async () => {
+  const f = await fixture();
+  const original = await f.sync({ knowledgeSpaceId: 'homeassistant:my-house', devices: [{ id: 'device', title: 'Original device' }] });
+  const before = createHomeGraphNodeIdentityPlanner(f.store).lookup({ ...selector, spaceId: original.spaceId });
+  if (!before) throw new Error('Original snapshot did not publish its device.');
+  const updated = await f.sync({ knowledgeSpaceId: 'HOMEASSISTANT:My House', devices: [{ id: 'device', title: 'Updated device' }] });
+  expect(updated.spaceId).toBe('HOMEASSISTANT:My House');
+  expect(updated.installationId).toBe('my-house'); expect(updated.home.id).toBe(original.home.id);
+  expect(updated.home.metadata.homeAssistant).toMatchObject({ installationId: 'my-house' });
+  expect(updated.source.metadata.homeAssistant).toMatchObject({ installationId: 'my-house' });
+  const device = createHomeGraphNodeIdentityPlanner(f.store).lookup({ ...selector, spaceId: 'homeassistant:my-house' });
+  expect(device?.id).toBe(before.id); expect(device?.title).toBe('Updated device');
+  expect(device?.metadata.homeAssistant).toMatchObject({ installationId: 'my-house', objectId: 'device' });
+  expect(f.store.listNodes().filter(node => node.kind === 'ha_device')).toHaveLength(1);
+  const custom = await f.sync({ knowledgeSpaceId: 'Project:My House', installationId: 'Other Installation', devices: [] });
+  expect(custom.spaceId).toBe('Project:My House'); expect(custom.installationId).toBe('other-installation');
+});

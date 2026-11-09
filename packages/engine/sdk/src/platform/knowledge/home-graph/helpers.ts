@@ -66,9 +66,7 @@ export function resolveHomeGraphSpace(input: HomeGraphSpaceInput = {}): {
     : homeAssistantKnowledgeSpaceId(installationId);
   return {
     spaceId,
-    installationId: spaceId.startsWith('homeassistant:')
-      ? normalizeHomeAssistantInstallationId(spaceId.slice('homeassistant:'.length))
-      : installationId,
+    installationId: homeAssistantSpaceComponent(spaceId) ?? installationId,
   };
 }
 

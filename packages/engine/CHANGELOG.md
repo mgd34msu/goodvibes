@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Preserve the Home Assistant installation when syncing through a recognized
+  space alias with a different prefix case or display spelling. Reuse the same
+  saved objects instead of rewriting their installation metadata.
+
 - Reject missing or mismatched native work proofs before hashing their current
   source. Reuse one actual goal-source comparison within a verification, while
   retaining the saved proof and answer checks required for settlement.

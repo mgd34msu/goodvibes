@@ -13,3 +13,39 @@ The public group ID and join key remain compatible with released peers. Before t
 Configuration transfers remain bound to the original live group and member generation across storage waits. Removing and re-adding a member, retiring the authenticated key generation, changing the group, or stopping the daemon prevents later writes or secret transmissions from that request. Ordinary heartbeat and display-name updates do not interrupt it. A write already entered before authority changes remains owned through completion; it is not blindly undone.
 
 Group envelopes use a shared group key. These checks restrict the claimed sender against the current roster; they do not turn that shared key into an independent signature for each machine.
+
+## Local configuration and credentials
+
+The daemon subscribes to successful configuration and credential-store changes.
+Only paths declared group-scoped by the platform policy are eligible; local
+ports, transport identity, user preferences and unrelated provider credentials
+stay on their original machine. A local configuration reset publishes its
+resolved default; an explicit group deletion publishes a tombstone. Standby
+edits and credential deletions are proposed to the master, which issues the
+revision. Explicitly setting a deleted setting again clears that deletion.
+
+On first master ownership in a membership incarnation, existing eligible
+credentials are seeded once. Absent values do not become deletion requests, and
+ordinary housekeeping does not repeatedly read every credential. Later changes
+are event-driven. Failed changes retain only bounded path metadata for retry
+under their original membership; a departed or revoked owner cannot transfer
+that pending work to a new group. Stop removes listeners and drains entered
+work before completing.
+
+Receiving a setting or credential does not announce it back as a fresh local
+edit. Suppression belongs to the particular entered store operation and exact
+key, so unrelated local edits still replicate. Credential values remain in the
+local encrypted store and recipient-sealed network payloads, never in replica
+files, status or a private change-value cache. Signed older secret revisions
+cannot replace a newer setting or deletion; metadata-first delivery at the same
+revision remains supported. Acknowledged storage effects are not blindly
+rolled back if cancellation happens while a store operation is in progress.
+
+Credential-bearing configuration paths use their declared schema classification:
+actual literal local credentials travel only as recipient-sealed values, never
+as ordinary config entries. Receivers store them encrypted and set the canonical
+local secret reference. Public credential metadata accepts only that exact
+reference or the empty setting; unsupported machine-specific secret references
+report guidance to use the encrypted credential setting. Incoming public literal
+credentials are refused before they can enter config/replica storage. A credential
+revision marker also cannot contain a raw value disguised as secret metadata.

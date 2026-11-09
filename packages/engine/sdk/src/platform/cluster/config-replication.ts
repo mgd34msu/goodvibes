@@ -32,6 +32,8 @@
  * puts one in `/status`, a replicated secret is reported as a path and a
  * revision, never as a value.
  */
+import { GroupConfigChangeRetiredError } from './group-config-changes.js';
+import { canonicalReplicatedSecretRef, ConfigReplicationPrivacyError, isSecretBearingConfigKey, localCredentialLiteral, publicCredentialPointer } from './config-replication-privacy.js';
 import { openSealedEnvelope, sealForMember, type NodeKeyMaterial } from './group-crypto.js';
 import {
   isReplicatedConfigPath,
@@ -49,6 +51,7 @@ import {
   readConfigReplicaDocument,
   sweepConfigReplica,
   type ConfigReplicaDocument,
+  type ConfigReplicaTombstone,
 } from './config-replica.js';
 import type { GroupMember, GroupStateDocument } from './group-state.js';
 import type { ClusterEnvelope } from './protocol-envelope.js';
@@ -64,6 +67,15 @@ export const CONFIG_MESSAGE_TYPES = {
 
 const SECRET_SEAL_CONTEXT = 'goodvibes-cluster-config-secret-v1';
 
+interface PendingReplicaEffect { readonly revision: number; readonly origin: string; readonly secret: boolean; readonly assertCurrent: () => void }
+function sameEffect(entry: { revision: number; origin: string; secret: boolean } | null | undefined, selected: Pick<PendingReplicaEffect, 'revision' | 'origin' | 'secret'>): boolean {
+  return !!entry && entry.revision === selected.revision && entry.origin === selected.origin && entry.secret === selected.secret;
+}
+function selectedDeletion(document: ConfigReplicaDocument, path: string): ConfigReplicaTombstone | null {
+  const deletion = document.tombstones.find(entry => entry.path === path), value = findReplicaEntry(document, path);
+  return deletion && (!value || value.revision <= deletion.revision) ? deletion : null;
+}
+
 /** The narrow slice of config this layer touches. */
 export interface ReplicatedConfigStore {
   get(path: string): unknown;
@@ -74,6 +86,8 @@ export interface ReplicatedConfigStore {
    * that value from being replicated back out.
    */
   reset?(path: string): void;
+  /** Actual successful local edits, including file-watcher reloads. */
+  subscribe?(path: string, listener: () => void): () => void;
 }
 
 /** The narrow slice of the secret store this layer touches. */
@@ -81,6 +95,7 @@ export interface ReplicatedSecretStore {
   get(key: string): Promise<string | null>;
   set(key: string, value: string): Promise<void>;
   delete(key: string): Promise<void>;
+  onDidChange?(listener: (key: string) => void): () => void;
 }
 
 /** What the replication service borrows from the group runtime. */
@@ -120,6 +135,10 @@ export class ConfigReplicationService {
   private lastAppliedFrom: string | null = null;
   private lastAppliedAt: number | null = null;
   private pendingProposals = 0;
+  private readonly pendingSets = new Map<string, PendingReplicaEffect>();
+  private readonly pendingDeletes = new Map<string, PendingReplicaEffect>();
+  private pendingPersistence: (() => void) | null = null;
+  private readonly secretMutations = new Map<string, Promise<void>>();
 
   constructor(private readonly host: ConfigReplicationHost, groupId: string) {
     this.document = createConfigReplicaDocument(groupId);
@@ -127,7 +146,8 @@ export class ConfigReplicationService {
 
   /** Adopt a document read back from disk, or from a group this node just joined. */
   adopt(document: ConfigReplicaDocument): void {
-    this.document = document;
+    this.pendingSets.clear(); this.pendingDeletes.clear(); this.pendingPersistence = null;
+    this.document = this.publicDocument(document);
   }
 
   get replica(): ConfigReplicaDocument {
@@ -146,13 +166,37 @@ export class ConfigReplicationService {
     };
   }
 
+  private publicDocument(document: ConfigReplicaDocument): ConfigReplicaDocument {
+    const entries = document.entries.filter(entry => {
+      if (entry.secret) {
+        const marker = entry.value;
+        if (marker && typeof marker === 'object' && !Array.isArray(marker) && Object.keys(marker).length === 1
+          && 'secretRevision' in marker && Number.isSafeInteger(marker.secretRevision) && (marker.secretRevision as number) >= 0) return true;
+      } else if (!isSecretBearingConfigKey(entry.path) || publicCredentialPointer(entry.path, entry.value)) return true;
+      this.host.logger.warn('cluster: refused public credential configuration; use the encrypted credential setting', { path: entry.path }); return false;
+    });
+    return entries.length === document.entries.length ? document : { ...document, entries };
+  }
+  private credentialLiteral(path: string, value: unknown): string | null {
+    try { return localCredentialLiteral(path, value); }
+    catch (error) { this.host.logger.warn('cluster: credential reference is local-only; use the encrypted credential setting for group sharing', { path }); throw error; }
+  }
+
+  private async effectiveSecret(path: string, assertCurrent: () => void): Promise<string | null> {
+    const config = this.host.config(), classified = isSecretBearingConfigKey(path), configured = classified ? config?.get(path) : undefined;
+    const literal = classified ? this.credentialLiteral(path, configured) : null;
+    assertCurrent(); const value = literal ?? await this.host.secrets()?.get(replicatedSecretKeyFor(path)) ?? null;
+    assertCurrent(); if (classified && config?.get(path) !== configured) throw new ConfigReplicationPrivacyError();
+    return value;
+  }
+
   // ── reconciling this machine's own config into the replica ────────────────
 
   /**
    * Fold local changes into the replica, and broadcast them.
    *
    * Runs on the master only. It is a reconcile rather than a change hook
-   * because the config manager has no change event: comparing the replica
+   * as anti-entropy as well as the event bridge: comparing the replica
    * against what is actually on disk catches an edit made through any path at
    * all, including one made while this process was not running.
    */
@@ -176,7 +220,7 @@ export class ConfigReplicationService {
       // undo the operator's deletion on the next housekeeping tick, which is
       // exactly what this loop did before the rule existed. Re-adding is an
       // explicit act: `announceLocalChange` clears the tombstone.
-      if (deleted.has(path)) continue;
+      if (deleted.has(path) || isSecretBearingConfigKey(path)) continue;
       const value = config.get(path);
       if (!isReplicableValue(value)) continue;
       const entry = findReplicaEntry(document, path);
@@ -205,10 +249,16 @@ export class ConfigReplicationService {
    * deleted. Setting a deleted path again is the operator undoing the deletion,
    * and this is the only path that can.
    */
-  async announceLocalChange(path: string): Promise<void> {
+  async announceLocalChange(path: string, observed?: () => void): Promise<void> {
     if (!isReplicatedConfigPath(path)) return;
-    const assertCurrent = this.host.captureAuthority(); assertCurrent();
+    const current = this.host.captureAuthority(); const assertCurrent = () => { observed?.(); current(); }; assertCurrent();
     const config = this.host.config();
+    if (isSecretBearingConfigKey(path)) {
+      const value = config?.get(path);
+      if (value === '') await this.publishDelete(path, true, assertCurrent, false);
+      else await this.announceLocalSecret(path, assertCurrent);
+      return;
+    }
     if (this.host.isMaster()) {
       const current = config?.get(path);
       if (!isReplicableValue(current)) return;
@@ -237,15 +287,19 @@ export class ConfigReplicationService {
   }
 
   /** Replicate a secret the operator set on this machine. */
-  async announceLocalSecret(configPath: string): Promise<void> {
+  async announceLocalSecret(configPath: string, observed?: () => void, seed = false): Promise<void> {
     if (!isReplicatedConfigPath(configPath)) return;
-    const assertCurrent = this.host.captureAuthority(); assertCurrent();
+    const current = this.host.captureAuthority(), config = this.host.config();
+    const configured = isSecretBearingConfigKey(configPath) ? config?.get(configPath) : undefined;
+    const assertCurrent = () => { observed?.(); current(); if (isSecretBearingConfigKey(configPath) && config?.get(configPath) !== configured) throw new ConfigReplicationPrivacyError(); }; assertCurrent();
     const secrets = this.host.secrets();
-    if (!secrets) return;
+    if (!secrets || (seed && !this.host.isMaster())) return;
     const secretKey = replicatedSecretKeyFor(configPath);
-    const value = await secrets.get(secretKey);
+    const literal = isSecretBearingConfigKey(configPath) ? this.credentialLiteral(configPath, configured) : null;
+    const value = literal ?? await secrets.get(secretKey);
     assertCurrent();
-    if (value === null) return;
+    if (value === null) { if (!seed) await this.publishDelete(configPath, true, assertCurrent, false); return; }
+    if (seed && this.document.tombstones.some(entry => entry.path === configPath)) return;
     if (!this.host.isMaster()) {
       this.pendingProposals += 1;
       await this.sendSealed(CONFIG_MESSAGE_TYPES.propose, configPath, value, assertCurrent);
@@ -257,9 +311,17 @@ export class ConfigReplicationService {
   }
 
   /** Delete a setting across the group. */
-  async announceLocalDelete(path: string, secret = false): Promise<void> {
-    if (!isReplicatedConfigPath(path) || !this.host.isMaster()) return;
-    const assertCurrent = this.host.captureAuthority(); assertCurrent();
+  async announceLocalDelete(path: string, secret = false, observed?: () => void): Promise<void> {
+    if (!isReplicatedConfigPath(path)) return;
+    const current = this.host.captureAuthority(); const assertCurrent = () => { observed?.(); current(); }; assertCurrent();
+    await this.publishDelete(path, secret, assertCurrent, true);
+  }
+  private async publishDelete(path: string, secret: boolean, assertCurrent: () => void, applyLocal: boolean): Promise<void> {
+    assertCurrent();
+    if (!this.host.isMaster()) {
+      this.pendingProposals += 1;
+      await this.send(assertCurrent, CONFIG_MESSAGE_TYPES.propose, { path, secret, delete: true }); return;
+    }
     const secrets = this.host.secrets();
     this.document = deleteReplicaEntry(this.document, {
       path,
@@ -269,15 +331,26 @@ export class ConfigReplicationService {
     });
     // Clear it here too, where the store can. A deletion the operator made on
     // the group should not leave this machine still running the old value.
-    assertCurrent(); this.host.config()?.reset?.(path);
+    assertCurrent(); if (applyLocal) this.host.config()?.reset?.(path);
     assertCurrent();
-    if (secret) { await secrets?.delete(replicatedSecretKeyFor(path)); assertCurrent(); }
+    if (applyLocal && secret && secrets) { await this.mutateSecret(path, assertCurrent, () => secrets.delete(replicatedSecretKeyFor(path))); assertCurrent(); }
     assertCurrent();
     this.host.persist(this.document);
     assertCurrent();
     await this.send(assertCurrent, CONFIG_MESSAGE_TYPES.delta, {
       deletes: [{ path, revision: this.document.revision, origin: this.host.nodeId, at: this.host.now(), secret }],
     });
+  }
+
+  /** Serialize entered writes/deletes for one actual credential. Queue only
+   * encrypted input/guards or callbacks, never decrypted credential caches.
+   */
+  private mutateSecret(path: string, assertCurrent: () => void, effect: () => Promise<void>): Promise<void> {
+    const previous = this.secretMutations.get(path) ?? Promise.resolve();
+    const task = previous.catch(() => {}).then(async () => { assertCurrent(); await effect(); assertCurrent(); });
+    this.secretMutations.set(path, task);
+    const drained = () => { if (this.secretMutations.get(path) === task) this.secretMutations.delete(path); };
+    void task.then(drained, drained); return task;
   }
 
   // ── sending ───────────────────────────────────────────────────────────────
@@ -331,6 +404,7 @@ export class ConfigReplicationService {
     if (Object.keys(sealed).length === 0) return;
     await this.send(assertCurrent, type, {
       secretPath: configPath,
+      origin: findReplicaEntry(this.document, configPath)?.origin ?? this.host.nodeId,
       revision: this.document.revision,
       sealed,
     });
@@ -380,12 +454,13 @@ export class ConfigReplicationService {
     if (!secrets || !member) return;
     for (const entry of this.document.entries.filter((candidate) => candidate.secret)) {
       assertCurrent();
-      const value = await secrets.get(replicatedSecretKeyFor(entry.path));
+      const value = await this.effectiveSecret(entry.path, assertCurrent);
       assertCurrent();
       if (findReplicaEntry(this.document, entry.path) !== entry) throw new Error('Original replicated secret entry changed');
       if (value === null) continue;
       await this.send(assertCurrent, CONFIG_MESSAGE_TYPES.delta, {
         secretPath: entry.path,
+        origin: entry.origin,
         revision: entry.revision,
         sealed: { [member.nodeId]: sealForMember(member.agreementKey, value, SECRET_SEAL_CONTEXT) },
       });
@@ -403,7 +478,7 @@ export class ConfigReplicationService {
       });
       return;
     }
-    const merged = mergeConfigReplica(this.document, incoming);
+    const merged = mergeConfigReplica(this.document, this.publicDocument(incoming));
     await this.applyDocument(merged, envelope.nodeId, assertCurrent);
     assertCurrent();
   }
@@ -427,7 +502,7 @@ export class ConfigReplicationService {
       isReplicatedConfigPath,
     );
     if (!incoming) return;
-    await this.applyDocument(mergeConfigReplica(this.document, incoming), envelope.nodeId, assertCurrent);
+    await this.applyDocument(mergeConfigReplica(this.document, this.publicDocument(incoming)), envelope.nodeId, assertCurrent);
     assertCurrent();
   }
 
@@ -441,18 +516,23 @@ export class ConfigReplicationService {
   private async onPropose(envelope: ClusterEnvelope, assertCurrent: () => void): Promise<void> {
     assertCurrent();
     if (!this.host.isMaster() || envelope.nodeId === this.host.nodeId) return;
+    if (envelope.body['delete'] !== undefined) {
+      const path = envelope.body['path'], secret = envelope.body['secret'];
+      if (Object.keys(envelope.body).length !== 3 || envelope.body['delete'] !== true || typeof path !== 'string'
+        || !isReplicatedConfigPath(path) || typeof secret !== 'boolean') return;
+      await this.announceLocalDelete(path, secret, assertCurrent); assertCurrent(); return;
+    }
     if (typeof envelope.body['secretPath'] === 'string') {
-      const opened = this.openSealed(envelope);
-      const path = envelope.body['secretPath'];
-      if (opened === null || !isReplicatedConfigPath(path)) return;
-      const secrets = this.host.secrets();
-      if (!secrets) return;
-      assertCurrent(); await secrets.set(replicatedSecretKeyFor(path), opened);
-      assertCurrent();
-      this.logApplied(path, envelope.nodeId, true);
-      assertCurrent();
-      await this.publishSecret(path, opened, assertCurrent);
-      assertCurrent();
+      const path = envelope.body['secretPath']; if (!isReplicatedConfigPath(path)) return;
+      await this.mutateSecret(path, assertCurrent, async () => {
+        const opened = this.openSealed(envelope), secrets = this.host.secrets(); if (opened === null || !secrets) return;
+        const original = findReplicaEntry(this.document, path), deleted = this.document.tombstones.find(entry => entry.path === path);
+        assertCurrent(); await secrets.set(replicatedSecretKeyFor(path), opened); assertCurrent();
+        if (findReplicaEntry(this.document, path) !== original || this.document.tombstones.find(entry => entry.path === path) !== deleted) return;
+        if (isSecretBearingConfigKey(path)) { this.host.config()?.set(path, canonicalReplicatedSecretRef(path)); assertCurrent(); }
+        this.logApplied(path, envelope.nodeId, true); assertCurrent();
+        await this.publishSecret(path, opened, assertCurrent); assertCurrent();
+      });
       return;
     }
     const path = envelope.body['path'];
@@ -460,11 +540,12 @@ export class ConfigReplicationService {
     if (typeof path !== 'string' || !isReplicatedConfigPath(path) || !isReplicableValue(value)) return;
     const config = this.host.config();
     if (!config) return;
+    if (isSecretBearingConfigKey(path) && !publicCredentialPointer(path, value)) { this.host.logger.warn('cluster: refused public credential proposal; use the encrypted credential setting', { path }); return; }
     assertCurrent(); config.set(path, value);
     assertCurrent();
     this.logApplied(path, envelope.nodeId, false);
     assertCurrent();
-    await this.reconcileLocal(assertCurrent);
+    await this.announceLocalChange(path, assertCurrent);
     assertCurrent();
   }
 
@@ -491,77 +572,91 @@ export class ConfigReplicationService {
    * rotation on one machine.
    */
   private async applySealedSecret(envelope: ClusterEnvelope, assertCurrent: () => void): Promise<void> {
-    assertCurrent();
     const path = envelope.body['secretPath'];
     if (typeof path !== 'string' || !isReplicatedConfigPath(path)) return;
-    const secrets = this.host.secrets();
-    const opened = this.openSealed(envelope);
-    if (!secrets || opened === null) return;
-    const secretKey = replicatedSecretKeyFor(path);
-    if (!isReplicatedSecretKey(secretKey)) return;
-    assertCurrent(); await secrets.set(secretKey, opened);
-    assertCurrent();
-    const revision = envelope.body['revision'];
-    this.document = putReplicaEntry(this.document, {
-      path,
-      value: { secretRevision: typeof revision === 'number' ? revision : this.document.revision + 1 },
-      origin: envelope.nodeId,
-      at: this.host.now(),
-      secret: true,
+    await this.mutateSecret(path, assertCurrent, async () => {
+      const revision = envelope.body['revision'];
+      if (typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision <= 0) return;
+      const suppliedOrigin = envelope.body['origin'], existing = findReplicaEntry(this.document, path);
+      if (suppliedOrigin !== undefined && (typeof suppliedOrigin !== 'string' || suppliedOrigin.length === 0 || suppliedOrigin.length > 256)) return;
+      const origin = typeof suppliedOrigin === 'string' ? suppliedOrigin : existing?.secret && existing.revision === revision ? existing.origin : envelope.nodeId;
+      const incoming: ConfigReplicaDocument = { version: 1, groupId: this.document.groupId, revision, tombstones: [], entries: [{
+        path, revision, origin, at: this.host.now(), secret: true, value: { secretRevision: revision },
+      }] };
+      const admitted = (): ConfigReplicaDocument | null => {
+        const merged = mergeConfigReplica(this.document, incoming), selected = findReplicaEntry(merged, path);
+        return selected?.secret && selected.revision === revision && selected.origin === origin ? merged : null;
+      };
+      if (!admitted()) return; // includes a tombstone at or above this revision
+      const secrets = this.host.secrets(), secretKey = replicatedSecretKeyFor(path);
+      if (!secrets || !isReplicatedSecretKey(secretKey)) return;
+      const opened = this.openSealed(envelope); if (opened === null) return;
+      assertCurrent(); await secrets.set(secretKey, opened); assertCurrent();
+      // A newer document may have arrived during an entered set. Its queued
+      // delete/write still owns the final store state; never resurrect metadata.
+      const merged = admitted(); if (!merged) return;
+      if (isSecretBearingConfigKey(path)) { assertCurrent(); this.host.config()?.set(path, canonicalReplicatedSecretRef(path)); assertCurrent(); }
+      this.document = merged; this.host.persist(merged); assertCurrent(); this.logApplied(path, envelope.nodeId, true);
     });
-    assertCurrent();
-    this.host.persist(this.document);
-    assertCurrent(); this.logApplied(path, envelope.nodeId, true);
   }
 
-  /** Apply a merged document to this machine's config, then persist it. */
+  /** Persist desired metadata first. Only newly selected effects, or the exact
+   * original failed effect, are admitted; historical tombstones are not commands.
+   */
   private async applyDocument(merged: ConfigReplicaDocument, from: string, assertCurrent: () => void): Promise<void> {
-    assertCurrent();
-    const secrets = this.host.secrets();
-    const config = this.host.config();
-    if (!config) return;
-    const before = this.document;
-    this.document = merged;
-    assertCurrent();
-    this.host.persist(merged);
-
+    assertCurrent(); const before = this.document; this.document = merged;
     for (const entry of merged.entries) {
-      assertCurrent();
       if (entry.secret) continue;
-      const existing = findReplicaEntry(before, entry.path);
-      if (existing && existing.revision === entry.revision) continue;
-      if (JSON.stringify(config.get(entry.path)) === JSON.stringify(entry.value)) continue;
-      assertCurrent();
-      try {
-        config.set(entry.path, entry.value);
-        this.logApplied(entry.path, entry.origin, false);
-      } catch (error) {
-        // A value this build's validator refuses is dropped, loudly, rather
-        // than throwing away the rest of the snapshot with it.
-        this.host.logger.warn('cluster: a replicated setting was refused by this build and was not applied', {
-          path: entry.path,
-          origin: entry.origin,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
+      const previous = findReplicaEntry(before, entry.path);
+      if (!previous || !sameEffect(previous, entry)) this.pendingSets.set(entry.path, { revision: entry.revision, origin: entry.origin, secret: false, assertCurrent });
     }
     for (const tombstone of merged.tombstones) {
-      assertCurrent();
-      if (!before.tombstones.some((entry) => entry.path === tombstone.path
-        && entry.revision === tombstone.revision)) {
-        this.host.logger.info('cluster: a setting was deleted by another machine in the group', {
-          path: tombstone.path,
-          origin: tombstone.origin,
-        });
-      }
-      assertCurrent();
-      if (tombstone.secret) { await secrets?.delete(replicatedSecretKeyFor(tombstone.path)); assertCurrent(); }
-      else config.reset?.(tombstone.path);
+      const selected = selectedDeletion(merged, tombstone.path); if (selected !== tombstone) continue;
+      const previous = selectedDeletion(before, tombstone.path);
+      if (!previous || !sameEffect(previous, tombstone)) this.pendingDeletes.set(tombstone.path, { revision: tombstone.revision, origin: tombstone.origin, secret: tombstone.secret, assertCurrent });
     }
-    assertCurrent();
-    this.lastAppliedFrom = from;
-    this.lastAppliedAt = this.host.now();
-    this.pendingProposals = 0;
+    this.pendingPersistence = assertCurrent; assertCurrent(); this.host.persist(merged); assertCurrent(); this.pendingPersistence = null;
+    await this.retryPendingEffects(); assertCurrent();
+    this.lastAppliedFrom = from; this.lastAppliedAt = this.host.now(); this.pendingProposals = 0;
+  }
+
+  /** A genuine successful local edit retires an older failed remote effect. */
+  observeLocalChange(path: string): void { this.pendingSets.delete(path); this.pendingDeletes.delete(path); }
+
+  /** Retry only original failed desired-state effects. Maps retain finite path
+   * metadata/authority guards, never a second copy of config or secret values.
+   */
+  async retryPendingEffects(): Promise<void> {
+    if (this.pendingPersistence) { const original = this.pendingPersistence; original(); this.host.persist(this.document); original(); if (this.pendingPersistence === original) this.pendingPersistence = null; }
+    const config = this.host.config(), secrets = this.host.secrets(); if (!config) return;
+    for (const [path, effect] of this.pendingSets) {
+      const entry = findReplicaEntry(this.document, path);
+      if (!sameEffect(entry, effect) || !entry || entry.secret) { if (this.pendingSets.get(path) === effect) this.pendingSets.delete(path); continue; }
+      const current = () => { effect.assertCurrent(); if (!sameEffect(findReplicaEntry(this.document, path), effect) || this.pendingSets.get(path) !== effect) throw new GroupConfigChangeRetiredError(); };
+      try {
+        current(); if (JSON.stringify(config.get(path)) !== JSON.stringify(entry.value)) { config.set(path, entry.value); current(); this.logApplied(path, entry.origin, false); }
+        if (this.pendingSets.get(path) === effect) this.pendingSets.delete(path);
+      } catch {
+        try { current(); } catch { if (this.pendingSets.get(path) === effect) this.pendingSets.delete(path); continue; }
+        this.host.logger.warn('cluster: a replicated setting was not applied and is awaiting retry', { path, origin: effect.origin });
+      }
+    }
+    for (const [path, effect] of this.pendingDeletes) {
+      const current = () => { effect.assertCurrent(); if (!sameEffect(selectedDeletion(this.document, path), effect) || this.pendingDeletes.get(path) !== effect) throw new GroupConfigChangeRetiredError(); };
+      try {
+        current();
+        if (effect.secret) {
+          if (!secrets || (isSecretBearingConfigKey(path) && !config.reset)) throw new Error('Replicated credential deletion is unavailable');
+          await this.mutateSecret(path, current, async () => { current(); config.reset?.(path); current(); await secrets.delete(replicatedSecretKeyFor(path)); current(); });
+        }
+        else config.reset?.(path);
+        current(); if (this.pendingDeletes.get(path) === effect) this.pendingDeletes.delete(path);
+        this.host.logger.info('cluster: a setting was deleted by another machine in the group', { path, origin: effect.origin });
+      } catch {
+        try { current(); } catch { if (this.pendingDeletes.get(path) === effect) this.pendingDeletes.delete(path); continue; }
+        this.host.logger.warn('cluster: a replicated deletion was not confirmed and is awaiting retry', { path, origin: effect.origin });
+      }
+    }
   }
 
   /**

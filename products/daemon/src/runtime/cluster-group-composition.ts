@@ -31,6 +31,7 @@ import {
   type ClusterSurfaceHolding,
   type GroupOperationsContext,
 } from '@goodvibes-jev/engine/sdk/platform/cluster';
+import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
 import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import type { SecretsManager } from '../config/secrets.js';
 import type { ClusterTransport } from '@goodvibes-jev/engine/sdk/platform/cluster';
@@ -74,7 +75,7 @@ function defaultNodeDisplayName(nodeId: string): string {
 export function createClusterGroupComposition(options: {
   readonly configManager: ConfigManager;
   readonly shellPaths: ShellPathService;
-  readonly secretsManager: Pick<SecretsManager, 'get' | 'set' | 'delete'>;
+  readonly secretsManager: Pick<SecretsManager, 'get' | 'set' | 'delete'> & Partial<Pick<SecretsManager, 'onDidChange'>>;
   /** Optional host/test seams; defaults preserve the real UDP/system-clock path. */
   readonly transport?: ClusterTransport | undefined;
   readonly clock?: ClusterClock | undefined;
@@ -123,6 +124,7 @@ export function createClusterGroupComposition(options: {
       get: (key) => options.secretsManager.get(key),
       set: (key, value) => options.secretsManager.set(key, value),
       delete: (key) => options.secretsManager.delete(key),
+      ...(options.secretsManager.onDidChange ? { onDidChange: (listener: (key: string) => void) => options.secretsManager.onDidChange!(listener) } : {}),
     },
     stateDirectory,
     nodeId,
@@ -141,6 +143,8 @@ export function createClusterGroupComposition(options: {
       set: (path, value) => (options.configManager as unknown as {
         set(key: string, value: unknown): void;
       }).set(path, value),
+      ...(typeof options.configManager.reset === 'function' ? { reset: (path: string) => options.configManager.reset(path as ConfigKey) } : {}),
+      ...(typeof options.configManager.subscribe === 'function' ? { subscribe: (path: string, listener: () => void) => options.configManager.subscribe(path as ConfigKey, listener) } : {}),
     },
   });
 
@@ -215,7 +219,7 @@ export function createClusterGroupComposition(options: {
 export function createClusterServices(options: {
   readonly configManager: ConfigManager;
   readonly shellPaths: ShellPathService;
-  readonly secretsManager: Pick<SecretsManager, 'get' | 'set' | 'delete'>;
+  readonly secretsManager: Pick<SecretsManager, 'get' | 'set' | 'delete'> & Partial<Pick<SecretsManager, 'onDidChange'>>;
   /** Optional host/test seams; defaults preserve the real UDP/system-clock path. */
   readonly transport?: ClusterTransport | undefined;
   readonly clock?: ClusterClock | undefined;

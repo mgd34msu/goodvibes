@@ -320,6 +320,8 @@ export interface ClusterSecretStore {
   get(key: string): Promise<string | null>;
   set(key: string, value: string): Promise<void>;
   delete(key: string): Promise<void>;
+  /** Successful local credential writes/deletes; values are never in events. */
+  onDidChange?(listener: (key: string) => void): () => void;
 }
 
 /** One actual store read distinguishes absence from unreadable/uncertain data. */

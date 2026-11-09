@@ -13,6 +13,7 @@ export * from './lib/load-config.js';
 export * from './lib/engine-pin-gate.js';
 export * from './lib/build-binaries.js';
 export * from './lib/client-reader-artifact.js';
+export * from './lib/retained-native-artifact-files.js';
 export * from './lib/bun-compile-compat.js';
 export * from './lib/bun-compile.js';
 export * from './lib/optional-externals.js';

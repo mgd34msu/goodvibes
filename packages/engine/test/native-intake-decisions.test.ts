@@ -1,5 +1,5 @@
 import { expect, spyOn, test } from 'bun:test';
-import { createSystemOnePort, JudgmentError, DEFAULT_MODEL, SqliteDecisionLog, withDecisionLog, type JudgmentPort, type JudgmentRequest, type Questions,
+import { canonicalJson, createSystemOnePort, JudgmentError, DEFAULT_MODEL, SqliteDecisionLog, withDecisionLog, type JudgmentPort, type JudgmentRequest, type Questions,
 } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import {
@@ -252,6 +252,53 @@ test('an absent borrowed decision ID has no fallback state-commitment consumer',
     expect(assertions).toBeGreaterThan(1);
     expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
   } finally { hashing.mockRestore(); }
+});
+
+for (const mode of ['absent', 'failed', 'id', 'id-number', 'id-empty', 'hash-absent', 'hash-shape', 'context', 'context-absent', 'questions', 'answers', 'state'] as const) {
+  test(`a present borrowed ID with ${mode} recorded provenance avoids an impossible fallback comparison`, async () => {
+    using log = new SqliteDecisionLog(':memory:'); const seedFake = answers(), recorded = withDecisionLog(seedFake.port, log);
+    const seeded = await readNativeIntakeRoute(input(recorded, log));
+    const seed = log.get(seeded.decisionId);
+    if (!seed || seed.status !== 'answered') throw new Error('Actual recorded fixture missing');
+    const fake = answers(); let reads = 0, assertions = 0;
+    let candidate: import('@goodvibes-jev/judgment').DecisionEntry | undefined;
+    const port: JudgmentPort = { ...recorded, async ask(request) {
+      const raw = await fake.port.ask(request);
+      const context = (mode === 'context' ? { site: 'unrelated-native-site' } : mode === 'context-absent' ? undefined : { ...request.context }) as typeof seed.context;
+      const questions = mode === 'questions' ? {} : JSON.parse(canonicalJson(request.questions as unknown as import('@goodvibes-jev/judgment').EntryType)) as typeof seed.questions;
+      const common = { id: (mode === 'id' ? 'another-recorded-id' : seed.id) as typeof seed.id, at: seed.at, context, questions, requestedModel: seed.requestedModel,
+        stateHash: (mode === 'hash-absent' ? undefined : mode === 'hash-shape' ? 'not-a-sha256' : 'f'.repeat(64)) as typeof seed.stateHash, latencyMs: 0, requestId: undefined };
+      candidate = mode === 'absent' ? undefined : mode === 'failed'
+        ? { ...common, status: 'failed', error: { kind: 'unavailable', message: 'Synthetic failed reading' } }
+        : { ...seed, ...common, answers: mode === 'answers' ? {} : JSON.parse(canonicalJson(raw.answers as unknown as import('@goodvibes-jev/judgment').EntryType)) as typeof seed.answers };
+      return { ...raw, decisionId: mode === 'id-number' ? 42 : mode === 'id-empty' ? '' : seed.id } as never;
+    } };
+    const hashing = spyOn(Bun.CryptoHasher, 'hash');
+    try {
+      await expect(readNativeIntakeRoute({ ...input(port, log), assertCurrent() { assertions++; },
+        decisionLog: { get() { reads++; return candidate; } } })).rejects.toMatchObject({ kind: 'unrecorded' });
+      expect(fake.requests).toHaveLength(1); expect(reads).toBe(mode === 'id-number' || mode === 'id-empty' ? 0 : 1); expect(assertions).toBeGreaterThan(1);
+      // Only the last case has a real possible consumer: its independent state
+      // binding must still be computed and rejected, rather than blindly trusted.
+      expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(mode === 'state' ? 1 : 0);
+    } finally { hashing.mockRestore(); }
+  });
+}
+
+for (const mode of ['returned', 'thrown', 'typed-error'] as const) test(`native intake observes ${mode} owner guard failure without changing its failure identity`, async () => {
+  using log = new SqliteDecisionLog(':memory:'); const fake = answers(), recorded = withDecisionLog(fake.port, log);
+  let rejected: Promise<never> | undefined; const stale = new JudgmentError('aborted', 'Original owner retired');
+  const operation = readNativeIntakeRoute({ ...input(recorded, log), assertCurrent() {
+    if (mode === 'typed-error') throw stale;
+    rejected = Promise.reject(stale);
+    if (mode === 'thrown') throw rejected;
+    return rejected as never;
+  } });
+  if (mode === 'returned') await expect(operation).rejects.toMatchObject({ kind: 'invalid-request' });
+  else if (mode === 'typed-error') await expect(operation).rejects.toBe(stale);
+  else { await expect(operation).rejects.toBeInstanceOf(Promise); expect(rejected).toBeDefined(); }
+  await new Promise<void>(resolve => setTimeout(resolve, 0));
+  expect(fake.requests).toHaveLength(0); expect(log.query()).toHaveLength(0);
 });
 
 test('a duplicate borrowed decision ID refuses before computing a discarded fallback commitment', async () => {

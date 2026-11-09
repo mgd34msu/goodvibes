@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
-import { createHash } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
-import { createReadStream, lstatSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { parseDaemonCiArtifact, parseNativeReaderCapabilities, realUpdateFileIo, type NativeReaderCapabilities } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import { retainNativeArtifactFiles } from '@goodvibes-jev/engine/toolchain';
 import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/config';
 import { drainNativeProcessGroup, signalNativeProcessGroup } from './native-execution-process.mjs';
 
@@ -18,37 +18,20 @@ function captureSource(source: DaemonArtifactSource): DaemonArtifactSource {
   return Object.freeze(captured);
 }
 
-async function inspect(root: string, source: DaemonArtifactSource): Promise<DaemonCiArtifact> {
-  const target = source.target ?? 'linux-x64';
-  const payloads = daemonCiPayloads(target);
-  const files = [];
-  for (const path of payloads) {
-    const full = resolve(root, 'native', path);
-    const stat = lstatSync(full);
-    if (!stat.isFile()) throw new Error(`Daemon CI artifact is not a regular file: ${path}`);
-    if ((path === payloads[0] || path.endsWith('.bun')) && (stat.mode & 0o111) === 0) throw new Error('Daemon CI binary is not executable');
-    const hash = createHash('sha256');
-    for await (const chunk of createReadStream(full)) hash.update(chunk);
-    files.push({ path, sha256: hash.digest('hex'), mode: stat.mode & 0o777, size: stat.size });
-  }
-  return { schema: 1, sourceCommit: source.sourceCommit, sourceTree: source.sourceTree, headCommit: source.headCommit, target, files };
+function inspect(root: string, source: DaemonArtifactSource, includeManifest = false) {
+  const target = source.target ?? 'linux-x64', payloads = daemonCiPayloads(target);
+  const retained = retainNativeArtifactFiles(resolve(root, 'native'), [
+    ...payloads.map(path => ({ path, executable: path === payloads[0] || path.endsWith('.bun') })),
+    ...(includeManifest ? [{ path: 'ci-artifact.json', mode: 0o644, pin: false }] : []),
+  ], { directoryRevisions: includeManifest });
+  const files = retained.files.slice(0, payloads.length).map(({ path, sha256, mode, size }) => ({ path, sha256: sha256!, mode, size }));
+  const artifact: DaemonCiArtifact = { schema: 1, sourceCommit: source.sourceCommit,
+    sourceTree: source.sourceTree, headCommit: source.headCommit, target, files };
+  return { artifact, retained };
 }
-
-/** Retain real filesystem revisions around the read-only child. File hashes
- * are computed once by inspect(), then checked against the recorded pins. */
-function retainInputs(root: string, source: DaemonArtifactSource, includeManifest: boolean): () => void {
-  const observe = realUpdateFileIo.observe;
-  if (!observe) throw new Error('Native artifact observation is unavailable');
-  const paths = [...daemonCiPayloads(source.target ?? 'linux-x64'), ...(includeManifest ? ['ci-artifact.json'] : [])]
-    .map(path => resolve(root, 'native', path));
-  const states = paths.map(path => {
-    const observed = observe(path); if (observed === null) throw new Error('Native artifact input is missing');
-    return { path, observed };
-  });
-  return () => { for (const state of states) {
-    const current = observe(state.path);
-    if (current === null || current.identity !== state.observed.identity || current.mode !== state.observed.mode) throw new Error('Native artifact input changed during reader inspection');
-  } };
+function immutableArtifact(artifact: DaemonCiArtifact): DaemonCiArtifact {
+  artifact.files.forEach(file => Object.freeze(file)); Object.freeze(artifact.files);
+  return Object.freeze(artifact);
 }
 
 /** Ask the verified compiled candidate, not this checkout's newer reader table.
@@ -85,8 +68,8 @@ async function readCompiledReaders(command: string): Promise<NativeReaderCapabil
  * reported by this compiled candidate's bounded read-only inspection. */
 export async function recordDaemonCiArtifact(root: string, source: DaemonArtifactSource): Promise<void> {
   source = captureSource(source);
-  const current = retainInputs(root, source, false);
-  const base = await inspect(root, source); current();
+  const { artifact: base, retained } = inspect(root, source);
+  const current = retained.assertCurrent; current();
   const binary = daemonCiPayloads(base.target)[0]; if (!binary) throw new Error('Native artifact has no executable');
   const readers = await readCompiledReaders(resolve(root, 'native', binary)); current();
   const artifact: DaemonCiArtifact = { ...base, schema: 2, readers };
@@ -105,25 +88,35 @@ export async function recordDaemonCiArtifact(root: string, source: DaemonArtifac
  * code; it must independently admit that archive's run/source/target owner. */
 export async function readVerifiedDaemonCiArtifact(root: string, source: DaemonArtifactSource,
   options: { readonly readerEvidence?: 'compiled' | 'recorded-ci' } = {}): Promise<DaemonCiArtifact> {
+  return (await retainVerifiedDaemonCiArtifact(root, source, options)).artifact;
+}
+
+/** Keep the actual cold-verified files alive through coordinator staging. */
+export async function retainVerifiedDaemonCiArtifact(root: string, source: DaemonArtifactSource,
+  options: { readonly readerEvidence?: 'compiled' | 'recorded-ci' } = {}) {
   const readerEvidence = options.readerEvidence ?? 'compiled';
+  if (readerEvidence !== 'compiled' && readerEvidence !== 'recorded-ci') throw new Error('Invalid native reader evidence mode');
   source = captureSource(source);
-  const current = retainInputs(root, source, true);
-  const stored = parseDaemonCiArtifact(JSON.parse(readFileSync(resolve(root, 'native/ci-artifact.json'), 'utf8')), source.target ?? 'linux-x64');
-  const actual = await inspect(root, source);
+  const { artifact: actual, retained } = inspect(root, source, true);
+  const current = retained.assertCurrent;
+  const stored = parseDaemonCiArtifact(JSON.parse(retained.files.at(-1)!.bytes.toString('utf8')), source.target ?? 'linux-x64');
   current();
   const base = { schema: 1, sourceCommit: stored.sourceCommit, sourceTree: stored.sourceTree,
     headCommit: stored.headCommit, target: stored.target, files: stored.files };
   if (JSON.stringify(base) !== JSON.stringify(actual)) {
     throw new Error('Restored Daemon CI artifact differs from its source, payload or mode manifest');
   }
-  // V1 has no capability evidence. Preserve that fact rather than borrowing
-  // support from the running checkout or executing an older inspection path.
-  if (stored.schema === 1) return actual;
-  if (readerEvidence === 'recorded-ci') return { ...actual, schema: 2, readers: stored.readers };
-  const binary = daemonCiPayloads(actual.target)[0]; if (!binary) throw new Error('Native artifact has no executable');
-  const readers = await readCompiledReaders(resolve(root, 'native', binary)); current();
-  if (JSON.stringify(readers) !== JSON.stringify(stored.readers)) throw new Error('Compiled native readers differ from the recorded artifact');
-  return { ...actual, schema: 2, readers };
+  // V1 never acquires reader support from the running checkout. Recorded-CI
+  // evidence still requires the coordinator's independent archive admission.
+  let artifact: DaemonCiArtifact = actual;
+  if (stored.schema === 2) {
+    const readers = readerEvidence === 'recorded-ci' ? stored.readers : await readCompiledReaders(resolve(root, 'native', daemonCiPayloads(actual.target)[0]!));
+    current();
+    if (JSON.stringify(readers) !== JSON.stringify(stored.readers)) throw new Error('Compiled native readers differ from the recorded artifact');
+    artifact = { ...actual, schema: 2, readers };
+  }
+  current();
+  return Object.freeze({ artifact: immutableArtifact(artifact), retained });
 }
 
 export async function verifyDaemonCiArtifact(root: string, source: DaemonArtifactSource): Promise<void> {

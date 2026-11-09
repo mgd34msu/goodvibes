@@ -1,17 +1,19 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { chmodSync, closeSync, constants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { captureExistingDirectory } from '@goodvibes-jev/engine/platform/platform/utils';
+import { createReleaseStage } from '@goodvibes-jev/engine/toolchain/release-publication';
 import { readTarGzEntries } from '../../packages/engine/platform/dist/platform/browser/index.js';
-import { assertDaemonNativePayloadBytes, nativeReaderCapabilities, parseDaemonCiArtifact, resolveDaemonNativePayloads, resolveSqliteVecAsset } from '../../packages/engine/platform/dist/platform/runtime/self-update.js';
-import { verifyAgentCiArtifact } from '../../products/agent/scripts/ci-artifact.ts';
+import { assertDaemonNativePayloadPins, nativeReaderCapabilities, parseDaemonCiArtifact, resolveDaemonNativePayloads, resolveSqliteVecAsset } from '../../packages/engine/platform/dist/platform/runtime/self-update.js';
+import { retainVerifiedAgentCiArtifact } from '../../products/agent/scripts/ci-artifact.ts';
 import { resolveSqliteVecArchive } from '../../products/agent/src/runtime/release-artifacts.ts';
-import { readVerifiedDaemonCiArtifact } from '../../products/daemon/scripts/ci-artifact.ts';
+import { retainVerifiedDaemonCiArtifact } from '../../products/daemon/scripts/ci-artifact.ts';
 import { nativeExecutionMembers, retainNativeExecutionFiles, verifyNativeExecutionArtifact } from '../../products/daemon/scripts/native-execution-artifact.mjs';
-import { boundedNativeProcessClose, drainNativeProcessGroup, signalNativeProcessGroup } from '../../products/daemon/scripts/native-execution-process.mjs';
-import { verifyTuiCiArtifact } from '../../products/tui/scripts/ci-artifact.ts';
+import { runNativeArchive } from '../../products/daemon/scripts/native-execution-process.mjs';
+import { retainVerifiedTuiCiArtifact } from '../../products/tui/scripts/ci-artifact.ts';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const stop = new AbortController();
@@ -45,28 +47,76 @@ export function daemonReleaseArtifactDescriptors(artifact, capabilityBytes) {
   return { compatible: Buffer.from(JSON.stringify(compatible, null, 2) + '\n'), capable: Buffer.from(capabilityBytes) };
 }
 
-async function archiveCommand(args, cwd) {
-  stop.signal.throwIfAborted();
-  const child = spawn('tar', args, { cwd, detached: true, stdio: 'ignore' });
-  const closed = new Promise((yes, no) => {
-    child.once('error', no);
-    child.once('close', (code, signal) => code === 0 && signal === null ? yes() : no(new Error('Native archive command failed')));
-  });
-  const cancelChild = () => signalNativeProcessGroup(child, 'SIGTERM');
-  stop.signal.addEventListener('abort', cancelChild, { once: true });
-  let failure;
+/** The destination is new, but its configured ancestry still belongs to the
+ * caller. Keep both that alias and the original physical output for all writes.
+ * Final files survive a later failure; cleanup removes only our private stage. */
+export function createNativeReleaseOutput(destination, assertSource) {
+  const parent = captureExistingDirectory(dirname(destination));
+  parent.assertCurrent();
+  const directory = join(parent.canonical, basename(destination));
+  const mask = process.umask(), adjustMask = (mask & 0o700) !== 0;
+  if (adjustMask) process.umask(mask & ~0o700);
+  try { mkdirSync(directory, { mode: 0o700 }); }
+  finally { if (adjustMask) process.umask(mask); }
+  const created = lstatSync(directory, { bigint: true });
+  const fd = openSync(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
   try {
-    if (stop.signal.aborted) cancelChild();
-    await boundedNativeProcessClose(closed, 30_000, 'Native archive command exceeded its deadline');
-    stop.signal.throwIfAborted();
+    const opened = fstatSync(fd, { bigint: true });
+    assert(opened.isDirectory() && created.dev === opened.dev && created.ino === opened.ino && created.birthtimeNs === opened.birthtimeNs,
+      'Native release output changed during creation');
+    parent.assertCurrent(); fchmodSync(fd, 0o755);
+    const ready = lstatSync(directory, { bigint: true });
+    assert(ready.isDirectory() && !ready.isSymbolicLink() && created.dev === ready.dev && created.ino === ready.ino && created.birthtimeNs === ready.birthtimeNs,
+      'Native release output changed during creation');
+    parent.assertCurrent();
+  } finally { closeSync(fd); }
+  const stage = createReleaseStage(directory, '.native-release-output-'), published = new Map();
+  const assertCurrent = () => { parent.assertCurrent(); stage.assertCurrent(); };
+  const put = (name, bytes, mode) => {
+    assert.equal(basename(name), name, 'A release asset must have one filename');
+    assertCurrent();
+    const original = published.get(name);
+    if (original) {
+      original.assertCurrent();
+      const stat = lstatSync(original.path), selected = readFileSync(original.path);
+      original.assertCurrent(); assertCurrent();
+      assert.equal(stat.mode & 0o777, mode, 'Shared native asset modes differ');
+      assert(selected.equals(bytes), 'Shared native asset bytes differ');
+      return original;
+    }
+    const file = stage.publishBytes(name, bytes, mode);
+    published.set(name, file); assertCurrent(); return file;
+  };
+  const archive = async (name, members, cwd, signal) => {
+    signal?.throwIfAborted();
+    assertCurrent();
+    const file = await stage.publishFile(name, name, async fd => {
+      assertCurrent(); await runNativeArchive(members, cwd, fd, signal); assertCurrent();
+    }, 0o644, () => {
+      signal?.throwIfAborted();
+      // Preserve a nonvoid result for the publisher's strict restriction
+      // admission; do not erase a rejected promise behind a void callback.
+      const restricted = assertSource?.();
+      if (restricted !== undefined) return restricted;
+      signal?.throwIfAborted();
+    });
+    published.set(name, file); assertCurrent(); return file;
+  };
+  return Object.freeze({ directory, put, archive, assertCurrent, cleanup: stage.cleanup });
+}
+
+export function createNativeReleaseInput() { return createReleaseStage(tmpdir(), 'goodvibes-native-release-'); }
+
+/** Preserve the primary failure and report incomplete original cleanup. Never
+ * retry cleanup through a replaced pathname or recursively remove final output. */
+export function cleanupNativeReleaseStages(stages, failure, failed = failure !== undefined) {
+  const cleanupFailures = [];
+  for (const stage of stages) {
+    try { stage?.cleanup(); } catch (error) { cleanupFailures.push(error); }
   }
-  catch (error) { failure = error; }
-  finally {
-    stop.signal.removeEventListener('abort', cancelChild);
-    try { await drainNativeProcessGroup(child, closed); }
-    catch (error) { failure = failure ? new AggregateError([failure, error], 'Native archive drain failed') : error; }
-  }
-  if (failure) throw failure;
+  return cleanupFailures.length ? failed
+    ? new AggregateError([failure, ...cleanupFailures], 'Native release staging and original cleanup failed')
+    : new AggregateError(cleanupFailures, 'Native release original cleanup failed') : failure;
 }
 
 async function main() {
@@ -79,30 +129,25 @@ async function main() {
   const sourceTree = git('rev-parse', 'HEAD^{tree}');
   const suiteVersion = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8')).version;
   assert.equal(typeof suiteVersion, 'string', 'Release suite version is missing');
-  const inputRoot = mkdtempSync(join(tmpdir(), 'goodvibes-native-release-'));
-  let ownsOutput = false;
+  const inputStage = createNativeReleaseInput(), inputRoot = inputStage.path;
+  let output, failure, failed = false;
   const retained = [];
   const assertCurrent = () => {
     stop.signal.throwIfAborted();
+    inputStage.assertCurrent(); output?.assertCurrent();
     assert.equal(git('rev-parse', 'HEAD'), sourceCommit, 'Release checkout changed');
     git('diff', '--exit-code', 'HEAD');
     for (const owner of retained) owner.assertCurrent();
   };
   const put = (name, bytes, mode) => {
-    assert.equal(basename(name), name, 'A release asset must have one filename');
     assertCurrent();
-    const path = join(destination, name);
-    if (existsSync(path)) {
-      assert(lstatSync(path).isFile() && !lstatSync(path).isSymbolicLink(), 'Asset collision is not a regular file');
-      assert.equal(lstatSync(path).mode & 0o777, mode, 'Shared native asset modes differ');
-      assert(readFileSync(path).equals(bytes), 'Shared native asset bytes differ');
-    } else writeFileSync(path, bytes, { flag: 'wx', mode });
+    output.put(name, bytes, mode);
     assertCurrent();
   };
   const restore = (name, members) => {
     const directory = join(downloads, name);
     const archiveName = name + '.tgz';
-    const archive = retainNativeExecutionFiles(directory, [{ path: archiveName, mode: 0o644 }]);
+    const archive = retainNativeExecutionFiles(directory, [{ path: archiveName, mode: 0o644, pin: false }]);
     retained.push(archive); assertCurrent();
     const bytes = archive.files[0].bytes;
     const entries = admitNativeReleaseArchive(bytes, members);
@@ -116,13 +161,11 @@ async function main() {
     assertCurrent(); return { root, archive: archive.files[0] };
   };
   try {
-    mkdirSync(destination, { mode: 0o755 }); ownsOutput = true;
+    output = createNativeReleaseOutput(destination, assertCurrent);
     phase = 'Agent native admission';
     const agent = join(repo, 'products/agent');
-    verifyAgentCiArtifact(agent, sourceCommit);
-    const agentManifest = JSON.parse(readFileSync(join(agent, 'dist/ci-artifact.json'), 'utf8'));
-    const agentOwner = retainNativeExecutionFiles(join(agent, 'dist'), [...agentManifest.files, { path: 'ci-artifact.json', mode: 0o644 }, { path: 'reader-ci-artifact.json', mode: 0o644 }]);
-    retained.push(agentOwner); verifyAgentCiArtifact(agent, sourceCommit); assertCurrent();
+    const { retained: agentOwner } = retainVerifiedAgentCiArtifact(agent, sourceCommit);
+    retained.push(agentOwner); assertCurrent();
     for (const file of agentOwner.files) {
       if (file.path.startsWith('lib/')) continue;
       put(file.path === 'ci-artifact.json' ? 'goodvibes-agent-linux-x64.ci-artifact.json'
@@ -132,7 +175,7 @@ async function main() {
     const agentAddon = agentOwner.files.find(file => file.path === addon.entryPath); assert(agentAddon, 'Agent native addon is absent');
     const addonRoot = join(inputRoot, 'agent-addon'); mkdirSync(join(addonRoot, dirname(addon.entryPath)), { recursive: true });
     writeFileSync(join(addonRoot, addon.entryPath), agentAddon.bytes, { flag: 'wx', mode: agentAddon.mode });
-    assertCurrent(); await archiveCommand(['--format=ustar', '-czf', join(destination, addon.assetName), addon.entryPath], addonRoot); assertCurrent();
+    assertCurrent(); await output.archive(addon.assetName, [addon.entryPath], addonRoot, stop.signal); assertCurrent();
 
     phase = 'TUI native admission';
     const tuiBinary = 'goodvibes-linux-x64';
@@ -144,10 +187,8 @@ async function main() {
     const tui = join(tuiRestored.root, 'products/tui');
     writeFileSync(join(tui, 'package.json'), readFileSync(join(repo, 'products/tui/package.json')), { flag: 'wx', mode: 0o644 });
     const tuiSource = { sourceCommit, sourceTree, headCommit: sourceCommit };
-    await verifyTuiCiArtifact(tui, tuiSource);
-    const tuiManifest = JSON.parse(readFileSync(join(tui, 'dist/ci-artifact.json'), 'utf8'));
-    const tuiOwner = retainNativeExecutionFiles(join(tui, 'dist'), [...tuiManifest.files, { path: 'ci-artifact.json', mode: 0o644 }, { path: 'reader-ci-artifact.json', mode: 0o644 }]);
-    retained.push(tuiOwner); await verifyTuiCiArtifact(tui, tuiSource); assertCurrent();
+    const { retained: tuiOwner } = await retainVerifiedTuiCiArtifact(tui, tuiSource);
+    retained.push(tuiOwner); assertCurrent();
     const tuiAddon = resolveSqliteVecAsset('linux', 'x64'); assert(tuiAddon, 'TUI native addon is unsupported');
     for (const file of tuiOwner.files) put(file.path === 'ci-artifact.json' ? 'goodvibes-linux-x64.ci-artifact.json'
       : file.path === 'reader-ci-artifact.json' ? 'goodvibes-linux-x64.reader-ci-artifact.json' : file.path.startsWith('lib/') ? tuiAddon.assetName : file.path, file.bytes, file.mode);
@@ -165,13 +206,13 @@ async function main() {
       // restore() admitted this exact native CI run/source/target archive.
       // The coordinator retains its recorded compiled-reader evidence; it
       // cannot execute an ARM64 daemon on the x64 release host.
-      const artifact = parseDaemonCiArtifact(await readVerifiedDaemonCiArtifact(daemon, source, { readerEvidence: 'recorded-ci' }), target);
+      const verified = await retainVerifiedDaemonCiArtifact(daemon, source, { readerEvidence: 'recorded-ci' });
+      const artifact = parseDaemonCiArtifact(verified.artifact, target);
       assert.equal(artifact.schema, 2, 'Current native release requires compiled reader capability evidence');
       assert.deepEqual(artifact.readers, nativeReaderCapabilities(suiteVersion), 'Compiled daemon reader profile differs from the admitted release source');
-      const native = join(daemon, 'native');
-      const owner = retainNativeExecutionFiles(native, [...artifact.files, { path: 'ci-artifact.json', mode: 0o644 }]);
-      retained.push(owner); await readVerifiedDaemonCiArtifact(daemon, source, { readerEvidence: 'recorded-ci' });
-      assertDaemonNativePayloadBytes(artifact, owner.files.slice(0, -1).map(file => file.bytes)); assertCurrent();
+      const owner = verified.retained;
+      retained.push(owner);
+      assertDaemonNativePayloadPins(artifact, owner.files.slice(0, -1), owner.files[3].bytes); assertCurrent();
       for (const payload of payloads) {
         const file = owner.files.find(file => file.path === payload.relativePath); assert(file, 'Daemon native companion is absent');
         put(payload.assetName, file.bytes, file.mode);
@@ -198,9 +239,12 @@ async function main() {
     }
     assertCurrent(); phase = 'complete';
   } catch (error) {
-    if (ownsOutput) rmSync(destination, { recursive: true, force: true });
-    throw error;
-  } finally { rmSync(inputRoot, { recursive: true, force: true }); }
+    failure = error; failed = true;
+  } finally {
+    const cleaned = cleanupNativeReleaseStages([output, inputStage], failure, failed);
+    if (cleaned !== failure) { failure = cleaned; failed = true; }
+  }
+  if (failed) throw failure;
 }
 
 if (import.meta.main) {

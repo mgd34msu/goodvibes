@@ -97,7 +97,7 @@ describe('release-artifact naming + checksums', () => {
   });
 
   test('checksum manifest parsing tolerates asterisks and blank lines', () => {
-    const digest = sha256(Buffer.from('payload'));
+    const digest = 'a'.repeat(64); // Parser/compare-only fixture: no payload bytes are consumed.
     const parsed = parseChecksumFile(`\n${digest}  file-a\n${digest} *file-b\n\nnot a checksum line\n`);
     expect(parsed.get('file-a')).toBe(digest);
     expect(parsed.get('file-b')).toBe(digest);
@@ -105,9 +105,9 @@ describe('release-artifact naming + checksums', () => {
   });
 
   test('a missing manifest entry is as fatal as a mismatch', () => {
-    const digest = sha256(Buffer.from('payload'));
+    const digest = 'a'.repeat(64); // Parser/compare-only fixture: no payload bytes are consumed.
     expect(() => verifyChecksum('artifact', digest, undefined)).toThrow(/no checksum entry/);
-    expect(() => verifyChecksum('artifact', digest, sha256(Buffer.from('other')))).toThrow(/checksum mismatch/);
+    expect(() => verifyChecksum('artifact', digest, 'b'.repeat(64))).toThrow(/checksum mismatch/);
     expect(() => verifyChecksum('artifact', digest, digest)).not.toThrow();
   });
 });

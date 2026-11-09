@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
+import * as crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { recordAgentCiArtifact, verifyAgentCiArtifact } from '../../../scripts/ci-artifact.ts';
+import { recordAgentCiArtifact, retainVerifiedAgentCiArtifact, verifyAgentCiArtifact } from '../../../scripts/ci-artifact.ts';
 import { nativeReaderCapabilities } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 
 const revision = 'a'.repeat(40);
@@ -26,7 +27,19 @@ test('the archive round trip preserves binary, library, provenance and executabl
     const archive = join(dir, 'artifact.tgz');
     expect(spawnSync('tar', ['-czf', archive, '-C', source, 'dist']).status).toBe(0);
     expect(spawnSync('tar', ['-xzf', archive, '-C', restored]).status).toBe(0);
-    expect(() => verifyAgentCiArtifact(restored, revision, metadata)).not.toThrow();
+    const hash = spyOn(crypto, 'createHash');
+    try {
+      const verified = retainVerifiedAgentCiArtifact(restored, revision, metadata);
+      expect(hash).toHaveBeenCalledTimes(5);
+      verified.retained.assertCurrent(); verified.retained.assertCurrent();
+      const binary = verified.retained.files[0]!;
+      const original = binary.bytes; binary.bytes.fill(0);
+      expect(binary.bytes).toEqual(original);
+      expect(hash).toHaveBeenCalledTimes(5);
+      expect(Object.hasOwn(verified.retained.files.at(-1)!, 'sha256')).toBe(false);
+      expect(() => verifyAgentCiArtifact(restored, revision, metadata)).not.toThrow();
+      expect(hash).toHaveBeenCalledTimes(10); // independent cold consumer
+    } finally { hash.mockRestore(); }
     expect(() => verifyAgentCiArtifact(restored, 'b'.repeat(40), metadata)).toThrow(/manifest/);
     chmodSync(join(restored, 'dist/goodvibes-agent-linux-x64'), 0o644);
     expect(() => verifyAgentCiArtifact(restored, revision, metadata)).toThrow(/executable/);

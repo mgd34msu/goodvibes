@@ -298,8 +298,10 @@ describe('asynchronous preparation owns immutable intent', () => {
   });
   test('conflicting checksum entries refuse the cohort before any write', async () => {
     const state = memory();
+    const originalPin = sha256(payloads.daemon);
+    const conflictingPin = (originalPin[0] === '0' ? '1' : '0') + originalPin.slice(1);
     const fetchImpl: UpdateFetchLike = async (url) => url.endsWith('/SHA256SUMS.txt')
-      ? response(url, Buffer.from(`${sha256(payloads.daemon)}  daemon\n${sha256(Buffer.from('other'))}  daemon`))
+      ? response(url, Buffer.from(`${originalPin}  daemon\n${conflictingPin}  daemon`))
       : fetchRelease(url);
     await expect(apply(state.io, { fetchImpl })).rejects.toThrow(/conflicting checksum entries/);
     expect(state.operations).toEqual([]);

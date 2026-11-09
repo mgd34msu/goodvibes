@@ -86,11 +86,24 @@ interface RecordedRead { readonly id: string; readonly stateHash: string; readon
 interface RouteOwnership { readonly text: string; readonly sourceRevision: string; readonly sourceIssues: string; readonly continuation: string; readonly binding: JevDecisionBinding; readonly records: readonly RecordedRead[]; readonly assertCurrent: () => void; }
 const applyRouteOwner = Reflect.apply, getRouteOwner = WeakMap.prototype.get, setRouteOwner = WeakMap.prototype.set;
 const routeOwners = new WeakMap<NativeIntakeRouteEvidence, RouteOwnership>();
-function assertRecorded(log: Pick<DecisionLog, 'get'>, record: RecordedRead): void {
+function assertRecorded(log: Pick<DecisionLog, 'get'>, record: Omit<RecordedRead, 'stateHash'> & { readonly stateHash: string | (() => string) }): string {
   const entry = log.get(record.id);
-  if (!entry || entry.status !== 'answered' || entry.stateHash !== record.stateHash
+  // The independently recorded entry must first be a possible consumer of the
+  // state commitment. Never hash a fabricated ID or a known unrelated reading.
+  if (!entry || entry.id !== record.id || entry.status !== 'answered') throw new JudgmentError('unrecorded', 'Native intake requires matching recorded judgment provenance');
+  const savedStateHash: unknown = entry.stateHash;
+  if (typeof savedStateHash !== 'string' || !/^[a-f0-9]{64}$/.test(savedStateHash)
     || canonicalJson(entry.context as unknown as EntryType) !== record.context || canonicalJson(entry.questions) !== record.questions
     || canonicalJson(entry.answers) !== record.answers) throw new JudgmentError('unrecorded', 'Native intake requires matching recorded judgment provenance');
+  const stateHash = typeof record.stateHash === 'string' ? record.stateHash : record.stateHash();
+  if (savedStateHash !== stateHash) throw new JudgmentError('unrecorded', 'Native intake requires matching recorded judgment provenance');
+  return stateHash;
+}
+function assertIntakeGuard(check: () => unknown, message: string): void {
+  let checked: unknown;
+  try { checked = check(); }
+  catch (error) { drainOwned(error); throw error; }
+  if (checked !== undefined) { drainOwned(checked); throw new JudgmentError('invalid-request', message); }
 }
 function readSession(input: NativeIntakeReadInput, records: RecordedRead[] = [], finalSite = NATIVE_INTAKE_DECISION_SITE) {
   const text = input.text, sourceRevision = input.sourceRevision;
@@ -107,15 +120,13 @@ function readSession(input: NativeIntakeReadInput, records: RecordedRead[] = [],
   if (!basePort.recorder) throw new JudgmentError('unrecorded', 'Native intake requires a recorded judgment port');
   const active = () => {
     ownerSignal?.throwIfAborted();
-    const checked: unknown = assertCurrent();
-    if (checked !== undefined) { drainOwned(checked); throw new JudgmentError('invalid-request', 'Native intake owner guards must complete synchronously without a return value'); }
+    assertIntakeGuard(() => assertCurrent(), 'Native intake owner guards must complete synchronously without a return value');
     for (const record of records) assertRecorded(decisionLog, record);
   };
   const port: JudgmentPort = { ...basePort, async ask(request) {
     const beforeAttempt = () => {
       active(); request.signal?.throwIfAborted();
-      const checked: unknown = request.beforeAttempt?.();
-      if (checked !== undefined) { drainOwned(checked); throw new JudgmentError('invalid-request', 'Native intake attempt guards must complete synchronously without a return value'); }
+      assertIntakeGuard(() => request.beforeAttempt?.(), 'Native intake attempt guards must complete synchronously without a return value');
       active(); request.signal?.throwIfAborted();
     };
     const signal = ownerSignal === undefined ? request.signal : request.signal === undefined ? ownerSignal : AbortSignal.any([ownerSignal, request.signal]);
@@ -143,7 +154,7 @@ function readSession(input: NativeIntakeReadInput, records: RecordedRead[] = [],
     const captured = captureStrictJudgmentJson(borrowed, () => new JudgmentError('invalid-response', 'Native intake requires plain recorded response data'));
     const result = reuseObservedJudgmentResult(borrowed, captured);
     const decisionId = result.decisionId;
-    if (!decisionId || records.some(record => record.id === decisionId)) {
+    if (typeof decisionId !== 'string' || !decisionId || records.some(record => record.id === decisionId)) {
       // Preserve the original owner/attempt fence even when this result cannot
       // possibly name a new saved reading. There is no commitment consumer.
       beforeAttempt();
@@ -152,10 +163,11 @@ function readSession(input: NativeIntakeReadInput, records: RecordedRead[] = [],
     // Only an actual recorded original may reuse its exact input commitment.
     // A custom/copy result must independently bind this captured input to the
     // real log once; a copied public decisionId cannot acquire provenance.
-    const stateHash = recordedJudgmentInputHash(borrowed, forwarded) ?? hashState(state);
     beforeAttempt();
-    const record = { id: decisionId, stateHash, ...expected, answers: canonicalJson(result.answers as unknown as EntryType) };
-    assertRecorded(decisionLog, record); records.push(Object.freeze(record));
+    const recordMetadata = { id: decisionId, ...expected, answers: canonicalJson(result.answers as unknown as EntryType) };
+    const stateHash = assertRecorded(decisionLog, { ...recordMetadata,
+      stateHash: () => recordedJudgmentInputHash(borrowed, forwarded) ?? hashState(state) });
+    records.push(Object.freeze({ ...recordMetadata, stateHash }));
     return result;
   } };
   active();

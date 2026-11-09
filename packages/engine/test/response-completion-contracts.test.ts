@@ -17,6 +17,12 @@ import { hashState } from '@goodvibes-jev/judgment';
 import { goalObligationSource } from '../platform/src/platform/contract/goal-obligation-proof.js';
 import { originalObligationSource } from '../platform/src/platform/contract/batteries/original-obligation-coverage.js';
 
+// These fields are shape-only in the saved-work projection under test. They
+// are not backed by a decision-log lookup here and must not manufacture hashes
+// of invented request/evidence strings. Actual source/answer pins stay real.
+const shapeOnlyCommitments = { contentState: '1'.repeat(64), contentEvidence: '2'.repeat(64), scopeState: '3'.repeat(64),
+  oldPrimaryEvidence: '4'.repeat(64), originalRequest: '5'.repeat(64), removedField: '6'.repeat(64) };
+
 const originalPort = installJudgmentPort(undefined);
 afterEach(() => installJudgmentPort(originalPort));
 const check: UnitCheck = { id: 'work.k1', at: 100, trigger: 'completion', result: 'pass',
@@ -30,13 +36,14 @@ const contract = (overrides: Record<string, unknown> = {}) => ({ id: 'work', ses
 
 function approvedWork(projectRoot = '/project') {
   const view = contract({ criteria: [{ id: 'c1', text: 'Review all source and deliver review.md.', disposition: 'judged', status: 'met', readings: [] }] });
-  const content = { schemaVersion: 2, passed: true, outputDigest: hashState(view.answer!),
-    stateHash: hashState('actual-reviewed-state'), evidenceDigest: hashState('actual-reviewed-evidence'),
+  const outputDigest = hashState(view.answer!);
+  const content = { schemaVersion: 2, passed: true, outputDigest,
+    stateHash: shapeOnlyCommitments.contentState, evidenceDigest: shapeOnlyCommitments.contentEvidence,
     policy: { fulfillment: { name: 'contract.deliverable-judge', version: 5 }, content: { name: 'contract.final-answer-review', version: 9 }, stakes: 'high' },
     readings: { unfinished: { probability: .01, verdict: 'no', outcome: 'act' }, unsupported: { probability: .01, verdict: 'no', outcome: 'act' } },
     decisionIds: ['actual-content-review'], fulfillmentDecisionIds: ['actual-original-scope-check'] };
   const scope = { schemaVersion: 1, passed: true, policy: { name: 'contract.goal-obligations', version: 1 },
-    outputDigest: hashState(view.answer!), literalSourceDigest: hashState(goalObligationSource(view)), stateHash: hashState('actual-scope-state'),
+    outputDigest, literalSourceDigest: hashState(goalObligationSource(view)), stateHash: shapeOnlyCommitments.scopeState,
     sourceJudgmentDecisionIds: ['actual-original-scope-check'], decisionIds: ['actual-scope-implication'],
     reading: { probability: .01, verdict: 'no', outcome: 'act' }, sourceGoal: { probability: .01, verdict: 'no', outcome: 'act' } };
   const accepted = { ...view, decisions: [
@@ -248,7 +255,7 @@ test('completed records stay observations through projection and retrieval, neve
 test('the exact recorded Jev content review is bound to the saved answer and an older matching pass cannot hide a stale latest receipt', () => {
   const answer = 'Findings are in review.md.';
   const review = { schemaVersion: 2, passed: true, outputDigest: hashState(answer),
-    stateHash: hashState('actual-reviewed-state'), evidenceDigest: hashState('actual-reviewed-evidence'),
+    stateHash: shapeOnlyCommitments.contentState, evidenceDigest: shapeOnlyCommitments.contentEvidence,
     policy: { fulfillment: { name: 'contract.deliverable-judge', version: 5 }, content: { name: 'contract.final-answer-review', version: 9 }, stakes: 'high' },
     readings: { unfinished: { probability: .01, verdict: 'no', outcome: 'act' }, unsupported: { probability: .01, verdict: 'no', outcome: 'act' } },
     decisionIds: ['actual-content-review'], fulfillmentDecisionIds: ['actual-original-scope-check'] };
@@ -271,8 +278,8 @@ test.each([1, 2] as const)('original-obligation coverage v%s retains exact sourc
   const source = contract();
   const receipt = { schemaVersion, passed: true, policy: { name: 'contract.original-obligation-coverage', version: schemaVersion },
     sourceDigest: hashState(originalObligationSource(source)), outputDigest: hashState(source.answer!),
-    ...(schemaVersion === 1 ? { evidenceDigest: hashState('actual primary evidence') } : {}),
-    stateHash: hashState('actual original coverage request'),
+    ...(schemaVersion === 1 ? { evidenceDigest: shapeOnlyCommitments.oldPrimaryEvidence } : {}),
+    stateHash: shapeOnlyCommitments.originalRequest,
     reading: { probability: 0.03, verdict: 'no', outcome: 'act' }, decisionIds: ['actual-original-coverage'] };
   const decision = { id: 'work.d3', targetId: 'work.original-obligations', reason: JSON.stringify(receipt), decisionIds: [...receipt.decisionIds] };
   const content = approvedWork()[0]!.contentReview!.record;
@@ -291,7 +298,7 @@ test.each([1, 2] as const)('original-obligation coverage v%s retains exact sourc
   expect(isNativeCompletedWorkReceipt(copied, copied)).toBe(true);
   expect(isNativeCompletedWorkReceipt(structuredClone(copied), copied)).toBe(false);
   for (const invalid of [{ ...receipt, schemaVersion: 3 },
-    ...(schemaVersion === 2 ? [{ ...receipt, evidenceDigest: hashState('removed decorative field') }] : [])]) {
+    ...(schemaVersion === 2 ? [{ ...receipt, evidenceDigest: shapeOnlyCommitments.removedField }] : [])]) {
     const malformed = contract({ ...saved, decisions: [contentDecision, { ...decision, reason: JSON.stringify(invalid) }] });
     const observation = completedContractEvidence({ list: () => [malformed] }, 'session', '/project')[0]!;
     expect(observation.originalObligationCoverage!.wellFormed).toBe(false);

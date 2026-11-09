@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
+import * as crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { recordTuiCiArtifact, verifyTuiCiArtifact, type TuiArtifactSource } from '../../../scripts/ci-artifact.ts';
+import { recordTuiCiArtifact, retainVerifiedTuiCiArtifact, verifyTuiCiArtifact, type TuiArtifactSource } from '../../../scripts/ci-artifact.ts';
 import { nativeReaderCapabilities } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 
 const source: TuiArtifactSource = { sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40), headCommit: 'c'.repeat(40) };
@@ -31,7 +32,18 @@ test('a tar round trip preserves the exact source, binary, library and executabl
   const restored = join(root, 'restored');
   mkdirSync(restored);
   execFileSync('tar', ['-xzf', archive, '-C', restored]);
-  await expect(verifyTuiCiArtifact(restored, source)).resolves.toBeUndefined();
+  const hash = spyOn(crypto, 'createHash');
+  try {
+    const verified = await retainVerifiedTuiCiArtifact(restored, source);
+    expect(hash).toHaveBeenCalledTimes(5);
+    verified.retained.assertCurrent(); verified.retained.assertCurrent();
+    const binary = verified.retained.files[0]!, original = binary.bytes;
+    binary.bytes.fill(0); expect(binary.bytes).toEqual(original);
+    expect(hash).toHaveBeenCalledTimes(5);
+    expect(Object.hasOwn(verified.retained.files.at(-1)!, 'sha256')).toBe(false);
+    await expect(verifyTuiCiArtifact(restored, source)).resolves.toBeUndefined();
+    expect(hash).toHaveBeenCalledTimes(10); // independent cold consumer
+  } finally { hash.mockRestore(); }
 }));
 
 for (const path of ['goodvibes-linux-x64', 'goodvibes-linux-x64.bun', 'goodvibes-linux-x64.bun.LICENSE.md', 'goodvibes-linux-x64.bun.json', 'lib/sqlite-vec-linux-x64/vec0.so']) {

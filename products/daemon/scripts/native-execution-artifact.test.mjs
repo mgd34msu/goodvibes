@@ -115,7 +115,9 @@ test('retained payload bytes cannot change behind an unchanged source manifest',
   verified.retained.assertCurrent(); verified.retained.assertCurrent();
   original.bytes.fill(0);
   assert.deepEqual(readFileSync(join(f.root, original.path)), before);
-  assert.throws(() => verified.retained.assertCurrent(), /Retained native execution bytes changed/);
+  // The returned buffer is a detached read, never the private original proof.
+  verified.retained.assertCurrent();
+  assert.deepEqual(original.bytes, before);
 });
 
 for (const target of ['darwin-x64', 'darwin-arm64']) {
@@ -156,7 +158,7 @@ for (const target of ['darwin-x64', 'darwin-arm64']) {
     const f = fixture(target, { record: false });
     assert.throws(() => recordNativeExecutionArtifact(f.product, f.source, { inspectReader(input) {
       const reader = syntheticReader(input); writeFileSync(join(f.root, f.members[0].path), 'Changed while describing readers'); return reader;
-    } }), /Retained native execution/);
+    } }), /Retained native artifact/);
     assert.throws(() => readFileSync(join(f.root, f.members.at(-1).path)), /ENOENT/);
     assert.throws(() => readFileSync(join(f.root, 'native-execution-artifact.json')), /ENOENT/);
   });

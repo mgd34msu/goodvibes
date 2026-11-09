@@ -51,11 +51,12 @@ test('actual whole-output owner is reused through parent/child ranges and saved 
 });
 
 test('historical saved passage commitments/questions remain exact while invalid mixed/future scopes refuse', () => {
-  const output = 'Historical saved complete answer', scope = { start: 0, end: output.length, textDigest: hashState(output) };
+  const output = 'Historical saved complete answer', commitment = hashState(output);
+  const scope = { start: 0, end: output.length, textDigest: commitment };
   expect(completeAnswerClaimCoverage(output, [scope])).toBe(true);
   expect(completeAnswerClaimCoverage(output + '.', [scope])).toBe(false);
-  const question = scopedClaimQuestion({ type: 'noul', instructions: 'Supported?' }, scope, hashState(output));
-  expect(question.instructions).toMatchObject({ claimScope: { ...scope, outputDigest: hashState(output) } });
+  const question = scopedClaimQuestion({ type: 'noul', instructions: 'Supported?' }, scope, commitment);
+  expect(question.instructions).toMatchObject({ claimScope: { ...scope, outputDigest: commitment } });
   const fresh = answerClaimScopes(output)[0]!;
   expect(completeAnswerClaimCoverage(output, [{ ...fresh, textDigest: scope.textDigest } as unknown as typeof fresh])).toBe(false);
   expect(completeAnswerClaimCoverage(output, [{ ...fresh, version: 3 } as unknown as typeof fresh])).toBe(false);

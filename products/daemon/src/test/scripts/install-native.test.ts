@@ -1,4 +1,5 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
+import * as crypto from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -53,6 +54,18 @@ nativeTest('offline first installation preserves the exact cohort and executable
   expect(result.status).toBe(0); expect(result.stdout).toBe('goodvibes-daemon 1.2.3\n');
   expect(JSON.parse(readFileSync(join(f.prefix, 'daemon-installation.json'), 'utf8'))).toMatchObject({ packageName: '@goodvibes-jev/daemon', version: first.version, artifact: { sourceCommit: first.sourceCommit } });
   expect(transientFiles(f.prefix)).toEqual([]);
+});
+
+nativeTest('offline install pins each source once and independently verifies the newly staged destination cohort', async () => {
+  const f = await fixture(), hash = spyOn(crypto, 'createHash');
+  try {
+    await f.install();
+    // Five cold source member pins, one new installation receipt pin, then
+    // six actual destination-stage checksum checks. No repeated source pass.
+    expect(hash).toHaveBeenCalledTimes(12);
+    expect(state(f.prefix).slice(0, DAEMON_CI_PAYLOADS.length)).toEqual(DAEMON_CI_PAYLOADS.map(path => readFileSync(join(f.source, 'native', path), 'utf8')));
+    expect(transientFiles(f.prefix)).toEqual([]);
+  } finally { hash.mockRestore(); }
 });
 
 nativeTest('upgrade, idempotent retry and full kept-previous rollback retain one coherent receipt/artifact cohort', async () => {

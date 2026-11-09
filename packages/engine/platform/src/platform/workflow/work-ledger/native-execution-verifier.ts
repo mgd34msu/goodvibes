@@ -2,7 +2,7 @@
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, realpathSync } from 'node:fs';
 import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
-import { hashState, recordedJudgmentInputHash, readYesNo, type YesNoBand, type DecisionLog, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { canonicalJson, hashState, recordedJudgmentInputHash, readYesNo, type YesNoBand, type DecisionLog, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { captureOwnedJson } from '../../gate/judgment-input.js';
 import { assertDurableCheckpoint, parseDurableAdmission } from '../../contract/durable-admission.js';
@@ -31,7 +31,10 @@ function freeze<T>(value: T): T {
   if (value !== null && typeof value === 'object') { for (const child of Object.values(value)) freeze(child); Object.freeze(value); }
   return value;
 }
-function assertSynchronousGuard(result: unknown): void {
+function assertSynchronousGuard(check: () => unknown): void {
+  let result: unknown;
+  try { result = check(); }
+  catch (error) { drainOwned(error); throw error; }
   if (result !== undefined) { drainOwned(result); throw new NativeWorkExecutionError('invalid'); }
 }
 function contained(root: string, path: string): string {
@@ -125,7 +128,7 @@ export async function verifyNativeWorkExecution(options: {
   if (!record.receipt || record.state !== 'launch-claimed') throw new Error('Native execution has no claimed durable receipt');
   const admission = parseDurableAdmission({ ...record.receipt, input: record.request.input }, record.request);
   const source = record.request.input.nativeSource!;
-  const current = () => { options.signal.throwIfAborted(); assertSynchronousGuard(options.assertCurrent()); options.signal.throwIfAborted(); };
+  const current = () => { options.signal.throwIfAborted(); assertSynchronousGuard(() => options.assertCurrent()); options.signal.throwIfAborted(); };
   current(); await options.runner.join(admission.contractId); current();
   const raw = options.runner.get(admission.contractId);
   if (!raw) throw new Error('Native runner checkpoint is unavailable');
@@ -346,34 +349,47 @@ export async function verifyNativeWorkExecution(options: {
   const changes: FileChange[] = captured.map(item => ({ path: item.path, diff: `${item.path}\n${item.text}` }));
   const evidence = freeze(trimEvidence({ output: contract.answer ?? '', changes, gates: deliverable!.gates, commands: [] }, unit));
   const originalSource = nativeContractSourceForAdmission(contract);
-  const states = new Map<string, { hash: string; state: EntryType; questions: unknown; answers: unknown; decisionId?: string }>();
+  const states = new Map<string, { hash: string; state: EntryType; context: unknown; questions: unknown; answers: unknown; decisionId?: string }>();
   const checkAbort = new AbortController(); const checkSignal = AbortSignal.any([options.signal, checkAbort.signal]);
   const pending = new Set<Promise<unknown>>();
   const checkPort: JudgmentPort = { ...options.port, ask(request) {
     const operation = Promise.resolve().then(async () => {
-      const active = () => { checkSignal.throwIfAborted(); assertCurrent(); request.signal?.throwIfAborted(); assertSynchronousGuard(request.beforeAttempt?.()); assertCurrent(); checkSignal.throwIfAborted(); };
+      const active = () => { checkSignal.throwIfAborted(); assertCurrent(); request.signal?.throwIfAborted(); assertSynchronousGuard(() => request.beforeAttempt?.()); assertCurrent(); checkSignal.throwIfAborted(); };
       const state = freeze(structuredClone({ ...(request.state as Record<string, EntryType>), originalSource })) as unknown as EntryType;
       const questions = freeze(structuredClone(request.questions));
+      const context = freeze(structuredClone(request.context));
       const site = request.context?.site;
       if (!site || (site !== CHECK_SITES.judge && site !== CHECK_SITES.quality)) throw new Error('Unexpected native settlement decision site');
       // Forward the registered runUnitCheck request with detached images. This
       // adapter defines no questions or decision; the generic request type stays intact.
-      const forwarded: typeof request = { ...request, state, questions, signal: checkSignal, beforeAttempt: active };
+      const forwarded: typeof request = { ...request, state, questions, ...(context === undefined ? {} : { context }), signal: checkSignal, beforeAttempt: active };
       active();
       // The shared port lends an object. Snapshot before borrowed guards or a
       // later microtask can change what the battery reads after provenance capture.
       const borrowed = await options.port.ask(forwarded);
       const result = freeze(structuredClone(captureOwnedJson(borrowed, nodeTypes.isProxy))) as typeof borrowed;
-      if (!result.decisionId) {
+      const decisionId = result.decisionId;
+      if (typeof decisionId !== 'string' || !decisionId) {
         active();
         throw new Error('Native decision provenance is missing or mismatched');
       }
       // Actual recorded results already bind this exact input. A borrowed copy
       // cannot inherit that provenance: compare its actual forwarded input to
       // the independent log once, then still compare questions/answers below.
-      const recorded = recordedJudgmentInputHash(borrowed, forwarded) ?? hashState(state);
       active();
-      states.set(site, { hash: recorded, state, questions, answers: result.answers, ...(result.decisionId ? { decisionId: result.decisionId } : {}) }); return result;
+      const entry = options.decisionLog.get(decisionId);
+      if (!entry || entry.id !== decisionId || entry.status !== 'answered') throw new Error('Native decision provenance is missing or mismatched');
+      const savedStateHash: unknown = entry.stateHash;
+      if (typeof savedStateHash !== 'string' || !/^[a-f0-9]{64}$/.test(savedStateHash) || entry.context?.site !== site
+        || canonicalJson(entry.context as unknown as EntryType) !== canonicalJson(context as unknown as EntryType)
+        || !isDeepStrictEqual(questions, entry.questions) || !isDeepStrictEqual(result.answers, entry.answers)) {
+        throw new Error('Native decision provenance is missing or mismatched');
+      }
+      // No borrowed callback or await separates this actual candidate reading
+      // from the remaining input comparison. Missing/unrelated rows hash zero.
+      const recorded = recordedJudgmentInputHash(borrowed, forwarded) ?? hashState(state);
+      if (savedStateHash !== recorded) throw new Error('Native decision provenance is missing or mismatched');
+      states.set(site, { hash: recorded, state, context, questions, answers: result.answers, decisionId }); return result;
     });
     pending.add(operation); void operation.then(() => pending.delete(operation), () => pending.delete(operation)); return operation;
   } };
@@ -389,10 +405,12 @@ export async function verifyNativeWorkExecution(options: {
     const entry = options.decisionLog.get(id); const site = index === 0 ? CHECK_SITES.judge : CHECK_SITES.quality;
     const expected = { ...(index === 0 ? judgeState(unit, evidence) : qualityState(unit, evidence)), originalSource } as unknown as EntryType;
     const observed = states.get(site);
-    if (!entry || !observed || entry.status !== 'answered' || entry.context.site !== site || entry.stateHash !== observed.hash || !isDeepStrictEqual(observed.state, expected) || observed.decisionId !== id || !isDeepStrictEqual(observed.questions, entry.questions) || !isDeepStrictEqual(observed.answers, entry.answers)) throw new Error('Native decision provenance is missing or mismatched');
+    if (!entry || !observed || entry.id !== id || entry.status !== 'answered') throw new Error('Native decision provenance is missing or mismatched');
+    const savedStateHash = entry.stateHash;
+    if (entry.context?.site !== site || savedStateHash !== observed.hash || canonicalJson(entry.context as unknown as EntryType) !== canonicalJson(observed.context as unknown as EntryType) || !isDeepStrictEqual(observed.state, expected) || observed.decisionId !== id || !isDeepStrictEqual(observed.questions, entry.questions) || !isDeepStrictEqual(observed.answers, entry.answers)) throw new Error('Native decision provenance is missing or mismatched');
     // The actual independent log already committed this full original input.
-    // Reuse that real content identity, not a new checksum of the log row.
-    return { kind: 'decision', ref: `decision:${id}`, digest: entry.stateHash };
+    // Reuse that exact compared value, never reread a borrowed property or hash the log row.
+    return { kind: 'decision', ref: `decision:${id}`, digest: savedStateHash };
   });
   if (decisionReferences.length !== 2 || new Set(result.check.decisionIds).size !== 2) throw new Error('Native settlement requires both recorded decision batteries');
   const references: WorkEvidenceReference[] = [...decisionReferences,

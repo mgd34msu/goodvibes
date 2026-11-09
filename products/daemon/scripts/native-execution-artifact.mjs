@@ -1,16 +1,17 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { chmodSync, lstatSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { inspectTerminalReaderArtifact } from '@goodvibes-jev/engine/toolchain';
+import { assertNativeArtifactFilesCurrent, inspectTerminalReaderArtifact, retainNativeArtifactFiles } from '@goodvibes-jev/engine/toolchain';
+import { createReleaseStage } from '@goodvibes-jev/engine/toolchain/release-publication';
 import { parseClientReaderArtifact } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import { runNativeArchive } from './native-execution-process.mjs';
 
 export const NATIVE_EXECUTION_TARGETS = Object.freeze(['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64']);
 const MANIFEST = 'native-execution-artifact.json';
-const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const json = path => JSON.parse(readFileSync(path, 'utf8'));
+const immutableArtifact = artifact => { artifact.files.forEach(file => Object.freeze(file)); Object.freeze(artifact.files); return Object.freeze(artifact); };
 
 /** CI execution ownership is separate from the Linux install/update receipt. */
 export function nativeExecutionPayloadMembers(product, target) {
@@ -63,41 +64,11 @@ function inspectReaderSource(reader, expectedOwner, payloads) {
   return parsed;
 }
 
-function observe(path, root, directoryRevisions = true) {
-  const parents = [];
-  for (let current = dirname(path);;) {
-    const stat = lstatSync(current, { bigint: true });
-    assert(stat.isDirectory() && !stat.isSymbolicLink(), 'Native execution parent must be a regular directory');
-    const selected = current === root || current.startsWith(root + '/');
-    parents.push(`${realpathSync(current)}:${stat.dev}:${stat.ino}:${stat.mode}:${stat.uid}:${stat.gid}${directoryRevisions && selected ? `:${stat.ctimeNs}:${stat.mtimeNs}` : ''}`);
-    const parent = dirname(current); if (parent === current) break; current = parent;
-  }
-  const stat = lstatSync(path, { bigint: true });
-  assert(stat.isFile() && !stat.isSymbolicLink(), 'Native execution payload must be a regular file');
-  return { identity: `${parents.join('|')}:${stat.dev}:${stat.ino}:${stat.ctimeNs}:${stat.mtimeNs}:${stat.size}:${stat.uid}:${stat.gid}:${stat.mode}`, mode: Number(stat.mode & 0o7777n), size: Number(stat.size) };
-}
-
+/** Keep the actual original files, not caller-supplied hashes. Metadata with
+ * no checksum consumer is guarded/read without inventing an extra pin. */
 export function retainNativeExecutionFiles(root, members, { directoryRevisions = true } = {}) {
-  const retained = members.map(member => {
-    const full = join(root, member.path), before = observe(full, root, directoryRevisions);
-    assert.equal(before.mode, member.mode, 'Native execution payload mode differs');
-    const bytes = readFileSync(full);
-    assert.equal(observe(full, root, directoryRevisions).identity, before.identity, 'Native execution payload changed while read');
-    assert.equal(bytes.length, before.size);
-    // The manifest is parsed and compared against these independently computed
-    // payload pins; no consumer uses a digest of the manifest itself.
-    return Object.freeze({ ...member, ...(member.path === MANIFEST ? {} : { sha256: digest(bytes) }), size: bytes.length, identity: before.identity, bytes });
-  });
-  const assertCurrent = () => {
-    for (const file of retained) {
-      const full = join(root, file.path);
-      assert.equal(observe(full, root, directoryRevisions).identity, file.identity, 'Retained native execution owner changed');
-      assert(readFileSync(full).equals(file.bytes), 'Retained native execution bytes changed');
-      assert.equal(observe(full, root, directoryRevisions).identity, file.identity, 'Retained native execution owner changed during verification');
-    }
-  };
-  assertCurrent();
-  return Object.freeze({ files: Object.freeze(retained), assertCurrent });
+  return retainNativeArtifactFiles(root, members.map(member => ({ ...member,
+    pin: member.path !== MANIFEST && member.pin !== false })), { directoryRevisions });
 }
 
 function owner(product, source) {
@@ -116,7 +87,8 @@ function inspectSqliteCompanion(product, target, retained, artifactOwner) {
   const library = retained.files.find(file => file.path === row.sqliteRuntime.libraryPath);
   const provenance = retained.files.find(file => file.path === row.sqliteRuntime.provenancePath);
   const cpu = target === 'darwin-x64' ? 0x01000007 : 0x0100000c;
-  assert(library.bytes.length >= 32 && library.bytes.readUInt32LE(0) === 0xfeedfacf && library.bytes.readUInt32LE(4) === cpu && library.bytes.readUInt32LE(12) === 6, 'Native SQLite Mach-O architecture differs');
+  const libraryBytes = library.bytes;
+  assert(libraryBytes.length >= 32 && libraryBytes.readUInt32LE(0) === 0xfeedfacf && libraryBytes.readUInt32LE(4) === cpu && libraryBytes.readUInt32LE(12) === 6, 'Native SQLite Mach-O architecture differs');
   assert.deepEqual(JSON.parse(provenance.bytes.toString('utf8')), { schema: 1, packageName: artifactOwner.packageName,
     daemonVersion: artifactOwner.version, target, sqliteVersion: row.sqliteRuntime.sqliteVersion,
     sourceUrl: row.sqliteRuntime.sourceUrl, sourceSha3: row.sqliteRuntime.sourceSha3, sha256: library.sha256, size: library.size }, 'Native SQLite supplier/byte provenance differs');
@@ -137,7 +109,7 @@ export function recordNativeExecutionArtifact(product, source, { inspectReader =
     const reader = inspectReaderSource(inspectReader({ directory: root, packageName: expectedOwner.packageName,
       version: expectedOwner.version, target: source.target, sourceCommit: source.sourceCommit, sourceTree: source.sourceTree,
       headCommit: source.headCommit, files: retained.files.map(({ path, sha256, mode, size }) => ({ path, sha256, mode, size })),
-      assertCurrent: retained.assertCurrent }), expectedOwner, retained.files);
+      assertCurrent: retained.assertCurrent, retained }), expectedOwner, retained.files);
     retained.assertCurrent();
     const member = nativeExecutionMembers(product, source.target).at(-1);
     writeFileSync(join(root, member.path), JSON.stringify(reader, null, 2) + '\n', { flag: 'wx', mode: member.mode });
@@ -149,7 +121,7 @@ export function recordNativeExecutionArtifact(product, source, { inspectReader =
   retained.assertCurrent(); readerOwner?.assertCurrent();
   writeFileSync(join(root, MANIFEST), JSON.stringify(artifact, null, 2) + '\n', { flag: 'wx', mode: 0o644 });
   retained.assertCurrent(); readerOwner?.assertCurrent();
-  return Object.freeze(artifact);
+  return immutableArtifact(artifact);
 }
 
 export function verifyNativeExecutionArtifact(product, source, { allowEarlierAttempt = false } = {}) {
@@ -173,7 +145,7 @@ export function verifyNativeExecutionArtifact(product, source, { allowEarlierAtt
     inspectReaderSource(JSON.parse(reader.bytes.toString('utf8')), expectedOwner, retained.files.slice(0, payloads.length));
   }
   retained.assertCurrent();
-  return Object.freeze({ artifact: Object.freeze(actual), members, retained });
+  return Object.freeze({ artifact: immutableArtifact(actual), members, retained });
 }
 
 export function nativeExecutionSource(product, sourceCommit, headCommit, env = process.env) {
@@ -186,6 +158,30 @@ export function nativeExecutionSource(product, sourceCommit, headCommit, env = p
   return Object.freeze({ sourceCommit, sourceTree: git('rev-parse', 'HEAD^{tree}'), headCommit, target, runId: env.GITHUB_RUN_ID, runAttempt: env.GITHUB_RUN_ATTEMPT });
 }
 
+/** Publish only after the actual verified cohort's tar producer and complete
+ * process group have drained into an original exclusive staging descriptor. */
+export async function archiveNativeExecutionArtifact(product, source, archive, signal) {
+  signal?.throwIfAborted();
+  const verified = verifyNativeExecutionArtifact(product, source);
+  const stage = createReleaseStage(dirname(archive), '.native-archive-');
+  let published;
+  try {
+    published = await stage.publishFile('native.tgz', basename(archive), async fd => {
+      assertNativeArtifactFilesCurrent(verified.retained); signal?.throwIfAborted();
+      await runNativeArchive([...verified.members.map(file => file.path), MANIFEST].map(path => `products/daemon/native/${path}`),
+      resolve(product, '../..'), fd, signal);
+      assertNativeArtifactFilesCurrent(verified.retained); signal?.throwIfAborted();
+    }, 0o644, () => {
+      signal?.throwIfAborted(); assertNativeArtifactFilesCurrent(verified.retained); signal?.throwIfAborted();
+    });
+  } catch (error) {
+    try { stage.cleanup(); }
+    catch (cleanup) { throw new AggregateError([error, cleanup], 'Native archive failed and its original staging could not be cleaned'); }
+    throw error;
+  }
+  stage.cleanup(); return published;
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const product = resolve(dirname(fileURLToPath(import.meta.url)), '..');
   const [action, sourceCommit, headCommit, archive, ...extra] = process.argv.slice(2);
@@ -193,12 +189,11 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     'Usage: native-execution-artifact.mjs <record|verify|archive> <checkout SHA> <head SHA> [archive output]');
   const source = nativeExecutionSource(product, sourceCommit, headCommit);
   if (action === 'record') recordNativeExecutionArtifact(product, source);
+  else if (action === 'verify') verifyNativeExecutionArtifact(product, source, { allowEarlierAttempt: true });
   else {
-    const verified = verifyNativeExecutionArtifact(product, source, { allowEarlierAttempt: action === 'verify' });
-    if (action === 'archive') {
-      // Names are fixed by the actual source target, never supplied by JSON.
-      execFileSync('tar', ['--format=ustar', '-czf', resolve(archive), ...[...verified.members.map(file => file.path), MANIFEST].map(path => `products/daemon/native/${path}`)], { cwd: resolve(product, '../..'), timeout: 30_000 });
-      chmodSync(resolve(archive), 0o644); verified.retained.assertCurrent();
-    }
+    const cancellation = new AbortController(), cancel = () => cancellation.abort(new Error('Native archive cancelled'));
+    process.once('SIGINT', cancel); process.once('SIGTERM', cancel);
+    try { await archiveNativeExecutionArtifact(product, source, archive, cancellation.signal); }
+    finally { process.off('SIGINT', cancel); process.off('SIGTERM', cancel); }
   }
 }

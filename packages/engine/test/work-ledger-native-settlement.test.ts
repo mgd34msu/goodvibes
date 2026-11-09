@@ -586,6 +586,67 @@ test('native verifier never hashes a new borrowed wire state when its result can
   } finally { hashing.mockRestore(); }
 });
 
+for (const mode of ['absent', 'failed', 'id', 'id-number', 'id-empty', 'hash-absent', 'hash-shape', 'context', 'context-absent', 'questions', 'answers', 'state'] as const) {
+  test(`native verifier refuses ${mode} candidate logs before any unused new wire-state commitment`, async () => {
+    const f = await fixture(); const started = await f.host.start(f.target, f.authority);
+    await completed(f.harness, started.admission.contractId);
+    const original = f.storage.current(f.key).record!, seed = f.log.query({ status: 'answered', limit: 1 })[0];
+    if (!seed || seed.status !== 'answered') throw new Error('Actual runner reading missing');
+    const fake = fakePort(() => noulAnswer(0.01)), id = 'synthetic-unrecorded-verifier';
+    const attemptedStates = new Set<string>();
+    const candidates = new Map<string, import('@goodvibes-jev/judgment').DecisionEntry | undefined>(); let sequence = 0;
+    const port: JudgmentPort = { ...f.hostOptions.port, async ask(request) {
+      attemptedStates.add(canonicalJson(request.state));
+      const candidateId = `${id}:${++sequence}`;
+      const raw = await fake.port.ask(request);
+      const context = (mode === 'context' ? { site: 'unrelated-settlement-site' } : mode === 'context-absent' ? undefined : { ...request.context }) as typeof seed.context;
+      const questions = mode === 'questions' ? {} : JSON.parse(canonicalJson(request.questions as unknown as import('@goodvibes-jev/judgment').EntryType)) as typeof seed.questions;
+      const common = { id: (mode === 'id' ? 'another-recorded-id' : candidateId) as typeof seed.id, at: seed.at, context, questions, requestedModel: seed.requestedModel,
+        stateHash: (mode === 'hash-absent' ? undefined : mode === 'hash-shape' ? 'not-a-sha256' : 'f'.repeat(64)) as typeof seed.stateHash, latencyMs: 0, requestId: undefined };
+      const candidate: import('@goodvibes-jev/judgment').DecisionEntry | undefined = mode === 'absent' ? undefined : mode === 'failed'
+        ? { ...common, status: 'failed', error: { kind: 'unavailable', message: 'Synthetic failed reading' } }
+        : { ...seed, ...common, answers: mode === 'answers' ? {} : JSON.parse(canonicalJson(raw.answers as unknown as import('@goodvibes-jev/judgment').EntryType)) as typeof seed.answers };
+      candidates.set(candidateId, candidate);
+      return { ...raw, decisionId: mode === 'id-number' ? 42 : mode === 'id-empty' ? '' : candidateId } as never;
+    } };
+    const hashing = spyOn(Bun.CryptoHasher, 'hash');
+    try {
+      await expect(verifyNativeWorkExecution({ execution: original, runner: f.harness.runner, port,
+        decisionLog: { get(readId) { return readId.startsWith(id + ':') ? candidates.get(readId) : f.log.get(readId); } },
+        settings: checkSettings(CONTRACT_CONFIG_DEFAULTS), readAccessFilter: async () => true,
+        signal: new AbortController().signal, assertCurrent() {} })).rejects.toThrow('provenance');
+      expect(attemptedStates.size).toBeGreaterThan(0);
+      const count = hashing.mock.calls.filter(([algorithm, state]) => algorithm === 'sha256'
+        && typeof state === 'string' && attemptedStates.has(state)).length;
+      expect(count).toBe(mode === 'state' ? fake.requests.length : 0);
+      expect(f.storage.current(f.key).ledger.evidence).toHaveLength(0);
+    } finally { hashing.mockRestore(); }
+  });
+}
+
+for (const mode of ['returned', 'thrown', 'typed-error'] as const) test(`native verifier drains ${mode} owner guard failure and preserves original failure identity`, async () => {
+  const f = await fixture(); const started = await f.host.start(f.target, f.authority);
+  await completed(f.harness, started.admission.contractId);
+  const execution = f.storage.current(f.key).record!, stale = new Error('Original verifier owner retired');
+  let rejected: Promise<never> | undefined;
+  const calls = spyOn(f.hostOptions.port, 'ask');
+  try {
+    const operation = verifyNativeWorkExecution({ execution, runner: f.harness.runner, port: f.hostOptions.port, decisionLog: f.log,
+      settings: checkSettings(CONTRACT_CONFIG_DEFAULTS), readAccessFilter: async () => true, signal: new AbortController().signal,
+      assertCurrent() {
+        if (mode === 'typed-error') throw stale;
+        rejected = Promise.reject(stale);
+        if (mode === 'thrown') throw rejected;
+        return rejected as never;
+      } });
+    if (mode === 'returned') await expect(operation).rejects.toMatchObject({ code: 'invalid' });
+    else if (mode === 'typed-error') await expect(operation).rejects.toBe(stale);
+    else { await expect(operation).rejects.toBeInstanceOf(Promise); expect(rejected).toBeDefined(); }
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    expect(calls).not.toHaveBeenCalled(); expect(f.storage.current(f.key).ledger.evidence).toHaveLength(0);
+  } finally { calls.mockRestore(); }
+});
+
 test('a freshly reconstructed terminal runner verifies without restoring an execution owner or replaying effects', async () => {
   const f = await fixture(); const started = await f.host.start(f.target, f.authority); await completed(f.harness, started.admission.contractId);
   f.harness.store.flush(); await f.host.close();

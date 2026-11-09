@@ -1,11 +1,12 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
+import * as crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { nativeReaderCapabilities } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
-import { recordDaemonCiArtifact, readVerifiedDaemonCiArtifact, verifyDaemonCiArtifact, type DaemonArtifactSource } from '../../../scripts/ci-artifact.ts';
+import { recordDaemonCiArtifact, retainVerifiedDaemonCiArtifact, readVerifiedDaemonCiArtifact, verifyDaemonCiArtifact, type DaemonArtifactSource } from '../../../scripts/ci-artifact.ts';
 import { nativeReaderProbeScript, nativeRuntimeProvenance, writeV1NativeArtifactFixture } from '../helpers/native-runtime-provenance.ts';
 
 const source: DaemonArtifactSource = { sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40), headCommit: 'c'.repeat(40) };
@@ -32,7 +33,18 @@ test('a tar round trip preserves the exact source, binary, library and executabl
   const restored = join(root, 'restored');
   mkdirSync(restored);
   execFileSync('tar', ['-xzf', archive, '-C', restored]);
-  await expect(verifyDaemonCiArtifact(restored, source)).resolves.toBeUndefined();
+  const hash = spyOn(crypto, 'createHash');
+  try {
+    const verified = await retainVerifiedDaemonCiArtifact(restored, source);
+    expect(hash).toHaveBeenCalledTimes(5);
+    verified.retained.assertCurrent(); verified.retained.assertCurrent();
+    const binary = verified.retained.files[0]!, original = binary.bytes;
+    binary.bytes.fill(0); expect(binary.bytes).toEqual(original);
+    expect(hash).toHaveBeenCalledTimes(5);
+    expect(Object.hasOwn(verified.retained.files.at(-1)!, 'sha256')).toBe(false);
+    await expect(verifyDaemonCiArtifact(restored, source)).resolves.toBeUndefined();
+    expect(hash).toHaveBeenCalledTimes(10); // independent cold consumer
+  } finally { hash.mockRestore(); }
 }));
 
 for (const path of ['goodvibes-daemon-linux-x64', 'goodvibes-daemon-linux-x64.bun', 'goodvibes-daemon-linux-x64.bun.LICENSE.md', 'goodvibes-daemon-linux-x64.bun.json', 'lib/sqlite-vec-linux-x64/vec0.so']) {
@@ -158,7 +170,7 @@ test('source changes made by a misbehaving inspection cannot be published as the
   await recordDaemonCiArtifact(root, source); const path = join(root, 'native/ci-artifact.json'); const before = readFileSync(path);
   const changed = nativeReaderProbeScript('3.1.2').replace('#!/bin/sh\n', '#!/bin/sh\nprintf changed > goodvibes-daemon-linux-x64.bun.LICENSE.md\n');
   writeFileSync(join(root, 'native/goodvibes-daemon-linux-x64'), changed);
-  await expect(recordDaemonCiArtifact(root, source)).rejects.toThrow('input changed');
+  await expect(recordDaemonCiArtifact(root, source)).rejects.toThrow('owner changed');
   expect(readFileSync(path)).toEqual(before);
 }));
 

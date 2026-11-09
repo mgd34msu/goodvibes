@@ -9,6 +9,7 @@ import { clientReaderPayloadPaths, clientReaderAsset, nativeReaderCapabilities, 
   type ClientReaderArtifact, type ClientReaderPackage, type ClientReaderTarget } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { fileObservationIdentity } from '@goodvibes-jev/engine/platform/platform/utils';
 import { writeFileAtomic } from '@goodvibes-jev/engine/platform/platform/utils';
+import { assertNativeArtifactFilesCurrent, nativeArtifactPins, retainNativeArtifactFiles, type RetainedNativeArtifactFiles } from './retained-native-artifact-files.js';
 
 export interface TerminalReaderSource {
   readonly sourceCommit: string;
@@ -23,6 +24,9 @@ export interface TerminalReaderArtifactInput extends TerminalReaderSource {
   readonly directory: string;
   /** Pins already computed by this producer's artifact admission. */
   readonly files: ClientReaderArtifact['files'];
+  /** Only an actual original capture can reuse its existing pins. Public/copied
+   * pin descriptors remain supported through independent cold verification. */
+  readonly retained?: RetainedNativeArtifactFiles;
   /** Captured before this producer read or pinned the native payloads. */
   readonly assertCurrent: () => void;
 }
@@ -45,11 +49,15 @@ export function inspectTerminalReaderArtifact(input: TerminalReaderArtifactInput
     if (!file) throw new Error('Native terminal reader cohort is incomplete');
     return { ...file };
   });
+  const retained = input.retained === undefined ? retainNativeArtifactFiles(input.directory,
+    expectedPaths.map(path => ({ path })), { directoryRevisions: false }) : input.retained;
+  const originalPins = nativeArtifactPins(retained, input.directory, expectedPaths);
+  if (!isDeepStrictEqual(files, originalPins)) throw new Error('Native terminal reader pins differ from the actual original payloads');
   const expected = parseClientReaderArtifact({ schema: 1, packageName: input.packageName, version: input.version, target: input.target,
     sourceCommit: input.sourceCommit, sourceTree: input.sourceTree, headCommit: input.headCommit, files,
     readers: nativeReaderCapabilities(input.version) });
   const before = files.map(file => ({ path: join(input.directory, file.path), identity: fileObservationIdentity(join(input.directory, file.path)) }));
-  const current = () => { for (const file of before) if (fileObservationIdentity(file.path) !== file.identity) throw new Error('Native terminal changed while recording its readers'); };
+  const current = () => { assertNativeArtifactFilesCurrent(retained); for (const file of before) if (fileObservationIdentity(file.path) !== file.identity) throw new Error('Native terminal changed while recording its readers'); };
   current(); input.assertCurrent();
   const output = execFileSync(join(input.directory, asset), ['check-install-reader', '--describe'], {
     encoding: 'utf8', timeout: 15_000, maxBuffer: 32 * 1024, stdio: ['ignore', 'pipe', 'pipe'],

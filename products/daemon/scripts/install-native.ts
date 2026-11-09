@@ -5,9 +5,10 @@ import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
   applyVerifiedUpdate, captureUpdateFileIo, realUpdateFileIo, rollbackKeptPrevious, sha256, UpdateTransactionError,
-  assertDaemonNativePayloadBytes, retainDaemonNativeFiles, assertNativeReaderCompatible, resolveDaemonInstallationReaders, type UpdateFileIo, type UpdateFetchLike,
+  assertDaemonNativePayloadPins, retainDaemonNativeFiles, assertNativeReaderCompatible, resolveDaemonInstallationReaders, type UpdateFileIo, type UpdateFetchLike,
 } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
-import { readVerifiedDaemonCiArtifact } from './ci-artifact.ts';
+import { retainVerifiedDaemonCiArtifact } from './ci-artifact.ts';
+import { nativeArtifactPins } from '@goodvibes-jev/engine/toolchain';
 import { assertNativeInstallHost, assertPath, expectedModes, inspectInstallation, inspectInstallationIdentity, targetPaths, validateOwner, type DaemonInstallOwner, type InstallationReceipt } from '../src/cli/native-installation.ts';
 import { daemonCiPayloads, daemonNativeHost, type DaemonNativeTarget } from '../src/cli/native-artifact.ts';
 
@@ -69,15 +70,23 @@ export async function installDaemonNative(options: InstallDaemonNativeOptions): 
   const retainedSource = retainDaemonNativeFiles(sourceTargets, captureUpdateFileIo(realUpdateFileIo));
   const retainedTargets = retainDaemonNativeFiles(targets, io);
   const retainedDirectories = retainInstallDirectories([artifactRoot, prefix, ...sourceTargets.map(target => dirname(target.path)), ...targets.map(target => dirname(target.path))]);
-  const assertSourceCurrent = () => { signal?.throwIfAborted(); retainedDirectories(); retainedSource(); };
-  const artifact = await readVerifiedDaemonCiArtifact(artifactRoot, owner);
+  const verified = await retainVerifiedDaemonCiArtifact(artifactRoot, owner);
+  const artifact = verified.artifact;
+  const assertSourceCurrent = () => { signal?.throwIfAborted(); retainedDirectories(); retainedSource(); verified.retained.assertCurrent(); };
   if (artifact.schema === 2 && artifact.readers.version !== owner.version) throw new Error('Native reader version differs from the selected source product');
   assertSourceCurrent(); retainedTargets();
   expectedModes(artifact);
-  // Snapshot after verification; canonical checksum verification below catches
-  // any bytes changed since the verifier ran, before the first destination write.
-  const buffers = artifact.files.map(file => { const path = join(artifactRoot, 'native', file.path); assertPath(path); return readFileSync(path); });
-  assertDaemonNativePayloadBytes(artifact, buffers);
+  // Read only this verifier's actual originals. Reuse their genuine portable
+  // pins for source/provenance checks; the destination updater independently
+  // verifies each newly staged payload against those pins below.
+  const paths = daemonCiPayloads(owner.target);
+  const buffers = paths.map(path => {
+    const file = verified.retained.files.find(file => file.path === path);
+    if (!file) throw new Error('Native install source cohort is incomplete');
+    return file.bytes;
+  });
+  assertDaemonNativePayloadPins(artifact, nativeArtifactPins(verified.retained, join(artifactRoot, 'native'), paths), buffers[3]);
+  assertSourceCurrent();
   const receipt: InstallationReceipt = { schema: 1, packageName: PACKAGE, version: owner.version, artifact };
   buffers.push(Buffer.from(JSON.stringify(receipt, null, 2) + '\n'));
   const hashes = [...artifact.files.map(file => file.sha256), sha256(buffers[buffers.length - 1]!)];

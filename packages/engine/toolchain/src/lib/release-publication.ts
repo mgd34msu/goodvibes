@@ -1,8 +1,9 @@
 /** Release-builder-local publication. Final names are never replaced implicitly. */
-import { chmodSync, closeSync, constants, fchmodSync, fstatSync, linkSync, lstatSync, mkdtempSync, openSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, fchmodSync, fstatSync, linkSync, lstatSync, mkdtempSync, openSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import type { BigIntStats } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { captureExistingDirectory, prepareAtomicPublicationDirectory, fileObservationIdentity } from '@goodvibes-jev/engine/platform/platform/utils';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 
 export interface PublishedReleaseFile {
   readonly path: string;
@@ -38,11 +39,26 @@ export function createReleaseStage(outDir: string, prefix: string) {
   filename(prefix);
   const parent = prepareAtomicPublicationDirectory(outDir);
   parent.assertCurrent();
-  const path = mkdtempSync(join(parent.canonical, prefix));
+  const mask = process.umask(), adjustMask = (mask & 0o700) !== 0;
+  let path: string;
+  // A mode000 directory cannot be opened for descriptor-based permission
+  // publication. Clear only owner masking for this one private native create;
+  // restore before any owner callback, producer, or asynchronous work.
+  if (adjustMask) process.umask(mask & ~0o700);
+  try { path = mkdtempSync(join(parent.canonical, prefix)); }
+  finally { if (adjustMask) process.umask(mask); }
   const created = lstatSync(path, { bigint: true });
-  chmodSync(path, 0o700);
-  const ready = lstatSync(path, { bigint: true });
-  if (created.dev !== ready.dev || created.ino !== ready.ino || created.birthtimeNs !== ready.birthtimeNs) throw new Error('Release staging directory changed during creation.');
+  const fd = openSync(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  try {
+    const opened = fstatSync(fd, { bigint: true });
+    if (!opened.isDirectory() || created.dev !== opened.dev || created.ino !== opened.ino || created.birthtimeNs !== opened.birthtimeNs)
+      throw new Error('Release staging directory changed during creation.');
+    parent.assertCurrent(); fchmodSync(fd, 0o700);
+    const ready = lstatSync(path, { bigint: true });
+    if (!ready.isDirectory() || ready.isSymbolicLink() || created.dev !== ready.dev || created.ino !== ready.ino || created.birthtimeNs !== ready.birthtimeNs)
+      throw new Error('Release staging directory changed during creation.');
+    parent.assertCurrent();
+  } finally { closeSync(fd); }
   const original = captureExistingDirectory(path);
   let cleaned = false;
   const assertCurrent = (): void => { parent.assertCurrent(); original.assertCurrent(); if (cleaned) throw new Error('Release staging has closed.'); };
@@ -100,5 +116,34 @@ export function createReleaseStage(outDir: string, prefix: string) {
     } finally { closeSync(fd); }
     return publish(name, name, written);
   };
-  return Object.freeze({ path, assertCurrent, cleanup, publish: (member: string, name: string) => publish(member, name), publishBytes });
+  const publishFile = async (member: string, name: string, producer: (fd: number) => Promise<void>, mode = 0o644,
+    beforePublish?: () => void): Promise<PublishedReleaseFile> => {
+    filename(member); filename(name); assertCurrent();
+    const selected = join(path, member);
+    const fd = openSync(selected, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, mode);
+    try {
+      fchmodSync(fd, mode);
+      const original = fstatSync(fd, { bigint: true });
+      // The producer owns its subprocess lifetime and returns only after all
+      // writers have drained. Keep this original descriptor open throughout.
+      await producer(fd);
+      assertCurrent();
+      const written = fstatSync(fd, { bigint: true });
+      if (!written.isFile() || written.dev !== original.dev || written.ino !== original.ino
+        || written.uid !== original.uid || written.gid !== original.gid || written.mode !== original.mode
+        || written.birthtimeNs !== original.birthtimeNs || written.nlink !== 1n
+        || stamp(lstatSync(selected, { bigint: true })) !== stamp(written)) {
+        throw new Error('Release stage member changed while its producer was writing.');
+      }
+      // An optional source fence can only restrict this actual native output.
+      // Do not await it or let returned/thrown work escape unhandled, and let
+      // publish independently recheck the original file after this callback.
+      try {
+        const restricted: unknown = beforePublish?.();
+        if (restricted !== undefined) { drainOwned(restricted); throw new Error('Release publication guard must be synchronous and return no value.'); }
+      } catch (error) { drainOwned(error); throw new Error('Release publication source is unavailable.'); }
+      return publish(member, name, stamp(written));
+    } finally { closeSync(fd); }
+  };
+  return Object.freeze({ path, assertCurrent, cleanup, publish: (member: string, name: string) => publish(member, name), publishBytes, publishFile });
 }

@@ -24,6 +24,13 @@ import { acquireCrossProcessLock } from '../platform/src/platform/workspace/chec
 import { finishes } from './contract/steps-support.js';
 import { makeHarness, makeRepo, oneUnitPlan, runnerPort, waitFor } from './contract/runner-support.js';
 
+// A corruption fixture needs a different, well-formed commitment; hashing an
+// invented body would not add evidence about any actual receipt or publication.
+function changedCommitment(original: string): string {
+  if (!/^[0-9a-f]{64}$/.test(original)) throw new Error('Expected actual original commitment fixture');
+  return (original[0] === '0' ? '1' : '0') + original.slice(1);
+}
+
 const cleanups: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
@@ -63,8 +70,8 @@ async function fixture(options: { root?: string; actorId?: string; associate?: b
     await opened.storage.transaction(key, () => ({ next: record, nextIntent: { ...intent, state: 'associated' }, value: undefined }));
   }
   if (!record.receipt) throw new Error('Fixture launch receipt is missing');
-  const receiptDigest = nativeSettlementDigest(record.receipt); const contractDigest = nativeSettlementDigest({ fixture: 'terminal-contract' });
-  const references = [{ kind: 'test' as const, ref: 'fixture:acceptance', digest: nativeSettlementDigest('acceptance') },
+  const receiptDigest = nativeSettlementDigest(record.receipt); const contractDigest = 'a'.repeat(64); // Synthetic storage shape, not a verified terminal contract.
+  const references = [{ kind: 'test' as const, ref: 'fixture:acceptance', digest: 'b'.repeat(64) },
     { kind: 'test' as const, ref: `receipt:${record.receipt.contractId}`, digest: receiptDigest },
     { kind: 'test' as const, ref: `execution:${record.receipt.contractId}`, digest: contractDigest }];
   const publication: HistoricalNativeWorkSettlementPublication = {
@@ -369,8 +376,8 @@ test('exact retries and null reconciliation retain the first receipt; conflictin
   const conflicts: NativeWorkSettlementPublication[] = [
     { ...f.publication, report: 'Another result' },
     { ...f.publication, actorId: 'another-owner' },
-    { ...f.publication, receiptDigest: nativeSettlementDigest('other-receipt') },
-    { ...f.publication, contractDigest: nativeSettlementDigest('other-contract') },
+    { ...f.publication, receiptDigest: changedCommitment(f.publication.receiptDigest) },
+    { ...f.publication, contractDigest: changedCommitment(f.publication.contractDigest) },
     { ...f.publication, attestation: { ...f.publication.attestation, reason: 'Another attestation' } },
   ];
   for (const publication of conflicts) {
@@ -456,12 +463,12 @@ for (const corruption of ['execution', 'intent', 'history'] as const) test(`sche
 });
 
 const corruptBindings: readonly { name: string; change: (receipt: Extract<NativeWorkSettlementReceipt, { version: 1 }>) => NativeWorkSettlementReceipt }[] = [
-  { name: 'receipt digest', change: receipt => ({ ...receipt, receiptDigest: nativeSettlementDigest('foreign-receipt') }) },
-  { name: 'payload revision', change: receipt => ({ ...receipt, payloadRevision: nativeSettlementDigest('foreign-payload') }) },
+  { name: 'receipt digest', change: receipt => ({ ...receipt, receiptDigest: changedCommitment(receipt.receiptDigest) }) },
+  { name: 'payload revision', change: receipt => ({ ...receipt, payloadRevision: changedCommitment(receipt.payloadRevision) }) },
   { name: 'original target', change: receipt => ({ ...receipt, target: { ...receipt.target, workRevision: receipt.target.workRevision + 1 } }) },
   { name: 'contract identity', change: receipt => ({ ...receipt, contractId: 'ctr-abcdef01' }) },
-  { name: 'contract digest', change: receipt => ({ ...receipt, contractDigest: nativeSettlementDigest('foreign-contract') }) },
-  { name: 'publication digest', change: receipt => ({ ...receipt, publicationDigest: nativeSettlementDigest('foreign-publication') }) },
+  { name: 'contract digest', change: receipt => ({ ...receipt, contractDigest: changedCommitment(receipt.contractDigest) }) },
+  { name: 'publication digest', change: receipt => ({ ...receipt, publicationDigest: changedCommitment(receipt.publicationDigest) }) },
   { name: 'report request', change: receipt => ({ ...receipt, reportRequestId: 'foreign-report' }) },
   { name: 'evidence request', change: receipt => ({ ...receipt, evidenceRequestId: 'foreign-evidence' }) },
   { name: 'adjacent sequence', change: receipt => ({ ...receipt, evidenceSequence: receipt.evidenceSequence + 1 }) },
@@ -484,7 +491,7 @@ for (const corruption of ['missing-table', 'missing-execution', 'misindexed-key'
     if (corruption === 'missing-table') db.run('DROP TABLE native_work_execution_settlements');
     else if (corruption === 'missing-execution') { db.run('DELETE FROM native_work_executions'); db.run('DELETE FROM native_work_execution_intents'); }
     else if (corruption === 'misindexed-key') {
-      const keyHash = nativeSettlementDigest('unassociated-key');
+      const keyHash = changedCommitment(receipt.keyHash);
       db.run('UPDATE native_work_execution_settlements SET key_hash = ?, state_json = ?', [keyHash, JSON.stringify({ ...receipt, keyHash })]);
     } else db.run('UPDATE native_work_execution_settlements SET state_json = ?', [JSON.stringify({ ...receipt, target: { ...receipt.target, attemptId: 'unassociated-attempt' } })]);
   });

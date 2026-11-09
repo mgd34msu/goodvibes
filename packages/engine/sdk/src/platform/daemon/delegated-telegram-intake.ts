@@ -1,7 +1,10 @@
 /** Daemon-local, explicitly selected third-party intake. Never an owner-text capture. */
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
+import { captureDelegatedOwner, sameDelegatedOwner, delegatedReviewOwnership } from './delegated-review-owner.js';
+import type { DelegatedReviewOwner } from '../control-plane/delegated-inbound-wire.js';
 import type { TelegramSourceAccountReader, TelegramSourceAccountSnapshot, TelegramSourceAccountHandle } from '../channels/telegram/source-account.js';
-import type { NativeExecutionAuthority, NativePairedSnapshot } from '../security/http-auth.js';
+import type { NativeExecutionAuthority } from '../security/http-auth.js';
 import type { ApprovalBroker } from '../control-plane/approval-broker.js';
 import type { SharedSessionBroker } from '../control-plane/session-broker.js';
 import type { AutomationRouteBinding } from '../automation/routes.js';
@@ -14,16 +17,14 @@ import { PersistentStore } from '../state/persistent-store.js';
 import { StoreWriteQueue } from '../state/store-write-queue.js';
 // Isolate the provider reader from the long-lived coordinator closure context.
 const sourceReader = (read: () => string) => () => ({ text: read(), unsupportedSources: [] });
-const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const routeKey = (chatId: string, threadId?: string) => JSON.stringify([chatId, threadId ?? null]);
-const routeRevision = (route: AutomationRouteBinding) => digest([route.id, route.surfaceKind, route.surfaceId, route.channelId, route.threadId, route.externalId, route.createdAt, route.kind, route.sessionPolicy, route.threadPolicy]);
-const ownerRevision = (owner: NativePairedSnapshot) => digest([owner.principalId, owner.tokenId, [...owner.scopes].sort()]);
+const routeFacts = (route: AutomationRouteBinding) => Object.freeze([route.id, route.surfaceKind, route.surfaceId, route.channelId, route.threadId, route.externalId, route.createdAt, route.kind, route.sessionPolicy, route.threadPolicy]);
 interface Selection { readonly chatId: string; readonly threadId?: string; }
 interface SelectionStore extends Record<string, unknown> { readonly selected: readonly Selection[]; }
 interface Configuration {
   readonly id: string; readonly choice: DelegatedTelegramConfiguration; readonly owner: NativeExecutionAuthority;
   readonly account: TelegramSourceAccountSnapshot;
-  readonly expected: NativePairedSnapshot; readonly revision: string; readonly controller: AbortController;
+  readonly expected: DelegatedReviewOwner; readonly revision: string; readonly controller: AbortController;
   readonly expiresAt: number; readonly timer: ReturnType<typeof setTimeout>;
 }
 export interface DelegatedTelegramIngress {
@@ -68,11 +69,11 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
     readonly accounts: TelegramSourceAccountReader; readonly workspaceRoot: string;
     readonly isWorkspaceCurrent?: (() => boolean) | undefined;
     readonly subscribeWorkspaceInvalidation?: ((invalidate: () => void) => () => void) | undefined;
-    readonly selectionPath: string; readonly receiptPath: string;
+    readonly selectionPath: string; readonly receiptPath: string; readonly beforeReviewOwnerWrite?: () => void;
   }) {
     this.selectionStore = new PersistentStore(deps.selectionPath);
-    this.receiver = new DelegatedInboundReviewReceiver(deps.receiptPath);
-    this.workspaceRevision = digest([deps.workspaceRoot, randomUUID()]);
+    this.receiver = new DelegatedInboundReviewReceiver(deps.receiptPath, deps.beforeReviewOwnerWrite);
+    this.workspaceRevision = randomUUID();
     this.watchWorkspace();
   }
   private watchWorkspace(): void {
@@ -99,7 +100,7 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
     this.assertWorkspace();
     const current = config.owner.current();
     if (this.closed || config.controller.signal.aborted || Date.now() >= config.expiresAt
-      || !current || ownerRevision(current) !== config.revision
+      || !sameDelegatedOwner(current, config.expected)
       || this.configurations.get(routeKey(config.choice.chatId, config.choice.threadId)) !== config) {
       config.controller.abort(); throw new Error('Delegated Telegram configuration is no longer current');
     }
@@ -128,22 +129,24 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
   }
   async selectConfiguration(choice: DelegatedTelegramConfiguration, owner: NativeExecutionAuthority): Promise<string> {
     const generation = this.lifecycleGeneration; this.assertWorkspace(); await this.start();
-    const expected = owner.current(); if (!expected || this.closed || generation !== this.lifecycleGeneration) throw new Error('Owner or lifecycle unavailable');
+    const initialOwner = owner.current(); if (!initialOwner || this.closed || generation !== this.lifecycleGeneration) throw new Error('Owner or lifecycle unavailable');
+    const expected = captureDelegatedOwner(initialOwner);
     const key = routeKey(choice.chatId, choice.threadId); const attempt = randomUUID();
     this.selectionAttempts.set(key, attempt); const previous = this.configurations.get(key); previous?.controller.abort(); if (previous) clearTimeout(previous.timer);
     this.selected.set(key, { chatId: choice.chatId, ...(choice.threadId ? { threadId: choice.threadId } : {}) });
     const selection = { selected: [...this.selected.values()] };
     await this.selectionWrites.run(() => this.selectionStore.persist(selection, { durable: true }));
-    this.assertWorkspace(); if (this.closed || generation !== this.lifecycleGeneration || !owner.current() || ownerRevision(owner.current()!) !== ownerRevision(expected)) throw new Error('Owner or lifecycle changed');
+    this.assertWorkspace(); const current = owner.current(); if (this.closed || generation !== this.lifecycleGeneration || !sameDelegatedOwner(current, expected)) throw new Error('Owner or lifecycle changed');
     return attempt;
   }
   async configure(choice: DelegatedTelegramConfiguration, owner: NativeExecutionAuthority, prepared?: TelegramSourceAccountHandle | null, selectedAttempt?: string): Promise<Record<string, unknown>> {
     const generation = this.lifecycleGeneration; this.assertWorkspace();
     const attempt = selectedAttempt ?? await this.selectConfiguration(choice, owner);
-    const expected = owner.current(); if (!expected) throw new Error('Owner is unavailable');
+    const initialOwner = owner.current(); if (!initialOwner) throw new Error('Owner is unavailable');
+    const expected = captureDelegatedOwner(initialOwner);
     const key = routeKey(choice.chatId, choice.threadId);
     const assertOwner = () => { this.assertWorkspace(); if (this.closed || generation !== this.lifecycleGeneration || this.selectionAttempts.get(key) !== attempt) throw new Error('Delegated intake lifecycle or selection changed');
-      if (!owner.current() || ownerRevision(owner.current()!) !== ownerRevision(expected)) throw new Error('Owner no longer current'); };
+      const current = owner.current(); if (!sameDelegatedOwner(current, expected)) throw new Error('Owner no longer current'); };
     assertOwner();
     const handle = prepared === undefined ? await this.prepareAccount() : prepared;
     const account = handle ? this.deps.accounts.assertCurrent(handle) : null;
@@ -154,7 +157,7 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
     if (expectedAccount !== account.id && expectedAccount !== account.username.toLowerCase()) return { outcome: 'held', route: 'selected-and-held', reason: 'Choose the verified provider account explicitly.', accountIdentity: account };
     const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), choice.configurationLifetimeMs); timer.unref();
     const config: Configuration = { id: `telegram-config-${randomUUID()}`, choice: Object.freeze({ ...choice }), owner, expected, account,
-      revision: ownerRevision(expected), controller, timer, expiresAt: Date.now() + choice.configurationLifetimeMs };
+      revision: randomUUID(), controller, timer, expiresAt: Date.now() + choice.configurationLifetimeMs };
     this.configurations.set(key, config); this.assertConfiguration(config);
     return { configurationId: config.id, accountIdentity: account, expiresAt: config.expiresAt, pendingRetentionMs: choice.pendingRetentionMs,
       processing: 'requires-per-message-approval', restart: 'selected-route-held-without-original-or-grant' };
@@ -191,7 +194,7 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
     const timers = new Set<ReturnType<typeof setTimeout>>();
     const expire = (at: number) => { const timer = setTimeout(() => sourceController.abort(), Math.max(1, at - Date.now())); timer.unref(); timers.add(timer); };
     expire(sourceExpiresAt.value);
-    const expectedRoute = routeRevision(input.binding);
+    const expectedRoute = routeFacts(input.binding);
     const bindingId = input.binding.id;
     const incarnation = this.deps.routes.getBindingIncarnation(bindingId);
     let boundSessionId: string | undefined;
@@ -199,11 +202,11 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
     const assertCurrent = () => {
       this.assertConfiguration(config, !approvedSource); sourceController.signal.throwIfAborted();
       const route = this.deps.routes.getBinding(bindingId);
-      if (Date.now() >= sourceExpiresAt.value || !route || !incarnation || this.deps.routes.getBindingIncarnation(bindingId) !== incarnation || routeRevision(route) !== expectedRoute || (boundSessionId !== undefined && route.sessionId !== boundSessionId)) { sourceController.abort(); throw new Error('Original source expired or route changed'); }
+      if (Date.now() >= sourceExpiresAt.value || !route || !incarnation || this.deps.routes.getBindingIncarnation(bindingId) !== incarnation || !isDeepStrictEqual(routeFacts(route), expectedRoute) || (boundSessionId !== undefined && route.sessionId !== boundSessionId)) { sourceController.abort(); throw new Error('Original source expired or route changed'); }
     };
     const lifetime = AbortSignal.any([sourceController.signal, config.controller.signal]);
     const sources = createNativeInboundSourceOwner({ origin: { kind: 'external-original', accountId: config.account.id,
-      accountRevision: config.account.revision, routeId: input.binding.id, routeRevision: expectedRoute }, lifetime, assertCurrent,
+      accountRevision: config.account.revision, routeId: input.binding.id, routeRevision: incarnation ?? 'unavailable' }, lifetime, assertCurrent,
       readBrokerInput: target => this.deps.broker.getInputs(target.sessionId, 500).find(row => row.id === target.inputId) ?? null });
     lifetime.addEventListener('abort', () => { for (const timer of timers) clearTimeout(timer); sources.close(); }, { once: true });
     try {
@@ -217,6 +220,7 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
           boundSessionId = row.sessionId;
           ref = sources.producer.bind(handle, { sessionId: row.sessionId, inputId: row.id }); return { ref, assertCurrent };
         });
+      assertCurrent();
       const approval = await this.deps.approvals.raiseOwnerApproval({ sessionId: ref.sessionId, signal: lifetime,
         timeoutMs: Math.max(1, sourceExpiresAt.value - Date.now()),
         request: { callId: ref.requestId, tool: 'inbound.telegram.review', category: 'delegate', args: { ref, origin: { kind: 'external-original', accountId: config.account.id, accountRevision: config.account.revision, username: config.account.username, routeId: input.binding.id },
@@ -229,6 +233,7 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
           if (!parsed.approved || parsed.approvalId !== approval.approval.id || !sameNativeInboundSourceRef(parsed.ref, ref)) throw new Error('Decision does not bind this exact source');
         } },
       });
+      assertCurrent();
       const pending: Pending = { ref, configuration: config, sourceController, sourceExpiresAt, timers, assertCurrent, approval, state: 'awaiting-owner', approveRetainedSource: () => { approvedSource = true; }, run: async () => ({ outcome: 'held' }) };
       const handoff = createNativeInboundHandoff({ sources: sources.resolver, lifetime,
         owner: { withCurrent: async (_source, use) => { assertCurrent(); if (!pending.grant) throw new Error('No exact owner approval');
@@ -253,8 +258,9 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
     this.assertWorkspace();
     const pending = this.pending.get(input.ref.requestId);
     if (!pending || !sameNativeInboundSourceRef(pending.ref, input.ref) || pending.approval.approval.id !== input.approvalId) throw new Error('Exact pending source is unavailable');
-    const current = authority.current(); if (!current || ownerRevision(current) !== pending.configuration.revision) throw new Error('Only the configured paired owner may decide');
-    const assertOwner = () => { if (!authority.current() || ownerRevision(authority.current()!) !== ownerRevision(current)) throw new Error('Owner no longer current'); };
+    const current = authority.current(); if (!sameDelegatedOwner(current, pending.configuration.expected)) throw new Error('Only the configured paired owner may decide');
+    const expectedOwner = pending.configuration.expected;
+    const assertOwner = () => { this.assertWorkspace(); const active = authority.current(); if (!sameDelegatedOwner(active, expectedOwner)) throw new Error('Owner no longer current'); };
     {
       if (input.approved) {
         const handle = prepared === undefined ? await this.prepareAccount() : prepared; const account = handle ? this.deps.accounts.assertCurrent(handle) : null;
@@ -266,17 +272,17 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
       if (input.approved && input.choices) {
         const expiresAt = Date.now() + input.choices.sourceRetentionMs;
         if (expiresAt > pending.configuration.expiresAt) throw new Error('Source lifetime must fit within the explicitly configured owner lifetime');
-        pending.grant = { configurationId: pending.configuration.id, ownerRevision: pending.configuration.revision, workspaceRevision: this.workspaceRevision,
+        pending.grant = { configurationId: pending.configuration.id, ownerRevision: pending.configuration.revision, owner: expectedOwner, workspaceRevision: this.workspaceRevision,
           approvalId: input.approvalId, choices: Object.freeze({ ...input.choices }), sourceExpiresAt: expiresAt };
       }
       pending.state = 'deciding';
-      const settled = await pending.approval.resolveOwnerDecision({ decision: { approved: input.approved, ...(input.approved ? { modifiedArgs: input } : {}) }, actor: current.principalId, actorSurface: 'paired-owner-command', assertCurrent: assert });
+      const settled = await pending.approval.resolveOwnerDecision({ decision: { approved: input.approved, ...(input.approved ? { modifiedArgs: input } : {}) }, actor: expectedOwner.principalId, actorSurface: 'paired-owner-command', assertCurrent: assert });
       assertOwner();
       if (input.approved && (settled?.status !== 'approved' || settled.decision?.disposition !== 'approved' || JSON.stringify(settled.decision.modifiedArgs) !== JSON.stringify(input))) { pending.sourceController.abort(); throw new Error('Exact approval was not durably resolved'); }
       if (!input.approved) {
         pending.sourceController.abort();
         const row = this.deps.broker.getInputs(input.ref.sessionId, 500).find(value => value.id === input.ref.inputId);
-        if (row?.state === 'queued') await this.deps.broker.cancelInput(input.ref.sessionId, input.ref.inputId);
+        if (row?.state === 'queued') { await this.deps.broker.cancelInput(input.ref.sessionId, input.ref.inputId); assertOwner(); }
         return { outcome: 'held', reason: 'owner-denied' };
       }
       assert();
@@ -284,45 +290,62 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
       pending.approveRetainedSource();
       pending.sourceExpiresAt.value = pending.grant!.sourceExpiresAt;
       const timer = setTimeout(() => pending.sourceController.abort(), Math.max(1, pending.sourceExpiresAt.value - Date.now())); timer.unref(); pending.timers.add(timer);
-      pending.state = 'approved'; return pending.run();
+      pending.state = 'approved'; const outcome = await pending.run(); assertOwner(); return outcome;
     }
   }
-  private checkRecordOwner(record: { ownerRevision: string }, authority: NativeExecutionAuthority): void {
+  private captureOwner(authority: NativeExecutionAuthority): { owner: DelegatedReviewOwner; assertCurrent: () => void } {
     this.assertWorkspace();
-    const current = authority.current(); if (!current || ownerRevision(current) !== record.ownerRevision) throw new Error('Review receipt belongs to another paired owner');
+    if (this.closed) throw new Error('Delegated intake is closed');
+    const initial = authority.current(); if (!initial) throw new Error('Owner unavailable');
+    const owner = captureDelegatedOwner(initial), generation = this.lifecycleGeneration;
+    return { owner, assertCurrent: () => {
+      this.assertWorkspace(); const current = authority.current();
+      if (this.closed || generation !== this.lifecycleGeneration || !sameDelegatedOwner(current, owner)) throw new Error('Owner or lifecycle changed');
+    } };
   }
   async status(ref: NativeInboundSourceRef, authority: NativeExecutionAuthority, read = false): Promise<Record<string, unknown>> {
+    const { owner, assertCurrent } = this.captureOwner(authority);
     const pending = this.pending.get(ref.requestId);
-    const record = await this.receiver.get(ref);
+    const record = await this.receiver.get(ref); assertCurrent();
     if (record) {
-      this.checkRecordOwner(record, authority); const original = await this.receiver.read(ref);
+      if (!delegatedReviewOwnership(owner)(record)) throw new Error('Review receipt belongs to another paired owner');
+      let original = await this.receiver.read(ref); assertCurrent();
+      if (original) {
+        try {
+          if (!pending || !sameNativeInboundSourceRef(pending.ref, ref)) throw new Error('Original source proof is unavailable');
+          pending.assertCurrent();
+        } catch { this.receiver.release(ref); original = null; }
+      }
       return { record, source: original ? 'available-in-memory' : 'expired-or-lost', recovery: original ? 'owner-review-available' : 'new-original-required', ...(read && original ? { original } : {}) };
     }
     if (!pending || !sameNativeInboundSourceRef(pending.ref, ref)) return { outcome: 'held', reason: 'missing-source-proof' };
-    this.checkRecordOwner({ ownerRevision: pending.configuration.revision }, authority);
+    if (!isDeepStrictEqual(owner, pending.configuration.expected)) throw new Error('Review receipt belongs to another paired owner');
     let available = true; try { pending.assertCurrent(); } catch { available = false; }
     return { ref, outcome: available ? pending.state : 'held', source: available ? 'awaiting-owner' : 'expired-or-lost', approvalId: pending.approval.approval.id };
   }
   async list(authority: NativeExecutionAuthority): Promise<Record<string, unknown>> {
-    this.assertWorkspace();
-    const current = authority.current(); if (!current) throw new Error('Owner unavailable');
-    return { records: (await this.receiver.list()).filter(record => record.ownerRevision === ownerRevision(current)).map(record => ({ ...record, execution: 'not-started' })),
-      pending: [...this.pending.values()].filter(entry => entry.configuration.revision === ownerRevision(current)).map(entry => ({ ref: entry.ref, approvalId: entry.approval.approval.id, sourceExpiresAt: entry.sourceExpiresAt.value, outcome: entry.sourceController.signal.aborted ? 'held' : entry.state })) };
+    const { owner, assertCurrent } = this.captureOwner(authority);
+    const records = await this.receiver.list(); assertCurrent();
+    return { records: records.filter(delegatedReviewOwnership(owner)).map(record => ({ ...record, execution: 'not-started' })),
+      pending: [...this.pending.values()].filter(entry => isDeepStrictEqual(entry.configuration.expected, owner)).map(entry => ({ ref: entry.ref, approvalId: entry.approval.approval.id, sourceExpiresAt: entry.sourceExpiresAt.value, outcome: entry.sourceController.signal.aborted ? 'held' : entry.state })) };
   }
   async cancel(ref: NativeInboundSourceRef, authority: NativeExecutionAuthority): Promise<Record<string, unknown>> {
-    const pending = this.pending.get(ref.requestId); const record = await this.receiver.get(ref);
-    if (record) this.checkRecordOwner(record, authority);
-    else if (pending && sameNativeInboundSourceRef(pending.ref, ref)) this.checkRecordOwner({ ownerRevision: pending.configuration.revision }, authority);
+    const { owner, assertCurrent } = this.captureOwner(authority);
+    const pending = this.pending.get(ref.requestId); const record = await this.receiver.get(ref); assertCurrent();
+    if (record) { if (!delegatedReviewOwnership(owner)(record)) throw new Error('Review receipt belongs to another paired owner'); }
+    else if (pending && sameNativeInboundSourceRef(pending.ref, ref)) { if (!isDeepStrictEqual(pending.configuration.expected, owner)) throw new Error('Review receipt belongs to another paired owner'); }
     else return { outcome: 'held', reason: 'missing-source-proof' };
-    if (pending) { pending.sourceController.abort(); pending.state = 'cancelled'; await this.deps.approvals.cancelApproval(pending.approval.approval.id, authority.current()!.principalId, 'paired-owner-command'); }
+    if (pending) { pending.sourceController.abort(); pending.state = 'cancelled'; await this.deps.approvals.cancelApproval(pending.approval.approval.id, owner.principalId, 'paired-owner-command'); assertCurrent(); }
     const row = this.deps.broker.getInputs(ref.sessionId, 500).find(value => value.id === ref.inputId);
-    if (row?.state === 'queued') await this.deps.broker.cancelInput(ref.sessionId, ref.inputId);
-    await this.receiver.cancel(ref); return { outcome: 'cancelled', execution: 'not-started' };
+    if (row?.state === 'queued') { await this.deps.broker.cancelInput(ref.sessionId, ref.inputId); assertCurrent(); }
+    await this.receiver.cancel(ref); assertCurrent(); return { outcome: 'cancelled', execution: 'not-started' };
   }
   revoke(configurationId: string, authority: NativeExecutionAuthority): Record<string, unknown> {
+    const { owner } = this.captureOwner(authority);
     const config = [...this.configurations.values()].find(value => value.id === configurationId);
     if (!config) return { outcome: 'held', reason: 'configuration-unavailable' };
-    this.checkRecordOwner({ ownerRevision: config.revision }, authority); config.controller.abort(); clearTimeout(config.timer);
+    if (!isDeepStrictEqual(owner, config.expected)) throw new Error('Configuration belongs to another paired owner');
+    config.controller.abort(); clearTimeout(config.timer);
     return { outcome: 'revoked', route: 'remains-selected-and-held' };
   }
   /** A new daemon lifecycle restores commands, never previous source/grant lifetimes. */

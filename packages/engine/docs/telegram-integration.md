@@ -340,3 +340,21 @@ unfinished.
 Just change `surfaces.telegram.mode` and restart. The daemon reconciles the
 Telegram-side registration for you, and does not drop pending updates when it
 removes a webhook.
+
+
+## Explicit owner review of delegated messages
+
+A selected delegated route holds each external message for the paired owner's
+explicit review decision. The owner chooses the original message's memory
+lifetime and the metadata record's retention period. Approving review does not
+start work. Closing the review, changing the configured owner or route, expiry,
+or leaving the workspace releases access to the retained original.
+
+Review metadata records the paired identity and granted scopes without storing
+a bearer token or the original message. A restart can display that metadata but
+cannot recover the original message or its approval capability. Older saved
+review records remain readable by their matching paired owner.
+
+Native installations declare support for the explicit-owner receipt format
+before saving it. Updating or rolling back to a binary that cannot read that
+format is refused; choose a compatible build instead.

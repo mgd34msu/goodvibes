@@ -17,6 +17,8 @@ import type { WorkspaceSwapManagerLike } from '../daemon-sdk/src/system-route-ty
 import { RuntimeEventBus, createEventEnvelope } from '../sdk/src/platform/runtime/events/index.js';
 import { createShellPathService } from '../sdk/src/platform/runtime/shell-paths.js';
 import type { NativeExecutionAuthority, NativePairedSnapshot } from '../sdk/src/platform/security/http-auth.js';
+import { createNativeDataWriteOwner, assertNativeReaderCompatible, NativeDataCompatibilityError, NATIVE_READER_REQUIREMENT_FILE } from '../sdk/src/platform/runtime/native-reader-compatibility.js';
+import { realUpdateFileIo } from '../sdk/src/platform/runtime/self-update.js';
 import { WorkspaceSwapManager, type WorkspaceSwapResult } from '../sdk/src/platform/workspace/workspace-swap-manager.js';
 
 const cleanups: Array<() => void | Promise<void>> = [];
@@ -33,7 +35,7 @@ const choices: DelegatedInboundChoices = {
 };
 type PendingSource = { ref: NativeInboundSourceRef; approvalId: string };
 
-async function fixture() {
+async function fixture(beforeWrite?: () => void) {
   const directory = mkdtempSync(join(tmpdir(), 'delegated-workspace-fence-'));
   cleanups.push(() => rmSync(directory, { recursive: true, force: true }));
   const initialRoot = join(directory, 'first');
@@ -59,9 +61,11 @@ async function fixture() {
   const manager = new WorkspaceSwapManager(initialRoot, { runtimeBus, daemonHomeDir: join(directory, 'daemon'),
     getBusySessionCount: () => broker.countBusySessions(),
     rerootStores: async path => { rerootCalls.push(path); await reroot(path); } });
+  const execPath = join(directory, 'goodvibes-daemon');
+  const nativeDataWriter = createNativeDataWriteOwner({ execPath, version: '3.1.2', assertCurrent: () => { beforeWrite?.(); } });
   const construct = (workspaceRoot = manager.getCurrentWorkingDir(), swapManager: WorkspaceSwapManagerLike | null = manager) => {
     const runtime = { sessionBroker: broker, approvalBroker: approvals, routeBindings: routes, runtimeBus,
-      gatewayMethods: new GatewayMethodCatalog(), runtimeServices: { workingDirectory: workspaceRoot,
+      gatewayMethods: new GatewayMethodCatalog(), runtimeServices: { workingDirectory: workspaceRoot, nativeDataWriter,
         shellPaths: createShellPathService({ workingDirectory: workspaceRoot, homeDirectory: directory }) },
     } as unknown as ResolvedDaemonFacadeRuntime;
     const host = composeDelegatedTelegramIntake(runtime, accounts.reader, swapManager);
@@ -89,7 +93,7 @@ async function fixture() {
     // RuntimeEventBus deliberately delivers subscribers in microtasks.
     await Promise.resolve();
   };
-  return { initialRoot, replacementRoot, authority, broker, construct, accept, approve, emitStarted, runtimeBus, manager, rerootCalls,
+  return { directory, execPath, initialRoot, replacementRoot, authority, broker, construct, accept, approve, emitStarted, runtimeBus, manager, rerootCalls,
     onReroot: (callback: typeof reroot) => { reroot = callback; } };
 }
 
@@ -253,4 +257,28 @@ test('the async workspace notice remains a defensive fence for transitions outsi
   await host.configure(configuration, f.authority); const pending = await f.approve(host);
   await f.emitStarted();
   await expect(host.status(pending.ref, f.authority, true)).rejects.toThrow('fresh workspace construction');
+});
+
+
+// Regression source intentionally unrun during the coding-first pass.
+test('real delegated composition publishes a reader requirement before its first explicit-owner receipt', async () => {
+  const f = await fixture(); const host = f.construct();
+  await host.configure(configuration, f.authority);
+  const compatibility = join(f.directory, NATIVE_READER_REQUIREMENT_FILE);
+  expect(existsSync(compatibility)).toBe(false);
+  await f.approve(host);
+  expect(existsSync(compatibility)).toBe(true);
+  expect(() => assertNativeReaderCompatible(f.execPath, '3.1.2', realUpdateFileIo,
+    { schema: 1, version: '3.1.2', formats: [] })).toThrow(NativeDataCompatibilityError);
+});
+
+test('a retired native writer cannot publish a delegated review receipt', async () => {
+  let retired = false;
+  const f = await fixture(() => { if (retired) throw new Error('Fixture native writer retired'); });
+  const host = f.construct(); await host.configure(configuration, f.authority);
+  const pending = await f.accept(host) as PendingSource; retired = true;
+  expect(await host.decide({ ...pending, approved: true, choices }, f.authority)).toMatchObject({ outcome: 'unknown' });
+  expect((await host.list(f.authority)).records).toEqual([]);
+  expect(await host.status(pending.ref, f.authority, true)).not.toHaveProperty('original');
+  expect(existsSync(join(f.directory, NATIVE_READER_REQUIREMENT_FILE))).toBe(false);
 });

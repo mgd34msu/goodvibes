@@ -54,6 +54,7 @@ export function composeDelegatedTelegramIntake(runtime: ResolvedDaemonFacadeRunt
   const workspaceRevision = swapManager?.getWorkspaceRevision?.();
   const host = new DelegatedTelegramIntake({ broker: runtime.sessionBroker, approvals: runtime.approvalBroker, routes: runtime.routeBindings,
     accounts, workspaceRoot: runtime.runtimeServices.workingDirectory,
+    beforeReviewOwnerWrite: () => runtime.runtimeServices.nativeDataWriter?.declare('delegated-review-owner-v2'),
     isWorkspaceCurrent: () => !swapManager || (typeof swapManager.subscribeBeforeSwap === 'function'
       && typeof swapManager.getWorkspaceRevision === 'function' && swapManager.getWorkspaceRevision() === workspaceRevision
       && swapManager.getCurrentWorkingDir() === runtime.runtimeServices.workingDirectory),

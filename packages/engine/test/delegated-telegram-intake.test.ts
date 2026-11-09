@@ -5,6 +5,9 @@ import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../sdk
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
+import { DelegatedInboundReviewReceiver } from '../sdk/src/platform/control-plane/delegated-inbound-receiver.js';
 import { join } from 'node:path';
 import { ApprovalBroker } from '../sdk/src/platform/control-plane/approval-broker.js';
 import { SharedSessionBroker } from '../sdk/src/platform/control-plane/session-broker.js';
@@ -85,6 +88,8 @@ async function fixture(persistedPairing = false) {
     get updateDeps() { return updateDeps(); }, sourceReads: () => sourceReads,
     spawned: () => spawned, changeAccount: () => { lease = attachAccount(456, 'replacement_bot', '456:synthetic-replacement'); },
     rotateSameAccount: () => { lease = attachAccount(123, configuredUsername, '123:synthetic-rotated'); },
+    replaceOwner: (change: Partial<NativePairedSnapshot>) => { if (!current) throw new Error('Fixture owner missing'); current = { ...current, ...change }; },
+    mutateOwnerScopes: () => { if (!current) throw new Error('Fixture owner missing'); (current.scopes as string[]).push('read:other-fixture'); },
     revokeOwner: () => { current = null; } };
 }
 
@@ -419,3 +424,110 @@ test('provider proof has a finite deadline even without caller cancellation', as
   await expect(host.prepareAccount()).rejects.toThrow('timed out');
   expect(f.approvals.listApprovals()).toHaveLength(0);
 }, 10_000);
+
+
+// Regression source intentionally unrun during the coding-first pass.
+test('delegated owner binding is detached from mutable scopes and includes authority revisions', async () => {
+  const f = await fixture(); await f.configure(); const pending = await f.ingress();
+  f.mutateOwnerScopes();
+  await expect(f.decide(pending)).rejects.toThrow();
+  expect(f.spawned()).toBe(0);
+  const g = await fixture(); await g.configure(); const other = await g.ingress();
+  g.replaceOwner({ authorityRevision: 'replacement-native-authority' });
+  await expect(g.host.decide({ ...other, approved: true, choices: choices as import('../sdk/src/platform/control-plane/delegated-inbound-wire.js').DelegatedInboundChoices }, g.authority)).rejects.toThrow();
+});
+
+test('scope ordering does not change owner identity and public revisions remain opaque and bounded', async () => {
+  const f = await fixture(); await f.configure(); const pending = await f.ingress();
+  f.replaceOwner({ scopes: [...f.authority.current()!.scopes].reverse() });
+  await f.decide(pending);
+  const result = await f.host.status(pending.ref, f.authority, true);
+  const record = result.record as { ownerRevision: string; workspaceRevision: string; owner: { authorityId: string; scopes: string[] }; origin: { routeRevision: string } };
+  expect(record.ownerRevision).toMatch(/^[0-9a-f-]{36}$/);
+  expect(record.workspaceRevision).toMatch(/^[0-9a-f-]{36}$/);
+  expect(record.origin.routeRevision).toBe(f.hostDeps.routes.getBindingIncarnation(f.hostDeps.routes.listBindings()[0]!.id));
+  expect(record.owner.authorityId).toBe(f.authority.current()!.authorityId);
+  expect(record.owner.scopes).toEqual([...f.authority.current()!.scopes].sort());
+  expect(JSON.stringify(record)).not.toContain('EXTERNAL ORIGINAL');
+});
+
+test('owner revocation during original-source read cannot return retained text', async () => {
+  const f = await fixture(); await f.configure(); const pending = await f.ingress(); await f.decide(pending);
+  const originalRead = DelegatedInboundReviewReceiver.prototype.read;
+  let entered!: () => void; let release!: () => void;
+  const waiting = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const held = spyOn(DelegatedInboundReviewReceiver.prototype, 'read').mockImplementationOnce(async function (this: DelegatedInboundReviewReceiver, ref) {
+    const value = await originalRead.call(this, ref); entered(); await gate; return value;
+  });
+  try {
+    const reading = f.host.status(pending.ref, f.authority, true); await waiting;
+    f.revokeOwner(); const refused = expect(reading).rejects.toThrow(); release(); await refused;
+  } finally { release(); held.mockRestore(); }
+});
+
+test('owner scope changes during metadata listing cannot return a stale-owner result', async () => {
+  const f = await fixture(); await f.configure(); const pending = await f.ingress(); await f.decide(pending);
+  const originalList = DelegatedInboundReviewReceiver.prototype.list;
+  let entered!: () => void; let release!: () => void;
+  const waiting = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const held = spyOn(DelegatedInboundReviewReceiver.prototype, 'list').mockImplementationOnce(async function (this: DelegatedInboundReviewReceiver) {
+    const records = await originalList.call(this); entered(); await gate; return records;
+  });
+  try {
+    const listing = f.host.list(f.authority); await waiting;
+    f.mutateOwnerScopes(); const refused = expect(listing).rejects.toThrow(); release(); await refused;
+  } finally { release(); held.mockRestore(); }
+});
+
+test('saved digest-only review receipts retain metadata access without restoring source authority', async () => {
+  const f = await fixture(); await f.configure(); const pending = await f.ingress(); await f.decide(pending); f.host.close();
+  const path = f.hostDeps.receiptPath;
+  const saved = JSON.parse(readFileSync(path, 'utf8')) as { records: Array<{ owner?: unknown; ownerRevision: string }> };
+  const owner = f.authority.current()!;
+  // Reproduce actual old saved bytes only; new production receipts never issue a digest.
+  for (const row of saved.records) { delete row.owner; row.ownerRevision = createHash('sha256').update(JSON.stringify([owner.principalId, owner.tokenId, [...owner.scopes].sort()])).digest('hex'); }
+  writeFileSync(path, JSON.stringify(saved));
+  const reopened = new DelegatedTelegramIntake(f.hostDeps); cleanups.push(() => reopened.close());
+  expect(await reopened.status(pending.ref, f.authority, true)).toMatchObject({ source: 'expired-or-lost', recovery: 'new-original-required' });
+  expect((await reopened.list(f.authority)).records).toHaveLength(1);
+  expect(await reopened.cancel(pending.ref, f.authority)).toMatchObject({ outcome: 'cancelled' });
+  const retained = JSON.parse(readFileSync(path, 'utf8')) as { records: Array<{ owner?: unknown; state: string }> };
+  expect(retained.records[0]?.owner).toBeUndefined();
+  expect(retained.records[0]?.state).toBe('cancelled');
+  f.replaceOwner({ scopes: ['read:work-ledger'] });
+  await expect(reopened.status(pending.ref, f.authority, true)).rejects.toThrow();
+});
+
+
+test('review cancellation while a source read settles cannot return the already-released original', async () => {
+  const f = await fixture(); await f.configure(); const pending = await f.ingress(); await f.decide(pending);
+  const originalRead = DelegatedInboundReviewReceiver.prototype.read;
+  let entered!: () => void; let release!: () => void;
+  const waiting = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const held = spyOn(DelegatedInboundReviewReceiver.prototype, 'read').mockImplementationOnce(async function (this: DelegatedInboundReviewReceiver, ref) {
+    const value = await originalRead.call(this, ref); entered(); await gate; return value;
+  });
+  try {
+    const reading = f.host.status(pending.ref, f.authority, true); await waiting;
+    await f.host.cancel(pending.ref, f.authority); release();
+    const result = await reading;
+    expect(result).not.toHaveProperty('original');
+    expect(result.source).toBe('expired-or-lost');
+  } finally { release(); held.mockRestore(); }
+});
+
+
+test('review startup finishing after close cannot restore retention timers', async () => {
+  const f = await fixture(); await f.configure(); const pending = await f.ingress(); await f.decide(pending); f.host.close();
+  const receiver = new DelegatedInboundReviewReceiver(f.hostDeps.receiptPath); cleanups.push(() => receiver.close());
+  const timers = spyOn(globalThis, 'setTimeout');
+  try {
+    const loading = receiver.list(); receiver.close(); await loading;
+    // The saved metadata has a 20-second record lifetime. Closing before its
+    // async load settles must not recreate that retention timer afterward.
+    expect(timers.mock.calls.some(([, delay]) => typeof delay === 'number' && delay > 10_000)).toBe(false);
+  } finally { timers.mockRestore(); }
+});

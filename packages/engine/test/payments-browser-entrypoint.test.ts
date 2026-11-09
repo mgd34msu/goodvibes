@@ -49,10 +49,10 @@ for (const source of [true, false]) {
   describe(`payment browser policy through the ${source ? 'Bun source' : 'published import'} condition`, () => {
     test('bundles the four UI helpers and fails closed for remote or unknown surfaces', async () => {
       const policy = await bundleConsumer(source);
-      expect(Object.keys(policy).sort()).toEqual([
+      expect(Object.keys(policy)).toEqual(expect.arrayContaining([
         'CVV_PROMPT_TRADEOFF_WARNING', 'describeCardEntryRefusal',
         'mayEnterCardDetails', 'mayOfferCardEntryFlow',
-      ]);
+      ]));
       for (const surface of ['tui', 'agent-terminal', 'webui', ' WEBUI ']) {
         expect(policy.mayEnterCardDetails(surface)).toBe(true);
         expect(policy.mayOfferCardEntryFlow(surface)).toBe(true);

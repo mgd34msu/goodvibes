@@ -125,8 +125,8 @@ export async function isCardFieldDescriptor(control: FormControlDescriptor, read
       label: text(control.label),
     }, { site: CARD_FIELD_SITE, signal, beforeAttempt: current });
     current();
-    const reading = run.readings.card_field;
-    const ordinary = reading.verdict === 'no' && reading.outcome === 'act';
+    const resultReading = run.readings.card_field;
+    const ordinary = resultReading.verdict === 'no' && resultReading.outcome === 'act';
     run.recordAction(ordinary ? 'value reported' : 'value suppressed');
     current();
     return !ordinary;

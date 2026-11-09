@@ -19,12 +19,16 @@ function deliveriesValid(value: unknown): boolean {
   const entries: readonly unknown[] = value;
   for (const entry of entries) {
     if (!object(entry) || typeof entry['channel'] !== 'string' || !channels.includes(entry['channel'])
-      || seen.has(entry['channel']) || typeof entry['delivered'] !== 'boolean' || typeof entry['backfillable'] !== 'boolean') return false;
+      || typeof entry['delivered'] !== 'boolean' || typeof entry['backfillable'] !== 'boolean') return false;
+    let identity = entry['channel'];
     if (Object.hasOwn(entry, 'receipt')) {
       const channel = parseCommandAuthorityChannel(entry['channel']);
-      if (!channel || entry['delivered'] !== true || capturePaymentNoticeReceipt(entry['receipt'], channel) === null) return false;
+      const receipt = channel ? capturePaymentNoticeReceipt(entry['receipt'], channel) : null;
+      if (!receipt || entry['delivered'] !== true) return false;
+      identity = JSON.stringify([entry['channel'], receipt.surfaceKind, receipt.accountId ?? null, receipt.conversationId, receipt.threadId ?? null, receipt.messageId]);
     }
-    seen.add(entry['channel']);
+    if (seen.has(identity)) return false;
+    seen.add(identity);
   }
   return true;
 }

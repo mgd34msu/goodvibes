@@ -36,7 +36,7 @@ function fixture(failWrite = false) {
     files: () => [credential], fetchImpl: (async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(input instanceof Request ? input.url : String(input));
       requests.push({ path: url.pathname, body: init?.body ? JSON.parse(String(init.body)) as unknown : undefined, headers: new Headers(init?.headers) });
-      if (url.pathname.includes('auth/current')) return Response.json({ authenticated: true, authMode: 'shared-token', tokenPresent: true,
+      if (url.pathname === '/api/control-plane/auth') return Response.json({ authenticated: true, authMode: 'shared-token', tokenPresent: true,
         authorizationHeaderPresent: true, sessionCookiePresent: false, principalId: 'pairing:owner', principalKind: 'token', admin: true,
         scopes: ['read:channels', 'write:channels'], roles: [] });
       const actionId = url.pathname.split('/').at(-1);
@@ -56,7 +56,7 @@ function fixture(failWrite = false) {
 test('model dispatch cannot open recovery; a real owner reviews the bot before one exact write', async () => {
   const f = fixture(); await f.registry.execute('channels', ['telegram-cursor'], f.context);
   expect(f.requests).toEqual([]); expect(f.modal.active).toBe(false);
-  await f.open(); expect(f.modal.items[0]?.id).toBe('keep-blocked');
+  await f.open(); expect(f.modal.items[0]?.id, f.messages.join('\n')).toBe('keep-blocked');
   expect(f.modal.items[1]?.detail).toContain('@original_bot'); expect(f.modal.items[1]?.detail).toContain('501');
   f.choose('migrate'); await until(() => f.messages.some(message => message.includes('Saved original position.')));
   const writes = f.requests.filter(request => request.path.endsWith('cursor-migration-commit'));

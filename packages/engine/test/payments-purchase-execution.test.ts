@@ -458,7 +458,7 @@ for (const shape of shapes()) for (const answer of ['approve', 'deny'] as const)
       return { answer, channel: 'tui' };
     };
     const outcome = await runOn(harness, merchant);
-    expect(windows).toBe(2); expect(harness.notices.map(notice => notice.kind)).toEqual(['veto', 'approval']);
+    expect(windows).toBe(2); expect(harness.notices.map(notice => notice.kind)).toEqual(answer === 'approve' ? ['veto', 'approval', 'veto'] : ['veto', 'approval']);
     if (answer === 'approve') {
       expect(outcome.kind).toBe('purchased'); expect(merchant.submissions).toHaveLength(1);
       expect(harness.recorded[0]?.totalMinorUnits).toBe(merchant.shape === 'alpha' ? 22_649 : 238_690);
@@ -1293,7 +1293,7 @@ describe('when the merchant interrupts or the process dies', () => {
     const harness = buildHarness({ merchant: alpha, challenge: { kind: 'otp', step: 'x', url: 'https://x.test/' } });
     await runOn(harness, alpha);
     // The first is paused mid-flight and still owns the page.
-    await expect(runOn(harness, alpha)).rejects.toThrow(/already in flight/);
+    await expect(runOn(harness, alpha)).rejects.toThrow(/already belongs to a checkout/);
   });
 });
 

@@ -39,7 +39,7 @@ test.each(['clean', 'tainted', 'incomplete'] as const)('the paired dispatcher re
   const helper = new DaemonControlPlaneHelper({ gatewayMethods: catalog, pairingTokens: pairing, authToken: () => 'synthetic-shared',
     userAuth: { validateSession: () => null } } as unknown as DaemonControlPlaneContext);
   const values: Record<string, unknown> = { 'payments.enabled': true, 'payments.budget.dailyItem': 100,
-    'payments.budget.dailyOverage': 100, 'payments.budget.perPurchaseCeiling': 100, 'payments.notifyChannels': 'telegram', 'payments.cvvHandling': 'stored' };
+    'payments.budget.dailyOverage': 100, 'payments.budget.perPurchaseCeiling': 100, 'payments.notifyChannels': 'tui', 'payments.cvvHandling': 'stored' };
   for (const [key, value] of Object.entries({ name: 'Fixture owner', line1: '1 Fixture Street', city: 'Fixture City', region: 'TS', postalCode: '00000', country: 'US' })) values[`payments.shippingAddress.${key}`] = value;
   const config = { get: (key: string) => values[key] }, secrets = new Map<string, string>(), effects: string[] = [];
   const originalBrowser = { version: 1 as const, endpoint: 'ws://127.0.0.1:9222/devtools/browser/original-private-browser',
@@ -69,7 +69,8 @@ test.each(['clean', 'tainted', 'incomplete'] as const)('the paired dispatcher re
       purchases: new DaemonPurchaseLedger({ filePath: join(root, 'purchases.json') }), checkout: {
         operations, requests, replies, journal: new DurableCheckoutJournal(join(root, 'journal.json')), approvals: new DaemonApprovalStore(join(root, 'approvals.json')),
         addresses: configBackedAddressStore(config), untrusted: getProcessUntrustedContentLedger(), merchantJudge: createJevMerchantJudge(),
-        notifier: channelBackedPaymentNotifier(config, { async deliver(request) { request.assertCurrent?.(); return 'synthetic-delivery'; } }, replies),
+        notifier: channelBackedPaymentNotifier(config, { async deliver() { throw new Error('Payment receipt required'); },
+          async deliverWithReceipt(request) { request.assertCurrent?.(); return { receipt: { surfaceKind: 'tui', conversationId: 'original-local-terminal', messageId: '51' } }; } }, replies),
         seam: (() => {
           const seam = { cardFieldGuard: new CardMaterialRedactor(), armSubmitApproval: async () => {},
             async captureCheckoutRecovery(sessionId: string, pageId: string, refs: readonly string[], owner: { readonly assertCurrent?: (() => void) | undefined }) {
@@ -132,7 +133,8 @@ test.each(['clean', 'tainted', 'incomplete'] as const)('the paired dispatcher re
     content: original === 'clean' ? 'A later stranger mentions bestbuy.com.' : 'An unrelated later source.' });
   releasePreflight();
   if (original === 'clean') {
-    await until(() => f.replies.inspect().length === 1);
+    try { await until(() => f.replies.inspect().length === 1); }
+    catch (error) { throw new Error(`Detached checkout status: ${JSON.stringify(f.operations.get(body.requestId))}`, { cause: error }); }
     const status = readPaymentWindowStatus((await call('payments.purchase.status')).body);
     expect(status.operations[0]).toMatchObject({ purchaseId: body.requestId, state: 'running', phase: 'awaiting-window' });
     const window = status.windows[0]; if (!window) throw new Error('Expected the real reply window');
@@ -141,8 +143,9 @@ test.each(['clean', 'tainted', 'incomplete'] as const)('the paired dispatcher re
     expect(window.notice).toContain('Fixture item'); expect(window.notice).not.toContain(body.item);
     expect((await call('payments.purchase.cancel', { purchaseId: window.purchaseId, windowId: window.windowId, confirm: true })).status).toBe(200);
   }
-  const expectedState = original === 'clean' ? 'cancelled' : 'refused';
+  const expectedState = 'refused';
   await until(() => f.operations.get(body.requestId)?.state === expectedState);
+  if (original === 'clean') expect(f.operations.get(body.requestId)?.outcome).toBe('refused:requested-maximum-exceeded-denied');
   await until(() => !existsSync(privatePath));
   expect(new PairingTokenManager(join(root, 'pairing.json')).readNativeContinuation(saved.host.continuation)).toBeNull();
   if (original !== 'clean') {

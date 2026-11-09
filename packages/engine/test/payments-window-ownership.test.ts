@@ -129,7 +129,9 @@ test('an early unresolved veto at an expired armed deadline fails instead of bec
   const waiting = reception.awaitAnswer(200);
   expect(await offering).toEqual({ consumed: false, reason: 'no-window' });
   await expect(waiting).rejects.toMatchObject({ kind: 'unsettled-reply' });
-  expect(readings.requests).toEqual([]); expect(replies.pending).toBe(0);
+  expect(readings.requests).toHaveLength(1);
+  expect(readings.requests[0]?.state).toEqual({ proposal: original.notice, reply: 'stop' });
+  expect(replies.pending).toBe(0);
 });
 
 test('one purchase cannot silently replace its live window', async () => {

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { GatewayMethodCatalog, prepareGatewayScopePolicyOwner, completeGatewayScopePolicyBootstrap } from '@goodvibes-jev/engine/sdk/platform/control-plane';
@@ -43,7 +43,7 @@ function fixture(catalog = new GatewayMethodCatalog()) {
     if (!result.body || typeof result.body !== 'object' || Array.isArray(result.body)) throw new Error('Expected object response');
     return result.body as Record<string, unknown>;
   });
-  const values: Record<string, unknown> = { 'payments.enabled': true, 'payments.budget.dailyItem': 100, 'payments.budget.dailyOverage': 100, 'payments.budget.perPurchaseCeiling': 100, 'payments.notifyChannels': 'telegram', 'payments.cvvHandling': 'stored' };
+  const values: Record<string, unknown> = { 'payments.enabled': true, 'payments.budget.dailyItem': 100, 'payments.budget.dailyOverage': 100, 'payments.budget.perPurchaseCeiling': 100, 'payments.notifyChannels': 'tui', 'payments.cvvHandling': 'stored' };
   for (const [key, value] of Object.entries({ name: 'Fixture owner', line1: '1 Fixture Street', city: 'Fixture City', region: 'TS', postalCode: '00000', country: 'US' })) values[`payments.shippingAddress.${key}`] = value;
   const secrets = new Map<string, string>();
   const scopes: unknown[] = [];
@@ -59,7 +59,8 @@ function fixture(catalog = new GatewayMethodCatalog()) {
       async delete(key: string) { secrets.delete(key); },
     },
     gatewayMethods: catalog, isPaymentsLeader: () => leader, checkoutSeam: browser.get,
-    channelDeliveryRouter: { async deliver(request: unknown) { deliveries.push(request); return 'fixture-notice'; } },
+    channelDeliveryRouter: { async deliver(request: unknown) { deliveries.push(request); return 'fixture-notice'; },
+      async deliverWithReceipt(request: unknown) { deliveries.push(request); return { receipt: { surfaceKind: 'tui' as const, conversationId: 'original-terminal', messageId: 'fixture-notice' } }; } },
   };
   const services = createPaymentsServices(options);
   return { root, values, scopes, deliveries, browser, catalog, options, services, pairing, setLeader(value: boolean) { leader = value; } };
@@ -287,7 +288,10 @@ test('real product close drains boot recovery delivery and cannot stamp a retire
   const f = fixture(); await f.services.ready; await f.services.close();
   const journal = new DurableCheckoutJournal(journalPath(f)); await journal.put(interruptedRecord('submit-pending', null));
   const entered = barrier(), gate = barrier();
-  f.options.channelDeliveryRouter.deliver = async request => { f.deliveries.push(request); entered.release(); await gate.pending; return 'late-notice'; };
+  f.options.channelDeliveryRouter.deliverWithReceipt = async request => {
+    f.deliveries.push(request); entered.release(); await gate.pending;
+    return { receipt: { surfaceKind: 'tui', conversationId: 'original-terminal', messageId: 'late-notice' } };
+  };
   const replacement = createPaymentsServices(f.options);
   try {
     await entered.pending;
@@ -392,7 +396,11 @@ function recordedSubmission(): PurchaseRecord {
 
 test('actual boot recovery finds the real recorded submission without upgrading unverified to purchased', async () => {
   const f = fixture(); await f.services.ready;
-  await f.services.purchases.record(recordedSubmission()); await f.services.close();
+  const record = recordedSubmission();
+  const hold = f.services.budget.reserve({ id: record.purchaseId, itemMinorUnits: record.itemPoolDraw, overageMinorUnits: record.overagePoolDraw, toleranceMinorUnits: record.tolerancePoolDraw,
+    limits: readPaymentsServiceConfig(f.options.configManager).limits, nowMs: Date.parse(record.atUtc), timezone: 'UTC', retainUntilSettled: true });
+  expect(hold).not.toBeNull(); expect(f.services.budget.commit(record.purchaseId, Date.parse(record.atUtc))).not.toBeNull();
+  await f.services.purchases.record(record); await f.services.close();
   await new DurableCheckoutJournal(journalPath(f)).put(interruptedRecord('submit-pending', null));
   const replacement = createPaymentsServices(f.options);
   try {
@@ -402,13 +410,13 @@ test('actual boot recovery finds the real recorded submission without upgrading 
     expect(await new DurableCheckoutJournal(journalPath(f)).list()).toEqual([]);
     expect(JSON.stringify(f.deliveries)).toContain('submission is recorded');
     expect(JSON.stringify(f.deliveries)).not.toContain('the order completed');
-    expect(replacement.budget.state().spend).toEqual([]);
+    expect(replacement.budget.state().spend).toMatchObject([{ purchaseId: 'old-purchase', itemMinorUnits: 1000 }]);
   } finally { await replacement.close(); }
 });
 
 test('a damaged real ledger keeps interrupted evidence and refuses new checkout before browser admission', async () => {
   const f = fixture(); await f.services.ready; await f.services.close();
-  const damaged = '{"version":1,"purchases":[{'; writeFileSync(purchasePath(f), damaged);
+  const damaged = '{"version":1,"purchases":[{'; mkdirSync(dirname(purchasePath(f)), { recursive: true }); writeFileSync(purchasePath(f), damaged);
   await new DurableCheckoutJournal(journalPath(f)).put(interruptedRecord('submit-pending', null));
   let driverCalls = 0;
   f.browser.set({ cardFieldGuard: new CardMaterialRedactor(), driverFor: () => { driverCalls++; throw new Error('Unexpected browser admission'); }, armSubmitApproval: async () => {} });
@@ -423,6 +431,6 @@ test('a damaged real ledger keeps interrupted evidence and refuses new checkout 
     try { await invoke(f.catalog, 'payments.checkout.begin', beginBody('missing-card')); } catch (error) { failure = error; }
     expect(failure).toMatchObject({ status: 409 }); expect(String(failure)).not.toContain(f.root);
     expect(driverCalls).toBe(0); expect(readFileSync(purchasePath(f), 'utf8')).toBe(damaged);
-    expect(replacement.budget.state().reservations).toEqual([]);
+    expect(() => replacement.budget.state()).toThrow('Payment budget accounting is unavailable');
   } finally { await replacement.close(); }
 });

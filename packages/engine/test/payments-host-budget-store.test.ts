@@ -1,3 +1,4 @@
+import * as fs from 'node:fs';
 /**
  * DurableBudgetLedger: the daily pools survive a restart.
  *
@@ -10,9 +11,9 @@
  * itself (budget.ts's own tests already cover that; this class changes
  * nothing about it).
  */
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { logger } from '../sdk/src/platform/utils/logger.js';
 import { dayKey } from '../sdk/src/platform/payments/day.js';
 import type { BudgetLimits } from '../sdk/src/platform/payments/budget.js';
@@ -272,27 +273,25 @@ describe('every stored amount must be finite and non-negative, or accounting ref
 });
 
 describe('a disk write that fails on commit never loses the spend, and retries on the next mutation', () => {
-  /**
-   * Blocks every write beneath `path`'s directory by replacing the directory
-   * itself with a plain file: `atomicWriteFileSync`'s `mkdirSync(dirname(path),
-   * { recursive: true })` then throws ENOTDIR, deterministically and
-   * regardless of the process's privilege level (unlike a permission-bit
-   * test, which root bypasses).
-   */
-  function blockWrites(path: string): void {
-    rmSync(path, { recursive: true, force: true });
-    writeFileSync(path, 'a plain file standing where a directory needs to be');
+  let restoreWrite = () => {};
+  afterEach(() => restoreWrite());
+  function blockWrites(_path: string): void {
+    // Fail the actual staging-file flush while retaining the original ledger
+    // and its parent. Replacing that parent correctly retires the whole owner.
+    const actual = fs.fsyncSync;
+    const failure = spyOn(fs, 'fsyncSync').mockImplementation(fd => {
+      if (fs.fstatSync(fd).isFile()) throw new Error('Synthetic ledger flush failure');
+      actual(fd);
+    });
+    restoreWrite = () => failure.mockRestore();
   }
 
-  /** Undoes `blockWrites`, restoring the real directory so a write can land again. */
-  function unblockWrites(path: string): void {
-    rmSync(path, { force: true });
-    mkdirSync(path, { recursive: true });
-  }
+  /** Restores file flushing so the same original ledger can publish again. */
+  function unblockWrites(_path: string): void { restoreWrite(); }
 
   test('commit does not throw when the write fails; the spend is kept in memory and reported', () => {
     const ledger = new DurableBudgetLedger(filePath);
-    // Reserve BEFORE sabotaging the directory, so this reservation's own write
+    // Reserve before fault injection, so this reservation's own write
     // succeeds normally and proves the ledger is otherwise working.
     const reserved = ledger.reserve({
       id: 'pur-1', itemMinorUnits: 3_000, overageMinorUnits: 0, toleranceMinorUnits: 0,
@@ -416,15 +415,20 @@ describe('every stored timestamp must be a value Date can hold, or accounting re
 });
 
 describe('a disk write that fails on reserve rolls the reservation back rather than holding it', () => {
-  function blockWrites(path: string): void {
-    rmSync(path, { recursive: true, force: true });
-    writeFileSync(path, 'a plain file standing where a directory needs to be');
+  let restoreWrite = () => {};
+  afterEach(() => restoreWrite());
+  function blockWrites(_path: string): void {
+    // Fail the actual staging-file flush while retaining the original ledger
+    // and its parent. Replacing that parent correctly retires the whole owner.
+    const actual = fs.fsyncSync;
+    const failure = spyOn(fs, 'fsyncSync').mockImplementation(fd => {
+      if (fs.fstatSync(fd).isFile()) throw new Error('Synthetic ledger flush failure');
+      actual(fd);
+    });
+    restoreWrite = () => failure.mockRestore();
   }
 
-  function unblockWrites(path: string): void {
-    rmSync(path, { force: true });
-    mkdirSync(path, { recursive: true });
-  }
+  function unblockWrites(_path: string): void { restoreWrite(); }
 
   test('reserve throws when the write fails, and leaves remaining unchanged', () => {
     const ledger = new DurableBudgetLedger(filePath);

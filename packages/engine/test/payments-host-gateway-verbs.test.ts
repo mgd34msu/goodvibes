@@ -1,3 +1,4 @@
+import { PaymentReplyInbox } from '../sdk/src/platform/payments/reply-inbox.js';
 /**
  * payments.* over a composed gateway catalog, called the way the control plane calls it.
  *
@@ -163,6 +164,7 @@ async function composePayments(input: {
       approvals: new DaemonApprovalStore(join(input.root, 'payments-approvals.json')),
       journal: new MemoryCheckoutJournal(),
       operations: new DurablePaymentOperations(join(input.root, 'operations')),
+      replies: new PaymentReplyInbox(),
       requests: new ProtectedPaymentRequests(join(input.root, 'requests')),
     },
   });
@@ -370,7 +372,7 @@ describe('payments.* is attached to this daemon, not a cataloged 501 facade', ()
     const deadline = Date.now() + 2000;
     for (;;) {
       const status = await readJson(await fixture.fetch('/api/payments/purchase/status?purchaseId=wire-approved-missing-card'));
-      expect(status.status).toBe(200);
+      expect(status.status, JSON.stringify(status.body)).toBe(200);
       const operation = readPaymentWindowStatus(status.body).operations[0];
       if (operation?.state === 'refused') { expect(operation.outcome).toBe('refused:no-card'); break; }
       if (Date.now() >= deadline) throw new Error('The detached wire fixture did not record its later refusal');

@@ -41,7 +41,7 @@ function fixture(options: { readonly window?: PaymentWindowView; readonly princi
     const headers = new Headers(init?.headers);
     const body: unknown = init?.body ? JSON.parse(String(init.body)) : undefined;
     requests.push({ url, headers, body, signal: init?.signal });
-    if (url.pathname.includes('auth/current')) {
+    if (url.pathname === '/api/control-plane/auth') {
       await holdAuth;
       return Response.json({ authenticated: true, authMode: 'shared-token', tokenPresent: true, authorizationHeaderPresent: true,
         sessionCookiePresent: false, principalId: principal, principalKind: 'token', admin: true, scopes: ['read:payments', 'write:payments'], roles: [] });
@@ -90,7 +90,7 @@ test('only a direct owner command opens the actual payment picker', async () => 
   await f.registry.execute('payments', ['pending'], f.context);
   expect(f.requests).toHaveLength(0); expect(f.modal.active).toBe(false);
   await f.open();
-  expect(f.modal.title).toBe('Purchases');
+  expect(f.modal.title, f.messages.join('\n')).toBe('Purchases');
   expect(f.modal.items[0]?.detail).toContain(window.notice);
   expect(f.requests.every(request => !request.headers.has('x-goodvibes-explicit-user-request'))).toBe(true);
 });

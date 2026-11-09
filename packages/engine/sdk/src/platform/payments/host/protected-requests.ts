@@ -156,7 +156,8 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
   private readonly records = new Map<string, { operationId: string; physical: string }>();
   constructor(private readonly directory: string, private readonly beforeCheckpoint?: (version: 1 | 2) => void,
     private readonly beforeReplyHistory?: () => void, private readonly beforeReplyReceiveCoverage?: () => void,
-    private readonly beforeReplyReceiveSpans?: () => void) {}
+    private readonly beforeReplyReceiveSpans?: () => void,
+    private readonly beforeMultiRecipientCheckpoint?: () => void) {}
   get supportsReplyHistory(): boolean { return this.beforeReplyHistory !== undefined; }
   get supportsReplyReceiveCoverage(): boolean { return this.beforeReplyHistory !== undefined && this.beforeReplyReceiveCoverage !== undefined; }
   get supportsReplyReceiveSpans(): boolean { return this.beforeReplyHistory !== undefined && this.beforeReplyReceiveSpans !== undefined; }
@@ -213,6 +214,7 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
       || typeof envelope['data'] !== 'string' || envelope['data'].length > MAX_REQUEST_BYTES * 2
       || envelope['data'].length % 2 !== 0 || !/^[0-9a-f]+$/.test(envelope['data'])) throw new ProtectedPaymentRequestError();
     const request = own(JSON.parse(decryptStore(envelope as unknown as EncryptedStoreEnvelope, key)));
+    this.declareMultiRecipientCheckpoint(request.window);
     if (request.purchaseId !== id || request.operationId !== operationId) throw new ProtectedPaymentRequestError();
     current(check); this.keyBytes(false, check);
     if (fileObservationIdentity(path) !== file.physical) throw new ProtectedPaymentRequestError();
@@ -225,6 +227,7 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
     let staged: string | undefined;
     try {
       current(check); const request = own(value), plaintext = JSON.stringify(request);
+      this.declareMultiRecipientCheckpoint(request.window); current(check);
       if (request.replyHistory) {
         if (!this.beforeReplyHistory) throw new ProtectedPaymentRequestError();
         const declared: unknown = this.declareHistory(request.replyHistory);
@@ -261,6 +264,19 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
     before(); atomicWriteFileSync(path, `${JSON.stringify(encryptStore(plaintext, key))}\n`, { mode: 0o600, assertCurrent: before });
     current(check); this.keyBytes(false, check); this.records.set(id, { operationId, physical: fileObservationIdentity(path) });
     if (!isDeepStrictEqual(this.readOwned(id, operationId, check), next)) throw new ProtectedPaymentRequestError();
+  }
+
+  private declareMultiRecipientCheckpoint(window: CheckoutWindowCheckpoint | undefined): void {
+    const deliveries = window?.record.windowDeliveries ?? [];
+    if (new Set(deliveries.map(delivery => delivery.channel)).size === deliveries.length) return;
+    // Older checkpoint readers accepted at most one recipient per channel.
+    // Declare this exact new shape before publication/adoption, including
+    // imported encrypted windows, so rollback preflight sees the requirement.
+    if (!this.beforeMultiRecipientCheckpoint) throw new ProtectedPaymentRequestError();
+    let result: unknown;
+    try { result = this.beforeMultiRecipientCheckpoint(); }
+    catch (error) { drainOwned(error); throw error instanceof Error ? error : new ProtectedPaymentRequestError(); }
+    if (result !== undefined) { drainOwned(result); throw new ProtectedPaymentRequestError(); }
   }
 
   private declareHistory(history: PaymentReplyHistory): unknown {
@@ -357,6 +373,7 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
       const next = own({ ...retained, window: selected, ...(replyHistory ? { replyHistory } : {}),
         host: { ...authority, ...(recovery ? { browser: recovery.connection, browserControls: recovery.controls } : {}) } });
       this.replaceOwned(next, file, check, () => {
+        this.declareMultiRecipientCheckpoint(selected);
         const declared: unknown = this.beforeCheckpoint?.(selected.terms === undefined ? 1 : 2);
         if (declared !== undefined) return declared;
         return next.replyHistory ? this.declareHistory(next.replyHistory) : undefined;

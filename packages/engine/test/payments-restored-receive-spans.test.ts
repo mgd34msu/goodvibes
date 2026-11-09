@@ -39,7 +39,7 @@ async function fixture(partial = false, future = false) {
   beforeCursor.save(500, () => {});
   if (partial) before.gap({ conversationId: '-100456' });
   beforeLife.abort(); beforeCursor.release();
-  const store = new ProtectedPaymentRequests(join(root, 'requests'), () => {}, () => {}, () => {}, () => {});
+  const store = new ProtectedPaymentRequests(join(root, 'requests'), () => {}, () => {}, () => {}, () => {}, () => {});
   await store.retain(original, () => {});
   await store.checkpointWindow(original.purchaseId, original.operationId, window, null, () => {}, window.record.windowDeliveries.map(delivery => ({
     receipt: delivery.receipt, selector, deadlineMs: window.record.windowDeadlineMs, acceptPositive: true,
@@ -49,11 +49,15 @@ async function fixture(partial = false, future = false) {
   inbox.bindTelegramSource(accounts.reader, lifetime.signal);
   const binding = paymentReplyHistoryBinding(window), order: string[] = [];
   const history = inbox.retainReplyHistory(original.purchaseId, window, async (entry, current) => {
+    order.push('archive-start');
     await store.appendReply(original.purchaseId, original.operationId, binding, entry, current); order.push('archive');
   }, () => lifetime.signal.throwIfAborted(), (coverage, current) => store.recordReceiveCoverage(original.purchaseId, original.operationId, binding, coverage, current));
   const polls: { offset: unknown; finish(updates: unknown[]): void }[] = [], arrivals: ReturnType<typeof deferred<void>>[] = [];
   const waitPoll = async (index: number) => {
-    const entry = arrivals[index] ??= deferred<void>(); if (polls[index]) return; await entry.promise;
+    const entry = arrivals[index] ??= deferred<void>(); if (polls[index]) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try { await Promise.race([entry.promise, new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error(`Missing poll ${index}; observed ${order.join(',')}; status ${JSON.stringify(supervisor.status)}`)), 2000); })]); }
+    finally { clearTimeout(timer); }
   };
   const values: Record<string, unknown> = { 'surfaces.telegram.enabled': true, 'surfaces.telegram.mode': 'polling',
     'surfaces.telegram.botToken': '123:synthetic-token', 'surfaces.telegram.botUsername': 'fixture_bot' };
@@ -78,6 +82,7 @@ async function fixture(partial = false, future = false) {
       return Response.json({ ok: true, result: true });
     }),
     buildSurfaceAdapterContext: () => ({ configManager: { get: (key: string) => values[key] },
+      hasPaymentReplyWindow: () => inbox.pending > 0,
       async authorizeSurfaceIngress(input: ChannelIngressPolicyInput) {
         const reply = await tryResolvePaymentReplyFromChannel(input, policy, inbox, accounts.reader);
         return { ...policy, allowed: false, reason: 'reason' in reply && reply.reason === 'recorded' ? 'payment-reply-recorded' : 'payment-reply-consumed' };

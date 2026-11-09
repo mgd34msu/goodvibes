@@ -582,10 +582,15 @@ describe('no filler item is ever added', () => {
     expect(check.ok).toBe(true); expect(check.unexpected).toEqual([]); expect(check.missing).toEqual([]);
   });
 
-  test.each([0, -1, 1.5, NaN, Number.MAX_SAFE_INTEGER + 1])('invalid quantity %s is refused before a cart reading', async quantity => {
+  test.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])('invalid quantity %s is refused before a cart reading', async quantity => {
     const before = readings.requests.length;
     const check = await assertCartMatchesRequest([{ label: 'Cable', quantity, unitMinorUnits: 1_000 }], [{ label: 'Cable', quantity: 1 }]);
     expect(check.ok).toBe(false); expect(readings.requests).toHaveLength(before);
+  });
+  test('a non-JSON quantity is rejected before a cart reading', async () => {
+    const before = readings.requests.length;
+    await expect(assertCartMatchesRequest([{ label: 'Cable', quantity: NaN, unitMinorUnits: 1_000 }], [{ label: 'Cable', quantity: 1 }])).rejects.toThrow('plain JSON');
+    expect(readings.requests).toHaveLength(before);
   });
   test('an extra line the owner did not ask for aborts the purchase', async () => {
     const check = await assertCartMatchesRequest(

@@ -59,7 +59,7 @@ beforeEach(() => {
 describe('DaemonPurchaseLedger', () => {
   test('an absent ledger lists as empty rather than failing', () => {
     const ledger = new DaemonPurchaseLedger({ filePath });
-    expect(ledger.list({ limit: 10, dayKey: undefined })).toEqual({ purchases: [], total: 0 });
+    expect(ledger.list({ limit: 10, dayKey: undefined })).toEqual({ purchases: [], total: 0, reconciliations: [] });
   });
 
   test('a recorded purchase comes back whole', async () => {

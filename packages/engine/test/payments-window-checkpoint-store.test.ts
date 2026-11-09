@@ -15,7 +15,7 @@ afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: 
 async function fixture(beforeCheckpoint?: () => void) {
   const root = mkdtempSync(join(tmpdir(), 'payment-window-checkpoint-')); roots.push(root);
   const directory = join(root, 'requests'), original = protectedPaymentRequest(), window = protectedPaymentWindow(original);
-  const store = new ProtectedPaymentRequests(directory, beforeCheckpoint);
+  const store = new ProtectedPaymentRequests(directory, beforeCheckpoint, undefined, undefined, undefined, () => {});
   await store.retain(original, () => {});
   const path = join(directory, `${Buffer.from(original.purchaseId).toString('base64url')}.json`);
   const old = readFileSync(path);
@@ -63,12 +63,12 @@ test('an earlier checkpoint cannot overwrite a later retained quote', async () =
 });
 
 test('the real installed-data owner declares the checkpoint format before incompatible encrypted publication', async () => {
-  let declare = () => {};
-  const f = await fixture(() => declare());
+  const publication = { declare: () => {} };
+  const f = await fixture(() => publication.declare());
   const execPath = join(f.root, 'goodvibes-daemon'), requirement = join(f.root, NATIVE_READER_REQUIREMENT_FILE);
   const native = createNativeDataWriteOwner({ execPath, version: '3.1.2', assertCurrent: () => {} });
   expect(existsSync(requirement)).toBe(false);
-  declare = () => {
+  publication.declare = () => {
     expect(readFileSync(f.path)).toEqual(f.old);
     native.declare('payment-window-checkpoints-v1');
     expect(() => assertNativeReaderCompatible(execPath, '3.1.2', realUpdateFileIo,
@@ -79,12 +79,17 @@ test('the real installed-data owner declares the checkpoint format before incomp
   expect(() => assertNativeReaderCompatible(execPath, '3.1.2', realUpdateFileIo, nativeReaderCapabilities('3.1.2'))).not.toThrow();
 });
 
+function replaceCheckpointFile(path: string, bytes: Buffer): void {
+  writeFileSync(path + '.other', bytes, { mode: 0o600 });
+  renameSync(path + '.other', path);
+}
+
 test.each(['retire', 'replace'] as const)('a publication callback cannot %s the original owned file then continue', async kind => {
   let publish = () => {}, live = true;
   const f = await fixture(() => publish());
   publish = () => {
     if (kind === 'retire') live = false;
-    else { writeFileSync(f.path + '.other', f.old, { mode: 0o600 }); renameSync(f.path + '.other', f.path); }
+    else replaceCheckpointFile(f.path, f.old);
   };
   await expect(f.store.checkpointWindow(f.original.purchaseId, f.original.operationId, f.window, null,
     () => { if (!live) throw new Error('Owner retired'); })).rejects.toThrow();
@@ -119,4 +124,53 @@ test('exact selected terms use the v2 native reader floor and remain independent
   expect(() => assertNativeReaderCompatible(execPath, '3.1.2', realUpdateFileIo, nativeReaderCapabilities('3.1.2'))).not.toThrow();
   expect(() => captureCheckoutWindowCheckpoint({ ...window, terms: { ...window.terms, shippingLabel: 'Unselected option' } })).toThrow();
   expect(() => captureCheckoutWindowCheckpoint({ ...window, terms: { ...window.terms, totalMinorUnits: 1 } })).toThrow();
+});
+
+
+test('encrypted checkpoints retain distinct recipients on one channel and refuse the same receipt twice', async () => {
+  const f = await fixture(), first = f.window.record.windowDeliveries?.[0];
+  if (!first?.receipt) throw new Error('Missing original receipt');
+  const second = { ...first, receipt: { ...first.receipt, conversationId: '-100456' } };
+  const window = { ...f.window, record: { ...f.window.record, windowDeliveries: [first, second] } };
+  await f.store.checkpointWindow(f.original.purchaseId, f.original.operationId, window, null, () => {});
+  const saved = await new ProtectedPaymentRequests(f.directory, undefined, undefined, undefined, undefined, () => {}).read(f.original.purchaseId, f.original.operationId, () => {});
+  expect(saved.window?.record.windowDeliveries).toEqual([first, second]);
+  const before = readFileSync(f.path);
+  await expect(f.store.checkpointWindow(f.original.purchaseId, f.original.operationId,
+    { ...window, record: { ...window.record, windowDeliveries: [first, { ...first }] } }, null, () => {})).rejects.toThrow();
+  expect(readFileSync(f.path)).toEqual(before);
+});
+
+test('a multi-recipient native floor precedes encrypted publication and an older same-version reader refuses it', async () => {
+  const f = await fixture(), first = f.window.record.windowDeliveries?.[0];
+  if (!first?.receipt) throw new Error('Missing original receipt');
+  const window = { ...f.window, record: { ...f.window.record, windowDeliveries: [first, { ...first, receipt: { ...first.receipt, conversationId: '-100456' } }] } };
+  const execPath = join(f.root, 'goodvibes-daemon'), native = createNativeDataWriteOwner({ execPath, version: '3.1.2', assertCurrent() {} });
+  let declarations = 0;
+  const store = new ProtectedPaymentRequests(f.directory, undefined, undefined, undefined, undefined, () => {
+    if (declarations++ === 0) expect(readFileSync(f.path)).toEqual(f.old);
+    native.declare('payment-multi-recipient-checkpoints-v1');
+  });
+  await store.checkpointWindow(f.original.purchaseId, f.original.operationId, window, null, () => {});
+  expect(declarations).toBeGreaterThan(0);
+  const older = nativeReaderCapabilities('3.1.2');
+  expect(() => assertNativeReaderCompatible(execPath, '3.1.2', realUpdateFileIo,
+    { ...older, formats: older.formats.filter(format => format !== 'payment-multi-recipient-checkpoints-v1') })).toThrow();
+  expect(() => assertNativeReaderCompatible(execPath, '3.1.2', realUpdateFileIo, older)).not.toThrow();
+  await expect(new ProtectedPaymentRequests(f.directory).read(f.original.purchaseId, f.original.operationId, () => {})).rejects.toThrow();
+  expect((await store.read(f.original.purchaseId, f.original.operationId, () => {})).window).toEqual(window);
+});
+
+test.each(['missing', 'refused', 'async', 'thrown-rejection'] as const)('an unavailable %s multi-recipient floor preserves the original encrypted checkpoint', async kind => {
+  const f = await fixture(), first = f.window.record.windowDeliveries?.[0];
+  if (!first?.receipt) throw new Error('Missing original receipt');
+  const window = { ...f.window, record: { ...f.window.record, windowDeliveries: [first, { ...first, receipt: { ...first.receipt, conversationId: '-100456' } }] } };
+  const before = kind === 'missing' ? undefined : kind === 'refused'
+    ? () => { throw new Error('Original native readers cannot admit this format'); }
+    : kind === 'thrown-rejection' ? () => { throw Promise.reject(new Error('Misused thrown native writer')); }
+    : () => Promise.reject(new Error('Misused asynchronous native writer'));
+  const store = new ProtectedPaymentRequests(f.directory, undefined, undefined, undefined, undefined, before);
+  await expect(store.checkpointWindow(f.original.purchaseId, f.original.operationId, window, null, () => {})).rejects.toThrow();
+  expect(readFileSync(f.path)).toEqual(f.old);
+  expect((await new ProtectedPaymentRequests(f.directory).read(f.original.purchaseId, f.original.operationId, () => {})).window).toBeUndefined();
 });

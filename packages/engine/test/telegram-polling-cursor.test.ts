@@ -15,7 +15,7 @@ function fixture() {
   return { root, path: join(root, 'cursor.json') };
 }
 function retain(path: string, account = '123') {
-  const cursor = new TelegramOffsetStore(path, account).retainPolling(); cleanup.push(() => cursor.release()); return cursor;
+  const cursor = new TelegramOffsetStore(path, account).retainPolling(); cleanup.push(() => { try { cursor.release(); } catch { /* An explicitly replaced lease is foreign. */ } }); return cursor;
 }
 
 test('one actual polling owner retains its cursor, and only its own confirmed save advances its observation', () => {
@@ -51,7 +51,7 @@ test('a replaced polling lease retires the original capability and its release c
   const f = fixture(), original = retain(f.path), observation = original.capture().observation;
   expect(observation).toEqual({ accountId: '123', offset: null, physical: null });
   unlinkSync(`${f.path}.polling-123.lock`);
-  const replacement = retain(f.path); expect(() => original.assertCurrent()).toThrow(); original.release();
+  const replacement = retain(f.path); expect(() => original.assertCurrent()).toThrow(); expect(() => original.release()).toThrow('Original native lock owner changed');
   expect(() => replacement.assertCurrent()).not.toThrow(); expect(() => new TelegramOffsetStore(f.path, '123').retainPolling()).toThrow('Another Telegram owner');
 });
 
@@ -95,11 +95,12 @@ function receiver(path: string, options: { ignoreAbort?: boolean; processing?: P
   const supervisor = new TelegramIngressSupervisor({ offsetFilePath: path, telegramSourceAccounts: accounts,
     configManager: { get: (key: string) => settings[key] } as never,
     secretsManager: { get: () => null, getGlobalHome: () => undefined, onDidChange: () => () => {}, resolveLocalSecretSync: () => ({ state: 'absent' }) } as never,
-    serviceRegistry: { resolveSecret: async () => null } as never,
+    serviceRegistry: { get: () => null, resolveSecret: async () => null } as never,
     onConcurrentConsumerConflict() { conflict.resolve(); },
     createApi: token => new TelegramBotApi(token, async (url, init) => {
       const method = url.split('/').pop();
       if (method === 'getMe') return Response.json({ ok: true, result: { id: 123, username: 'fixture_bot', is_bot: true, first_name: 'Fixture' } });
+      if (method === 'getWebhookInfo') return Response.json({ ok: true, result: { url: '', pending_update_count: 0 } });
       if (method !== 'getUpdates') return Response.json({ ok: true, result: true });
       const body = JSON.parse(String(init.body)) as Record<string, unknown>;
       return new Promise<Response>((resolve, reject) => {

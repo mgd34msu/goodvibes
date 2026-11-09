@@ -100,7 +100,7 @@ test('a registered webhook still refuses a different verified sending bot', asyn
     authorizeWebhook: account.owner.authorizeWebhook?.bind(account.owner),
   });
   expect(response.status).toBe(403); expect(account.verifies()).toBe(1); expect(readings.requests).toEqual([]);
-  expect(f.inbox.pending).toBe(1); f.prepared.cancel(); await expect(f.waiting).rejects.toBeInstanceOf(PaymentReplyWindowError);
+  expect(f.inbox.pending).toBe(0); await expect(f.waiting).rejects.toMatchObject({ kind: 'source-unavailable' });
 });
 async function window(purchaseId = 'original', noticeReceipt: typeof receipt | null = receipt, deadlineMs = Date.now() + 60_000,
   kind: 'approval' | 'veto' = 'approval', inbox = new PaymentReplyInbox()) {
@@ -135,8 +135,8 @@ test.each([
 test('a different authenticated bot in the same chat cannot answer the notice', async () => {
   const account = source('456'), f = await window();
   expect(await tryResolvePaymentReplyFromChannel(message(account), decision, f.inbox, account.owner.reader)).toEqual({ consumed: false, reason: 'no-window' });
-  expect(account.verifies()).toBe(1); expect(readings.requests).toEqual([]); expect(f.inbox.pending).toBe(1);
-  f.prepared.cancel(); await expect(f.waiting).rejects.toBeInstanceOf(PaymentReplyWindowError);
+  expect(account.verifies()).toBe(1); expect(readings.requests).toEqual([]); expect(f.inbox.pending).toBe(0);
+  await expect(f.waiting).rejects.toMatchObject({ kind: 'source-unavailable' });
 });
 
 test('the actual Telegram normalizer passes only its private poller account capability into the original window', async () => {

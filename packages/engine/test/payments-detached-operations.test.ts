@@ -142,7 +142,8 @@ test('durable acknowledgement survives request abort, uses a root-owned context 
   cleanup.push(async () => { gate.release(); await operations.close(); }); await operations.recover();
   const body = { ...structuredClone(input) };
   const accepted = await context.run('request-only', () => operations.admit('request', body, { principalId: 'pairing:owner', assertCurrent() {} }, () => request.signal.throwIfAborted(), () => { admitted++; }));
-  expect(accepted.state).toBe('accepted'); expect(store.get('request')).toEqual(accepted);
+  expect(accepted.state).toBe('accepted');
+  expect(store.get('request')).toMatchObject({ ...accepted, state: 'running', updatedAtMs: expect.any(Number) });
   request.abort(); body.item = 'changed after acknowledgement';
   await entered.wait;
   expect(inherited).toBeUndefined(); expect(captured?.item).toBe('owner item'); expect(executions).toBe(1);

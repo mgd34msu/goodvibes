@@ -23,6 +23,7 @@ test('owned Home Graph stamps remain readable at a clock whose digits satisfy Lu
     if (!page.source) throw new Error('Expected the published device passport source.');
     expect(typeof page.source.metadata.generatedAt).toBe('number');
     expect(typeof page.passport.metadata.refreshedAt).toBe('number');
+    expect(page.passport.metadata.pageContentHash).toBeNull();
     expect(() => assertJudgmentInput(knowledgeRawRepresentation(page.source))).not.toThrow();
     expect(() => assertJudgmentInput(knowledgeRawRepresentation(page.passport))).not.toThrow();
   } finally { clock.mockRestore(); }

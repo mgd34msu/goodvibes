@@ -2,7 +2,7 @@ import { isClassicOperation, requireDecisionFeature } from '../../runtime/decisi
 import { retainGeneratedFactRecordReferences } from '../generated-fact-record-references.js';
 import { rankHomeGraphPageCandidates, HomeGraphPagePriorityHeldError } from './page-priority.js';
 import { prioritySubject } from './pages.js';
-import { knowledgeClockIso, knowledgeRawRepresentation } from '../store-record-representation.js';
+import { knowledgeClockIso } from '../store-record-representation.js';
 import { withDevicePageRefresh } from './page-refresh-queue.js';
 import { prepareObservedKnowledgeNodeInput } from '../store-node-observation.js';
 import { GoodVibesSdkError } from '@goodvibes-jev/engine/errors';
@@ -47,7 +47,6 @@ import {
   renderPacketPage,
   renderRoomPage,
 } from './rendering.js';
-import { knowledgeContentHash } from '../content-hash.js';
 import { retainHomeGraphPageInputs } from './page-read-set.js';
 import { createSemanticWriteGuard } from '../semantic/primary-source-plan.js';
 import { prepareSourceLinkedRepairProfileFacts } from '../semantic/self-improvement-promotion.js';
@@ -355,11 +354,7 @@ async function refreshHomeGraphDevicePassportNow(
   const qualityGuards: Array<() => void> = [];
   const missingFields = await missingDevicePassportFields(device, sources, semanticFacts, { entities, signal: context.signal, assertCurrent: assertPageCurrent, retainCurrent: check => qualityGuards.push(check) });
   const markdown = renderDevicePassportPage({ spaceId, device, entities, sources, issues, missingFields, semanticFacts, factPlan });
-  const pageContentHash = knowledgeContentHash(markdown, 16);
   const passportId = homeGraphNodeId(spaceId, 'ha_device_passport', input.deviceId);
-  const existingPassport = store.getNode(passportId);
-  const existingPassportMetadata = readRecord(existingPassport?.metadata);
-  const previousRefreshedAt = knowledgeRawRepresentation(existingPassportMetadata).refreshedAt;
   const assertPublicationCurrent = () => {
     for (const check of qualityGuards) check();
     throwIfAborted(context.signal);
@@ -384,10 +379,10 @@ async function refreshHomeGraphDevicePassportNow(
         homeAssistant: { installationId, objectKind: 'device_passport', objectId: input.deviceId },
         deviceId: input.deviceId,
         missingFields,
-        pageContentHash,
-        refreshedAt: existingPassportMetadata.pageContentHash === pageContentHash && previousRefreshedAt !== undefined
-          ? previousRefreshedAt
-          : knowledgeClockIso(Date.now()),
+        // Artifact reuse compares the actual markdown bytes. A refresh clock
+        // records this completed refresh, independently of content changes.
+        pageContentHash: null,
+        refreshedAt: knowledgeClockIso(Date.now()),
       }),
     }, 'generated-page-index', device, () => store.getNode(device.id));
   const nodeSlug = createSemanticNodeSlugPlanner(store);

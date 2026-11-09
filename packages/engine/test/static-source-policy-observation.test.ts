@@ -45,7 +45,7 @@ test('actual multi-candidate identifier gate and deferred-source reader hash pol
     expect(checkNoInternalIdentifiers(candidates, readings, finding => { held.push(finding); })).toEqual([]);
     expect(held.length).toBeGreaterThan(1); expect(descriptorReads(read)).toBe(16);
     read.mockClear();
-    const markers = Array.from({ length: 12 }, (_, index) => `// Finish persistence for reader ${index}.`).join('\n\n');
+    const markers = Array.from({ length: 181 }, (_, index) => `// Finish persistence for reader ${index}.`).join('\n\n');
     expect(sourceMarkerFindings('sdk/src/example.ts', markers, readings).length).toBeGreaterThan(1);
     expect(descriptorReads(read)).toBe(16);
     // A completed pass cannot make a later invocation silently reuse its owner.
@@ -99,11 +99,11 @@ test('the final actual gate callback cannot release a result using an invalidate
 
 test('incoherent original capture is rejected instead of caching a mixed16-file manifest', () => {
   const f = fixture(), originalRead = fs.readFileSync; let reads = 0, edited = false;
-  const read = spyOn(fs, 'readFileSync').mockImplementation((...args: Parameters<typeof fs.readFileSync>) => {
+  const read = spyOn(fs, 'readFileSync').mockImplementation(((...args: Parameters<typeof fs.readFileSync>) => {
     const value = Reflect.apply(originalRead, fs, args);
     if (typeof args[0] === 'number' && ++reads === 2) { edited = true; f.edit(f.changed); }
     return value;
-  });
+  }) as typeof fs.readFileSync);
   try {
     withStaticSourcePolicyPass(() => {
       expect(() => staticDecisionSourceHash()).toThrow('Static policy source changed');

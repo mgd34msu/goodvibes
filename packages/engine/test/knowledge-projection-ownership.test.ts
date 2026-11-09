@@ -29,7 +29,7 @@ describe('generated page original output ownership', () => {
     const item = await fixture();
     await item.store.replaceSourceRecord({ ...item.first.source, metadata: { ...item.first.source.metadata, generatedContentHash: 'a'.repeat(40) } });
     const previous = item.store.getSource(item.first.source.id);
-    if (!previous) throw new Error('Saved generated page missing');
+    if (!previous?.artifactId) throw new Error('Saved generated page omitted its artifact');
     const oldClock = knowledgeRawRepresentation(previous.metadata).generatedAt;
     const oldCrawl = knowledgeRawRepresentation(previous).lastCrawledAt;
     const next = await materializeGeneratedKnowledgeProjection(item.input);
@@ -239,6 +239,7 @@ for (const reuse of [false, true]) {
     try { result = await materializeGeneratedKnowledgeProjection({ ...item.input, ...(reuse ? {} : { markdown: '# Changed while owned' }) }); }
     finally { ingest.mockRestore(); }
     expect(result.artifactCreated).toBe(!reuse);
+    if (!candidateId) throw new Error('Actual materializer did not retain its candidate artifact');
     expect(result.artifact.id).toBe(candidateId);
     const acquired = tryAcquireArtifactPublication(item.artifactStore.captureOriginal(result.artifact.id));
     expect(acquired).not.toBeNull(); acquired?.release();

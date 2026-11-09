@@ -8,10 +8,10 @@ test('native representation keeps detached raw values without granting copies th
   retainKnowledgeRepresentation(value, original);
   const expected = structuredClone(original);
   original.metadata.stamp.decidedAt = 'Mutated external raw input';
-  expect(knowledgeRawRepresentation(value)).toEqual(expected);
+  expect(knowledgeRawRepresentation<unknown>(value)).toEqual(expected);
   expect(knowledgeRawRepresentation(structuredClone(value))).toEqual(value);
   value.metadata.description = 'Changed text';
-  expect(knowledgeRawRepresentation(value)).toEqual({ metadata: { stamp: expected.metadata.stamp, description: 'Changed text' } });
+  expect(knowledgeRawRepresentation<unknown>(value)).toEqual({ metadata: { stamp: expected.metadata.stamp, description: 'Changed text' } });
   value.metadata.stamp = { decidedAt: value.metadata.stamp.decidedAt };
   expect(knowledgeRawRepresentation(value)).toEqual(value);
 });
@@ -26,4 +26,16 @@ test('record equality preserves absence, negative zero and complete array data w
   const hostile = Object.defineProperty({}, 'value', { enumerable: true, get() { getterCalls++; return 'same'; } });
   expect(() => sameKnowledgeRecord(hostile, { value: 'same' })).toThrow(JudgmentInputError);
   expect(getterCalls).toBe(0);
+});
+
+
+test('nested named array edits revoke the original raw binding without hiding the caller change', () => {
+  const values = Object.assign(['same'], { meaning: 'Original view' });
+  const record = { metadata: { values } };
+  retainKnowledgeRepresentation(record, { metadata: { values: Object.assign(['same'], { meaning: 'Canonical original' }) } });
+  expect(knowledgeRawRepresentation(record).metadata.values.meaning).toBe('Canonical original');
+  values.meaning = 'Changed complete input';
+  expect(knowledgeRawRepresentation(record).metadata.values.meaning).toBe('Changed complete input');
+  expect(sameKnowledgeRecord({ values }, { values: ['same'] })).toBe(false);
+  expect(sameKnowledgeRecord(new Array(1), [undefined])).toBe(false);
 });

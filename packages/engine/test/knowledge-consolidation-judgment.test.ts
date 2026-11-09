@@ -319,7 +319,9 @@ describe('knowledge consolidation reading', () => {
     await h.store.close(); const restarted = new KnowledgeStore({ dbPath: h.dbPath });
     try {
       await restarted.init();
-      expect(restarted.getSourceGeneration(candidate!.subjectId)).toBe(candidate!.metadata.subjectRevision);
+      const originalRevision = candidate!.metadata.subjectRevision;
+      if (typeof originalRevision !== 'string') throw new Error('Consolidation fixture lost its native source revision');
+      expect(restarted.getSourceGeneration(candidate!.subjectId)).toBe(originalRevision);
       await decide({ ...h.context, store: restarted }, candidate!.id, 'accept');
       expect(h.memory.retrieve()).toHaveLength(1); expect(fake.requests).toHaveLength(1);
     } finally { await restarted.close(); }

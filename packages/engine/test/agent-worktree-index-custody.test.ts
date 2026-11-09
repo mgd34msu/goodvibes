@@ -27,13 +27,14 @@ function fixture() {
 test('an alias retarget cannot redirect failed-commit compensation into an equal foreign index', async () => {
   const f = fixture(), foreign = join(f.root, 'foreign'), alias = join(f.root, 'selected');
   fs.cpSync(f.original, foreign, { recursive: true }); fs.symlinkSync(f.original, alias);
-  let foreignIndex: Buffer | undefined;
+  let foreignIndex: Buffer<ArrayBuffer> | undefined;
   await expect(new AgentWorktree(alias).commitWorkingTree('Rejected result', ['result.txt'], () => {
     foreignIndex = fs.readFileSync(f.index);
     fs.writeFileSync(join(foreign, '.git', 'index'), foreignIndex);
     fs.unlinkSync(alias); fs.symlinkSync(foreign, alias);
     throw new Error('Original source retired');
   })).rejects.toThrow('Original source retired');
+  if (!foreignIndex) throw new Error('Fixture did not retain the original staged index');
   expect(fs.readFileSync(join(foreign, '.git', 'index'))).toEqual(foreignIndex);
   expect(fs.readFileSync(f.index)).toEqual(f.before);
   expect(fs.readlinkSync(alias)).toBe(foreign);
@@ -42,20 +43,21 @@ test('an alias retarget cannot redirect failed-commit compensation into an equal
 });
 
 test('a same-byte index replacement after staging is preserved as a newer physical source', async () => {
-  const f = fixture(); let newer: Buffer | undefined;
+  const f = fixture(); let newer: Buffer<ArrayBuffer> | undefined;
   await expect(new AgentWorktree(f.original).commitWorkingTree('Rejected result', ['result.txt'], () => {
     newer = fs.readFileSync(f.index);
     fs.writeFileSync(`${f.index}.replacement`, newer);
     fs.renameSync(`${f.index}.replacement`, f.index);
     throw new Error('New owner installed its index');
   })).rejects.toThrow('New owner installed its index');
+  if (!newer) throw new Error('Fixture did not install its replacement index');
   expect(fs.readFileSync(f.index)).toEqual(newer);
   expect(fs.existsSync(`${f.index}.lock`)).toBe(false);
 });
 
 test('compensation never cleans a replacement Git lock after its own write fails', async () => {
   const f = fixture(), actualWrite = fs.writeFileSync;
-  let staged: Buffer | undefined, replaced = false;
+  let staged: Buffer<ArrayBuffer> | undefined, replaced = false;
   const write = spyOn(fs, 'writeFileSync').mockImplementation((file, data, options) => {
     actualWrite(file, data, options);
     if (typeof file === 'number' && !replaced) {
@@ -70,6 +72,7 @@ test('compensation never cleans a replacement Git lock after its own write fails
       staged = fs.readFileSync(f.index); throw new Error('Original commit rejected');
     })).rejects.toThrow('Original commit rejected');
     expect(replaced).toBe(true);
+    if (!staged) throw new Error('Fixture did not capture its staged index');
     expect(fs.readFileSync(f.index)).toEqual(staged);
     expect(fs.readFileSync(`${f.index}.lock`, 'utf8')).toBe('Foreign lock must remain');
     expect(fs.existsSync(`${f.index}.lock.original`)).toBe(true);

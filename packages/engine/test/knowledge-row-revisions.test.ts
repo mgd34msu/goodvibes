@@ -31,7 +31,7 @@ function generation(db: SqlDatabase, table: typeof knowledgeRevisionTables[numbe
   return knowledgeRowGenerationFromRows(db.exec(`SELECT * FROM ${table} WHERE id='record'`));
 }
 
-test.each(knowledgeRevisionTables)('%s revisions belong to actual writes and survive reopen without content hashing', async table => {
+for (const table of knowledgeRevisionTables) test(`${table} revisions belong to actual writes and survive reopen without content hashing`, async () => {
   const db = await database();
   expect(generation(db, table)).toBeNull(); db.run(inserts[table]);
   const original = generation(db, table);

@@ -2,12 +2,13 @@ import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-po
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import * as nativeFs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
 import type { KnowledgeImportInput } from '../sdk/src/platform/knowledge/store-import.js';
 import type { SQLiteStore } from '../sdk/src/platform/state/sqlite-store.js';
-import type { SQLitePublicationIO, SQLiteStorePersistence } from '../sdk/src/platform/state/sqlite-store-persistence.js';
+import type { SQLiteStorePersistence } from '../sdk/src/platform/state/sqlite-store-persistence.js';
 
 const roots: string[] = [], stores: KnowledgeStore[] = [];
 afterEach(async () => {
@@ -62,7 +63,7 @@ test('unrelated external winner survives failed import with no published cache, 
 
 test('native prepublication rename failure publishes no imported image, caches or callback and cleans its temporary file', async () => {
   const store = await fixture(), before = cacheState(store), bytes = readFileSync(store.storagePath);
-  const io = (persistenceOf(store) as unknown as { io: SQLitePublicationIO }).io;
+  const io = nativeFs;
   const rename = io.renameSync;
   const failure = spyOn(io, 'renameSync').mockImplementation((from, to) => {
     if (to === store.storagePath) throw new Error('Synthetic native import rename failure');
@@ -74,7 +75,7 @@ test('native prepublication rename failure publishes no imported image, caches o
   expect(committed).toBe(0); expect(cacheState(store)).toEqual(before);
   expect(localGeneratedRows(store)).toEqual([0, 0, 0, 0, 0, 0]);
   expect(readFileSync(store.storagePath)).toEqual(bytes);
-  expect(readdirSync(dirname(store.storagePath)).filter(name => name.includes('.pending-'))).toEqual([]);
+  expect(readdirSync(dirname(store.storagePath)).filter(name => name.includes('.pending-') || name.includes('.tmp-'))).toEqual([]);
   expect(cacheState(await open(store.storagePath))).toEqual(before);
 });
 
@@ -103,7 +104,7 @@ test('a same-handle winner during persistence admission is retained without publ
 });
 
 test('visible indeterminate publication retains its exact SQL/cache references, withholds callback and fences later writes', async () => {
-  const store = await fixture(), io = (persistenceOf(store) as unknown as { io: SQLitePublicationIO }).io;
+  const store = await fixture(), io = nativeFs;
   const rename = io.renameSync, fsync = io.fsyncSync;
   let renamed = false, committed = 0;
   const renameWatch = spyOn(io, 'renameSync').mockImplementation((from, to) => {
@@ -185,8 +186,10 @@ test('throwing postcommit notification retains the real receipt and native rows 
   const warn = spyOn(logger, 'warn').mockImplementation((...args) => { warnings.push(args); });
   try {
     const receipt = await store.applyPreparedIngest(input, graph, {}, () => { throw new Error(secret); });
-    expect(receipt.sources[0]).toBe(store.getSource('generated'));
-    expect(receipt.nodes[0]).toBe(store.getNode('generated-node'));
+    if (!receipt.sources[0]) throw new Error('Acknowledged import receipt omitted its source');
+    expect(store.getSource('generated')).toBe(receipt.sources[0]);
+    if (!receipt.nodes[0]) throw new Error('Acknowledged import receipt omitted its node');
+    expect(store.getNode('generated-node')).toBe(receipt.nodes[0]);
     expect(localGeneratedRows(store)).toEqual([1, 1, 1, 1, 1, 1]);
     const reopened = await open(store.storagePath);
     expect(reopened.getSource('generated')?.artifactId).toBe('generated-artifact');
@@ -207,7 +210,8 @@ test('returned async observer is drained without delaying or rejecting the commi
       called++; await release.promise; settled = true; throw new Error('SYNTHETIC_PRIVATE_LATE_NOTIFICATION');
     });
     expect(called).toBe(1); expect(settled).toBe(false);
-    expect(receipt.sources[0]).toBe(store.getSource('generated'));
+    if (!receipt.sources[0]) throw new Error('Acknowledged import receipt omitted its source');
+    expect(store.getSource('generated')).toBe(receipt.sources[0]);
     expect((await open(store.storagePath)).getSource('generated')?.artifactId).toBe('generated-artifact');
     release.resolve();
     await new Promise<void>(resolve => setImmediate(resolve));
@@ -223,7 +227,8 @@ test('ordinary primitive notification returns do not produce a spurious warning'
   const warn = spyOn(logger, 'warn').mockImplementation((...args) => { warnings.push(args); });
   try {
     const receipt = await store.applyPreparedIngest(input, graph, {}, () => notifications.push('committed'));
-    expect(notifications).toEqual(['committed']); expect(receipt.sources[0]).toBe(store.getSource('generated'));
+    expect(notifications).toEqual(['committed']); if (!receipt.sources[0]) throw new Error('Acknowledged import receipt omitted its source');
+    expect(store.getSource('generated')).toBe(receipt.sources[0]);
     expect(JSON.stringify(warnings)).not.toContain('notification');
   } finally { warn.mockRestore(); }
 });

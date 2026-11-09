@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Compare complete knowledge record representations, including named array
+  fields and sparse slots, when checking whether captured evidence is current.
+  Reuse the existing representation cache without adding hashing.
+
 - Reuse the existing work identity for fresh native criteria references. A
   surviving native checkpoint prevents another execution of the same work
   attempt even if its intent and execution journals were lost or its earlier

@@ -1,7 +1,7 @@
 /** Configured model/fallback regression source; not executed during the coding pass. */
 import { expect, test } from 'bun:test';
 import { createSystemOnePort, DECISION_MODEL_PROFILES, observeJudgmentModel, reuseObservedJudgmentResult,
-  SqliteDecisionLog, withDecisionLog, type JudgmentConfig, type JudgmentEndpoint } from '@goodvibes-jev/judgment';
+  SqliteDecisionLog, withDecisionLog, type JudgmentConfig, type JudgmentEndpoint, type Questions } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { captureTriageJudgment } from '../sdk/src/platform/intake/triage/model-result.js';
 import { scoreInboxTriage } from '../sdk/src/platform/intake/triage/scorer.js';
@@ -11,10 +11,15 @@ import { readCustomTagMeaning } from '../sdk/src/platform/intake/triage/tagger/m
 
 const item = { id: 'synthetic-one', surface: 'synthetic', subject: 'A routine synthetic update' };
 const signal = () => new AbortController().signal;
-const reply = (model: string, questions: Record<string, unknown>, choice = false) => ({ model,
-  answers: Object.fromEntries(Object.keys(questions).map(name => [name, choice
-    ? { type: 'choice', choice: 'normal', confidence: .99, probabilities: { spam: 0, priority: 0, normal: 1, unknown: 0 } }
-    : { type: 'noul', noul: .01 }])), usage: { input_tokens: 19, output_tokens: 2, truncated: false } });
+const reply = (model: string, questions: Questions, choice = false) => ({ model,
+  answers: Object.fromEntries(Object.entries(questions).map(([name, question]) => {
+    if (choice && question.type === 'choice') {
+      const selected = 'normal' in question.criteria ? 'normal' : 'act';
+      return [name, { type: 'choice', choice: selected, confidence: .99, x_jev_confidence: .99,
+        probabilities: Object.fromEntries(Object.keys(question.criteria).map(key => [key, key === selected ? 1 : 0])) }];
+    }
+    return [name, { type: 'noul', noul: .01 }];
+  })), usage: { input_tokens: 19, output_tokens: 2, truncated: false } });
 
 for (const profile of DECISION_MODEL_PROFILES) {
   test(`triage delegates selection to the configured ${profile.name} native adapter`, async () => {
@@ -25,12 +30,13 @@ for (const profile of DECISION_MODEL_PROFILES) {
         ...(profile.responseModels ? { responseModels: profile.responseModels } : {}) };
     const resolved = profile.responseModels?.[0] ?? profile.model;
     const requests: string[] = [];
-    const port = createSystemOnePort({ endpoint, model: profile.model, signal: signal(), retry: {}, fetch: async (_url, init) => {
-      const body = JSON.parse(String(init?.body)) as { model: string; questions: Record<string, unknown> };
+    const port = createSystemOnePort({ endpoint, model: profile.model, signal: signal(), timeoutMs: 30_000, retry: {}, fetch: async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as { model: string; questions: Questions };
       requests.push(body.model); const result = reply(resolved, body.questions);
       return Response.json(cloudflare ? { success: true, result, errors: [], messages: [] } : result);
     } });
     const [receipt] = await scoreInboxTriage([item], port);
+    if (!receipt) throw new Error('Actual triage fixture returned no receipt');
     expect(requests).toEqual([profile.model]);
     expect(receipt).toMatchObject({ receiptVersion: 2, status: 'settled', model: profile.model, actualModel: resolved, targetModel: profile.model });
     expect(checkTriageReceipt(receipt)).toEqual(receipt);
@@ -39,10 +45,10 @@ for (const profile of DECISION_MODEL_PROFILES) {
 
 const fallbackConfig = (choice = false): JudgmentConfig => ({
   endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:9100', apiKey: '', authentication: 'none' },
-  model: 'jev-latest', signal: signal(), retry: {},
+  model: 'jev-latest', signal: signal(), timeoutMs: 30_000, retry: {},
   fallbacks: [{ model: 'english', endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:9200', apiKey: '', authentication: 'none', adapter: 'laya', responseModels: ['laya-rl-agent'] } }],
   fetch: async (url, init) => String(url).includes(':9100') ? Response.json({}, { status: 503 })
-    : Response.json(reply('laya-rl-agent', (JSON.parse(String(init?.body)) as { questions: Record<string, unknown> }).questions, choice)),
+    : Response.json(reply('laya-rl-agent', (JSON.parse(String(init?.body)) as { questions: Questions }).questions, choice)),
 });
 
 test('actual fallback attribution survives log projection and complete strict-result admission', async () => {
@@ -81,11 +87,12 @@ test('native model proof cannot be obtained by copying valid results or forgeabl
 
 test('unavailable receipts do not invent a requested or answered model; historical receipts remain readable', async () => {
   const [unavailable] = await scoreInboxTriage([item]);
+  if (!unavailable) throw new Error('Missing unavailable receipt');
   expect(unavailable).toMatchObject({ receiptVersion: 2, status: 'unavailable' });
   expect(unavailable?.model).toBeUndefined(); expect(unavailable?.actualModel).toBeUndefined();
   expect(checkTriageReceipt(unavailable)).toEqual(unavailable);
-  const historical = { ...unavailable, model: 'jev-latest' } as Record<string, unknown>;
-  delete historical['receiptVersion']; expect(checkTriageReceipt(historical)).toEqual(historical);
+  const historical = { ...unavailable, model: 'jev-latest' };
+  delete historical.receiptVersion; expect(checkTriageReceipt(historical)).toEqual(historical);
 });
 
 test('a borrowed recorder getter is rejected without executing user code', async () => {
@@ -99,7 +106,7 @@ test('a borrowed recorder getter is rejected without executing user code', async
   using log = new SqliteDecisionLog(':memory:');
   const model = '@local/decision';
   const port = withDecisionLog(createSystemOnePort({ endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:9300', apiKey: '', authentication: 'none' },
-    model, signal: signal(), retry: {}, fetch: async (_url, init) => Response.json(reply(model, (JSON.parse(String(init?.body)) as { questions: Record<string, unknown> }).questions)),
+    model, signal: signal(), timeoutMs: 30_000, retry: {}, fetch: async (_url, init) => Response.json(reply(model, (JSON.parse(String(init?.body)) as { questions: Questions }).questions)),
   }), log);
   expect((await scoreInboxTriage([item], port))[0]).toMatchObject({ status: 'settled', model, actualModel: model });
   expect(log.query()[0]).toMatchObject({ status: 'answered', requestedModel: model, model });

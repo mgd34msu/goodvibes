@@ -9,12 +9,13 @@ const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'artifact-reference-index-')); roots.push(root); const path = join(root, 'knowledge.sqlite'), store = new SQLiteStore(path, { coordinated: true });
-  await store.init(db => { db.run('CREATE TABLE knowledge_sources(id TEXT PRIMARY KEY, artifact_id TEXT)'); db.run('CREATE TABLE knowledge_extractions(id TEXT PRIMARY KEY, artifact_id TEXT)'); db.run('CREATE TABLE knowledge_edges(id TEXT PRIMARY KEY, from_kind TEXT NOT NULL,from_id TEXT NOT NULL,to_kind TEXT NOT NULL,to_id TEXT NOT NULL,relation TEXT NOT NULL)'); db.run('CREATE UNIQUE INDEX idx_knowledge_edges_unique ON knowledge_edges(from_kind,from_id,to_kind,to_id,relation)'); createArtifactReferenceIndexes(db); });
+  await store.init(db => { db.run('CREATE TABLE IF NOT EXISTS knowledge_sources(id TEXT PRIMARY KEY, artifact_id TEXT)'); db.run('CREATE TABLE IF NOT EXISTS knowledge_extractions(id TEXT PRIMARY KEY, artifact_id TEXT)'); db.run('CREATE TABLE IF NOT EXISTS knowledge_edges(id TEXT PRIMARY KEY, from_kind TEXT NOT NULL,from_id TEXT NOT NULL,to_kind TEXT NOT NULL,to_id TEXT NOT NULL,relation TEXT NOT NULL)'); db.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_edges_unique ON knowledge_edges(from_kind,from_id,to_kind,to_id,relation)'); createArtifactReferenceIndexes(db); });
+  await store.save();
   return { root, path, store };
 }
 test('sources, extraction-only, outgoing artifact edges and incoming artifact edges each preserve a real typed reference', async () => {
   const f = await fixture(); try {
-    const db = f.store.getDb(); db.run('INSERT INTO knowledge_sources VALUES(?,?)', ['source', 'source-artifact']); db.run('INSERT INTO knowledge_extractions VALUES(?,?)', ['extraction', 'extracted-artifact']);
+    const db = f.store; db.run('INSERT INTO knowledge_sources VALUES(?,?)', ['source', 'source-artifact']); db.run('INSERT INTO knowledge_extractions VALUES(?,?)', ['extraction', 'extracted-artifact']);
     db.run('INSERT INTO knowledge_edges VALUES(?,?,?,?,?,?)', ['from-edge', 'artifact', 'outgoing-artifact', 'source', 'source', 'derived']); db.run('INSERT INTO knowledge_edges VALUES(?,?,?,?,?,?)', ['to-edge', 'source', 'source', 'artifact', 'incoming-artifact', 'derived']);
     for (const id of ['source-artifact', 'extracted-artifact', 'outgoing-artifact', 'incoming-artifact']) expect(persistedArtifactIsReferenced(db, id)).toBe(true);
     expect(persistedArtifactsReferenced(db, ['source-artifact', 'extracted-artifact', 'outgoing-artifact', 'incoming-artifact', 'unreferenced'])).toEqual(['source-artifact', 'extracted-artifact', 'outgoing-artifact', 'incoming-artifact']);
@@ -23,7 +24,7 @@ test('sources, extraction-only, outgoing artifact edges and incoming artifact ed
 });
 test('actual EXPLAIN uses partial source/extraction/artifact-target indexes and existing from-prefix index without full relation scans', async () => {
   const f = await fixture(); try {
-    const db = f.store.getDb(), plans = db.exec(`EXPLAIN QUERY PLAN ${persistedArtifactReferenceSql}`, ['artifact', 'artifact', 'artifact', 'artifact']); const details = plans.flatMap(result => result.values.map(row => String(row[3])));
+    const db = f.store, plans = db.exec(`EXPLAIN QUERY PLAN ${persistedArtifactReferenceSql}`, ['artifact', 'artifact', 'artifact', 'artifact']); const details = plans.flatMap(result => result.values.map(row => String(row[3])));
     for (const index of artifactReferenceIndexes) expect(details.some(detail => detail.includes(index.name))).toBe(true);
     expect(details.some(detail => detail.includes('idx_knowledge_edges_unique'))).toBe(true);
     for (const table of ['knowledge_sources', 'knowledge_extractions', 'knowledge_edges']) expect(details.some(detail => new RegExp(`\\bSCAN ${table}\\b`).test(detail))).toBe(false);
@@ -37,7 +38,7 @@ test('actual writer-locked reference inspection with changed:false leaves persis
 });
 test('same-name indexes with different predicates cannot hide a full-scan/counterfeit plan', async () => {
   const f = await fixture(); try {
-    const db = f.store.getDb(), index = artifactReferenceIndexes[0]!; db.run(`DROP INDEX ${index.name}`); db.run(`CREATE INDEX ${index.name} ON knowledge_sources(id)`);
+    const db = f.store, index = artifactReferenceIndexes[0]!; db.run(`DROP INDEX ${index.name}`); db.run(`CREATE INDEX ${index.name} ON knowledge_sources(id)`);
     expect(() => validateArtifactReferenceIndexes(db)).toThrow('unsupported'); expect(() => createArtifactReferenceIndexes(db)).toThrow('unsupported');
   } finally { f.store.close(); }
 });

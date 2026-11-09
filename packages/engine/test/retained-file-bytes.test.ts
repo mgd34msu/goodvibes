@@ -79,12 +79,19 @@ test('synchronous comparison refuses pathname replacement after opening its cand
   const retained = await RetainedFileBytes.capture(writer => writer.capture(f.source)); bundles.add(retained.files);
   const inode = syncFs.statSync(f.target).ino, read = syncFs.readSync;
   let replaced = false;
-  const tap = spyOn(syncFs, 'readSync').mockImplementation((...args: Parameters<typeof read>) => {
-    if (!replaced && syncFs.fstatSync(args[0]).ino === inode) {
+  function tappedRead(fd: number, buffer: NodeJS.ArrayBufferView, offset: number, length: number, position: syncFs.ReadPosition | null): number;
+  function tappedRead(fd: number, buffer: NodeJS.ArrayBufferView, options?: syncFs.ReadSyncOptions): number;
+  function tappedRead(fd: number, buffer: NodeJS.ArrayBufferView, offsetOrOptions?: number | syncFs.ReadSyncOptions, length?: number, position?: syncFs.ReadPosition | null): number {
+    if (!replaced && syncFs.fstatSync(fd).ino === inode) {
       replaced = true; renameSync(f.target, join(f.root, 'old-candidate')); writeFileSync(f.target, readFileSync(f.source));
     }
-    return Reflect.apply(read, syncFs, args);
-  });
+    if (typeof offsetOrOptions === 'number') {
+      if (length === undefined) throw new Error('Fixture numeric read omitted its length');
+      return read(fd, buffer, offsetOrOptions, length, position ?? null);
+    }
+    return read(fd, buffer, offsetOrOptions);
+  }
+  const tap = spyOn(syncFs, 'readSync').mockImplementation(tappedRead);
   try { expect(() => retained.files.matchesFileSync(retained.value, f.target)).toThrow('changed while comparing'); }
   finally { tap.mockRestore(); }
   expect(replaced).toBe(true);

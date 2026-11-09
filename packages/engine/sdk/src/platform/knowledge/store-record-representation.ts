@@ -1,5 +1,4 @@
 import { captureOwnedJson, JudgmentInputError } from '../gate/judgment-input.js';
-import { isDeepStrictEqual } from 'node:util';
 
 /** Representation evidence only, never permission to publish. Entries are issued
  * by actual writers/SQL decoders and bind complete object values. JSON copies,
@@ -28,13 +27,15 @@ export function knowledgeRecordVersion(value: unknown): string {
   return version;
 }
 export function sameKnowledgeRecord(left: unknown, right: unknown): boolean {
-  return isDeepStrictEqual(captureOwnedJson(left), captureOwnedJson(right));
+  // Bun's util comparator ignores named array fields. Reuse the complete
+  // existing representation and its original immutable-root memo instead.
+  return knowledgeRecordVersion(left) === knowledgeRecordVersion(right);
 }
 function known(value: unknown): unknown | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const entry = representations.get(value);
   if (!entry) return undefined;
-  try { return isDeepStrictEqual(captureOwnedJson(value), entry.view) ? entry.raw : undefined; } catch { return undefined; }
+  try { return sameKnowledgeRecord(value, entry.view) ? entry.raw : undefined; } catch { return undefined; }
 }
 /** Bind decoder/writer-created numeric views to their exact canonical originals.
  * This is internal transport; callers of public replacement APIs never use it. */

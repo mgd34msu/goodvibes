@@ -21,7 +21,7 @@ test('ordinary and staged SQLite images are 0600 inside an owner-only operator d
 test('opening a genuine older image tightens its descriptor permissions without changing rows', async () => {
   const root = makeProjectTempDir('handler-sqlite-old-mode'), old = store(root); await old.init(); old.run('INSERT INTO notes (value) VALUES (?)', ['Keep this row']); await old.save(); old.close();
   chmodSync(old.dbPath, 0o644); const reopened = store(root); await reopened.init();
-  expect(statSync(old.dbPath).mode & 0o777).toBe(0o600); expect(reopened.get('SELECT value FROM notes')).toEqual({ value: 'Keep this row' });
+  expect(statSync(old.dbPath).mode & 0o777).toBe(0o600); expect(reopened.get<{ value: string }>('SELECT value FROM notes')).toEqual({ value: 'Keep this row' });
 });
 
 test.each(['symlink', 'hardlink'] as const)('a %s is refused without quarantining or rewriting its target', async kind => {

@@ -34,6 +34,7 @@ async function savedUrl(store: KnowledgeStore, id: string, extra: Record<string,
 
 test('old exact source ID and canonical URI survive restart without label regeneration', async () => {
   const f = await fixture(), original = await savedUrl(f.store, 'hg-src-1470179648492cbe3c32885b');
+  if (!original.canonicalUri) throw new Error('Saved URL fixture omitted its canonical URI');
   const pass = createHomeGraphSourceIdentityPlanner(f.store), identity = pass.prepare(selector);
   expect(identity.id).toBe(original.id); expect(identity.canonicalUri).toBe(original.canonicalUri);
   await f.store.close(); const next = await fixture(f.dbPath), before = readFileSync(f.dbPath), ids = spyOn(crypto, 'randomUUID');

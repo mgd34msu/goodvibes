@@ -656,8 +656,8 @@ function capturePolicyMatches(captureHash: unknown, kind: StaticRule, manifests:
   const capturedBatterySource = ownValue(batterySources, captureHash);
   if (typeof capturedBatterySource !== 'string' || sha256(capturedBatterySource) !== captured.get('batteries/static-source.ts')) return false;
   const previousPolicy = deferredBatteryPolicyStatements(capturedBatterySource);
-  const currentPolicy = deferredBatteryPolicyStatements(currentBatterySource);
-  return previousPolicy !== null && currentPolicy !== null && JSON.stringify(previousPolicy) === JSON.stringify(currentPolicy);
+  const currentStatements = deferredBatteryPolicyStatements(currentBatterySource);
+  return previousPolicy !== null && currentStatements !== null && JSON.stringify(previousPolicy) === JSON.stringify(currentStatements);
 }
 
 /** Produce explicit revalidation provenance, retaining original captures and any held observations. */

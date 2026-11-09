@@ -21,7 +21,7 @@ test('simultaneous independent native preparations adopt exactly one saved ident
   const f = fixture();
   const [first, second] = await Promise.all([prepareConfiguredProjectContext(f.config, f.workspace, undefined, { activate: true }), prepareConfiguredProjectContext(f.config, f.workspace, undefined, { activate: true })]);
   expect(first.projectId).toBe(second.projectId); expect(first.projectId).toMatch(/^project-[a-p-]+$/);
-  const store = createConfiguredPlanningStore(f.config); try { await store.init(); const selected = ProjectPlanningService.forConfiguredWorkspace(store, f.config, f.workspace); expect((await selected.service.status()).projectId).toBe(first.projectId); } finally { await store.close(); }
+  const store = createConfiguredPlanningStore(f.config); try { await store.init(); const selected = ProjectPlanningService.forConfiguredWorkspace(store, f.config, f.workspace); expect<unknown>((await selected.service.status()).projectId).toBe(first.projectId); } finally { await store.close(); }
   expect((await prepareConfiguredProjectContext(f.config, f.workspace)).projectId).toBe(first.projectId);
 });
 test('registered identity remains stable across an unrelated append without whole-registry byte fencing', async () => {
@@ -31,7 +31,7 @@ test('registered identity remains stable across an unrelated append without whol
   first.assertCurrent(); expect(registry.inspect(f.workspace)?.projectId).toBe(first.projectId);
 });
 test('actual selected native source replacement before initial read refuses the foreign database', async () => {
-  const f = fixture(), seeded = new KnowledgeStore({ configManager: f.config }); await seeded.init(); await seeded.close();
+  const f = fixture(), seeded = new KnowledgeStore({ configManager: f.config }); await seeded.upsertSource({ id: 'persisted-source', connectorId: 'fixture', sourceType: 'manual', status: 'indexed' }); await seeded.close();
   await prepareConfiguredProjectContext(f.config, f.workspace, undefined, { activate: true });
   const bytes = readFileSync(seeded.storagePath); renameSync(seeded.storagePath, `${seeded.storagePath}.original`); writeFileSync(seeded.storagePath, bytes);
   expect(() => createConfiguredPlanningStore(f.config)).toThrow(); expect(readFileSync(`${seeded.storagePath}.original`)).toEqual(bytes);

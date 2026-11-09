@@ -12,7 +12,7 @@ import { WorkLedgerAccessError } from '../sdk/src/platform/workflow/work-ledger/
 import { createWorkLedger } from '../sdk/src/platform/workflow/work-ledger/service.js';
 import { prepareLegacyWorkLedgerMigration } from '../sdk/src/platform/workflow/work-ledger/legacy-import.js';
 import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { knowledgeSourceSnapshotFromRows } from '../sdk/src/platform/knowledge/store-source-generation.js';
+import type { SQLiteStore } from '../sdk/src/platform/state/sqlite-store.js';
 import { PairingTokenManager } from '../sdk/src/platform/pairing/pairing-token-store.js';
 import { WorkspaceRegistrationStore } from '../sdk/src/platform/workspace/registration/store.js';
 import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../sdk/src/platform/daemon/control-plane.js';
@@ -154,7 +154,7 @@ test('a command retained by a host callback cannot change while its admission re
   };
   expect(await f.run()).toMatchObject({ kind: 'rejected', code: 'request_conflict' });
   expect((await f.ledger.service.readSnapshot(f.actor)).revision).toBe(0);
-  expect(f.log.query({ site: NATIVE_IMPORT_SITE }).some(entry => entry.notes.some(note => note.kind === 'action'
+  expect(f.log.query({ site: NATIVE_IMPORT_SITE }).some(entry => entry.status === 'answered' && entry.notes.some(note => note.kind === 'action'
     && note.action.startsWith('autonomous:claim:')))).toBe(false);
 });
 
@@ -553,8 +553,10 @@ test('raw-only SQL JSON changes invalidate native admission even when the mapped
   const f = await fixture();
   const current = f.store.getSourceSnapshot({ id: 'source' });
   if (!current.raw || typeof current.raw.metadata !== 'string') throw new Error('Missing raw source metadata');
-  const raw = { ...current.raw, metadata: ` ${current.raw.metadata}` };
-  const changed = knowledgeSourceSnapshotFromRows([{ columns: Object.keys(raw), values: [Object.values(raw)] }]);
+  const sqlite = (f.store as unknown as { sqlite: SQLiteStore }).sqlite;
+  sqlite.run('UPDATE knowledge_sources SET metadata = ? WHERE id = ?', [` ${current.raw.metadata}`, 'source']);
+  await sqlite.save();
+  const changed = f.store.getSourceSnapshot({ id: 'source' });
   expect(changed.source).toEqual(current.source);
   expect(changed.generation).not.toBe(current.generation);
   const host = createNativeLegacyImportHost({ ...f.deps, readSource: () => changed });

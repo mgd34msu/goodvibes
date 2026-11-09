@@ -1,6 +1,8 @@
-import { createHash, randomUUID } from 'node:crypto';
-import { chmodSync, createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
+import { chmodSync, closeSync, createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFile as writeFileDescriptor } from 'node:fs';
+import { readFile, stat } from 'node:fs/promises';
+import { ArtifactStorageOwner, type ArtifactCreatedLeaf } from './storage-ownership.js';
 import { finished } from 'node:stream/promises';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { logger } from '../utils/logger.js';
@@ -264,6 +266,8 @@ interface ResolvedArtifactInput {
 
 export class ArtifactStore {
   private readonly rootDir: string;
+  private readonly storageOwner: ArtifactStorageOwner;
+  private readonly recordFiles = new Map<string, { readonly content: string; readonly metadata: string }>();
   private readonly records = new Map<string, ArtifactRecord>();
   private readonly maxBytes: number;
   private readonly defaultRetentionMs: number;
@@ -284,6 +288,7 @@ export class ArtifactStore {
     mkdirSync(this.rootDir, { recursive: true, mode: 0o700 });
     // Existing stores receive the same directory boundary as new stores.
     chmodSync(this.rootDir, 0o700);
+    this.storageOwner = new ArtifactStorageOwner(this.rootDir);
     this.loadExisting();
   }
 
@@ -318,8 +323,7 @@ export class ArtifactStore {
     this.pruneExpired();
     const record = this.records.get(id);
     if (!record) return false;
-    this.removeRecordFiles(record);
-    return true;
+    return this.removeRecordFiles(record);
   }
 
   deleteMany(ids: Iterable<string>): number {
@@ -337,38 +341,38 @@ export class ArtifactStore {
     this.pruneExpired();
     const record = this.records.get(id);
     if (!record) throw new Error(`Unknown artifact: ${id}`);
-    return {
-      record,
-      buffer: await readFile(record.contentPath),
-    };
+    const files = this.recordFiles.get(id);
+    if (!files) throw new Error('Artifact original file ownership is unavailable');
+    this.storageOwner.assertImported(record.contentPath, files.content);
+    this.storageOwner.assertImported(record.metadataPath, files.metadata);
+    const buffer = await readFile(record.contentPath);
+    this.storageOwner.assertImported(record.contentPath, files.content);
+    this.storageOwner.assertImported(record.metadataPath, files.metadata);
+    return { record, buffer };
   }
 
   async create(input: ArtifactCreateInput, ownership: ArtifactWriteOwnership = {}): Promise<ArtifactDescriptor> {
-    ownership.signal?.throwIfAborted(); ownership.assertCurrent?.();
+    ownership.signal?.throwIfAborted(); ownership.assertCurrent?.(); this.storageOwner.assertCurrent();
     const intent = resolveArtifactIntent(input);
     const resolved = await this.resolveInput(input, intent, ownership.signal);
     return this.writeResolvedArtifact(input, intent, resolved, ownership);
   }
 
   async createFromStream(input: ArtifactStreamCreateInput, ownership: ArtifactWriteOwnership = {}): Promise<ArtifactDescriptor> {
-    const check = () => { ownership.signal?.throwIfAborted(); ownership.assertCurrent?.(); };
+    const check = () => { ownership.signal?.throwIfAborted(); ownership.assertCurrent?.(); this.storageOwner.assertCurrent(); };
     check();
-    const id = `artifact-${randomUUID().slice(0, 8)}`;
+    const id = `artifact-${opaqueUuid()}`;
     const filename = sanitizeArtifactFilename(input.filename, 'artifact');
     const contentPath = assertWithinArtifactRoot(this.rootDir, join(this.rootDir, `${id}.data`), 'Artifact content path');
     const metadataPath = assertWithinArtifactRoot(this.rootDir, join(this.rootDir, `${id}.json`), 'Artifact metadata path');
     const retentionMs = sanitizeRetentionMs(input.retentionMs, this.defaultRetentionMs, this.maxRetentionMs);
-    await mkdir(this.rootDir, { recursive: true, mode: 0o700 });
-    check();
-    const { sizeBytes, sha256 } = await this.writeStreamContent({
-      contentPath,
-      stream: input.stream,
-      expectedSizeBytes: input.sizeBytes,
-      assertCurrent: check,
-      signal: ownership.signal,
-    });
+    const content = this.storageOwner.leaf(`${id}.data`), metadata = this.storageOwner.leaf(`${id}.json`);
     let record: ArtifactRecord;
     try {
+      check();
+      const { sizeBytes, sha256 } = await this.writeStreamContent({
+        leaf: content, stream: input.stream, expectedSizeBytes: input.sizeBytes, assertCurrent: check, signal: ownership.signal,
+      });
       check();
       // Kind inference is a judgment call and can reject after the bytes were
       // spooled. It belongs to the same cleanup boundary as metadata writing.
@@ -389,13 +393,23 @@ export class ArtifactStore {
         metadataPath,
       };
       check();
-      await writeFile(metadataPath, `${JSON.stringify(record, null, 2)}\n`, { encoding: 'utf-8', mode: 0o600 });
-      check();
+      content.assertSealed();
+      const fd = metadata.open();
+      try {
+        metadata.claim(fd); check(); content.assertSealed();
+        await new Promise<void>((resolve, reject) => writeFileDescriptor(fd, `${JSON.stringify(record, null, 2)}\n`, { encoding: 'utf8' }, error => error ? reject(error) : resolve()));
+        check(); content.assertSealed(); metadata.seal(fd);
+      } finally { closeSync(fd); }
+      check(); content.assertSealed(); metadata.assertSealed();
     } catch (error) {
-      rmSync(contentPath, { force: true });
-      rmSync(metadataPath, { force: true });
+      content.cleanup(); metadata.cleanup();
+      // An admission/open failure may precede acquiring a stream reader. A
+      // waiting web producer must still hear cancellation, without making an
+      // ignored cancel promise ownership of a file it never opened.
+      try { if (isWebReadableStream(input.stream)) void input.stream.cancel(error).catch(() => {}); } catch { /* Preserve the original file failure. */ }
       throw error;
     }
+    this.recordFiles.set(id, { content: this.storageOwner.importedStamp(contentPath), metadata: this.storageOwner.importedStamp(metadataPath) });
     this.records.set(id, record);
     return this.toDescriptor(record);
   }
@@ -433,7 +447,7 @@ export class ArtifactStore {
   }
 
   private async writeStreamContent(input: {
-    readonly contentPath: string;
+    readonly leaf: ArtifactCreatedLeaf;
     readonly stream: ArtifactStreamCreateInput['stream'];
     readonly expectedSizeBytes?: number | undefined;
     readonly assertCurrent?: (() => void) | undefined;
@@ -442,10 +456,18 @@ export class ArtifactStore {
     if (typeof input.expectedSizeBytes === 'number' && input.expectedSizeBytes > this.maxBytes) {
       throw new Error(`Artifact exceeds the ${this.maxBytes}-byte limit.`);
     }
-    const contentPath = assertWithinArtifactRoot(this.rootDir, input.contentPath, 'Artifact cleanup path');
-
     const hash = createHash('sha256');
-    const writer = createWriteStream(contentPath, { flags: 'wx', mode: 0o600 });
+    const writer = createWriteStream(input.leaf.path, { flags: 'wx', mode: 0o600 });
+    let descriptor: number | undefined;
+    writer.once('open', fd => {
+      descriptor = fd;
+      try { input.leaf.claim(fd); input.assertCurrent?.(); }
+      catch (error) { writer.destroy(error instanceof Error ? error : new Error('Artifact storage owner changed')); }
+    });
+    writer.once('finish', () => {
+      try { if (descriptor === undefined) throw new Error('Artifact writer did not open'); input.leaf.seal(descriptor); }
+      catch (error) { writer.destroy(error instanceof Error ? error : new Error('Artifact storage owner changed')); }
+    });
     // Observe errors for the writer's whole lifetime, including while the
     // producer has no chunk ready. An EventEmitter error is not caught by try.
     const settled = finished(writer, { cleanup: true });
@@ -483,7 +505,7 @@ export class ArtifactStore {
       }
       await Promise.race([finishWriter(writer), writerFailure]);
       await settled;
-      input.assertCurrent?.();
+      input.assertCurrent?.(); input.leaf.assertSealed();
       return { sizeBytes, sha256: hash.digest('hex') };
     } catch (error) {
       // Destruction can race the asynchronous open. Wait for actual closure
@@ -491,7 +513,7 @@ export class ArtifactStore {
       producer.abort(error);
       writer.destroy();
       try { await settled; } catch { /* Preserve the initiating failure. */ }
-      rmSync(contentPath, { force: true });
+      input.leaf.cleanup();
       throw error;
     } finally {
       input.signal?.removeEventListener('abort', onAbort);
@@ -567,10 +589,14 @@ export class ArtifactStore {
       if (!entry.endsWith('.json')) continue;
       const metadataPath = join(this.rootDir, entry);
       try {
+        const metadataStamp = this.storageOwner.importedStamp(metadataPath);
         const parsed = normalizeExistingRecord(JSON.parse(readFileSync(metadataPath, 'utf-8')) as ArtifactRecord);
+        this.storageOwner.assertImported(metadataPath, metadataStamp);
         if (!parsed?.id || typeof parsed.contentPath !== 'string' || !existsSync(parsed.contentPath)) continue;
-        assertWithinArtifactRoot(this.rootDir, parsed.contentPath, 'Stored artifact content path');
-        assertWithinArtifactRoot(this.rootDir, parsed.metadataPath, 'Stored artifact metadata path');
+        if (parsed.id !== entry.slice(0, -5) || resolve(parsed.contentPath) !== join(this.rootDir, `${parsed.id}.data`)
+          || typeof parsed.metadataPath !== 'string' || resolve(parsed.metadataPath) !== metadataPath) throw new Error('Artifact metadata does not own this file pair');
+        const files = { content: this.storageOwner.importedStamp(parsed.contentPath), metadata: metadataStamp };
+        this.recordFiles.set(parsed.id, files);
         if (typeof parsed.expiresAt === 'number' && parsed.expiresAt <= Date.now()) {
           this.removeRecordFiles(parsed);
           continue;
@@ -593,18 +619,23 @@ export class ArtifactStore {
     }
   }
 
-  private removeRecordFiles(record: ArtifactRecord): void {
-    this.records.delete(record.id);
+  private removeRecordFiles(record: ArtifactRecord): boolean {
+    const files = this.recordFiles.get(record.id);
     try {
+      if (!files) throw new Error('Artifact original file ownership is unavailable');
+      this.storageOwner.assertImported(record.contentPath, files.content);
+      this.storageOwner.assertImported(record.metadataPath, files.metadata);
       const contentPath = assertWithinArtifactRoot(this.rootDir, record.contentPath, 'Artifact content deletion path');
       const metadataPath = assertWithinArtifactRoot(this.rootDir, record.metadataPath, 'Artifact metadata deletion path');
       if (existsSync(contentPath)) rmSync(contentPath, { force: true });
       if (existsSync(metadataPath)) rmSync(metadataPath, { force: true });
+      this.records.delete(record.id); this.recordFiles.delete(record.id); return true;
     } catch (error) {
       logger.warn('[artifacts] failed to prune expired artifact files', {
         artifactId: record.id,
         error: summarizeError(error),
       });
+      return false;
     }
   }
 

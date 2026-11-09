@@ -398,3 +398,46 @@ jobs:
       assets-glob: dist/*
       changelog-path: packages/engine/CHANGELOG.md
       toolchain-source: workspace
+
+  published-install-acceptance:
+    # Exercise the public installer only AFTER all native assets are public.
+    # These exact hosted accounts are disposable, never a user's local service.
+    needs: [verify-tag-version, github-release]
+    if: needs.github-release.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-24.04
+          - target: linux-arm64
+            runner: ubuntu-22.04-arm
+          - target: darwin-x64
+            runner: macos-15-intel
+          - target: darwin-arm64
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ needs.verify-tag-version.outputs.sha }}
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: '22'
+      - name: Download, install, serve and uninstall the published suite
+        env:
+          RELEASE_TAG: ${{ needs.verify-tag-version.outputs.tag }}
+          RELEASE_SOURCE: ${{ needs.verify-tag-version.outputs.sha }}
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: node scripts/accept-published-suite.mjs "$RELEASE_TAG" "$RELEASE_SOURCE" "$RELEASE_TARGET"
+      - name: Preserve bounded native acceptance result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: published-install-${{ matrix.target }}
+          path: ${{ runner.temp }}/goodvibes-published-*/acceptance-result.json
+          if-no-files-found: warn
+          retention-days: 7

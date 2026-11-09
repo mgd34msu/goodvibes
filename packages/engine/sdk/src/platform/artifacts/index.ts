@@ -8,6 +8,7 @@ export type {
   ArtifactFetchMode,
   ArtifactKind,
   ArtifactRecord,
+  ArtifactOriginalObservation,
   ArtifactReference,
 } from './types.js';
 export {

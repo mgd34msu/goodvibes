@@ -1,6 +1,7 @@
+import { freezeArtifactRecord, parseArtifactRecord } from './record-snapshot.js';
 import { createHash } from 'node:crypto';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
-import { chmodSync, closeSync, createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFile as writeFileDescriptor } from 'node:fs';
+import { chmodSync, closeSync, createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFile as writeFileDescriptor } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { ArtifactStorageOwner, type ArtifactCreatedLeaf } from './storage-ownership.js';
 import { finished } from 'node:stream/promises';
@@ -17,6 +18,7 @@ import type {
   ArtifactDescriptor,
   ArtifactFetchMode,
   ArtifactRecord,
+  ArtifactOriginalObservation,
   ArtifactReference,
   ArtifactStreamCreateInput,
 } from './types.js';
@@ -123,6 +125,7 @@ function normalizeExistingRecord(record: ArtifactRecord): ArtifactRecord {
         : 'not-applicable';
   return {
     ...record,
+    metadata: record.metadata ?? {},
     acquisitionMode,
     fetchMode,
   };
@@ -265,7 +268,22 @@ interface ResolvedArtifactInput {
   readonly sourceUri?: string | undefined;
 }
 
+const nativeApply = Reflect.apply, nativeMapGet = Map.prototype.get, nativeMapSet = Map.prototype.set, nativeMapDelete = Map.prototype.delete;
+const nativeWeakGet = WeakMap.prototype.get, nativeWeakSet = WeakMap.prototype.set;
+const nativeStoragePrototype = ArtifactStorageOwner.prototype;
+const nativeStorageMethods = Object.freeze(['assertCurrent', 'assertOriginalDirectory', 'importedStamp', 'assertImported'].map(key => Object.freeze({ key, value: Object.getOwnPropertyDescriptor(nativeStoragePrototype, key)?.value as unknown })));
+const originalObservations = new WeakMap<ArtifactOriginalObservation, { readonly id: string; readonly remove: () => boolean }>();
+/** Internal native cleanup selectors; neither takes an arbitrary artifact ID. */
+export function artifactOriginalId(observation: ArtifactOriginalObservation): string {
+  const original = nativeApply(nativeWeakGet, originalObservations, [observation]) as { readonly id: string } | undefined;
+  if (!original) throw new Error('Original artifact observation is unavailable.'); return original.id;
+}
+export function removeOriginalArtifact(observation: ArtifactOriginalObservation): boolean {
+  const original = nativeApply(nativeWeakGet, originalObservations, [observation]) as { readonly remove: () => boolean } | undefined;
+  if (!original) throw new Error('Original artifact observation is unavailable.'); return original.remove();
+}
 export class ArtifactStore {
+  readonly #originalOwner: { readonly slots: readonly { readonly key: string; readonly descriptor: PropertyDescriptor }[]; readonly records: Map<string, ArtifactRecord>; readonly files: Map<string, { readonly content: string; readonly metadata: string }>; readonly storage: ArtifactStorageOwner; readonly storageSlots: readonly { readonly key: string; readonly descriptor: PropertyDescriptor }[]; readonly entries: WeakMap<ArtifactRecord, { readonly content: string; readonly metadata: string }> };
   private readonly rootDir: string;
   private readonly storageOwner: ArtifactStorageOwner;
   /** Only actual earlier persisted checksum rows enter this pending set. */
@@ -292,6 +310,7 @@ export class ArtifactStore {
     // Existing stores receive the same directory boundary as new stores.
     chmodSync(this.rootDir, 0o700);
     this.storageOwner = new ArtifactStorageOwner(this.rootDir);
+    this.#originalOwner = Object.freeze({ records: this.records, files: this.recordFiles, storage: this.storageOwner, storageSlots: Object.freeze(Object.entries(Object.getOwnPropertyDescriptors(this.storageOwner)).map(([key, descriptor]) => Object.freeze({ key, descriptor: Object.freeze(descriptor) }))), entries: new WeakMap(), slots: Object.freeze(['rootDir', 'storageOwner', 'records', 'recordFiles'].map(key => { const descriptor = Object.getOwnPropertyDescriptor(this, key); if (!descriptor || !('value' in descriptor)) throw new Error('Artifact original owner is unavailable.'); return Object.freeze({ key, descriptor: Object.freeze(descriptor) }); })) });
     this.loadExisting();
   }
 
@@ -326,7 +345,7 @@ export class ArtifactStore {
     this.pruneExpired();
     const record = this.records.get(id);
     if (!record) return false;
-    return this.removeRecordFiles(record);
+    return this.#removeRecordFiles(record);
   }
 
   deleteMany(ids: Iterable<string>): number {
@@ -340,24 +359,42 @@ export class ArtifactStore {
     return deleted;
   }
 
-  async readContent(id: string): Promise<ArtifactContentRead> {
-    this.pruneExpired();
-    const record = this.records.get(id);
-    if (!record) throw new Error(`Unknown artifact: ${id}`);
-    const files = this.recordFiles.get(id);
-    if (!files) throw new Error('Artifact original file ownership is unavailable');
-    const serialized = JSON.stringify(record), contentPath = record.contentPath, metadataPath = record.metadataPath;
-    const assertCurrent = () => {
-      if (this.records.get(id) !== record || this.recordFiles.get(id) !== files || JSON.stringify(record) !== serialized) throw new Error('Artifact original record changed.');
-      this.storageOwner.assertImported(contentPath, files.content);
-      this.storageOwner.assertImported(metadataPath, files.metadata);
+  /** Capture only actual private record/file facts. No prune, content read,
+   * serialization or digest occurs in this readonly observation. */
+  captureOriginal(id: string): ArtifactOriginalObservation {
+    const owner = this.#originalOwner;
+    const record = nativeApply(nativeMapGet, owner.records, [id]) as ArtifactRecord | undefined;
+    const files = nativeApply(nativeMapGet, owner.files, [id]) as { readonly content: string; readonly metadata: string } | undefined;
+    if (!record || !files || nativeApply(nativeWeakGet, owner.entries, [record]) !== files || !Object.isFrozen(record)) throw new Error('Original artifact record is unavailable.');
+    const original = () => {
+      for (const { key, descriptor } of owner.slots) {
+        const current = Object.getOwnPropertyDescriptor(this, key);
+        if (!current || !('value' in current) || current.value !== descriptor.value || current.writable !== descriptor.writable || current.enumerable !== descriptor.enumerable || current.configurable !== descriptor.configurable) throw new Error('Artifact original owner changed.');
+      }
+      if (nativeApply(nativeMapGet, owner.records, [id]) !== record || nativeApply(nativeMapGet, owner.files, [id]) !== files) throw new Error('Artifact original record changed.');
+      if (Object.getPrototypeOf(owner.storage) !== nativeStoragePrototype || Reflect.ownKeys(owner.storage).length !== owner.storageSlots.length) throw new Error('Artifact original storage changed.');
+      for (const { key, descriptor } of owner.storageSlots) {
+        const actual = Object.getOwnPropertyDescriptor(owner.storage, key);
+        if (!actual || !('value' in actual) || actual.value !== descriptor.value || actual.writable !== descriptor.writable || actual.enumerable !== descriptor.enumerable || actual.configurable !== descriptor.configurable) throw new Error('Artifact original storage changed.');
+      }
+      for (const { key, value } of nativeStorageMethods) if (Object.hasOwn(owner.storage, key) || Object.getOwnPropertyDescriptor(nativeStoragePrototype, key)?.value !== value) throw new Error('Artifact original storage method changed.');
+      owner.storage.assertImported(record.contentPath, files.content); owner.storage.assertImported(record.metadataPath, files.metadata);
     };
-    assertCurrent(); const buffer = await readFile(contentPath); assertCurrent();
+    const current = () => { original(); if (typeof record.expiresAt === 'number' && record.expiresAt <= Date.now()) throw new Error('Original artifact expired.'); };
+    const remove = () => { original(); if (!this.#removeRecordFiles(record)) throw new Error('Original artifact removal was not confirmed.'); return true; };
+    original(); const observation = Object.freeze({ id: record.id, assertCurrent: current, deleteOriginal: remove });
+    nativeApply(nativeWeakSet, originalObservations, [observation, Object.freeze({ id: record.id, remove })]); return observation;
+  }
+
+  async readContent(id: string): Promise<ArtifactContentRead> {
+    this.pruneExpired(); const record = nativeApply(nativeMapGet, this.#originalOwner.records, [id]) as ArtifactRecord | undefined;
+    if (!record) throw new Error(`Unknown artifact: ${id}`);
+    const observation = this.captureOriginal(id), assertCurrent = observation.assertCurrent;
+    assertCurrent(); const buffer = await readFile(record.contentPath); assertCurrent();
     if (buffer.byteLength !== record.sizeBytes) throw new Error('Artifact original size changed.');
     const savedChecksum = this.savedChecksumPins.get(id);
     if (savedChecksum !== undefined) {
-      // Verify an actual earlier persisted format's published bytes once on
-      // first byte acquisition. Fresh local records never enter this branch.
+      // Only an actual saved earlier format's published bytes are verified once.
       if (createHash('sha256').update(buffer).digest('hex') !== savedChecksum) throw new Error('The saved artifact checksum does not match its original content.');
       assertCurrent(); this.savedChecksumPins.delete(id);
     }
@@ -406,10 +443,11 @@ export class ArtifactStore {
       };
       check();
       content.assertSealed();
+      const serializedRecord = `${JSON.stringify(record, null, 2)}\n`; record = parseArtifactRecord(serializedRecord);
       const fd = metadata.open();
       try {
         metadata.claim(fd); check(); content.assertSealed();
-        await new Promise<void>((resolve, reject) => writeFileDescriptor(fd, `${JSON.stringify(record, null, 2)}\n`, { encoding: 'utf8' }, error => error ? reject(error) : resolve()));
+        await new Promise<void>((resolve, reject) => writeFileDescriptor(fd, serializedRecord, { encoding: 'utf8' }, error => error ? reject(error) : resolve()));
         check(); content.assertSealed(); metadata.seal(fd);
       } finally { closeSync(fd); }
       check(); content.assertSealed(); metadata.assertSealed();
@@ -421,8 +459,9 @@ export class ArtifactStore {
       try { if (isWebReadableStream(input.stream)) void input.stream.cancel(error).catch(() => {}); } catch { /* Preserve the original file failure. */ }
       throw error;
     }
-    this.recordFiles.set(id, { content: this.storageOwner.importedStamp(contentPath), metadata: this.storageOwner.importedStamp(metadataPath) });
-    this.records.set(id, record);
+    const publishedFiles = Object.freeze({ content: this.storageOwner.importedStamp(contentPath), metadata: this.storageOwner.importedStamp(metadataPath) });
+    nativeApply(nativeMapSet, this.recordFiles, [id, publishedFiles]); nativeApply(nativeWeakSet, this.#originalOwner.entries, [record, publishedFiles]);
+    nativeApply(nativeMapSet, this.records, [id, record]);
     return this.toDescriptor(record);
   }
 
@@ -600,20 +639,21 @@ export class ArtifactStore {
       const metadataPath = join(this.rootDir, entry);
       try {
         const metadataStamp = this.storageOwner.importedStamp(metadataPath);
-        const parsed = normalizeExistingRecord(JSON.parse(readFileSync(metadataPath, 'utf-8')) as ArtifactRecord);
+        const parsed = freezeArtifactRecord(normalizeExistingRecord(JSON.parse(readFileSync(metadataPath, 'utf-8')) as ArtifactRecord));
         this.storageOwner.assertImported(metadataPath, metadataStamp);
         if (!parsed?.id || typeof parsed.contentPath !== 'string' || !existsSync(parsed.contentPath)) continue;
         if (parsed.id !== entry.slice(0, -5) || resolve(parsed.contentPath) !== join(this.rootDir, `${parsed.id}.data`)
           || typeof parsed.metadataPath !== 'string' || resolve(parsed.metadataPath) !== metadataPath) throw new Error('Artifact metadata does not own this file pair');
         if (parsed.sha256 !== undefined && !/^[0-9a-f]{64}$/.test(parsed.sha256)) throw new Error('Saved artifact checksum format is invalid');
-        const files = { content: this.storageOwner.importedStamp(parsed.contentPath), metadata: metadataStamp };
+        const files = Object.freeze({ content: this.storageOwner.importedStamp(parsed.contentPath), metadata: metadataStamp });
         if (parsed.sha256 !== undefined) this.savedChecksumPins.set(parsed.id, parsed.sha256);
-        this.recordFiles.set(parsed.id, files);
+        nativeApply(nativeMapSet, this.recordFiles, [parsed.id, files]);
         if (typeof parsed.expiresAt === 'number' && parsed.expiresAt <= Date.now()) {
-          this.removeRecordFiles(parsed);
+          this.#removeRecordFiles(parsed);
           continue;
         }
-        this.records.set(parsed.id, parsed);
+        nativeApply(nativeWeakSet, this.#originalOwner.entries, [parsed, files]);
+        nativeApply(nativeMapSet, this.records, [parsed.id, parsed]);
       } catch (error) {
         logger.warn('[artifacts] skipping unreadable artifact metadata', {
           path: metadataPath,
@@ -626,22 +666,22 @@ export class ArtifactStore {
   private pruneExpired(now = Date.now()): void {
     for (const record of this.records.values()) {
       if (typeof record.expiresAt === 'number' && record.expiresAt <= now) {
-        this.removeRecordFiles(record);
+        this.#removeRecordFiles(record);
       }
     }
   }
 
-  private removeRecordFiles(record: ArtifactRecord): boolean {
-    const files = this.recordFiles.get(record.id);
+  #removeRecordFiles(record: ArtifactRecord): boolean {
+    const owner = this.#originalOwner, files = nativeApply(nativeMapGet, owner.files, [record.id]) as { readonly content: string; readonly metadata: string } | undefined;
     try {
       if (!files) throw new Error('Artifact original file ownership is unavailable');
       this.storageOwner.assertImported(record.contentPath, files.content);
       this.storageOwner.assertImported(record.metadataPath, files.metadata);
       const contentPath = assertWithinArtifactRoot(this.rootDir, record.contentPath, 'Artifact content deletion path');
       const metadataPath = assertWithinArtifactRoot(this.rootDir, record.metadataPath, 'Artifact metadata deletion path');
-      if (existsSync(contentPath)) rmSync(contentPath, { force: true });
-      if (existsSync(metadataPath)) rmSync(metadataPath, { force: true });
-      this.records.delete(record.id); this.recordFiles.delete(record.id); this.savedChecksumPins.delete(record.id); return true;
+      this.storageOwner.assertImported(contentPath, files.content); unlinkSync(contentPath);
+      this.storageOwner.assertImported(metadataPath, files.metadata); unlinkSync(metadataPath);
+      nativeApply(nativeMapDelete, owner.records, [record.id]); nativeApply(nativeMapDelete, owner.files, [record.id]); nativeApply(nativeMapDelete, this.savedChecksumPins, [record.id]); return true;
     } catch (error) {
       logger.warn('[artifacts] failed to prune expired artifact files', {
         artifactId: record.id,

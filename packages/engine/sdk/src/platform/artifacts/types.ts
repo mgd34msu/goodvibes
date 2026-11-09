@@ -29,6 +29,14 @@ export interface ArtifactRecord extends ArtifactDescriptor {
   readonly metadataPath: string;
 }
 
+/** Host-local original-file observation. Parsed IDs or copied fields cannot
+ * manufacture the bound original removal operation. */
+export interface ArtifactOriginalObservation {
+  readonly id: string;
+  assertCurrent(): void;
+  deleteOriginal(): boolean;
+}
+
 export interface ArtifactContentRead {
   readonly record: ArtifactRecord;
   readonly buffer: Buffer;

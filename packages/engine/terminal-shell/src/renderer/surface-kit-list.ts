@@ -235,19 +235,39 @@ export interface KitListContext {
 
 function contextLayout(options: KitListOptions): { height: number; lines: readonly KitSpan[] } {
   const width = Math.max(1, options.x1 - options.x0 + 1);
-  const details = options.rows.map(row => row.detail ? wrapLines(row.detail, width) : []);
-  const lines = options.context?.lines ?? (details[options.activeIndex ?? options.rows.findIndex(row => row.selected)] ?? [])
-    .map(text => ({ text, fg: activeTokens().textMuted }));
   const capacity = Math.max(0, options.bottom - options.top + 1);
+  let minimumItems = 0;
+  for (const row of options.rows) {
+    if (!isHeader(row) && ++minimumItems === 3) break;
+  }
+  const maximumHeight = Math.max(0, capacity - Math.max(1, minimumItems) - 1);
+  if (maximumHeight === 0) return { height: 0, lines: [] };
+  let desired = options.context?.height;
+  const selectedIndex = options.activeIndex ?? options.rows.findIndex(row => row.selected);
+  let selectedDetail: string[] | undefined;
   // Reserve the same area across selection changes, including items with no
   // help. Changing focus must never move the list or insert prose between rows.
-  const desired = options.context?.height ?? (options.context?.lines || options.context?.window
-    ? Math.floor(capacity * 0.4)
-    : details.reduce((max, detail) => Math.max(max, detail.length), 0));
-  const minimumItems = Math.max(1, Math.min(3, options.rows.filter(row => !isHeader(row)).length));
-  const height = Math.max(0, Math.min(desired, capacity - minimumItems - 1));
+  if (desired === undefined) {
+    if (options.context?.lines || options.context?.window) desired = Math.floor(capacity * 0.4);
+    else {
+      desired = 0;
+      // Explicit documentation already supplies its own lines/window. Only
+      // measure row details for automatic sizing, stopping at the viewport cap.
+      for (const [index, row] of options.rows.entries()) {
+        if (!row.detail) continue;
+        const detail = wrapLines(row.detail, width);
+        if (index === selectedIndex) selectedDetail = detail;
+        desired = Math.max(desired, detail.length);
+        if (desired >= maximumHeight) break;
+      }
+    }
+  }
+  const height = Math.max(0, Math.min(desired, maximumHeight));
   if (height === 0) return { height, lines: [] };
   if (options.context?.window) return { height, lines: options.context.window(height).slice(0, height) };
+  const selected = options.rows[selectedIndex]?.detail;
+  const lines = options.context?.lines ?? (selectedDetail ?? (selected ? wrapLines(selected, width) : []))
+    .map(text => ({ text, fg: activeTokens().textMuted }));
   if (lines.length <= height) {
     options.context?.setOffset?.(0);
     return { height, lines };

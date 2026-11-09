@@ -1,4 +1,13 @@
-import {createCommandModeFeedRoute,createWorkTreeFeedRoute} from '@goodvibes-jev/engine/terminal-shell/input-feed-adapters';
+import {
+  createCommandModeFeedRoute,
+  createWorkTreeFeedRoute,
+  captureModalFeedState,
+  captureIndicatorFeedState,
+  capturePromptTextState,
+  capturePromptKeyState,
+  captureMouseFeedState,
+  captureShortcutFeedState,
+} from '@goodvibes-jev/engine/terminal-shell/input-feed-adapters';
 import { createFeedInputTokens } from '@goodvibes-jev/engine/terminal-shell/input-feed-pipeline';
 import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
 import type { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';
@@ -10,7 +19,7 @@ import { SelectionModal } from './selection-modal.ts';
 import type { SelectionResult } from './selection-modal.ts';
 import { SearchManager } from './search.ts';
 import type { InputHistory, HistorySearch } from './input-history.ts';
-import type { BlockMeta, ConversationManager } from '../core/conversation';
+import type { ConversationManager } from '../core/conversation';
 import { ProcessModal } from '../renderer/process-modal.ts';
 import { LiveTailModal } from '../renderer/live-tail-modal.ts';
 import { BlockActionsMenu } from '../renderer/block-actions.ts';
@@ -23,7 +32,6 @@ import type { McpWorkspace } from './mcp-workspace.ts';
 import type { AgentWorkspace } from './agent-workspace.ts';
 import { SessionPickerModal } from './session-picker-modal.ts';
 import { ProfilePickerModal } from './profile-picker-modal.ts';
-import { IMAGE_EXTENSIONS, formatFileSize, mediaTypeFromExt } from './handler-content-actions.ts';
 import { handleIndicatorFocusToken, handleMouseToken, handlePromptKeyToken, handlePromptTextToken } from './handler-feed-routes.ts';
 import type { WrappedPromptInfo } from './handler-prompt-buffer.ts';
 import '../renderer/conversation-layout.ts';
@@ -188,181 +196,37 @@ export const feedInputTokens = createFeedInputTokens<InputFeedContext>({
   surfaceModalTokens: 'text-key',
   guardModalWrites: true,
   pairing: (context, token) => context.handleSetupPairingToken?.(token) ?? false,
-  modal: (context, token, { history }) => {
-    const keybindings = context.keybindingsManager;
-    return handleModalTokenRoutes(
-      {
-        history,
-        searchShortcutMatch: token.type === 'key' && keybindings.matches('search', token),
-        selectionModal: context.selectionModal,
-        selectionCallback: context.selectionCallback,
-        getSelectionCallback: () => context.selectionCallback,
-        setSelectionCallback: (callback) => {
-          context.selectionCallback = callback;
-        },
-        bookmarkModal: context.bookmarkModal,
-        settingsModal: context.settingsModal,
-        mcpWorkspace: context.mcpWorkspace,
-        agentWorkspace: context.agentWorkspace,
-        sessionPickerModal: context.sessionPickerModal,
-        profilePickerModal: context.profilePickerModal,
-        helpOverlayActive: context.helpOverlayActive,
-        helpScrollOffset: context.helpScrollOffset,
-        shortcutsOverlayActive: context.shortcutsOverlayActive,
-        shortcutsScrollOffset: context.shortcutsScrollOffset,
-        historySearch: context.historySearch,
-        prompt: context.prompt,
-        cursorPos: context.cursorPos,
-        modelPicker: context.modelPicker,
-        modalStack: context.modalStack,
-        commandContext: context.commandContext,
-        getViewportHeight: context.getViewportHeight,
-        requestRender: context.requestRender,
-        handleEscape: context.handleEscape,
-        liveTailModal: context.liveTailModal,
-        processModal: context.processModal,
-        contextInspectorModal: context.contextInspectorModal,
-        overlayFilters: context.overlayFilters,
-        modalOpened: context.modalOpened,
-        filePicker: context.filePicker,
-        imageRegistry: context.imageRegistry,
-        nextImageId: context.nextImageId,
-        saveUndoState: context.saveUndoState,
-        ensureInputCursorVisible: () => context.ensureInputCursorVisible(),
-        formatFileSize,
-        mediaTypeFromExt,
-        imageExtensions: IMAGE_EXTENSIONS,
-        blockActionsMenu: context.blockActionsMenu,
-        executeBlockAction: context.executeBlockAction,
-        searchManager: context.searchManager,
-        conversationManager: context.conversationManager,
-        scroll: context.scroll,
-        getScrollTop: context.getScrollTop,
-        openModelPickerWithTarget: context.openModelPickerWithTarget,
-        openProviderModelPickerWithTarget: context.openProviderModelPickerWithTarget,
-        onModelPickerCommit: context.onModelPickerCommit,
-      },
-      token,
-    );
-  },
+  modal: (context, token, { history }) => handleModalTokenRoutes(
+    {
+      ...captureModalFeedState(context, token, history),
+      agentWorkspace: context.agentWorkspace,
+      liveTailModal: context.liveTailModal,
+      processModal: context.processModal,
+    },
+    token,
+  ),
   workTree: createWorkTreeFeedRoute<InputFeedContext>(handleWorkTreeToken),
-  indicator: (context, token) => {
-    return handleIndicatorFocusToken(
-      {
-        indicatorFocused: context.indicatorFocused,
-        modalOpened: context.modalOpened,
-        processModal: context.processModal,
-        requestRender: context.requestRender,
-      },
-      token,
-    );
-  },
-  text: (context, token) => {
-    return handlePromptTextToken(
-      {
-        prompt: context.prompt,
-        cursorPos: context.cursorPos,
-        commandMode: context.commandMode,
-        nextPasteId: context.nextPasteId,
-        nextImageId: context.nextImageId,
-        pasteRegistry: context.pasteRegistry,
-        imageRegistry: context.imageRegistry,
-        inputHistory: context.inputHistory,
-        commandRegistry: context.commandRegistry,
-        commandContext: context.commandContext,
-        autocomplete: context.autocomplete,
-        filePicker: context.filePicker,
-        modalOpened: context.modalOpened,
-        saveUndoState: context.saveUndoState,
-        ensureInputCursorVisible: () => context.ensureInputCursorVisible(),
-        registerPaste: context.registerPaste,
-        requestRender: context.requestRender,
-      },
-      token,
-    );
-  },
-  key: (context, token) => {
-    return handlePromptKeyToken(
-      {
-        prompt: context.prompt,
-        cursorPos: context.cursorPos,
-        inputScrollTop: context.inputScrollTop,
-        commandMode: context.commandMode,
-        contentWidth: context.contentWidth,
-        maxInputRows: 8,
-        inputHistory: context.inputHistory,
-        indicatorFocused: context.indicatorFocused,
-        conversationManager: context.conversationManager,
-        commandContext: context.commandContext,
-        autocomplete: context.autocomplete,
-        blockActionsMenu: { open: (block: BlockMeta) => context.blockActionsMenu.open(block) },
-        processModal: context.processModal,
-        modalOpened: context.modalOpened,
-        saveUndoState: context.saveUndoState,
-        ensureInputCursorVisible: context.ensureInputCursorVisible,
-        getWrappedPromptInfo: context.getWrappedPromptInfo,
-        moveCursorVertical: context.moveCursorVertical,
-        handlePathCompletion: context.handlePathCompletion,
-        handleBlockToggle: context.handleBlockToggle,
-        findMarkerAtPos: context.findMarkerAtPos,
-        cleanupMarkerRegistry: context.cleanupMarkerRegistry,
-        expandPrompt: context.expandPrompt,
-        submitConcealedInput: context.submitConcealedInput,
-        scroll: context.scroll,
-        exitApp: context.exitApp,
-        requestRender: context.requestRender,
-      },
-      token,
-    );
-  },
-  mouse: (context, token, { viewportHeight, scrollTop, lineCount }) => {
-    return handleMouseToken(
-      {
-        conversationManager: context.conversationManager,
-        selection: context.selection,
-        mouseDownRow: context.mouseDownRow,
-        mouseDownCol: context.mouseDownCol,
-        scrollTop,
-        viewportHeight,
-        lineCount,
-        scroll: context.scroll,
-        requestRender: context.requestRender,
-        handlePaste: context.handlePaste,
-        handleCopy: context.handleCopy,
-        bodyTopRow: context.bodyTopRow,
-      },
-      token,
-    );
-  },
+  indicator: (context, token) => handleIndicatorFocusToken(
+    {
+      ...captureIndicatorFeedState(context),
+      processModal: context.processModal,
+    },
+    token,
+  ),
+  text: (context, token) => handlePromptTextToken(capturePromptTextState(context), token),
+  key: (context, token) => handlePromptKeyToken(
+    {
+      ...capturePromptKeyState(context),
+      processModal: context.processModal,
+    },
+    token,
+  ),
+  mouse: (context, token, environment) => handleMouseToken(captureMouseFeedState(context, environment), token),
   shortcut: (context, token, { viewportHeight }) => {
     const shortcutState = {
-      prompt: context.prompt,
-      cursorPos: context.cursorPos,
-      commandMode: context.commandMode,
-      autocomplete: context.autocomplete,
-      historySearch: context.historySearch,
-      searchManager: context.searchManager,
-      conversationManager: context.conversationManager,
-      commandContext: context.commandContext,
-      contentWidth: context.contentWidth,
-      getScrollTop: context.getScrollTop,
-      getWrappedPromptInfo: context.getWrappedPromptInfo,
-      saveUndoState: context.saveUndoState,
-      requestRender: context.requestRender,
-      scroll: context.scroll,
-      ensureInputCursorVisible: () => context.ensureInputCursorVisible(),
-      handleCopy: context.handleCopy,
-      handleCtrlC: context.handleCtrlC,
-      handleBlockCopy: context.handleBlockCopy,
-      handleBookmark: context.handleBookmark,
-      handleBlockSave: context.handleBlockSave,
-      handleUndo: context.handleUndo,
-      handleRedo: context.handleRedo,
-      handlePaste: context.handlePaste,
-      handleEscape: context.handleEscape,
+      ...captureShortcutFeedState(context),
       cycleAgentWorkspaceCategory: context.cycleAgentWorkspaceCategory,
       dismissAgentWorkspace: context.dismissAgentWorkspace,
-      keybindingsManager: context.keybindingsManager,
     };
     const handled = handleGlobalShortcutToken(shortcutState, token, viewportHeight);
     return { ...shortcutState, handled };

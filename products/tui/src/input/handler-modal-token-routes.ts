@@ -1,5 +1,4 @@
 import { createModalTokenPipeline } from '@goodvibes-jev/engine/terminal-shell/modal-token-pipeline';
-import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
 import type { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';
 import type { ConversationManager } from '../core/conversation';
 import type { SelectionResult, SelectionModal } from './selection-modal.ts';

@@ -1,5 +1,6 @@
 import {
-  applyConversationOverlayRows,
+  applyConversationPopupRows,
+  isCommonConversationModalOpen,
   composeConversationLayers,
   type ModalEntry,
 } from '@goodvibes-jev/engine/terminal-shell/renderer/conversation-overlays';
@@ -42,21 +43,7 @@ export interface ConversationOverlayContext {
 
 /** True while a modal covers the screen, so the composer-anchored popups stay hidden. */
 function modalOpen(input: InputHandler): boolean {
-  return (
-    input.modelPicker.active ||
-    input.settingsModal.active ||
-    input.configModal.active ||
-    input.mcpWorkspace.active ||
-    input.sessionPickerModal.active ||
-    input.profilePickerModal.active ||
-    input.bookmarkModal.active ||
-    input.blockActionsMenu.active ||
-    input.selectionModal.active ||
-    input.contextInspectorModal.active ||
-    input.helpOverlayActive ||
-    input.shortcutsOverlayActive ||
-    input.surfaceModals.active
-  );
+  return isCommonConversationModalOpen(input) || input.configModal.active;
 }
 
 /**
@@ -67,7 +54,7 @@ function modalOpen(input: InputHandler): boolean {
  */
 export function applyConversationOverlays(viewport: Line[], context: ConversationOverlayContext): Line[] {
   const { input, conversationWidth: width, viewportHeight: height } = context;
-  return applyConversationOverlayRows(viewport, {
+  return applyConversationPopupRows(viewport, input, {
     width,
     height,
     covered: modalOpen(input),
@@ -80,11 +67,11 @@ export function applyConversationOverlays(viewport: Line[], context: Conversatio
             height,
           )
       : undefined,
-    filePicker: input.filePicker.active ? () => renderFilePickerOverlay(input.filePicker, width, height) : undefined,
-    search: input.searchManager.active ? () => renderSearchOverlay(input.searchManager, width) : undefined,
-    historySearch: input.historySearch.active ? () => renderHistorySearchOverlay(input.historySearch, width) : undefined,
-    autocomplete:
-      input.commandMode && input.autocomplete?.isActive ? () => renderAutocompleteOverlay(input.autocomplete!, width, height) : undefined,
+  }, {
+    filePicker: renderFilePickerOverlay,
+    search: renderSearchOverlay,
+    historySearch: renderHistorySearchOverlay,
+    autocomplete: renderAutocompleteOverlay,
   });
 }
 

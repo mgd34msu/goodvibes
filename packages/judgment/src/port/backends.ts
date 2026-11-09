@@ -24,7 +24,7 @@ export function validateBackendInput(endpoint: JudgmentEndpoint, model: string, 
     throw new JudgmentError('invalid-request', 'the complete judgment input exceeds this target deployment capability');
   }
   if (adapter === 'cloudflare-workers-ai') {
-    if (!['clef', 'clef-flash'].includes(model) || !new URL(endpoint.baseURL).pathname.endsWith(`/${model}`)) {
+    if (!['clef', 'clef-flash'].includes(model) || !new URL(endpoint.baseURL).pathname.replace(/\/$/, '').endsWith(`/${model}`)) {
       throw new JudgmentError('invalid-request', 'the Cloudflare decision model must match its configured run endpoint');
     }
     if (questions.length > 64 || questions.some(name => !/^[A-Za-z0-9_.-]{1,100}$/.test(name))) {
@@ -66,7 +66,9 @@ export async function askBackend<Q extends Questions>(
   if (usage.truncated !== undefined && typeof usage.truncated !== 'boolean'
       && (typeof usage.truncated !== 'number' || !Number.isSafeInteger(usage.truncated) || usage.truncated < 0)
     || usage.state_tokens_dropped !== undefined && (typeof usage.state_tokens_dropped !== 'number'
-      || !Number.isSafeInteger(usage.state_tokens_dropped) || usage.state_tokens_dropped < 0)) {
+      || !Number.isSafeInteger(usage.state_tokens_dropped) || usage.state_tokens_dropped < 0)
+    || usage.truncated_questions !== undefined && (!Array.isArray(usage.truncated_questions)
+      || usage.truncated_questions.some(question => typeof question !== 'string'))) {
     throw new JudgmentError('invalid-response', 'the decision model returned invalid truncation evidence');
   }
   if (usage.truncated === true || typeof usage.truncated === 'number' && usage.truncated > 0

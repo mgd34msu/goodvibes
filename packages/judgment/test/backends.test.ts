@@ -46,6 +46,20 @@ describe('decision backend protocol conformance', () => {
     expect(answer.answers.category.confidence).toBe(0.8);
   });
 
+  test.each(['clef', 'clef-flash'])('Cloudflare %s keeps its adapter and model when the run URL has a trailing slash', async model => {
+    const endpoint: JudgmentEndpoint = { kind: 'hosted',
+      baseURL: `https://api.cloudflare.com/client/v4/accounts/test/ai/run/@cf/cloudflare/${model}/`, apiKey: 'fixture-key' };
+    let calls = 0;
+    const port = createSystemOnePort(configured(endpoint, model, async (url, init) => {
+      calls++;
+      expect(String(url)).toBe(endpoint.baseURL.slice(0, -1));
+      expect(JSON.parse(String(init?.body))).toEqual({ model, state, questions });
+      return Response.json({ success: true, result: result(model) });
+    }));
+    expect((await port.ask({ state, questions })).model).toBe(model);
+    expect(calls).toBe(1);
+  });
+
   test('Cloudflare rejects overlong complete input locally and can fall back without shortening it', async () => {
     const endpoint: JudgmentEndpoint = { kind: 'hosted', baseURL: 'https://api.cloudflare.com/client/v4/accounts/test/ai/run/@cf/cloudflare/clef', apiKey: 'fixture-key' };
     const complete = '完整 evidence '.repeat(5000);
@@ -79,6 +93,23 @@ describe('decision backend protocol conformance', () => {
       usage: { input_tokens: 19, output_tokens: 2, ...flags },
     }))));
     await expect(port.ask({ state, questions })).rejects.toMatchObject({ kind: 'invalid-response' });
+  });
+
+  test.each(['yes', false, null, {}, [null], [1]])('malformed truncated question metadata %j falls back with the complete original input', async truncated_questions => {
+    const primary: JudgmentEndpoint = { kind: 'local', baseURL: 'http://127.0.0.1:9000', apiKey: '', authentication: 'none' };
+    const seen: unknown[] = [];
+    const config = configured(primary, 'first', async (url, init) => {
+      seen.push(JSON.parse(String(init?.body)));
+      return Response.json(String(url).includes(':9000/')
+        ? result('first', { usage: { input_tokens: 19, output_tokens: 2, truncated_questions } }) : result('second'));
+    });
+    const port = createSystemOnePort({ ...config, fallbacks: [{
+      endpoint: { ...primary, baseURL: 'http://127.0.0.1:9001' }, model: 'second',
+    }] });
+    const answer = await port.ask({ state, questions });
+    expect(answer.model).toBe('second');
+    expect(seen).toEqual([{ model: 'first', state, questions }, { model: 'second', state, questions }]);
+    expect(answer.lineage?.attempts.map(attempt => attempt.outcome)).toEqual(['invalid-response', 'answered']);
   });
 
   test('only declared deployment aliases may change the returned model identity', async () => {

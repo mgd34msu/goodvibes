@@ -4,6 +4,23 @@
 
 ### Fixed
 
+- Preserve existing artifact content and metadata when creation collides or a
+  producer fails. New artifacts use full opaque UUIDs; imported metadata cannot
+  direct expiration or deletion at unrelated sibling files.
+
+- Create atomic temporary files exclusively and keep cleanup bound to the
+  original file and directory. Preserve uncertain published writes, leave live
+  writers' temporary files alone, and reject JSON inputs that serialize to no
+  value before replacing a saved store.
+
+- Preserve newer contract checkpoints at their original paths and refuse to
+  overwrite them with an older format. Reuse the original file observation for
+  unchanged version checks instead of reparsing the checkpoint repeatedly.
+
+- Accept a trailing slash on Clef and Clef-flash run endpoints. Refuse malformed
+  truncation metadata and continue to the next configured decision model with
+  the complete original input.
+
 - Keep fresh durable configuration file observations without nested file-content
   hashes. Existing configuration history remains readable; a real settings
   mutation advances its owner before adopting the new observation format.
